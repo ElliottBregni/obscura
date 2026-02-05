@@ -13,6 +13,9 @@ copilot-cli/
 pkg/
 *.pkg
 
+# User-specific MCP config (may contain secrets)
+# Keep mcp-config.json as a template for team
+
 # Vault-only folders (can be committed to vault repo if desired)
 scratch/
 thinking/
