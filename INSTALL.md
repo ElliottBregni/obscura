@@ -2,10 +2,22 @@
 
 ## Prerequisites
 
+## Prerequisites
+
 ### Required
-- **Obsidian** - Download from https://obsidian.md
-- **GitHub Copilot CLI** - Already installed (see usage with `copilot` command)
 - **Git** - For version control
+- **GitHub Copilot CLI** - Install with:
+  ```bash
+  brew install copilot-cli
+  # or
+  npm install -g @github/copilot
+  ```
+
+### Optional (Recommended)
+- **Obsidian** - Download from https://obsidian.md
+  - Provides visual navigation, backlinks, and graph view
+  - **Not required** - You can edit markdown files in any editor (VS Code, vim, etc.)
+  - The vault is just a folder with `.md` files and symlinks
 
 ### Recommended MCP Servers
 The Copilot CLI uses Model Context Protocol (MCP) servers for extended functionality.

@@ -24,7 +24,7 @@ This creates `repo/.copilot/` → `vault/repos/{repo-name}/dot.copilot/`
 - Files in `repos/{repo-name}/` are **real repo files** (via symlink)
 - Files in `copilot-cli/` are **CLI config** (user-specific, not committed)
 - Files outside these are **vault-only** (not in git)
-- Edit skills and context in Obsidian, commit from repo when ready
+- Edit in **any editor** - Obsidian provides visual benefits but isn't required
 - Use scratch/thinking for iteration before promotion
 
 ## Commands

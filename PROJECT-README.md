@@ -20,7 +20,8 @@ chmod +x install.sh
 
 ## ✨ Features
 
-- 🔗 **Symlink-based architecture** - Edit in Obsidian, changes instantly appear in repos
+- 📝 **Editor agnostic** - Use Obsidian, VS Code, vim, or any markdown editor
+- 🔗 **Symlink-based architecture** - Edit anywhere, changes instantly appear in repos
 - 🔄 **Bidirectional sync** - Merge content from repo and vault automatically
 - 📁 **Multi-repo support** - Manage context for unlimited repos in one vault
 - 🎯 **LLM-optimized** - Direct access for Copilot CLI, Claude, Cursor, etc.
@@ -66,9 +67,12 @@ cd ~/git/YourRepo
 
 ## 🔧 Prerequisites
 
-- [Obsidian](https://obsidian.md)
-- [GitHub Copilot CLI](https://github.com/features/copilot)
-- Git
+- **Git** - Required for repo management
+- **GitHub Copilot CLI** - Required for LLM context (install: `brew install copilot-cli`)
+- **Obsidian** - *Optional but recommended* for visual navigation and editing
+  - Download from https://obsidian.md
+  - **Without Obsidian**: Edit markdown files in any editor (VS Code, vim, etc.)
+  - The vault is just a folder structure—use what you prefer!
 
 ## 📚 Documentation
 

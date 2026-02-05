@@ -26,12 +26,25 @@ cd ~/FV-Copilot
 
 ## After Install
 
+### Option 1: With Obsidian (Recommended)
 1. **Open in Obsidian**
    ```
    File → Open Vault → ~/FV-Copilot
    ```
+   - Visual file browser
+   - Markdown preview
+   - Backlinks and graph view
 
-2. **Link your first repo**
+### Option 2: Without Obsidian
+1. **Use any editor**
+   ```bash
+   cd ~/FV-Copilot
+   code .          # VS Code
+   vim README.md   # Vim
+   # Any editor works—it's just markdown files!
+   ```
+
+### Link Your First Repo (Either Way)
    ```bash
    cd ~/git/YourRepo
    ~/FV-Copilot/sync-copilot.sh . --dry-run  # Preview
