@@ -64,64 +64,70 @@ EOF
 
 # Create README
 cat > README.md << 'EOF'
-# Obsidian Vault for Code Repos
+# FV-Copilot Vault
+
+Obsidian vault for managing GitHub Copilot context across multiple code repositories.
 
 ## Structure
 
-- **repos/** → per-repo context (each repo's `.copilot/` symlinks here)
-- **copilot-cli/** → symlink to `~/.copilot` (Copilot CLI config and state)
-- **scratch/** → private notes, drafts, experiments
-- **thinking/** → working through ideas
-- **_attachments/** → vault-only assets
+```
+~/FV-Copilot/
+├── repos/              → Repo-specific .github content
+│   └── RepoName/       → IS the .github folder content
+├── docs/               → Vault documentation
+├── copilot-cli/        → Symlink to ~/.copilot (CLI config)
+├── scratch/            → Private notes
+├── thinking/           → Working notes
+└── _attachments/       → Vault-only assets
+```
+
+## How It Works
+
+**Flattened structure:**
+- `vault/repos/RepoName/` directly contains `.github` content
+- `repo/.github` symlinks to `vault/repos/RepoName/`
+- No nested `.github` folders in vault!
+
+**Nested modules:**
+- `.github` only created where code exists in repo
+- Vault can have extra folders (skills/, instructions/) - no symlink needed
 
 ## Linking Repos
 
-From any git repo root:
+From any git repo:
 ```bash
-~/FV-Copilot/sync-copilot.sh . --dry-run  # Test first
-~/FV-Copilot/sync-copilot.sh .            # Apply
+cd ~/git/YourRepo
+~/FV-Copilot/sync-github.sh --dry-run  # Test first
+~/FV-Copilot/sync-github.sh            # Apply
 ```
 
-This creates `repo/.copilot/` → `vault/repos/{repo-name}/dot.copilot/`
-
-**Note**: Hidden files (`.copilot`, `.claude`) are stored as `dot.copilot`, `dot.claude` in the vault to avoid Obsidian conflicts.
+Creates: `repo/.github` → `vault/repos/RepoName/`
 
 ## Rules
 
-- Files in `repos/{repo-name}/` are **real repo files** (via symlink)
-- Files in `copilot-cli/` are **CLI config** (user-specific, not committed)
-- Files outside these are **vault-only** (not in git)
-- Edit skills and context in Obsidian, commit from repo when ready
-- Use scratch/thinking for iteration before promotion
+✅ **DO:**
+- Edit `.github` content in Obsidian
+- Create vault-only folders (skills/, docs/)
+- Work in `.github` directories where code lives
 
-## Commands
+❌ **DON'T:**
+- Create `.github` symlinks manually
+- Edit symlink targets directly
+- Commit `repos/` or `copilot-cli/` to vault repo
 
-### Syncing .copilot Directories
-- `./sync-copilot.sh <path> [--dry-run]` - **Recommended**: Bidirectional sync with merge
-  - Merges content from both repo and vault
-  - Works forward (repo→vault) or backward (vault→repo)
-  - Use `--dry-run` to test without making changes
-  - Examples:
-    - `./sync-copilot.sh .` - Sync repo root
-    - `./sync-copilot.sh platform/service` - Sync nested module
-    - `./sync-copilot.sh . --dry-run` - Test first
+## Documentation
 
-### Legacy Scripts
-- `./link-repo.sh` - Link current repo's .copilot to vault (simple)
-- `./link-nested.sh <path>` - Link nested .copilot dir
-- `./unlink-repo.sh` - Unlink and move content back to repo
-- `./setup-vault.sh` - Recreate vault structure on new machines
-
-## Installation & MCP Config
-
-See [INSTALL.md](./INSTALL.md) for:
-- Prerequisites and tools
-- MCP server configuration (`copilot-cli/mcp-config.json`)
-- Adding new repos to the vault
+See `docs/` folder:
+- `INSTALL.md` - Installation guide
+- `QUICKSTART.md` - Quick start
+- `GITHUB-INTEGRATION.md` - How .github works
+- `NO-OBSIDIAN.md` - Using without Obsidian
+- `MCP-README.md` - MCP configuration
 EOF
 
 echo "📜 Creating installation guide..."
-cat > INSTALL.md << 'EOF'
+mkdir -p docs
+cat > docs/INSTALL.md << 'EOF'
 # FV-Copilot Installation Guide
 
 ## Quick Start
@@ -139,81 +145,56 @@ chmod +x *.sh
 
 ## Prerequisites
 
+### Optional but Recommended
+- **Obsidian** (optional, but helpful) - Download from https://obsidian.md
+  - The vault is just markdown files - works without Obsidian!
+  - See `docs/NO-OBSIDIAN.md` for alternatives
+
 ### Required
-- **Obsidian** - Download from https://obsidian.md
 - **GitHub Copilot CLI** - Install with:
   ```bash
-  brew install copilot-cli
-  # or
-  npm install -g @github/copilot
+  gh extension install github/gh-copilot
   ```
 - **Git** - For version control
 
 ### Recommended MCP Servers
 The Copilot CLI uses Model Context Protocol (MCP) servers for extended functionality.
 
-Current MCP config location: `copilot-cli/mcp-config.json` (symlinked to `~/.copilot/mcp-config.json`)
-
-#### To Add More MCP Servers
-Use the Copilot CLI:
-```bash
-/mcp add <server-name>
-```
-
-Or manually edit `copilot-cli/mcp-config.json`
-
-### Python Tools (if working with Python services)
-```bash
-# Per-service virtualenv
-cd platform/some-service
-python3.9 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Node/Serverless Tools
-```bash
-npm install -g serverless
-```
+See `docs/MCP-README.md` for configuration details.
 
 ## Vault Setup
 
-1. Open `~/FV-Copilot` in Obsidian
-2. Trust the vault when prompted
-3. All repo `.copilot/` folders are symlinked to `repos/`
-4. CLI config (including MCP) is at `copilot-cli/`
+1. (Optional) Open `~/FV-Copilot` in Obsidian
+2. All repo `.github/` folders are symlinked to `repos/`
+3. CLI config (including MCP) is at `copilot-cli/`
 
-## Adding New Repos
+## Adding Repos
 
-### Recommended: Use sync-copilot.sh
 From any git repository:
 ```bash
 # Test first with dry-run
 cd ~/git/YourRepo
-~/FV-Copilot/sync-copilot.sh . --dry-run
+~/FV-Copilot/sync-github.sh --dry-run
 
 # Apply if looks good
-~/FV-Copilot/sync-copilot.sh .
+~/FV-Copilot/sync-github.sh
 ```
 
 This intelligently:
-- Merges existing content from repo and vault
-- Creates `dot.copilot` in vault
-- Symlinks `repo/.copilot` → vault
+- Finds all .github content in vault
+- Creates symlinks for root + nested modules
+- Only links where actual code directories exist
 
-### For nested modules:
-```bash
-cd ~/git/YourRepo
-~/FV-Copilot/sync-copilot.sh platform/service --dry-run
-~/FV-Copilot/sync-copilot.sh platform/service
+## Structure
+
+```
+~/git/YourRepo/
+├── .github/ → vault/repos/YourRepo/
+└── platform/module/
+    └── .github/ → vault/repos/YourRepo/platform/module/
 ```
 
-### Legacy method:
-```bash
-~/FV-Copilot/link-repo.sh
-```
-
-This symlinks `repo/.copilot/` to `FV-Copilot/repos/{repo-name}/dot.copilot/`
+Vault can have extra folders (skills/, instructions/) without repo matches.
 
 ## MCP Configuration
 
@@ -225,207 +206,33 @@ This symlinks `repo/.copilot/` to `FV-Copilot/repos/{repo-name}/dot.copilot/`
 ## Notes
 
 - `.gitignore` excludes symlinked content and pkg files
-- Commit only vault-specific content (scratch, thinking, etc.)
-- Do not commit `repos/` or `copilot-cli/` - these are symlinks to external data
+- Commit only vault-specific content (docs, scratch, thinking, etc.)
+- Do not commit `repos/` or `copilot-cli/` - these are symlinks
 EOF
 
-echo "🔧 Downloading helper scripts..."
-
-# Download or create sync-copilot.sh
-cat > sync-copilot.sh << 'SYNCEOF'
-#!/bin/bash
-# Bidirectional sync/merge script for .copilot directories
-# Merges content from repo and vault, creates symlink
-# Usage: ./sync-copilot.sh <relative-path> [--dry-run]
-
-set -e
-
-DRY_RUN=false
-if [[ "$2" == "--dry-run" ]] || [[ "$1" == "--dry-run" ]]; then
-    DRY_RUN=true
-    echo "🧪 DRY RUN MODE - No changes will be made"
-    echo ""
-fi
-
-VAULT_PATH="$HOME/FV-Copilot"
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-
-if [ -z "$REPO_ROOT" ]; then
-    echo "❌ Error: Must run from within a git repository"
-    exit 1
-fi
-
-# Handle path argument
-if [ -z "$1" ] || [[ "$1" == "--dry-run" ]]; then
-    RELATIVE_PATH="."
-else
-    RELATIVE_PATH="$1"
-fi
-
-# Normalize path
-if [ "$RELATIVE_PATH" == "." ]; then
-    RELATIVE_PATH=""
-fi
-
-REPO_NAME=$(basename "$REPO_ROOT")
-VAULT_BASE="$VAULT_PATH/repos/$REPO_NAME"
-
-if [ -z "$RELATIVE_PATH" ]; then
-    VAULT_DOT_PATH="$VAULT_BASE/dot.copilot"
-    REPO_DOT_PATH="$REPO_ROOT/.copilot"
-    DISPLAY_PATH="(repo root)"
-else
-    VAULT_DOT_PATH="$VAULT_BASE/$RELATIVE_PATH/dot.copilot"
-    REPO_DOT_PATH="$REPO_ROOT/$RELATIVE_PATH/.copilot"
-    DISPLAY_PATH="$RELATIVE_PATH"
-fi
-
-echo "📁 Syncing: $DISPLAY_PATH"
-echo "  Vault: $VAULT_DOT_PATH"
-echo "  Repo:  $REPO_DOT_PATH"
-echo ""
-
-# Check what exists
-VAULT_EXISTS=false
-REPO_EXISTS=false
-REPO_IS_SYMLINK=false
-
-if [ -d "$VAULT_DOT_PATH" ]; then
-    VAULT_EXISTS=true
-    VAULT_FILES=$(find "$VAULT_DOT_PATH" -type f 2>/dev/null | wc -l | tr -d ' ')
-    echo "✓ Vault has $VAULT_FILES files"
-fi
-
-if [ -L "$REPO_DOT_PATH" ]; then
-    REPO_IS_SYMLINK=true
-    echo "✓ Repo has symlink (already linked)"
-elif [ -d "$REPO_DOT_PATH" ]; then
-    REPO_EXISTS=true
-    REPO_FILES=$(find "$REPO_DOT_PATH" -type f 2>/dev/null | wc -l | tr -d ' ')
-    echo "✓ Repo has $REPO_FILES files"
-fi
-
-echo ""
-
-# Plan actions
-if [ "$REPO_IS_SYMLINK" = true ]; then
-    echo "⏭️  Already symlinked - nothing to do"
-    exit 0
-fi
-
-# Merge strategy
-if [ "$VAULT_EXISTS" = true ] && [ "$REPO_EXISTS" = true ]; then
-    echo "🔀 MERGE: Both locations have content"
-    echo "   → Copy repo files to vault"
-    echo "   → Remove repo directory"
-    echo "   → Create symlink"
-    
-    if [ "$DRY_RUN" = false ]; then
-        mkdir -p "$VAULT_DOT_PATH"
-        cp -Rn "$REPO_DOT_PATH/"* "$VAULT_DOT_PATH/" 2>/dev/null || true
-        cp -Rn "$REPO_DOT_PATH/".* "$VAULT_DOT_PATH/" 2>/dev/null || true
-        rm -rf "$REPO_DOT_PATH"
-        ln -s "$VAULT_DOT_PATH" "$REPO_DOT_PATH"
-        echo "✅ Merged and linked"
-    fi
-    
-elif [ "$REPO_EXISTS" = true ]; then
-    echo "➡️  MOVE: Repo → Vault"
-    echo "   → Move repo directory to vault as dot.copilot"
-    echo "   → Create symlink"
-    
-    if [ "$DRY_RUN" = false ]; then
-        mkdir -p "$(dirname "$VAULT_DOT_PATH")"
-        mv "$REPO_DOT_PATH" "$VAULT_DOT_PATH"
-        ln -s "$VAULT_DOT_PATH" "$REPO_DOT_PATH"
-        echo "✅ Moved and linked"
-    fi
-    
-elif [ "$VAULT_EXISTS" = true ]; then
-    echo "⬅️  LINK: Vault → Repo"
-    echo "   → Create symlink (vault already has content)"
-    
-    if [ "$DRY_RUN" = false ]; then
-        ln -s "$VAULT_DOT_PATH" "$REPO_DOT_PATH"
-        echo "✅ Linked"
-    fi
-    
-else
-    echo "➕ CREATE: New empty directory"
-    echo "   → Create in vault"
-    echo "   → Create symlink"
-    
-    if [ "$DRY_RUN" = false ]; then
-        mkdir -p "$VAULT_DOT_PATH"
-        ln -s "$VAULT_DOT_PATH" "$REPO_DOT_PATH"
-        echo "✅ Created and linked"
-    fi
-fi
-
-if [ "$DRY_RUN" = true ]; then
-    echo ""
-    echo "🧪 Dry run complete - no changes made"
-    echo "   Run without --dry-run to apply changes"
-fi
-SYNCEOF
-
-chmod +x sync-copilot.sh
-
-# Create other helper scripts
-cat > link-repo.sh << 'LINKEOF'
-#!/bin/bash
-# Link a repo's .copilot directory to the Obsidian vault
-# Usage: Run from repo root OR pass repo path as argument
-
-set -e
-
-VAULT_PATH="$HOME/FV-Copilot"
-REPO_PATH="${1:-$(pwd)}"
-
-if [ ! -d "$REPO_PATH/.git" ]; then
-    echo "Error: $REPO_PATH is not a git repository"
-    exit 1
-fi
-
-REPO_NAME=$(basename "$REPO_PATH")
-VAULT_REPO_PATH="$VAULT_PATH/repos/$REPO_NAME"
-mkdir -p "$VAULT_REPO_PATH"
-
-if [ -L "$REPO_PATH/.copilot" ]; then
-    echo "Removing existing symlink at $REPO_PATH/.copilot"
-    rm "$REPO_PATH/.copilot"
-fi
-
-if [ -d "$REPO_PATH/.copilot" ]; then
-    echo "Moving existing .copilot directory to vault as dot.copilot..."
-    mv "$REPO_PATH/.copilot" "$VAULT_REPO_PATH/dot.copilot"
-fi
-
-ln -s "$VAULT_REPO_PATH/dot.copilot" "$REPO_PATH/.copilot"
-
-echo "✓ Linked $REPO_NAME/.copilot → FV-Copilot/repos/$REPO_NAME/dot.copilot"
-echo "✓ Edit context in Obsidian, changes appear in repo instantly"
-LINKEOF
-
-chmod +x link-repo.sh
+echo "🔧 Creating helper scripts..."
 
 cat > setup-vault.sh << 'SETUPEOF'
 #!/bin/bash
-# Bootstrap script to recreate Obsidian vault structure and symlinks
+# Bootstrap script to recreate vault structure on new machines
 
 VAULT_PATH="$HOME/FV-Copilot"
 
 # Create vault directories
-mkdir -p "$VAULT_PATH"/{scratch,thinking,_attachments,repos}
+mkdir -p "$VAULT_PATH"/{scratch,thinking,_attachments,repos,docs}
 
 # Symlink ~/.copilot (CLI config)
-ln -sf "$HOME/.copilot" "$VAULT_PATH/copilot-cli"
+if [ -d "$HOME/.copilot" ]; then
+    ln -sf "$HOME/.copilot" "$VAULT_PATH/copilot-cli"
+    echo "✓ Symlinked ~/.copilot → $VAULT_PATH/copilot-cli"
+else
+    echo "⚠️  ~/.copilot not found - run Copilot CLI once to initialize"
+fi
 
 echo "✓ Vault structure created at $VAULT_PATH"
-echo "✓ Symlinked ~/.copilot → $VAULT_PATH/copilot-cli"
 echo ""
-echo "Open $VAULT_PATH in Obsidian to start editing."
-echo "Use link-repo.sh to add repo-specific .copilot folders."
+echo "Next: Copy sync-github.sh and docs from repo"
+echo "Then use sync-github.sh to link your repositories"
 SETUPEOF
 
 chmod +x setup-vault.sh
@@ -434,16 +241,16 @@ echo ""
 echo "✅ Installation complete!"
 echo ""
 echo "Next steps:"
-echo "  1. Open Obsidian: File → Open Vault → $VAULT_PATH"
+echo "  1. (Optional) Open Obsidian: File → Open Vault → $VAULT_PATH"
 echo "  2. Link your repos:"
 echo "     cd ~/git/YourRepo"
-echo "     $VAULT_PATH/sync-copilot.sh . --dry-run"
-echo "     $VAULT_PATH/sync-copilot.sh ."
+echo "     $VAULT_PATH/sync-github.sh --dry-run"
+echo "     $VAULT_PATH/sync-github.sh"
 echo ""
-echo "  3. (Optional) Initialize git in vault for personal notes:"
+echo "  3. (Optional) Initialize git in vault:"
 echo "     cd $VAULT_PATH"
 echo "     git init"
-echo "     git add scratch/ thinking/ _attachments/ *.md"
+echo "     git add docs/ scratch/ thinking/ *.md *.sh"
 echo "     git commit -m 'Initial vault setup'"
 echo ""
-echo "📖 Read $VAULT_PATH/README.md for more info"
+echo "📖 Read $VAULT_PATH/README.md and $VAULT_PATH/docs/ for more info"

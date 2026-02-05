@@ -20,3 +20,5 @@ pkg/
 scratch/
 thinking/
 _attachments/
+scratch/*
+thinking/*

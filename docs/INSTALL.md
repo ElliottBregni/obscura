@@ -71,7 +71,7 @@ cd ~/git/YourRepo
 
 This intelligently:
 - Merges existing content from repo and vault
-- Creates `dot.github` in vault
+- Creates `.github` in vault (mirrors repo structure)
 - Symlinks `repo/.github` → vault
 
 **File Organization:**

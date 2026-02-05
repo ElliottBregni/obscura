@@ -9,7 +9,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/your-org/FV-Copilot/main/ins
 ## Manual Install
 
 ```bash
-# Clone the installer
+# Clone the vault
 git clone https://github.com/your-org/FV-Copilot.git ~/FV-Copilot
 
 # Run installer
@@ -19,12 +19,25 @@ cd ~/FV-Copilot
 
 ## What Gets Installed
 
-- `~/FV-Copilot/` - Your Obsidian vault
+- `~/FV-Copilot/` - Your vault
 - Symlink to `~/.copilot` (Copilot CLI config)
-- Helper scripts for syncing repos
+- `sync-github.sh` script for linking repos
 - Documentation and examples
 
-## After Install
+## Link Your First Repo
+
+```bash
+# From any git repository
+cd ~/git/FV-Platform-Main
+~/FV-Copilot/sync-github.sh --dry-run  # Preview
+~/FV-Copilot/sync-github.sh            # Apply
+```
+
+This creates:
+- `repo/.github` → `vault/repos/FV-Platform-Main/`
+- Nested `.github` for modules (if vault content exists)
+
+## Using the Vault
 
 ### Option 1: With Obsidian (Recommended)
 1. **Open in Obsidian**
@@ -33,7 +46,12 @@ cd ~/FV-Copilot
    ```
    - Visual file browser
    - Markdown preview
-   - Backlinks and graph view
+   - Graph view for navigation
+
+2. **Edit .github content**
+   - Navigate to `repos/YourRepo/`
+   - Edit `copilot-instructions.md`
+   - Changes appear instantly in repo!
 
 ### Option 2: Without Obsidian
 1. **Use any editor**

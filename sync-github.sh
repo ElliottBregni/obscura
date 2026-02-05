@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sync .github directory to vault for editing
+# Sync .github directories to vault for editing (root + nested modules)
 # Usage: ./sync-github.sh [--dry-run]
 
 set -e
@@ -20,126 +20,103 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 
 REPO_NAME=$(basename "$REPO_ROOT")
-VAULT_GITHUB_PATH="$VAULT_PATH/repos/$REPO_NAME/dot.github"
-REPO_GITHUB_PATH="$REPO_ROOT/.github"
+VAULT_REPO_BASE="$VAULT_PATH/repos/$REPO_NAME"
 
-echo "📁 Syncing: .github directory"
-echo "  Vault: $VAULT_GITHUB_PATH"
-echo "  Repo:  $REPO_GITHUB_PATH"
-echo ""
-
-# Check what exists
-VAULT_EXISTS=false
-REPO_EXISTS=false
-REPO_IS_SYMLINK=false
-
-if [ -d "$VAULT_GITHUB_PATH" ]; then
-    VAULT_EXISTS=true
-    echo "✓ Vault has .github files"
-fi
-
-if [ -L "$REPO_GITHUB_PATH" ]; then
-    REPO_IS_SYMLINK=true
-    echo "✓ Repo has symlink (already linked)"
-elif [ -d "$REPO_GITHUB_PATH" ]; then
-    REPO_EXISTS=true
-    echo "✓ Repo has .github directory"
-fi
-
-echo ""
-
-# Plan actions
-if [ "$REPO_IS_SYMLINK" = true ]; then
-    echo "⏭️  Already symlinked - nothing to do"
-    exit 0
-fi
-
-# Merge strategy
-if [ "$VAULT_EXISTS" = true ] && [ "$REPO_EXISTS" = true ]; then
-    echo "🔀 MERGE: Both locations have .github"
-    echo "   → Copy repo files to vault"
-    echo "   → Remove repo directory"
-    echo "   → Create symlink"
+# Function to sync a single .github location
+sync_github_location() {
+    local repo_path="$1"
+    local vault_path="$2"
+    local relative_path="$3"
     
-    if [ "$DRY_RUN" = false ]; then
-        mkdir -p "$VAULT_GITHUB_PATH"
-        cp -Rn "$REPO_GITHUB_PATH/"* "$VAULT_GITHUB_PATH/" 2>/dev/null || true
-        cp -Rn "$REPO_GITHUB_PATH/".* "$VAULT_GITHUB_PATH/" 2>/dev/null || true
-        rm -rf "$REPO_GITHUB_PATH"
-        ln -s "$VAULT_GITHUB_PATH" "$REPO_GITHUB_PATH"
-        echo "✅ Merged and linked"
+    echo ""
+    echo "📁 Syncing: $relative_path"
+    echo "  Vault: $vault_path"
+    echo "  Repo:  $repo_path"
+    
+    # Check what exists
+    local vault_exists=false
+    local repo_exists=false
+    local repo_is_symlink=false
+    
+    if [ -d "$vault_path" ] && [ -n "$(ls -A "$vault_path" 2>/dev/null)" ]; then
+        vault_exists=true
+        echo "  ✓ Vault has content"
     fi
     
-elif [ "$REPO_EXISTS" = true ]; then
-    echo "➡️  MOVE: Repo → Vault"
-    echo "   → Move .github to vault as dot.github"
-    echo "   → Create symlink"
-    
-    if [ "$DRY_RUN" = false ]; then
-        mkdir -p "$(dirname "$VAULT_GITHUB_PATH")"
-        mv "$REPO_GITHUB_PATH" "$VAULT_GITHUB_PATH"
-        ln -s "$VAULT_GITHUB_PATH" "$REPO_GITHUB_PATH"
-        echo "✅ Moved and linked"
+    if [ -L "$repo_path" ]; then
+        repo_is_symlink=true
+        echo "  ✓ Already symlinked"
+    elif [ -d "$repo_path" ]; then
+        repo_exists=true
+        echo "  ✓ Repo has .github directory"
     fi
     
-elif [ "$VAULT_EXISTS" = true ]; then
-    echo "⬅️  LINK: Vault → Repo"
-    echo "   → Create symlink (vault already has content)"
-    
-    if [ "$DRY_RUN" = false ]; then
-        ln -s "$VAULT_GITHUB_PATH" "$REPO_GITHUB_PATH"
-        echo "✅ Linked"
+    # Skip if already linked
+    if [ "$repo_is_symlink" = true ]; then
+        echo "  ⏭️  Nothing to do"
+        return 0
     fi
     
-else
-    echo "➕ CREATE: New .github directory"
-    echo "   → Create in vault with copilot-instructions.md"
-    echo "   → Create symlink"
-    
-    if [ "$DRY_RUN" = false ]; then
-        mkdir -p "$VAULT_GITHUB_PATH"
+    # Handle different scenarios
+    if [ "$vault_exists" = true ] && [ "$repo_exists" = true ]; then
+        echo "  🔀 MERGE: Copy repo → vault, then link"
+        if [ "$DRY_RUN" = false ]; then
+            cp -Rn "$repo_path/"* "$vault_path/" 2>/dev/null || true
+            rm -rf "$repo_path"
+            ln -s "$vault_path" "$repo_path"
+            echo "  ✅ Merged and linked"
+        fi
         
-        # Create template copilot-instructions.md
-        cat > "$VAULT_GITHUB_PATH/copilot-instructions.md" << 'EOF'
-# Copilot Instructions for $(basename "$REPO_ROOT")
-
-## Project Overview
-[Brief description of what this project does]
-
-## Architecture
-[Key architectural patterns and decisions]
-
-## Development Guidelines
-- Coding standards
-- Testing requirements
-- Deployment process
-
-## Common Tasks
-### Running Tests
-```bash
-# Command to run tests
-```
-
-### Building
-```bash
-# Command to build
-```
-
-### Deployment
-```bash
-# Command to deploy
-```
-
-## Context for AI Assistants
-- Use this space to provide context that helps Copilot understand your codebase
-- Mention important patterns, conventions, or gotchas
-- Link to key files or documentation
-EOF
+    elif [ "$repo_exists" = true ]; then
+        echo "  ➡️  MOVE: Repo → vault, then link"
+        if [ "$DRY_RUN" = false ]; then
+            mkdir -p "$(dirname "$vault_path")"
+            mv "$repo_path" "$vault_path"
+            ln -s "$vault_path" "$repo_path"
+            echo "  ✅ Moved and linked"
+        fi
         
-        ln -s "$VAULT_GITHUB_PATH" "$REPO_GITHUB_PATH"
-        echo "✅ Created with template and linked"
+    elif [ "$vault_exists" = true ]; then
+        echo "  ⬅️  LINK: Create symlink to vault"
+        if [ "$DRY_RUN" = false ]; then
+            ln -s "$vault_path" "$repo_path"
+            echo "  ✅ Linked"
+        fi
+    else
+        echo "  ⏭️  No content - skipping"
     fi
+}
+
+# Sync root .github
+echo "🔄 Scanning for .github directories..."
+sync_github_location "$REPO_ROOT/.github" "$VAULT_REPO_BASE" ".github (root)"
+
+# Find all nested directories in vault that should have .github symlinks
+# Only sync if directory contains actual content files (*.md, etc), not just subdirectories
+if [ -d "$VAULT_REPO_BASE" ]; then
+    while IFS= read -r -d '' vault_dir; do
+        # Get relative path from vault repo base
+        rel_path="${vault_dir#$VAULT_REPO_BASE/}"
+        
+        # Skip if it's the root (already handled)
+        if [ "$rel_path" = "$VAULT_REPO_BASE" ] || [ -z "$rel_path" ]; then
+            continue
+        fi
+        
+        # Corresponding repo location
+        repo_dir="$REPO_ROOT/$rel_path"
+        
+        # Only sync if:
+        # 1. Vault dir has actual content FILES (*.md, *.json)
+        # 2. The corresponding directory exists in the actual repo (not vault-only)
+        if [ -d "$repo_dir" ] && [ -n "$(find "$vault_dir" -maxdepth 1 -type f \( -name "*.md" -o -name "*.json" \) 2>/dev/null)" ]; then
+            sync_github_location "$repo_dir/.github" "$vault_dir" ".github ($rel_path)"
+        fi
+    done < <(find "$VAULT_REPO_BASE" -type d -print0)
 fi
+
+echo ""
+echo "✅ Sync complete!"
 
 if [ "$DRY_RUN" = true ]; then
     echo ""
