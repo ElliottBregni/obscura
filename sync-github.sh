@@ -1,5 +1,10 @@
 #!/bin/bash
 # Sync .github directories to vault for editing (root + nested modules)
+# 
+# Creates symlinks: repo/.github → vault/repos/RepoName/
+# Only creates dedicated .github where code directories exist
+# Vault-only folders (skills/, instructions/) accessible via parent .github
+#
 # Usage: ./sync-github.sh [--dry-run]
 
 set -e

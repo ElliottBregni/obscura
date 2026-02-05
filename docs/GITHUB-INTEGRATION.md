@@ -63,8 +63,9 @@ Script creates:
 ```
 
 **But if** vault has `skills/` with no matching repo folder:
-- ❌ No symlink created
-- ✅ Content stays vault-only for reference
+- ❌ No dedicated `.github` symlink at `repo/skills/.github`
+- ✅ Still accessible via parent: `repo/.github/skills/`
+- ✅ Content available to Copilot, just not as a separate module
 
 ## What Goes in copilot-instructions.md
 
@@ -99,22 +100,25 @@ Brief description of what this code does
 
 ## Vault-Only vs Repo Folders
 
-**Repo folders (symlinked):**
-- Code exists in actual repo
-- `.github` created automatically
-- Team can see content (if committed)
+**Repo folders (get dedicated .github):**
+- Code directory exists in actual repo
+- Script creates dedicated `.github` symlink at that location
+- Team sees it as a module-specific context
 
-**Vault-only folders:**
-- No matching code directory
-- Skills, reference docs, experiments
-- Personal context, not in repo
+**Vault-only folders (accessible through parent):**
+- No matching code directory in repo
+- NO dedicated `.github` symlink for that folder
+- Still accessible via parent `.github` symlink
+- Example: `repo/.github/skills/` works, but `repo/skills/.github` doesn't exist
+- Use for: skills, reference docs, experiments
 
 ## Workflow
 
 1. **Create content in vault** (edit in Obsidian or any editor)
-2. **Script creates symlinks** (only where code exists)
-3. **Commit to repo** (optional, for team sharing)
-4. **Iterate freely** (vault-only folders never touch repo)
+2. **Script creates symlinks** (only where code directories exist)
+3. **Vault-only folders automatically accessible** (via parent .github)
+4. **Commit to repo** (optional, for team sharing)
+5. **Iterate freely** (add vault folders anytime, no repo changes needed)
 
 ## Example Full Structure
 
@@ -123,17 +127,23 @@ Vault (~/FV-Copilot/):
 repos/
 └── YourRepo/
     ├── copilot-instructions.md      ← Repo root context
-    ├── skills/                      ← Vault-only (no repo match)
+    ├── skills/                      ← Vault-only (accessible via root .github)
     └── platform/service/
         ├── copilot-instructions.md  ← Module context
-        └── instructions/            ← Detailed docs
+        └── instructions/            ← Vault-only (accessible via module .github)
             └── *.md
 
 Repo (~/git/YourRepo/):
 ├── .github → vault/repos/YourRepo/
+│   ├── copilot-instructions.md      ✅ Visible
+│   └── skills/                      ✅ Visible (vault-only, through parent)
 └── platform/service/
     ├── .github → vault/repos/YourRepo/platform/service/
+    │   ├── copilot-instructions.md  ✅ Visible
+    │   └── instructions/            ✅ Visible (vault-only, through parent)
     └── actual_code.py
 ```
+
+**Key insight:** Vault-only folders are visible through parent `.github`, they just don't get their own dedicated `.github` symlink!
 
 Clean, simple, powerful! 🎯
