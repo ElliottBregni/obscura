@@ -1,0 +1,19 @@
+# Obsidian metadata
+.obsidian/
+.DS_Store
+
+# Symlinked repos (tracked in their respective repos)
+repos/
+
+# Symlinked Copilot CLI config (user-specific, do not commit)
+copilot-cli/
+
+# Package files (MCP servers, plugins, etc.)
+**/pkg/
+pkg/
+*.pkg
+
+# Vault-only folders (can be committed to vault repo if desired)
+scratch/
+thinking/
+_attachments/
