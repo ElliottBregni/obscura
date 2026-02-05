@@ -29,15 +29,15 @@ This creates `repo/.copilot/` → `vault/repos/{repo-name}/dot.copilot/`
 
 ## Commands
 
-### Syncing .copilot Directories
-- `./sync-copilot.sh <path> [--dry-run]` - **Recommended**: Bidirectional sync with merge
-  - Merges content from both repo and vault
-  - Works forward (repo→vault) or backward (vault→repo)
-  - Use `--dry-run` to test without making changes
-  - Examples:
-    - `./sync-copilot.sh .` - Sync repo root
-    - `./sync-copilot.sh platform/service` - Sync nested module
-    - `./sync-copilot.sh . --dry-run` - Test first
+### Syncing Directories
+- `./sync-copilot.sh <path> [--dry-run]` - Sync `.copilot` directories (private context)
+- `./sync-github.sh [--dry-run]` - Sync `.github` directory (official instructions)
+
+**Recommended workflow:**
+1. Test with `--dry-run` first
+2. Apply changes
+3. Edit in vault (Obsidian or any editor)
+4. Commit from repo when ready
 
 ### Legacy Scripts
 - `./link-repo.sh` - Link current repo's .copilot to vault (simple)
