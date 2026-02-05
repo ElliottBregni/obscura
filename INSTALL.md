@@ -58,35 +58,32 @@ npm install -g serverless
 
 ## Adding New Repos
 
-### Recommended: Use sync-copilot.sh
+### Recommended: Use sync-github.sh
 From any git repository:
 ```bash
 # Test first with dry-run
 cd ~/git/YourRepo
-~/FV-Copilot/sync-copilot.sh . --dry-run
+~/FV-Copilot/sync-github.sh --dry-run
 
 # Apply if looks good
-~/FV-Copilot/sync-copilot.sh .
+~/FV-Copilot/sync-github.sh
 ```
 
 This intelligently:
 - Merges existing content from repo and vault
-- Creates `dot.copilot` in vault
-- Symlinks `repo/.copilot` → vault
+- Creates `dot.github` in vault
+- Symlinks `repo/.github` → vault
 
-### For nested modules:
-```bash
-cd ~/git/YourRepo
-~/FV-Copilot/sync-copilot.sh platform/service --dry-run
-~/FV-Copilot/sync-copilot.sh platform/service
+**File Organization:**
 ```
-
-### Legacy method:
-```bash
-~/FV-Copilot/link-repo.sh
+.github/
+├── copilot-instructions.md    # Main instructions
+├── instructions/               # Module-specific context
+│   └── platform/
+│       └── service/
+│           └── context.instructions.md
+└── skills/                     # Project skills
 ```
-
-This symlinks `repo/.copilot/` to `FV-Copilot/repos/{repo-name}/dot.copilot/`
 
 ## MCP Configuration
 

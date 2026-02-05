@@ -51,19 +51,22 @@ cd ~/git/YourRepo
 ~/FV-Copilot/
 ├── repos/
 │   └── YourRepo/
-│       └── dot.copilot/          # Repo context (symlinked)
-├── copilot-cli/                  # CLI config (symlinked to ~/.copilot)
-├── scratch/                      # Private notes
-├── thinking/                     # Working drafts
-└── _attachments/                 # Vault-only files
+│       └── dot.github/               # Repo context (symlinked)
+│           ├── copilot-instructions.md
+│           ├── instructions/         # Module-specific
+│           └── skills/               # Project skills
+├── copilot-cli/                      # CLI config (symlinked to ~/.copilot)
+├── scratch/                          # Private notes
+├── thinking/                         # Working drafts
+└── _attachments/                     # Vault-only files
 ```
 
 ## 🎓 How It Works
 
-1. **Vault stores everything** - All `.copilot` content lives in `~/FV-Copilot/repos/`
-2. **Repos use symlinks** - `repo/.copilot` → `vault/repos/RepoName/dot.copilot/`
-3. **Obsidian sees folders** - Hidden files appear as `dot.copilot` (visible in sidebar)
-4. **LLMs see real files** - Symlinks are transparent to Copilot CLI
+1. **Vault stores everything** - All `.github` content lives in `~/FV-Copilot/repos/`
+2. **Repos use symlinks** - `repo/.github` → `vault/repos/RepoName/dot.github/`
+3. **Obsidian sees folders** - Hidden files appear as `dot.github` (visible in sidebar)
+4. **Copilot reads real files** - Symlinks are transparent to Copilot CLI
 
 ## 🔧 Prerequisites
 
