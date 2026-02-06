@@ -2,12 +2,6 @@
 .obsidian/
 .DS_Store
 
-# Python
-__pycache__/
-*.pyc
-*.egg-info/
-.venv/
-
 # Symlinked repos (tracked in their respective repos)
 repos/
 

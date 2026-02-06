@@ -1,4 +1,18 @@
-# FV-Copilot Vault
+# VaultHopper
+
+
+
+Roadmap: stabilize an MVP (polished CLI, pip/standalone binaries, docs, example prompt pipelines, Obsidian symlink
+  manager), then build the recursive-agent prototype with strict loop termination, caching, cost controls and
+  observability; next add integrations (Docker image, tiny web dashboard, analytics), team features (SSO, audit logs),
+  SDKs/IDE plugins and a prompt/plugin marketplace for extensibility.
+  Monetization: freemium (use-limited free tier) → Pro per-user subscription + Team tier (flat fee + per-seat or usage),
+  enterprise contracts (on‑prem or managed, SSO, SLA), plus paid add‑ons (marketplace listings, priority support,
+  analytics, white‑label licensing) and usage-based billing for high-volume customers.
+  Go-to-market: publish to PyPI/GitHub, one‑page site + demo video, targeted developer content (tutorials, HN/Reddit
+  posts, newsletter outreach), early-access trials/webinars and convert power users to paid via time‑limited discounts
+  and case-study-driven outreach.
+
 
 **Multi-agent context management system** for code repositories. Keep skills, instructions, and architectural knowledge in one place, synced across multiple AI agents (GitHub Copilot, Claude, etc.) and repositories.
 
