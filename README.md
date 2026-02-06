@@ -18,7 +18,7 @@ A **single source of truth** for LLM context that:
 
 ### 1. **Add a Repository**
 ```bash
-cd ~/FV-Copilot
+cd ~/obscura
 # Add repo path to repos/INDEX.md
 echo "~/git/YourRepo" >> repos/INDEX.md
 ```
@@ -30,7 +30,7 @@ python3 sync.py --repo ~/git/YourRepo --agent copilot --mode symlink
 ```
 
 ### 3. **Edit & Iterate**
-- Edit files in `~/FV-Copilot/skills/` or `instructions/`
+- Edit files in `~/obscura/skills/` or `instructions/`
 - Changes instantly appear in all linked repos via symlinks
 - No git commits needed until you're ready
 
@@ -285,7 +285,7 @@ cat ~/git/MyRepo/.claude/skills/python.md
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      FV-Copilot Vault                        │
+│                      obscura Vault                        │
 │  (Single Source of Truth)                                    │
 │                                                               │
 │  skills/                instructions/           agents/      │
