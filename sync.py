@@ -42,8 +42,17 @@ import shutil
 import subprocess
 import sys
 import time
+import types
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+
+# ---------------------------------------------------------------------------
+# Type aliases
+# ---------------------------------------------------------------------------
+
+Classification = Literal["UNIVERSAL", "AGENT_NAMED", "AGENT_NESTED", "AGENT_DIR", "SKIP"]
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +81,7 @@ EXCLUDE_FILENAMES: set[str] = {
 CONTENT_DIRS: list[str] = ["skills", "instructions", "docs"]
 
 # Priority values (higher = wins)
-PRIORITY = {
+PRIORITY: dict[str, int] = {
     "UNIVERSAL": 0,
     "AGENT_NAMED": 1,
     "AGENT_NESTED": 2,
@@ -158,7 +167,7 @@ class VaultSync:
 
     def classify_file(
         self, filepath: Path, base_path: Path, agent: str
-    ) -> tuple[str, Path]:
+    ) -> tuple[Classification, Path]:
         """Classify a file for a given agent.
 
         Returns (classification, dest_relative_path).
@@ -382,7 +391,7 @@ class VaultSync:
 
     def _classify_with_dest(
         self, source_abs: Path, dest_rel: Path, agent: str
-    ) -> tuple[str, Path]:
+    ) -> tuple[Classification, Path]:
         """Classify a file using its destination-relative path.
 
         This handles agent filtering, nested overrides, agent dirs, etc.
@@ -870,7 +879,7 @@ class VaultSync:
 
 LOCK_FILE = Path("/tmp/fv-copilot-watcher.pid")
 DEBOUNCE_SECONDS = 0.5
-FSWATCH_EXCLUDES = [r"\.git", r"\.DS_Store", r"node_modules", r"__pycache__"]
+FSWATCH_EXCLUDES: list[str] = [r"\.git", r"\.DS_Store", r"node_modules", r"__pycache__"]
 
 
 class VaultWatcher:
@@ -947,7 +956,7 @@ class VaultWatcher:
         except Exception as e:
             print(f"Sync error: {e}", file=sys.stderr)
 
-    def _cleanup(self, signum: int = 0, frame: object = None) -> None:
+    def _cleanup(self, signum: int = 0, frame: types.FrameType | None = None) -> None:
         if self._process and self._process.poll() is None:
             self._process.terminate()
             try:
