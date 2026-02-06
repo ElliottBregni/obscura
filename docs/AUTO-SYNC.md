@@ -1,47 +1,55 @@
 # Auto-Sync Methods
 
-The `watch-and-sync.sh` script supports multiple modes.
+All sync operations are handled by `sync.py`.
 
 ## **Modes**
 
-### Symlink Mode
-- Creates symlinks: `repo/.github` → `vault/repos/RepoName/`
-- Lightweight, one-way (vault = source)
-- Command: `~/FV-Copilot/watch-and-sync.sh --mode symlink`
+### Symlink Mode (Default)
+- Creates per-file symlinks: `repo/.github/skills/x.md` → `vault/skills/x.md`
+- Recursive: matches vault directory tree to repo directory tree
+- Command: `python3 sync.py --mode symlink`
+
+### Copy Mode
+- One-way file copy from vault to repo
+- Command: `python3 sync.py --mode copy`
 
 ### Watch Mode
-- Bi-directional file sync via fswatch
-- `~/.copilot` ↔ `~/FV-Copilot/copilot-cli/`
-- Command: `~/FV-Copilot/watch-and-sync.sh --mode watch`
-
-### Both Mode (Default)
-- Symlinks for repos + Watch for copilot-cli
-- Command: `~/FV-Copilot/watch-and-sync.sh`
+- Continuous background sync using fswatch
+- Re-syncs all repos on any vault file change
+- Command: `python3 sync.py --watch`
 
 ---
 
 ## **Usage**
 
-### Setup Symlinks
+### One-Shot Sync
 ```bash
-~/FV-Copilot/watch-and-sync.sh --mode symlink
-```
-Creates symlinks, exits.
+# Sync all repos for all agents
+python3 sync.py --mode symlink
 
-### Start Watcher
-```bash
-~/FV-Copilot/watch-and-sync.sh --mode watch
-```
-Runs continuously (Ctrl+C to stop).
+# Sync specific repo
+python3 sync.py --mode symlink --repo ~/git/FV-Platform-Main
 
-### Both (Recommended)
-```bash
-~/FV-Copilot/watch-and-sync.sh
+# Sync specific agent only
+python3 sync.py --mode symlink --agent copilot
 ```
 
-### Specific Repo
+### Continuous Watch
 ```bash
-~/FV-Copilot/watch-and-sync.sh --mode symlink --repo FV-Platform-Main
+python3 sync.py --watch
+```
+Runs continuously (Ctrl+C to stop). Requires `fswatch` (`brew install fswatch`).
+
+### Other Operations
+```bash
+# Remove all symlinks
+python3 sync.py --clean
+
+# Merge real files back to vault, then re-symlink
+python3 sync.py --merge
+
+# Dry run (preview without changes)
+python3 sync.py --mode symlink --dry-run
 ```
 
 ---
@@ -50,7 +58,7 @@ Runs continuously (Ctrl+C to stop).
 
 ### Option A: Manual (Terminal)
 ```bash
-~/FV-Copilot/watch-and-sync.sh --mode both
+python3 ~/FV-Copilot/sync.py --watch
 ```
 Foreground, see output, Ctrl+C to stop.
 
@@ -69,47 +77,40 @@ launchctl list | grep fv-copilot
 tail -f /tmp/fv-copilot-watcher.log
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.fv-copilot.watch-and-sync.plist
+launchctl unload ~/Library/LaunchAgents/com.fv-copilot.watcher.plist
 
 # Start
-launchctl load ~/Library/LaunchAgents/com.fv-copilot.watch-and-sync.plist
+launchctl load ~/Library/LaunchAgents/com.fv-copilot.watcher.plist
 ```
 
 ---
 
 ## **What Syncs**
 
-### Repos (Symlink Mode)
+### Domain 1: In-Repo (Symlink Mode)
+Vault content is symlinked into each repo's agent directories:
 ```
-~/FV-Copilot/repos/FV-Platform-Main/
-  ├── copilot-instructions.md
-  └── platform/partview_core/partview_service/
-      └── copilot-instructions.md
-```
-Creates symlinks at:
-```
-~/git/FV-Platform-Main/.github → vault/repos/FV-Platform-Main/
-~/git/FV-Platform-Main/platform/.../service/.github → vault/.../service/
+vault/skills/x.md        → repo/.github/skills/x.md (copilot)
+vault/skills/x.md        → repo/.claude/skills/x.md (claude)
+vault/instructions/y.md  → repo/.github/instructions/y.md
 ```
 
-### Copilot-CLI (Watch Mode)
+Recursive matching: if the vault has `repos/RepoName/platform/service/` and the repo has `platform/service/`, a nested `.github/` is created there too.
+
+### Domain 2: System-Level
+System-wide agent configs:
 ```
-~/.copilot/ ↔ ~/FV-Copilot/copilot-cli/
-├── agent.json
-├── config.json
-├── mcp-config.json
-├── logs/
-├── session-state/
-└── ... (all files)
+vault/skills/x.md        → ~/.github/skills/x.md
+vault/instructions/y.md  → ~/.claude/instructions/y.md
 ```
 
 ---
 
 ## **System Cost**
 
-**Idle:** 30MB RAM, 0% CPU
-**Active:** Minimal I/O, ~100ms CPU spike during copy
-**Disk:** copilot-cli/ mirrors ~/.copilot
+**Idle:** 30MB RAM, 0% CPU (fswatch)
+**Active:** Minimal I/O, ~100ms CPU spike during sync
+**Disk:** Symlinks only (zero copy)
 
 ---
 
@@ -117,8 +118,10 @@ Creates symlinks at:
 
 | Goal | Command |
 |------|---------|
-| Full setup | `~/FV-Copilot/watch-and-sync.sh` |
-| Watch only | `--mode watch` |
-| Symlinks only | `--mode symlink` |
+| Full sync | `python3 sync.py --mode symlink` |
+| Watch mode | `python3 sync.py --watch` |
+| Copy mode | `python3 sync.py --mode copy` |
+| Clean all | `python3 sync.py --clean` |
+| Merge & relink | `python3 sync.py --merge` |
+| One repo | `python3 sync.py --mode symlink --repo ~/git/RepoName` |
 | Background service | `install-launchd-service.sh` |
-| One repo | `--mode symlink --repo RepoName` |

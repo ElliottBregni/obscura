@@ -2,38 +2,27 @@
 
 ## Prerequisites
 
-## Prerequisites
-
 ### Required
 - **Git** - For version control
-- **GitHub Copilot CLI** - Install with:
-  ```bash
-  brew install copilot-cli
-  # or
-  npm install -g @github/copilot
-  ```
+- **Python 3.x** - For sync.py (ships with macOS)
 
 ### Optional (Recommended)
+- **fswatch** - For watch mode (`brew install fswatch`)
 - **Obsidian** - Download from https://obsidian.md
   - Provides visual navigation, backlinks, and graph view
   - **Not required** - You can edit markdown files in any editor (VS Code, vim, etc.)
   - The vault is just a folder with `.md` files and symlinks
 
 ### Recommended MCP Servers
-The Copilot CLI uses Model Context Protocol (MCP) servers for extended functionality.
+The vault includes MCP configuration for extended AI agent functionality.
 
-Current MCP config location: `copilot-cli/mcp-config.json` (symlinked to `~/.copilot/mcp-config.json`)
+Current MCP config: `mcp-config.json`
 
 #### Installed MCP Servers
 - **github-mcp-server** - GitHub integration (repos, PRs, issues, actions)
 
 #### To Add More MCP Servers
-Use the Copilot CLI:
-```bash
-/mcp add <server-name>
-```
-
-Or manually edit `copilot-cli/mcp-config.json`
+Manually edit `mcp-config.json` or use your agent's MCP configuration commands.
 
 ### Python Tools (if working with Python services)
 ```bash
@@ -51,49 +40,46 @@ npm install -g serverless
 
 ## Vault Setup
 
-1. Open `~/FV-Copilot` in Obsidian
-2. Trust the vault when prompted
-3. All repo `.copilot/` folders are symlinked to `repos/`
-4. CLI config (including MCP) is at `copilot-cli/`
+1. Clone or copy `~/FV-Copilot`
+2. Open in Obsidian (optional) or any editor
+3. Add repos to `repos/INDEX.md`
+4. Run sync: `python3 sync.py --mode symlink`
 
 ## Adding New Repos
 
-### Recommended: Use sync-github.sh
-From any git repository:
 ```bash
-# Test first with dry-run
-cd ~/git/YourRepo
-~/FV-Copilot/sync-github.sh --dry-run
+# Add to index
+echo "~/git/YourRepo" >> repos/INDEX.md
 
-# Apply if looks good
-~/FV-Copilot/sync-github.sh
+# Sync (creates per-file symlinks)
+python3 sync.py --repo ~/git/YourRepo --mode symlink
+
+# Or dry-run first
+python3 sync.py --repo ~/git/YourRepo --mode symlink --dry-run
 ```
 
-This intelligently:
-- Merges existing content from repo and vault
-- Creates `.github` in vault (mirrors repo structure)
-- Symlinks `repo/.github` → vault
+This creates per-file symlinks:
+- `repo/.github/skills/x.md` → `vault/skills/x.md`
+- `repo/.claude/skills/x.md` → `vault/skills/x.md`
+- Nested `.github/` for modules matching vault structure
 
 **File Organization:**
 ```
 .github/
-├── copilot-instructions.md    # Main instructions
-├── instructions/               # Module-specific context
-│   └── platform/
-│       └── service/
-│           └── context.instructions.md
-└── skills/                     # Project skills
+├── copilot-instructions.md    # Main instructions (from vault repo mirror)
+├── instructions/               # Instruction files
+│   └── *.md
+└── skills/                     # Skill files
+    └── *.md
 ```
 
 ## MCP Configuration
 
-- **Location**: `copilot-cli/mcp-config.json`
-- **Manage**: Use `/mcp` commands in Copilot CLI
-- **Enable/Disable**: `/mcp enable <server>` or `/mcp disable <server>`
-- **Package installs**: Stored in `copilot-cli/pkg/` (gitignored)
+- **Location**: `mcp-config.json` (vault root)
+- **Template**: `mcp-config.template.json`
 
 ## Notes
 
-- `.gitignore` excludes symlinked content and pkg files
-- Commit only vault-specific content (scratch, thinking, etc.)
-- Do not commit `repos/` or `copilot-cli/` - these are symlinks to external data
+- `.gitignore` excludes symlinked content and temporary files
+- Commit only vault-specific content
+- `repos/` contains repo mirror directories (vault content that maps into repos)

@@ -40,14 +40,20 @@ vault/repos/RepoName/
 ### Scripts Changed
 **Removed:**
 - `sync-copilot.sh` - No longer needed
-- `link-repo.sh` - Replaced by sync-github.sh
+- `link-repo.sh` - Replaced by sync.py
 - `link-nested.sh` - Nested now in `.github/instructions/`
 - `unlink-repo.sh` - No longer needed
+- `sync-github.sh` - Replaced by sync.py
+- `watch-and-sync.sh` - Replaced by sync.py --watch
+- `merge-and-relink.sh` - Replaced by sync.py --merge
+- `remove-links.sh` - Replaced by sync.py --clean
+- `setup-vault.sh` - No longer needed
+- `install.sh` - No longer needed
 
-**Kept:**
-- ✅ `sync-github.sh` - Main sync script
-- ✅ `setup-vault.sh` - Vault initialization
-- ✅ `install.sh` - Team installer
+**Current:**
+- `sync.py` - All sync operations (symlink, copy, watch, merge, clean)
+- `test_sync.py` - Test suite
+- `install-launchd-service.sh` - macOS background service setup
 
 ### Documentation Updated
 - ✅ README.md - Updated all references

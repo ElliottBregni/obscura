@@ -34,16 +34,16 @@ GitHub Copilot CLI looks for instructions in these locations (in order):
 ### Sync Script
 
 ```bash
-cd ~/git/YourRepo
-~/FV-Copilot/sync-github.sh --dry-run  # Preview
-~/FV-Copilot/sync-github.sh            # Apply
+cd ~/FV-Copilot
+python3 sync.py --repo ~/git/YourRepo --mode symlink --dry-run  # Preview
+python3 sync.py --repo ~/git/YourRepo --mode symlink             # Apply
 ```
 
 This automatically:
-- ✅ Syncs root `.github`
-- ✅ Finds nested modules with content
-- ✅ Creates symlinks only where code exists
-- ✅ Skips vault-only folders (skills/, instructions/)
+- Syncs root `.github` and `.claude`
+- Finds nested modules with matching vault content
+- Creates per-file symlinks
+- Supports multi-agent routing
 
 ### Nested Module Example
 

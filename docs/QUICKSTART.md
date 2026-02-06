@@ -1,41 +1,33 @@
 # Quick Start for New Developers
 
-## One-Line Install
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/your-org/FV-Copilot/main/install.sh)
-```
-
-## Manual Install
+## Setup
 
 ```bash
 # Clone the vault
 git clone https://github.com/your-org/FV-Copilot.git ~/FV-Copilot
-
-# Run installer
-cd ~/FV-Copilot
-./install.sh
 ```
 
-## What Gets Installed
+## What You Get
 
-- `~/FV-Copilot/` - Your vault
-- Symlink to `~/.copilot` (Copilot CLI config)
-- `sync-github.sh` script for linking repos
+- `~/FV-Copilot/` - Your vault (skills, instructions, docs)
+- `sync.py` - Single Python script for all sync operations
 - Documentation and examples
 
 ## Link Your First Repo
 
 ```bash
-# From any git repository
-cd ~/git/FV-Platform-Main
-~/FV-Copilot/sync-github.sh --dry-run  # Preview
-~/FV-Copilot/sync-github.sh            # Apply
+# Add repo to index
+echo "~/git/FV-Platform-Main" >> ~/FV-Copilot/repos/INDEX.md
+
+# Sync (creates per-file symlinks)
+cd ~/FV-Copilot
+python3 sync.py --repo ~/git/FV-Platform-Main --mode symlink
 ```
 
 This creates:
-- `repo/.github` → `vault/repos/FV-Platform-Main/`
-- Nested `.github` for modules (if vault content exists)
+- `repo/.github/skills/` → vault skill files (copilot)
+- `repo/.claude/skills/` → vault skill files (claude)
+- Nested `.github/` for modules (if vault content exists)
 
 ## Using the Vault
 
@@ -48,42 +40,43 @@ This creates:
    - Markdown preview
    - Graph view for navigation
 
-2. **Edit .github content**
-   - Navigate to `repos/YourRepo/`
-   - Edit `copilot-instructions.md`
-   - Changes appear instantly in repo!
+2. **Edit content**
+   - Navigate to `skills/` or `instructions/`
+   - Edit any `.md` file
+   - Changes appear instantly in all linked repos via symlinks
 
 ### Option 2: Without Obsidian
-1. **Use any editor**
-   ```bash
-   cd ~/FV-Copilot
-   code .          # VS Code
-   vim README.md   # Vim
-   # Any editor works—it's just markdown files!
-   ```
-
-### Link Your First Repo (Either Way)
-   ```bash
-   cd ~/git/YourRepo
-   ~/FV-Copilot/sync-copilot.sh . --dry-run  # Preview
-   ~/FV-Copilot/sync-copilot.sh .            # Apply
-   ```
-
-3. **Edit in Obsidian, commit from repo when ready**
-
-## Sharing the Installer
-
-Send teammates:
-```
-bash <(curl -fsSL https://your-company-url/install.sh)
+```bash
+cd ~/FV-Copilot
+code .          # VS Code
+vim skills/python.md   # Vim
+# Any editor works — it's just markdown files!
 ```
 
-Or add to your team's onboarding docs!
+## Sync Commands
+
+```bash
+# Sync all repos for all agents
+python3 sync.py --mode symlink
+
+# Sync one repo, one agent
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode symlink
+
+# Preview without changes
+python3 sync.py --mode symlink --dry-run
+
+# Watch mode (auto-sync on file changes)
+python3 sync.py --watch
+
+# Remove all symlinks
+python3 sync.py --clean
+```
 
 ## Requirements
 
-- Obsidian (https://obsidian.md)
-- GitHub Copilot CLI
+- Python 3.x (for sync.py)
 - Git
+- fswatch (optional, for watch mode: `brew install fswatch`)
+- Obsidian (optional, https://obsidian.md)
 
-Takes < 1 minute to install! 🚀
+Takes < 1 minute to set up!

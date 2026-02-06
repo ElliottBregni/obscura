@@ -196,11 +196,11 @@ Claude sees:
 
 ## Implementation Details
 
-- Merge logic in `watch-and-sync.sh:merge_agent_overlay()`
-- File-level detection: `find -name "*.${agent}.*"`
-- Agent suffix stripped: `sed "s/\.${agent}\././"`
-- Applies to watch mode and symlink mode (future)
-- Both methods processed in single merge pass
+- Merge logic in `sync.py:VaultSync.classify_file()`
+- Priority constants: `PRIORITY = {"UNIVERSAL": 0, "AGENT_NAMED": 1, "AGENT_NESTED": 2, "AGENT_DIR": 3}`
+- File classification determines routing based on file location and naming
+- Applied in both symlink and copy modes
+- Both methods processed in single discovery pass via `discover_sync_targets()`
 
 ## When to Use Which
 
@@ -317,11 +317,11 @@ vault/skills/
 
 ## Implementation
 
-- Merge logic: `watch-and-sync.sh:merge_agent_overlay()`
-- Directory scan: `find -maxdepth 1 -type d -name "*.${agent}"`
-- Nested detection: `[[ "$filename" =~ \.${agent}\. ]]`
-- Root routing: `find -maxdepth 1 -type f -name "*.${agent}.*"`
-- Priority merge: AWK associative arrays with type-based override logic
+- Classification: `sync.py:VaultSync.classify_file()`
+- Discovery: `sync.py:VaultSync.discover_sync_targets()`
+- Directory override detection: checks for `DIR.agent/` directories
+- Nested detection: filename pattern matching `*.agent.ext`
+- Priority merge: Python dict with numeric priority comparison
 
 ## See Also
 

@@ -10,16 +10,13 @@
 2. [Vault Directory Structure](#2-vault-directory-structure)
 3. [Agent Routing System](#3-agent-routing-system)
 4. [File Resolution Priority](#4-file-resolution-priority)
-5. [watch-and-sync.sh — Function Scopes](#5-watch-and-syncsh--function-scopes)
-6. [merge-and-relink.sh — Function Scopes](#6-merge-and-relinksh--function-scopes)
-7. [remove-links.sh — Function Scope](#7-remove-linkssh--function-scope)
-8. [install-launchd-service.sh — Function Scope](#8-install-launchd-servicesh--function-scope)
-9. [Git Hooks — Function Scopes](#9-git-hooks--function-scopes)
-10. [Sync Modes — State Machine](#10-sync-modes--state-machine)
-11. [Data Flow — End to End](#11-data-flow--end-to-end)
-12. [Multi-Agent Overlay Merge — Sequence](#12-multi-agent-overlay-merge--sequence)
-13. [TypeScript Rewrite — Target Module Map](#13-typescript-rewrite--target-module-map)
-14. [Runtime Environment](#14-runtime-environment)
+5. [sync.py — Function Scopes](#5-syncpy--function-scopes)
+6. [install-launchd-service.sh — Function Scope](#6-install-launchd-servicesh--function-scope)
+7. [Git Hooks — Function Scopes](#7-git-hooks--function-scopes)
+8. [Sync Modes — State Machine](#8-sync-modes--state-machine)
+9. [Data Flow — End to End](#9-data-flow--end-to-end)
+10. [Multi-Agent Overlay Merge — Sequence](#10-multi-agent-overlay-merge--sequence)
+11. [Runtime Environment](#11-runtime-environment)
 
 ---
 
@@ -49,10 +46,8 @@ graph TB
             RP2[repos/OtherRepo/]
         end
 
-        subgraph Scripts["CLI Scripts"]
-            WS[watch-and-sync.sh]
-            MR[merge-and-relink.sh]
-            RL[remove-links.sh]
+        subgraph Scripts["CLI Tools"]
+            SP[sync.py]
             IL[install-launchd-service.sh]
         end
 
@@ -89,15 +84,14 @@ graph TB
     GH2 -->|reads| COP
     CL2 -->|reads| CLU
 
-    WS -->|creates symlinks| Repo1
-    WS -->|creates symlinks| Repo2
-    MR -->|merges & relinks| Repo1
+    SP -->|creates symlinks| Repo1
+    SP -->|creates symlinks| Repo2
     PM -->|auto-repairs| Repo1
 
-    AI -->|agent registry| WS
-    RI -->|repo list| WS
-    VaultContent -->|universal content| WS
-    AgentOverrides -->|agent overrides| WS
+    AI -->|agent registry| SP
+    RI -->|repo list| SP
+    VaultContent -->|universal content| SP
+    AgentOverrides -->|agent overrides| SP
 ```
 
 ---
@@ -144,7 +138,6 @@ graph LR
             G1[".obsidian/"]
             G2["scratch/"]
             G3["thinking/"]
-            G4["copilot-cli/"]
         end
     end
 ```
@@ -228,398 +221,117 @@ flowchart TD
 
 ---
 
-## 5. watch-and-sync.sh — Function Scopes
+## 5. sync.py — Function Scopes
 
 ### 5.1 Top-Level Entry Point
 
 ```mermaid
 flowchart TD
-    Entry([watch-and-sync.sh]) --> ParseArgs["Parse CLI Args<br/>--mode, --repo, --agent, --dry-run"]
-    ParseArgs --> ValidateMode{Mode valid?<br/>symlink|watch|both}
-    ValidateMode -->|No| Err1["Exit: Invalid mode"]
-    ValidateMode -->|Yes| CheckFswatch{fswatch<br/>installed?}
-    CheckFswatch -->|No| Err2["Exit: fswatch not installed"]
-    CheckFswatch -->|Yes| CheckIndex{repos/INDEX.md<br/>exists?}
-    CheckIndex -->|No| Err3["Exit: INDEX.md not found"]
-    CheckIndex -->|Yes| ModeSwitch
+    Entry([sync.py]) --> ParseArgs["Parse CLI Args<br/>--mode, --repo, --agent, --dry-run,<br/>--clean, --merge, --watch"]
+    ParseArgs --> Dispatch
 
-    ModeSwitch{Mode?}
-    ModeSwitch -->|symlink / both| SymlinkMode["symlink_mode()"]
-    ModeSwitch -->|watch / both| WatchMode["watch_mode()"]
+    Dispatch{Action?}
+    Dispatch -->|--watch| WatchMode["VaultWatcher.run()"]
+    Dispatch -->|--clean| CleanMode["remove_all_links()"]
+    Dispatch -->|--merge| MergeMode["merge_and_relink()"]
+    Dispatch -->|--mode symlink| SymlinkMode["sync_all() → symlink"]
+    Dispatch -->|--mode copy| CopyMode["sync_all() → copy"]
 
     style Entry fill:#264653,color:#fff
-    style SymlinkMode fill:#2a9d8f,color:#fff
     style WatchMode fill:#e9c46a,color:#000
+    style SymlinkMode fill:#2a9d8f,color:#fff
+    style CopyMode fill:#2a9d8f,color:#fff
 ```
 
-### 5.2 get_registered_agents()
+### 5.2 VaultSync.classify_file()
 
 ```mermaid
 flowchart TD
-    GRA([get_registered_agents]) --> CheckFile{agents/INDEX.md<br/>exists?}
-    CheckFile -->|No| ErrReturn["stderr: not found<br/>return 1"]
-    CheckFile -->|Yes| ParseAwk["AWK: extract lines after<br/>'## Active Agents' header<br/>matching '- agentname'"]
-    ParseAwk --> Output["stdout: agent names<br/>(one per line)"]
+    CF(["classify_file(path, agent)"]) --> CheckDir{"In DIR.agent/<br/>directory?"}
+    CheckDir -->|Yes| AgentDir["Return: AGENT_DIR (priority 3)"]
+    CheckDir -->|No| CheckNested{"Filename matches<br/>*.agent.ext?"}
+    CheckNested -->|Yes| InSubdir{"In subdirectory?"}
+    InSubdir -->|Yes| AgentNested["Return: AGENT_NESTED (priority 2)"]
+    InSubdir -->|No| AgentNamed["Return: AGENT_NAMED (priority 1)"]
+    CheckNested -->|No| Universal["Return: UNIVERSAL (priority 0)"]
 
-    style GRA fill:#264653,color:#fff
+    style CF fill:#264653,color:#fff
+    style AgentDir fill:#2d6a4f,color:#fff
+    style AgentNested fill:#40916c,color:#fff
+    style AgentNamed fill:#74c69d,color:#000
+    style Universal fill:#b7e4c7,color:#000
 ```
 
-### 5.3 detect_agent_dirs()
+### 5.3 VaultSync.discover_sync_targets()
 
 ```mermaid
 flowchart TD
-    DAD(["detect_agent_dirs(agent)"]) --> Check1{"skills.{agent}/<br/>exists?"}
-    Check1 -->|Yes| Found1[found=true]
-    Check1 -->|No| Check2
+    DST(["discover_sync_targets(agent, repo)"]) --> Walk["_walk_vault(vault_repo_dir, repo_dir)"]
+    Walk --> Recursive["Recursive: match vault dirs to repo dirs"]
+    Recursive --> Collect["Collect SyncTarget per matching level"]
+    Collect --> Classify["classify_file() for each vault file"]
+    Classify --> Priority["Priority merge: higher priority wins"]
+    Priority --> Output["List of SyncTarget objects"]
 
-    Check2{"instructions.{agent}/<br/>exists?"}
-    Check2 -->|Yes| Found2[found=true]
-    Check2 -->|No| Check3
-
-    Check3{"docs.{agent}/<br/>exists?"}
-    Check3 -->|Yes| Found3[found=true]
-    Check3 -->|No| ReturnFalse["return 1<br/>(not found)"]
-
-    Found1 --> ReturnTrue["return 0<br/>(found)"]
-    Found2 --> ReturnTrue
-    Found3 --> ReturnTrue
-
-    style DAD fill:#264653,color:#fff
+    style DST fill:#264653,color:#fff
 ```
 
-### 5.4 get_agent_target_path()
+### 5.4 VaultSync.sync_all()
 
 ```mermaid
 flowchart TD
-    GATP(["get_agent_target_path(agent)"]) --> CheckEmpty{agent<br/>empty?}
-    CheckEmpty -->|Yes| ErrReturn["stderr: agent required<br/>return 1"]
-    CheckEmpty -->|No| Switch
+    SA([sync_all]) --> GetAgents["get_agents()"]
+    GetAgents --> GetRepos["get_repos()"]
+    GetRepos --> Domain1["Domain 1: In-Repo Sync"]
 
-    Switch{agent name?}
-    Switch -->|copilot| Out1[".github"]
-    Switch -->|claude| Out2[".claude"]
-    Switch -->|cursor| Out3[".cursor"]
-    Switch -->|other| Out4[".{agent}"]
+    Domain1 --> ForRepo["For each repo × agent:"]
+    ForRepo --> Discover["discover_sync_targets()"]
+    Discover --> ForTarget["For each SyncTarget:"]
+    ForTarget --> CreateDir["mkdir -p agent_dir"]
+    CreateDir --> ForFile["For each file in target:"]
+    ForFile --> ModeCheck{Mode?}
+    ModeCheck -->|symlink| Symlink["ln -s vault_file → agent_dir/file"]
+    ModeCheck -->|copy| Copy["cp vault_file → agent_dir/file"]
 
-    Out1 --> Stdout["stdout: path"]
-    Out2 --> Stdout
-    Out3 --> Stdout
-    Out4 --> Stdout
+    SA --> Domain2["Domain 2: System-Level"]
+    Domain2 --> SysSync["Sync to ~/.github, ~/.claude"]
 
-    style GATP fill:#264653,color:#fff
+    style SA fill:#2a9d8f,color:#fff
 ```
 
-### 5.5 validate_agents()
+### 5.5 VaultWatcher.run()
 
 ```mermaid
 flowchart TD
-    VA([validate_agents]) --> Phase1["Phase 1: For each registered agent"]
-    Phase1 --> Check1{"detect_agent_dirs(agent)?"}
-    Check1 -->|No| Warn1["Warning: agent in INDEX<br/>but no dirs found"]
-    Check1 -->|Yes| Next1["Continue"]
+    WM([VaultWatcher.run]) --> CheckFswatch{fswatch<br/>installed?}
+    CheckFswatch -->|No| ErrExit["Exit: fswatch not found"]
+    CheckFswatch -->|Yes| AcquireLock["Acquire PID lock"]
+    AcquireLock --> InitSync["Initial sync_all()"]
+    InitSync --> SpawnFswatch["Spawn single fswatch process"]
 
-    Phase1 --> Phase2["Phase 2: For each skills.*/instructions.*/docs.*"]
-    Phase2 --> Extract["Extract agent name<br/>from dir suffix"]
-    Extract --> Check2{"agent in<br/>INDEX.md?"}
-    Check2 -->|No| Warn2["Warning: dir found but<br/>agent not registered"]
-    Check2 -->|Yes| Next2["Continue"]
-
-    Warn1 --> Count["Count warnings"]
-    Warn2 --> Count
-    Next1 --> Count
-    Next2 --> Count
-    Count --> Result{warnings == 0?}
-    Result -->|Yes| Pass["Agent validation passed"]
-    Result -->|No| Warnings["Print warnings"]
-
-    style VA fill:#264653,color:#fff
-```
-
-### 5.6 get_managed_repos()
-
-```mermaid
-flowchart TD
-    GMR([get_managed_repos]) --> ReadIndex["Read repos/INDEX.md"]
-    ReadIndex --> AWK["AWK: extract lines<br/>starting with ~ or /"]
-    AWK --> Expand["eval echo: expand<br/>~ to $HOME"]
-    Expand --> Output["stdout: full repo paths<br/>(one per line)"]
-
-    style GMR fill:#264653,color:#fff
-```
-
-### 5.7 merge_agent_overlay()
-
-```mermaid
-flowchart TD
-    MAO(["merge_agent_overlay(agent, source_path)"]) --> CheckAgent{agent<br/>empty?}
-    CheckAgent -->|Yes| ErrReturn["stderr: agent required<br/>return 1"]
-    CheckAgent -->|No| Step1
-
-    subgraph Step1["Step 1: Scan Universal Directories"]
-        S1A["find -maxdepth 1 -type d<br/>(no . prefix, no agent suffix)"]
-        S1A --> S1B["For each universal dir:"]
-        S1B --> S1C["find all files"]
-        S1C --> S1D{"filename matches<br/>.{agent}. pattern?"}
-        S1D -->|Yes| S1E["Emit: dest|source|AGENT_NESTED<br/>(strip agent suffix)"]
-        S1D -->|No| S1F["Emit: dest|source|UNIVERSAL"]
-    end
-
-    Step1 --> Step2
-
-    subgraph Step2["Step 2: Scan Agent-Specific Directories"]
-        S2A["find -maxdepth 1 -type d<br/>-name '*.{agent}'"]
-        S2A --> S2B["For each agent dir:"]
-        S2B --> S2C["Map dir.agent/ → dir/"]
-        S2C --> S2D["Emit: dest|source|AGENT"]
-    end
-
-    Step2 --> Step2b
-
-    subgraph Step2b["Step 2b: Scan Root Agent Files"]
-        S2bA["find -type f<br/>-name '*.{agent}.*'"]
-        S2bA --> S2bB["Strip agent suffix from name"]
-        S2bB --> S2bC["Map to target path<br/>(.github/, .claude/, etc.)"]
-        S2bC --> S2bD["Emit: dest|source|AGENT_FILE"]
-    end
-
-    Step2b --> Step3
-
-    subgraph Step3["Step 3: Priority Merge (AWK)"]
-        S3A["Concatenate all emissions"]
-        S3A --> S3B["AWK associative arrays:<br/>key = dest path"]
-        S3B --> S3C["Override rules:<br/>AGENT > AGENT_NESTED > AGENT_FILE > UNIVERSAL"]
-        S3C --> S3D["Output: merged file list<br/>(dest|source|type per line)"]
-    end
-
-    style MAO fill:#264653,color:#fff
-    style Step1 fill:#e9f5db,color:#000
-    style Step2 fill:#d8f3dc,color:#000
-    style Step2b fill:#b7e4c7,color:#000
-    style Step3 fill:#95d5b2,color:#000
-```
-
-### 5.8 apply_overlay_to_target()
-
-```mermaid
-flowchart TD
-    AOT(["apply_overlay_to_target(agent, target_dir)"]) --> Validate{agent and<br/>target_dir set?}
-    Validate -->|No| ErrReturn["stderr: required params"]
-    Validate -->|Yes| GetPath["get_agent_target_path(agent)"]
-    GetPath --> CallMerge["merge_agent_overlay(agent)"]
-    CallMerge --> Loop["For each: dest|source|type"]
-    Loop --> MkDir["mkdir -p dest_dir"]
-    MkDir --> Copy["cp source → target_dir/{agent_path}/dest"]
-    Copy --> Log{"type == AGENT?"}
-    Log -->|Yes| LogAgent["Log: (agent-specific)"]
-    Log -->|No| LogNormal["Log: dest"]
-
-    style AOT fill:#264653,color:#fff
-```
-
-### 5.9 symlink_mode()
-
-```mermaid
-flowchart TD
-    SM([symlink_mode]) --> ValidateAgent{--agent<br/>specified?}
-
-    ValidateAgent -->|Yes| CheckRegistered{"Agent in<br/>INDEX.md?"}
-    CheckRegistered -->|No| ErrAgent["Exit: Agent not registered"]
-    CheckRegistered -->|Yes| ProceedAgent["Use single agent"]
-
-    ValidateAgent -->|No| AllAgents["Use all registered agents"]
-
-    ProceedAgent --> CheckRepo{--repo<br/>specified?}
-    AllAgents --> CheckRepo
-
-    CheckRepo -->|Yes| SingleRepo["Process single repo"]
-    CheckRepo -->|No| AllRepos["Loop: get_managed_repos()"]
-
-    SingleRepo --> ForEachAgent["For each agent:<br/>symlink_repo()"]
-    AllRepos --> ForEachRepo["For each repo path:"]
-    ForEachRepo --> CheckExists{repo dir<br/>exists?}
-    CheckExists -->|No| SkipWarn["Warning: skip"]
-    CheckExists -->|Yes| ForEachAgent2["For each agent:<br/>symlink_repo()"]
-
-    style SM fill:#2a9d8f,color:#fff
-```
-
-### 5.10 symlink_repo()
-
-```mermaid
-flowchart TD
-    SR(["symlink_repo(name, path, vault_path, agent)"]) --> CheckAgentParam{agent<br/>param set?}
-    CheckAgentParam -->|No| ErrReturn["stderr: agent required"]
-    CheckAgentParam -->|Yes| GetTarget["target = get_agent_target_path(agent)<br/>e.g. .github, .claude"]
-
-    GetTarget --> CheckVaultDir{vault repo dir<br/>exists?}
-    CheckVaultDir -->|No| SkipWarn["Warning: skip"]
-    CheckVaultDir -->|Yes| CheckLink
-
-    CheckLink{repo/{target}<br/>is symlink?}
-    CheckLink -->|Yes, correct target| AlreadyOk["Already symlinked correctly"]
-    CheckLink -->|Yes, wrong target| WrongTarget["Warning: different target"]
-    CheckLink -->|Yes, broken| Repair["Remove broken link"]
-    CheckLink -->|No, is directory| DirExists["Warning: real dir exists"]
-    CheckLink -->|No, is file| FileExists["Warning: file exists"]
-    CheckLink -->|No, nothing| Create
-
-    Repair --> Create["ln -s vault_path → repo/{target}"]
-    Create --> Success["Created symlink"]
-
-    style SR fill:#2a9d8f,color:#fff
-```
-
-### 5.11 watch_mode()
-
-```mermaid
-flowchart TD
-    WM([watch_mode]) --> CheckLock{Lock file<br/>exists?}
-    CheckLock -->|Yes| CheckPid{"Process<br/>still running?"}
-    CheckPid -->|Yes| ErrRunning["Exit: already running"]
-    CheckPid -->|No| RemoveLock["Remove stale lock"]
-    CheckLock -->|No| WriteLock["Write PID to lock"]
-    RemoveLock --> WriteLock
-
-    WriteLock --> SetTrap["trap: cleanup on SIGINT/SIGTERM/EXIT"]
-    SetTrap --> StartWatch["Start 3 fswatch processes:"]
-
-    subgraph Watchers["Parallel fswatch Processes"]
-        W1["fswatch repos/"]
-        W2["fswatch copilot-cli/"]
-        W3["fswatch ~/.copilot/"]
-    end
-
-    StartWatch --> Watchers
-    Watchers --> EventLoop["Event Loop: for each changed file"]
-
-    EventLoop --> Route{File source?}
-
-    Route -->|"repos/*"| VaultToRepo["Vault → Repo sync<br/>(run sync-github.sh)"]
-    Route -->|"copilot-cli/*"| VaultToCopilot["Vault → ~/.copilot<br/>(cp file)"]
-    Route -->|"~/.copilot/*"| CopilotToVault["~/.copilot → Vault<br/>(cp file)"]
+    SpawnFswatch --> EventLoop["Read stdout line-by-line"]
+    EventLoop --> Debounce{"Within 0.5s<br/>of last sync?"}
+    Debounce -->|Yes| Skip["Skip (debounce)"]
+    Debounce -->|No| ReSync["sync_all()"]
+    Skip --> EventLoop
+    ReSync --> EventLoop
 
     style WM fill:#e9c46a,color:#000
-    style Watchers fill:#fefae0,color:#000
 ```
 
 ---
 
-## 6. merge-and-relink.sh — Function Scopes
-
-### 6.1 Top-Level Entry Point
+## 6. install-launchd-service.sh — Function Scope
 
 ```mermaid
 flowchart TD
-    Entry([merge-and-relink.sh]) --> ParseArgs["Parse CLI Args<br/>--force, --repo"]
-    ParseArgs --> DryRunCheck{--force<br/>specified?}
-    DryRunCheck -->|No| DryMode["DRY RUN MODE"]
-    DryRunCheck -->|Yes| LiveMode["LIVE MODE"]
-
-    DryMode --> CheckIndex{INDEX.md<br/>exists?}
-    LiveMode --> CheckIndex
-    CheckIndex -->|No| ErrExit["Exit: INDEX.md not found"]
-    CheckIndex -->|Yes| RepoCheck
-
-    RepoCheck{--repo<br/>specified?}
-    RepoCheck -->|Yes| SingleRepo["merge_repo(name, path, vault_path)"]
-    RepoCheck -->|No| AllRepos["Loop: get_managed_repos()<br/>→ merge_repo() each"]
-
-    style Entry fill:#264653,color:#fff
-```
-
-### 6.2 merge_repo()
-
-```mermaid
-flowchart TD
-    MR(["merge_repo(name, repo_path, vault_path)"]) --> CheckGithub
-
-    CheckGithub{".github is<br/>real directory?<br/>(not symlink)"}
-    CheckGithub -->|"Symlink"| AlreadyLinked["Already symlinked — skip"]
-    CheckGithub -->|"No .github"| NoGithub["No .github found"]
-    CheckGithub -->|"Real dir"| ScanFiles
-
-    ScanFiles["Count files in .github/"]
-    ScanFiles --> ForEachFile["For each file in .github/:"]
-    ForEachFile --> CheckVault{"File exists<br/>in vault?"}
-    CheckVault -->|Yes| VaultWins["Skip: vault wins"]
-    CheckVault -->|No| CopyNew["Copy to vault (new file)"]
-
-    CopyNew --> RemoveReal["rm -rf repo/.github"]
-    VaultWins --> RemoveReal
-    RemoveReal --> CreateLink["ln -s vault_path → repo/.github"]
-    CreateLink --> Done["Merged and relinked"]
-
-    Done --> ScanModules["Scan nested modules<br/>(subdirs with .github/)"]
-    ScanModules --> ForEachModule["For each module:"]
-    ForEachModule --> CheckModuleGithub{".github is<br/>real directory?"}
-    CheckModuleGithub -->|Yes| RepeatMerge["Same merge logic:<br/>copy new → rm → symlink"]
-    CheckModuleGithub -->|Symlink| ModuleOk["Already linked"]
-
-    style MR fill:#264653,color:#fff
-```
-
-### 6.3 get_managed_repos() (merge-and-relink version)
-
-```mermaid
-flowchart TD
-    GMR([get_managed_repos]) --> Grep["grep '^- ' INDEX.md"]
-    Grep --> Sed["sed: strip '- ' prefix"]
-    Sed --> Output["stdout: repo names"]
-
-    style GMR fill:#264653,color:#fff
-```
-
----
-
-## 7. remove-links.sh — Function Scope
-
-```mermaid
-flowchart TD
-    Entry([remove-links.sh]) --> ParseArgs["Parse: --force, --repo"]
-    ParseArgs --> Mode{--force?}
-    Mode -->|No| DryRun["DRY RUN"]
-    Mode -->|Yes| Live["LIVE MODE"]
-
-    DryRun --> Scope
-    Live --> Scope
-
-    Scope{--repo<br/>specified?}
-    Scope -->|Yes| SingleRepo["Check single repo"]
-    Scope -->|No| AllRepos["Loop: get_managed_repos()"]
-
-    SingleRepo --> CheckLink{".github<br/>is symlink?"}
-    AllRepos --> CheckEach["For each repo:"]
-    CheckEach --> CheckLink
-
-    CheckLink -->|Yes| RemoveOrPreview{DRY_RUN?}
-    CheckLink -->|No| ScanNested["find -type l -name .github"]
-    ScanNested --> RemoveNestedOrPreview{DRY_RUN?}
-
-    RemoveOrPreview -->|Dry| Preview["Print: (would remove)"]
-    RemoveOrPreview -->|Live| Remove["rm symlink"]
-    RemoveNestedOrPreview -->|Dry| PreviewN["Print: (would remove)"]
-    RemoveNestedOrPreview -->|Live| RemoveN["rm symlink"]
-
-    Preview --> Summary["Summary: N symlink(s) found"]
-    Remove --> Summary
-    PreviewN --> Summary
-    RemoveN --> Summary
-
-    style Entry fill:#264653,color:#fff
-```
-
----
-
-## 8. install-launchd-service.sh — Function Scope
-
-```mermaid
-flowchart TD
-    Entry([install-launchd-service.sh]) --> MkDir["mkdir ~/Library/LaunchAgents/"]
-    MkDir --> WritePlist["Write .plist file:<br/>com.fv-copilot.watch-and-sync.plist"]
+    Entry([install-launchd-service.sh]) --> CleanOld["Remove old plist if exists"]
+    CleanOld --> MkDir["mkdir ~/Library/LaunchAgents/"]
+    MkDir --> WritePlist["Write .plist file:<br/>com.fv-copilot.watcher.plist"]
 
     subgraph PlistConfig["Plist Configuration"]
-        P1["Label: com.fv-copilot.watch-and-sync"]
-        P2["Program: watch-and-sync.sh"]
+        P1["Label: com.fv-copilot.watcher"]
+        P2["Program: python3 sync.py --watch"]
         P3["RunAtLoad: true"]
         P4["KeepAlive: true"]
         P5["Logs: /tmp/fv-copilot-watcher.log"]
@@ -637,109 +349,107 @@ flowchart TD
 
 ---
 
-## 9. Git Hooks — Function Scopes
+## 7. Git Hooks — Function Scopes
 
-### 9.1 post-merge Hook
+### 7.1 post-merge Hook
 
 ```mermaid
 flowchart TD
     Hook([post-merge]) --> GetRoot["git rev-parse --show-toplevel"]
     GetRoot --> GetName["basename → repo name"]
-    GetName --> CheckScript{"merge-and-relink.sh<br/>exists?"}
+    GetName --> CheckScript{"sync.py<br/>exists?"}
     CheckScript -->|No| Noop["Exit silently"]
-    CheckScript -->|Yes| CheckGithub{".github is<br/>real directory?<br/>(not symlink)"}
-    CheckGithub -->|No| Noop2["Exit: nothing to repair"]
-    CheckGithub -->|Yes| RunMerge["bash merge-and-relink.sh<br/>--force --repo {name}"]
+    CheckScript -->|Yes| RunMerge["python3 sync.py --merge<br/>--repo {path}"]
     RunMerge --> Repaired["Symlinks repaired"]
 
     style Hook fill:#e76f51,color:#fff
 ```
 
-### 9.2 post-commit Hook
+### 7.2 post-commit Hook
 
 ```mermaid
 flowchart TD
-    Hook([post-commit]) --> CheckScript{"sync-github.sh<br/>exists?"}
+    Hook([post-commit]) --> CheckScript{"sync.py<br/>exists?"}
     CheckScript -->|No| Noop["Exit silently"]
-    CheckScript -->|Yes| RunAsync["bash sync-github.sh &<br/>(background)"]
+    CheckScript -->|Yes| RunAsync["python3 sync.py --mode symlink &<br/>(background)"]
 
     style Hook fill:#e76f51,color:#fff
 ```
 
 ---
 
-## 10. Sync Modes — State Machine
+## 8. Sync Modes — State Machine
 
 ```mermaid
 stateDiagram-v2
     [*] --> ParseArgs
 
-    ParseArgs --> SymlinkMode: mode=symlink
-    ParseArgs --> WatchMode: mode=watch
-    ParseArgs --> BothMode: mode=both
-
-    BothMode --> SymlinkMode: phase 1
-    BothMode --> WatchMode: phase 2
+    ParseArgs --> SymlinkMode: --mode symlink
+    ParseArgs --> CopyMode: --mode copy
+    ParseArgs --> WatchMode: --watch
+    ParseArgs --> CleanMode: --clean
+    ParseArgs --> MergeMode: --merge
 
     state SymlinkMode {
-        [*] --> ValidateAgent
-        ValidateAgent --> ResolveRepos
-        ResolveRepos --> ForEachRepo
-        ForEachRepo --> ForEachAgent
-        ForEachAgent --> CheckExisting
-        CheckExisting --> CreateSymlink: not linked
-        CheckExisting --> Skip: already linked
-        CheckExisting --> Repair: broken link
-        Repair --> CreateSymlink
-        CreateSymlink --> [*]
-        Skip --> [*]
+        [*] --> GetAgents_S
+        GetAgents_S --> GetRepos_S
+        GetRepos_S --> ForEachRepo_S
+        ForEachRepo_S --> ForEachAgent_S
+        ForEachAgent_S --> DiscoverTargets
+        DiscoverTargets --> ForEachTarget
+        ForEachTarget --> CreateSymlinks
+        CreateSymlinks --> [*]
+    }
+
+    state CopyMode {
+        [*] --> GetAgents_C
+        GetAgents_C --> GetRepos_C
+        GetRepos_C --> DiscoverTargets_C
+        DiscoverTargets_C --> CopyFiles
+        CopyFiles --> [*]
     }
 
     state WatchMode {
         [*] --> AcquireLock
-        AcquireLock --> StartFswatch
+        AcquireLock --> InitialSync
+        InitialSync --> StartFswatch
         StartFswatch --> ListenEvents
-        ListenEvents --> RouteEvent
-        RouteEvent --> VaultToRepo: repos/* changed
-        RouteEvent --> VaultToCopilot: copilot-cli/* changed
-        RouteEvent --> CopilotToVault: ~/.copilot/* changed
-        VaultToRepo --> ListenEvents
-        VaultToCopilot --> ListenEvents
-        CopilotToVault --> ListenEvents
+        ListenEvents --> Debounce
+        Debounce --> SyncAll: >0.5s since last
+        Debounce --> ListenEvents: within 0.5s
+        SyncAll --> ListenEvents
     }
 ```
 
 ---
 
-## 11. Data Flow — End to End
+## 9. Data Flow — End to End
 
 ```mermaid
 sequenceDiagram
     participant User as Developer
     participant Vault as FV-Copilot Vault
-    participant Script as watch-and-sync.sh
+    participant Sync as sync.py
     participant Index as repos/INDEX.md
     participant AgentIdx as agents/INDEX.md
-    participant Overlay as merge_agent_overlay()
     participant Repo as Target Repository
     participant Agent as AI Agent
 
-    User->>Script: ./watch-and-sync.sh --mode symlink
-    Script->>Index: Read managed repos
-    Index-->>Script: [~/git/FV-Platform-Main, ...]
-    Script->>AgentIdx: Read registered agents
-    AgentIdx-->>Script: [copilot, claude]
+    User->>Sync: python3 sync.py --mode symlink
+    Sync->>Index: Read managed repos
+    Index-->>Sync: [~/git/FV-Platform-Main, ...]
+    Sync->>AgentIdx: Read registered agents
+    AgentIdx-->>Sync: [copilot, claude]
 
     loop For each repo × agent
-        Script->>Overlay: merge_agent_overlay(agent)
-        Overlay->>Vault: Scan universal dirs
-        Overlay->>Vault: Scan agent-specific dirs
-        Overlay->>Vault: Scan nested overrides
-        Overlay-->>Script: Merged file list (dest|source|priority)
-        Script->>Repo: Create symlink: repo/.github → vault/repos/name
+        Sync->>Vault: discover_sync_targets(agent, repo)
+        Vault-->>Sync: List of SyncTarget (repo_path + files)
+        loop For each SyncTarget
+            Sync->>Repo: Create per-file symlinks in agent dir
+        end
     end
 
-    Note over Repo: Symlinks now active
+    Note over Repo: Per-file symlinks now active
 
     User->>Vault: Edit skills/python.md
     Note over Repo: Change visible instantly via symlink
@@ -749,115 +459,47 @@ sequenceDiagram
 
 ---
 
-## 12. Multi-Agent Overlay Merge — Sequence
+## 10. Multi-Agent File Classification — Sequence
 
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant MAO as merge_agent_overlay()
+    participant DST as discover_sync_targets()
+    participant CF as classify_file()
     participant FS as Filesystem
-    participant AWK as AWK Merge
 
-    Caller->>MAO: merge_agent_overlay("copilot")
+    Caller->>DST: discover_sync_targets("copilot", repo)
 
-    Note over MAO: Step 1: Universal Scan
-    MAO->>FS: find dirs (no agent suffix)
-    FS-->>MAO: [skills/, instructions/, docs/]
+    Note over DST: Walk vault directory tree
+    DST->>FS: Scan CONTENT_DIRS (skills/, instructions/, docs/)
+    FS-->>DST: All files found
 
-    loop For each universal dir
-        MAO->>FS: find all files
-        FS-->>MAO: [setup.md, python.md, python.copilot.md, ...]
+    loop For each file
+        DST->>CF: classify_file(path, "copilot")
 
-        alt filename matches .copilot.
-            MAO->>MAO: Emit: skills/python.md|path|AGENT_NESTED
-        else no agent suffix
-            MAO->>MAO: Emit: skills/python.md|path|UNIVERSAL
+        alt In skills.copilot/ directory
+            CF-->>DST: AGENT_DIR (priority 3)
+        else Named *.copilot.md in subdir
+            CF-->>DST: AGENT_NESTED (priority 2)
+        else Named *.copilot.md at root
+            CF-->>DST: AGENT_NAMED (priority 1)
+        else No agent suffix
+            CF-->>DST: UNIVERSAL (priority 0)
         end
+
+        Note over DST: Priority merge: keep highest per dest path
     end
 
-    Note over MAO: Step 2: Agent Dir Scan
-    MAO->>FS: find dirs named *.copilot
-    FS-->>MAO: [skills.copilot/, instructions.copilot/]
+    DST->>FS: Walk repo mirror (repos/RepoName/)
+    FS-->>DST: Matching directories at each level
 
-    loop For each agent dir
-        MAO->>FS: find all files
-        FS-->>MAO: [setup.md, database.md, ...]
-        MAO->>MAO: Emit: skills/setup.md|path|AGENT
-    end
-
-    Note over MAO: Step 2b: Root Agent Files
-    MAO->>FS: find -name "*.copilot.*"
-    FS-->>MAO: [quickstart.copilot.md]
-    MAO->>MAO: Emit: .github/quickstart.md|path|AGENT_FILE
-
-    Note over MAO: Step 3: Priority Merge
-    MAO->>AWK: All emissions
-    AWK->>AWK: For same dest: AGENT > AGENT_NESTED > AGENT_FILE > UNIVERSAL
-    AWK-->>Caller: Final merged list
+    Note over DST: Build SyncTarget per matching level
+    DST-->>Caller: List[SyncTarget]
 ```
 
 ---
 
-## 13. TypeScript Rewrite — Target Module Map
-
-```mermaid
-graph TD
-    subgraph CLI["fv-copilot CLI (TypeScript)"]
-        Main["src/index.ts<br/>(CLI entry point)"]
-
-        subgraph Core["src/core/"]
-            Config["config.ts<br/>VaultConfig, paths, constants"]
-            AgentRegistry["agent-registry.ts<br/>getRegisteredAgents()<br/>detectAgentDirs()<br/>getAgentTargetPath()<br/>validateAgents()"]
-            RepoIndex["repo-index.ts<br/>getManagedRepos()"]
-            Overlay["overlay.ts<br/>mergeAgentOverlay()<br/>applyOverlayToTarget()"]
-        end
-
-        subgraph Commands["src/commands/"]
-            Symlink["symlink.ts<br/>symlinkMode()<br/>symlinkRepo()"]
-            Watch["watch.ts<br/>watchMode()<br/>startFswatch()"]
-            Merge["merge.ts<br/>mergeRepo()<br/>mergeAndRelink()"]
-            Remove["remove.ts<br/>removeLinks()"]
-            Install["install.ts<br/>installLaunchdService()"]
-            Validate["validate.ts<br/>validateAll()"]
-        end
-
-        subgraph Hooks["src/hooks/"]
-            PostMerge["post-merge.ts"]
-            PostCommit["post-commit.ts"]
-        end
-
-        subgraph Utils["src/utils/"]
-            FS["fs-utils.ts<br/>symlinkSafe(), isSymlink()"]
-            Shell["shell.ts<br/>exec(), spawn()"]
-            Logger["logger.ts<br/>info(), warn(), error()"]
-        end
-    end
-
-    Main --> Config
-    Main --> Commands
-    Symlink --> AgentRegistry
-    Symlink --> RepoIndex
-    Symlink --> Overlay
-    Symlink --> FS
-    Watch --> RepoIndex
-    Watch --> Shell
-    Merge --> RepoIndex
-    Merge --> FS
-    Remove --> RepoIndex
-    Remove --> FS
-    Install --> Config
-    Validate --> AgentRegistry
-
-    style CLI fill:#1a1a2e,color:#fff
-    style Core fill:#16213e,color:#fff
-    style Commands fill:#0f3460,color:#fff
-    style Hooks fill:#533483,color:#fff
-    style Utils fill:#e94560,color:#fff
-```
-
----
-
-## 14. Runtime Environment
+## 11. Runtime Environment
 
 ```mermaid
 graph LR
@@ -906,26 +548,15 @@ graph LR
 | 2 | Vault Directory Structure | Graph | File/folder layout |
 | 3 | Agent Routing System | Flowchart | 3-tier routing logic |
 | 4 | File Resolution Priority | Flowchart | Priority cascade |
-| 5.1 | watch-and-sync: Entry | Flowchart | CLI parsing, mode dispatch |
-| 5.2 | get_registered_agents() | Flowchart | Agent index parser |
-| 5.3 | detect_agent_dirs() | Flowchart | Dir existence checks |
-| 5.4 | get_agent_target_path() | Flowchart | Agent→path mapping |
-| 5.5 | validate_agents() | Flowchart | Bidirectional validation |
-| 5.6 | get_managed_repos() | Flowchart | Repo index parser |
-| 5.7 | merge_agent_overlay() | Flowchart | 3-step overlay merge |
-| 5.8 | apply_overlay_to_target() | Flowchart | File copy with overlay |
-| 5.9 | symlink_mode() | Flowchart | Symlink orchestrator |
-| 5.10 | symlink_repo() | Flowchart | Per-repo symlink logic |
-| 5.11 | watch_mode() | Flowchart | Fswatch event loop |
-| 6.1 | merge-and-relink: Entry | Flowchart | CLI parsing, dispatch |
-| 6.2 | merge_repo() | Flowchart | Merge+relink per repo |
-| 6.3 | get_managed_repos() (v2) | Flowchart | Repo parser variant |
-| 7 | remove-links.sh | Flowchart | Full script flow |
-| 8 | install-launchd-service.sh | Flowchart | Plist install flow |
-| 9.1 | post-merge hook | Flowchart | Auto-repair flow |
-| 9.2 | post-commit hook | Flowchart | Auto-sync flow |
-| 10 | Sync Modes | State Diagram | Mode state machine |
-| 11 | Data Flow (E2E) | Sequence | Full sync sequence |
-| 12 | Overlay Merge | Sequence | merge_agent_overlay detail |
-| 13 | TypeScript Module Map | Graph | Rewrite target architecture |
-| 14 | Runtime Environment | Graph | pyenv, nvm, tools |
+| 5.1 | sync.py: Entry | Flowchart | CLI parsing, mode dispatch |
+| 5.2 | classify_file() | Flowchart | File classification logic |
+| 5.3 | discover_sync_targets() | Flowchart | Recursive target discovery |
+| 5.4 | sync_all() | Flowchart | Full sync orchestration |
+| 5.5 | VaultWatcher.run() | Flowchart | Fswatch event loop |
+| 6 | install-launchd-service.sh | Flowchart | Plist install flow |
+| 7.1 | post-merge hook | Flowchart | Auto-repair flow |
+| 7.2 | post-commit hook | Flowchart | Auto-sync flow |
+| 8 | Sync Modes | State Diagram | Mode state machine |
+| 9 | Data Flow (E2E) | Sequence | Full sync sequence |
+| 10 | File Classification | Sequence | classify_file detail |
+| 11 | Runtime Environment | Graph | pyenv, nvm, tools |

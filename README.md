@@ -18,19 +18,17 @@ A **single source of truth** for LLM context that:
 
 ## 🚀 Quick Start
 
-### 1. **Initial Setup**
+### 1. **Add a Repository**
 ```bash
 cd ~/FV-Copilot
-./install.sh
-```
-
-### 2. **Link a Repository**
-```bash
 # Add repo path to repos/INDEX.md
 echo "~/git/YourRepo" >> repos/INDEX.md
+```
 
+### 2. **Sync**
+```bash
 # Sync in symlink mode (instant, zero-copy)
-./watch-and-sync.sh --repo ~/git/YourRepo --agent copilot --mode symlink
+python3 sync.py --repo ~/git/YourRepo --agent copilot --mode symlink
 ```
 
 ### 3. **Edit & Iterate**
@@ -52,7 +50,6 @@ echo "~/git/YourRepo" >> repos/INDEX.md
 | **`repos/`** | Repository index (`INDEX.md`) | Links to code repos |
 | **`docs/`** | Vault documentation | Internal only |
 | **`git-hooks/`** | Shared git hooks | → `repo/.git/hooks/` |
-| **`copilot-cli-state/`** | CLI session snapshots | → `~/.copilot/` |
 
 ### **Universal vs Agent-Specific Files**
 
@@ -103,37 +100,41 @@ Zero-copy, instant sync with multi-agent support. Changes in vault appear immedi
 
 ```bash
 # Link for a specific agent
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode symlink
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode symlink
 
 # Link for all registered agents
-./watch-and-sync.sh --repo ~/git/MyRepo --mode symlink
+python3 sync.py --repo ~/git/MyRepo --mode symlink
 ```
 
-**✅ Now supports:**
-- ✅ Multi-agent routing (copilot → `.github/`, claude → `.claude/`)
-- ✅ Multiple agents per repo (both `.github/` and `.claude/` can coexist)
-- ✅ Broken symlink detection and auto-repair
-- ✅ Agent validation (ensures agent is registered before linking)
+**Features:**
+- Multi-agent routing (copilot → `.github/`, claude → `.claude/`)
+- Multiple agents per repo (both `.github/` and `.claude/` can coexist)
+- Recursive directory-matching sync (vault tree → repo tree)
+- Broken symlink detection and auto-repair
+- Agent validation (ensures agent is registered before linking)
 
-**Pros:** Instant, no duplication, edit anywhere, multi-agent support  
+**Pros:** Instant, no duplication, edit anywhere, multi-agent support
 **Cons:** Git operations can break symlinks (auto-repair available via git hooks)
 
 ### **Copy Mode**
 One-way file copy from vault to repo.
 
 ```bash
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode copy
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode copy
 ```
 
-**Pros:** Git-safe, no symlink issues  
+**Pros:** Git-safe, no symlink issues
 **Cons:** Manual sync required for changes
 
-### **Watch Mode** (Coming Soon)
-Continuous background sync with auto-repair.
+### **Watch Mode**
+Continuous background sync using fswatch. Auto-syncs when vault files change.
 
 ```bash
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode watch
+python3 sync.py --watch
 ```
+
+**Pros:** Hands-free, re-syncs on every vault edit
+**Cons:** Requires fswatch (`brew install fswatch`)
 
 ---
 
@@ -181,24 +182,24 @@ cat repos/INDEX.md
 # ~/git/OtherProject
 
 # Sync all repos for Copilot
-./watch-and-sync.sh --agent copilot --mode symlink
+python3 sync.py --agent copilot --mode symlink
 
 # Sync all repos for all registered agents
-./watch-and-sync.sh --mode symlink
+python3 sync.py --mode symlink
 
 # Sync specific repo for specific agent
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode symlink
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode symlink
 ```
 
 ### **Test Before Committing**
 ```bash
 # 1. Link repo in symlink mode
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode symlink
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode symlink
 
 # 2. Edit skills/instructions in vault
 # 3. Test in your IDE (changes are live via symlinks)
 # 4. When ready, convert symlinks to real files:
-./merge-and-relink.sh ~/git/MyRepo copilot
+python3 sync.py --merge --repo ~/git/MyRepo
 
 # 5. Commit in repo
 cd ~/git/MyRepo && git add .github/ && git commit
@@ -234,7 +235,7 @@ Each agent gets its own target path in repositories. Files route automatically b
 ls -la ~/git/MyRepo/.github/
 
 # Re-link if broken
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode symlink
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode symlink
 ```
 
 ### **Agent Not Seeing Files?**
@@ -261,7 +262,7 @@ cp git-hooks/post-merge ~/git/MyRepo/.git/hooks/
 chmod +x ~/git/MyRepo/.git/hooks/post-merge
 
 # Or manually re-link
-./watch-and-sync.sh --repo ~/git/MyRepo --agent copilot --mode symlink
+python3 sync.py --repo ~/git/MyRepo --agent copilot --mode symlink
 ```
 
 ---
@@ -295,7 +296,7 @@ cat ~/git/MyRepo/.claude/skills/python.md
 │  └── skill.claude.md   └── x.claude.md             claude    │
 └───────────────┬─────────────────────────────────────────────┘
                 │
-                │ watch-and-sync.sh (symlink/copy/watch)
+                │ sync.py (symlink/copy/watch)
                 │
         ┌───────┴────────┬────────────────┐
         ▼                ▼                ▼
