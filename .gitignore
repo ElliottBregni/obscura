@@ -5,16 +5,14 @@
 # Symlinked repos (tracked in their respective repos)
 repos/
 
-# Symlinked Copilot CLI config (user-specific, do not commit)
-copilot-cli/
+# Agent CLI state (synced bidirectionally, user-specific configs)
+# Not committed to vault repo (local sync only)
+*-cli/
 
 # Package files (MCP servers, plugins, etc.)
 **/pkg/
 pkg/
 *.pkg
-
-# User-specific MCP config (may contain secrets)
-# Keep mcp-config.json as a template for team
 
 # Vault-only folders (can be committed to vault repo if desired)
 scratch/
@@ -22,3 +20,4 @@ thinking/
 _attachments/
 scratch/*
 thinking/*
+
