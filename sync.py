@@ -30,6 +30,12 @@ Classification priority (highest wins):
     2. AGENT_NESTED - *.{agent}.* pattern (setup.copilot.md -> setup.md)
     3. AGENT_NAMED  - agent name as word segment (copilot-instructions.md)
     4. UNIVERSAL    - shared across all agents
+
+Variant selection (post-manifest filtering):
+    After building the manifest, VariantSelector filters by active sync profile:
+    - Model variants: setup.claude.opus.md replaces setup.claude.md when model=opus
+    - Role overlays:  roles/reviewer.md included only when role=reviewer
+    Profile read from .sync-profile.yml in vault root (per-repo overrides supported).
 """
 
 from __future__ import annotations
@@ -81,6 +87,10 @@ EXCLUDE_FILENAMES: set[str] = {
 
 CONTENT_DIRS: list[str] = ["skills", "instructions", "docs"]
 
+KNOWN_MODELS: set[str] = {"opus", "sonnet", "haiku"}
+
+SYNC_PROFILE_FILE = ".sync-profile.yml"
+
 PRIORITY: dict[str, int] = {
     "UNIVERSAL": 0,
     "AGENT_NAMED": 1,
@@ -94,6 +104,33 @@ class SyncTarget:
     """A discovered location where agent dirs should be created."""
     repo_path: Path
     files: list[tuple[Path, Path]] = field(default_factory=list)
+
+
+@dataclass
+class SyncProfile:
+    """Active model/role variant for manifest filtering."""
+    model: str | None = None
+    role: str | None = None
+
+
+def parse_sync_profile(path: Path) -> SyncProfile:
+    """Parse a .sync-profile.yml file (simple key: value format)."""
+    if not path.is_file():
+        return SyncProfile()
+
+    data: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line:
+            key, _, value = line.partition(":")
+            data[key.strip()] = value.strip()
+
+    return SyncProfile(
+        model=data.get("model") or None,
+        role=data.get("role") or None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +365,161 @@ class ManifestBuilder:
 
 
 # ---------------------------------------------------------------------------
+# VariantSelector — model/role filtering on manifests
+# ---------------------------------------------------------------------------
+
+class VariantSelector:
+    """Filter manifest entries by active model and role profile.
+
+    Operates on the manifest dict *after* ManifestBuilder and *before*
+    SymlinkManager.  Three operations:
+
+    1. Model swap — ``setup.claude.opus.md`` replaces ``setup.claude.md``
+       when model=opus; all non-matching model variants are stripped.
+    2. Role filter — files under ``roles/`` are included only when their
+       stem matches the active role; all others are dropped.
+    3. Strip — any remaining unmatched variant files are removed.
+    """
+
+    def __init__(self, model: str | None = None, role: str | None = None) -> None:
+        self._model = model.lower() if model else None
+        self._role = role.lower() if role else None
+
+    @property
+    def model(self) -> str | None:
+        return self._model
+
+    @property
+    def role(self) -> str | None:
+        return self._role
+
+    # -- Public API ---------------------------------------------------------
+
+    def select(self, manifest: dict[Path, Path]) -> dict[Path, Path]:
+        """Return a filtered copy of *manifest* with variant rules applied."""
+        result = self._apply_model_swaps(dict(manifest))
+        result = self._apply_role_filter(result)
+        return result
+
+    # -- Model variants -----------------------------------------------------
+
+    def _apply_model_swaps(self, manifest: dict[Path, Path]) -> dict[Path, Path]:
+        """Handle model-variant files (``*.{model}.*`` pattern).
+
+        When model=opus:
+          - ``setup.claude.opus.md`` → dest becomes ``setup.claude.md``
+            (replaces the base file if present)
+          - ``setup.claude.sonnet.md`` → stripped entirely
+
+        When no model is set, all model-variant files are stripped so only
+        base files remain.
+        """
+        # First pass: identify model-variant entries and their base paths
+        variants: dict[Path, dict[str, tuple[Path, Path]]] = {}  # base_dest → {model → (dest, src)}
+        regular: dict[Path, Path] = {}
+
+        for dest, source in manifest.items():
+            model_name = self._detect_model_in_dest(dest)
+            if model_name is not None:
+                base_dest = self._strip_model_from_dest(dest, model_name)
+                if base_dest not in variants:
+                    variants[base_dest] = {}
+                variants[base_dest][model_name] = (dest, source)
+            else:
+                regular[dest] = source
+
+        # Second pass: resolve which variant wins
+        result: dict[Path, Path] = {}
+        for dest, source in regular.items():
+            if dest in variants and self._model and self._model in variants[dest]:
+                # Active model variant replaces this base file
+                _, variant_source = variants[dest][self._model]
+                result[dest] = variant_source
+            elif dest in variants:
+                # No matching model variant — keep base as-is
+                result[dest] = source
+            else:
+                result[dest] = source
+
+        # Include model variants that have NO base file equivalent
+        for base_dest, model_map in variants.items():
+            if base_dest in result:
+                continue  # already handled above
+            if self._model and self._model in model_map:
+                _, variant_source = model_map[self._model]
+                result[base_dest] = variant_source
+            # else: no matching variant and no base → omit entirely
+
+        return result
+
+    def _detect_model_in_dest(self, dest: Path) -> str | None:
+        """Check if dest filename contains a known model name as a dotted segment.
+
+        ``setup.claude.opus.md`` → ``"opus"``
+        ``setup.claude.md``      → ``None``
+        """
+        parts = dest.name.split(".")
+        for part in parts:
+            if part.lower() in KNOWN_MODELS:
+                return part.lower()
+        return None
+
+    def _strip_model_from_dest(self, dest: Path, model_name: str) -> Path:
+        """Remove the model segment from a dest path.
+
+        ``skills/setup.claude.opus.md`` → ``skills/setup.claude.md``
+        """
+        name = dest.name
+        # Replace .model. with . (e.g. "setup.claude.opus.md" → "setup.claude.md")
+        stripped = re.sub(rf"\.{re.escape(model_name)}\.", ".", name, count=1, flags=re.IGNORECASE)
+        if stripped == name:
+            # model might be last before extension: "thing.opus.md" → "thing.md"
+            stripped = re.sub(rf"\.{re.escape(model_name)}\b", "", name, count=1, flags=re.IGNORECASE)
+        return dest.parent / stripped if dest.parent != Path() else Path(stripped)
+
+    # -- Role filter --------------------------------------------------------
+
+    def _apply_role_filter(self, manifest: dict[Path, Path]) -> dict[Path, Path]:
+        """Include/exclude files under ``roles/`` based on active role.
+
+        - If role is set: include only ``roles/{role}.md`` (or ``roles/{role}/...``)
+        - If role is not set: strip ALL role files
+        """
+        result: dict[Path, Path] = {}
+        for dest, source in manifest.items():
+            if self._is_role_path(dest):
+                if self._role and self._matches_role(dest):
+                    result[dest] = source
+                # else: drop non-matching or all role files when no role set
+            else:
+                result[dest] = source
+        return result
+
+    def _is_role_path(self, dest: Path) -> bool:
+        """Check if dest is inside a ``roles/`` directory."""
+        return "roles" in dest.parts
+
+    def _matches_role(self, dest: Path) -> bool:
+        """Check if a role path matches the active role.
+
+        Matches: ``roles/reviewer.md``, ``roles/reviewer/checklist.md``
+        """
+        if not self._role:
+            return False
+        parts = list(dest.parts)
+        try:
+            idx = parts.index("roles")
+        except ValueError:
+            return False
+        if idx + 1 >= len(parts):
+            return False
+        next_part = parts[idx + 1]
+        # Either "reviewer.md" (stem match) or "reviewer/" (dir match)
+        stem = Path(next_part).stem
+        return stem.lower() == self._role
+
+
+# ---------------------------------------------------------------------------
 # SymlinkManager — filesystem operations (create/remove symlinks)
 # ---------------------------------------------------------------------------
 
@@ -426,6 +618,7 @@ class SymlinkManager:
         manifest_builder: ManifestBuilder,
         vault_repo_root: Path, repo_root: Path,
         agent_target_name: str,
+        selector: VariantSelector | None = None,
     ) -> None:
         """Create per-file symlinks in target.repo_path/<agent_target>/."""
         target_dir = target.repo_path / agent_target_name
@@ -440,6 +633,8 @@ class SymlinkManager:
             target_dir.mkdir(exist_ok=True)
 
         manifest = manifest_builder.for_target(agent, target, vault_repo_root, repo_root)
+        if selector is not None:
+            manifest = selector.select(manifest)
         count_new, count_skip, created = self.apply_manifest(target_dir, manifest)
         count_stale = self.prune_stale(target_dir, created)
 
@@ -452,6 +647,7 @@ class SymlinkManager:
         self, agent: str, vault_path: Path,
         manifest_builder: ManifestBuilder,
         agent_target_name: str,
+        selector: VariantSelector | None = None,
     ) -> None:
         """Sync vault-wide content to ~/{agent_target}/."""
         target_dir = Path.home() / agent_target_name
@@ -465,6 +661,8 @@ class SymlinkManager:
         simple: dict[Path, Path] = {
             dest: src for dest, (src, _) in vault_manifest.items()
         }
+        if selector is not None:
+            simple = selector.select(simple)
         count_new, count_skip, created = self.apply_manifest(target_dir, simple)
         count_stale = self.prune_stale(target_dir, created, restrict_to=CONTENT_DIRS)
 
@@ -527,6 +725,11 @@ class VaultSync:
         self._manifest: ManifestBuilder | None = None
         self._discovery = TargetDiscovery()
         self._linker = SymlinkManager(dry_run=dry_run)
+        self._global_profile = self._load_profile()
+        self._selector = VariantSelector(
+            model=self._global_profile.model,
+            role=self._global_profile.role,
+        )
 
     # -- Lazy init (classifier needs agents list) ------------------------
 
@@ -585,6 +788,28 @@ class VaultSync:
         """Map agent name to target directory name."""
         return AGENT_TARGET_MAP.get(agent, f".{agent}")
 
+    def _load_profile(self, repo_name: str | None = None) -> SyncProfile:
+        """Load sync profile, optionally with per-repo override merged on top."""
+        global_profile = parse_sync_profile(self.vault_path / SYNC_PROFILE_FILE)
+        if repo_name is None:
+            return global_profile
+        repo_profile = parse_sync_profile(
+            self.repos_base / repo_name / SYNC_PROFILE_FILE,
+        )
+        return SyncProfile(
+            model=repo_profile.model or global_profile.model,
+            role=repo_profile.role or global_profile.role,
+        )
+
+    def _get_selector(self, repo_name: str | None = None) -> VariantSelector:
+        """Get VariantSelector for the given repo (or global default)."""
+        if repo_name is None:
+            return self._selector
+        profile = self._load_profile(repo_name)
+        if profile == self._global_profile:
+            return self._selector
+        return VariantSelector(model=profile.model, role=profile.role)
+
     # -- Delegates (preserve public API) ---------------------------------
 
     def classify_file(
@@ -614,10 +839,13 @@ class VaultSync:
     def sync_target(
         self, agent: str, target: SyncTarget,
         vault_repo_root: Path, repo_root: Path,
+        selector: VariantSelector | None = None,
     ) -> None:
+        sel = selector or self._selector
         self._linker.sync_target(
             agent, target, self._get_manifest_builder(),
             vault_repo_root, repo_root, self.get_agent_target(agent),
+            selector=sel,
         )
 
     def sync_all(
@@ -644,6 +872,7 @@ class VaultSync:
                     print(f"  Repo not found: {repo_path}")
                     continue
 
+                repo_selector = self._get_selector(repo_path.name)
                 targets = self.discover_sync_targets(vault_repo, repo_path)
                 for target in targets:
                     label = repo_path.name
@@ -655,7 +884,10 @@ class VaultSync:
                         if a not in self.get_registered_agents():
                             print(f"  Agent '{a}' not registered, skipping")
                             continue
-                        self.sync_target(a, target, vault_repo, repo_path)
+                        self.sync_target(
+                            a, target, vault_repo, repo_path,
+                            selector=repo_selector,
+                        )
 
         print(f"\nSyncing system-level agent config:")
         self.sync_system(agent=agent)
@@ -671,6 +903,7 @@ class VaultSync:
             self._linker.sync_system(
                 a, self.vault_path,
                 self._get_manifest_builder(), self.get_agent_target(a),
+                selector=self._selector,
             )
 
     # -- Cleanup ---------------------------------------------------------
@@ -809,6 +1042,10 @@ class VaultWatcher:
                 base, _, _ = entry.name.partition(".")
                 if base in CONTENT_DIRS:
                     paths.append(entry)
+        # Watch the sync profile file for model/role changes
+        profile_file = self.vault_path / SYNC_PROFILE_FILE
+        if profile_file.is_file():
+            paths.append(profile_file)
         return paths
 
     def _build_fswatch_cmd(self, paths: list[Path]) -> list[str]:
@@ -824,6 +1061,12 @@ class VaultWatcher:
             return
         self._last_sync = now
         print(f"\nChange detected: {Path(changed_path).name}")
+        # Reload profile so .sync-profile.yml changes take effect at runtime
+        self.sync._global_profile = self.sync._load_profile()
+        self.sync._selector = VariantSelector(
+            model=self.sync._global_profile.model,
+            role=self.sync._global_profile.role,
+        )
         print("Re-syncing...")
         try:
             self.sync.sync_all(agent=self.agent, repo=self.repo)

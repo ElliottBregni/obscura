@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sync import LOCK_FILE, VaultSync, VaultWatcher
+from sync import LOCK_FILE, SyncProfile, VariantSelector, VaultSync, VaultWatcher
 
 
 # ---------------------------------------------------------------------------
@@ -136,3 +136,51 @@ def mock_lock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     lock = tmp_path / "test-watcher.pid"
     monkeypatch.setattr("sync.LOCK_FILE", lock)
     return lock
+
+
+# ---------------------------------------------------------------------------
+# Variant / profile fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def variant_vault(tmp_path: Path) -> Path:
+    """Vault with model-variant and role files for VariantSelector tests."""
+    vault = tmp_path / "variant_vault"
+    vault.mkdir()
+
+    _mk(vault, "agents/INDEX.md", (
+        "# Agent Registry\n\n## Active Agents\n- copilot\n- claude\n"
+    ))
+    _mk(vault, "repos/INDEX.md", "# placeholder\n")
+
+    # Vault-wide skills with model variants
+    _mk(vault, "skills/setup.md", "# Base setup\n")
+    _mk(vault, "skills/setup.opus.md", "# Opus setup\n")
+    _mk(vault, "skills/setup.sonnet.md", "# Sonnet setup\n")
+    _mk(vault, "skills/git-workflow.md", "# Git workflow (no variants)\n")
+    _mk(vault, "skills/testing.md", "# Testing (no variants)\n")
+
+    # Agent-specific + model variant
+    _mk(vault, "skills/config.copilot.md", "# Copilot config base\n")
+    _mk(vault, "skills/config.copilot.opus.md", "# Copilot config opus\n")
+
+    # Role files
+    _mk(vault, "skills/roles/reviewer.md", "# Reviewer role\n")
+    _mk(vault, "skills/roles/implementer.md", "# Implementer role\n")
+    _mk(vault, "skills/roles/architect/overview.md", "# Architect overview\n")
+    _mk(vault, "skills/roles/architect/patterns.md", "# Architect patterns\n")
+
+    # instructions/
+    _mk(vault, "instructions/general.md", "# General\n")
+    _mk(vault, "instructions/general.opus.md", "# General opus\n")
+
+    # docs/ (no variants — tests that non-variant files pass through)
+    _mk(vault, "docs/AUTO-SYNC.md", "# Auto sync\n")
+
+    return vault
+
+
+@pytest.fixture()
+def variant_sync(variant_vault: Path) -> VaultSync:
+    """VaultSync with no profile set (baseline — no variant filtering)."""
+    return VaultSync(vault_path=variant_vault)
