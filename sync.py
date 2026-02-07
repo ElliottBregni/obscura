@@ -66,7 +66,7 @@ _AgentTargetFn = Callable[[str], str]
 # Constants
 # ---------------------------------------------------------------------------
 
-VAULT_PATH = Path.home() / "FV-Copilot"
+VAULT_PATH = Path.home() / "obscura"
 REPOS_BASE = VAULT_PATH / "repos"
 AGENTS_INDEX = VAULT_PATH / "agents" / "INDEX.md"
 REPOS_INDEX = REPOS_BASE / "INDEX.md"

@@ -1,9 +1,18 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Obsidian metadata
 .obsidian/
 .DS_Store
 
 # Symlinked repos (tracked in their respective repos)
 repos/
+repo/
+
+# Agent system-level symlinks (machine-specific paths)
+agents/copilot
+agents/claude
 
 # Agent CLI state (synced bidirectionally, user-specific configs)
 # Not committed to vault repo (local sync only)
@@ -21,3 +30,5 @@ _attachments/
 scratch/*
 thinking/*
 
+crawlers/*
+crawlers/

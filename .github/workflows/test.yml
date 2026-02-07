@@ -16,7 +16,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install "pytest>=8.0"
+        run: pip install "pytest>=8.0" pytest-asyncio
 
       - name: Run tests
         run: PYTHONPATH=. pytest -q

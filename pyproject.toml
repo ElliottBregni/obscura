@@ -1,12 +1,20 @@
 [project]
 name = "fv-copilot"
-version = "0.1.0"
-description = "FV-Copilot vault sync — recursive directory-matching with per-file symlinks"
+version = "0.2.0"
+description = "FV-Copilot vault sync + unified SDK wrapper for Copilot and Claude"
 requires-python = ">=3.12"
+dependencies = [
+    "github-copilot-sdk>=0.1.0",
+    "claude-agent-sdk>=0.1.0",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+obscura-sdk = "sdk.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+asyncio_mode = "auto"
