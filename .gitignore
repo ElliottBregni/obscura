@@ -5,6 +5,10 @@
 # Symlinked repos (tracked in their respective repos)
 repos/
 
+# Agent system-level symlinks (machine-specific paths)
+agents/copilot
+agents/claude
+
 # Agent CLI state (synced bidirectionally, user-specific configs)
 # Not committed to vault repo (local sync only)
 *-cli/
