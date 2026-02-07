@@ -1,3 +1,7 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Obsidian metadata
 .obsidian/
 .DS_Store
