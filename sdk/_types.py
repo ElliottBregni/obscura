@@ -131,6 +131,11 @@ class HookPoint(enum.Enum):
     POST_TOOL_USE = "post_tool_use"
     USER_PROMPT_SUBMITTED = "user_prompt_submitted"
     STOP = "stop"
+    # Agent-loop hooks (APER)
+    PRE_ANALYZE = "pre_analyze"
+    POST_PLAN = "post_plan"
+    PRE_EXECUTE = "pre_execute"
+    POST_RESPOND = "post_respond"
 
 
 @dataclass(frozen=True)
@@ -141,6 +146,34 @@ class HookContext:
     tool_input: dict[str, Any] = field(default_factory=dict)
     tool_output: Any = None
     message: Message | None = None
+
+
+# ---------------------------------------------------------------------------
+# Agent types (APER loop)
+# ---------------------------------------------------------------------------
+
+class AgentPhase(enum.Enum):
+    """Phases in the Analyze → Plan → Execute → Respond agent loop."""
+    ANALYZE = "analyze"
+    PLAN = "plan"
+    EXECUTE = "execute"
+    RESPOND = "respond"
+
+
+@dataclass
+class AgentContext:
+    """Mutable context passed through the APER loop.
+
+    Each phase reads from and writes to this context. The ``metadata``
+    dict carries arbitrary data (system prompts, role context, etc.).
+    """
+    phase: AgentPhase
+    input_data: Any = None
+    analysis: Any = None
+    plan: Any = None
+    results: list[Any] = field(default_factory=list)
+    response: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

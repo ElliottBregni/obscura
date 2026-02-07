@@ -4,6 +4,7 @@
 
 # Symlinked repos (tracked in their respective repos)
 repos/
+repo/
 
 # Agent system-level symlinks (machine-specific paths)
 agents/copilot
@@ -25,3 +26,5 @@ _attachments/
 scratch/*
 thinking/*
 
+crawlers/*
+crawlers/

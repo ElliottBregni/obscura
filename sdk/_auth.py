@@ -86,6 +86,54 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
     )
 
 
+class TokenRefresher:
+    """Auto-refreshing auth for long-running agents.
+
+    Wraps :func:`resolve_auth` and re-resolves credentials when the
+    refresh interval elapses.  Safe for concurrent use — multiple
+    callers will see the same cached result until it expires.
+
+    Usage::
+
+        refresher = TokenRefresher(Backend.COPILOT, refresh_interval=3600)
+        auth = await refresher.get_valid_auth()
+    """
+
+    def __init__(
+        self,
+        backend: Backend,
+        *,
+        explicit: AuthConfig | None = None,
+        refresh_interval: float = 3600,
+    ) -> None:
+        self._backend = backend
+        self._explicit = explicit
+        self._refresh_interval = refresh_interval
+        self._cached: AuthConfig | None = None
+        self._resolved_at: float = 0.0
+
+    async def get_valid_auth(self) -> AuthConfig:
+        """Return cached auth or re-resolve if interval has elapsed."""
+        import asyncio
+        import time
+
+        now = time.monotonic()
+        if self._cached is not None and (now - self._resolved_at) < self._refresh_interval:
+            return self._cached
+
+        # Re-resolve in a thread to avoid blocking the event loop
+        self._cached = await asyncio.to_thread(
+            resolve_auth, self._backend, self._explicit,
+        )
+        self._resolved_at = time.monotonic()
+        return self._cached
+
+    def invalidate(self) -> None:
+        """Force re-resolution on next call."""
+        self._cached = None
+        self._resolved_at = 0.0
+
+
 def resolve_auth(backend: Backend, explicit: AuthConfig | None = None) -> AuthConfig:
     """Resolve auth credentials for a backend.
 
