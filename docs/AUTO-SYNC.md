@@ -71,16 +71,16 @@ Auto-starts on login, runs silently.
 **Service commands:**
 ```bash
 # Check status
-launchctl list | grep fv-copilot
+launchctl list | grep obscura
 
 # View logs
-tail -f /tmp/fv-copilot-watcher.log
+tail -f /tmp/obscura-watcher.log
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.fv-copilot.watcher.plist
+launchctl unload ~/Library/LaunchAgents/com.obscura.watcher.plist
 
 # Start
-launchctl load ~/Library/LaunchAgents/com.fv-copilot.watcher.plist
+launchctl load ~/Library/LaunchAgents/com.obscura.watcher.plist
 ```
 
 ---

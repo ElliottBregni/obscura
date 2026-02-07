@@ -327,10 +327,10 @@ flowchart TD
 flowchart TD
     Entry([install-launchd-service.sh]) --> CleanOld["Remove old plist if exists"]
     CleanOld --> MkDir["mkdir ~/Library/LaunchAgents/"]
-    MkDir --> WritePlist["Write .plist file:<br/>com.fv-copilot.watcher.plist"]
+    MkDir --> WritePlist["Write .plist file:<br/>com.obscura.watcher.plist"]
 
     subgraph PlistConfig["Plist Configuration"]
-        P1["Label: com.fv-copilot.watcher"]
+        P1["Label: com.obscura.watcher"]
         P2["Program: python3 sync.py --watch"]
         P3["RunAtLoad: true"]
         P4["KeepAlive: true"]

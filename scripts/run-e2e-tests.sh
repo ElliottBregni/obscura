@@ -13,21 +13,27 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Export test configuration
+export OBSCURA_URL=http://localhost:8080
+export OBSCURA_AUTH_ENABLED=false
+export OTEL_ENABLED=false
+
 # Check if server is already running
 if curl -s http://localhost:8080/health > /dev/null; then
     echo -e "${YELLOW}⚠️  Server already running on localhost:8080${NC}"
-    echo "Using existing server..."
-    export OBSCURA_URL=http://localhost:8080
-    export OBSCURA_TOKEN=local-dev-token
+    echo "Using existing server (may need auth token)..."
 else
     echo "🚀 Starting temporary server..."
+    echo "   Auth: disabled"
+    echo "   OTel: disabled"
     
-    # Start server in background
-    python -m uvicorn sdk.server:create_app --factory --port 8080 --host 0.0.0.0 &
+    # Start server in background with explicit env vars
+    env OBSCURA_AUTH_ENABLED=false OTEL_ENABLED=false \
+        python -m uvicorn sdk.server:create_app --factory --port 8080 --host 0.0.0.0 &
     SERVER_PID=$!
     
     # Trap to kill server on exit
-    trap "echo 'Stopping server...'; kill $SERVER_PID 2>/dev/null || true" EXIT
+    trap "echo ''; echo 'Stopping server...'; kill $SERVER_PID 2>/dev/null || true" EXIT
     
     # Wait for server to be ready
     echo "⏳ Waiting for server to start..."
@@ -42,14 +48,14 @@ else
             exit 1
         fi
     done
-    
-    export OBSCURA_URL=http://localhost:8080
-    export OBSCURA_TOKEN=local-dev-token
 fi
 
 echo ""
 echo "🧪 Running E2E tests..."
 echo ""
+
+# Run tests without token (auth disabled)
+export OBSCURA_TOKEN=""
 
 # Run tests
 if pytest tests/e2e/ -v --run-e2e "$@"; then

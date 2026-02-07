@@ -220,7 +220,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     except ImportError:
         print(
             "Error: uvicorn is not installed. "
-            "Install server extras: pip install 'fv-copilot[server]'",
+            "Install server extras: pip install 'obscura[server]'","
             file=sys.stderr,
         )
         return 1

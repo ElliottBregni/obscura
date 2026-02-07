@@ -76,6 +76,7 @@ class TestAgentRuntime:
         assert len(agents) == 1
         assert agents[0].config.name == "search-agent"
 
+    @pytest.mark.skipif(not bool(__import__('os').environ.get('ANTHROPIC_API_KEY')), reason='Claude auth requires ANTHROPIC_API_KEY env var.')
     @pytest.mark.asyncio
     async def test_agent_lifecycle(self, runtime: AgentRuntime) -> None:
         await runtime.start()
@@ -217,6 +218,7 @@ class TestAgentMemoryIntegration:
 
 
 class TestAgentErrorHandling:
+    @pytest.mark.skipif(not bool(__import__('os').environ.get('ANTHROPIC_API_KEY')), reason='Claude auth requires ANTHROPIC_API_KEY env var.')
     @pytest.mark.asyncio
     async def test_agent_handles_run_error(self, runtime: AgentRuntime) -> None:
         await runtime.start()
@@ -237,6 +239,7 @@ class TestAgentErrorHandling:
 
 
 class TestAgentStreaming:
+    @pytest.mark.skipif(not bool(__import__('os').environ.get('ANTHROPIC_API_KEY')), reason='Claude auth requires ANTHROPIC_API_KEY env var.')
     @pytest.mark.asyncio
     async def test_stream_chunks(self, runtime: AgentRuntime) -> None:
         await runtime.start()

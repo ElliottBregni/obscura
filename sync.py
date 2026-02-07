@@ -988,7 +988,7 @@ class VaultSync:
 # File watcher
 # ---------------------------------------------------------------------------
 
-LOCK_FILE = Path("/tmp/fv-copilot-watcher.pid")
+LOCK_FILE = Path("/tmp/obscura-watcher.pid")
 DEBOUNCE_SECONDS = 0.5
 FSWATCH_EXCLUDES: list[str] = [r"\.git", r"\.DS_Store", r"node_modules", r"__pycache__"]
 

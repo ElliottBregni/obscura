@@ -5,17 +5,26 @@ import httpx
 import os
 
 BASE_URL = os.environ.get("OBSCURA_URL", "http://localhost:8080")
-TOKEN = os.environ.get("OBSCURA_TOKEN", "local-dev-token")
+TOKEN = os.environ.get("OBSCURA_TOKEN")
+
+
+def get_client():
+    """HTTP client with optional auth."""
+    headers = {}
+    if TOKEN:
+        headers["Authorization"] = f"Bearer {TOKEN}"
+    
+    return httpx.Client(
+        base_url=BASE_URL,
+        headers=headers,
+        timeout=30.0
+    )
 
 
 @pytest.fixture
 def client():
-    """HTTP client with auth."""
-    return httpx.Client(
-        base_url=BASE_URL,
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        timeout=30.0
-    )
+    """HTTP client for E2E tests."""
+    return get_client()
 
 
 @pytest.mark.e2e

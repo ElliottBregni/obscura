@@ -1,11 +1,11 @@
 README.md
 pyproject.toml
-fv_copilot.egg-info/PKG-INFO
-fv_copilot.egg-info/SOURCES.txt
-fv_copilot.egg-info/dependency_links.txt
-fv_copilot.egg-info/entry_points.txt
-fv_copilot.egg-info/requires.txt
-fv_copilot.egg-info/top_level.txt
+obscura.egg-info/PKG-INFO
+obscura.egg-info/SOURCES.txt
+obscura.egg-info/dependency_links.txt
+obscura.egg-info/entry_points.txt
+obscura.egg-info/requires.txt
+obscura.egg-info/top_level.txt
 sdk/__init__.py
 sdk/_auth.py
 sdk/_sessions.py
