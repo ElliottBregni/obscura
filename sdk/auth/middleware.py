@@ -14,8 +14,18 @@ import time
 from typing import Any
 
 import httpx
-from jose import JWTError, jwt
-from jose.exceptions import ExpiredSignatureError
+try:
+    from jose import JWTError, jwt
+    from jose.exceptions import ExpiredSignatureError
+    _JOSE_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency may be missing in some environments
+    # Provide fallbacks so the module can be imported even when the optional
+    # `python-jose` dependency is not installed. Runtime checks will raise an
+    # informative ImportError when JWT functionality is actually used.
+    JWTError = Exception
+    ExpiredSignatureError = Exception
+    jwt = None
+    _JOSE_AVAILABLE = False
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -118,6 +128,12 @@ async def decode_and_validate(
 
     Raises ``JWTError`` or ``ValueError`` on failure.
     """
+    if jwt is None:
+        raise ImportError(
+            "Missing optional dependency 'python-jose'. Install with "
+            "'pip install python-jose[cryptography]' or install the 'server' extras: "
+            "'pip install .[server]'"
+        )
     keys = await jwks_cache.get_keys()
 
     try:
@@ -207,6 +223,17 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Token has expired"},
+            )
+        except ImportError as exc:
+            logger.error("JWT library missing: %s", exc)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": (
+                        "Server misconfigured: missing dependency 'python-jose'. "
+                        "Install with 'pip install python-jose[cryptography]' or 'pip install .[server]'"
+                    )
+                },
             )
         except (JWTError, ValueError) as exc:
             logger.warning("JWT validation failed: %s", exc)

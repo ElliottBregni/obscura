@@ -508,6 +508,20 @@ def serve(host, port, reload, workers):
     )
 
 
+# TUI command
+@cli.command("tui")
+def tui():
+    """Launch interactive TUI."""
+    try:
+        from obscura.tui.app import TUIApp
+        app = TUIApp()
+        app.run()
+    except ImportError as e:
+        console.print(f"[bold red]Error:[/] TUI dependencies not installed.")
+        console.print(f"[yellow]Run: pip install textual[/]")
+        sys.exit(1)
+
+
 # Health check
 @cli.command("health")
 @click.pass_context

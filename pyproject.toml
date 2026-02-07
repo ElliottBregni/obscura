@@ -8,10 +8,20 @@ dependencies = [
     "claude-agent-sdk>=0.1.0",
     "httpx>=0.27.0",
     "numpy>=2.1.0",
+    "python-jose[cryptography]>=3.3.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "cryptography>=42.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "cryptography>=42.0",
+    "click>=8.3.1",
+    "fastapi>=0.128.4",
+    "rich>=14.3.2",
+    "uvicorn>=0.40.0",
+    "sse-starlette>=3.2.0",
+]
 server = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -25,6 +35,10 @@ telemetry = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "structlog>=23.0.0",
+]
+tui = [
+    "textual>=0.45.0",
+    "rich>=14.0.0",
 ]
 
 [project.scripts]
@@ -45,7 +59,7 @@ dev = [
 
 # Package discovery - explicitly define what to include
 [tool.setuptools]
-packages = ["sdk"]
+packages = ["sdk", "obscura"]
 
 [tool.setuptools.package-data]
 sdk = ["py.typed"]
