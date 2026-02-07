@@ -32,3 +32,6 @@ thinking/*
 
 crawlers/*
 crawlers/
+
+tests/__pycache__
+__pycache__
