@@ -92,8 +92,11 @@ class CopilotBackend:
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_session()
-        response = await self._session.send_and_wait(prompt, kwargs.get("options"))
-        return self._to_message(response)
+        tracer = _get_backend_tracer()
+        with tracer.start_as_current_span("copilot.send") as span:
+            _set_span_attr(span, "backend", "copilot")
+            response = await self._session.send_and_wait({"prompt": prompt}, kwargs.get("options"))
+            return self._to_message(response)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks."""
@@ -126,17 +129,20 @@ class CopilotBackend:
         unsub_fns.append(self._session.on(_make_handler("session.error", _on_error)))
 
         # Send the message (non-blocking)
-        await self._session.send(prompt, kwargs.get("options"))
+        tracer = _get_backend_tracer()
+        with tracer.start_as_current_span("copilot.stream") as span:
+            _set_span_attr(span, "backend", "copilot")
+            await self._session.send({"prompt": prompt}, kwargs.get("options"))
 
-        # Yield chunks from the bridge
-        try:
-            async for chunk in bridge:
-                yield chunk
-        finally:
-            # Unsubscribe all handlers
-            for unsub in unsub_fns:
-                if callable(unsub):
-                    unsub()
+            # Yield chunks from the bridge
+            try:
+                async for chunk in bridge:
+                    yield chunk
+            finally:
+                # Unsubscribe all handlers
+                for unsub in unsub_fns:
+                    if callable(unsub):
+                        unsub()
 
     # -- Sessions ------------------------------------------------------------
 
@@ -297,3 +303,26 @@ def _make_handler(event_type: str, callback: Callable) -> Callable:
     # Tag the handler so the SDK can identify it
     handler._event_type = event_type  # type: ignore[attr-defined]
     return handler
+
+
+# ---------------------------------------------------------------------------
+# Lazy telemetry helpers
+# ---------------------------------------------------------------------------
+
+from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+
+
+def _get_backend_tracer() -> Any:
+    try:
+        from sdk.telemetry.traces import get_tracer
+        return get_tracer("obscura.copilot_backend")
+    except Exception:
+        return _NoOpTracer()
+
+
+def _set_span_attr(span: Any, key: str, value: Any) -> None:
+    try:
+        if hasattr(span, "set_attribute"):
+            span.set_attribute(key, value)
+    except Exception:
+        pass

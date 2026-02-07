@@ -1,0 +1,40 @@
+# =============================================================================
+# Kind cluster config for Obscura local development
+# =============================================================================
+# Usage: kind create cluster --config infra/k8s/kind-config.yaml --name obscura
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Obscura SDK API
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Jaeger UI
+      - containerPort: 30686
+        hostPort: 16686
+        protocol: TCP
+      # Grafana
+      - containerPort: 30300
+        hostPort: 3000
+        protocol: TCP
+      # Prometheus
+      - containerPort: 30900
+        hostPort: 9090
+        protocol: TCP
+
+  - role: worker
+
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
+      endpoint = ["http://kind-registry:5000"]

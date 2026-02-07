@@ -83,36 +83,42 @@ class ClaudeBackend:
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_client()
+        tracer = _get_backend_tracer()
+        with tracer.start_as_current_span("claude.send") as span:
+            _set_span_attr(span, "backend", "claude")
 
-        last_msg: Any = None
-        async for msg in self._client.receive_response():
-            last_msg = msg
+            last_msg: Any = None
+            async for msg in self._client.receive_response():
+                last_msg = msg
 
-        # Use query for a fresh exchange
-        await self._client.query(prompt)
-        messages: list[Any] = []
-        async for msg in self._client.receive_response():
-            messages.append(msg)
-            # Track session ID from ResultMessage
-            if type(msg).__name__ == "ResultMessage" and hasattr(msg, "session_id"):
-                self._last_session_id = msg.session_id
+            # Use query for a fresh exchange
+            await self._client.query(prompt)
+            messages: list[Any] = []
+            async for msg in self._client.receive_response():
+                messages.append(msg)
+                # Track session ID from ResultMessage
+                if type(msg).__name__ == "ResultMessage" and hasattr(msg, "session_id"):
+                    self._last_session_id = msg.session_id
 
-        return self._to_message(messages)
+            return self._to_message(messages)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks."""
         self._ensure_client()
+        tracer = _get_backend_tracer()
+        with tracer.start_as_current_span("claude.stream") as span:
+            _set_span_attr(span, "backend", "claude")
 
-        await self._client.query(prompt)
-        source = self._client.receive_response()
-        adapter = ClaudeIteratorAdapter(source)
+            await self._client.query(prompt)
+            source = self._client.receive_response()
+            adapter = ClaudeIteratorAdapter(source)
 
-        async for chunk in adapter:
-            # Track session ID from done events
-            if chunk.kind == ChunkKind.DONE and chunk.raw is not None:
-                if hasattr(chunk.raw, "session_id"):
-                    self._last_session_id = chunk.raw.session_id
-            yield chunk
+            async for chunk in adapter:
+                # Track session ID from done events
+                if chunk.kind == ChunkKind.DONE and chunk.raw is not None:
+                    if hasattr(chunk.raw, "session_id"):
+                        self._last_session_id = chunk.raw.session_id
+                yield chunk
 
     # -- Sessions ------------------------------------------------------------
 
@@ -331,3 +337,26 @@ class ClaudeBackend:
             raw=raw,
             backend=Backend.CLAUDE,
         )
+
+
+# ---------------------------------------------------------------------------
+# Lazy telemetry helpers
+# ---------------------------------------------------------------------------
+
+from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+
+
+def _get_backend_tracer() -> Any:
+    try:
+        from sdk.telemetry.traces import get_tracer
+        return get_tracer("obscura.claude_backend")
+    except Exception:
+        return _NoOpTracer()
+
+
+def _set_span_attr(span: Any, key: str, value: Any) -> None:
+    try:
+        if hasattr(span, "set_attribute"):
+            span.set_attribute(key, value)
+    except Exception:
+        pass

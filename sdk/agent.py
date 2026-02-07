@@ -91,24 +91,65 @@ class BaseAgent:
         if self._context_loader is not None:
             ctx.metadata["system_prompt"] = self._context_loader.load_system_prompt()
 
-        # Analyze
-        ctx.phase = AgentPhase.ANALYZE
-        await self._fire_hook(HookPoint.PRE_ANALYZE, ctx)
-        await self.analyze(ctx)
+        # Get tracer lazily (no-op if OTel not installed)
+        _tracer = _get_agent_tracer()
 
-        # Plan
-        ctx.phase = AgentPhase.PLAN
-        await self.plan(ctx)
-        await self._fire_hook(HookPoint.POST_PLAN, ctx)
+        with _tracer.start_as_current_span(
+            f"agent.run.{self._name}",
+        ) as run_span:
+            _set_span_attr(run_span, "agent.name", self._name)
 
-        # Execute
-        ctx.phase = AgentPhase.EXECUTE
-        await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
-        await self.execute(ctx)
+            # Analyze
+            ctx.phase = AgentPhase.ANALYZE
+            await self._fire_hook(HookPoint.PRE_ANALYZE, ctx)
+            with _tracer.start_as_current_span("agent.analyze") as span:
+                _set_span_attr(span, "agent.phase", "analyze")
+                await self.analyze(ctx)
 
-        # Respond
-        ctx.phase = AgentPhase.RESPOND
-        await self.respond(ctx)
-        await self._fire_hook(HookPoint.POST_RESPOND, ctx)
+            # Plan
+            ctx.phase = AgentPhase.PLAN
+            with _tracer.start_as_current_span("agent.plan") as span:
+                _set_span_attr(span, "agent.phase", "plan")
+                await self.plan(ctx)
+            await self._fire_hook(HookPoint.POST_PLAN, ctx)
+
+            # Execute
+            ctx.phase = AgentPhase.EXECUTE
+            await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
+            with _tracer.start_as_current_span("agent.execute") as span:
+                _set_span_attr(span, "agent.phase", "execute")
+                await self.execute(ctx)
+
+            # Respond
+            ctx.phase = AgentPhase.RESPOND
+            with _tracer.start_as_current_span("agent.respond") as span:
+                _set_span_attr(span, "agent.phase", "respond")
+                await self.respond(ctx)
+            await self._fire_hook(HookPoint.POST_RESPOND, ctx)
 
         return ctx.response
+
+
+# ---------------------------------------------------------------------------
+# Lazy telemetry helpers (no-op when OTel is unavailable)
+# ---------------------------------------------------------------------------
+
+def _get_agent_tracer() -> Any:
+    """Return a tracer, falling back to no-op if telemetry is unavailable."""
+    try:
+        from sdk.telemetry.traces import get_tracer
+        return get_tracer("obscura.agent")
+    except Exception:
+        return _NoOpTracer()
+
+
+from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+
+
+def _set_span_attr(span: Any, key: str, value: Any) -> None:
+    """Safely set a span attribute."""
+    try:
+        if hasattr(span, "set_attribute"):
+            span.set_attribute(key, value)
+    except Exception:
+        pass

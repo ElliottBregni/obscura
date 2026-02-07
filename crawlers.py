@@ -523,6 +523,7 @@ class DiagramCrawlerAgent(BaseAgent):
                 code = entry.absolute.read_text(encoding="utf-8")
                 prompt = MERMAID_PROMPT + code
 
+                print(f"  → sending {entry.repo_relative} ...", flush=True)
                 async with self._copilot_sem:
                     response = await self._client.send(prompt)
 
@@ -536,13 +537,18 @@ class DiagramCrawlerAgent(BaseAgent):
                 )
 
                 counter += 1
-                print(f"  [{counter}/{total}] {entry.repo_relative}", flush=True)
+                print(f"  ✓ [{counter}/{total}] {entry.repo_relative}", flush=True)
                 return (entry, content)
+            except asyncio.TimeoutError:
+                counter += 1
+                print(f"  ✗ [{counter}/{total}] {entry.repo_relative}: timeout", file=sys.stderr, flush=True)
+                return (entry, None)
             except Exception as e:
-                print(f"[warn] {entry.repo_relative}: {e}", file=sys.stderr)
+                counter += 1
+                print(f"  ✗ [{counter}/{total}] {entry.repo_relative}: {e}", file=sys.stderr, flush=True)
                 return (entry, None)
 
-        print(f"  Processing {total} files via copilot-sdk...")
+        print(f"  Processing {total} files via copilot-sdk (max {self._copilot_sem._value} concurrent)...")
         ctx.results = await asyncio.gather(*[process_one(e) for e in to_process])
 
     async def respond(self, ctx: AgentContext) -> None:

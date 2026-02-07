@@ -59,18 +59,21 @@ class ObscuraClient:
         cwd: str | None = None,
         # Copilot-specific
         streaming: bool = True,
+        # HTTP server context
+        user: object | None = None,
     ) -> None:
         if isinstance(backend, str):
             backend = Backend(backend)
         self._backend_type = backend
+        self._user = user
 
         # Resolve model via copilot_models aliases
         resolved_model = self._resolve_model(
             backend, model, model_alias, automation_safe,
         )
 
-        # Resolve auth
-        resolved_auth = resolve_auth(backend, auth)
+        # Resolve auth (pass user for per-identity scoping)
+        resolved_auth = resolve_auth(backend, auth, user=user)
 
         # Build tool registry
         self._tool_registry = ToolRegistry()
@@ -114,12 +117,46 @@ class ObscuraClient:
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send prompt, wait for full response."""
-        return await self._backend.send(prompt, **kwargs)
+        import time as _time
+
+        tracer = _get_client_tracer()
+        with tracer.start_as_current_span("obscura.client.send") as span:
+            _set_span_attr(span, "obscura.backend", self._backend_type.value)
+            _set_span_attr(span, "obscura.method", "send")
+            start = _time.monotonic()
+            try:
+                result = await self._backend.send(prompt, **kwargs)
+                duration = _time.monotonic() - start
+                _record_request_metric(self._backend_type.value, "send", "success")
+                _record_request_duration(self._backend_type.value, "send", duration)
+                return result
+            except Exception:
+                duration = _time.monotonic() - start
+                _record_request_metric(self._backend_type.value, "send", "error")
+                _record_request_duration(self._backend_type.value, "send", duration)
+                raise
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send prompt, yield streaming chunks."""
-        async for chunk in self._backend.stream(prompt, **kwargs):
-            yield chunk
+        import time as _time
+
+        tracer = _get_client_tracer()
+        with tracer.start_as_current_span("obscura.client.stream") as span:
+            _set_span_attr(span, "obscura.backend", self._backend_type.value)
+            _set_span_attr(span, "obscura.method", "stream")
+            start = _time.monotonic()
+            status = "success"
+            try:
+                async for chunk in self._backend.stream(prompt, **kwargs):
+                    _record_stream_chunk(self._backend_type.value, chunk.kind.value)
+                    yield chunk
+            except Exception:
+                status = "error"
+                raise
+            finally:
+                duration = _time.monotonic() - start
+                _record_request_metric(self._backend_type.value, "stream", status)
+                _record_request_duration(self._backend_type.value, "stream", duration)
 
     # -- Sessions ------------------------------------------------------------
 
@@ -238,3 +275,53 @@ class ObscuraClient:
             )
 
         raise ValueError(f"Unknown backend: {backend}")
+
+
+# ---------------------------------------------------------------------------
+# Lazy telemetry helpers (no-op when OTel is unavailable)
+# ---------------------------------------------------------------------------
+
+from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+
+
+def _get_client_tracer() -> Any:
+    try:
+        from sdk.telemetry.traces import get_tracer
+        return get_tracer("obscura.client")
+    except Exception:
+        return _NoOpTracer()
+
+
+def _set_span_attr(span: Any, key: str, value: Any) -> None:
+    try:
+        if hasattr(span, "set_attribute"):
+            span.set_attribute(key, value)
+    except Exception:
+        pass
+
+
+def _record_request_metric(backend: str, method: str, status: str) -> None:
+    try:
+        from sdk.telemetry.metrics import get_metrics
+        m = get_metrics()
+        m.requests_total.add(1, {"backend": backend, "method": method, "status": status})
+    except Exception:
+        pass
+
+
+def _record_request_duration(backend: str, method: str, duration: float) -> None:
+    try:
+        from sdk.telemetry.metrics import get_metrics
+        m = get_metrics()
+        m.request_duration_seconds.record(duration, {"backend": backend, "method": method})
+    except Exception:
+        pass
+
+
+def _record_stream_chunk(backend: str, chunk_kind: str) -> None:
+    try:
+        from sdk.telemetry.metrics import get_metrics
+        m = get_metrics()
+        m.stream_chunks_total.add(1, {"backend": backend, "chunk_kind": chunk_kind})
+    except Exception:
+        pass

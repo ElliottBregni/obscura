@@ -36,3 +36,16 @@ crawlers/
 tests/__pycache__
 __pycache__
 node_modules/
+
+# Infrastructure secrets
+infra/zitadel/machinekey.json
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Docker
+.env
+
+# Helm dependencies (downloaded charts)
+helm/obscura/charts/
+helm/obscura/Chart.lock

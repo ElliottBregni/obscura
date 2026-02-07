@@ -134,11 +134,28 @@ class TokenRefresher:
         self._resolved_at = 0.0
 
 
-def resolve_auth(backend: Backend, explicit: AuthConfig | None = None) -> AuthConfig:
+def resolve_auth(
+    backend: Backend,
+    explicit: AuthConfig | None = None,
+    user: object | None = None,
+) -> AuthConfig:
     """Resolve auth credentials for a backend.
 
     Priority: explicit AuthConfig values > environment variables > CLI fallback.
     Raises ValueError with guidance when credentials cannot be found.
+
+    Parameters
+    ----------
+    backend:
+        Which backend to resolve credentials for.
+    explicit:
+        Caller-provided credentials (takes priority over env vars).
+    user:
+        Optional :class:`~sdk.auth.models.AuthenticatedUser` from the
+        HTTP server.  When provided, future per-user credential scoping
+        can use the identity to select organisation-specific secrets.
+        Currently unused but wired through so that the server can pass
+        the authenticated user context into backend auth resolution.
     """
     config = explicit or AuthConfig()
 

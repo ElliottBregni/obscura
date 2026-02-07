@@ -1,0 +1,2 @@
+[console_scripts]
+obscura-sdk = sdk.cli:main

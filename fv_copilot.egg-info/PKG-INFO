@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: fv-copilot
+Version: 0.2.0
+Summary: FV-Copilot vault sync + unified SDK wrapper for Copilot and Claude
+Requires-Python: >=3.12
+Requires-Dist: github-copilot-sdk>=0.1.0
+Requires-Dist: claude-agent-sdk>=0.1.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: numpy>=2.1.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: cryptography>=42.0; extra == "dev"
+Provides-Extra: server
+Requires-Dist: fastapi>=0.115.0; extra == "server"
+Requires-Dist: uvicorn[standard]>=0.32.0; extra == "server"
+Requires-Dist: python-jose[cryptography]>=3.3.0; extra == "server"
+Requires-Dist: httpx>=0.27.0; extra == "server"
+Requires-Dist: sse-starlette>=2.1.0; extra == "server"
+Provides-Extra: telemetry
+Requires-Dist: opentelemetry-api>=1.20.0; extra == "telemetry"
+Requires-Dist: opentelemetry-sdk>=1.20.0; extra == "telemetry"
+Requires-Dist: opentelemetry-exporter-otlp-proto-grpc>=1.20.0; extra == "telemetry"
+Requires-Dist: opentelemetry-instrumentation-fastapi>=0.41b0; extra == "telemetry"
+Requires-Dist: structlog>=23.0.0; extra == "telemetry"

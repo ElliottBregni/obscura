@@ -30,7 +30,9 @@ from sdk._types import (
     ToolSpec,
 )
 from sdk.agent import BaseAgent
+from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
+from sdk.config import ObscuraConfig
 from sdk.context import ContextLoader
 from sdk.handlers import RequestHandler, SimpleHandler
 
@@ -46,6 +48,8 @@ __all__ = [
     "SimpleHandler",
     # Context
     "ContextLoader",
+    # Config
+    "ObscuraConfig",
     # Types
     "Backend",
     "BackendProtocol",
@@ -60,6 +64,7 @@ __all__ = [
     "ToolSpec",
     # Auth
     "AuthConfig",
+    "AuthenticatedUser",
     # Tools
     "tool",
     "ToolRegistry",

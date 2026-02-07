@@ -1,0 +1,180 @@
+# =============================================================================
+# Obscura — Full local development stack
+# =============================================================================
+# Usage:
+#   docker compose up -d          # start everything
+#   docker compose up -d --build  # rebuild obscura-sdk image
+#   docker compose logs -f        # tail all logs
+#   docker compose down -v        # tear down (remove volumes)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Obscura SDK — the main application
+  # ---------------------------------------------------------------------------
+  obscura-sdk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: obscura-sdk:local
+    container_name: obscura-sdk
+    ports:
+      - "8080:8080"
+    environment:
+      # Auth (Zitadel)
+      OBSCURA_AUTH_ENABLED: "true"
+      OBSCURA_AUTH_ISSUER: "http://zitadel:8080"
+      OBSCURA_AUTH_AUDIENCE: "obscura-sdk"
+      # Telemetry (OpenTelemetry)
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_SERVICE_NAME: "obscura-sdk"
+      # Logging
+      OBSCURA_LOG_LEVEL: "DEBUG"
+      OBSCURA_LOG_FORMAT: "json"
+      # Backend
+      OBSCURA_DEFAULT_BACKEND: "copilot"
+      # API keys from .env
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    depends_on:
+      zitadel:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Zitadel — OIDC identity provider
+  # ---------------------------------------------------------------------------
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v2.64.1
+    container_name: zitadel
+    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
+    environment:
+      ZITADEL_DATABASE_COCKROACH_HOST: cockroachdb
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_EXTERNALPORT: 8080
+      ZITADEL_EXTERNALDOMAIN: zitadel
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: "admin@obscura.local"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: "ObscuraDev1!"
+    ports:
+      - "8081:8080"
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/debug/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.2.4
+    container_name: cockroachdb
+    command: start-single-node --insecure --store=attrs=ssd,path=/var/lib/cockroach/
+    ports:
+      - "26257:26257"
+    volumes:
+      - cockroach-data:/var/lib/cockroach
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # OpenTelemetry Collector
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # gRPC OTLP
+      - "4318:4318"   # HTTP OTLP
+      - "8888:8888"   # Collector metrics
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Jaeger — Distributed tracing UI
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14250:14250"  # gRPC (collector)
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — Metrics collection
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    volumes:
+      - ./infra/otel/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Grafana — Dashboards
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: obscura
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/otel/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/otel/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - jaeger
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  cockroach-data:
+  prometheus-data:
+  grafana-data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  obscura-net:
+    name: obscura-net
+    driver: bridge

@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Obscura — Agent Monitor</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --bg-secondary: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --success: #238636;
+            --warning: #f0883e;
+            --danger: #da3633;
+            --info: #1f6feb;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+        
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .header h1::before {
+            content: "🧪";
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+        
+        .connection-status.connected {
+            color: var(--success);
+        }
+        
+        .connection-status::before {
+            content: "";
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--danger);
+        }
+        
+        .connection-status.connected::before {
+            background: var(--success);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+        
+        .stat-card h3 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        
+        .section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .section-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }
+        
+        .btn:hover {
+            opacity: 0.9;
+        }
+        
+        .btn-secondary {
+            background: var(--bg);
+            border: 1px solid var(--border);
+        }
+        
+        .agents-grid {
+            display: grid;
+            gap: 1rem;
+            padding: 1.5rem;
+        }
+        
+        .agent-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            gap: 1rem;
+            align-items: center;
+        }
+        
+        .agent-status {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+        
+        .agent-status.PENDING { background: var(--text-secondary); }
+        .agent-status.RUNNING { background: var(--accent); animation: pulse 1.5s infinite; }
+        .agent-status.WAITING { background: var(--warning); }
+        .agent-status.COMPLETED { background: var(--success); }
+        .agent-status.FAILED { background: var(--danger); }
+        .agent-status.STOPPED { background: var(--border); }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .agent-info h4 {
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .agent-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .agent-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .btn-small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+        }
+        
+        .logs-container {
+            padding: 1.5rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.75rem;
+            padding: 0.5rem;
+            border-left: 2px solid transparent;
+            margin-bottom: 0.5rem;
+        }
+        
+        .log-entry.info { border-left-color: var(--info); }
+        .log-entry.success { border-left-color: var(--success); }
+        .log-entry.error { border-left-color: var(--danger); }
+        
+        .log-time {
+            color: var(--text-secondary);
+            margin-right: 0.5rem;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 500px;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 0.5rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            font-size: 0.875rem;
+        }
+        
+        .form-group textarea {
+            min-height: 100px;
+            font-family: monospace;
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>Obscura Agent Monitor</h1>
+        <div class="connection-status" id="connectionStatus">
+            Disconnected
+        </div>
+    </header>
+    
+    <div class="container">
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Active Agents</h3>
+                <div class="stat-value" id="activeCount">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Running Tasks</h3>
+                <div class="stat-value" id="runningCount">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Completed</h3>
+                <div class="stat-value" id="completedCount">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Failed</h3>
+                <div class="stat-value" id="failedCount">0</div>
+            </div>
+        </div>
+        
+        <!-- Agents Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">Active Agents</h2>
+                <button class="btn" onclick="openSpawnModal()">+ Spawn Agent</button>
+            </div>
+            <div class="agents-grid" id="agentsList">
+                <div class="empty-state">No agents running</div>
+            </div>
+        </div>
+        
+        <!-- Logs Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">System Logs</h2>
+                <button class="btn btn-secondary" onclick="clearLogs()">Clear</button>
+            </div>
+            <div class="logs-container" id="logsContainer">
+                <div class="empty-state">No logs yet</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Spawn Agent Modal -->
+    <div class="modal" id="spawnModal">
+        <div class="modal-content">
+            <h2>Spawn New Agent</h2>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="agentName" placeholder="e.g., code-reviewer">
+            </div>
+            <div class="form-group">
+                <label>Model</label>
+                <select id="agentModel">
+                    <option value="claude">Claude</option>
+                    <option value="copilot">Copilot</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>System Prompt</label>
+                <textarea id="agentPrompt" placeholder="You are an expert code reviewer..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeSpawnModal()">Cancel</button>
+                <button class="btn" onclick="spawnAgent()">Spawn</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Configuration
+        const API_URL = 'http://localhost:8080';
+        const WS_URL = 'ws://localhost:8080';
+        const TOKEN = 'local-dev-token';
+        
+        // State
+        let ws = null;
+        let agents = [];
+        let logs = [];
+        
+        // WebSocket connection
+        function connect() {
+            ws = new WebSocket(`${WS_URL}/ws/monitor`);
+            
+            ws.onopen = () => {
+                updateConnectionStatus(true);
+                addLog('Connected to Obscura server', 'success');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus(false);
+                addLog('Disconnected from server', 'error');
+                // Reconnect after 3 seconds
+                setTimeout(connect, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                addLog('WebSocket error', 'error');
+            };
+        }
+        
+        function handleWebSocketMessage(data) {
+            if (data.type === 'init' || data.type === 'update') {
+                agents = data.agents;
+                updateAgentsList();
+                updateStats();
+            }
+        }
+        
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            status.textContent = connected ? 'Connected' : 'Disconnected';
+            status.classList.toggle('connected', connected);
+        }
+        
+        function updateStats() {
+            const active = agents.length;
+            const running = agents.filter(a => a.status === 'RUNNING').length;
+            const completed = agents.filter(a => a.status === 'COMPLETED').length;
+            const failed = agents.filter(a => a.status === 'FAILED').length;
+            
+            document.getElementById('activeCount').textContent = active;
+            document.getElementById('runningCount').textContent = running;
+            document.getElementById('completedCount').textContent = completed;
+            document.getElementById('failedCount').textContent = failed;
+        }
+        
+        function updateAgentsList() {
+            const container = document.getElementById('agentsList');
+            
+            if (agents.length === 0) {
+                container.innerHTML = '<div class="empty-state">No agents running</div>';
+                return;
+            }
+            
+            container.innerHTML = agents.map(agent => `
+                <div class="agent-card">
+                    <div class="agent-status ${agent.status}"></div>
+                    <div class="agent-info">
+                        <h4>${escapeHtml(agent.name)}</h4>
+                        <div class="agent-meta">
+                            ${agent.agent_id} • ${agent.model} • ${agent.status}
+                        </div>
+                    </div>
+                    <div class="agent-actions">
+                        <button class="btn btn-small" onclick="viewAgent('${agent.agent_id}')">View</button>
+                        <button class="btn btn-small btn-danger" onclick="stopAgent('${agent.agent_id}')">Stop</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function addLog(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            logs.push({ time, message, type });
+            
+            // Keep only last 100 logs
+            if (logs.length > 100) logs.shift();
+            
+            updateLogs();
+        }
+        
+        function updateLogs() {
+            const container = document.getElementById('logsContainer');
+            
+            if (logs.length === 0) {
+                container.innerHTML = '<div class="empty-state">No logs yet</div>';
+                return;
+            }
+            
+            container.innerHTML = logs.map(log => `
+                <div class="log-entry ${log.type}">
+                    <span class="log-time">${log.time}</span>
+                    ${escapeHtml(log.message)}
+                </div>
+            `).join('');
+            
+            // Scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function clearLogs() {
+            logs = [];
+            updateLogs();
+        }
+        
+        // Modal functions
+        function openSpawnModal() {
+            document.getElementById('spawnModal').classList.add('active');
+        }
+        
+        function closeSpawnModal() {
+            document.getElementById('spawnModal').classList.remove('active');
+        }
+        
+        async function spawnAgent() {
+            const name = document.getElementById('agentName').value;
+            const model = document.getElementById('agentModel').value;
+            const prompt = document.getElementById('agentPrompt').value;
+            
+            if (!name) {
+                alert('Please enter a name');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/api/v1/agents`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${TOKEN}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        model,
+                        system_prompt: prompt,
+                        memory_namespace: 'web-ui'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    addLog(`Spawned agent: ${name} (${data.agent_id})`, 'success');
+                    closeSpawnModal();
+                    // Reset form
+                    document.getElementById('agentName').value = '';
+                    document.getElementById('agentPrompt').value = '';
+                } else {
+                    throw new Error('Failed to spawn agent');
+                }
+            } catch (error) {
+                addLog(`Error spawning agent: ${error.message}`, 'error');
+            }
+        }
+        
+        async function stopAgent(agentId) {
+            if (!confirm('Stop this agent?')) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/api/v1/agents/${agentId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${TOKEN}` }
+                });
+                
+                if (response.ok) {
+                    addLog(`Stopped agent: ${agentId}`, 'success');
+                } else {
+                    throw new Error('Failed to stop agent');
+                }
+            } catch (error) {
+                addLog(`Error stopping agent: ${error.message}`, 'error');
+            }
+        }
+        
+        function viewAgent(agentId) {
+            // Open agent details in new window or modal
+            window.open(`${API_URL}/api/v1/agents/${agentId}?token=${TOKEN}`, '_blank');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Initialize
+        connect();
+        addLog('Agent Monitor initialized', 'info');
+        
+        // Refresh agents list periodically (fallback if WebSocket fails)
+        setInterval(async () => {
+            try {
+                const response = await fetch(`${API_URL}/api/v1/agents`, {
+                    headers: { 'Authorization': `Bearer ${TOKEN}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    agents = data.agents;
+                    updateAgentsList();
+                    updateStats();
+                }
+            } catch (error) {
+                // Silent fail, WebSocket is primary
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
