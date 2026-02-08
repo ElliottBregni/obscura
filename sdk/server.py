@@ -1810,4 +1810,198 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             if client in _memory_watch_clients[namespace]:
                 _memory_watch_clients[namespace].remove(client)
 
+    # -- workflows --------------------------------------------------------
+
+    _workflows: dict[str, dict] = {}
+    _workflow_executions: dict[str, dict] = {}
+
+    @app.post("/api/v1/workflows", tags=["workflows"])
+    async def workflow_create(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Create a workflow with steps."""
+        import uuid
+        
+        workflow_id = str(uuid.uuid4())
+        workflow = {
+            "workflow_id": workflow_id,
+            "name": body.get("name", "unnamed-workflow"),
+            "description": body.get("description", ""),
+            "steps": body.get("steps", []),
+            "created_by": user.user_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        
+        _workflows[workflow_id] = workflow
+        
+        _audit("workflow.create", user, f"workflow:{workflow_id}", "create", "success",
+               name=workflow["name"])
+        
+        return JSONResponse(content=workflow)
+
+    @app.get("/api/v1/workflows", tags=["workflows"])
+    async def workflow_list(
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """List all workflows."""
+        workflows = list(_workflows.values())
+        return JSONResponse(content={
+            "workflows": workflows,
+            "count": len(workflows),
+        })
+
+    @app.get("/api/v1/workflows/{workflow_id}", tags=["workflows"])
+    async def workflow_get(
+        workflow_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get a specific workflow."""
+        workflow = _workflows.get(workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        return JSONResponse(content=workflow)
+
+    @app.delete("/api/v1/workflows/{workflow_id}", tags=["workflows"])
+    async def workflow_delete(
+        workflow_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Delete a workflow."""
+        if workflow_id not in _workflows:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        
+        del _workflows[workflow_id]
+        
+        _audit("workflow.delete", user, f"workflow:{workflow_id}", "delete", "success")
+        
+        return JSONResponse(content={"workflow_id": workflow_id, "deleted": True})
+
+    @app.post("/api/v1/workflows/{workflow_id}/execute", tags=["workflows"])
+    async def workflow_execute(
+        workflow_id: str,
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Execute a workflow with inputs."""
+        import uuid
+        
+        runtime = await _get_runtime(user)
+        
+        workflow = _workflows.get(workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        
+        inputs = body.get("inputs", {})
+        execution_id = str(uuid.uuid4())
+        
+        # Create execution record
+        execution = {
+            "execution_id": execution_id,
+            "workflow_id": workflow_id,
+            "status": "running",
+            "inputs": inputs,
+            "outputs": {},
+            "step_results": {},
+            "started_at": datetime.utcnow().isoformat(),
+            "completed_at": None,
+        }
+        _workflow_executions[execution_id] = execution
+        
+        # Execute steps (simplified - in production this would be async)
+        steps = workflow.get("steps", [])
+        completed_steps = set()
+        
+        for step in steps:
+            step_name = step.get("name")
+            template_id = step.get("agent_template")
+            
+            # Spawn agent from template or create new
+            if template_id and template_id in _agent_templates:
+                template = _agent_templates[template_id]
+                agent = runtime.spawn(
+                    name=f"{workflow['name']}-{step_name}",
+                    model=template.get("model", "claude"),
+                    system_prompt=template.get("system_prompt", ""),
+                )
+            else:
+                agent = runtime.spawn(
+                    name=f"{workflow['name']}-{step_name}",
+                    model="claude",
+                )
+            
+            await agent.start()
+            
+            # Build prompt from inputs and previous step outputs
+            prompt_template = step.get("input", "")
+            prompt = prompt_template
+            for key, value in inputs.items():
+                prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
+            for prev_step, result in execution["step_results"].items():
+                prompt = prompt.replace(f"{{{{{prev_step}.output}}}}", str(result))
+            
+            # Run the agent
+            try:
+                result = await agent.run(prompt)
+                execution["step_results"][step_name] = result
+                completed_steps.add(step_name)
+            except Exception as e:
+                execution["status"] = "failed"
+                execution["error"] = str(e)
+                break
+            finally:
+                await agent.stop()
+        
+        # Complete execution
+        if execution["status"] == "running":
+            execution["status"] = "completed"
+            # Set final output from last step
+            if steps:
+                last_step = steps[-1].get("name")
+                execution["outputs"]["result"] = execution["step_results"].get(last_step)
+        
+        execution["completed_at"] = datetime.utcnow().isoformat()
+        
+        _audit("workflow.execute", user, f"workflow:{workflow_id}", "execute", execution["status"],
+               execution_id=execution_id)
+        
+        return JSONResponse(content={
+            "execution_id": execution_id,
+            "workflow_id": workflow_id,
+            "status": execution["status"],
+            "outputs": execution["outputs"],
+            "step_results": execution["step_results"],
+        })
+
+    @app.get("/api/v1/workflows/{workflow_id}/executions", tags=["workflows"])
+    async def workflow_list_executions(
+        workflow_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """List executions for a workflow."""
+        if workflow_id not in _workflows:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        
+        executions = [
+            e for e in _workflow_executions.values()
+            if e["workflow_id"] == workflow_id
+        ]
+        
+        return JSONResponse(content={
+            "workflow_id": workflow_id,
+            "executions": executions,
+            "count": len(executions),
+        })
+
+    @app.get("/api/v1/workflows/executions/{execution_id}", tags=["workflows"])
+    async def workflow_get_execution(
+        execution_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get a specific execution."""
+        execution = _workflow_executions.get(execution_id)
+        if execution is None:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        return JSONResponse(content=execution)
+
     return app
