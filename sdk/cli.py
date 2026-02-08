@@ -129,6 +129,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of worker processes (default: 1).",
     )
 
+    # -- tui subcommand --------------------------------------------------
+    tui_parser = sub.add_parser("tui", help="Launch interactive TUI")
+    tui_parser.add_argument(
+        "--backend",
+        default="claude",
+        choices=["claude", "copilot"],
+        help="Backend to use (default: claude).",
+    )
+    tui_parser.add_argument(
+        "--model",
+        default=None,
+        help="Model ID override.",
+    )
+    tui_parser.add_argument(
+        "--cwd",
+        default=".",
+        help="Working directory for file operations.",
+    )
+    tui_parser.add_argument(
+        "--session",
+        default=None,
+        help="Resume a saved TUI session by ID.",
+    )
+    tui_parser.add_argument(
+        "--mode",
+        default="ask",
+        choices=["ask", "plan", "code", "diff"],
+        help="Initial mode (default: ask).",
+    )
+
     return p
 
 
@@ -220,7 +250,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     except ImportError:
         print(
             "Error: uvicorn is not installed. "
-            "Install server extras: pip install 'obscura[server]'","
+            "Install server extras: pip install 'obscura[server]'",
             file=sys.stderr,
         )
         return 1
@@ -232,6 +262,32 @@ def _run_serve(args: argparse.Namespace) -> int:
         port=args.port,
         reload=args.reload,
         workers=args.workers,
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# TUI runner
+# ---------------------------------------------------------------------------
+
+def _run_tui(args: argparse.Namespace) -> int:
+    """Launch the interactive TUI."""
+    try:
+        from sdk.tui.app import run_tui
+    except ImportError:
+        print(
+            "Error: TUI dependencies not installed. "
+            "Install with: pip install 'obscura[tui]'",
+            file=sys.stderr,
+        )
+        return 1
+
+    run_tui(
+        backend=args.backend,
+        model=args.model,
+        cwd=args.cwd,
+        session=args.session,
+        mode=args.mode,
     )
     return 0
 
@@ -250,6 +306,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         return _run_serve(args)
+
+    if args.command == "tui":
+        return _run_tui(args)
 
     # copilot / claude
     return asyncio.run(_run(args))
