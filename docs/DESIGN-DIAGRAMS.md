@@ -334,7 +334,7 @@ flowchart TD
         P2["Program: python3 sync.py --watch"]
         P3["RunAtLoad: true"]
         P4["KeepAlive: true"]
-        P5["Logs: /tmp/fv-copilot-watcher.log"]
+        P5["Logs: /tmp/obscura-watcher.log"]
     end
 
     WritePlist --> PlistConfig

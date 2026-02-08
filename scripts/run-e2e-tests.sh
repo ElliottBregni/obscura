@@ -15,21 +15,31 @@ NC='\033[0m' # No Color
 
 # Export test configuration
 export OBSCURA_URL=http://localhost:8080
+export OBSCURA_PORT=8080
 export OBSCURA_AUTH_ENABLED=false
 export OTEL_ENABLED=false
+export OBSCURA_LOG_LEVEL=WARNING
+export OBSCURA_TOKEN=""
+
+echo "Environment:"
+echo "  OBSCURA_AUTH_ENABLED=$OBSCURA_AUTH_ENABLED"
+echo "  OTEL_ENABLED=$OTEL_ENABLED"
+echo ""
+
+# Kill any existing server on port 8080
+echo "Checking for existing server..."
+lsof -ti:8080 | xargs kill 2>/dev/null || true
+sleep 1
 
 # Check if server is already running
-if curl -s http://localhost:8080/health > /dev/null; then
+if curl -s http://localhost:8080/health > /dev/null 2>&1; then
     echo -e "${YELLOW}⚠️  Server already running on localhost:8080${NC}"
-    echo "Using existing server (may need auth token)..."
+    echo "Using existing server..."
 else
-    echo "🚀 Starting temporary server..."
-    echo "   Auth: disabled"
-    echo "   OTel: disabled"
+    echo "🚀 Starting test server..."
     
-    # Start server in background with explicit env vars
-    env OBSCURA_AUTH_ENABLED=false OTEL_ENABLED=false \
-        python -m uvicorn sdk.server:create_app --factory --port 8080 --host 0.0.0.0 &
+    # Use uv run to ensure we're in the venv
+    uv run python scripts/test_server.py &
     SERVER_PID=$!
     
     # Trap to kill server on exit
@@ -54,11 +64,8 @@ echo ""
 echo "🧪 Running E2E tests..."
 echo ""
 
-# Run tests without token (auth disabled)
-export OBSCURA_TOKEN=""
-
 # Run tests
-if pytest tests/e2e/ -v --run-e2e "$@"; then
+if uv run pytest tests/e2e/ -v --run-e2e "$@"; then
     echo ""
     echo -e "${GREEN}✓ All E2E tests passed!${NC}"
     exit 0
