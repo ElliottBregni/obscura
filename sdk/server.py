@@ -2004,4 +2004,442 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
         return JSONResponse(content=execution)
 
+    # -- webhooks ---------------------------------------------------------
+
+    _webhooks: dict[str, dict] = {}
+
+    @app.post("/api/v1/webhooks", tags=["webhooks"])
+    async def webhook_create(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Create a webhook for events."""
+        import uuid
+        import hashlib
+        import secrets
+
+        webhook_id = str(uuid.uuid4())
+        
+        # Generate secret for webhook signature
+        secret = secrets.token_urlsafe(32)
+        
+        webhook = {
+            "webhook_id": webhook_id,
+            "url": body.get("url"),
+            "events": body.get("events", []),
+            "secret": secret,
+            "active": True,
+            "created_by": user.user_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        
+        _webhooks[webhook_id] = webhook
+        
+        _audit("webhook.create", user, f"webhook:{webhook_id}", "create", "success",
+               url=webhook["url"], events=webhook["events"])
+        
+        # Return webhook without secret (only shown once)
+        return JSONResponse(content={
+            "webhook_id": webhook_id,
+            "url": webhook["url"],
+            "events": webhook["events"],
+            "secret": secret,  # Only shown on creation
+            "active": webhook["active"],
+            "created_at": webhook["created_at"],
+        })
+
+    @app.get("/api/v1/webhooks", tags=["webhooks"])
+    async def webhook_list(
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """List all webhooks."""
+        webhooks = [
+            {k: v for k, v in w.items() if k != "secret"}  # Don't expose secrets
+            for w in _webhooks.values()
+        ]
+        return JSONResponse(content={
+            "webhooks": webhooks,
+            "count": len(webhooks),
+        })
+
+    @app.get("/api/v1/webhooks/{webhook_id}", tags=["webhooks"])
+    async def webhook_get(
+        webhook_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get a specific webhook."""
+        webhook = _webhooks.get(webhook_id)
+        if webhook is None:
+            raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
+        
+        # Don't expose secret
+        return JSONResponse(content={
+            k: v for k, v in webhook.items() if k != "secret"
+        })
+
+    @app.delete("/api/v1/webhooks/{webhook_id}", tags=["webhooks"])
+    async def webhook_delete(
+        webhook_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Delete a webhook."""
+        if webhook_id not in _webhooks:
+            raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
+        
+        del _webhooks[webhook_id]
+        
+        _audit("webhook.delete", user, f"webhook:{webhook_id}", "delete", "success")
+        
+        return JSONResponse(content={"webhook_id": webhook_id, "deleted": True})
+
+    @app.post("/api/v1/webhooks/{webhook_id}/test", tags=["webhooks"])
+    async def webhook_test(
+        webhook_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Send a test event to a webhook."""
+        import httpx
+        import hmac
+        import hashlib
+        import json
+
+        webhook = _webhooks.get(webhook_id)
+        if webhook is None:
+            raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
+        
+        # Create test payload
+        payload = {
+            "event": "test",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": {"message": "This is a test event"},
+        }
+        
+        # Sign payload
+        payload_json = json.dumps(payload, separators=(',', ':'))
+        signature = hmac.new(
+            webhook["secret"].encode(),
+            payload_json.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        # Send webhook
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    webhook["url"],
+                    json=payload,
+                    headers={
+                        "X-Webhook-Signature": f"sha256={signature}",
+                        "X-Webhook-ID": webhook_id,
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0
+                )
+                
+                return JSONResponse(content={
+                    "webhook_id": webhook_id,
+                    "status_code": resp.status_code,
+                    "success": 200 <= resp.status_code < 300,
+                })
+        except Exception as e:
+            return JSONResponse(content={
+                "webhook_id": webhook_id,
+                "error": str(e),
+                "success": False,
+            })
+
+    async def _trigger_webhooks(event_type: str, data: dict):
+        """Trigger all webhooks subscribed to an event."""
+        import httpx
+        import hmac
+        import hashlib
+        import json
+
+        payload = {
+            "event": event_type,
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": data,
+        }
+        payload_json = json.dumps(payload, separators=(',', ':'))
+        
+        for webhook in _webhooks.values():
+            if not webhook.get("active", True):
+                continue
+            
+            if event_type not in webhook.get("events", []):
+                continue
+            
+            # Sign payload
+            signature = hmac.new(
+                webhook["secret"].encode(),
+                payload_json.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Fire and forget
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        webhook["url"],
+                        json=payload,
+                        headers={
+                            "X-Webhook-Signature": f"sha256={signature}",
+                            "X-Webhook-ID": webhook["webhook_id"],
+                            "Content-Type": "application/json",
+                        },
+                        timeout=30.0
+                    )
+            except:
+                pass  # Best effort
+
+    # -- audit logs -------------------------------------------------------
+
+    _audit_logs: list[dict] = []
+    _max_audit_logs = 10000
+
+    @app.get("/api/v1/audit/logs", tags=["admin"])
+    async def audit_logs_list(
+        start: str | None = None,
+        end: str | None = None,
+        user_id: str | None = None,
+        resource: str | None = None,
+        action: str | None = None,
+        outcome: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        user: AuthenticatedUser = Depends(require_role("admin")),
+    ) -> JSONResponse:
+        """Query audit logs. Admin only."""
+        logs = _audit_logs
+        
+        # Apply filters
+        if start:
+            logs = [l for l in logs if l.get("timestamp", "") >= start]
+        if end:
+            logs = [l for l in logs if l.get("timestamp", "") <= end]
+        if user_id:
+            logs = [l for l in logs if l.get("user_id") == user_id]
+        if resource:
+            logs = [l for l in logs if resource in l.get("resource", "")]
+        if action:
+            logs = [l for l in logs if l.get("action") == action]
+        if outcome:
+            logs = [l for l in logs if l.get("outcome") == outcome]
+        
+        # Sort by timestamp descending
+        logs = sorted(logs, key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        total = len(logs)
+        
+        # Apply pagination
+        logs = logs[offset:offset + limit]
+        
+        return JSONResponse(content={
+            "logs": logs,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+
+    @app.get("/api/v1/audit/logs/summary", tags=["admin"])
+    async def audit_logs_summary(
+        user: AuthenticatedUser = Depends(require_role("admin")),
+    ) -> JSONResponse:
+        """Get audit log summary. Admin only."""
+        from collections import Counter
+        
+        # Count by action
+        actions = Counter(l.get("action") for l in _audit_logs)
+        outcomes = Counter(l.get("outcome") for l in _audit_logs)
+        
+        # Recent activity (last 24 hours)
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        recent = [l for l in _audit_logs if l.get("timestamp", "") > cutoff]
+        
+        return JSONResponse(content={
+            "total_logs": len(_audit_logs),
+            "actions": dict(actions),
+            "outcomes": dict(outcomes),
+            "last_24h": len(recent),
+        })
+
+    # -- metrics -----------------------------------------------------------
+
+    @app.get("/api/v1/metrics", tags=["admin"])
+    async def metrics_get(
+        user: AuthenticatedUser = Depends(require_any_role("admin", "agent:read")),
+    ) -> JSONResponse:
+        """Get system metrics."""
+        runtime = await _get_runtime(user)
+        
+        # Agent metrics
+        agents = runtime.list_agents()
+        agent_stats = {
+            "total": len(agents),
+            "by_status": {},
+            "by_model": {},
+        }
+        
+        for agent in agents:
+            status = agent.status.name
+            model = agent.config.model
+            
+            agent_stats["by_status"][status] = agent_stats["by_status"].get(status, 0) + 1
+            agent_stats["by_model"][model] = agent_stats["by_model"].get(model, 0) + 1
+        
+        # Memory metrics
+        from sdk.memory import MemoryStore
+        store = MemoryStore.for_user(user)
+        memory_stats = store.get_stats()
+        
+        # Template metrics
+        template_stats = {
+            "total_templates": len(_agent_templates),
+        }
+        
+        # Workflow metrics
+        workflow_stats = {
+            "total_workflows": len(_workflows),
+            "total_executions": len(_workflow_executions),
+        }
+        
+        return JSONResponse(content={
+            "agents": agent_stats,
+            "memory": memory_stats,
+            "templates": template_stats,
+            "workflows": workflow_stats,
+            "webhooks": {
+                "total": len(_webhooks),
+                "active": sum(1 for w in _webhooks.values() if w.get("active", True)),
+            },
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+    @app.get("/api/v1/metrics/agents/{agent_id}", tags=["admin"])
+    async def metrics_agent_get(
+        agent_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("admin", "agent:read")),
+    ) -> JSONResponse:
+        """Get metrics for a specific agent."""
+        runtime = await _get_runtime(user)
+        
+        agent = runtime.get_agent(agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+        
+        state = agent.get_state()
+        
+        return JSONResponse(content={
+            "agent_id": agent_id,
+            "name": state.name,
+            "status": state.status.name,
+            "created_at": state.created_at.isoformat(),
+            "updated_at": state.updated_at.isoformat(),
+            "iteration_count": state.iteration_count,
+            "error_message": state.error_message,
+        })
+
+    # -- rate limits -------------------------------------------------------
+
+    _rate_limits: dict[str, dict] = {}
+
+    @app.get("/api/v1/rate-limits", tags=["admin"])
+    async def rate_limits_get(
+        user: AuthenticatedUser = Depends(require_role("admin")),
+    ) -> JSONResponse:
+        """Get current rate limits. Admin only."""
+        return JSONResponse(content={
+            "default": {
+                "requests_per_minute": 100,
+                "concurrent_agents": 10,
+                "memory_quota_mb": 1024,
+            },
+            "custom": _rate_limits,
+        })
+
+    @app.post("/api/v1/rate-limits", tags=["admin"])
+    async def rate_limits_set(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_role("admin")),
+    ) -> JSONResponse:
+        """Set rate limits for an API key. Admin only."""
+        api_key = body.get("api_key")
+        if not api_key:
+            raise HTTPException(status_code=400, detail="api_key is required")
+        
+        _rate_limits[api_key] = {
+            "requests_per_minute": body.get("requests_per_minute", 100),
+            "concurrent_agents": body.get("concurrent_agents", 10),
+            "memory_quota_mb": body.get("memory_quota_mb", 1024),
+            "set_by": user.user_id,
+            "set_at": datetime.utcnow().isoformat(),
+        }
+        
+        return JSONResponse(content={
+            "api_key": api_key[:8] + "...",
+            "limits": _rate_limits[api_key],
+        })
+
+    @app.delete("/api/v1/rate-limits/{api_key}", tags=["admin"])
+    async def rate_limits_delete(
+        api_key: str,
+        user: AuthenticatedUser = Depends(require_role("admin")),
+    ) -> JSONResponse:
+        """Delete custom rate limits for an API key. Admin only."""
+        if api_key in _rate_limits:
+            del _rate_limits[api_key]
+        
+        return JSONResponse(content={"api_key": api_key[:8] + "...", "deleted": True})
+
+    # Update _audit to also log to memory
+    original_audit = _audit
+
+    def _audit_with_storage(
+        event_type: str,
+        user: AuthenticatedUser,
+        resource: str,
+        action: str,
+        outcome: str,
+        **details: Any
+    ) -> None:
+        """Audit helper that also stores in memory."""
+        # Call original audit
+        original_audit(event_type, user, resource, action, outcome, **details)
+        
+        # Store in memory
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "event_type": event_type,
+            "user_id": user.user_id,
+            "user_email": user.email,
+            "resource": resource,
+            "action": action,
+            "outcome": outcome,
+            "details": details,
+        }
+        
+        _audit_logs.append(log_entry)
+        
+        # Trim if too many
+        if len(_audit_logs) > _max_audit_logs:
+            _audit_logs.pop(0)
+        
+        # Trigger webhooks for important events
+        if outcome in ["success", "failure"] and event_type in [
+            "agent.spawn", "agent.stop", "agent.run",
+            "workflow.execute", "memory.set", "memory.delete"
+        ]:
+            asyncio.create_task(_trigger_webhooks(event_type, {
+                "user_id": user.user_id,
+                "resource": resource,
+                "action": action,
+                "outcome": outcome,
+            }))
+
+    # Replace _audit function
+    import sys
+    current_module = sys.modules[__name__]
+    current_module._audit = _audit_with_storage
+
     return app
