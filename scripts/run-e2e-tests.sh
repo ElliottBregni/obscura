@@ -38,8 +38,12 @@ if curl -s http://localhost:8080/health > /dev/null 2>&1; then
 else
     echo "🚀 Starting test server..."
     
-    # Use uv run to ensure we're in the venv
-    uv run python scripts/test_server.py &
+    # Use uv if available, otherwise run with python directly
+    if command -v uv >/dev/null 2>&1; then
+        uv run python scripts/test_server.py &
+    else
+        python scripts/test_server.py &
+    fi
     SERVER_PID=$!
     
     # Trap to kill server on exit
@@ -65,12 +69,24 @@ echo "🧪 Running E2E tests..."
 echo ""
 
 # Run tests
-if uv run pytest tests/e2e/ -v --run-e2e "$@"; then
-    echo ""
-    echo -e "${GREEN}✓ All E2E tests passed!${NC}"
-    exit 0
+if command -v uv >/dev/null 2>&1; then
+    if uv run pytest tests/e2e/ -v --run-e2e "$@"; then
+        echo ""
+        echo -e "${GREEN}✓ All E2E tests passed!${NC}"
+        exit 0
+    else
+        echo ""
+        echo -e "${RED}✗ Some tests failed${NC}"
+        exit 1
+    fi
 else
-    echo ""
-    echo -e "${RED}✗ Some tests failed${NC}"
-    exit 1
+    if python -m pytest tests/e2e/ -v --run-e2e "$@"; then
+        echo ""
+        echo -e "${GREEN}✓ All E2E tests passed!${NC}"
+        exit 0
+    else
+        echo ""
+        echo -e "${RED}✗ Some tests failed${NC}"
+        exit 1
+    fi
 fi
