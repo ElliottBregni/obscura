@@ -29,11 +29,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, AsyncIterator, Callable, Coroutine
+from typing import Any, AsyncIterator, Callable, Coroutine, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,20 @@ class AgentStatus(Enum):
 
 
 @dataclass
+class MCPConfig:
+    """Configuration for MCP (Model Context Protocol) integration."""
+    enabled: bool = False
+    servers: list[dict[str, Any]] = field(default_factory=list)
+    """List of MCP server configurations. Each server config should have:
+    - transport: "stdio" or "sse"
+    - command: str (for stdio)
+    - args: list[str] (for stdio)
+    - url: str (for sse)
+    - env: dict[str, str] (optional)
+    """
+
+
+@dataclass
 class AgentConfig:
     """Configuration for an agent instance."""
     name: str
@@ -65,6 +80,7 @@ class AgentConfig:
     tools: list[str] = field(default_factory=list)
     parent_agent_id: str | None = None
     tags: list[str] = field(default_factory=list)
+    mcp: MCPConfig = field(default_factory=MCPConfig)
 
 
 @dataclass
@@ -117,8 +133,11 @@ class Agent:
         self.updated_at = self.created_at
         self.iteration_count = 0
         self._client: ObscuraClient | None = None
+        self._mcp_backend: Any = None  # Optional MCP backend for external tools
         self._message_queue: asyncio.Queue[AgentMessage] = asyncio.Queue()
         self._task: asyncio.Task | None = None
+        self._heartbeat_client: Any | None = None
+        self._heartbeat_enabled: bool = True
         self._current_prompt: str = ""
         self._result: Any = None
         self._error: Exception | None = None
@@ -136,6 +155,35 @@ class Agent:
             user=self.user,
         )
         await self._client.start()
+        
+        # Initialize MCP backend if configured
+        if self.config.mcp.enabled and self.config.mcp.servers:
+            from sdk.mcp.types import MCPConnectionConfig, MCPTransportType
+            from sdk.backends.mcp_backend import MCPBackend
+            
+            mcp_configs = []
+            for server_config in self.config.mcp.servers:
+                transport = MCPTransportType(server_config.get("transport", "stdio"))
+                config = MCPConnectionConfig(
+                    transport=transport,
+                    command=server_config.get("command"),
+                    args=server_config.get("args", []),
+                    url=server_config.get("url"),
+                    env=server_config.get("env", {}),
+                )
+                mcp_configs.append(config)
+            
+            self._mcp_backend = MCPBackend(mcp_configs)
+            await self._mcp_backend.start()
+            
+            # Register MCP tools with the client
+            for tool in self._mcp_backend.list_tools():
+                self._client.register_tool(tool)
+        
+        # Initialize heartbeat client if enabled
+        if self._heartbeat_enabled:
+            await self._start_heartbeat()
+        
         self.status = AgentStatus.WAITING
         self._update_state()
     
@@ -238,21 +286,41 @@ class Agent:
     
     def _load_relevant_memory(self, prompt: str) -> dict[str, Any]:
         """Load memory relevant to the current task."""
-        # Get last few tasks from this namespace
+        relevant = {}
+
+        # Use vector search with reranking if available
+        if hasattr(self, 'vector_memory'):
+            try:
+                memories = self.recall(
+                    prompt,
+                    top_k=5,
+                    use_reranking=True,
+                    recency_weight=0.2,
+                )
+                for mem in memories:
+                    relevant[f"semantic:{mem.key.key}"] = {
+                        "text": mem.text,
+                        "score": mem.final_score,
+                        "type": mem.memory_type,
+                    }
+            except Exception:
+                pass  # Fall through to KV search
+
+        # Also pull recent tasks from KV store
         tasks_ns = f"{self.config.memory_namespace}:tasks"
         keys = self.memory.list_keys(namespace=tasks_ns)
-        
-        relevant = {}
-        for key in sorted(keys, key=lambda k: k.key, reverse=True)[:5]:
+
+        for key in sorted(keys, key=lambda k: k.key, reverse=True)[:3]:
             value = self.memory.get(key.key, namespace=key.namespace)
             if value:
+                relevant[f"task:{str(key)}"] = value
+
+        # Fallback text search if no vector results
+        if not any(k.startswith("semantic:") for k in relevant):
+            search_results = self.memory.search(prompt[:50])
+            for key, value in search_results[:3]:
                 relevant[str(key)] = value
-        
-        # Also search for related info
-        search_results = self.memory.search(prompt[:50])  # First 50 chars
-        for key, value in search_results[:3]:
-            relevant[str(key)] = value
-        
+
         return relevant
     
     def _build_prompt(
@@ -343,6 +411,26 @@ class Agent:
             namespace="agent:runtime"
         )
     
+    async def _start_heartbeat(self) -> None:
+        """Initialize and start the heartbeat client."""
+        # Get monitor URL from environment or use default
+        monitor_url = os.environ.get("OBSCURA_HEARTBEAT_URL", "http://localhost:8080")
+        interval = int(os.environ.get("OBSCURA_HEARTBEAT_INTERVAL", "30"))
+        
+        try:
+            from sdk.heartbeat import AgentHeartbeatClient
+            self._heartbeat_client = AgentHeartbeatClient(
+                agent_id=self.id,
+                monitor_url=monitor_url,
+                interval=interval,
+                tags=self.config.tags,
+            )
+            await self._heartbeat_client.start()
+            logger.debug(f"Started heartbeat client for agent {self.id}")
+        except Exception as e:
+            logger.warning(f"Failed to start heartbeat client for agent {self.id}: {e}")
+            self._heartbeat_client = None
+    
     async def stop(self) -> None:
         """Stop the agent and cleanup."""
         self.status = AgentStatus.STOPPED
@@ -353,9 +441,26 @@ class Agent:
                 # Ignore cancel scope errors from underlying SDK
                 if "cancel scope" not in str(e):
                     raise
+        if self._mcp_backend:
+            await self._mcp_backend.stop()
+            self._mcp_backend = None
+        if self._heartbeat_client:
+            await self._heartbeat_client.stop()
+            self._heartbeat_client = None
         if self._task and not self._task.done():
             self._task.cancel()
         self._update_state()
+    
+    async def stop_graceful(self, timeout: float = 5.0) -> None:
+        """Stop the agent gracefully with a timeout."""
+        try:
+            await asyncio.wait_for(self.stop(), timeout=timeout)
+        except asyncio.TimeoutError:
+            # Force stop
+            if self._task and not self._task.done():
+                self._task.cancel()
+            self.status = AgentStatus.STOPPED
+            self._update_state()
     
     def get_state(self) -> AgentState:
         """Get current agent state."""
@@ -436,6 +541,18 @@ class AgentRuntime:
         
         # Store reference
         self._agents[agent_id] = agent
+        
+        # Register with heartbeat monitor if enabled
+        heartbeat_enabled = os.environ.get("OBSCURA_HEARTBEAT_ENABLED", "true").lower() == "true"
+        if heartbeat_enabled:
+            try:
+                from sdk.heartbeat import get_default_monitor
+                monitor = get_default_monitor()
+                # Schedule registration - can't be async in sync method
+                asyncio.create_task(monitor.register_agent(agent_id))
+                logger.debug(f"Registered agent {agent_id} with heartbeat monitor")
+            except Exception as e:
+                logger.warning(f"Failed to register agent {agent_id} with heartbeat monitor: {e}")
         
         return agent
     

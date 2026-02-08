@@ -201,6 +201,9 @@ class _FakeVectorResult:
     text: str
     score: float
     metadata: dict[str, Any]
+    memory_type: str = "general"
+    rerank_score: float = 0.0
+    final_score: float = 0.0
 
 
 class _FakeVectorMemoryStore:
@@ -223,9 +226,9 @@ class _FakeVectorMemoryStore:
         cls._stores.clear()
 
     def set(self, key: str, text: str, metadata: dict | None = None, namespace: str = "default", **kw: Any) -> None:
-        self._data[f"{namespace}:{key}"] = {"text": text, "metadata": metadata or {}}
+        self._data[f"{namespace}:{key}"] = {"text": text, "metadata": metadata or {}, "memory_type": kw.get("memory_type", "general")}
 
-    def search_similar(self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any) -> list[_FakeVectorResult]:
+    def _build_results(self, namespace: str | None = None, top_k: int = 5) -> list[_FakeVectorResult]:
         results = []
         for k, v in self._data.items():
             ns, name = k.split(":", 1)
@@ -235,8 +238,16 @@ class _FakeVectorMemoryStore:
                     text=v["text"],
                     score=0.9,
                     metadata=v["metadata"],
+                    memory_type=v.get("memory_type", "general"),
+                    final_score=0.9,
                 ))
         return results[:top_k]
+
+    def search_similar(self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any) -> list[_FakeVectorResult]:
+        return self._build_results(namespace, top_k)
+
+    def search_reranked(self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any) -> list[_FakeVectorResult]:
+        return self._build_results(namespace, top_k)
 
     def delete(self, key: str, namespace: str = "default") -> bool:
         k = f"{namespace}:{key}"

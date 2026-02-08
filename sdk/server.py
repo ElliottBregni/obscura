@@ -222,7 +222,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.warning("Could not pre-fetch JWKS; will retry on first request")
 
+    # Initialize heartbeat monitor
+    try:
+        from sdk.heartbeat import HeartbeatMonitor, get_default_monitor
+        monitor = get_default_monitor()
+        await monitor.start()
+        app.state._heartbeat_monitor = monitor
+        logger.info("Heartbeat monitor started")
+    except Exception:
+        logger.warning("Could not initialize heartbeat monitor; continuing without health monitoring")
+        app.state._heartbeat_monitor = None
+
     yield
+
+    # Cleanup heartbeat monitor
+    if app.state._heartbeat_monitor:
+        try:
+            await app.state._heartbeat_monitor.stop()
+            logger.info("Heartbeat monitor stopped")
+        except Exception:
+            pass
 
     logger.info("Obscura SDK server shutting down")
 
@@ -248,6 +267,8 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     # Stash shared state
     app.state.config = config
     app.state.client_factory = ClientFactory(config)
+    app.state._heartbeat_monitor = None
+    app.state._health_ws_clients = []
 
     # Telemetry middleware (must be added before auth so it wraps auth)
     if config.otel_enabled:
@@ -278,6 +299,17 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # ---- MCP routes -----------------------------------------------------
+    # Add MCP router for MCP protocol endpoints
+    try:
+        from sdk.mcp.server import ObscuraMCPServer, create_mcp_router
+        mcp_server = ObscuraMCPServer()
+        mcp_router = create_mcp_router(mcp_server)
+        app.include_router(mcp_router)
+        logger.info("MCP router added")
+    except Exception as e:
+        logger.warning(f"Could not initialize MCP router: {e}")
 
     # ---- routes ---------------------------------------------------------
 
@@ -796,7 +828,8 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         store = VectorMemoryStore.for_user(user)
         text = body.get("text", "")
         metadata = body.get("metadata", {})
-        store.set(key, text, metadata=metadata, namespace=namespace)
+        memory_type = body.get("memory_type", "general")
+        store.set(key, text, metadata=metadata, namespace=namespace, memory_type=memory_type)
         _audit("vector_memory.set", user, f"vector:{namespace}:{key}", "write", "success")
         return JSONResponse(content={"namespace": namespace, "key": key, "stored": True, "type": "vector"})
 
@@ -805,12 +838,47 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         q: str,
         namespace: str | None = None,
         top_k: int = 5,
+        memory_types: str | None = None,
+        rerank: bool = False,
+        recency_weight: float = 0.2,
+        first_stage_k: int = 50,
+        date_from: str | None = None,
+        date_to: str | None = None,
         user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
     ) -> JSONResponse:
-        """Semantic search over vector memories."""
+        """Semantic search over vector memories with optional reranking."""
+        from datetime import datetime as dt
         from sdk.vector_memory import VectorMemoryStore
         store = VectorMemoryStore.for_user(user)
-        results = store.search_similar(q, namespace=namespace, top_k=top_k)
+
+        memory_type_list = memory_types.split(",") if memory_types else None
+        date_range = None
+        if date_from and date_to:
+            date_range = (dt.fromisoformat(date_from), dt.fromisoformat(date_to))
+        elif date_from:
+            date_range = (dt.fromisoformat(date_from), dt.now(UTC))
+        elif date_to:
+            date_range = (dt.min, dt.fromisoformat(date_to))
+
+        if rerank:
+            results = store.search_reranked(
+                q,
+                namespace=namespace,
+                top_k=top_k,
+                first_stage_k=first_stage_k,
+                memory_types=memory_type_list,
+                date_range=date_range,
+                recency_weight=recency_weight,
+            )
+        else:
+            results = store.search_similar(
+                q,
+                namespace=namespace,
+                top_k=top_k,
+                memory_types=memory_type_list,
+                date_range=date_range,
+            )
+
         return JSONResponse(content={
             "query": q,
             "results": [
@@ -819,11 +887,60 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                     "key": r.key.key,
                     "text": r.text,
                     "score": r.score,
+                    "final_score": r.final_score,
+                    "memory_type": r.memory_type,
                     "metadata": r.metadata,
                 }
                 for r in results
             ],
             "count": len(results),
+        })
+
+    @app.post("/api/v1/vector-memory/search/routed", tags=["vector-memory"])
+    async def vector_memory_search_routed(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Multi-query search with memory type routing and weighted merging."""
+        from sdk.vector_memory import VectorMemoryStore
+        from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery
+
+        store = VectorMemoryStore.for_user(user)
+        router = MemoryRouter(store)
+
+        query = body["query"]
+        routes = [
+            MemoryTypeQuery(
+                memory_type=r["memory_type"],
+                weight=r.get("weight", 1.0),
+                top_k=r.get("top_k", 10),
+            )
+            for r in body.get("routes", [])
+        ]
+
+        result = router.route_and_merge(
+            query=query,
+            routes=routes,
+            final_top_k=body.get("final_top_k", 10),
+            namespace=body.get("namespace"),
+        )
+
+        return JSONResponse(content={
+            "query": query,
+            "results": [
+                {
+                    "namespace": r.key.namespace,
+                    "key": r.key.key,
+                    "text": r.text,
+                    "score": r.score,
+                    "final_score": r.final_score,
+                    "memory_type": r.memory_type,
+                    "metadata": r.metadata,
+                }
+                for r in result.entries
+            ],
+            "sources": result.sources,
+            "count": len(result.entries),
         })
 
     # -- agents -----------------------------------------------------------
@@ -836,24 +953,31 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         """Spawn a new agent."""
         runtime = await _get_runtime(user)
 
+        # Parse MCP configuration if provided
+        mcp_config = body.get("mcp", {})
+        mcp_enabled = mcp_config.get("enabled", False)
+        mcp_servers = mcp_config.get("servers", [])
+
         agent = runtime.spawn(
             name=body.get("name", "unnamed"),
             model=body.get("model", "claude"),
             system_prompt=body.get("system_prompt", ""),
             memory_namespace=body.get("memory_namespace", "default"),
             max_iterations=body.get("max_iterations", 10),
+            mcp={"enabled": mcp_enabled, "servers": mcp_servers},
         )
 
         await agent.start()
 
         _audit("agent.spawn", user, f"agent:{agent.id}", "create", "success",
-               name=agent.config.name, model=agent.config.model)
+               name=agent.config.name, model=agent.config.model, mcp_enabled=mcp_enabled)
 
         return JSONResponse(content={
             "agent_id": agent.id,
             "name": agent.config.name,
             "status": agent.status.name,
             "created_at": agent.created_at.isoformat(),
+            "mcp_enabled": mcp_enabled,
         })
 
     @app.get("/api/v1/agents/{agent_id}", tags=["agents"])
@@ -2389,6 +2513,159 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             del _rate_limits[api_key]
         
         return JSONResponse(content={"api_key": api_key[:8] + "...", "deleted": True})
+
+    # -- heartbeat ---------------------------------------------------------
+
+    _heartbeat_monitor: Any = None
+    _health_ws_clients: list[WebSocket] = []
+
+    async def _get_heartbeat_monitor() -> Any:
+        """Get or create the heartbeat monitor."""
+        if app.state._heartbeat_monitor is None:
+            from sdk.heartbeat import HeartbeatMonitor, get_default_monitor
+            monitor = get_default_monitor()
+            await monitor.start()
+            app.state._heartbeat_monitor = monitor
+        return app.state._heartbeat_monitor
+
+    @app.post("/api/v1/heartbeat", tags=["heartbeat"])
+    async def heartbeat_receive(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Receive a heartbeat from an agent."""
+        from sdk.heartbeat.types import Heartbeat, HealthStatus, SystemMetrics
+        
+        monitor = await _get_heartbeat_monitor()
+        
+        # Parse heartbeat from request
+        try:
+            heartbeat = Heartbeat(
+                agent_id=body["agent_id"],
+                timestamp=datetime.fromisoformat(body.get("timestamp", datetime.now(UTC).isoformat())),
+                status=HealthStatus(body.get("status", "unknown")),
+                metrics=SystemMetrics(**body.get("metrics", {})),
+                message=body.get("message"),
+                ttl=body.get("ttl", 30),
+                version=body.get("version", "0.1.0"),
+                tags=body.get("tags", []),
+            )
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid heartbeat: {e}")
+        
+        # Record the heartbeat
+        await monitor.record_heartbeat(heartbeat)
+        
+        # Broadcast to WebSocket clients
+        await _broadcast_health_update(heartbeat.agent_id, heartbeat.status.value)
+        
+        _audit("heartbeat.receive", user, f"agent:{heartbeat.agent_id}", "heartbeat", "success",
+               status=heartbeat.status.value)
+        
+        return JSONResponse(content={
+            "received": True,
+            "agent_id": heartbeat.agent_id,
+            "status": heartbeat.status.value,
+            "timestamp": datetime.now(UTC).isoformat(),
+        })
+
+    @app.get("/api/v1/heartbeat/{agent_id}", tags=["heartbeat"])
+    async def heartbeat_get_agent(
+        agent_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get health status for a specific agent."""
+        monitor = await _get_heartbeat_monitor()
+        
+        record = await monitor.get_agent_record(agent_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found in health records")
+        
+        return JSONResponse(content={
+            "agent_id": agent_id,
+            "status": record.computed_status.value,
+            "last_heartbeat": record.last_heartbeat.to_dict() if record.last_heartbeat else None,
+            "expected_interval": record.expected_interval,
+            "missed_count": record.missed_count,
+            "registered_at": record.registered_at.isoformat(),
+            "alert_count": record.alert_count,
+        })
+
+    @app.get("/api/v1/health", tags=["heartbeat"])
+    async def health_list_all(
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """List health status for all agents."""
+        monitor = await _get_heartbeat_monitor()
+        summary = await monitor.get_health_summary()
+        
+        return JSONResponse(content=summary)
+
+    @app.websocket("/ws/health")
+    async def health_websocket(websocket: WebSocket):
+        """
+        WebSocket endpoint for real-time health updates.
+        
+        Streams updates whenever agent health status changes.
+        """
+        user = await _authenticate_websocket(websocket)
+        if user is None:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+        await websocket.accept()
+        app.state._health_ws_clients.append(websocket)
+        
+        try:
+            monitor = await _get_heartbeat_monitor()
+            
+            # Send initial state
+            summary = await monitor.get_health_summary()
+            await websocket.send_json({
+                "type": "init",
+                "data": summary,
+            })
+            
+            # Keep connection alive, send periodic updates
+            while True:
+                await asyncio.sleep(5)
+                
+                if websocket not in app.state._health_ws_clients:
+                    break
+                
+                # Send ping to keep alive
+                try:
+                    await websocket.send_json({"type": "ping", "timestamp": datetime.now(UTC).isoformat()})
+                except:
+                    break
+                    
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+        finally:
+            if websocket in app.state._health_ws_clients:
+                app.state._health_ws_clients.remove(websocket)
+
+    async def _broadcast_health_update(agent_id: str, status: str) -> None:
+        """Broadcast health update to all connected WebSocket clients."""
+        message = {
+            "type": "update",
+            "agent_id": agent_id,
+            "status": status,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        
+        disconnected = []
+        for client in app.state._health_ws_clients:
+            try:
+                await client.send_json(message)
+            except:
+                disconnected.append(client)
+        
+        for client in disconnected:
+            if client in app.state._health_ws_clients:
+                app.state._health_ws_clients.remove(client)
 
     # Update _audit to also log to memory
     original_audit = _audit

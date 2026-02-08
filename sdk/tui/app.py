@@ -424,16 +424,21 @@ class ObscuraTUI(App):
         self.action_switch_mode(args[0])
 
     async def _cmd_backend(self, args: list[str]) -> None:
-        """Handle /backend <claude|copilot>."""
+        """Handle /backend <name>."""
+        from sdk._types import Backend
+        supported = {b.value for b in Backend}
         if not args:
             self._show_system(
                 f"Current backend: {self._bridge.backend_name}. "
-                "Usage: /backend <claude|copilot>"
+                f"Usage: /backend <{'|'.join(sorted(supported))}>"
             )
             return
         backend = args[0]
-        if backend not in ("claude", "copilot"):
-            self._show_system(f"Unknown backend: {backend}")
+        if backend not in supported:
+            self._show_system(
+                f"Unknown backend: {backend}. "
+                f"Available: {', '.join(sorted(supported))}"
+            )
             return
         self._show_system(f"Switching to {backend}...")
         try:
@@ -515,20 +520,86 @@ class ObscuraTUI(App):
         self._show_system("Conversation cleared.")
 
     async def _cmd_memory(self, args: list[str]) -> None:
-        """Handle /memory <list|get <key>>."""
+        """Handle /memory <list|get <ns> <key>|set <ns> <key> <value>>."""
         if not args:
-            self._show_system("Usage: /memory <list|get <key>>")
+            self._show_system(
+                "Usage: /memory <list|get <ns> <key>|set <ns> <key> <value>>"
+            )
             return
         subcmd = args[0]
         if subcmd == "list":
-            self._show_system("Memory browser coming soon.")
+            await self._memory_list()
         elif subcmd == "get":
-            if len(args) < 2:
-                self._show_system("Usage: /memory get <key>")
+            if len(args) < 3:
+                self._show_system("Usage: /memory get <namespace> <key>")
                 return
-            self._show_system(f"Memory key '{args[1]}': (coming soon)")
+            await self._memory_get(args[1], args[2])
+        elif subcmd == "set":
+            if len(args) < 4:
+                self._show_system("Usage: /memory set <namespace> <key> <value>")
+                return
+            await self._memory_set(args[1], args[2], " ".join(args[3:]))
         else:
             self._show_system(f"Unknown memory command: {subcmd}")
+
+    async def _memory_list(self) -> None:
+        """List memory namespaces via the backend API."""
+        import httpx
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("http://localhost:8080/api/v1/memory/namespaces")
+                resp.raise_for_status()
+                data = resp.json()
+            namespaces = data.get("namespaces", [])
+            if not namespaces:
+                self._show_system("  (no namespaces)")
+            else:
+                self._show_system(f"Memory namespaces ({len(namespaces)}):")
+                for ns in namespaces:
+                    self._show_system(f"  {ns}")
+        except Exception as e:
+            self._show_system(f"Error listing memory: {e}")
+
+    async def _memory_get(self, namespace: str, key: str) -> None:
+        """Get a memory value via the backend API."""
+        import httpx
+        import json
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"http://localhost:8080/api/v1/memory/{namespace}/{key}"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            value = data.get("value", data)
+            self._show_system(
+                f"{namespace}/{key} = {json.dumps(value, indent=2)}"
+            )
+        except Exception as e:
+            self._show_system(f"Error reading memory: {e}")
+
+    async def _memory_set(self, namespace: str, key: str, value: str) -> None:
+        """Set a memory value via the backend API."""
+        import httpx
+        import json
+
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = value
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"http://localhost:8080/api/v1/memory/{namespace}/{key}",
+                    json={"value": parsed},
+                )
+                resp.raise_for_status()
+            self._show_system(f"Set {namespace}/{key}")
+        except Exception as e:
+            self._show_system(f"Error setting memory: {e}")
 
     async def _cmd_diff(self, args: list[str]) -> None:
         """Handle /diff <show|accept-all|reject-all>."""
@@ -556,17 +627,22 @@ class ObscuraTUI(App):
 
     async def _cmd_help(self, args: list[str]) -> None:
         """Handle /help."""
+        from sdk._types import Backend
+        backends = "|".join(sorted(b.value for b in Backend))
+        modes = "|".join(m.value for m in TUIMode)
+
         help_lines = [
             "Obscura TUI Commands:",
-            "  /mode <ask|plan|code|diff>     Switch mode",
-            "  /backend <claude|copilot>      Switch backend",
+            f"  /mode <{modes}>       Switch mode",
+            f"  /backend <{backends}>   Switch backend",
             "  /model <model-id>              Change model",
             "  /session new                   Start new session",
             "  /session list                  List saved sessions",
             "  /session load <id>             Resume session",
             "  /clear                         Clear conversation",
-            "  /memory list                   Show memory keys",
-            "  /memory get <key>              Read memory value",
+            "  /memory list                   List namespaces",
+            "  /memory get <ns> <key>         Read memory value",
+            "  /memory set <ns> <key> <val>   Write memory value",
             "  /diff show                     Show pending diffs",
             "  /diff accept-all               Accept all changes",
             "  /diff reject-all               Reject all changes",

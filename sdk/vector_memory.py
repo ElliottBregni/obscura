@@ -87,7 +87,10 @@ class VectorMemoryEntry:
     embedding: list[float]
     metadata: dict[str, Any]
     created_at: datetime
-    score: float = 0.0  # Similarity score (set during search)
+    memory_type: str = "general"
+    score: float = 0.0  # Stage 1 similarity score
+    rerank_score: float = 0.0  # Stage 2 rerank score
+    final_score: float = 0.0  # Combined score
 
 
 class VectorMemoryStore:
@@ -148,9 +151,9 @@ class VectorMemoryStore:
     def _init_db(self) -> None:
         """Initialize the database schema with vector support."""
         conn = self._get_conn()
-        
+
         # Main table for vector memories
-        conn.execute(f"""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS vector_memory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 namespace TEXT NOT NULL,
@@ -158,23 +161,57 @@ class VectorMemoryStore:
                 text TEXT NOT NULL,
                 embedding BLOB NOT NULL,  -- JSON array of floats
                 metadata TEXT,  -- JSON
+                memory_type TEXT NOT NULL DEFAULT 'general',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP,
                 UNIQUE(namespace, key)
             )
         """)
-        
-        # Indexes
+
+        # Original indexes (columns that always existed)
         conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_vec_memory_ns_key 
+            CREATE INDEX IF NOT EXISTS idx_vec_memory_ns_key
             ON vector_memory(namespace, key)
         """)
         conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_vec_memory_expires 
+            CREATE INDEX IF NOT EXISTS idx_vec_memory_expires
             ON vector_memory(expires_at)
         """)
-        
+
         conn.commit()
+
+        # Migrate existing databases before creating indexes on new columns
+        self._migrate_schema(conn)
+
+        # Indexes on new columns (safe after migration)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vec_memory_type
+            ON vector_memory(memory_type)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vec_memory_ns_created
+            ON vector_memory(namespace, created_at DESC)
+        """)
+        conn.commit()
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Apply schema migrations for existing databases."""
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        if version < 1:
+            # Add memory_type and updated_at columns if missing
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(vector_memory)").fetchall()}
+
+            if "memory_type" not in columns:
+                conn.execute("ALTER TABLE vector_memory ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'general'")
+
+            if "updated_at" not in columns:
+                conn.execute("ALTER TABLE vector_memory ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                conn.execute("UPDATE vector_memory SET updated_at = created_at WHERE updated_at IS NULL")
+
+            conn.execute("PRAGMA user_version = 1")
+            conn.commit()
     
     def set(
         self,
@@ -183,38 +220,41 @@ class VectorMemoryStore:
         metadata: dict[str, Any] | None = None,
         namespace: str = "default",
         ttl: timedelta | None = None,
+        memory_type: str = "general",
     ) -> None:
         """
         Store text with automatic embedding generation.
-        
+
         Args:
             key: The memory key
             text: The text content to store and embed
             metadata: Additional JSON-serializable metadata
             namespace: Logical grouping
             ttl: Optional time-to-live
+            memory_type: Classification (fact, preference, episode, summary, etc.)
         """
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
-        
+
         # Generate embedding
         embedding = self.embedding_fn(text)
-        
+
         expires_at = None
         if ttl:
             expires_at = datetime.now(UTC) + ttl
-        
+
         conn = self._get_conn()
         conn.execute(
             """
-            INSERT INTO vector_memory 
-                (namespace, key, text, embedding, metadata, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO vector_memory
+                (namespace, key, text, embedding, metadata, memory_type, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(namespace, key) DO UPDATE SET
                 text = excluded.text,
                 embedding = excluded.embedding,
                 metadata = excluded.metadata,
-                created_at = CURRENT_TIMESTAMP,
+                memory_type = excluded.memory_type,
+                updated_at = CURRENT_TIMESTAMP,
                 expires_at = excluded.expires_at
             """,
             (
@@ -223,6 +263,7 @@ class VectorMemoryStore:
                 text,
                 json.dumps(embedding),
                 json.dumps(metadata) if metadata else None,
+                memory_type,
                 expires_at,
             )
         )
@@ -232,33 +273,34 @@ class VectorMemoryStore:
         """Retrieve a specific memory entry by key."""
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
-        
+
         conn = self._get_conn()
         row = conn.execute(
             """
-            SELECT namespace, key, text, embedding, metadata, created_at, expires_at
-            FROM vector_memory 
+            SELECT namespace, key, text, embedding, metadata, memory_type, created_at, expires_at
+            FROM vector_memory
             WHERE namespace = ? AND key = ?
             """,
             (key.namespace, key.key)
         ).fetchone()
-        
+
         if row is None:
             return None
-        
+
         # Check expiration
         if row['expires_at']:
             expires = datetime.fromisoformat(row['expires_at'])
             if datetime.now(UTC) > expires:
                 self.delete(key)
                 return None
-        
+
         return VectorMemoryEntry(
             key=MemoryKey(namespace=row['namespace'], key=row['key']),
             text=row['text'],
             embedding=json.loads(row['embedding']),
             metadata=json.loads(row['metadata']) if row['metadata'] else {},
             created_at=datetime.fromisoformat(row['created_at']),
+            memory_type=row['memory_type'] or "general",
         )
     
     def search_similar(
@@ -267,44 +309,66 @@ class VectorMemoryStore:
         namespace: str | None = None,
         top_k: int = 5,
         threshold: float = -1.0,
+        memory_types: list[str] | None = None,
+        metadata_filters: list | None = None,
+        date_range: tuple[datetime, datetime] | None = None,
     ) -> list[VectorMemoryEntry]:
         """
         Search for semantically similar memories.
-        
+
         Args:
             query: The search query text
             namespace: Filter by namespace (None = all)
             top_k: Number of results to return
             threshold: Minimum similarity score (0-1)
-        
+            memory_types: Filter to specific memory types
+            metadata_filters: List of MetadataFilter objects for SQL pre-filtering
+            date_range: (start, end) tuple to filter by created_at
+
         Returns:
             List of memories sorted by similarity (highest first)
         """
+        from sdk.vector_memory_filters import (
+            DateRangeFilter,
+            FilterBuilder,
+            MemoryTypeFilter,
+        )
+
         query_embedding = self.embedding_fn(query)
-        
         conn = self._get_conn()
-        
-        # Get all candidates (in production, use vector index like FAISS, pgvector)
+
+        # Build SQL with pre-filters
+        base_sql = "SELECT * FROM vector_memory WHERE 1=1"
+        params: list = []
+
         if namespace:
-            rows = conn.execute(
-                "SELECT * FROM vector_memory WHERE namespace = ?",
-                (namespace,)
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM vector_memory").fetchall()
-        
+            base_sql += " AND namespace = ?"
+            params.append(namespace)
+
+        # Expiration filter (always applied)
+        base_sql += " AND (expires_at IS NULL OR expires_at > ?)"
+        params.append(datetime.now(UTC).isoformat())
+
+        # Apply structured filters
+        filters = list(metadata_filters or [])
+        if memory_types:
+            filters.append(MemoryTypeFilter(memory_types=memory_types))
+        if date_range:
+            filters.append(DateRangeFilter(field="created_at", start=date_range[0], end=date_range[1]))
+
+        if filters:
+            extra_clause, extra_params = FilterBuilder.build_sql(filters)
+            base_sql += extra_clause
+            params.extend(extra_params)
+
+        rows = conn.execute(base_sql, params).fetchall()
+
         # Compute similarities
         results = []
         for row in rows:
-            # Check expiration
-            if row['expires_at']:
-                expires = datetime.fromisoformat(row['expires_at'])
-                if datetime.now(UTC) > expires:
-                    continue
-            
             embedding = json.loads(row['embedding'])
             score = cosine_similarity(query_embedding, embedding)
-            
+
             if score >= threshold:
                 entry = VectorMemoryEntry(
                     key=MemoryKey(namespace=row['namespace'], key=row['key']),
@@ -312,13 +376,78 @@ class VectorMemoryStore:
                     embedding=embedding,
                     metadata=json.loads(row['metadata']) if row['metadata'] else {},
                     created_at=datetime.fromisoformat(row['created_at']),
+                    memory_type=row['memory_type'] or "general",
                     score=score,
+                    final_score=score,
                 )
                 results.append(entry)
-        
+
         # Sort by similarity (descending) and return top_k
         results.sort(key=lambda x: x.score, reverse=True)
         return results[:top_k]
+
+    def search_reranked(
+        self,
+        query: str,
+        namespace: str | None = None,
+        top_k: int = 5,
+        first_stage_k: int = 50,
+        threshold: float = -1.0,
+        memory_types: list[str] | None = None,
+        metadata_filters: list | None = None,
+        date_range: tuple[datetime, datetime] | None = None,
+        reranker: Any | None = None,
+        recency_weight: float = 0.2,
+    ) -> list[VectorMemoryEntry]:
+        """
+        Two-stage retrieval with reranking.
+
+        Stage 1: Vector similarity search to get a candidate pool.
+        Stage 2: Rerank candidates with additional signals (recency, BM25, metadata).
+
+        Args:
+            query: The search query text
+            namespace: Filter by namespace
+            top_k: Final number of results after reranking
+            first_stage_k: Candidate pool size from stage 1
+            threshold: Minimum similarity score for stage 1
+            memory_types: Filter to specific memory types
+            metadata_filters: SQL pre-filters
+            date_range: (start, end) created_at filter
+            reranker: A Reranker instance (default: RecencyReranker)
+            recency_weight: Weight for default RecencyReranker
+
+        Returns:
+            List of memories sorted by final_score (highest first)
+        """
+        from sdk.vector_memory_rerank import RecencyReranker
+
+        # Stage 1: get candidate pool
+        candidates = self.search_similar(
+            query=query,
+            namespace=namespace,
+            top_k=first_stage_k,
+            threshold=threshold,
+            memory_types=memory_types,
+            metadata_filters=metadata_filters,
+            date_range=date_range,
+        )
+
+        if not candidates:
+            return []
+
+        # Stage 2: rerank
+        if reranker is None:
+            reranker = RecencyReranker(weight=recency_weight)
+
+        query_embedding = self.embedding_fn(query)
+
+        for entry in candidates:
+            entry.rerank_score = reranker.score(query, entry, query_embedding)
+            entry.final_score = entry.score + entry.rerank_score
+
+        candidates.sort(key=lambda x: x.final_score, reverse=True)
+        return candidates[:top_k]
     
     def delete(self, key: str | MemoryKey, namespace: str = "default") -> bool:
         """Delete a memory entry."""
@@ -384,23 +513,29 @@ class VectorMemoryStore:
 # Integration with Agent class
 class SemanticMemoryMixin:
     """Mixin to add semantic memory capabilities to agents."""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._vector_memory: VectorMemoryStore | None = None
-    
+
     @property
     def vector_memory(self) -> VectorMemoryStore:
         """Get the vector memory store for this agent."""
         if self._vector_memory is None:
             self._vector_memory = VectorMemoryStore.for_user(self.user)
         return self._vector_memory
-    
-    def remember(self, text: str, key: str | None = None, **metadata) -> None:
+
+    def remember(
+        self,
+        text: str,
+        key: str | None = None,
+        memory_type: str = "general",
+        **metadata,
+    ) -> None:
         """Store a memory with semantic embedding."""
         if key is None:
             key = f"memory_{datetime.now(UTC).timestamp()}"
-        
+
         self.vector_memory.set(
             key,
             text,
@@ -409,13 +544,33 @@ class SemanticMemoryMixin:
                 "agent_name": self.config.name,
                 **metadata
             },
-            namespace=f"{self.config.memory_namespace}:semantic"
+            namespace=f"{self.config.memory_namespace}:semantic",
+            memory_type=memory_type,
         )
-    
-    def recall(self, query: str, top_k: int = 3) -> list[VectorMemoryEntry]:
-        """Recall semantically similar memories."""
+
+    def recall(
+        self,
+        query: str,
+        top_k: int = 3,
+        memory_types: list[str] | None = None,
+        use_reranking: bool = True,
+        recency_weight: float = 0.2,
+    ) -> list[VectorMemoryEntry]:
+        """Recall semantically similar memories with optional reranking."""
+        namespace = f"{self.config.memory_namespace}:semantic"
+
+        if use_reranking:
+            return self.vector_memory.search_reranked(
+                query,
+                namespace=namespace,
+                top_k=top_k,
+                memory_types=memory_types,
+                recency_weight=recency_weight,
+            )
+
         return self.vector_memory.search_similar(
             query,
-            namespace=f"{self.config.memory_namespace}:semantic",
-            top_k=top_k
+            namespace=namespace,
+            top_k=top_k,
+            memory_types=memory_types,
         )
