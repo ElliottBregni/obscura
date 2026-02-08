@@ -28,6 +28,26 @@ from sdk.tui.modes import TUIMode
 
 
 # ---------------------------------------------------------------------------
+# Custom TextArea that delegates Enter to parent
+# ---------------------------------------------------------------------------
+
+class _PromptTextArea(TextArea):
+    """TextArea subclass that emits Enter as a message instead of inserting a newline."""
+
+    class EnterPressed(Message):
+        """Emitted when Enter is pressed (without Shift)."""
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.EnterPressed())
+            return
+        # shift+enter inserts newline via default TextArea behavior
+        await super()._on_key(event)
+
+
+# ---------------------------------------------------------------------------
 # Slash command definitions
 # ---------------------------------------------------------------------------
 
@@ -127,16 +147,17 @@ class PromptInput(Widget):
                 self._prefix_text,
                 classes="mode-prefix",
             )
-            yield TextArea(
+            yield _PromptTextArea(
                 "",
                 id="prompt-textarea",
                 show_line_numbers=False,
+                placeholder="Enter to send, Shift+Enter for newline, /help for commands",
             )
 
     def on_mount(self) -> None:
         """Cache widget references and set initial focus."""
         try:
-            self._text_area = self.query_one("#prompt-textarea", TextArea)
+            self._text_area = self.query_one("#prompt-textarea", _PromptTextArea)
             self._prefix_widget = self.query_one(".mode-prefix", Static)
         except Exception:
             pass
@@ -155,40 +176,9 @@ class PromptInput(Widget):
 
     # -- Key handling -------------------------------------------------------
 
-    async def on_key(self, event: events.Key) -> None:
-        """Handle key presses for submit, newline, and history."""
-        if self._text_area is None:
-            return
-
-        # Enter without shift = submit
-        if event.key == "enter":
-            event.prevent_default()
-            event.stop()
-            await self._submit()
-            return
-
-        # shift+enter is handled by TextArea as newline (no action needed)
-
-        # Up arrow = history previous
-        if event.key == "up":
-            self._history_previous()
-            event.prevent_default()
-            event.stop()
-            return
-
-        # Down arrow = history next
-        if event.key == "down":
-            self._history_next()
-            event.prevent_default()
-            event.stop()
-            return
-
-        # Tab = autocomplete in code mode
-        if event.key == "tab" and self.mode == TUIMode.CODE:
-            event.prevent_default()
-            event.stop()
-            self._autocomplete()
-            return
+    async def on__prompt_text_area_enter_pressed(self) -> None:
+        """Handle Enter key from the custom TextArea."""
+        await self._submit()
 
     async def _submit(self) -> None:
         """Submit the current input text."""

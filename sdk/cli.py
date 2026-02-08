@@ -133,9 +133,9 @@ def build_parser() -> argparse.ArgumentParser:
     tui_parser = sub.add_parser("tui", help="Launch interactive TUI")
     tui_parser.add_argument(
         "--backend",
-        default="claude",
+        default="copilot",
         choices=["claude", "copilot"],
-        help="Backend to use (default: claude).",
+        help="Backend to use (default: copilot).",
     )
     tui_parser.add_argument(
         "--model",

@@ -24,10 +24,10 @@ import logging
 import subprocess
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, AsyncGenerator
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -463,53 +463,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     # -- memory -----------------------------------------------------------
 
-    @app.get("/api/v1/memory/{namespace}/{key}", tags=["memory"])
-    async def memory_get(
-        namespace: str,
-        key: str,
-        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
-    ) -> JSONResponse:
-        """Get a value from the user's memory store."""
-        from sdk.memory import MemoryStore
-        store = MemoryStore.for_user(user)
-        value = store.get(key, namespace=namespace)
-        if value is None:
-            raise HTTPException(status_code=404, detail=f"Key '{namespace}:{key}' not found")
-        return JSONResponse(content={"namespace": namespace, "key": key, "value": value})
-
-    @app.post("/api/v1/memory/{namespace}/{key}", tags=["memory"])
-    async def memory_set(
-        namespace: str,
-        key: str,
-        body: dict,
-        ttl: int | None = None,  # seconds
-        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
-    ) -> JSONResponse:
-        """Store a value in the user's memory store."""
-        from sdk.memory import MemoryStore
-        from datetime import timedelta
-        store = MemoryStore.for_user(user)
-        value = body.get("value")
-        ttl_delta = timedelta(seconds=ttl) if ttl else None
-        store.set(key, value, namespace=namespace, ttl=ttl_delta)
-        _audit("memory.set", user, f"memory:{namespace}:{key}", "write", "success")
-        return JSONResponse(content={"namespace": namespace, "key": key, "stored": True})
-
-    @app.delete("/api/v1/memory/{namespace}/{key}", tags=["memory"])
-    async def memory_delete(
-        namespace: str,
-        key: str,
-        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
-    ) -> JSONResponse:
-        """Delete a key from the user's memory store."""
-        from sdk.memory import MemoryStore
-        store = MemoryStore.for_user(user)
-        deleted = store.delete(key, namespace=namespace)
-        if not deleted:
-            raise HTTPException(status_code=404, detail=f"Key '{namespace}:{key}' not found")
-        _audit("memory.delete", user, f"memory:{namespace}:{key}", "delete", "success")
-        return JSONResponse(content={"namespace": namespace, "key": key, "deleted": True})
-
     @app.get("/api/v1/memory", tags=["memory"])
     async def memory_list(
         namespace: str | None = None,
@@ -587,7 +540,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "description": body.get("description", ""),
             "ttl_days": body.get("ttl_days"),
             "created_by": user.user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         
         _memory_namespaces[namespace_id] = namespace
@@ -727,7 +680,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                 data[ns][key.key] = value
         
         return JSONResponse(content={
-            "exported_at": datetime.utcnow().isoformat(),
+            "exported_at": datetime.now(UTC).isoformat(),
             "namespaces": list(data.keys()),
             "total_keys": sum(len(v) for v in data.values()),
             "data": data,
@@ -780,6 +733,54 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "errors": errors,
             "total": imported + skipped,
         })
+
+    # -- memory key-value (catch-all, must be after specific /memory/ routes)
+
+    @app.get("/api/v1/memory/{namespace}/{key}", tags=["memory"])
+    async def memory_get(
+        namespace: str,
+        key: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get a value from the user's memory store."""
+        from sdk.memory import MemoryStore
+        store = MemoryStore.for_user(user)
+        value = store.get(key, namespace=namespace)
+        if value is None:
+            raise HTTPException(status_code=404, detail=f"Key '{namespace}:{key}' not found")
+        return JSONResponse(content={"namespace": namespace, "key": key, "value": value})
+
+    @app.post("/api/v1/memory/{namespace}/{key}", tags=["memory"])
+    async def memory_set(
+        namespace: str,
+        key: str,
+        body: dict,
+        ttl: int | None = None,  # seconds
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Store a value in the user's memory store."""
+        from sdk.memory import MemoryStore
+        store = MemoryStore.for_user(user)
+        value = body.get("value")
+        ttl_delta = timedelta(seconds=ttl) if ttl else None
+        store.set(key, value, namespace=namespace, ttl=ttl_delta)
+        _audit("memory.set", user, f"memory:{namespace}:{key}", "write", "success")
+        return JSONResponse(content={"namespace": namespace, "key": key, "stored": True})
+
+    @app.delete("/api/v1/memory/{namespace}/{key}", tags=["memory"])
+    async def memory_delete(
+        namespace: str,
+        key: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Delete a key from the user's memory store."""
+        from sdk.memory import MemoryStore
+        store = MemoryStore.for_user(user)
+        deleted = store.delete(key, namespace=namespace)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Key '{namespace}:{key}' not found")
+        _audit("memory.delete", user, f"memory:{namespace}:{key}", "delete", "success")
+        return JSONResponse(content={"namespace": namespace, "key": key, "deleted": True})
 
     # -- vector memory (semantic) -------------------------------------------
 
@@ -1132,7 +1133,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "memory_namespace": body.get("memory_namespace", "default"),
             "tags": body.get("tags", []),
             "created_by": user.user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         
         _agent_templates[template_id] = template
@@ -1331,8 +1332,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     # -- websockets -------------------------------------------------------
 
-    from fastapi import WebSocket, WebSocketDisconnect
-
     async def _authenticate_websocket(websocket: WebSocket) -> AuthenticatedUser | None:
         """Validate JWT token from WebSocket query params."""
         token = websocket.query_params.get("token", "")
@@ -1530,7 +1529,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "name": body.get("name", "unnamed-group"),
             "agents": body.get("agents", []),
             "created_by": user.user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         
         _agent_groups[group_id] = group
@@ -1717,7 +1716,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         """Broadcast an event to all connected clients."""
         message = {
             "type": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": data,
         }
         
@@ -1796,7 +1795,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "type": event_type,
             "namespace": namespace,
             "key": key,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         
         disconnected = []
@@ -1830,7 +1829,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "description": body.get("description", ""),
             "steps": body.get("steps", []),
             "created_by": user.user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         
         _workflows[workflow_id] = workflow
@@ -1903,7 +1902,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "inputs": inputs,
             "outputs": {},
             "step_results": {},
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
             "completed_at": None,
         }
         _workflow_executions[execution_id] = execution
@@ -1960,7 +1959,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                 last_step = steps[-1].get("name")
                 execution["outputs"]["result"] = execution["step_results"].get(last_step)
         
-        execution["completed_at"] = datetime.utcnow().isoformat()
+        execution["completed_at"] = datetime.now(UTC).isoformat()
         
         _audit("workflow.execute", user, f"workflow:{workflow_id}", "execute", execution["status"],
                execution_id=execution_id)
@@ -2030,7 +2029,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "secret": secret,
             "active": True,
             "created_by": user.user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         
         _webhooks[webhook_id] = webhook
@@ -2110,7 +2109,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         # Create test payload
         payload = {
             "event": "test",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": {"message": "This is a test event"},
         }
         
@@ -2157,7 +2156,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
         payload = {
             "event": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": data,
         }
         payload_json = json.dumps(payload, separators=(',', ':'))
@@ -2253,8 +2252,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         outcomes = Counter(l.get("outcome") for l in _audit_logs)
         
         # Recent activity (last 24 hours)
-        from datetime import timedelta
-        cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
         recent = [l for l in _audit_logs if l.get("timestamp", "") > cutoff]
         
         return JSONResponse(content={
@@ -2313,7 +2311,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                 "total": len(_webhooks),
                 "active": sum(1 for w in _webhooks.values() if w.get("active", True)),
             },
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     @app.get("/api/v1/metrics/agents/{agent_id}", tags=["admin"])
@@ -2373,7 +2371,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "concurrent_agents": body.get("concurrent_agents", 10),
             "memory_quota_mb": body.get("memory_quota_mb", 1024),
             "set_by": user.user_id,
-            "set_at": datetime.utcnow().isoformat(),
+            "set_at": datetime.now(UTC).isoformat(),
         }
         
         return JSONResponse(content={
@@ -2409,7 +2407,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         
         # Store in memory
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event_type": event_type,
             "user_id": user.user_id,
             "user_email": user.email,

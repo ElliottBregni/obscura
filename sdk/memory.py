@@ -21,7 +21,7 @@ import json
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ class MemoryEntry:
     def is_expired(self) -> bool:
         if self.ttl is None:
             return False
-        return datetime.utcnow() > self.updated_at + self.ttl
+        return datetime.now(UTC) > self.updated_at + self.ttl
 
 
 class MemoryStore:
@@ -141,7 +141,7 @@ class MemoryStore:
         
         expires_at = None
         if ttl:
-            expires_at = datetime.utcnow() + ttl
+            expires_at = datetime.now(UTC) + ttl
         
         conn = self._get_conn()
         conn.execute(
@@ -178,7 +178,7 @@ class MemoryStore:
         # Check expiration
         if row['expires_at']:
             expires = datetime.fromisoformat(row['expires_at'])
-            if datetime.utcnow() > expires:
+            if datetime.now(UTC) > expires:
                 self.delete(key)
                 return default
         
@@ -253,7 +253,7 @@ class MemoryStore:
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ?",
-            (datetime.utcnow(),)
+            (datetime.now(UTC),)
         )
         conn.commit()
         return cursor.rowcount
@@ -265,7 +265,7 @@ class MemoryStore:
         total = conn.execute("SELECT COUNT(*) as count FROM memory").fetchone()['count']
         expired = conn.execute(
             "SELECT COUNT(*) as count FROM memory WHERE expires_at IS NOT NULL AND expires_at < ?",
-            (datetime.utcnow(),)
+            (datetime.now(UTC),)
         ).fetchone()['count']
         
         namespaces = conn.execute(

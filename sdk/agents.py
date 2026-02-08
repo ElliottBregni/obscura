@@ -31,7 +31,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, AsyncIterator, Callable, Coroutine
 
@@ -86,7 +86,7 @@ class AgentMessage:
     source: str  # agent_id or "user" or "system"
     target: str  # agent_id or "broadcast"
     content: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     message_type: str = "text"  # "text", "command", "result", "error"
 
 
@@ -113,7 +113,7 @@ class Agent:
         self.user = user
         self.runtime = runtime
         self.status = AgentStatus.PENDING
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(UTC)
         self.updated_at = self.created_at
         self.iteration_count = 0
         self._client: ObscuraClient | None = None
@@ -155,7 +155,7 @@ class Agent:
             {
                 "prompt": prompt,
                 "context": context,
-                "started_at": datetime.utcnow().isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
             },
             namespace=f"{self.config.memory_namespace}:tasks"
         )
@@ -179,7 +179,7 @@ class Agent:
                 f"result_{self.iteration_count}",
                 {
                     "result": self._result,
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.now(UTC).isoformat(),
                 },
                 namespace=f"{self.config.memory_namespace}:tasks"
             )
@@ -214,7 +214,7 @@ class Agent:
             {
                 "prompt": prompt,
                 "context": context,
-                "started_at": datetime.utcnow().isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
                 "mode": "stream",
             },
             namespace=f"{self.config.memory_namespace}:tasks"
@@ -318,7 +318,7 @@ class Agent:
     
     def _update_state(self) -> None:
         """Persist agent state to memory."""
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
         state = AgentState(
             agent_id=self.id,
             name=self.config.name,

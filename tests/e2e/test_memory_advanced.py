@@ -35,22 +35,20 @@ class TestMemoryNamespaces:
         assert data["description"] == "Custom namespace for testing"
         assert data["ttl_days"] == 30
 
-    @pytest.mark.skip(reason="TestClient issue with DELETE query params")
     def test_delete_namespace(self, client):
         """Can delete a memory namespace."""
         # Create namespace
         client.post("/api/v1/memory/namespaces", json={
             "name": "temp-namespace"
         })
-        
-        # Delete without deleting data (use query string in URL)
-        resp = client.delete("/api/v1/memory/namespaces/temp-namespace?delete_data=false")
+
+        # Delete without deleting data
+        resp = client.delete("/api/v1/memory/namespaces/temp-namespace", params={"delete_data": "false"})
         
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert resp.json()["keys_deleted"] == 0
 
-    @pytest.mark.skip(reason="TestClient issue with DELETE query params")
     def test_delete_namespace_with_data(self, client):
         """Can delete namespace and all its data."""
         # Create namespace and data
@@ -59,9 +57,9 @@ class TestMemoryNamespaces:
         })
         client.post("/api/v1/memory/temp-with-data/key1", json={"value": "data1"})
         client.post("/api/v1/memory/temp-with-data/key2", json={"value": "data2"})
-        
+
         # Delete with data
-        resp = client.delete("/api/v1/memory/namespaces/temp-with-data?delete_data=true")
+        resp = client.delete("/api/v1/memory/namespaces/temp-with-data", params={"delete_data": "true"})
         
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
@@ -265,7 +263,7 @@ class TestMemoryImportExport:
         export_data = export_resp.json()["data"]
         
         # Clear data
-        client.delete("/api/v1/memory/namespaces/roundtrip?delete_data=true")
+        client.delete("/api/v1/memory/namespaces/roundtrip", params={"delete_data": "true"})
         
         # Re-import
         import_resp = client.post("/api/v1/memory/import", json={

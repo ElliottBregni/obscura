@@ -2,9 +2,11 @@
 """Test TUI client connectivity."""
 
 import asyncio
+import pytest
 from obscura.tui.client import TUIClient
 
 
+@pytest.mark.e2e
 async def test():
     """Test TUI client."""
     print("Testing TUI Client...")

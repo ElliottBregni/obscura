@@ -117,7 +117,6 @@ class TestAgentTemplates:
         assert data["model"] == "claude"
         assert data["system_prompt"] == "You are a code reviewer focused on security."
         
-        return data["template_id"]
 
     def test_list_templates(self, client):
         """Can list all templates."""

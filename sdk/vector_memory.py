@@ -28,7 +28,7 @@ import json
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -202,7 +202,7 @@ class VectorMemoryStore:
         
         expires_at = None
         if ttl:
-            expires_at = datetime.utcnow() + ttl
+            expires_at = datetime.now(UTC) + ttl
         
         conn = self._get_conn()
         conn.execute(
@@ -249,7 +249,7 @@ class VectorMemoryStore:
         # Check expiration
         if row['expires_at']:
             expires = datetime.fromisoformat(row['expires_at'])
-            if datetime.utcnow() > expires:
+            if datetime.now(UTC) > expires:
                 self.delete(key)
                 return None
         
@@ -299,7 +299,7 @@ class VectorMemoryStore:
             # Check expiration
             if row['expires_at']:
                 expires = datetime.fromisoformat(row['expires_at'])
-                if datetime.utcnow() > expires:
+                if datetime.now(UTC) > expires:
                     continue
             
             embedding = json.loads(row['embedding'])
@@ -399,7 +399,7 @@ class SemanticMemoryMixin:
     def remember(self, text: str, key: str | None = None, **metadata) -> None:
         """Store a memory with semantic embedding."""
         if key is None:
-            key = f"memory_{datetime.utcnow().timestamp()}"
+            key = f"memory_{datetime.now(UTC).timestamp()}"
         
         self.vector_memory.set(
             key,

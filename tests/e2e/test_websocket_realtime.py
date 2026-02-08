@@ -168,22 +168,48 @@ class TestAgentMessaging:
 class TestWebSocketEndpoints:
     """Test WebSocket endpoints."""
     
-    @pytest.mark.skip(reason="WebSocket tests require async test client")
     def test_agent_websocket(self, client):
         """WebSocket endpoint for agent communication."""
-        pass
-    
-    @pytest.mark.skip(reason="WebSocket tests require async test client")
+        # Spawn an agent first so it exists in the runtime
+        resp = client.post("/api/v1/agents", json={"name": "ws-test-agent"})
+        agent_id = resp.json()["agent_id"]
+
+        with client.websocket_connect(f"/ws/agents/{agent_id}?token=test") as ws:
+            # Request status
+            ws.send_json({"type": "status"})
+            data = ws.receive_json()
+            assert data["type"] == "status"
+            assert "status" in data
+
+            # Request stop
+            ws.send_json({"type": "stop"})
+            data = ws.receive_json()
+            assert data["type"] == "status"
+            assert data["status"] == "STOPPED"
+
     def test_broadcast_websocket(self, client):
         """WebSocket endpoint for broadcast events."""
-        pass
-    
-    @pytest.mark.skip(reason="WebSocket tests require async test client")
+        with client.websocket_connect("/ws/broadcast?token=test") as ws:
+            ws.send_text("ping")
+            assert ws.receive_text() == "pong"
+
     def test_memory_watch_websocket(self, client):
         """WebSocket endpoint for memory watching."""
-        pass
-    
-    @pytest.mark.skip(reason="WebSocket tests require async test client")
+        with client.websocket_connect("/ws/memory/test-ns?token=test") as ws:
+            # Should receive init message with current keys
+            data = ws.receive_json()
+            assert data["type"] == "init"
+            assert data["namespace"] == "test-ns"
+            assert "keys" in data
+
+            # Ping/pong keepalive
+            ws.send_text("ping")
+            assert ws.receive_text() == "pong"
+
     def test_monitor_websocket(self, client):
         """WebSocket endpoint for monitoring."""
-        pass
+        with client.websocket_connect("/ws/monitor?token=test") as ws:
+            # Should receive init message with agents list
+            data = ws.receive_json()
+            assert data["type"] == "init"
+            assert "agents" in data

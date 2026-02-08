@@ -9,7 +9,7 @@ This creates a self-signed JWT with admin privileges for testing.
 
 import json
 import base64
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from jose import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -41,7 +41,7 @@ def generate_test_token():
     public_numbers = public_key.public_numbers()
     
     # Create JWT payload with all required roles
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     payload = {
         "sub": "test-user-123",
         "email": "test@obscura.local",

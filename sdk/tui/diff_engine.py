@@ -245,8 +245,7 @@ class DiffEngine:
         Returns:
             The patched content with accepted hunks applied.
         """
-        accepted = [h for h in hunks if h.status == "accepted"]
-        if not accepted:
+        if not hunks:
             return original
 
         old_lines = original.splitlines(keepends=True)
@@ -258,7 +257,7 @@ class DiffEngine:
         old_idx = 0  # 0-based index into old_lines
 
         # Sort hunks by old_start to apply in order
-        sorted_hunks = sorted(accepted, key=lambda h: h.old_start)
+        sorted_hunks = sorted(hunks, key=lambda h: h.old_start)
 
         for hunk in sorted_hunks:
             # Copy unchanged lines before this hunk (old_start is 1-based)
