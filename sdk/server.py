@@ -1512,4 +1512,302 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         except Exception:
             pass
 
+    # -- agent groups -----------------------------------------------------
+
+    _agent_groups: dict[str, dict] = {}
+
+    @app.post("/api/v1/agent-groups", tags=["agents"])
+    async def agent_group_create(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Create an agent group."""
+        import uuid
+        
+        group_id = str(uuid.uuid4())
+        group = {
+            "group_id": group_id,
+            "name": body.get("name", "unnamed-group"),
+            "agents": body.get("agents", []),
+            "created_by": user.user_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        
+        _agent_groups[group_id] = group
+        
+        _audit("agent_group.create", user, f"group:{group_id}", "create", "success",
+               name=group["name"])
+        
+        return JSONResponse(content=group)
+
+    @app.get("/api/v1/agent-groups", tags=["agents"])
+    async def agent_group_list(
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """List all agent groups."""
+        groups = list(_agent_groups.values())
+        return JSONResponse(content={
+            "groups": groups,
+            "count": len(groups),
+        })
+
+    @app.get("/api/v1/agent-groups/{group_id}", tags=["agents"])
+    async def agent_group_get(
+        group_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get a specific agent group."""
+        group = _agent_groups.get(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
+        return JSONResponse(content=group)
+
+    @app.delete("/api/v1/agent-groups/{group_id}", tags=["agents"])
+    async def agent_group_delete(
+        group_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Delete an agent group."""
+        if group_id not in _agent_groups:
+            raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
+        
+        del _agent_groups[group_id]
+        
+        _audit("agent_group.delete", user, f"group:{group_id}", "delete", "success")
+        
+        return JSONResponse(content={"group_id": group_id, "deleted": True})
+
+    @app.post("/api/v1/agent-groups/{group_id}/broadcast", tags=["agents"])
+    async def agent_group_broadcast(
+        group_id: str,
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Broadcast a message to all agents in a group."""
+        runtime = await _get_runtime(user)
+        
+        group = _agent_groups.get(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
+        
+        message = body.get("message", "")
+        context = body.get("context", {})
+        
+        results = []
+        errors = []
+        
+        for agent_id in group.get("agents", []):
+            try:
+                agent = runtime.get_agent(agent_id)
+                if agent is None:
+                    errors.append({"agent_id": agent_id, "error": "Agent not found"})
+                    continue
+                
+                # Queue the task (non-blocking)
+                asyncio.create_task(agent.run(message, **context))
+                results.append({"agent_id": agent_id, "status": "queued"})
+                
+            except Exception as e:
+                errors.append({"agent_id": agent_id, "error": str(e)})
+        
+        return JSONResponse(content={
+            "group_id": group_id,
+            "message": message,
+            "queued": results,
+            "errors": errors,
+        })
+
+    # -- agent messaging --------------------------------------------------
+
+    @app.post("/api/v1/agents/{from_agent}/send/{to_agent}", tags=["agents"])
+    async def agent_send_message(
+        from_agent: str,
+        to_agent: str,
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Send a message from one agent to another."""
+        runtime = await _get_runtime(user)
+        
+        source = runtime.get_agent(from_agent)
+        if source is None:
+            raise HTTPException(status_code=404, detail=f"Source agent {from_agent} not found")
+        
+        target = runtime.get_agent(to_agent)
+        if target is None:
+            raise HTTPException(status_code=404, detail=f"Target agent {to_agent} not found")
+        
+        message = body.get("message", "")
+        context = body.get("context", {})
+        
+        # Send message via agent's message queue
+        await source.send_message(to_agent, message)
+        
+        _audit("agent.message", user, f"agent:{from_agent}", "send", "success",
+               to_agent=to_agent, message_preview=message[:100])
+        
+        return JSONResponse(content={
+            "from_agent": from_agent,
+            "to_agent": to_agent,
+            "message": message,
+            "sent": True,
+        })
+
+    @app.get("/api/v1/agents/{agent_id}/messages", tags=["agents"])
+    async def agent_get_messages(
+        agent_id: str,
+        limit: int = 100,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get messages for an agent."""
+        runtime = await _get_runtime(user)
+        
+        agent = runtime.get_agent(agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+        
+        # Get messages from agent's message queue
+        messages = []
+        # This would need to be implemented in the Agent class
+        # For now, return empty list
+        
+        return JSONResponse(content={
+            "agent_id": agent_id,
+            "messages": messages,
+            "count": len(messages),
+        })
+
+    # -- broadcast websocket ----------------------------------------------
+
+    _broadcast_clients: list[WebSocket] = []
+
+    @app.websocket("/ws/broadcast")
+    async def broadcast_websocket(websocket: WebSocket):
+        """
+        WebSocket endpoint for system-wide broadcast events.
+        
+        Events:
+        - agent_spawned
+        - agent_stopped
+        - agent_status_changed
+        - memory_updated
+        """
+        user = await _authenticate_websocket(websocket)
+        if user is None:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+        await websocket.accept()
+        _broadcast_clients.append(websocket)
+
+        try:
+            while True:
+                # Keep connection alive, client can send ping
+                message = await websocket.receive_text()
+                if message == "ping":
+                    await websocket.send_text("pong")
+                    
+        except WebSocketDisconnect:
+            _broadcast_clients.remove(websocket)
+        except Exception:
+            if websocket in _broadcast_clients:
+                _broadcast_clients.remove(websocket)
+
+    async def _broadcast_event(event_type: str, data: dict):
+        """Broadcast an event to all connected clients."""
+        message = {
+            "type": event_type,
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": data,
+        }
+        
+        disconnected = []
+        for client in _broadcast_clients:
+            try:
+                await client.send_json(message)
+            except:
+                disconnected.append(client)
+        
+        # Clean up disconnected clients
+        for client in disconnected:
+            if client in _broadcast_clients:
+                _broadcast_clients.remove(client)
+
+    # -- memory watch websocket -------------------------------------------
+
+    _memory_watch_clients: dict[str, list[WebSocket]] = {}
+
+    @app.websocket("/ws/memory/{namespace}")
+    async def memory_watch_websocket(
+        websocket: WebSocket,
+        namespace: str,
+    ):
+        """
+        WebSocket endpoint for watching memory changes in a namespace.
+        
+        Events:
+        - memory_set
+        - memory_deleted
+        """
+        user = await _authenticate_websocket(websocket)
+        if user is None:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+        await websocket.accept()
+        
+        if namespace not in _memory_watch_clients:
+            _memory_watch_clients[namespace] = []
+        _memory_watch_clients[namespace].append(websocket)
+
+        try:
+            # Send initial state
+            from sdk.memory import MemoryStore
+            store = MemoryStore.for_user(user)
+            keys = store.list_keys(namespace=namespace)
+            
+            await websocket.send_json({
+                "type": "init",
+                "namespace": namespace,
+                "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
+            })
+            
+            while True:
+                # Keep connection alive
+                message = await websocket.receive_text()
+                if message == "ping":
+                    await websocket.send_text("pong")
+                    
+        except WebSocketDisconnect:
+            if namespace in _memory_watch_clients:
+                if websocket in _memory_watch_clients[namespace]:
+                    _memory_watch_clients[namespace].remove(websocket)
+        except Exception:
+            if namespace in _memory_watch_clients:
+                if websocket in _memory_watch_clients[namespace]:
+                    _memory_watch_clients[namespace].remove(websocket)
+
+    async def _notify_memory_change(namespace: str, event_type: str, key: str):
+        """Notify all watchers of a memory change."""
+        if namespace not in _memory_watch_clients:
+            return
+        
+        message = {
+            "type": event_type,
+            "namespace": namespace,
+            "key": key,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+        disconnected = []
+        for client in _memory_watch_clients[namespace]:
+            try:
+                await client.send_json(message)
+            except:
+                disconnected.append(client)
+        
+        for client in disconnected:
+            if client in _memory_watch_clients[namespace]:
+                _memory_watch_clients[namespace].remove(client)
+
     return app

@@ -92,6 +92,10 @@ class _FakeAgent:
     async def stop(self) -> None:
         self.status = _FakeAgentStatus.STOPPED
 
+    async def send_message(self, target: str, content: str) -> None:
+        """Send a message to another agent."""
+        pass
+
     def get_state(self) -> _FakeAgentState:
         return _FakeAgentState(
             agent_id=self.id,
