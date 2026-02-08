@@ -22,6 +22,16 @@ from fastapi import Depends, HTTPException, Request
 
 from sdk.auth.models import AuthenticatedUser
 
+# Mock user for when auth is disabled
+_MOCK_USER = AuthenticatedUser(
+    user_id="anonymous",
+    email="anonymous@obscura.local",
+    roles=("admin", "agent:copilot", "agent:claude", "agent:read", "sync:write", "sessions:manage"),
+    org_id="local",
+    token_type="anonymous",
+    raw_token="",
+)
+
 
 # ---------------------------------------------------------------------------
 # Core dependency: extract user from request
@@ -33,9 +43,16 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     The :class:`~sdk.auth.middleware.JWTAuthMiddleware` must run before
     this dependency is evaluated -- it populates ``request.state.user``.
 
+    If auth is disabled, returns a mock user with all roles.
+
     Raises:
         HTTPException(401): if no user is attached to the request.
     """
+    # Check if auth is disabled via app config
+    config = getattr(request.app.state, "config", None)
+    if config is not None and not getattr(config, "auth_enabled", True):
+        return _MOCK_USER
+    
     user: AuthenticatedUser | None = getattr(request.state, "user", None)
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
