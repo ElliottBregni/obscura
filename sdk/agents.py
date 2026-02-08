@@ -64,6 +64,7 @@ class AgentConfig:
     timeout_seconds: float = 300.0
     tools: list[str] = field(default_factory=list)
     parent_agent_id: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass

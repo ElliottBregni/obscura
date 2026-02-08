@@ -798,7 +798,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "total_created": len(created),
         })
 
-    @app.delete("/api/v1/agents/bulk", tags=["agents"])
+    @app.post("/api/v1/agents/bulk/stop", tags=["agents"])
     async def agents_bulk_stop(
         body: dict,
         user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
@@ -1019,7 +1019,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             "added": list(new_tags - current_tags),
         })
 
-    @app.delete("/api/v1/agents/{agent_id}/tags", tags=["agents"])
+    @app.post("/api/v1/agents/{agent_id}/tags/remove", tags=["agents"])
     async def agent_remove_tags(
         agent_id: str,
         body: dict,

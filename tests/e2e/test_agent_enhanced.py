@@ -67,7 +67,7 @@ class TestAgentBulkOperations:
 
     def test_bulk_stop_empty_list(self, client):
         """Bulk stop with empty list returns error."""
-        resp = client.delete("/api/v1/agents/bulk", json={"agent_ids": []})
+        resp = client.post("/api/v1/agents/bulk/stop", json={"agent_ids": []})
         
         assert resp.status_code == 400
         assert "No agent_ids provided" in resp.json()["detail"]
@@ -91,7 +91,8 @@ class TestAgentBulkOperations:
         assert len(data["tagged"]) == 2
         
         # Cleanup
-        client.delete("/api/v1/agents/bulk", json={"agent_ids": agent_ids})
+        for aid in agent_ids:
+            client.delete(f"/api/v1/agents/{aid}")
 
 
 @pytest.mark.e2e
@@ -231,7 +232,7 @@ class TestAgentTags:
             assert resp.status_code == 200
             data = resp.json()
             assert set(data["tags"]) == {"production", "critical", "team-alpha"}
-            assert data["added"] == ["production", "critical", "team-alpha"]
+            assert set(data["added"]) == {"production", "critical", "team-alpha"}
         finally:
             client.delete(f"/api/v1/agents/{agent_id}")
 
@@ -249,7 +250,7 @@ class TestAgentTags:
             })
             
             # Remove some tags
-            resp = client.delete(f"/api/v1/agents/{agent_id}/tags", json={
+            resp = client.post(f"/api/v1/agents/{agent_id}/tags/remove", json={
                 "tags": ["tag1", "tag2"]
             })
             
@@ -309,7 +310,8 @@ class TestAgentTags:
         assert len(production_agents) >= 2
         
         # Cleanup
-        client.delete("/api/v1/agents/bulk", json={"agent_ids": agent_ids})
+        for aid in agent_ids:
+            client.delete(f"/api/v1/agents/{aid}")
 
     def test_filter_agents_by_name(self, client):
         """Can filter agents by name."""
@@ -332,4 +334,5 @@ class TestAgentTags:
         assert len(web_agents) >= 2
         
         # Cleanup
-        client.delete("/api/v1/agents/bulk", json={"agent_ids": agent_ids})
+        for aid in agent_ids:
+            client.delete(f"/api/v1/agents/{aid}")

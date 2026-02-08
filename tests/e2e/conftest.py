@@ -57,6 +57,7 @@ class _FakeAgentConfig:
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
+    tags: list = field(default_factory=list)
 
 
 @dataclass
