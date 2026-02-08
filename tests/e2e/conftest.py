@@ -284,3 +284,25 @@ def client():
         app.dependency_overrides[get_current_user] = lambda: _TEST_USER
         with TestClient(app) as tc:
             yield tc
+
+
+@pytest.fixture
+def client_no_auth_override():
+    """TestClient with auth ENABLED but no dependency override.
+    
+    Use this to test actual auth behavior (API keys, JWT).
+    """
+    config = ObscuraConfig(
+        auth_enabled=True,
+        otel_enabled=False,
+    )
+
+    with (
+        patch("sdk.server._get_runtime", side_effect=_mock_get_runtime),
+        patch("sdk.memory.MemoryStore", _FakeMemoryStore),
+        patch("sdk.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
+    ):
+        app = create_app(config)
+        # NO dependency override - tests real auth flow
+        with TestClient(app) as tc:
+            yield tc

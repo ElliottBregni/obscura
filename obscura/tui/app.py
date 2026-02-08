@@ -30,6 +30,7 @@ from obscura.tui.screens.plan import PlanScreen
 from obscura.tui.screens.code import CodeScreen
 from obscura.tui.screens.diff import DiffScreen
 from obscura.tui.screens.dashboard import DashboardScreen
+from obscura.tui.screens.new_agent import NewAgentScreen
 
 
 class TUIApp(App):
@@ -118,6 +119,7 @@ class TUIApp(App):
                     ListItem(Label("📋 Plan (F4)", classes="sidebar-item"), id="plan"),
                     ListItem(Label("📝 Code (F5)", classes="sidebar-item"), id="code"),
                     ListItem(Label("🔍 Diff (F6)", classes="sidebar-item"), id="diff"),
+                    ListItem(Label("➕ New Agent", classes="sidebar-item"), id="new_agent"),
                     ListItem(Label("⚙️  Settings", classes="sidebar-item"), id="settings"),
                 )
             
@@ -129,6 +131,7 @@ class TUIApp(App):
                     TabPane("Plan", PlanScreen(), id="plan"),
                     TabPane("Code", CodeScreen(), id="code"),
                     TabPane("Diff", DiffScreen(), id="diff"),
+                    TabPane("New Agent", NewAgentScreen(), id="new_agent"),
                 )
         
         # Status bar

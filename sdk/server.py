@@ -24,6 +24,7 @@ import logging
 import subprocess
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -692,9 +693,17 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     @app.get("/api/v1/agents", tags=["agents"])
     async def agent_list(
         status: str | None = None,
+        tags: str | None = None,
+        name: str | None = None,
         user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
     ) -> JSONResponse:
-        """List all agents for the user."""
+        """List all agents for the user.
+        
+        Query params:
+            status: Filter by status (PENDING, RUNNING, WAITING, COMPLETED, FAILED, STOPPED)
+            tags: Comma-separated list of tags to filter by (e.g., "production,critical")
+            name: Filter by name (partial match)
+        """
         from sdk.agents import AgentStatus
 
         runtime = await _get_runtime(user)
@@ -708,6 +717,21 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         
         agents = runtime.list_agents(status=status_filter)
         
+        # Filter by tags if provided
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",")]
+            agents = [
+                a for a in agents
+                if any(t in getattr(a.config, "tags", []) for t in tag_list)
+            ]
+        
+        # Filter by name if provided
+        if name:
+            agents = [
+                a for a in agents
+                if name.lower() in a.config.name.lower()
+            ]
+        
         return JSONResponse(content={
             "agents": [
                 {
@@ -715,11 +739,333 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                     "name": a.config.name,
                     "status": a.status.name,
                     "model": a.config.model,
+                    "tags": getattr(a.config, "tags", []),
                     "created_at": a.created_at.isoformat(),
                 }
                 for a in agents
             ],
             "count": len(agents),
+        })
+
+    # -- agent bulk operations --------------------------------------------
+
+    @app.post("/api/v1/agents/bulk", tags=["agents"])
+    async def agents_bulk_spawn(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Spawn multiple agents in one request."""
+        runtime = await _get_runtime(user)
+        agents_config = body.get("agents", [])
+        
+        if not agents_config:
+            raise HTTPException(status_code=400, detail="No agents provided")
+        
+        if len(agents_config) > 100:
+            raise HTTPException(status_code=400, detail="Cannot spawn more than 100 agents at once")
+        
+        created = []
+        errors = []
+        
+        for idx, cfg in enumerate(agents_config):
+            try:
+                agent = runtime.spawn(
+                    name=cfg.get("name", f"bulk-agent-{idx}"),
+                    model=cfg.get("model", "claude"),
+                    system_prompt=cfg.get("system_prompt", ""),
+                    memory_namespace=cfg.get("memory_namespace", "default"),
+                    max_iterations=cfg.get("max_iterations", 10),
+                    tags=cfg.get("tags", []),
+                )
+                await agent.start()
+                
+                created.append({
+                    "agent_id": agent.id,
+                    "name": agent.config.name,
+                    "status": agent.status.name,
+                })
+                
+                _audit("agent.spawn", user, f"agent:{agent.id}", "create", "success",
+                       name=agent.config.name, model=agent.config.model, bulk=True)
+                       
+            except Exception as e:
+                errors.append({"index": idx, "name": cfg.get("name"), "error": str(e)})
+        
+        return JSONResponse(content={
+            "created": created,
+            "errors": errors,
+            "total_requested": len(agents_config),
+            "total_created": len(created),
+        })
+
+    @app.delete("/api/v1/agents/bulk", tags=["agents"])
+    async def agents_bulk_stop(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Stop multiple agents in one request."""
+        runtime = await _get_runtime(user)
+        agent_ids = body.get("agent_ids", [])
+        
+        if not agent_ids:
+            raise HTTPException(status_code=400, detail="No agent_ids provided")
+        
+        stopped = []
+        errors = []
+        
+        for agent_id in agent_ids:
+            try:
+                agent = runtime.get_agent(agent_id)
+                if agent is None:
+                    errors.append({"agent_id": agent_id, "error": "Agent not found"})
+                    continue
+                    
+                await agent.stop()
+                stopped.append(agent_id)
+                _audit("agent.stop", user, f"agent:{agent_id}", "stop", "success", bulk=True)
+                
+            except Exception as e:
+                errors.append({"agent_id": agent_id, "error": str(e)})
+        
+        return JSONResponse(content={
+            "stopped": stopped,
+            "errors": errors,
+            "total_requested": len(agent_ids),
+            "total_stopped": len(stopped),
+        })
+
+    @app.post("/api/v1/agents/bulk/tag", tags=["agents"])
+    async def agents_bulk_tag(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Add tags to multiple agents."""
+        runtime = await _get_runtime(user)
+        agent_ids = body.get("agent_ids", [])
+        tags = body.get("tags", [])
+        
+        if not agent_ids:
+            raise HTTPException(status_code=400, detail="No agent_ids provided")
+        
+        if not tags:
+            raise HTTPException(status_code=400, detail="No tags provided")
+        
+        tagged = []
+        errors = []
+        
+        for agent_id in agent_ids:
+            try:
+                agent = runtime.get_agent(agent_id)
+                if agent is None:
+                    errors.append({"agent_id": agent_id, "error": "Agent not found"})
+                    continue
+                
+                # Add tags to agent config if supported
+                current_tags = getattr(agent.config, "tags", [])
+                new_tags = list(set(current_tags + tags))
+                agent.config.tags = new_tags
+                
+                tagged.append(agent_id)
+                
+            except Exception as e:
+                errors.append({"agent_id": agent_id, "error": str(e)})
+        
+        return JSONResponse(content={
+            "tagged": tagged,
+            "errors": errors,
+            "tags": tags,
+        })
+
+    # -- agent templates --------------------------------------------------
+
+    _agent_templates: dict[str, dict] = {}
+
+    @app.post("/api/v1/agent-templates", tags=["agents"])
+    async def template_create(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Create an agent template."""
+        import uuid
+        
+        template_id = str(uuid.uuid4())
+        template = {
+            "template_id": template_id,
+            "name": body.get("name", "unnamed-template"),
+            "model": body.get("model", "claude"),
+            "system_prompt": body.get("system_prompt", ""),
+            "timeout_seconds": body.get("timeout_seconds", 300),
+            "max_iterations": body.get("max_iterations", 10),
+            "memory_namespace": body.get("memory_namespace", "default"),
+            "tags": body.get("tags", []),
+            "created_by": user.user_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        
+        _agent_templates[template_id] = template
+        
+        _audit("template.create", user, f"template:{template_id}", "create", "success",
+               name=template["name"])
+        
+        return JSONResponse(content=template)
+
+    @app.get("/api/v1/agent-templates", tags=["agents"])
+    async def template_list(
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """List all agent templates."""
+        templates = list(_agent_templates.values())
+        return JSONResponse(content={
+            "templates": templates,
+            "count": len(templates),
+        })
+
+    @app.get("/api/v1/agent-templates/{template_id}", tags=["agents"])
+    async def template_get(
+        template_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get a specific agent template."""
+        template = _agent_templates.get(template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+        return JSONResponse(content=template)
+
+    @app.delete("/api/v1/agent-templates/{template_id}", tags=["agents"])
+    async def template_delete(
+        template_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Delete an agent template."""
+        if template_id not in _agent_templates:
+            raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+        
+        del _agent_templates[template_id]
+        
+        _audit("template.delete", user, f"template:{template_id}", "delete", "success")
+        
+        return JSONResponse(content={"template_id": template_id, "deleted": True})
+
+    @app.post("/api/v1/agents/from-template", tags=["agents"])
+    async def agent_spawn_from_template(
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Spawn an agent from a template."""
+        runtime = await _get_runtime(user)
+        template_id = body.get("template_id")
+        
+        if not template_id:
+            raise HTTPException(status_code=400, detail="template_id is required")
+        
+        template = _agent_templates.get(template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+        
+        # Override template values with request values
+        agent = runtime.spawn(
+            name=body.get("name", f"{template['name']}-instance"),
+            model=template.get("model", "claude"),
+            system_prompt=template.get("system_prompt", ""),
+            memory_namespace=template.get("memory_namespace", "default"),
+            max_iterations=template.get("max_iterations", 10),
+            tags=template.get("tags", []),
+        )
+        
+        await agent.start()
+        
+        _audit("agent.spawn", user, f"agent:{agent.id}", "create", "success",
+               name=agent.config.name, template_id=template_id)
+        
+        return JSONResponse(content={
+            "agent_id": agent.id,
+            "name": agent.config.name,
+            "status": agent.status.name,
+            "template_id": template_id,
+            "created_at": agent.created_at.isoformat(),
+        })
+
+    # -- agent tags -------------------------------------------------------
+
+    @app.post("/api/v1/agents/{agent_id}/tags", tags=["agents"])
+    async def agent_add_tags(
+        agent_id: str,
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Add tags to an agent."""
+        runtime = await _get_runtime(user)
+        agent = runtime.get_agent(agent_id)
+        
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+        
+        tags = body.get("tags", [])
+        if not tags:
+            raise HTTPException(status_code=400, detail="No tags provided")
+        
+        # Initialize tags if not present
+        if not hasattr(agent.config, "tags"):
+            agent.config.tags = []
+        
+        # Add new tags
+        current_tags = set(agent.config.tags)
+        new_tags = set(tags)
+        agent.config.tags = list(current_tags | new_tags)
+        
+        return JSONResponse(content={
+            "agent_id": agent_id,
+            "tags": agent.config.tags,
+            "added": list(new_tags - current_tags),
+        })
+
+    @app.delete("/api/v1/agents/{agent_id}/tags", tags=["agents"])
+    async def agent_remove_tags(
+        agent_id: str,
+        body: dict,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    ) -> JSONResponse:
+        """Remove tags from an agent."""
+        runtime = await _get_runtime(user)
+        agent = runtime.get_agent(agent_id)
+        
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+        
+        tags = body.get("tags", [])
+        if not tags:
+            raise HTTPException(status_code=400, detail="No tags provided")
+        
+        if not hasattr(agent.config, "tags"):
+            return JSONResponse(content={"agent_id": agent_id, "tags": [], "removed": []})
+        
+        current_tags = set(agent.config.tags)
+        remove_tags = set(tags)
+        agent.config.tags = list(current_tags - remove_tags)
+        
+        return JSONResponse(content={
+            "agent_id": agent_id,
+            "tags": agent.config.tags,
+            "removed": list(remove_tags & current_tags),
+        })
+
+    @app.get("/api/v1/agents/{agent_id}/tags", tags=["agents"])
+    async def agent_get_tags(
+        agent_id: str,
+        user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    ) -> JSONResponse:
+        """Get tags for an agent."""
+        runtime = await _get_runtime(user)
+        agent = runtime.get_agent(agent_id)
+        
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+        
+        tags = getattr(agent.config, "tags", [])
+        
+        return JSONResponse(content={
+            "agent_id": agent_id,
+            "tags": tags,
         })
 
     # -- agent stream (SSE) -----------------------------------------------

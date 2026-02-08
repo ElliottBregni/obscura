@@ -50,6 +50,14 @@ tests/test_telemetry_audit.py
 tests/test_telemetry_hooks.py
 tests/test_telemetry_metrics.py
 tests/test_telemetry_traces.py
+tests/test_tui_client.py
+tests/test_tui_diff.py
+tests/test_tui_file_ops.py
+tests/test_tui_modes.py
+tests/test_tui_plan.py
+tests/test_tui_session.py
+tests/test_tui_session_persist.py
+tests/test_tui_slash_commands.py
 tests/test_variants.py
 tests/test_vector_memory.py
 tests/test_watcher.py

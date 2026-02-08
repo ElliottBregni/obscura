@@ -346,7 +346,12 @@ class Agent:
         """Stop the agent and cleanup."""
         self.status = AgentStatus.STOPPED
         if self._client:
-            await self._client.stop()
+            try:
+                await self._client.stop()
+            except RuntimeError as e:
+                # Ignore cancel scope errors from underlying SDK
+                if "cancel scope" not in str(e):
+                    raise
         if self._task and not self._task.done():
             self._task.cancel()
         self._update_state()

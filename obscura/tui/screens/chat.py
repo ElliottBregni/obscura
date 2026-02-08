@@ -1,251 +1,193 @@
-"""Chat Screen - Interactive Agent Chat"""
+"""Chat Screen - Interactive agent chat with real API"""
 
 from textual.screen import Screen
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
-    Static,
     Input,
     Button,
     Label,
-    RichLog,
+    Log,
     Select,
-    LoadingIndicator,
+    Static,
 )
 from textual.reactive import reactive
 from textual.binding import Binding
-from rich.text import Text
-from rich.panel import Panel
+
+from obscura.tui.client import TUIClient
 
 
 class ChatScreen(Screen):
-    """Interactive chat interface with agents."""
+    """Interactive chat with agents."""
     
     CSS = """
     ChatScreen {
         padding: 0;
     }
     
-    #chat-container {
-        height: 100%;
-        padding: 1;
+    #header {
+        height: auto;
+        padding: 0 1;
+        background: $surface-darken-1;
+        border-bottom: solid $primary;
     }
     
-    #agent-selector {
-        height: auto;
-        margin-bottom: 1;
+    #agent-select {
+        width: 30;
     }
     
     #chat-log {
         height: 1fr;
         border: solid $primary;
-        padding: 1;
-        background: $surface-darken-1;
-    }
-    
-    .message-user {
-        color: $text;
-        background: $primary-darken-2;
-        padding: 1;
-        margin: 1 0;
-        border-left: solid $primary;
-    }
-    
-    .message-agent {
-        color: $text;
-        background: $surface;
-        padding: 1;
-        margin: 1 0;
-        border-left: solid $success;
-    }
-    
-    .message-system {
-        color: $text-muted;
-        text-style: italic;
-        text-align: center;
-        margin: 1 0;
+        margin: 1;
+        padding: 0;
     }
     
     #input-area {
         height: auto;
-        margin-top: 1;
+        padding: 0 1 1 1;
     }
     
     #message-input {
         width: 1fr;
     }
     
-    #send-button {
+    #send-btn {
         width: auto;
+        margin-left: 1;
     }
     
-    #loading {
-        display: none;
-        height: auto;
-        text-align: center;
+    .message-user {
         color: $primary;
+        margin: 0 0 0 0;
     }
     
-    #loading.active {
-        display: block;
+    .message-agent {
+        color: $text;
+        margin: 0 0 1 0;
+    }
+    
+    .message-system {
+        color: $text-muted;
+        text-style: italic;
     }
     """
     
     BINDINGS = [
-        Binding("ctrl+s", "send", "Send", show=True),
-        Binding("ctrl+l", "clear", "Clear", show=True),
-        Binding("up", "history_prev", "Prev", show=False),
-        Binding("down", "history_next", "Next", show=False),
+        Binding("enter", "send_message", "Send", show=True),
+        Binding("ctrl+r", "refresh_agents", "Refresh Agents", show=True),
     ]
     
-    messages: reactive[list] = reactive([])
     current_agent: reactive[str | None] = reactive(None)
-    is_loading: reactive[bool] = reactive(False)
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.message_history = []
-        self.history_index = 0
+    messages: reactive[list] = reactive([])
+    agents: reactive[list] = reactive([])
     
     def compose(self):
         """Compose the chat screen."""
-        with Vertical(id="chat-container"):
-            # Agent selector
-            with Horizontal(id="agent-selector"):
-                yield Label("Agent:")
-                yield Select(
-                    [("Select agent...", None), ("code-reviewer", "agent-1"), ("doc-writer", "agent-2")],
-                    id="agent-select",
-                    value=None,
-                )
-                yield Button("➕ New", id="btn-new-agent", variant="primary")
+        with Vertical():
+            # Header with agent selector
+            with Horizontal(id="header"):
+                yield Label("Agent: ")
+                yield Select([], id="agent-select", prompt="Select agent...")
+                yield Button("🔄", id="btn-refresh", variant="default")
             
             # Chat log
-            yield RichLog(id="chat-log", wrap=True, highlight=True)
-            
-            # Loading indicator
-            with Vertical(id="loading"):
-                yield LoadingIndicator()
-                yield Label("Agent is thinking...")
+            yield Log(id="chat-log", highlight=True)
             
             # Input area
             with Horizontal(id="input-area"):
-                yield Input(
-                    placeholder="Type your message... (Ctrl+S to send)",
-                    id="message-input",
-                )
-                yield Button("Send", id="send-button", variant="primary")
+                yield Input(placeholder="Type a message...", id="message-input")
+                yield Button("Send", id="send-btn", variant="primary")
     
     def on_mount(self):
         """Set up the chat screen."""
-        self.add_system_message("Welcome to Obscura Chat!")
-        self.add_system_message("Select an agent to start chatting.")
+        self.refresh_agents()
+        self.add_message("system", "Welcome to Obscura Chat!")
+        self.add_message("system", "Select an agent to start chatting.")
     
-    def add_message(self, role: str, content: str) -> None:
-        """Add a message to the chat."""
-        log = self.query_one("#chat-log", RichLog)
+    def watch_agents(self, agents: list):
+        """Update agent selector when agents change."""
+        select = self.query_one("#agent-select", Select)
+        options = [(f"{a.get('name', 'Unnamed')} ({a.get('agent_id', '')[:6]}...)", a.get('agent_id')) 
+                   for a in agents]
+        select.set_options(options)
+    
+    def add_message(self, role: str, content: str):
+        """Add a message to the chat log."""
+        log = self.query_one("#chat-log", Log)
         
         if role == "user":
-            text = Text(f"You: {content}", style="bold cyan")
-            log.write(Panel(text, border_style="cyan"))
+            prefix = "You: "
+            style = "message-user"
         elif role == "agent":
-            text = Text(f"Agent: {content}", style="bold green")
-            log.write(Panel(text, border_style="green"))
-        elif role == "system":
-            text = Text(content, style="dim italic")
-            log.write(text)
+            prefix = "Agent: "
+            style = "message-agent"
+        else:
+            prefix = ""
+            style = "message-system"
         
-        self.messages.append({"role": role, "content": content})
+        log.write_line(f"{prefix}{content}")
     
-    def add_system_message(self, content: str) -> None:
-        """Add a system message."""
-        self.add_message("system", content)
+    async def refresh_agents(self):
+        """Refresh the list of agents."""
+        try:
+            async with TUIClient() as client:
+                self.agents = await client.list_agents()
+                
+                if not self.agents:
+                    self.add_message("system", "No agents found. Create one from the dashboard.")
+                else:
+                    self.add_message("system", f"Found {len(self.agents)} agent(s)")
+                    
+        except Exception as e:
+            self.add_message("system", f"Error loading agents: {e}")
+    
+    def action_refresh_agents(self):
+        """Refresh agents action."""
+        self.run_worker(self.refresh_agents())
+    
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Handle agent selection."""
+        if event.value:
+            self.current_agent = event.value
+            self.add_message("system", f"Selected agent: {event.value[:8]}...")
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        if event.button.id == "send-button":
-            self.action_send()
-        elif event.button.id == "btn-new-agent":
-            self.app.notify("New agent dialog", severity="information")
+        if event.button.id == "btn-refresh":
+            self.run_worker(self.refresh_agents())
+        elif event.button.id == "send-btn":
+            self.action_send_message()
     
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle input submission."""
-        if event.input.id == "message-input":
-            self.action_send()
-    
-    def action_send(self) -> None:
-        """Send the current message."""
+    def action_send_message(self):
+        """Send a message to the current agent."""
+        if not self.current_agent:
+            self.app.notify("Please select an agent first", severity="error")
+            return
+        
         input_widget = self.query_one("#message-input", Input)
         message = input_widget.value.strip()
         
         if not message:
             return
         
-        if not self.current_agent:
-            self.app.notify("Please select an agent first!", severity="error")
-            return
-        
-        # Add user message
-        self.add_message("user", message)
         input_widget.value = ""
+        self.add_message("user", message)
         
-        # Store in history
-        self.message_history.append(message)
-        self.history_index = len(self.message_history)
-        
-        # Simulate agent response (TODO: connect to real API)
-        self.send_to_agent(message)
+        # Send to agent
+        self.run_worker(self.send_to_agent(message))
     
-    def send_to_agent(self, message: str) -> None:
-        """Send message to agent and handle response."""
-        self.is_loading = True
-        
-        # TODO: Connect to actual Obscura API
-        # For now, simulate async response
-        self.app.notify(f"Sending to {self.current_agent}...", severity="information")
-        
-        # Mock response
-        import asyncio
-        asyncio.create_task(self._mock_response())
-    
-    async def _mock_response(self):
-        """Mock agent response for testing."""
-        await asyncio.sleep(2)
-        self.is_loading = False
-        self.add_message("agent", "This is a mock response. Connect to real API for actual agent responses.")
-    
-    def watch_is_loading(self, loading: bool) -> None:
-        """Show/hide loading indicator."""
-        loading_widget = self.query_one("#loading", Vertical)
-        if loading:
-            loading_widget.add_class("active")
-        else:
-            loading_widget.remove_class("active")
-    
-    def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle agent selection."""
-        if event.select.id == "agent-select":
-            self.current_agent = event.value
-            if self.current_agent:
-                self.add_system_message(f"Switched to agent: {self.current_agent}")
-                self.app.current_agent = self.current_agent
-    
-    def action_clear(self) -> None:
-        """Clear chat history."""
-        log = self.query_one("#chat-log", RichLog)
-        log.clear()
-        self.messages.clear()
-        self.add_system_message("Chat history cleared.")
-    
-    def action_history_prev(self) -> None:
-        """Navigate to previous message in history."""
-        if self.history_index > 0:
-            self.history_index -= 1
-            input_widget = self.query_one("#message-input", Input)
-            input_widget.value = self.message_history[self.history_index]
-    
-    def action_history_next(self) -> None:
-        """Navigate to next message in history."""
-        if self.history_index < len(self.message_history) - 1:
-            self.history_index += 1
-            input_widget = self.query_one("#message-input", Input)
-            input_widget.value = self.message_history[self.history_index]
+    async def send_to_agent(self, message: str):
+        """Send message to agent via API."""
+        try:
+            self.add_message("system", "Thinking...")
+            
+            async with TUIClient() as client:
+                result = await client.run_task(self.current_agent, message)
+                
+                # Remove "Thinking..." and add response
+                # (In real implementation, we'd track and remove the thinking message)
+                response = result.get("response", "No response")
+                self.add_message("agent", response)
+                
+        except Exception as e:
+            self.add_message("system", f"Error: {e}")

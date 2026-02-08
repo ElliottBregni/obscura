@@ -1,4 +1,4 @@
-"""Dashboard Screen - Agent Overview"""
+"""Dashboard Screen - Agent Overview with real API"""
 
 from textual.screen import Screen
 from textual.containers import Vertical, Horizontal, Grid
@@ -7,11 +7,12 @@ from textual.widgets import (
     DataTable,
     Button,
     Label,
-    ProgressBar,
-    Rule,
 )
 from textual.reactive import reactive
 from textual.binding import Binding
+from textual.worker import Worker
+
+from obscura.tui.client import TUIClient
 
 
 class DashboardScreen(Screen):
@@ -55,6 +56,11 @@ class DashboardScreen(Screen):
         height: auto;
         margin: 1 0;
     }
+    
+    .loading {
+        text-align: center;
+        color: $text-muted;
+    }
     """
     
     BINDINGS = [
@@ -64,6 +70,7 @@ class DashboardScreen(Screen):
     
     agents: reactive[list] = reactive([])
     stats: reactive[dict] = reactive({})
+    loading: reactive[bool] = reactive(False)
     
     def compose(self):
         """Compose the dashboard."""
@@ -71,30 +78,26 @@ class DashboardScreen(Screen):
             # Stats cards
             with Grid(id="stats-grid"):
                 with Vertical(classes="stat-card"):
-                    yield Label("0", classes="stat-value", id="stat-active")
+                    yield Label("-", classes="stat-value", id="stat-active")
                     yield Label("Active Agents", classes="stat-label")
                 
                 with Vertical(classes="stat-card"):
-                    yield Label("0", classes="stat-value", id="stat-running")
+                    yield Label("-", classes="stat-value", id="stat-running")
                     yield Label("Running Tasks", classes="stat-label")
                 
                 with Vertical(classes="stat-card"):
-                    yield Label("0", classes="stat-value", id="stat-completed")
-                    yield Label("Completed", classes="stat-label")
+                    yield Label("-", classes="stat-value", id="stat-waiting")
+                    yield Label("Waiting", classes="stat-label")
                 
                 with Vertical(classes="stat-card"):
-                    yield Label("0", classes="stat-value", id="stat-memory")
+                    yield Label("-", classes="stat-value", id="stat-memory")
                     yield Label("Memory Entries", classes="stat-label")
-            
-            yield Rule()
             
             # Actions
             with Horizontal(id="actions"):
                 yield Button("➕ New Agent", id="btn-new", variant="primary")
                 yield Button("🔄 Refresh", id="btn-refresh", variant="default")
                 yield Button("⏹ Stop All", id="btn-stop-all", variant="error")
-            
-            yield Rule()
             
             # Agents table
             yield Label("Active Agents", classes="section-title")
@@ -103,30 +106,29 @@ class DashboardScreen(Screen):
     def on_mount(self):
         """Set up the dashboard."""
         table = self.query_one("#agents-table", DataTable)
-        table.add_columns("ID", "Name", "Model", "Status", "Runtime", "Actions")
+        table.add_columns("ID", "Name", "Status", "Created", "Actions")
         table.cursor_type = "row"
         
         # Load initial data
         self.load_data()
     
-    def load_data(self):
-        """Load agents and stats."""
-        # TODO: Connect to actual API
-        self.app.notify("Loading dashboard data...", severity="information")
+    async def load_data(self):
+        """Load agents and stats from API."""
+        self.loading = True
+        self.app.notify("Loading...", severity="information", timeout=1)
         
-        # Mock data for now
-        self.agents = [
-            {"id": "agent-1", "name": "code-reviewer", "model": "claude", "status": "running", "runtime": "5m"},
-            {"id": "agent-2", "name": "doc-writer", "model": "claude", "status": "waiting", "runtime": "2m"},
-        ]
+        try:
+            async with TUIClient() as client:
+                # Fetch data
+                self.agents = await client.list_agents()
+                self.stats = await client.get_stats()
+                
+        except Exception as e:
+            self.app.notify(f"Error loading data: {e}", severity="error")
+            self.agents = []
+            self.stats = {}
         
-        self.stats = {
-            "active": len(self.agents),
-            "running": sum(1 for a in self.agents if a["status"] == "running"),
-            "completed": 12,
-            "memory": 45,
-        }
-        
+        self.loading = False
         self.update_display()
     
     def update_display(self):
@@ -134,7 +136,7 @@ class DashboardScreen(Screen):
         # Update stats
         self.query_one("#stat-active", Label).update(str(self.stats.get("active", 0)))
         self.query_one("#stat-running", Label).update(str(self.stats.get("running", 0)))
-        self.query_one("#stat-completed", Label).update(str(self.stats.get("completed", 0)))
+        self.query_one("#stat-waiting", Label).update(str(self.stats.get("waiting", 0)))
         self.query_one("#stat-memory", Label).update(str(self.stats.get("memory", 0)))
         
         # Update table
@@ -142,21 +144,23 @@ class DashboardScreen(Screen):
         table.clear()
         
         for agent in self.agents:
+            status = agent.get("status", "UNKNOWN")
             status_emoji = {
-                "running": "🟢",
-                "waiting": "🟡",
-                "error": "🔴",
-                "completed": "✅",
-            }.get(agent["status"], "⚪")
+                "RUNNING": "🟢",
+                "WAITING": "🟡",
+                "ERROR": "🔴",
+                "COMPLETED": "✅",
+            }.get(status, "⚪")
+            
+            created = agent.get("created_at", "")[:10]  # Just date
             
             table.add_row(
-                agent["id"][:8],
-                agent["name"],
-                agent["model"],
-                f"{status_emoji} {agent['status']}",
-                agent["runtime"],
-                "[View] [Stop]",
-                key=agent["id"]
+                agent.get("agent_id", "")[:8],
+                agent.get("name", "Unnamed"),
+                f"{status_emoji} {status}",
+                created,
+                "[Stop]",
+                key=agent.get("agent_id", "")
             )
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -164,14 +168,36 @@ class DashboardScreen(Screen):
         if event.button.id == "btn-new":
             self.action_new_agent()
         elif event.button.id == "btn-refresh":
-            self.load_data()
+            self.run_worker(self.load_data())
         elif event.button.id == "btn-stop-all":
-            self.app.notify("Stopping all agents...", severity="warning")
+            self.run_worker(self.stop_all_agents())
+    
+    async def stop_all_agents(self):
+        """Stop all running agents."""
+        if not self.agents:
+            self.app.notify("No agents to stop", severity="information")
+            return
+        
+        self.app.notify("Stopping all agents...", severity="warning")
+        
+        try:
+            async with TUIClient() as client:
+                for agent in self.agents:
+                    try:
+                        await client.stop_agent(agent["agent_id"])
+                    except Exception:
+                        pass  # Agent might already be stopped
+            
+            self.app.notify("All agents stopped", severity="information")
+            await self.load_data()
+            
+        except Exception as e:
+            self.app.notify(f"Error stopping agents: {e}", severity="error")
     
     def action_refresh(self):
         """Refresh dashboard data."""
-        self.load_data()
+        self.run_worker(self.load_data())
     
     def action_new_agent(self):
         """Open new agent dialog."""
-        self.app.notify("New agent dialog (implement me)", severity="information")
+        self.app.push_screen("new_agent")

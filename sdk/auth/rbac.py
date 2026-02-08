@@ -17,6 +17,7 @@ Roles
 from __future__ import annotations
 
 from typing import Callable
+import os
 
 from fastapi import Depends, HTTPException, Request
 
@@ -32,6 +33,39 @@ _MOCK_USER = AuthenticatedUser(
     raw_token="",
 )
 
+# API Keys - loaded from env var OBSCURA_API_KEYS (comma-separated key:name:role1,role2)
+# Example: OBSCURA_API_KEYS="key1:dev-user:admin,agent:copilot;key2:readonly-user:agent:read"
+_API_KEYS: dict[str, dict] = {}
+
+def _load_api_keys():
+    """Load API keys from environment."""
+    global _API_KEYS
+    keys_env = os.environ.get("OBSCURA_API_KEYS", "")
+    if not keys_env:
+        # Default test key for convenience
+        _API_KEYS = {
+            "obscura-dev-key-123": {
+                "user_id": "dev-user",
+                "email": "dev@obscura.local",
+                "roles": ["admin", "agent:copilot", "agent:claude", "agent:read", "sync:write", "sessions:manage"]
+            }
+        }
+        return
+    
+    _API_KEYS = {}
+    for key_def in keys_env.split(";"):
+        parts = key_def.split(":")
+        if len(parts) >= 3:
+            key, user_id, roles_str = parts[0], parts[1], parts[2]
+            roles = roles_str.split(",") if roles_str else ["agent:read"]
+            _API_KEYS[key] = {
+                "user_id": user_id,
+                "email": f"{user_id}@obscura.local",
+                "roles": roles
+            }
+
+_load_api_keys()
+
 
 # ---------------------------------------------------------------------------
 # Core dependency: extract user from request
@@ -40,19 +74,36 @@ _MOCK_USER = AuthenticatedUser(
 async def get_current_user(request: Request) -> AuthenticatedUser:
     """FastAPI dependency that returns the authenticated user.
 
-    The :class:`~sdk.auth.middleware.JWTAuthMiddleware` must run before
-    this dependency is evaluated -- it populates ``request.state.user``.
-
-    If auth is disabled, returns a mock user with all roles.
+    Checks in order:
+    1. X-API-Key header (if OBSCURA_AUTH_ENABLED=true)
+    2. JWT token (from middleware, set in request.state.user)
+    3. Mock user (if auth is disabled)
 
     Raises:
-        HTTPException(401): if no user is attached to the request.
+        HTTPException(401): if no valid auth found.
     """
     # Check if auth is disabled via app config
     config = getattr(request.app.state, "config", None)
-    if config is not None and not getattr(config, "auth_enabled", True):
+    auth_enabled = getattr(config, "auth_enabled", True) if config else True
+    
+    # 1. Check API key header (works even when auth is enabled)
+    api_key = request.headers.get("X-API-Key")
+    if api_key and api_key in _API_KEYS:
+        key_data = _API_KEYS[api_key]
+        return AuthenticatedUser(
+            user_id=key_data["user_id"],
+            email=key_data["email"],
+            roles=tuple(key_data["roles"]),
+            org_id="local",
+            token_type="api_key",
+            raw_token=api_key
+        )
+    
+    # 2. If auth is disabled, return mock user
+    if not auth_enabled:
         return _MOCK_USER
     
+    # 3. Check JWT token from middleware
     user: AuthenticatedUser | None = getattr(request.state, "user", None)
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
