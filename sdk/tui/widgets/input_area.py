@@ -161,11 +161,13 @@ class PromptInput(Widget):
             return
 
         # Enter without shift = submit
-        if event.key == "enter" and not event.shift_key:
+        if event.key == "enter":
             event.prevent_default()
             event.stop()
             await self._submit()
             return
+
+        # shift+enter is handled by TextArea as newline (no action needed)
 
         # Up arrow = history previous
         if event.key == "up":

@@ -59,8 +59,7 @@ class FileTree(Widget):
     # -- Compose ------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="file-tree") as container:
-            pass  # Empty initially
+        yield Vertical(classes="file-tree")
 
     def on_mount(self) -> None:
         try:

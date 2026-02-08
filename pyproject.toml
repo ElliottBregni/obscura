@@ -60,7 +60,8 @@ dev = [
 
 # Package discovery - explicitly define what to include
 [tool.setuptools]
-packages = ["sdk", "obscura"]
+packages = ["sdk", "sdk.tui", "sdk.tui.widgets", "obscura", "obscura.tui", "obscura.tui.screens", "obscura.tui.widgets"]
+py-modules = ["obscura_cli"]
 
 [tool.setuptools.package-data]
 sdk = ["py.typed"]
