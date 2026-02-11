@@ -48,7 +48,7 @@ class MessageList(VerticalScroll):
 
     # -- Message management -------------------------------------------------
 
-    def add_user_message(self, content: str) -> MessageBubble:
+    async def add_user_message(self, content: str) -> MessageBubble:
         """Add a user message to the conversation.
 
         Args:
@@ -63,11 +63,11 @@ class MessageList(VerticalScroll):
             content=content,
             id=f"msg-{self._message_count}",
         )
-        self.mount(bubble)
+        await self.mount(bubble)
         self._scroll_to_bottom()
         return bubble
 
-    def add_assistant_message(self, content: str = "") -> MessageBubble:
+    async def add_assistant_message(self, content: str = "") -> MessageBubble:
         """Add an assistant message bubble (may be empty for streaming).
 
         Args:
@@ -83,7 +83,7 @@ class MessageList(VerticalScroll):
             id=f"msg-{self._message_count}",
         )
         self._current_bubble = bubble
-        self.mount(bubble)
+        await self.mount(bubble)
         self._scroll_to_bottom()
         return bubble
 

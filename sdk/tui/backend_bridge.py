@@ -204,16 +204,23 @@ class BackendBridge:
                     on_error=on_error,
                 )
 
+                # Yield control so Textual can process widget repaints
+                await asyncio.sleep(0)
+
         except asyncio.CancelledError:
             pass
         except Exception as e:
             if on_error:
                 on_error(str(e))
+            return
         finally:
             self._last_duration = time.monotonic() - self._stream_start
             self._streaming = False
-            if self._cancel_event.is_set() and on_done:
-                on_done()
+
+        # Call on_done for both normal completion and cancellation.
+        # (Error case returns above and skips this.)
+        if on_done:
+            on_done()
 
     def _dispatch_chunk(
         self,
@@ -245,8 +252,7 @@ class BackendBridge:
                 if on_tool_result:
                     on_tool_result(chunk.text)
             case ChunkKind.DONE:
-                if on_done:
-                    on_done()
+                pass  # handled after the stream loop finishes
             case ChunkKind.ERROR:
                 if on_error:
                     on_error(chunk.text)

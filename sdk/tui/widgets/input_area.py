@@ -167,7 +167,9 @@ class PromptInput(Widget):
     @property
     def _prefix_text(self) -> str:
         """Build the mode indicator prefix."""
-        return f"[{self.mode.value.upper()}]> "
+        mode_label = self.mode.value.upper()
+        # Use Rich markup: bold mode label + prompt character
+        return f"[bold]{mode_label}[/bold] > "
 
     def watch_mode(self, value: TUIMode) -> None:
         """Update the prefix when mode changes."""

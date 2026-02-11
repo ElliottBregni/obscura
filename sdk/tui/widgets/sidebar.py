@@ -35,6 +35,7 @@ class Sidebar(Widget):
 
     DEFAULT_CSS = """
     Sidebar {
+        dock: left;
         width: 28;
         padding: 1;
     }

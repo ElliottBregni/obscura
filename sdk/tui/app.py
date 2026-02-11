@@ -137,7 +137,7 @@ class ObscuraTUI(App):
         if self._session_id_to_resume:
             try:
                 self._session = TUISession.load(self._session_id_to_resume)
-                self._restore_session()
+                await self._restore_session()
                 self._show_system(
                     f"Resumed session {self._session.session_id}"
                 )
@@ -223,7 +223,7 @@ class ObscuraTUI(App):
 
         # Add user message to UI
         if self._message_list:
-            self._message_list.add_user_message(prompt)
+            await self._message_list.add_user_message(prompt)
 
         # Add to session
         if self._session:
@@ -256,8 +256,13 @@ class ObscuraTUI(App):
     async def _stream_response(self, prompt: str) -> None:
         """Stream a response from the backend."""
         if not self._bridge.connected:
-            self._show_system("Not connected to backend.")
-            return
+            self._show_system("Connecting to backend...")
+            try:
+                await self._bridge.connect()
+                self._show_system("Connected.")
+            except Exception as e:
+                self._show_system(f"Connection failed: {e}")
+                return
 
         if self._bridge.streaming:
             self._show_system("Already streaming. Press Escape to cancel.")
@@ -265,7 +270,7 @@ class ObscuraTUI(App):
 
         # Create assistant bubble
         if self._message_list:
-            self._current_bubble = self._message_list.add_assistant_message()
+            self._current_bubble = await self._message_list.add_assistant_message()
 
         self._assistant_text = ""
 
@@ -273,7 +278,9 @@ class ObscuraTUI(App):
         if self._status_bar:
             self._status_bar.set_streaming(True)
 
-        # Stream via bridge
+        # Stream directly in the event handler. The bridge's async
+        # iteration yields on each chunk, giving Textual a chance to
+        # process repaints between updates.
         try:
             await self._bridge.stream_prompt(
                 prompt,
@@ -289,6 +296,8 @@ class ObscuraTUI(App):
             self._on_stream_error(str(e))
 
     # -- Stream callbacks ---------------------------------------------------
+    # These are called from the stream worker. Use call_from_thread
+    # to safely update Textual widgets from the worker context.
 
     def _on_text_delta(self, text: str) -> None:
         """Handle text delta from stream."""
@@ -351,6 +360,10 @@ class ObscuraTUI(App):
         if self._message_list:
             self._message_list.clear_current()
 
+        # Re-focus input after stream completes
+        if self._input_area:
+            self._input_area.focus_input()
+
     def _on_stream_error(self, error: str) -> None:
         """Handle stream error."""
         if self._current_bubble:
@@ -363,6 +376,10 @@ class ObscuraTUI(App):
         self._current_bubble = None
         if self._message_list:
             self._message_list.clear_current()
+
+        # Re-focus input after error
+        if self._input_area:
+            self._input_area.focus_input()
 
     # -- Plan mode ----------------------------------------------------------
 
@@ -506,7 +523,7 @@ class ObscuraTUI(App):
             sid = args[1]
             try:
                 self._session = TUISession.load(sid)
-                self._restore_session()
+                await self._restore_session()
                 self._show_system(f"Loaded session {sid}")
             except FileNotFoundError:
                 self._show_system(f"Session not found: {sid}")
@@ -709,7 +726,7 @@ class ObscuraTUI(App):
             f"New session: {self._session.session_id}"
         )
 
-    def _restore_session(self) -> None:
+    async def _restore_session(self) -> None:
         """Restore messages from a loaded session into the UI."""
         if not self._session or not self._message_list:
             return
@@ -717,9 +734,9 @@ class ObscuraTUI(App):
         self._message_list.clear_all()
         for turn in self._session.turns:
             if turn.role == "user":
-                self._message_list.add_user_message(turn.content)
+                await self._message_list.add_user_message(turn.content)
             elif turn.role == "assistant":
-                bubble = self._message_list.add_assistant_message(
+                bubble = await self._message_list.add_assistant_message(
                     turn.content
                 )
                 bubble.finalize()

@@ -19,6 +19,7 @@ Screen {
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
 #sidebar {
+    dock: left;
     width: 28;
     background: #16161e;
     border-right: solid #292e42;
@@ -317,6 +318,20 @@ Screen {
     color: #e0af68;
 }
 
+/* ── System Messages ─────────────────────────────────────────── */
+.system-message {
+    color: #565f89;
+    padding: 0 2;
+    height: auto;
+    text-style: italic;
+}
+
+/* ── Message Content ─────────────────────────────────────────── */
+.message-content {
+    height: auto;
+    color: #c0caf5;
+}
+
 /* ── Scrollbar ────────────────────────────────────────────────── */
 Scrollbar {
     background: #16161e;
@@ -344,6 +359,7 @@ Screen {
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
 #sidebar {
+    dock: left;
     width: 28;
     background: #e8e8e8;
     border-right: solid #d0d0d0;
