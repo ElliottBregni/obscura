@@ -38,7 +38,7 @@ from typing import Any, AsyncIterator, Callable, Coroutine, Optional
 
 logger = logging.getLogger(__name__)
 
-from sdk._types import Backend, Message, Role
+from sdk._types import AgentEvent, AgentEventKind, Backend, Message, Role
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.memory import MemoryKey, MemoryStore
@@ -284,6 +284,149 @@ class Agent:
         finally:
             self._update_state()
     
+    async def run_loop(
+        self,
+        prompt: str,
+        *,
+        max_turns: int | None = None,
+        on_confirm: Any = None,
+        **context: Any,
+    ) -> str:
+        """Run the agent in an iterative loop with automatic tool execution.
+
+        Unlike :meth:`run` (single-shot send/receive), this method drives
+        the model across multiple turns. When the model calls a tool, the
+        loop executes the handler, feeds the result back, and lets the model
+        continue.
+
+        Returns the concatenated text output from all turns.
+        """
+        self._current_prompt = prompt
+        self.status = AgentStatus.RUNNING
+        self._update_state()
+
+        if max_turns is None:
+            max_turns = self.config.max_iterations
+
+        self.memory.set(
+            f"task_{self.iteration_count}",
+            {
+                "prompt": prompt,
+                "context": context,
+                "started_at": datetime.now(UTC).isoformat(),
+                "mode": "agent_loop",
+            },
+            namespace=f"{self.config.memory_namespace}:tasks",
+        )
+
+        try:
+            relevant_memory = self._load_relevant_memory(prompt)
+            full_prompt = self._build_prompt(prompt, relevant_memory, context)
+
+            result = await asyncio.wait_for(
+                self._client.run_loop_to_completion(
+                    full_prompt,
+                    max_turns=max_turns,
+                    on_confirm=on_confirm,
+                ),
+                timeout=self.config.timeout_seconds,
+            )
+
+            self._result = result
+            self.memory.set(
+                f"result_{self.iteration_count}",
+                {
+                    "result": self._result,
+                    "completed_at": datetime.now(UTC).isoformat(),
+                    "mode": "agent_loop",
+                },
+                namespace=f"{self.config.memory_namespace}:tasks",
+            )
+
+            self.status = AgentStatus.COMPLETED
+            self.iteration_count += 1
+            return self._result
+
+        except asyncio.TimeoutError:
+            self._error = TimeoutError(
+                f"Agent '{self.config.name}' timed out after {self.config.timeout_seconds}s"
+            )
+            self.status = AgentStatus.FAILED
+            raise self._error
+        except Exception as e:
+            self._error = e
+            self.status = AgentStatus.FAILED
+            raise
+        finally:
+            self._update_state()
+
+    async def stream_loop(
+        self,
+        prompt: str,
+        *,
+        max_turns: int | None = None,
+        on_confirm: Any = None,
+        **context: Any,
+    ) -> AsyncIterator[AgentEvent]:
+        """Stream agent loop events including tool calls and results.
+
+        Yields :class:`AgentEvent` objects for every interesting thing
+        that happens: text deltas, tool calls, tool results, turn
+        boundaries, and final completion.
+        """
+        self._current_prompt = prompt
+        self.status = AgentStatus.RUNNING
+        self._update_state()
+
+        if max_turns is None:
+            max_turns = self.config.max_iterations
+
+        self.memory.set(
+            f"task_{self.iteration_count}",
+            {
+                "prompt": prompt,
+                "context": context,
+                "started_at": datetime.now(UTC).isoformat(),
+                "mode": "stream_loop",
+            },
+            namespace=f"{self.config.memory_namespace}:tasks",
+        )
+
+        try:
+            relevant_memory = self._load_relevant_memory(prompt)
+            full_prompt = self._build_prompt(prompt, relevant_memory, context)
+
+            text_parts: list[str] = []
+            async for event in self._client.run_loop(
+                full_prompt,
+                max_turns=max_turns,
+                on_confirm=on_confirm,
+            ):
+                if event.kind == AgentEventKind.TEXT_DELTA:
+                    text_parts.append(event.text)
+                yield event
+
+            self._result = "".join(text_parts)
+            self.memory.set(
+                f"result_{self.iteration_count}",
+                {
+                    "result": self._result,
+                    "completed_at": datetime.now(UTC).isoformat(),
+                    "mode": "stream_loop",
+                },
+                namespace=f"{self.config.memory_namespace}:tasks",
+            )
+
+            self.status = AgentStatus.COMPLETED
+            self.iteration_count += 1
+
+        except Exception as e:
+            self._error = e
+            self.status = AgentStatus.FAILED
+            raise
+        finally:
+            self._update_state()
+
     def _load_relevant_memory(self, prompt: str) -> dict[str, Any]:
         """Load memory relevant to the current task."""
         relevant = {}

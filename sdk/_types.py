@@ -197,3 +197,49 @@ class BackendProtocol(Protocol):
 
     def register_tool(self, spec: ToolSpec) -> None: ...
     def register_hook(self, hook: HookPoint, callback: Callable) -> None: ...
+
+    def get_tool_registry(self) -> Any: ...
+
+
+# ---------------------------------------------------------------------------
+# Agent loop event types
+# ---------------------------------------------------------------------------
+
+class AgentEventKind(enum.Enum):
+    """Events yielded by the agent loop."""
+    TEXT_DELTA = "text_delta"
+    THINKING_DELTA = "thinking_delta"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    CONFIRMATION_REQUEST = "confirmation_request"
+    TURN_COMPLETE = "turn_complete"
+    TURN_START = "turn_start"
+    AGENT_DONE = "agent_done"
+    ERROR = "error"
+
+
+@dataclass
+class ToolCallInfo:
+    """Extracted tool call from a model response."""
+    tool_use_id: str
+    name: str
+    input: dict[str, Any] = field(default_factory=dict)
+    raw: Any = None
+
+
+@dataclass
+class AgentEvent:
+    """A single event from the agent loop.
+
+    Events stream in order: TURN_START → TEXT_DELTA / THINKING_DELTA /
+    TOOL_CALL / TOOL_RESULT → TURN_COMPLETE → ... → AGENT_DONE.
+    """
+    kind: AgentEventKind
+    text: str = ""
+    tool_name: str = ""
+    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_result: str = ""
+    tool_use_id: str = ""
+    is_error: bool = False
+    turn: int = 0
+    raw: Any = None

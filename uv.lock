@@ -587,6 +587,7 @@ dependencies = [
     { name = "github-copilot-sdk" },
     { name = "httpx" },
     { name = "numpy" },
+    { name = "python-dotenv" },
     { name = "python-jose", extra = ["cryptography"] },
 ]
 
@@ -650,6 +651,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "python-jose", extras = ["cryptography"], marker = "extra == 'server'", specifier = ">=3.3.0" },
     { name = "rich", marker = "extra == 'dev'", specifier = ">=14.3.2" },

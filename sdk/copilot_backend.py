@@ -14,7 +14,9 @@ from typing import Any, AsyncIterator, Callable
 from sdk._auth import AuthConfig
 from sdk._sessions import SessionStore
 from sdk._stream import EventToIteratorBridge
+from sdk._tools import ToolRegistry
 from sdk._types import (
+    AgentEvent,
     Backend,
     ChunkKind,
     ContentBlock,
@@ -56,6 +58,7 @@ class CopilotBackend:
 
         # Tool and hook registries
         self._tools: list[ToolSpec] = []
+        self._tool_registry = ToolRegistry()
         self._hooks: dict[HookPoint, list[Callable]] = {hp: [] for hp in HookPoint}
 
         # Session tracking
@@ -208,12 +211,47 @@ class CopilotBackend:
     def register_tool(self, spec: ToolSpec) -> None:
         """Register a tool for use in sessions."""
         self._tools.append(spec)
+        self._tool_registry.register(spec)
+
+    def get_tool_registry(self) -> ToolRegistry:
+        """Return the tool registry for agent loop use."""
+        return self._tool_registry
 
     # -- Hooks ---------------------------------------------------------------
 
     def register_hook(self, hook: HookPoint, callback: Callable) -> None:
         """Register a lifecycle hook callback."""
         self._hooks[hook].append(callback)
+
+    # -- Agent loop ----------------------------------------------------------
+
+    def run_loop(
+        self,
+        prompt: str,
+        *,
+        max_turns: int = 10,
+        on_confirm: Callable | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run an iterative agent loop with tool execution.
+
+        Yields ``AgentEvent`` instances as the model streams text,
+        calls tools, and iterates across multiple turns.
+
+        Example::
+
+            async for event in backend.run_loop("Fix the bug", max_turns=5):
+                print(event)
+        """
+        from sdk.agent_loop import AgentLoop
+
+        loop = AgentLoop(
+            self,
+            self._tool_registry,
+            max_turns=max_turns,
+            on_confirm=on_confirm,
+        )
+        return loop.run(prompt, **kwargs)
 
     # -- Internals -----------------------------------------------------------
 
