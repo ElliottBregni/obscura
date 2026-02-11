@@ -15,6 +15,7 @@ from sdk._auth import AuthConfig, resolve_auth
 from sdk._sessions import SessionStore
 from sdk._tools import ToolRegistry
 from sdk._types import (
+    AgentEvent,
     Backend,
     BackendProtocol,
     HookPoint,
@@ -157,6 +158,69 @@ class ObscuraClient:
                 duration = _time.monotonic() - start
                 _record_request_metric(self._backend_type.value, "stream", status)
                 _record_request_duration(self._backend_type.value, "stream", duration)
+
+    # -- Agent loop ----------------------------------------------------------
+
+    def run_loop(
+        self,
+        prompt: str,
+        *,
+        max_turns: int = 10,
+        on_confirm: Any = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run an iterative agent loop with automatic tool execution.
+
+        The model streams its response, and when it calls a tool, the loop
+        executes the tool handler, feeds the result back, and lets the model
+        continue — up to *max_turns* iterations.
+
+        Usage::
+
+            async for event in client.run_loop("Fix the auth bug", max_turns=5):
+                if event.kind == AgentEventKind.TEXT_DELTA:
+                    print(event.text, end="")
+                elif event.kind == AgentEventKind.TOOL_CALL:
+                    print(f"Calling {event.tool_name}...")
+
+        Parameters
+        ----------
+        prompt:
+            The initial user prompt.
+        max_turns:
+            Maximum number of model turns (default 10).
+        on_confirm:
+            Optional callback ``(ToolCallInfo) -> bool`` invoked before
+            each tool execution. Return False to deny.
+        """
+        from sdk.agent_loop import AgentLoop
+
+        loop = AgentLoop(
+            self._backend,
+            self._tool_registry,
+            max_turns=max_turns,
+            on_confirm=on_confirm,
+        )
+        return loop.run(prompt, **kwargs)
+
+    async def run_loop_to_completion(
+        self,
+        prompt: str,
+        *,
+        max_turns: int = 10,
+        on_confirm: Any = None,
+        **kwargs: Any,
+    ) -> str:
+        """Run the agent loop and return the final concatenated text."""
+        from sdk.agent_loop import AgentLoop
+
+        loop = AgentLoop(
+            self._backend,
+            self._tool_registry,
+            max_turns=max_turns,
+            on_confirm=on_confirm,
+        )
+        return await loop.run_to_completion(prompt, **kwargs)
 
     # -- Sessions ------------------------------------------------------------
 
