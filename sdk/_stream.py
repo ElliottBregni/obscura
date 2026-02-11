@@ -44,18 +44,25 @@ class EventToIteratorBridge:
     def on_text_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.message_delta`` event."""
         delta = ""
-        if hasattr(event, "data") and hasattr(event.data, "delta_content"):
+        if hasattr(event, "data") and hasattr(event.data, "delta_content") and event.data.delta_content:
             delta = event.data.delta_content
-        elif hasattr(event, "data") and hasattr(event.data, "delta"):
+        elif hasattr(event, "data") and hasattr(event.data, "content") and event.data.content:
+            delta = event.data.content
+        elif hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta:
             delta = event.data.delta
         elif isinstance(event, str):
             delta = event
-        self.push(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=delta, raw=event))
+        if delta:
+            self.push(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=delta, raw=event))
 
     def on_thinking_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.reasoning_delta`` event."""
         delta = ""
-        if hasattr(event, "data") and hasattr(event.data, "delta"):
+        if hasattr(event, "data") and hasattr(event.data, "delta_content") and event.data.delta_content:
+            delta = event.data.delta_content
+        elif hasattr(event, "data") and hasattr(event.data, "reasoning_text") and event.data.reasoning_text:
+            delta = event.data.reasoning_text
+        elif hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta:
             delta = event.data.delta
         elif isinstance(event, str):
             delta = event
@@ -64,8 +71,10 @@ class EventToIteratorBridge:
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
         name = ""
-        if hasattr(event, "data") and hasattr(event.data, "tool_name"):
+        if hasattr(event, "data") and hasattr(event.data, "tool_name") and event.data.tool_name:
             name = event.data.tool_name
+        elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
+            name = event.data.name
         self.push(StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name=name, raw=event))
 
     def finish(self, event: Any = None) -> None:

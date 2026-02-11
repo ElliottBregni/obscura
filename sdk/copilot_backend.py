@@ -95,7 +95,10 @@ class CopilotBackend:
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("copilot.send") as span:
             _set_span_attr(span, "backend", "copilot")
-            response = await self._session.send_and_wait({"prompt": prompt}, kwargs.get("options"))
+            msg_options: dict[str, Any] = {"prompt": prompt}
+            if kwargs.get("options"):
+                msg_options.update(kwargs["options"])
+            response = await self._session.send_and_wait(msg_options)
             return self._to_message(response)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
@@ -106,8 +109,19 @@ class CopilotBackend:
         # Register event handlers
         unsub_fns: list[Callable] = []
 
+        _got_deltas = False
+
         def _on_delta(event: Any) -> None:
+            nonlocal _got_deltas
+            _got_deltas = True
             bridge.on_text_delta(event)
+
+        def _on_message(event: Any) -> None:
+            """Fallback for full assistant messages (only if no deltas received)."""
+            if _got_deltas:
+                return  # Already streamed via deltas
+            if hasattr(event, "data") and hasattr(event.data, "content") and event.data.content:
+                bridge.push(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=event.data.content, raw=event))
 
         def _on_thinking(event: Any) -> None:
             bridge.on_thinking_delta(event)
@@ -123,8 +137,9 @@ class CopilotBackend:
 
         # Subscribe to session events
         unsub_fns.append(self._session.on(_make_handler("assistant.message_delta", _on_delta)))
+        unsub_fns.append(self._session.on(_make_handler("assistant.message", _on_message)))
         unsub_fns.append(self._session.on(_make_handler("assistant.reasoning_delta", _on_thinking)))
-        unsub_fns.append(self._session.on(_make_handler("tool_execution_start", _on_tool_start)))
+        unsub_fns.append(self._session.on(_make_handler("tool.execution_start", _on_tool_start)))
         unsub_fns.append(self._session.on(_make_handler("session.idle", _on_idle)))
         unsub_fns.append(self._session.on(_make_handler("session.error", _on_error)))
 
@@ -132,7 +147,10 @@ class CopilotBackend:
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("copilot.stream") as span:
             _set_span_attr(span, "backend", "copilot")
-            await self._session.send({"prompt": prompt}, kwargs.get("options"))
+            msg_options: dict[str, Any] = {"prompt": prompt}
+            if kwargs.get("options"):
+                msg_options.update(kwargs["options"])
+            await self._session.send(msg_options)
 
             # Yield chunks from the bridge
             try:
@@ -288,17 +306,16 @@ class CopilotBackend:
 def _make_handler(event_type: str, callback: Callable) -> Callable:
     """Create a Copilot event handler that filters by event type.
 
-    Copilot's session.on() may pass all events to a single callback,
-    or accept type-specific subscriptions. This wrapper handles both cases.
+    Copilot's session.on() passes ALL events to every handler.
+    This wrapper filters so the callback only fires for matching types.
     """
     def handler(event: Any) -> None:
-        # If the event has a type field, filter on it
         if hasattr(event, "type"):
-            if event.type == event_type or getattr(event.type, "value", None) == event_type:
+            etype = event.type
+            # Compare against string directly or via enum .value
+            if etype == event_type or getattr(etype, "value", None) == event_type:
                 callback(event)
-                return
-        # If no type filtering possible, just call through
-        callback(event)
+        # If event has no type field, silently ignore (don't call through)
 
     # Tag the handler so the SDK can identify it
     handler._event_type = event_type  # type: ignore[attr-defined]

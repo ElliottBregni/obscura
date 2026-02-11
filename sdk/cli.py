@@ -273,6 +273,12 @@ def _run_serve(args: argparse.Namespace) -> int:
 def _run_tui(args: argparse.Namespace) -> int:
     """Launch the interactive TUI."""
     try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    try:
         from sdk.tui.app import run_tui
     except ImportError:
         print(

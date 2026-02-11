@@ -291,7 +291,7 @@ def client():
     )
 
     with (
-        patch("sdk.server._get_runtime", side_effect=_mock_get_runtime),
+        patch("sdk.deps.get_runtime", side_effect=_mock_get_runtime),
         patch("sdk.memory.MemoryStore", _FakeMemoryStore),
         patch("sdk.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
     ):
@@ -305,7 +305,7 @@ def client():
 @pytest.fixture
 def client_no_auth_override():
     """TestClient with auth ENABLED but no dependency override.
-    
+
     Use this to test actual auth behavior (API keys, JWT).
     """
     config = ObscuraConfig(
@@ -314,7 +314,7 @@ def client_no_auth_override():
     )
 
     with (
-        patch("sdk.server._get_runtime", side_effect=_mock_get_runtime),
+        patch("sdk.deps.get_runtime", side_effect=_mock_get_runtime),
         patch("sdk.memory.MemoryStore", _FakeMemoryStore),
         patch("sdk.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
     ):

@@ -42,7 +42,7 @@ class BackendBridge:
 
     def __init__(
         self,
-        backend: str = "claude",
+        backend: str = "copilot",
         model: str | None = None,
         cwd: str | None = None,
         system_prompt: str = "",

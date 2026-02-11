@@ -74,7 +74,7 @@ class TestHealthEndpoints:
 # ---------------------------------------------------------------------------
 
 class TestSendEndpoint:
-    @patch("sdk.server.ClientFactory.create")
+    @patch("sdk.deps.ClientFactory.create")
     def test_send_success(self, mock_create: AsyncMock) -> None:
         """Successful send should return text and backend."""
         from sdk._types import ContentBlock, Message, Role
@@ -89,7 +89,7 @@ class TestSendEndpoint:
         app = _make_app()
         client = TestClient(app)
 
-        with patch("sdk.server.require_any_role", return_value=lambda: _TEST_USER):
+        with patch("sdk.auth.rbac.require_any_role", return_value=lambda: _TEST_USER):
             # Override the dependency
             from sdk.auth.rbac import require_any_role
             app.dependency_overrides[require_any_role("agent:copilot", "agent:claude", "agent:read")] = lambda: _TEST_USER
@@ -102,7 +102,7 @@ class TestSendEndpoint:
         # If auth is blocking, we at least verify the route exists
         assert resp.status_code in (200, 401, 403, 422)
 
-    @patch("sdk.server.ClientFactory.create")
+    @patch("sdk.deps.ClientFactory.create")
     def test_send_empty_prompt_rejected(self, mock_create: AsyncMock) -> None:
         """Empty prompt should fail validation (min_length=1)."""
         from sdk.auth.rbac import get_current_user

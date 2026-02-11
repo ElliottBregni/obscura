@@ -67,7 +67,7 @@ class ObscuraTUI(App):
 
     def __init__(
         self,
-        backend: str = "claude",
+        backend: str = "copilot",
         model: str | None = None,
         cwd: str | None = None,
         session_id: str | None = None,
@@ -775,7 +775,7 @@ class ObscuraTUI(App):
 # ---------------------------------------------------------------------------
 
 def run_tui(
-    backend: str = "claude",
+    backend: str = "copilot",
     model: str | None = None,
     cwd: str | None = None,
     session: str | None = None,

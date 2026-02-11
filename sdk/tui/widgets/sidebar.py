@@ -41,7 +41,7 @@ class Sidebar(Widget):
     """
 
     mode: reactive[TUIMode] = reactive(TUIMode.ASK)
-    backend: reactive[str] = reactive("claude")
+    backend: reactive[str] = reactive("copilot")
     model_name: reactive[str] = reactive("")
     session_id: reactive[str] = reactive("")
     turn_count: reactive[int] = reactive(0)

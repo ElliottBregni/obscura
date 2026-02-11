@@ -31,7 +31,7 @@ class StatusBar(Widget):
     """
 
     mode: reactive[TUIMode] = reactive(TUIMode.ASK)
-    backend: reactive[str] = reactive("claude")
+    backend: reactive[str] = reactive("copilot")
     model: reactive[str] = reactive("")
     session_id: reactive[str] = reactive("")
     duration: reactive[float] = reactive(0.0)

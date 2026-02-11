@@ -200,7 +200,7 @@ def agent():
 
 @agent.command("spawn")
 @click.option("--name", "-n", required=True, help="Agent name")
-@click.option("--model", "-m", default="claude", help="Model (claude or copilot)")
+@click.option("--model", "-m", default="copilot", help="Model (copilot or claude)")
 @click.option("--system-prompt", "-s", default="", help="System instructions")
 @click.option("--namespace", default="cli", help="Memory namespace")
 @click.pass_context
@@ -317,7 +317,7 @@ def agent_stop(ctx, agent_id):
 
 @agent.command("quick")
 @click.option("--name", "-n", default="quick-agent", help="Agent name")
-@click.option("--model", "-m", default="claude", help="Model")
+@click.option("--model", "-m", default="copilot", help="Model")
 @click.option("--prompt", "-p", required=True, help="Task prompt")
 @click.pass_context
 def agent_quick(ctx, name, model, prompt):
@@ -510,15 +510,31 @@ def serve(host, port, reload, workers):
 
 # TUI command
 @cli.command("tui")
-def tui():
+@click.option("--backend", "-b", default="copilot", type=click.Choice(["copilot", "claude"]), help="Backend to use")
+@click.option("--model", default=None, help="Model ID override")
+@click.option("--cwd", default=".", help="Working directory")
+@click.option("--session", "-s", default=None, help="Resume a saved session by ID")
+@click.option("--mode", default="ask", type=click.Choice(["ask", "plan", "code", "diff"]), help="Initial mode")
+def tui(backend, model, cwd, session, mode):
     """Launch interactive TUI."""
     try:
-        from obscura.tui.app import TUIApp
-        app = TUIApp()
-        app.run()
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    try:
+        from sdk.tui.app import run_tui
+        run_tui(
+            backend=backend,
+            model=model,
+            cwd=cwd,
+            session=session,
+            mode=mode,
+        )
     except ImportError as e:
-        console.print(f"[bold red]Error:[/] TUI dependencies not installed.")
-        console.print(f"[yellow]Run: pip install textual[/]")
+        console.print(f"[bold red]Error:[/] TUI dependencies not installed: {e}")
+        console.print(f"[yellow]Run: pip install 'obscura[tui]'[/]")
         sys.exit(1)
 
 

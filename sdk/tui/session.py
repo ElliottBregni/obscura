@@ -83,7 +83,7 @@ class TUISession:
     def __init__(
         self,
         session_id: str | None = None,
-        backend: str = "claude",
+        backend: str = "copilot",
         model: str | None = None,
     ) -> None:
         self.session_id: str = session_id or uuid.uuid4().hex[:8]
@@ -209,7 +209,7 @@ class TUISession:
         data = json.loads(path.read_text())
         session = cls(
             session_id=data["session_id"],
-            backend=data.get("backend", "claude"),
+            backend=data.get("backend", "copilot"),
             model=data.get("model"),
         )
         session.created_at = datetime.fromisoformat(data["created_at"])

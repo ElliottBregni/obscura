@@ -37,7 +37,7 @@ class AuthConfig:
 # Resolution
 # ---------------------------------------------------------------------------
 
-_COPILOT_ENV_VARS = ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+_COPILOT_ENV_VARS = ("COPILOT_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 _CLAUDE_ENV_VARS = ("ANTHROPIC_API_KEY",)
 
 

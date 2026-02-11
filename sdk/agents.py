@@ -514,7 +514,7 @@ class AgentRuntime:
     def spawn(
         self,
         name: str,
-        model: str = "claude",
+        model: str = "copilot",
         system_prompt: str = "",
         memory_namespace: str = "default",
         parent_agent_id: str | None = None,
@@ -560,7 +560,7 @@ class AgentRuntime:
         self,
         name: str,
         prompt: str,
-        model: str = "claude",
+        model: str = "copilot",
         system_prompt: str = "",
         **kwargs: Any
     ) -> tuple[Agent, Any]:
