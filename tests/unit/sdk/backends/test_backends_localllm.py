@@ -24,6 +24,7 @@ from sdk.internal.types import (
     ToolSpec,
 )
 from sdk.backends.localllm import LocalLLMBackend
+from sdk.backends.models import MCPServerConfig
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +140,8 @@ class TestLocalLLMInit:
     def test_mcp_servers_stored(self):
         servers = [{"url": "http://mcp:8080"}]
         b = LocalLLMBackend(_auth(), mcp_servers=servers)
-        assert b._mcp_servers == servers
+        expected = [MCPServerConfig.from_dict(s) for s in servers]
+        assert b._mcp_servers == expected
 
 
 # ===================================================================
@@ -559,8 +561,9 @@ class TestLocalLLMSessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
-        assert history[0] == {"role": "user", "content": "hello"}
-        assert history[1] == {"role": "assistant", "content": "reply"}
+        to_dict = lambda m: m.to_dict() if hasattr(m, "to_dict") else m  # type: ignore
+        assert to_dict(history[0]) == {"role": "user", "content": "hello"}
+        assert to_dict(history[1]) == {"role": "assistant", "content": "reply"}
 
     @pytest.mark.asyncio
     async def test_conversation_history_in_messages(self):
@@ -611,8 +614,9 @@ class TestLocalLLMSessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
-        assert history[0] == {"role": "user", "content": "prompt"}
-        assert history[1] == {"role": "assistant", "content": "streamed"}
+        to_dict = lambda m: m.to_dict() if hasattr(m, "to_dict") else m  # type: ignore
+        assert to_dict(history[0]) == {"role": "user", "content": "prompt"}
+        assert to_dict(history[1]) == {"role": "assistant", "content": "streamed"}
 
 
 # ===================================================================

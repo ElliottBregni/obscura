@@ -297,10 +297,14 @@ class ObscuraMCPServer:
         if agent is None:
             return {"error": f"Agent not found: {agent_id}"}
 
+        async def _maybe_await(result: Any) -> None:
+            if asyncio.iscoroutine(result):
+                await result
+
         if force:
-            await agent.stop()
+            await _maybe_await(agent.stop())
         else:
-            await agent.stop_graceful()
+            await _maybe_await(agent.stop_graceful())
 
         return {
             "agent_id": agent_id,
@@ -413,13 +417,16 @@ class ObscuraMCPServer:
         else:
             # Search all namespaces
             search_results = memory.search(query)
-            results = [
-                {
-                    "key": str(key),
-                    "value": value,
-                }
-                for key, value in search_results
-            ]
+            results = []
+            for key, value in search_results:
+                if hasattr(key, "namespace") and hasattr(key, "key"):
+                    key_str = f"{key.namespace}:{key.key}"
+                else:
+                    try:
+                        key_str = str(key)
+                    except TypeError:
+                        key_str = repr(key)
+                results.append({"key": key_str, "value": value})
 
         return {
             "results": results,
@@ -475,7 +482,13 @@ class ObscuraMCPServer:
     async def shutdown(self) -> None:
         """Shutdown the MCP server."""
         if self._runtime:
-            await self._runtime.stop()
+            stop_fn = getattr(self._runtime, "shutdown", None) or getattr(
+                self._runtime, "stop", None
+            )
+            if stop_fn:
+                stop_result = stop_fn()
+                if asyncio.iscoroutine(stop_result):
+                    await stop_result
             self._runtime = None
 
         self._initialized = False

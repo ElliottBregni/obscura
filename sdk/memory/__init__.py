@@ -17,6 +17,7 @@ Usage::
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import sqlite3
 import threading
@@ -76,8 +77,11 @@ class MemoryStore:
         self._db_id = hashlib.sha256(self.user_id.encode()).hexdigest()[:16]
 
         if db_path is None:
-            # Default: ~/.obscura/memory/<user_hash>.db
-            db_path = Path.home() / ".obscura" / "memory" / f"{self._db_id}.db"
+            # Default: ~/.obscura/memory/<user_hash>.db, overrideable for tests
+            base_dir = Path(
+                os.environ.get("OBSCURA_MEMORY_DIR", Path.home() / ".obscura" / "memory")
+            )
+            db_path = base_dir / f"{self._db_id}.db"
 
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

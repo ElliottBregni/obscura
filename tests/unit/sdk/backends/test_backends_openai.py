@@ -20,6 +20,7 @@ from sdk.internal.types import (
 )
 from sdk.internal.tools import ToolRegistry
 from sdk.backends.openai_compat import OpenAIBackend
+from sdk.backends.models import ChatMessage
 
 
 # ---------------------------------------------------------------------------
@@ -566,8 +567,9 @@ class TestOpenAISessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
-        assert history[0] == {"role": "user", "content": "Hello"}
-        assert history[1] == {"role": "assistant", "content": "Reply 1"}
+        to_dict = lambda m: m.to_dict() if hasattr(m, "to_dict") else m  # type: ignore
+        assert to_dict(history[0]) == {"role": "user", "content": "Hello"}
+        assert to_dict(history[1]) == {"role": "assistant", "content": "Reply 1"}
 
     @pytest.mark.asyncio
     async def test_conversation_history_included_in_messages(self):
@@ -610,8 +612,9 @@ class TestOpenAISessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
-        assert history[0] == {"role": "user", "content": "Hello stream"}
-        assert history[1] == {"role": "assistant", "content": "Hi there"}
+        to_dict = lambda m: m.to_dict() if hasattr(m, "to_dict") else m  # type: ignore
+        assert to_dict(history[0]) == {"role": "user", "content": "Hello stream"}
+        assert to_dict(history[1]) == {"role": "assistant", "content": "Hi there"}
 
     @pytest.mark.asyncio
     async def test_no_history_without_session(self):
@@ -912,8 +915,8 @@ class TestOpenAIBuildMessages:
     def test_with_conversation_history(self):
         b = _backend()
         b._conversations["sess1"] = [
-            {"role": "user", "content": "First"},
-            {"role": "assistant", "content": "Response"},
+            ChatMessage(role="user", content="First"),
+            ChatMessage(role="assistant", content="Response"),
         ]
         b._active_session = "sess1"
 
@@ -926,8 +929,8 @@ class TestOpenAIBuildMessages:
     def test_with_system_and_history(self):
         b = _backend(system_prompt="System msg")
         b._conversations["sess1"] = [
-            {"role": "user", "content": "Prev"},
-            {"role": "assistant", "content": "Reply"},
+            ChatMessage(role="user", content="Prev"),
+            ChatMessage(role="assistant", content="Reply"),
         ]
         b._active_session = "sess1"
 

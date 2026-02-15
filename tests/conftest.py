@@ -41,6 +41,25 @@ def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
         pass
 
 
+@pytest.fixture(autouse=True)
+def temp_memory_dirs(tmp_path_factory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route memory and vector memory storage to a writable temp dir."""
+    mem_dir = tmp_path_factory.mktemp("memory")
+    vec_dir = tmp_path_factory.mktemp("vector_memory")
+    monkeypatch.setenv("OBSCURA_MEMORY_DIR", str(mem_dir))
+    monkeypatch.setenv("OBSCURA_VECTOR_MEMORY_DIR", str(vec_dir))
+
+    # Reset singleton caches so each test gets a fresh DB
+    try:
+        from sdk.memory import MemoryStore
+        from sdk.vector_memory import VectorMemoryStore
+
+        MemoryStore._instances.clear()
+        VectorMemoryStore._instances.clear()
+    except Exception:
+        pass
+
+
 # Ensure test-local BackendBridge (tui) respects .client attribute assignment
 try:
     from tests.unit.sdk.tui import test_tui_backend_bridge as _tbb

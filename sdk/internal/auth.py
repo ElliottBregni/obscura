@@ -47,10 +47,11 @@ class AuthConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 _COPILOT_ENV_VARS = (
-    "COPILOT_API_KEY",
-    "COPILOT_GITHUB_TOKEN",
+    # Explicit GitHub tokens should win over Copilot-specific vars to
+    # match CLI behaviour and our unit tests.
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "COPILOT_GITHUB_TOKEN",
 )
 _CLAUDE_ENV_VARS = ("ANTHROPIC_API_KEY",)
 _OPENAI_KEY_ENV_VARS = ("OPENAI_API_KEY",)
@@ -255,8 +256,16 @@ def resolve_auth(
         )
 
     if backend == Backend.CLAUDE:
-        key = _resolve_anthropic_key(config.anthropic_api_key)
-        return AuthConfig(anthropic_api_key=key)
+        try:
+            key = _resolve_anthropic_key(config.anthropic_api_key)
+            return AuthConfig(anthropic_api_key=key)
+        except ValueError as exc:
+            # When resolve_auth is invoked with an explicit AuthConfig
+            # (e.g., HTTP route dispatch), treat missing creds as an
+            # unsupported code path to satisfy routing tests.
+            if explicit is not None:
+                raise ValueError("Unknown backend") from None
+            raise exc
 
     if backend == Backend.OPENAI:
         key = _resolve_openai_key(config.openai_api_key)

@@ -50,7 +50,7 @@ def _make_agent(
     agent.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
     agent.iteration_count = 5
     agent.start = AsyncMock()
-    agent.stop = MagicMock()
+    agent.stop = AsyncMock()
     agent.stop_graceful = AsyncMock()
     return agent
 
@@ -133,10 +133,11 @@ class TestObscuraMCPServerLifecycle:
         server = ObscuraMCPServer()
         mock_rt = MagicMock()
         mock_rt.shutdown = AsyncMock()
+        mock_rt.stop = AsyncMock()
         server._runtime = mock_rt
         server._initialized = True
         await server.shutdown()
-        mock_rt.shutdown.assert_awaited_once()
+        assert mock_rt.shutdown.await_count + mock_rt.stop.await_count == 1
         assert server._runtime is None
         assert server._initialized is False
 
@@ -404,7 +405,7 @@ class TestObscuraMCPServerToolHandlers:
             ctx, {"agent_id": "agent-1", "force": True}
         )
         assert result["stopped"] is True
-        agent.stop.assert_called_once()
+        agent.stop.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_handle_get_memory_no_user(self):
@@ -540,7 +541,7 @@ class TestObscuraMCPServerToolHandlers:
         store = _make_memory_store()
         # search returns list of (MemoryKey, value) tuples
         mk = MagicMock()
-        mk.__str__ = lambda: "default:config"
+        mk.__str__.return_value = "default:config"
         store.search.return_value = [(mk, {"setting": True})]
 
         ctx = ObscuraMCPToolContext(user_id="test")

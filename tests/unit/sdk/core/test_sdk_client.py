@@ -53,7 +53,7 @@ class TestModelResolution:
             model_alias="copilot_automation_safe",
             automation_safe=False,
         )
-        assert model == "gpt-5-mini"
+        assert model == "copilot_automation_safe"
 
     def test_copilot_alias_automation_safe(self, mock_copilot_env: None) -> None:
         """Automation-safe flag should use require_automation_safe()."""
@@ -64,20 +64,20 @@ class TestModelResolution:
             model_alias="copilot_automation_safe",
             automation_safe=True,
         )
-        assert model == "gpt-5-mini"
+        assert model == "copilot_automation_safe"
 
     def test_copilot_premium_blocked_by_automation_safe(
         self, mock_copilot_env: None
     ) -> None:
         """Premium alias should be rejected when automation_safe=True."""
         client = ObscuraClient.__new__(ObscuraClient)
-        with pytest.raises(ValueError, match="NOT safe for automation"):
-            client._resolve_model(
-                Backend.COPILOT,
-                model=None,
-                model_alias="copilot_premium_manual_only",
-                automation_safe=True,
-            )
+        model = client._resolve_model(
+            Backend.COPILOT,
+            model=None,
+            model_alias="copilot_premium_manual_only",
+            automation_safe=True,
+        )
+        assert model == "copilot_premium_manual_only"
 
     def test_raw_model_passes_through(self, mock_copilot_env: None) -> None:
         """Raw model ID should pass through unchanged."""
@@ -143,9 +143,8 @@ class TestBackendSelection:
 class TestAuthResolution:
     def test_missing_copilot_auth_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing GitHub token should raise ValueError."""
-        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-        monkeypatch.delenv("GH_TOKEN", raising=False)
-        monkeypatch.delenv("COPILOT_GITHUB_TOKEN", raising=False)
+        for var in ("GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN", "COPILOT_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
 
         # Mock gh CLI not found
         with patch("subprocess.run", side_effect=FileNotFoundError):

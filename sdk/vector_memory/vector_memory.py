@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import sqlite3
 import threading
@@ -120,7 +121,13 @@ class VectorMemoryStore:
         self._db_id = hashlib.sha256(self.user_id.encode()).hexdigest()[:16]
 
         if db_path is None:
-            db_path = Path.home() / ".obscura" / "vector_memory" / f"{self._db_id}.db"
+            base_dir = Path(
+                os.environ.get(
+                    "OBSCURA_VECTOR_MEMORY_DIR",
+                    Path.home() / ".obscura" / "vector_memory",
+                )
+            )
+            db_path = base_dir / f"{self._db_id}.db"
 
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

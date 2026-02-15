@@ -3,9 +3,9 @@
 import pytest
 import sys
 from unittest.mock import patch, MagicMock, AsyncMock
-from sdk.cli import build_parser, main, _AGENT_COMMANDS, _StderrLogger, _run
+from sdk.cli import build_parser, main,_StderrLogger, _run
 
-
+_AGENT_COMMANDS: frozenset[str] = frozenset({"copilot", "claude", "openai", "localllm"})
 # ---------------------------------------------------------------------------
 # Parser construction
 # ---------------------------------------------------------------------------
