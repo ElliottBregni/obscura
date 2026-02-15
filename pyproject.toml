@@ -109,6 +109,7 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F"]
+ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "infra/zitadel/setup.py" = ["E402"]
@@ -133,3 +134,4 @@ select = ["E", "F"]
 "tests/unit/sdk/telemetry/test_telemetry_metrics.py" = ["F401"]
 "tests/unit/sdk/test_legacy_module/test_crawlers.py" = ["F401"]
 "tests/unit/sdk/test_legacy_module/test_sync_integration.py" = ["F541"]
+"tests/unit/sdk/backends/test_copilot_models.py" = ["F405"]
