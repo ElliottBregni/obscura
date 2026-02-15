@@ -28,7 +28,9 @@ class SessionStore:
     file-based checkpoints).
     """
 
-    _sessions: dict[str, SessionRef] = field(default_factory=lambda: {})
+    _sessions: dict[str, SessionRef] = field(
+        default_factory=lambda: cast(dict[str, SessionRef], {})
+    )
 
     def add(self, ref: SessionRef) -> None:
         """Register a session reference."""

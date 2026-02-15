@@ -11,7 +11,8 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, override
+from typing import Mapping, Optional, override
+from types import MappingProxyType
 
 from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
 
@@ -84,6 +85,16 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         self._records: dict[str, HealthRecord] = {}
         self._heartbeats: dict[str, Heartbeat] = {}
         logger.debug("Initialized InMemoryHeartbeatStore")
+
+    @property
+    def records(self) -> Mapping[str, HealthRecord]:
+        """Read-only view of health records (testing/observability)."""
+        return MappingProxyType(self._records)
+
+    @property
+    def heartbeats(self) -> Mapping[str, Heartbeat]:
+        """Read-only view of latest heartbeats (testing/observability)."""
+        return MappingProxyType(self._heartbeats)
     
     @override
     async def register(self, agent_id: str, expected_interval: int = 30) -> None:
@@ -176,6 +187,15 @@ class InMemoryHeartbeatStore(HeartbeatStore):
             record for record in self._records.values()
             if record.computed_status != HealthStatus.HEALTHY
         ]
+
+    # Internal helpers used by persistence layer / tests
+    def upsert_record(self, record: HealthRecord) -> None:
+        """Insert or replace a health record."""
+        self._records[record.agent_id] = record
+
+    def upsert_heartbeat(self, heartbeat: Heartbeat) -> None:
+        """Insert or replace a heartbeat."""
+        self._heartbeats[heartbeat.agent_id] = heartbeat
     
     def clear(self) -> None:
         """Clear all stored data (useful for testing)."""
@@ -196,6 +216,16 @@ class FileHeartbeatStore(HeartbeatStore):
         self._memory_store = InMemoryHeartbeatStore()
         self._load_from_disk()
         logger.info(f"Initialized FileHeartbeatStore at {self._storage_path}")
+
+    @property
+    def records(self) -> Mapping[str, HealthRecord]:
+        """Read-only view of persisted health records (testing/observability)."""
+        return self._memory_store.records
+
+    @property
+    def heartbeats(self) -> Mapping[str, Heartbeat]:
+        """Read-only view of persisted heartbeats (testing/observability)."""
+        return self._memory_store.heartbeats
     
     def _load_from_disk(self) -> None:
         """Load existing data from disk."""
@@ -212,13 +242,13 @@ class FileHeartbeatStore(HeartbeatStore):
                         computed_status=HealthStatus(record_data.get("computed_status", "unknown")),
                         alert_count=record_data.get("alert_count", 0),
                     )
-                    self._memory_store._records[record.agent_id] = record
+                    self._memory_store.upsert_record(record)
                 
                 for heartbeat_data in data.get("heartbeats", []):
                     heartbeat = Heartbeat.from_dict(heartbeat_data)
-                    self._memory_store._heartbeats[heartbeat.agent_id] = heartbeat
+                    self._memory_store.upsert_heartbeat(heartbeat)
                 
-                logger.info(f"Loaded {len(self._memory_store._records)} records from disk")
+                logger.info(f"Loaded {len(self._memory_store.records)} records from disk")
             except Exception as e:
                 logger.warning(f"Failed to load data from disk: {e}")
     
@@ -236,50 +266,60 @@ class FileHeartbeatStore(HeartbeatStore):
                         "computed_status": r.computed_status.value,
                         "alert_count": r.alert_count,
                     }
-                    for r in self._memory_store._records.values()
+                    for r in self._memory_store.records.values()
                 ],
                 "heartbeats": [
-                    hb.to_dict() for hb in self._memory_store._heartbeats.values()
+                    hb.to_dict() for hb in self._memory_store.heartbeats.values()
                 ],
             }
             self._storage_path.write_text(json.dumps(data, indent=2))
         except Exception as e:
             logger.warning(f"Failed to persist data to disk: {e}")
     
+    @override
     async def register(self, agent_id: str, expected_interval: int = 30) -> None:
         await self._memory_store.register(agent_id, expected_interval)
         await self._persist_to_disk()
     
+    @override
     async def unregister(self, agent_id: str) -> bool:
         result = await self._memory_store.unregister(agent_id)
         await self._persist_to_disk()
         return result
     
+    @override
     async def save(self, heartbeat: Heartbeat) -> None:
         await self._memory_store.save(heartbeat)
         await self._persist_to_disk()
     
+    @override
     async def get_last(self, agent_id: str) -> Optional[Heartbeat]:
         return await self._memory_store.get_last(agent_id)
     
+    @override
     async def get_record(self, agent_id: str) -> Optional[HealthRecord]:
         return await self._memory_store.get_record(agent_id)
     
+    @override
     async def list_agents(self) -> list[str]:
         return await self._memory_store.list_agents()
     
+    @override
     async def list_records(self) -> list[HealthRecord]:
         return await self._memory_store.list_records()
     
+    @override
     async def update_computed_status(self, agent_id: str, status: HealthStatus) -> None:
         await self._memory_store.update_computed_status(agent_id, status)
         await self._persist_to_disk()
     
+    @override
     async def increment_missed_count(self, agent_id: str) -> int:
         result = await self._memory_store.increment_missed_count(agent_id)
         await self._persist_to_disk()
         return result
     
+    @override
     async def reset_missed_count(self, agent_id: str) -> None:
         await self._memory_store.reset_missed_count(agent_id)
         await self._persist_to_disk()
@@ -297,7 +337,7 @@ def get_default_store() -> HeartbeatStore:
     return _default_store
 
 
-def set_default_store(store: HeartbeatStore) -> None:
-    """Set the default heartbeat store."""
+def set_default_store(store: Optional[HeartbeatStore]) -> None:
+    """Set the default heartbeat store (pass None to clear for tests)."""
     global _default_store
     _default_store = store

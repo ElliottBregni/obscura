@@ -1,4 +1,5 @@
 """Tests for sdk.heartbeat.store — InMemoryHeartbeatStore and FileHeartbeatStore."""
+import asyncio
 import pytest
 import json
 import tempfile
@@ -11,7 +12,7 @@ from sdk.heartbeat.store import (
     get_default_store,
     set_default_store,
 )
-from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
+from sdk.heartbeat.types import Heartbeat, HealthStatus
 
 
 class TestInMemoryHeartbeatStore:
@@ -67,6 +68,7 @@ class TestInMemoryHeartbeatStore:
         )
         await store.save(hb)
         record = await store.get_record("a1")
+        assert record is not None
         assert record.computed_status == HealthStatus.WARNING
 
     @pytest.mark.asyncio
@@ -88,6 +90,7 @@ class TestInMemoryHeartbeatStore:
         await store.register("a1")
         await store.update_computed_status("a1", HealthStatus.CRITICAL)
         record = await store.get_record("a1")
+        assert record is not None
         assert record.computed_status == HealthStatus.CRITICAL
 
     @pytest.mark.asyncio
@@ -117,6 +120,7 @@ class TestInMemoryHeartbeatStore:
         await store.increment_missed_count("a1")
         await store.reset_missed_count("a1")
         record = await store.get_record("a1")
+        assert record is not None
         assert record.missed_count == 0
 
     @pytest.mark.asyncio
@@ -135,9 +139,10 @@ class TestInMemoryHeartbeatStore:
 
     def test_clear(self):
         store = InMemoryHeartbeatStore()
-        store._records["a1"] = HealthRecord(agent_id="a1")
+        # populate via public API
+        asyncio.run(store.register("a1"))
         store.clear()
-        assert len(store._records) == 0
+        assert len(store.records) == 0
 
     @pytest.mark.asyncio
     async def test_unregister_with_heartbeat(self):
@@ -173,7 +178,7 @@ class TestFileHeartbeatStore:
     async def test_load_from_disk(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
-            data = {
+            data: dict[str, list[dict[str, object]]] = {
                 "records": [{
                     "agent_id": "a1",
                     "expected_interval": 30,

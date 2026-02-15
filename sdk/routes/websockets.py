@@ -19,6 +19,27 @@ _broadcast_clients: list[WebSocket] = []
 _memory_watch_clients: dict[str, list[WebSocket]] = {}
 
 
+# Testing/observability helpers (read-only accessors)
+def broadcast_clients() -> list[WebSocket]:
+    """Mutable list of broadcast websocket clients (for tests/metrics)."""
+    return _broadcast_clients
+
+
+def clear_broadcast_clients() -> None:
+    """Clear broadcast clients (testing helper)."""
+    _broadcast_clients.clear()
+
+
+def memory_watch_clients() -> dict[str, list[WebSocket]]:
+    """Mutable mapping of namespace -> clients (for tests/metrics)."""
+    return _memory_watch_clients
+
+
+def clear_memory_watch_clients() -> None:
+    """Clear memory watch clients (testing helper)."""
+    _memory_watch_clients.clear()
+
+
 # -- agent websocket -------------------------------------------------------
 
 
