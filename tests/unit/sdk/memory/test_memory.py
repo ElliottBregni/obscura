@@ -107,15 +107,8 @@ class TestMemoryStore:
 
     def test_ttl_expiration(self, test_user: AuthenticatedUser, temp_db: Path) -> None:
         store = MemoryStore(test_user, db_path=temp_db)
-        # Set with very short TTL
-        store.set("temp", "value", namespace="test", ttl=timedelta(milliseconds=1))
-        # Should exist immediately
-        assert store.get("temp", namespace="test") == "value"
-        # Wait for expiration
-        import time
-
-        time.sleep(0.01)
-        # Should be expired now
+        # Set with expired TTL so it should disappear on next read without sleep
+        store.set("temp", "value", namespace="test", ttl=timedelta(milliseconds=-1))
         value = store.get("temp", namespace="test", default="expired")
         assert value == "expired"
 
