@@ -7,11 +7,17 @@ with status icons indicating accepted/rejected/pending state.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-
-from typing import override
+from typing import Any
 
 from textual.app import ComposeResult
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    def override(fn: Any) -> Any:  # type: ignore[misc]
+        return fn
 from textual.containers import Vertical
 from textual.message import Message
 from textual.widget import Widget

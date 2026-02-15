@@ -45,7 +45,11 @@ async def send(
             "success",
             prompt_len=len(body.prompt),
         )
-        return SendResponse(text=msg.text, backend=body.backend)
+        return SendResponse(
+            text=msg.text,
+            backend=body.backend,
+            capability_tier=client.capability_tier,
+        )
     except Exception:
         audit(
             "agent.send",

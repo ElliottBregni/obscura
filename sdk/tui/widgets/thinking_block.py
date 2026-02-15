@@ -7,9 +7,16 @@ Collapsed by default, toggled with the 't' key.
 
 from __future__ import annotations
 
-from typing import override
+import sys
+from typing import Any
 
 from textual.app import ComposeResult
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    def override(fn: Any) -> Any:  # type: ignore[misc]
+        return fn
 from textual.containers import Vertical
 from textual.reactive import reactive
 from textual.widget import Widget

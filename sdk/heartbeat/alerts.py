@@ -8,11 +8,18 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional, override
+from typing import Any, Callable, Optional
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    def override(fn: Any) -> Any:  # type: ignore[misc]
+        return fn
 
 import httpx
 

@@ -14,12 +14,18 @@ Launch via::
 
 from __future__ import annotations
 
-from typing import Any, override
+import sys
+from typing import Any, Callable, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
-from typing import Any, Callable, override, cast
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    def override(fn: Any) -> Any:  # type: ignore[misc]
+        return fn
 
 from sdk.tui.backend_bridge import BackendBridge
 from sdk.tui.modes import ModeManager, Plan, TUIMode

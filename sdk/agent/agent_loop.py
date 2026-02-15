@@ -81,11 +81,13 @@ class AgentLoop:
         *,
         max_turns: int = 10,
         on_confirm: ConfirmationCallback | None = None,
+        capability_token: Any | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
         self._max_turns = max_turns
         self._on_confirm = on_confirm
+        self._capability_token = capability_token
 
     @property
     def max_turns(self) -> int:
@@ -248,6 +250,35 @@ class AgentLoop:
                 )
                 continue
 
+            # Capability token enforcement (defense in depth)
+            if self._capability_token is not None:
+                try:
+                    from sdk.auth.capability import validate_capability_token
+
+                    if not validate_capability_token(self._capability_token):
+                        _audit_tool_denied(tc.name, "invalid_or_expired_token")
+                        results.append(
+                            (tc, "Capability token invalid or expired.", True)
+                        )
+                        continue
+
+                    token_tier = self._capability_token.tier.value
+                    if (
+                        spec.required_tier == "privileged"
+                        and token_tier != "privileged"
+                    ):
+                        _audit_tool_denied(tc.name, "insufficient_tier")
+                        results.append(
+                            (
+                                tc,
+                                f"Tool '{tc.name}' requires privileged tier.",
+                                True,
+                            )
+                        )
+                        continue
+                except Exception:
+                    pass  # Degrade gracefully if capability module unavailable
+
             try:
                 result = await self._call_handler(spec, tc.input)
                 result_text = (
@@ -353,3 +384,28 @@ class AgentLoop:
     def format_tool_results(results: list[tuple[ToolCallInfo, str, bool]]) -> str:
         """Public wrapper to format tool results (testing)."""
         return AgentLoop._format_tool_results(results)
+
+
+# ---------------------------------------------------------------------------
+# Audit helper for capability enforcement
+# ---------------------------------------------------------------------------
+
+
+def _audit_tool_denied(tool_name: str, reason: str) -> None:
+    """Emit an audit event when a tool call is denied by capability enforcement."""
+    try:
+        from sdk.telemetry.audit import AuditEvent, emit_audit_event
+
+        emit_audit_event(
+            AuditEvent(
+                event_type="tool.denied",
+                user_id="agent_loop",
+                user_email="",
+                resource=f"tool:{tool_name}",
+                action="execute",
+                outcome="denied",
+                details={"reason": reason},
+            )
+        )
+    except Exception:
+        pass

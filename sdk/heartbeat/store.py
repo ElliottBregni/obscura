@@ -8,11 +8,18 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, Optional, override
+from typing import Any, Mapping, Optional
 from types import MappingProxyType
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    def override(fn: Any) -> Any:  # type: ignore[misc]
+        return fn
 
 from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
 

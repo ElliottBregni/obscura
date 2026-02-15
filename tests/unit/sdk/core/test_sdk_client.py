@@ -237,6 +237,7 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     client._backend_type = Backend.COPILOT
     client._tool_registry = ToolRegistry()
     client._user = None
+    client._capability_token = None
     return client, mock_backend
 
 
@@ -455,6 +456,7 @@ class TestRunLoop:
                 client._tool_registry,
                 max_turns=5,
                 on_confirm=None,
+                capability_token=None,
             )
             mock_loop_instance.run.assert_called_once_with("fix bug")
 
@@ -475,6 +477,7 @@ class TestRunLoop:
                 client._tool_registry,
                 max_turns=3,
                 on_confirm=None,
+                capability_token=None,
             )
             mock_loop_instance.run_to_completion.assert_awaited_once_with("fix bug")
             assert result == "done!"
@@ -496,6 +499,7 @@ class TestRunLoop:
                 client._tool_registry,
                 max_turns=10,
                 on_confirm=confirm_fn,
+                capability_token=None,
             )
 
 

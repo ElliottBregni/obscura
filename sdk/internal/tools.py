@@ -45,6 +45,20 @@ class ToolRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._tools
 
+    def for_tier(self, tier_value: str) -> list[ToolSpec]:
+        """Return tools accessible at *tier_value*.
+
+        ``"privileged"`` gets all tools; ``"public"`` gets only those
+        with ``required_tier == "public"``.
+        """
+        if tier_value == "privileged":
+            return self.all()
+        return [t for t in self._tools.values() if t.required_tier == "public"]
+
+    def names_for_tier(self, tier_value: str) -> list[str]:
+        """Return tool names accessible at *tier_value*."""
+        return [t.name for t in self.for_tier(tier_value)]
+
 
 # ---------------------------------------------------------------------------
 # Schema inference
@@ -99,6 +113,7 @@ def tool(
     parameters: dict[str, Any] | None = None,
     *,
     pydantic_model: type[Any] | None = None,
+    required_tier: str = "public",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to define a tool that works with both backends.
 
@@ -133,6 +148,7 @@ def tool(
             parameters=schema or {},
             handler=fn,
             _pydantic_model=pydantic_model,
+            required_tier=required_tier,
         )
 
         @functools.wraps(fn)
