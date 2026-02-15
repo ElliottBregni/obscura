@@ -16,6 +16,7 @@ from sdk._sessions import SessionStore
 from sdk._stream import EventToIteratorBridge
 from sdk._tools import ToolRegistry
 from sdk._types import (
+    AgentHookConfig,
     AgentEvent,
     Backend,
     ChunkKind,
@@ -63,6 +64,59 @@ class CopilotBackend:
         # Session tracking
         self._session_store = SessionStore()
 
+    # -- Testing/observability accessors ------------------------------------
+
+    @property
+    def model(self) -> str | None:
+        return self._model
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    @property
+    def streaming(self) -> bool:
+        return self._streaming
+
+    @property
+    def client(self) -> Any:
+        return self._client
+
+    @property
+    def session(self) -> Any:
+        return self._session
+
+    def set_client_for_testing(self, client: Any) -> None:
+        self._client = client
+
+    def set_session_for_testing(self, session: Any) -> None:
+        self._session = session
+
+    @property
+    def tools(self) -> list[ToolSpec]:
+        return self._tools
+
+    @property
+    def tool_registry(self) -> ToolRegistry:
+        return self._tool_registry
+
+    @property
+    def hooks(self) -> dict[HookPoint, list[Callable[..., Any]]]:
+        return self._hooks
+
+    @property
+    def session_store(self) -> SessionStore:
+        return self._session_store
+
+    def ensure_client_started(self) -> None:
+        self._ensure_client()
+
+    def ensure_session_started(self) -> None:
+        self._ensure_session()
+
+    def to_message(self, raw: Any) -> Message:
+        return self._to_message(raw)
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
@@ -78,7 +132,7 @@ class CopilotBackend:
         await self._client.start()
 
         # Create default session
-        session_config = self._build_session_config()
+        session_config = self.build_session_config()
         self._session = await self._client.create_session(session_config)
 
     async def stop(self) -> None:
@@ -168,7 +222,7 @@ class CopilotBackend:
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new named session."""
         self._ensure_client()
-        config = self._build_session_config(**kwargs)
+        config = self.build_session_config(**kwargs)
         session = await self._client.create_session(config)
         ref = SessionRef(
             session_id=session.session_id,
@@ -262,7 +316,7 @@ class CopilotBackend:
         if self._session is None:
             raise RuntimeError("No active session. Call start() or create_session() first.")
 
-    def _build_session_config(self, **overrides: Any) -> dict[str, Any]:
+    def build_session_config(self, **overrides: Any) -> dict[str, Any]:
         """Build a SessionConfig dict for the Copilot SDK."""
         config: dict[str, Any] = {}
 
@@ -281,14 +335,14 @@ class CopilotBackend:
             config["tools"] = self._tools  # Backend translates ToolSpecs
 
         # Apply hook mappings
-        hooks = self._build_hooks_config()
+        hooks = self.build_hooks_config()
         if hooks:
             config["hooks"] = hooks
 
         config.update(overrides)
         return config
 
-    def _build_hooks_config(self) -> dict[str, Any] | None:
+    def build_hooks_config(self) -> dict[str, Any] | None:
         """Translate registered hooks to Copilot SDK hook config."""
         hook_map: dict[str, str] = {
             HookPoint.PRE_TOOL_USE.value: "on_pre_tool_use",
@@ -297,20 +351,22 @@ class CopilotBackend:
             HookPoint.STOP.value: "on_stop",
         }
 
-        result: dict[str, Any] = {}
+        result: AgentHookConfig = {}
         for hp, callbacks in self._hooks.items():
-            if callbacks:
-                copilot_key = hook_map.get(hp.value)
-                if copilot_key and len(callbacks) == 1:
-                    result[copilot_key] = callbacks[0]
-                elif copilot_key:
-                    # Chain multiple callbacks
-                    async def _chained(*args: Any, cbs: list[Callable[..., Any]] = callbacks, **kw: Any) -> Any:
-                        last_result: Any = None
-                        for cb in cbs:
-                            last_result = await cb(*args, **kw) if inspect.iscoroutinefunction(cb) else cb(*args, **kw)
-                        return last_result
-                    result[copilot_key] = _chained
+            if not callbacks:
+                continue
+            copilot_key = hook_map.get(hp.value)
+            if not copilot_key:
+                continue
+            if len(callbacks) == 1:
+                result[copilot_key] = callbacks[0]
+            else:
+                async def _chained(*args: Any, cbs: list[Callable[..., Any]] = callbacks, **kw: Any) -> Any:
+                    last_result: Any = None
+                    for cb in cbs:
+                        last_result = await cb(*args, **kw) if inspect.iscoroutinefunction(cb) else cb(*args, **kw)
+                    return last_result
+                result[copilot_key] = _chained
 
         return result or None
 
@@ -357,6 +413,9 @@ def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[...
     handler._event_type = event_type  # type: ignore[attr-defined]
     return handler
 
+# Export helper for tests
+public_make_handler = _make_handler
+
 
 # ---------------------------------------------------------------------------
 # Lazy telemetry helpers
@@ -379,3 +438,7 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
             span.set_attribute(key, value)
     except Exception:
         pass
+
+# Export telemetry helpers for tests
+public_get_backend_tracer = _get_backend_tracer
+public_set_span_attr = _set_span_attr

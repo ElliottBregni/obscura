@@ -114,6 +114,10 @@ class ToolSpec:
     _pydantic_model: type | None = None
 
 
+# Hook config type for Copilot backend
+AgentHookConfig = dict[str, Callable[..., Any]]
+
+
 # ---------------------------------------------------------------------------
 # Session reference
 # ---------------------------------------------------------------------------

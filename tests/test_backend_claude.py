@@ -5,18 +5,18 @@ from sdk._auth import AuthConfig
 from sdk._types import Backend, HookPoint
 
 
-def _make_auth(**kw):
-    return AuthConfig(anthropic_api_key=kw.get("api_key", "sk-ant-test"))
+def _make_auth(api_key: str = "sk-ant-test") -> AuthConfig:
+    return AuthConfig(anthropic_api_key=api_key)
 
 
 class TestClaudeBackendInit:
     def test_defaults(self):
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
-        assert b._model == "claude-sonnet-4-5-20250929"
-        assert b._permission_mode == "default"
-        assert b._cwd is None
-        assert b._client is None
+        assert b.model == "claude-sonnet-4-5-20250929"
+        assert b.permission_mode == "default"
+        assert b.cwd is None
+        assert b.client is None
 
     def test_custom_settings(self):
         from sdk.backends.claude import ClaudeBackend
@@ -27,10 +27,10 @@ class TestClaudeBackendInit:
             permission_mode="strict",
             cwd="/tmp",
         )
-        assert b._model == "claude-3-haiku"
-        assert b._system_prompt == "Be brief"
-        assert b._permission_mode == "strict"
-        assert b._cwd == "/tmp"
+        assert b.model == "claude-3-haiku"
+        assert b.system_prompt == "Be brief"
+        assert b.permission_mode == "strict"
+        assert b.cwd == "/tmp"
 
 
 class TestClaudeLifecycle:
@@ -44,15 +44,15 @@ class TestClaudeLifecycle:
              patch("claude_agent_sdk.ClaudeAgentOptions"):
             await b.start()
             mock_client.connect.assert_awaited_once()
-            assert b._client is mock_client
+            assert b.client is mock_client
 
     @pytest.mark.asyncio
     async def test_stop(self):
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
-        b._client = AsyncMock()
+        b.set_client_for_testing(AsyncMock())
         await b.stop()
-        assert b._client is None
+        assert b.client is None
 
     @pytest.mark.asyncio
     async def test_stop_when_not_started(self):
@@ -96,7 +96,7 @@ class TestClaudeSend:
 
         mock_client.receive_response = mock_receive
         mock_client.query = AsyncMock()
-        b._client = mock_client
+        b.set_client_for_testing(mock_client)
 
         msg = await b.send("Hello")
         assert msg.content[0].text == "Claude says hello"
@@ -114,7 +114,7 @@ class TestClaudeSessions:
     async def test_create_session(self):
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
-        b._client = AsyncMock()
+        b.set_client_for_testing(AsyncMock())
 
         # create_session calls query() then iterates receive_response()
         result_msg = MagicMock()
@@ -124,8 +124,8 @@ class TestClaudeSessions:
         async def mock_receive():
             yield result_msg
 
-        b._client.receive_response = mock_receive
-        b._client.query = AsyncMock()
+        b.client.receive_response = mock_receive
+        b.client.query = AsyncMock()
 
         ref = await b.create_session()
         assert ref.session_id == "claude-sess-1"
@@ -135,7 +135,7 @@ class TestClaudeSessions:
     async def test_list_sessions(self):
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
-        b._client = AsyncMock()
+        b.set_client_for_testing(AsyncMock())
 
         # First create a session so there's something to list
         result_msg = MagicMock()
@@ -145,8 +145,8 @@ class TestClaudeSessions:
         async def mock_receive():
             yield result_msg
 
-        b._client.receive_response = mock_receive
-        b._client.query = AsyncMock()
+        b.client.receive_response = mock_receive
+        b.client.query = AsyncMock()
 
         await b.create_session()
 
@@ -158,12 +158,12 @@ class TestClaudeSessions:
         from sdk.backends.claude import ClaudeBackend
         from sdk._types import SessionRef
         b = ClaudeBackend(_make_auth())
-        b._client = AsyncMock()
+        b.set_client_for_testing(AsyncMock())
 
         # delete_session just removes from session store, doesn't call client
         # First add a session to the store
         ref = SessionRef(session_id="s1", backend=Backend.CLAUDE)
-        b._session_store.add(ref)
+        b.session_store.add(ref)
 
         await b.delete_session(ref)
         # After deletion, listing should be empty
@@ -178,14 +178,14 @@ class TestClaudeTools:
         b = ClaudeBackend(_make_auth())
         spec = ToolSpec(name="t1", description="test tool", parameters={}, handler=lambda: None)
         b.register_tool(spec)
-        assert len(b._tools) == 1
+        assert len(b.tools) == 1
 
     def test_register_hook(self):
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
         cb = MagicMock()
         b.register_hook(HookPoint.STOP, cb)
-        assert cb in b._hooks[HookPoint.STOP]
+        assert cb in b.hooks[HookPoint.STOP]
 
 
 class TestClaudeInternals:
@@ -193,12 +193,12 @@ class TestClaudeInternals:
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
-            b._ensure_client()
+            b.ensure_client_started()
 
     def test_to_message_empty(self):
         from sdk.backends.claude import ClaudeBackend
         b = ClaudeBackend(_make_auth())
-        msg = b._to_message([])
+        msg = b.to_message([])
         assert msg.role.value == "assistant"
         assert msg.content[0].text == ""
 
@@ -213,7 +213,7 @@ class TestClaudeInternals:
         text_block.text = "Hello there"
         assistant_msg.content = [text_block]
 
-        msg = b._to_message([assistant_msg])
+        msg = b.to_message([assistant_msg])
         assert msg.content[0].text == "Hello there"
         assert msg.backend == Backend.CLAUDE
 
@@ -228,7 +228,7 @@ class TestClaudeInternals:
         thinking_block.thinking = "Let me think..."
         assistant_msg.content = [thinking_block]
 
-        msg = b._to_message([assistant_msg])
+        msg = b.to_message([assistant_msg])
         assert msg.content[0].kind == "thinking"
         assert msg.content[0].text == "Let me think..."
 
@@ -245,6 +245,6 @@ class TestClaudeInternals:
         tool_block.id = "tu_123"
         assistant_msg.content = [tool_block]
 
-        msg = b._to_message([assistant_msg])
+        msg = b.to_message([assistant_msg])
         assert msg.content[0].kind == "tool_use"
         assert msg.content[0].tool_name == "my_tool"

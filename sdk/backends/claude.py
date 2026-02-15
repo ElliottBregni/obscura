@@ -64,6 +64,52 @@ class ClaudeBackend:
         # Session tracking
         self._session_store = SessionStore()
 
+    # -- Testing/observability accessors ------------------------------------
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    @property
+    def permission_mode(self) -> str:
+        return self._permission_mode
+
+    @property
+    def cwd(self) -> str | None:
+        return self._cwd
+
+    @property
+    def client(self) -> Any:
+        return self._client
+
+    def set_client_for_testing(self, client: Any) -> None:
+        """Inject a fake ClaudeSDKClient for tests."""
+        self._client = client
+
+    @property
+    def tools(self) -> list[ToolSpec]:
+        return self._tools
+
+    @property
+    def hooks(self) -> dict[HookPoint, list[Callable[..., Any]]]:
+        return self._hooks
+
+    @property
+    def session_store(self) -> SessionStore:
+        return self._session_store
+
+    def ensure_client_started(self) -> None:
+        """Public wrapper used in tests."""
+        self._ensure_client()
+
+    def to_message(self, raw_messages: list[Any]) -> Message:
+        """Public wrapper for testing message conversion."""
+        return self._to_message(raw_messages)
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
