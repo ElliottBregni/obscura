@@ -1,8 +1,8 @@
 """Tests for sdk.backends.openai_compat — OpenAIBackend."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from sdk._auth import AuthConfig
-from sdk._types import Backend, ChunkKind, HookPoint
+from sdk.internal.auth import AuthConfig
+from sdk.internal.types import Backend, ChunkKind, HookPoint
 
 
 def _make_auth(**kw):
@@ -180,7 +180,7 @@ class TestOpenAISessions:
 class TestOpenAITools:
     def test_register_tool(self):
         from sdk.backends.openai_compat import OpenAIBackend
-        from sdk._types import ToolSpec
+        from sdk.internal.types import ToolSpec
         b = OpenAIBackend(_make_auth())
         spec = ToolSpec(name="tool1", description="desc", parameters={"type": "object"}, handler=lambda: None)
         b.register_tool(spec)

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Callable
 
-from sdk._auth import AuthConfig
-from sdk._sessions import SessionStore
-from sdk._stream import ClaudeIteratorAdapter
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.auth import AuthConfig
+from sdk.internal.sessions import SessionStore
+from sdk.internal.stream import ClaudeIteratorAdapter
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     AgentEvent,
     Backend,
     ChunkKind,
@@ -257,7 +257,7 @@ class ClaudeBackend:
         Yields ``AgentEvent`` instances as the model streams text,
         calls tools, and iterates across multiple turns.
         """
-        from sdk.agent_loop import AgentLoop
+        from sdk.agent.agent_loop import AgentLoop
 
         loop = AgentLoop(
             self,

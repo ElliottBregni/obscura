@@ -20,7 +20,7 @@ import asyncio
 import sys
 from typing import Any
 
-from sdk._types import Backend, ChunkKind, SessionRef
+from sdk.internal.types import Backend, ChunkKind, SessionRef
 from sdk.client import ObscuraClient
 
 

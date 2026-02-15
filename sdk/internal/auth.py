@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from sdk._types import Backend
+from sdk.internal.types import Backend
 
 
 # ---------------------------------------------------------------------------

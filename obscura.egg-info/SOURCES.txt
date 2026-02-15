@@ -13,9 +13,6 @@ sdk/_sessions.py
 sdk/_stream.py
 sdk/_tools.py
 sdk/_types.py
-sdk/agent.py
-sdk/agent_loop.py
-sdk/agents.py
 sdk/cli.py
 sdk/client.py
 sdk/config.py
@@ -163,3 +160,6 @@ sdk/vector_memory/vector_memory.py
 sdk/vector_memory/vector_memory_filters.py
 sdk/vector_memory/vector_memory_rerank.py
 sdk/vector_memory/vector_memory_router.py
+sdk/agent/agent.py
+sdk/agent/agents.py
+sdk/agent/agent_loop.py

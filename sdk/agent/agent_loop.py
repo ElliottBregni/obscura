@@ -9,8 +9,8 @@ Works with all backends (Copilot, Claude, OpenAI, LocalLLM).
 
 Usage::
 
-    from sdk.agent_loop import AgentLoop
-    from sdk._types import AgentEventKind
+    from sdk.agent.agent_loop import AgentLoop
+    from sdk.internal.types import AgentEventKind
 
     loop = AgentLoop(backend, tool_registry, max_turns=10)
 
@@ -35,8 +35,8 @@ import logging
 import uuid
 from typing import Any, AsyncIterator, Awaitable, Callable
 
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     AgentEvent,
     AgentEventKind,
     BackendProtocol,

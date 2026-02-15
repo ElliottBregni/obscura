@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from sdk._types import Backend, SessionRef
+from sdk.internal.types import Backend, SessionRef
 from sdk.auth.models import AuthenticatedUser
 from sdk.auth.rbac import require_role
 from sdk.deps import ClientFactory, audit

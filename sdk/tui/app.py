@@ -444,7 +444,7 @@ class ObscuraTUI(App[None]):
 
     async def _cmd_backend(self, args: list[str]) -> None:
         """Handle /backend <name>."""
-        from sdk._types import Backend
+        from sdk.internal.types import Backend
         supported = {b.value for b in Backend}
         if not args:
             self._show_system(
@@ -646,7 +646,7 @@ class ObscuraTUI(App[None]):
 
     async def _cmd_help(self, args: list[str]) -> None:
         """Handle /help."""
-        from sdk._types import Backend
+        from sdk.internal.types import Backend
         backends = "|".join(sorted(b.value for b in Backend))
         modes = "|".join(m.value for m in TUIMode)
 

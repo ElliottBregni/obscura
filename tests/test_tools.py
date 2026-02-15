@@ -1,8 +1,8 @@
-"""Tests for sdk._tools — ToolRegistry, @tool decorator, schema inference."""
+"""Tests for sdk.internal.tools — ToolRegistry, @tool decorator, schema inference."""
 import pytest
 
-from sdk._tools import ToolRegistry, tool, _infer_schema_from_hints
-from sdk._types import ToolSpec
+from sdk.internal.tools import ToolRegistry, tool, _infer_schema_from_hints
+from sdk.internal.types import ToolSpec
 
 
 class TestToolRegistry:

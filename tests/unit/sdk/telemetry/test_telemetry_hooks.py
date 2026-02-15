@@ -8,7 +8,7 @@ from sdk.telemetry.hooks import (
     start_tool_span,
     end_tool_span,
 )
-from sdk._types import HookPoint
+from sdk.internal.types import HookPoint
 
 
 class TestRegisterTelemetryHooks:

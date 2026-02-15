@@ -127,6 +127,47 @@ class MCPClient:
         self._request_id += 1
         return str(self._request_id)
 
+    # Public accessors for testing/observability
+    @property
+    def initialized(self) -> bool:
+        return self._initialized
+
+    @initialized.setter
+    def initialized(self, value: bool) -> None:
+        self._initialized = value
+
+    @property
+    def request_counter(self) -> int:
+        return self._request_id
+
+    @property
+    def transport(self) -> "MCPTransport | None":
+        return self._transport
+
+    @transport.setter
+    def transport(self, value: "MCPTransport | None") -> None:
+        self._transport = value
+
+    @property
+    def pending_requests(self) -> dict[str, asyncio.Future[dict[str, Any]]]:
+        return self._pending_requests
+
+    def next_id(self) -> str:
+        """Public wrapper around the request ID generator."""
+        return self._next_id()
+
+    async def request(self, method: str, params: dict[str, Any]) -> Any:
+        """Public wrapper around the JSON-RPC request helper."""
+        return await self._request(method, params)
+
+    async def notify(self, method: str, params: dict[str, Any]) -> None:
+        """Public wrapper around the JSON-RPC notification helper."""
+        await self._notification(method, params)
+
+    def handle_response(self, response: dict[str, Any]) -> None:
+        """Public wrapper to feed incoming responses."""
+        self._handle_response(response)
+
     async def _request(self, method: str, params: dict[str, Any]) -> Any:
         """Send a JSON-RPC request and wait for response."""
         if self._transport is None:
@@ -339,6 +380,23 @@ class StdioTransport(MCPTransport):
         self._message_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._client: MCPClient | None = None
 
+    # Public accessors for testing/observability
+    @property
+    def process(self) -> asyncio.subprocess.Process | None:
+        return self._process
+
+    @process.setter
+    def process(self, value: asyncio.subprocess.Process | None) -> None:
+        self._process = value
+
+    @property
+    def read_task(self) -> asyncio.Task[None] | None:
+        return self._read_task
+
+    @read_task.setter
+    def read_task(self, value: asyncio.Task[None] | None) -> None:
+        self._read_task = value
+
     @override
     async def connect(self) -> None:
         """Spawn the MCP server process."""
@@ -441,6 +499,39 @@ class SSETransport(MCPTransport):
         self._message_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._read_task: asyncio.Task[None] | None = None
 
+    # Public accessors for testing/observability
+    @property
+    def client(self) -> httpx.AsyncClient | None:
+        return self._client
+
+    @client.setter
+    def client(self, value: httpx.AsyncClient | None) -> None:
+        self._client = value
+
+    @property
+    def endpoint(self) -> str | None:
+        return self._endpoint
+
+    @endpoint.setter
+    def endpoint(self, value: str | None) -> None:
+        self._endpoint = value
+
+    @property
+    def event_source(self) -> Any:
+        return self._event_source
+
+    @event_source.setter
+    def event_source(self, value: Any) -> None:
+        self._event_source = value
+
+    @property
+    def read_task(self) -> asyncio.Task[None] | None:
+        return self._read_task
+
+    @read_task.setter
+    def read_task(self, value: asyncio.Task[None] | None) -> None:
+        self._read_task = value
+
     @override
     async def connect(self) -> None:
         """Connect to SSE endpoint."""
@@ -540,6 +631,11 @@ class MCPSessionManager:
     def list_sessions(self) -> list[str]:
         """List all session names."""
         return list(self._sessions.keys())
+
+    @property
+    def sessions(self) -> dict[str, MCPClient]:
+        """Read-only access to managed sessions (for testing/observability)."""
+        return self._sessions
 
     async def close_all(self) -> None:
         """Close all sessions."""

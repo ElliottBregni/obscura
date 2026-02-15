@@ -1,10 +1,10 @@
-"""Tests for sdk._sessions — SessionStore and PersistentSessionStore."""
+"""Tests for sdk.internal.sessions — SessionStore and PersistentSessionStore."""
 import json
 import tempfile
 from pathlib import Path
 
-from sdk._sessions import SessionStore, PersistentSessionStore
-from sdk._types import Backend, SessionRef
+from sdk.internal.sessions import SessionStore, PersistentSessionStore
+from sdk.internal.types import Backend, SessionRef
 
 
 class TestSessionStore:

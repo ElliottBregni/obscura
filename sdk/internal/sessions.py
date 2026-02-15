@@ -1,5 +1,5 @@
 """
-sdk._sessions — Lightweight session tracking across backends.
+sdk.internal.sessions — Lightweight session tracking across backends.
 
 Backends handle actual session persistence. This store provides a
 unified index so the CLI can list and resume sessions across both
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, cast
 
-from sdk._types import Backend, SessionRef
+from sdk.internal.types import Backend, SessionRef
 
 
 # ---------------------------------------------------------------------------

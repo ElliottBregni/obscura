@@ -1,5 +1,5 @@
 """
-sdk._stream — Streaming adapters for normalizing backend output.
+sdk.internal.stream — Streaming adapters for normalizing backend output.
 
 Copilot is event/push-based (register callbacks, events fire).
 Claude is pull-based (async iterator of Messages/StreamEvents).
@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator
 
-from sdk._types import ChunkKind, StreamChunk
+from sdk.internal.types import ChunkKind, StreamChunk
 
 
 # ---------------------------------------------------------------------------

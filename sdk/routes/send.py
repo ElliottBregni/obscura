@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
 
-from sdk._types import Backend, SessionRef
+from sdk.internal.types import Backend, SessionRef
 from sdk.auth.models import AuthenticatedUser
 from sdk.auth.rbac import AGENT_READ_ROLES, require_any_role
 from sdk.deps import ClientFactory, audit

@@ -70,7 +70,7 @@ class TestGetRuntime:
         mock_rt = AsyncMock()
         MockRuntime = MagicMock(return_value=mock_rt)
 
-        with patch("sdk.agents.AgentRuntime", MockRuntime):
+        with patch("sdk.agent.agents.AgentRuntime", MockRuntime):
             rt = await get_runtime(user)
             MockRuntime.assert_called_once_with(user)
             mock_rt.start.assert_awaited_once()

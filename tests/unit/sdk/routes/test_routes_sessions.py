@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import AsyncMock
 from starlette.testclient import TestClient
 from sdk.config import ObscuraConfig
-from sdk._types import Backend, SessionRef
+from sdk.internal.types import Backend, SessionRef
 
 
 @pytest.fixture

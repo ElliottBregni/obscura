@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sdk._auth import AuthConfig
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.auth import AuthConfig
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     Backend,
     ChunkKind,
     HookContext,

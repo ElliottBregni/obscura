@@ -32,9 +32,9 @@ import logging
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 if TYPE_CHECKING:
-    from sdk._tools import ToolRegistry
+    from sdk.internal.tools import ToolRegistry
 
-from sdk._types import (
+from sdk.internal.types import (
     HookContext,
     HookPoint,
     Message,
@@ -62,7 +62,7 @@ class MCPBackend:
         mcp_servers: list[MCPConnectionConfig] | None = None,
         name: str = "mcp",
     ):
-        from sdk._tools import ToolRegistry
+        from sdk.internal.tools import ToolRegistry
 
         self.name = name
         self.mcp_servers = mcp_servers or []
@@ -103,7 +103,7 @@ class MCPBackend:
     
     async def _refresh_tools(self) -> None:
         """Refresh the list of available tools from all servers."""
-        from sdk._tools import ToolRegistry
+        from sdk.internal.tools import ToolRegistry
 
         self._tools = []
         self._tool_registry = ToolRegistry()

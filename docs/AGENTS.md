@@ -23,7 +23,7 @@ Think of it as a **"process manager for AI agents."**
 ### Python SDK
 
 ```python
-from sdk.agents import AgentRuntime
+from sdk.agent.agents import AgentRuntime
 from sdk.auth.models import AuthenticatedUser
 
 # Create runtime

@@ -7,7 +7,7 @@ import pytest
 
 from pathlib import Path
 
-from sdk._types import Backend
+from sdk.internal.types import Backend
 from sdk.context import ContextLoader
 
 

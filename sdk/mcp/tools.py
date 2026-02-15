@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, cast
 
-from sdk._types import ToolSpec
+from sdk.internal.types import ToolSpec
 from sdk.mcp.types import (
     MCPError,
     MCPErrorCode,

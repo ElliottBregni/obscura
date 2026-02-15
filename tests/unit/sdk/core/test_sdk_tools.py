@@ -1,8 +1,8 @@
-"""Tests for sdk._tools — @tool decorator, ToolRegistry, schema inference."""
+"""Tests for sdk.internal.tools — @tool decorator, ToolRegistry, schema inference."""
 
 from __future__ import annotations
 
-from sdk._tools import ToolRegistry, _infer_schema_from_hints, tool
+from sdk.internal.tools import ToolRegistry, _infer_schema_from_hints, tool
 
 
 # ---------------------------------------------------------------------------

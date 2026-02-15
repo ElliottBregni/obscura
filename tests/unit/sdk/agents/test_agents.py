@@ -1,4 +1,4 @@
-"""Tests for sdk.agents — Agent runtime and lifecycle management."""
+"""Tests for sdk.agent.agents — Agent runtime and lifecycle management."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sdk.agents import (
+from sdk.agent.agents import (
     Agent,
     AgentConfig,
     AgentMessage,
@@ -18,7 +18,7 @@ from sdk.agents import (
     AgentStatus,
     MCPConfig,
 )
-from sdk._types import AgentEvent, AgentEventKind
+from sdk.internal.types import AgentEvent, AgentEventKind
 from sdk.auth.models import AuthenticatedUser
 
 
@@ -163,7 +163,7 @@ class TestAgentRuntime:
         mock_message = MagicMock()
         mock_message.text = "result from run"
 
-        with patch("sdk.agents.ObscuraClient") as MockClient:
+        with patch("sdk.agent.agents.ObscuraClient") as MockClient:
             instance = AsyncMock()
             instance.send = AsyncMock(return_value=mock_message)
             MockClient.return_value = instance
@@ -312,7 +312,7 @@ class TestAgentStart:
         agent = _make_agent(runtime, "start-test")
         agent.heartbeat_enabled = False
 
-        with patch("sdk.agents.ObscuraClient") as MockClient:
+        with patch("sdk.agent.agents.ObscuraClient") as MockClient:
             instance = AsyncMock()
             MockClient.return_value = instance
 
@@ -340,7 +340,7 @@ class TestAgentStart:
         mock_tool = MagicMock()
         mock_tool.name = "my_tool"
 
-        with patch("sdk.agents.ObscuraClient") as MockClient:
+        with patch("sdk.agent.agents.ObscuraClient") as MockClient:
             client_instance = AsyncMock()
             # register_tool is a sync method, not async
             client_instance.register_tool = MagicMock()
@@ -364,7 +364,7 @@ class TestAgentStart:
         agent = _make_agent(runtime, "hb-test")
         agent.heartbeat_enabled = True
 
-        with patch("sdk.agents.ObscuraClient") as MockClient:
+        with patch("sdk.agent.agents.ObscuraClient") as MockClient:
             client_instance = AsyncMock()
             MockClient.return_value = client_instance
 
@@ -384,7 +384,7 @@ class TestAgentStart:
         agent = _make_agent(runtime, "hb-fail")
         agent.heartbeat_enabled = True
 
-        with patch("sdk.agents.ObscuraClient") as MockClient:
+        with patch("sdk.agent.agents.ObscuraClient") as MockClient:
             client_instance = AsyncMock()
             MockClient.return_value = client_instance
 

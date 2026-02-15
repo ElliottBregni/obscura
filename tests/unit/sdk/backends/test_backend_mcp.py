@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sdk._types import HookPoint, ToolSpec
+from sdk.internal.types import HookPoint, ToolSpec
 from sdk.backends.mcp_backend import MCPBackend
 from sdk.mcp.types import MCPConnectionConfig, MCPTransportType, MCPError
 
@@ -81,7 +81,7 @@ class TestMCPBackendSessions:
 
     @pytest.mark.asyncio
     async def test_resume_session_not_implemented(self):
-        from sdk._types import SessionRef, Backend
+        from sdk.internal.types import SessionRef, Backend
         b = MCPBackend()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         with pytest.raises(NotImplementedError):
@@ -95,7 +95,7 @@ class TestMCPBackendSessions:
 
     @pytest.mark.asyncio
     async def test_delete_session_not_implemented(self):
-        from sdk._types import SessionRef, Backend
+        from sdk.internal.types import SessionRef, Backend
         b = MCPBackend()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         with pytest.raises(NotImplementedError):

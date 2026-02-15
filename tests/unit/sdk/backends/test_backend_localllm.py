@@ -1,8 +1,8 @@
 """Tests for sdk.backends.localllm — LocalLLMBackend."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from sdk._auth import AuthConfig
-from sdk._types import Backend, ChunkKind, HookPoint
+from sdk.internal.auth import AuthConfig
+from sdk.internal.types import Backend, ChunkKind, HookPoint
 
 
 def _make_auth(**kw):
@@ -146,7 +146,7 @@ class TestLocalLLMSessions:
     @pytest.mark.asyncio
     async def test_resume_unknown_session(self):
         from sdk.backends.localllm import LocalLLMBackend
-        from sdk._types import SessionRef
+        from sdk.internal.types import SessionRef
         b = LocalLLMBackend(_make_auth())
         b._client = MagicMock()
         ref = SessionRef(session_id="unknown", backend=Backend.LOCALLLM)
@@ -166,7 +166,7 @@ class TestLocalLLMSessions:
 class TestLocalLLMTools:
     def test_register_tool(self):
         from sdk.backends.localllm import LocalLLMBackend
-        from sdk._types import ToolSpec
+        from sdk.internal.types import ToolSpec
         b = LocalLLMBackend(_make_auth())
         spec = ToolSpec(name="t1", description="test", parameters={}, handler=lambda: None)
         b.register_tool(spec)

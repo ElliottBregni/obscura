@@ -1,4 +1,4 @@
-"""Tests for sdk._stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
+"""Tests for sdk.internal.stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from sdk._stream import ClaudeIteratorAdapter, EventToIteratorBridge
-from sdk._types import ChunkKind, StreamChunk
+from sdk.internal.stream import ClaudeIteratorAdapter, EventToIteratorBridge
+from sdk.internal.types import ChunkKind, StreamChunk
 
 
 # ---------------------------------------------------------------------------

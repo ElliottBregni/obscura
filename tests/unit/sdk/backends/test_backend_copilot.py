@@ -1,8 +1,8 @@
 """Tests for sdk.backends.copilot — CopilotBackend."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from sdk._auth import AuthConfig
-from sdk._types import Backend, HookPoint, ToolSpec
+from sdk.internal.auth import AuthConfig
+from sdk.internal.types import Backend, HookPoint, ToolSpec
 from sdk.backends.copilot import (
     CopilotBackend,
     public_make_handler,
@@ -100,7 +100,7 @@ class TestCopilotBackendSessions:
     async def test_resume_session(self):
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
-        from sdk._types import SessionRef
+        from sdk.internal.types import SessionRef
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         await b.resume_session(ref)
         b.client.resume_session.assert_awaited_once_with("s1")
@@ -121,7 +121,7 @@ class TestCopilotBackendSessions:
     async def test_delete_session(self):
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
-        from sdk._types import SessionRef
+        from sdk.internal.types import SessionRef
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         await b.delete_session(ref)
         b.client.delete_session.assert_awaited_once_with("s1")

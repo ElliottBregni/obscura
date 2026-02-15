@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sdk._types import Backend
+from sdk.internal.types import Backend
 
 
 # Agent target mapping — must match sync.py AGENT_TARGET_MAP

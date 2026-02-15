@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import Any, override
 from urllib.error import HTTPError
 
-from sdk._types import AgentContext
-from sdk.agent import BaseAgent
+from sdk.internal.types import AgentContext
+from sdk.agent.agent import BaseAgent
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +216,6 @@ def _strip_markdown_fences(text: str) -> str:
             continue
         out.append(line)
     return "\n".join(out).strip()
-
 
 def _trim_leading_prose(text: str) -> str:
     """Trim any leading non-Mermaid prose before the first diagram header."""
@@ -694,6 +693,15 @@ async def async_main(argv: list[str] | None = None) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Sync entry point — wraps async_main."""
     return asyncio.run(async_main(argv))
+
+
+# Public testing aliases (placed at end to avoid forward refs)
+strip_markdown_fences = _strip_markdown_fences
+trim_leading_prose = _trim_leading_prose
+build_stub_markdown = _build_stub_markdown
+render_svg_with_kroki = _render_svg_with_kroki
+render_svg_with_mmdc = _render_svg_with_mmdc
+render_single_diagram = _render_single_diagram
 
 
 if __name__ == "__main__":

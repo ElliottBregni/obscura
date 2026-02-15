@@ -20,8 +20,8 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sdk.agent import BaseAgent
-    from sdk._types import AgentContext
+    from sdk.agent.agent import BaseAgent
+    from sdk.internal.types import AgentContext
 
 
 def register_telemetry_hooks(agent: BaseAgent) -> None:
@@ -30,7 +30,7 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
     Creates spans for each APER phase and for tool use. Records phase
     durations and tool call counts/durations as metrics.
     """
-    from sdk._types import HookPoint
+    from sdk.internal.types import HookPoint
 
     # Shared state for timing phases and tool calls
     _phase_starts: dict[str, float] = {}
@@ -169,7 +169,6 @@ def _start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) ->
 
 def _end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
     """End the current tool span and record metrics."""
-    status = "success"
     try:
         from opentelemetry import trace, context
 
@@ -180,8 +179,8 @@ def _end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, o
         token = tokens.pop(f"tool.{tool_name}", None) if tokens else None
         if token is not None:
             context.detach(token)  # type: ignore[arg-type]
-        except ImportError:
-            pass
+    except ImportError:
+        pass
 
 
 # Public wrappers for testing/observability
@@ -199,7 +198,7 @@ def start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) -> 
 
 def end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
     _end_tool_span(tool_name, start_time, tokens)
-
+    status = "success"
     try:
         from sdk.telemetry.metrics import get_metrics
         m = get_metrics()

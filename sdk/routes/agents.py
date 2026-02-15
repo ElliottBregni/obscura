@@ -55,7 +55,7 @@ async def agent_spawn(
     mcp_enabled: bool = mcp_config.get("enabled", False)
     mcp_servers: list[dict[str, Any]] = mcp_config.get("servers", [])
 
-    from sdk.agents import MCPConfig
+    from sdk.agent.agents import MCPConfig
     agent = runtime.spawn(
         name=body.get("name", "unnamed"),
         model=model,
@@ -158,7 +158,7 @@ async def agent_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agents for the user."""
-    from sdk.agents import AgentStatus
+    from sdk.agent.agents import AgentStatus
 
     runtime = await get_runtime(user)
 

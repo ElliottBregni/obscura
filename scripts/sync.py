@@ -1083,7 +1083,7 @@ class VaultWatcher:
         cmd.extend(str(p) for p in paths)
         return cmd
 
-    # Expose read-only helpers for tests/observability
+    # Expose helpers for tests/observability
     def get_watch_paths(self) -> list[Path]:
         """Public accessor for watch paths (used in tests)."""
         return self._get_watch_paths()
@@ -1091,6 +1091,26 @@ class VaultWatcher:
     def build_fswatch_cmd(self, paths: list[Path]) -> list[str]:
         """Public wrapper for fswatch command generation."""
         return self._build_fswatch_cmd(paths)
+
+    def acquire_lock(self) -> None:
+        """Public wrapper to acquire the lock file."""
+        self._acquire_lock()
+
+    def release_lock(self) -> None:
+        """Public wrapper to release the lock file."""
+        self._release_lock()
+
+    @property
+    def last_sync(self) -> float:
+        return self._last_sync
+
+    @last_sync.setter
+    def last_sync(self, value: float) -> None:
+        self._last_sync = value
+
+    def handle_change(self, changed_path: str) -> None:
+        """Public wrapper around change handling (debounce + sync)."""
+        self._handle_change(changed_path)
 
     def _handle_change(self, changed_path: str) -> None:
         now = time.monotonic()

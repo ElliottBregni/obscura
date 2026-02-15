@@ -1,8 +1,8 @@
-"""Tests for sdk._types — dataclasses, enums, message normalization."""
+"""Tests for sdk.internal.types — dataclasses, enums, message normalization."""
 
 from __future__ import annotations
 
-from sdk._types import (
+from sdk.internal.types import (
     Backend,
     ChunkKind,
     ContentBlock,

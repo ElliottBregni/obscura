@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
-from sdk._types import AgentContext, AgentPhase, HookPoint
+from sdk.internal.types import AgentContext, AgentPhase, HookPoint
 
 if TYPE_CHECKING:
     from sdk.client import ObscuraClient

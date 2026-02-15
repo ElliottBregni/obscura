@@ -1,8 +1,8 @@
 """Tests for sdk.backends.claude — ClaudeBackend."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from sdk._auth import AuthConfig
-from sdk._types import Backend, HookPoint
+from sdk.internal.auth import AuthConfig
+from sdk.internal.types import Backend, HookPoint
 
 
 def _make_auth(api_key: str = "sk-ant-test") -> AuthConfig:
@@ -156,7 +156,7 @@ class TestClaudeSessions:
     @pytest.mark.asyncio
     async def test_delete_session(self):
         from sdk.backends.claude import ClaudeBackend
-        from sdk._types import SessionRef
+        from sdk.internal.types import SessionRef
         b = ClaudeBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
 
@@ -174,7 +174,7 @@ class TestClaudeSessions:
 class TestClaudeTools:
     def test_register_tool(self):
         from sdk.backends.claude import ClaudeBackend
-        from sdk._types import ToolSpec
+        from sdk.internal.types import ToolSpec
         b = ClaudeBackend(_make_auth())
         spec = ToolSpec(name="t1", description="test tool", parameters={}, handler=lambda: None)
         b.register_tool(spec)

@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     HookContext,
     HookPoint,
     SessionRef,
@@ -130,7 +130,7 @@ class TestMCPBackendSessions:
 
     @pytest.mark.asyncio
     async def test_resume_session_raises(self):
-        from sdk._types import Backend
+        from sdk.internal.types import Backend
 
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
@@ -145,7 +145,7 @@ class TestMCPBackendSessions:
 
     @pytest.mark.asyncio
     async def test_delete_session_raises(self):
-        from sdk._types import Backend
+        from sdk.internal.types import Backend
 
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)

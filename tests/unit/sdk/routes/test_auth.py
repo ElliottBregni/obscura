@@ -1,9 +1,9 @@
-"""Tests for sdk._auth — Auth resolution and TokenRefresher."""
+"""Tests for sdk.internal.auth — Auth resolution and TokenRefresher."""
 import pytest
 import os
 from unittest.mock import patch, MagicMock
 
-from sdk._auth import (
+from sdk.internal.auth import (
     AuthConfig,
     resolve_auth,
     resolve_github_token,
@@ -13,7 +13,7 @@ from sdk._auth import (
     resolve_localllm_base_url,
     TokenRefresher,
 )
-from sdk._types import Backend
+from sdk.internal.types import Backend
 
 
 class TestAuthConfig:

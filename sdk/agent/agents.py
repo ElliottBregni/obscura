@@ -6,7 +6,7 @@ Think of it as a "process manager for AI agents."
 
 Usage::
 
-    from sdk.agents import AgentRuntime, Agent
+    from sdk.agent.agents import AgentRuntime, Agent
     
     runtime = AgentRuntime()
     
@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-from sdk._types import AgentEvent, AgentEventKind
+from sdk.internal.types import AgentEvent, AgentEventKind
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.memory import MemoryStore

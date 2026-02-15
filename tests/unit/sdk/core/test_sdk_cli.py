@@ -262,7 +262,7 @@ class TestAsyncRun:
     @patch("sdk.cli.ObscuraClient")
     async def test_run_stream_mode(self, MockClient, mock_telemetry, mock_logger):
         """Lines 181-250: streaming mode happy path."""
-        from sdk._types import ChunkKind
+        from sdk.internal.types import ChunkKind
 
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -340,7 +340,7 @@ class TestAsyncRun:
     @patch("sdk.cli.ObscuraClient")
     async def test_run_list_sessions_with_results(self, MockClient, mock_telemetry, mock_logger):
         """Lines 214-215: sessions exist."""
-        from sdk._types import Backend
+        from sdk.internal.types import Backend
 
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -366,7 +366,7 @@ class TestAsyncRun:
     @patch("sdk.cli.ObscuraClient")
     async def test_run_resume_session(self, MockClient, mock_telemetry, mock_logger):
         """Lines 219-224: --session resumes."""
-        from sdk._types import ChunkKind
+        from sdk.internal.types import ChunkKind
 
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -436,7 +436,7 @@ class TestAsyncRun:
     @patch("sdk.cli.ObscuraClient")
     async def test_run_stream_thinking_delta(self, MockClient, mock_telemetry, mock_logger):
         """Lines 231-233: thinking delta chunk."""
-        from sdk._types import ChunkKind
+        from sdk.internal.types import ChunkKind
 
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -466,7 +466,7 @@ class TestAsyncRun:
     @patch("sdk.cli.ObscuraClient")
     async def test_run_stream_tool_use(self, MockClient, mock_telemetry, mock_logger):
         """Lines 234-235: tool_use_start chunk."""
-        from sdk._types import ChunkKind
+        from sdk.internal.types import ChunkKind
 
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -496,7 +496,7 @@ class TestAsyncRun:
     @patch("sdk.cli.ObscuraClient")
     async def test_run_stream_error_chunk(self, MockClient, mock_telemetry, mock_logger):
         """Lines 236-237: error chunk in stream."""
-        from sdk._types import ChunkKind
+        from sdk.internal.types import ChunkKind
 
         mock_log = MagicMock()
         mock_logger.return_value = mock_log

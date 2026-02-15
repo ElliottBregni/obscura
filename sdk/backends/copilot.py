@@ -11,11 +11,11 @@ from __future__ import annotations
 import inspect
 from typing import Any, AsyncIterator, Callable
 
-from sdk._auth import AuthConfig
-from sdk._sessions import SessionStore
-from sdk._stream import EventToIteratorBridge
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.auth import AuthConfig
+from sdk.internal.sessions import SessionStore
+from sdk.internal.stream import EventToIteratorBridge
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     AgentHookConfig,
     AgentEvent,
     Backend,
@@ -295,7 +295,7 @@ class CopilotBackend:
             async for event in backend.run_loop("Fix the bug", max_turns=5):
                 print(event)
         """
-        from sdk.agent_loop import AgentLoop
+        from sdk.agent.agent_loop import AgentLoop
 
         loop = AgentLoop(
             self,

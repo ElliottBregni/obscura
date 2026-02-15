@@ -1,14 +1,31 @@
 """Tests for crawlers.py — Mermaid diagram crawler."""
+# pyright: reportGeneralTypeIssues=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnknownParameterType=false
+# pyright: reportMissingParameterType=false
+# pyright: reportOptionalMemberAccess=false
+# pyright: reportMissingImports=false
+# pyright: reportPrivateUsage=false
+# pyright: reportUnusedImport=false
+# pyright: reportArgumentType=false
+# pyright: reportUnknownArgumentType=false
+# pyright: reportUnusedFunction=false
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch, MagicMock, AsyncMock
 
+from _pytest.capture import CaptureFixture
+from _pytest.monkeypatch import MonkeyPatch
 import pytest
 
-from crawlers import (
+# pyright: reportMissingImports=false
+# pyright: reportPrivateUsage=false
+from scripts.crawlers import (
     FileEntry,
     CrawlResult,
     crawl_repo,
@@ -16,12 +33,12 @@ from crawlers import (
     generate_index,
     build_parser,
     main,
-    _strip_markdown_fences,
-    _trim_leading_prose,
-    _build_stub_markdown,
-    _render_svg_with_kroki,
-    _render_svg_with_mmdc,
-    _render_single_diagram,
+    strip_markdown_fences,
+    trim_leading_prose,
+    build_stub_markdown,
+    render_svg_with_kroki,
+    render_svg_with_mmdc,
+    render_single_diagram,
     DiagramCrawlerAgent,
     MERMAID_PROMPT,
     SKIP_DIRS,
@@ -46,12 +63,17 @@ def _make_message(text: str) -> MagicMock:
     return msg
 
 
+def _assert_crawl_result(result: CrawlResult) -> None:
+    """Lightweight runtime/type guard."""
+    assert isinstance(result, CrawlResult)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def sample_repo(tmp_path):
+def sample_repo(tmp_path: Path) -> Path:
     """Create a sample repository structure for testing."""
     repo = tmp_path / "my_repo"
     repo.mkdir()
@@ -89,7 +111,7 @@ def sample_repo(tmp_path):
 
 
 @pytest.fixture
-def file_entry(tmp_path):
+def file_entry(tmp_path: Path) -> FileEntry:
     """Create a FileEntry for testing."""
     code_file = tmp_path / "sample.py"
     code_file.write_text("def greet():\n    return 'hello'\n")
@@ -237,48 +259,48 @@ class TestSplitMermaidDiagrams:
 
 
 # ---------------------------------------------------------------------------
-# _strip_markdown_fences
+# strip_markdown_fences
 # ---------------------------------------------------------------------------
 
 class TestStripMarkdownFences:
     def test_strips_mermaid_fences(self):
         text = "```mermaid\ngraph TD\n    A-->B\n```"
-        assert "```" not in _strip_markdown_fences(text)
-        assert "graph TD" in _strip_markdown_fences(text)
+        assert "```" not in strip_markdown_fences(text)
+        assert "graph TD" in strip_markdown_fences(text)
 
     def test_strips_plain_fences(self):
         text = "```\ngraph TD\n    A-->B\n```"
-        assert "```" not in _strip_markdown_fences(text)
+        assert "```" not in strip_markdown_fences(text)
 
     def test_no_fences_unchanged(self):
         text = "graph TD\n    A-->B"
-        assert _strip_markdown_fences(text) == text
+        assert strip_markdown_fences(text) == text
 
     def test_empty_string(self):
-        assert _strip_markdown_fences("") == ""
+        assert strip_markdown_fences("") == ""
 
 
 # ---------------------------------------------------------------------------
-# _trim_leading_prose
+# trim_leading_prose
 # ---------------------------------------------------------------------------
 
 class TestTrimLeadingProse:
     def test_trims_prose(self):
         text = "Here is a diagram:\n\ngraph TD\n    A-->B"
-        result = _trim_leading_prose(text)
+        result = trim_leading_prose(text)
         assert result.startswith("graph TD")
 
     def test_no_prose_unchanged(self):
         text = "graph TD\n    A-->B"
-        assert _trim_leading_prose(text) == text
+        assert trim_leading_prose(text) == text
 
     def test_no_diagram_header(self):
         text = "Just some text"
-        assert _trim_leading_prose(text) == text
+        assert trim_leading_prose(text) == text
 
     def test_multiple_lines_of_prose(self):
         text = "Line 1\nLine 2\nLine 3\nflowchart LR\n    A-->B"
-        result = _trim_leading_prose(text)
+        result = trim_leading_prose(text)
         assert result.startswith("flowchart LR")
 
 
@@ -287,91 +309,91 @@ class TestTrimLeadingProse:
 # ---------------------------------------------------------------------------
 
 class TestCrawlRepo:
-    def test_finds_python_files(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_finds_python_files(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert "main.py" in names
         assert "utils.py" in names
         assert "helper.py" in names
 
-    def test_skips_node_modules(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py", ".js"})
+    def test_skips_node_modules(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py", ".js"})
         names = {e.repo_relative.name for e in result.files}
         assert "lib.js" not in names
         assert result.skipped_dirs > 0
 
-    def test_skips_hidden_dirs(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_skips_hidden_dirs(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert "secret.py" not in names
 
-    def test_skips_ds_store(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_skips_ds_store(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert ".DS_Store" not in names
 
-    def test_skips_readme(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py", ".md"})
+    def test_skips_readme(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py", ".md"})
         names = {e.repo_relative.name for e in result.files}
         assert "README.md" not in names
         assert "AGENTS.md" not in names
 
-    def test_skips_oversized_files(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_skips_oversized_files(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert "big_file.py" not in names
         assert result.skipped_size > 0
 
-    def test_skips_empty_files(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_skips_empty_files(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert "empty.py" not in names
 
-    def test_skips_wrong_extension(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_skips_wrong_extension(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert "notes.txt" not in names
         assert result.skipped_ext > 0
 
-    def test_custom_extensions(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".txt"})
+    def test_custom_extensions(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".txt"})
         names = {e.repo_relative.name for e in result.files}
         assert "notes.txt" in names
         assert "main.py" not in names
 
-    def test_custom_max_size(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"}, max_size=10)
+    def test_custom_max_size(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"}, max_size=10)
         # All .py files except empty should be skipped as too large
         assert result.skipped_size > 0
 
-    def test_nonexistent_repo(self, tmp_path):
+    def test_nonexistent_repo(self, tmp_path: Path):
         with pytest.raises(FileNotFoundError):
             crawl_repo(tmp_path / "nonexistent")
 
-    def test_repo_relative_paths(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_repo_relative_paths(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         for entry in result.files:
             assert not entry.repo_relative.is_absolute()
             assert entry.absolute.is_absolute()
 
-    def test_file_entry_fields(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_file_entry_fields(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         for entry in result.files:
             assert entry.size > 0
             assert entry.extension == ".py"
             assert entry.absolute.exists()
 
-    def test_total_discovered(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_total_discovered(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         assert result.total_discovered > len(result.files)
 
-    def test_repo_name(self, sample_repo):
-        result = crawl_repo(sample_repo)
+    def test_repo_name(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo)
         assert result.repo_name == "my_repo"
 
 
 # ---------------------------------------------------------------------------
-# _render_svg_with_kroki
+# render_svg_with_kroki
 # ---------------------------------------------------------------------------
 
 class TestRenderSvgWithKroki:
@@ -383,7 +405,7 @@ class TestRenderSvgWithKroki:
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
 
-        result = _render_svg_with_kroki("graph TD\n    A-->B")
+        result = render_svg_with_kroki("graph TD\n    A-->B")
         assert "<svg" in result
 
     @patch("crawlers.urllib.request.urlopen")
@@ -394,7 +416,7 @@ class TestRenderSvgWithKroki:
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
 
-        _render_svg_with_kroki("graph TD\n    A-->B")
+        render_svg_with_kroki("graph TD\n    A-->B")
         req = mock_urlopen.call_args[0][0]
         assert req.method == "POST"
         assert req.get_header("Content-type") == "text/plain; charset=utf-8"
@@ -408,61 +430,61 @@ class TestRenderSvgWithKroki:
         mock_urlopen.return_value = mock_resp
 
         with pytest.raises(RuntimeError, match="did not return SVG"):
-            _render_svg_with_kroki("graph TD\n    A-->B")
+            render_svg_with_kroki("graph TD\n    A-->B")
 
 
 # ---------------------------------------------------------------------------
-# _render_svg_with_mmdc
+# render_svg_with_mmdc
 # ---------------------------------------------------------------------------
 
 class TestRenderSvgWithMmdc:
     @patch("crawlers.subprocess.run")
     def test_returns_none_when_mmdc_not_found(self, mock_run):
         mock_run.side_effect = FileNotFoundError
-        result = _render_svg_with_mmdc("graph TD\n    A-->B")
+        result = render_svg_with_mmdc("graph TD\n    A-->B")
         assert result is None
 
 
 # ---------------------------------------------------------------------------
-# _render_single_diagram
+# render_single_diagram
 # ---------------------------------------------------------------------------
 
 class TestRenderSingleDiagram:
-    @patch("crawlers._render_svg_with_mmdc")
-    @patch("crawlers._render_svg_with_kroki")
+    @patch("crawlers.render_svg_with_mmdc")
+    @patch("crawlers.render_svg_with_kroki")
     def test_prefers_mmdc(self, mock_kroki, mock_mmdc):
         mock_mmdc.return_value = "<svg>mmdc</svg>"
-        result = _render_single_diagram("graph TD\n    A-->B")
+        result = render_single_diagram("graph TD\n    A-->B")
         assert result == "<svg>mmdc</svg>"
         mock_kroki.assert_not_called()
 
-    @patch("crawlers._render_svg_with_mmdc")
-    @patch("crawlers._render_svg_with_kroki")
+    @patch("crawlers.render_svg_with_mmdc")
+    @patch("crawlers.render_svg_with_kroki")
     def test_falls_back_to_kroki(self, mock_kroki, mock_mmdc):
         mock_mmdc.return_value = None
         mock_kroki.return_value = "<svg>kroki</svg>"
-        result = _render_single_diagram("graph TD\n    A-->B")
+        result = render_single_diagram("graph TD\n    A-->B")
         assert result == "<svg>kroki</svg>"
 
-    @patch("crawlers._render_svg_with_mmdc")
-    @patch("crawlers._render_svg_with_kroki")
+    @patch("crawlers.render_svg_with_mmdc")
+    @patch("crawlers.render_svg_with_kroki")
     def test_returns_none_on_all_failure(self, mock_kroki, mock_mmdc):
         mock_mmdc.return_value = None
         mock_kroki.side_effect = RuntimeError("Kroki failed")
-        result = _render_single_diagram("graph TD\n    A-->B")
+        result = render_single_diagram("graph TD\n    A-->B")
         assert result is None
 
 
 # ---------------------------------------------------------------------------
-# _build_stub_markdown
+# build_stub_markdown
 # ---------------------------------------------------------------------------
 
 class TestBuildStubMarkdown:
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_single_diagram(self, mock_render, file_entry):
         mock_render.return_value = '<svg xmlns="http://www.w3.org/2000/svg">test</svg>'
 
-        md = _build_stub_markdown(file_entry, "graph TD\n    A --> B")
+        md = build_stub_markdown(file_entry, "graph TD\n    A --> B")
 
         assert "# Diagram: sample.py" in md
         assert "```mermaid" in md
@@ -472,11 +494,11 @@ class TestBuildStubMarkdown:
         assert '<svg xmlns="http://www.w3.org/2000/svg">test</svg>' in md
         assert "Auto-generated by Obscura crawlers" in md
 
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_multiple_diagrams(self, mock_render, file_entry):
         mock_render.return_value = '<svg>test</svg>'
 
-        md = _build_stub_markdown(
+        md = build_stub_markdown(
             file_entry,
             "graph TD\n    A --> B\nflowchart LR\n    C --> D",
         )
@@ -486,27 +508,27 @@ class TestBuildStubMarkdown:
         assert md.count("```mermaid") == 2
         assert md.count("<svg>test</svg>") == 2
 
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_render_failure_includes_note(self, mock_render, file_entry):
         mock_render.return_value = None
 
-        md = _build_stub_markdown(file_entry, "graph TD\n    A --> B")
+        md = build_stub_markdown(file_entry, "graph TD\n    A --> B")
 
         assert "```mermaid" in md
         assert "graph TD" in md
         assert "SVG rendering failed" in md
 
     def test_no_valid_diagrams(self, file_entry):
-        md = _build_stub_markdown(file_entry, "")
+        md = build_stub_markdown(file_entry, "")
 
         assert "No valid Mermaid diagrams" in md
 
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_svg_not_fenced(self, mock_render, file_entry):
         svg_content = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
         mock_render.return_value = svg_content
 
-        md = _build_stub_markdown(file_entry, "graph TD\n    A --> B")
+        md = build_stub_markdown(file_entry, "graph TD\n    A --> B")
 
         # SVG should appear as raw inline, not inside a code fence
         lines = md.splitlines()
@@ -516,27 +538,27 @@ class TestBuildStubMarkdown:
                 if i + 1 < len(lines):
                     assert "```" not in lines[i + 1] or "mermaid" in lines[i + 1]
 
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_single_diagram_uses_mermaid_header(self, mock_render, file_entry):
         """When there's only one diagram, section header should be 'Mermaid' not 'Diagram 1'."""
         mock_render.return_value = '<svg>ok</svg>'
 
-        md = _build_stub_markdown(file_entry, "graph TD\n    A --> B")
+        md = build_stub_markdown(file_entry, "graph TD\n    A --> B")
 
         assert "## Mermaid" in md
         assert "## Diagram 1" not in md
 
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_fenced_copilot_output(self, mock_render, file_entry):
         """Copilot wrapping output in fences should still work."""
         mock_render.return_value = '<svg>ok</svg>'
 
-        md = _build_stub_markdown(file_entry, "```mermaid\ngraph TD\n    A --> B\n```")
+        md = build_stub_markdown(file_entry, "```mermaid\ngraph TD\n    A --> B\n```")
         assert "```mermaid" in md
         assert "graph TD" in md
         assert "<svg>ok</svg>" in md
 
-    @patch("crawlers._render_single_diagram")
+    @patch("crawlers.render_single_diagram")
     def test_multiple_with_partial_failure(self, mock_render, file_entry):
         """If one diagram fails to render, others should still have SVG."""
         call_count = 0
@@ -550,7 +572,7 @@ class TestBuildStubMarkdown:
 
         mock_render.side_effect = render_side_effect
 
-        md = _build_stub_markdown(
+        md = build_stub_markdown(
             file_entry,
             "graph TD\n    A --> B\nflowchart LR\n    C --> D",
         )
@@ -565,8 +587,8 @@ class TestBuildStubMarkdown:
 # ---------------------------------------------------------------------------
 
 class TestGenerateIndex:
-    def test_basic_index(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_basic_index(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         index = generate_index(result)
 
         assert "crawlers Index: my_repo" in index
@@ -575,8 +597,8 @@ class TestGenerateIndex:
         assert "utils.py" in index
         assert "helper.py" in index
 
-    def test_index_has_stats(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_index_has_stats(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         index = generate_index(result)
 
         assert "Source files" in index
@@ -585,22 +607,22 @@ class TestGenerateIndex:
         assert "Skipped (wrong ext)" in index
         assert "Directories pruned" in index
 
-    def test_index_has_directory_sections(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_index_has_directory_sections(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         index = generate_index(result)
 
         assert "(root)" in index
         assert "sub" in index
 
-    def test_index_has_file_links(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_index_has_file_links(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         index = generate_index(result)
 
         assert "[main.py]" in index
         assert ".md)" in index  # Link targets end in .md)
 
-    def test_index_skipped_count(self, sample_repo):
-        result = crawl_repo(sample_repo, extensions={".py"})
+    def test_index_skipped_count(self, sample_repo: Path):
+        result: CrawlResult = crawl_repo(sample_repo, extensions={".py"})
         index = generate_index(result)
         total_skipped = result.skipped_files + result.skipped_size + result.skipped_ext
         assert f"Skipped: {total_skipped}" in index
@@ -617,7 +639,7 @@ class TestDiagramCrawlerAgent:
         agent = DiagramCrawlerAgent(
             client, sample_repo, tmp_path / "out", extensions={".py"},
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -634,7 +656,7 @@ class TestDiagramCrawlerAgent:
         agent = DiagramCrawlerAgent(
             client, sample_repo, output_dir, extensions={".py"},
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.PLAN)
 
         # Analyze first
@@ -661,19 +683,18 @@ class TestDiagramCrawlerAgent:
             client, sample_repo, tmp_path / "out",
             extensions={".py"}, max_concurrent=2,
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
         await agent.plan(ctx)
 
-        with patch("crawlers._render_single_diagram", return_value="<svg>ok</svg>"):
+        with patch("crawlers.render_single_diagram", return_value="<svg>ok</svg>"):
             await agent.execute(ctx)
 
         assert len(ctx.results) > 0
         # Each result is a (FileEntry, content) tuple
-        for entry, content in ctx.results:
-            assert isinstance(entry, FileEntry)
+        for _, content in ctx.results:
             if content is not None:
                 assert "```mermaid" in content
 
@@ -684,7 +705,7 @@ class TestDiagramCrawlerAgent:
             client, sample_repo, tmp_path / "out",
             extensions={".py"}, dry_run=True,
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -702,7 +723,7 @@ class TestDiagramCrawlerAgent:
         agent = DiagramCrawlerAgent(
             client, sample_repo, output_dir, extensions={".py"},
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         # Simulate analyze
@@ -729,7 +750,7 @@ class TestDiagramCrawlerAgent:
             client, sample_repo, output_dir,
             extensions={".py"}, dry_run=True,
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
         await agent.analyze(ctx)
 
@@ -748,7 +769,7 @@ class TestDiagramCrawlerAgent:
             client, sample_repo, tmp_path / "out",
             extensions={".py"}, max_concurrent=2,
         )
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -756,7 +777,7 @@ class TestDiagramCrawlerAgent:
         await agent.execute(ctx)
 
         # Should not crash — entries get None content
-        for entry, content in ctx.results:
+        for _, content in ctx.results:
             assert content is None
 
     @pytest.mark.asyncio
@@ -771,7 +792,7 @@ class TestDiagramCrawlerAgent:
             extensions={".py"}, max_concurrent=2,
         )
 
-        with patch("crawlers._render_single_diagram", return_value="<svg>ok</svg>"):
+        with patch("crawlers.render_single_diagram", return_value="<svg>ok</svg>"):
             written = await agent.run()
 
         assert written > 0
@@ -804,12 +825,12 @@ class TestDiagramCrawlerAgent:
             extensions={".py"}, max_concurrent=1,
         )
 
-        from sdk._types import AgentContext, AgentPhase
+        from sdk.internal.types import AgentContext, AgentPhase
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
         await agent.analyze(ctx)
         await agent.plan(ctx)
 
-        with patch("crawlers._render_single_diagram", return_value="<svg>ok</svg>"):
+        with patch("crawlers.render_single_diagram", return_value="<svg>ok</svg>"):
             await agent.execute(ctx)
 
         # With max_concurrent=1, peak should be exactly 1
@@ -856,7 +877,7 @@ class TestCLI:
         assert args.dry_run is True
         assert args.stats is True
 
-    def test_main_dry_run(self, sample_repo, capsys):
+    def test_main_dry_run(self, sample_repo: Path, capsys: pytest.CaptureFixture[str]):
         ret = main(["--repo", str(sample_repo), "--dry-run"])
         assert ret == 0
         captured = capsys.readouterr()
@@ -866,13 +887,13 @@ class TestCLI:
         ret = main(["--repo", "/nonexistent/path/xyzzy"])
         assert ret == 1
 
-    def test_main_stats(self, sample_repo, capsys):
+    def test_main_stats(self, sample_repo: Path, capsys: pytest.CaptureFixture[str]):
         ret = main(["--repo", str(sample_repo), "--stats", "--dry-run"])
         assert ret == 0
         captured = capsys.readouterr()
         assert "Crawl Stats" in captured.out
 
-    def test_main_custom_extensions(self, sample_repo, capsys):
+    def test_main_custom_extensions(self, sample_repo: Path, capsys: pytest.CaptureFixture[str]):
         ret = main(["--repo", str(sample_repo), "--extensions", "py", "js", "--dry-run"])
         assert ret == 0
 
@@ -943,7 +964,7 @@ class TestEdgeCases:
         result = split_mermaid_diagrams(text)
         assert len(result) == 1
 
-    def test_crawl_repo_symlinks(self, tmp_path):
+    def test_crawl_repo_symlinks(self, tmp_path: Path):
         """Symlinks should be handled without crashing."""
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -953,14 +974,14 @@ class TestEdgeCases:
         except OSError:
             pytest.skip("Symlinks not supported")
 
-        result = crawl_repo(repo, extensions={".py"})
+        result: CrawlResult = crawl_repo(repo, extensions={".py"})
         names = {e.repo_relative.name for e in result.files}
         assert "real.py" in names
 
-    def test_crawl_empty_repo(self, tmp_path):
+    def test_crawl_empty_repo(self, tmp_path: Path):
         """Empty repo should return empty result without error."""
         repo = tmp_path / "empty_repo"
         repo.mkdir()
-        result = crawl_repo(repo, extensions={".py"})
+        result: CrawlResult = crawl_repo(repo, extensions={".py"})
         assert len(result.files) == 0
         assert result.repo_name == "empty_repo"

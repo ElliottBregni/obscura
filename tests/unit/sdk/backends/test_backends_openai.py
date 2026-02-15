@@ -8,8 +8,8 @@ All OpenAI SDK interactions are mocked via AsyncMock/MagicMock.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sdk._auth import AuthConfig
-from sdk._types import (
+from sdk.internal.auth import AuthConfig
+from sdk.internal.types import (
     Backend,
     ChunkKind,
     HookContext,
@@ -19,7 +19,7 @@ from sdk._types import (
     SessionRef,
     ToolSpec,
 )
-from sdk._tools import ToolRegistry
+from sdk.internal.tools import ToolRegistry
 from sdk.backends.openai_compat import OpenAIBackend
 
 

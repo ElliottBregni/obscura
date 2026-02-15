@@ -1,4 +1,4 @@
-"""Tests for sdk.agent_loop — Iterative agent loop with tool execution."""
+"""Tests for sdk.agent.agent_loop — Iterative agent loop with tool execution."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any, AsyncIterator, Callable, override
 
 import pytest
 
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     AgentEventKind,
     AgentEvent,
     Backend,
@@ -22,8 +22,8 @@ from sdk._types import (
     ToolSpec,
     HookPoint,
 )
-from sdk.agent_loop import AgentLoop
-from sdk._types import BackendProtocol
+from sdk.agent.agent_loop import AgentLoop
+from sdk.internal.types import BackendProtocol
 
 
 # ---------------------------------------------------------------------------

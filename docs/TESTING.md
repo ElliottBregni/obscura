@@ -77,7 +77,7 @@ def test_something_with_validation():
 The `ContentBlock` dataclass uses `kind` (not `type`) to avoid shadowing Python's built-in:
 
 ```python
-from sdk._types import ContentBlock
+from sdk.internal.types import ContentBlock
 
 # ✅ Correct
 block = ContentBlock(kind="text", text="Hello!")

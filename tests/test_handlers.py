@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sdk._types import Backend, ContentBlock, Message, Role
+from sdk.internal.types import Backend, ContentBlock, Message, Role
 from sdk.handlers import RequestHandler, SimpleHandler
 
 

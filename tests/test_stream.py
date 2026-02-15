@@ -1,9 +1,9 @@
-"""Tests for sdk._stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
+"""Tests for sdk.internal.stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
 import pytest
 from unittest.mock import MagicMock
 
-from sdk._stream import EventToIteratorBridge, ClaudeIteratorAdapter
-from sdk._types import ChunkKind, StreamChunk
+from sdk.internal.stream import EventToIteratorBridge, ClaudeIteratorAdapter
+from sdk.internal.types import ChunkKind, StreamChunk
 
 
 class TestEventToIteratorBridge:

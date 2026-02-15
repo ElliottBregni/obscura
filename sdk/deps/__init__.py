@@ -50,7 +50,7 @@ class ClientFactory:
 # Global agent runtime registry (keyed by user_id)
 # ---------------------------------------------------------------------------
 
-from sdk.agents import AgentRuntime
+from sdk.agent.agents import AgentRuntime
 
 _runtimes: dict[str, AgentRuntime] = {}
 _runtimes_lock = asyncio.Lock()

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sdk._types import (
+from sdk.internal.types import (
     ChunkKind,
     ContentBlock,
     Message,

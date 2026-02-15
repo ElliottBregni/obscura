@@ -1,6 +1,6 @@
 # pyright: reportMissingImports=false
 """
-sdk._tools — Unified tool definitions for both backends.
+sdk.internal.tools — Unified tool definitions for both backends.
 
 Provides a ``@tool`` decorator that creates a ``ToolSpec`` which can be
 registered with either the Copilot or Claude backend. Includes basic
@@ -13,7 +13,7 @@ import functools
 import inspect
 from typing import Any, Callable
 
-from sdk._types import ToolSpec
+from sdk.internal.types import ToolSpec
 
 
 # ---------------------------------------------------------------------------

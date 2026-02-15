@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
 
-from sdk._types import Message
+from sdk.internal.types import Message
 
 if TYPE_CHECKING:
     from sdk.client import ObscuraClient

@@ -7,8 +7,8 @@ from typing import Any, override
 
 import pytest
 
-from sdk._types import AgentContext, AgentPhase, HookPoint
-from sdk.agent import BaseAgent
+from sdk.internal.types import AgentContext, AgentPhase, HookPoint
+from sdk.agent.agent import BaseAgent
 
 
 # ---------------------------------------------------------------------------

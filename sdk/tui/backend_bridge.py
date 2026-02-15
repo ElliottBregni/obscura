@@ -12,7 +12,7 @@ import asyncio
 import time
 from typing import Any, Callable
 
-from sdk._types import ChunkKind, Message, StreamChunk
+from sdk.internal.types import ChunkKind, Message, StreamChunk
 from sdk.client import ObscuraClient
 
 

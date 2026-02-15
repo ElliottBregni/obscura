@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sdk._types import (
+from sdk.internal.types import (
     Backend,
     ChunkKind,
     ContentBlock,
@@ -206,7 +206,7 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     mock_backend.register_tool = MagicMock()
     mock_backend.register_hook = MagicMock()
 
-    from sdk._tools import ToolRegistry
+    from sdk.internal.tools import ToolRegistry
 
     client._backend = mock_backend
     client._backend_type = Backend.COPILOT
@@ -417,7 +417,7 @@ class TestRunLoop:
         mock_loop_instance = MagicMock()
         mock_loop_instance.run.return_value = iter([])  # returns an iterator
 
-        with patch("sdk.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
+        with patch("sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
             client.run_loop("fix bug", max_turns=5)
 
             mock_cls.assert_called_once_with(
@@ -435,7 +435,7 @@ class TestRunLoop:
         mock_loop_instance = MagicMock()
         mock_loop_instance.run_to_completion = AsyncMock(return_value="done!")
 
-        with patch("sdk.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
+        with patch("sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
             result = await client.run_loop_to_completion("fix bug", max_turns=3)
 
             mock_cls.assert_called_once_with(
@@ -455,7 +455,7 @@ class TestRunLoop:
         mock_loop_instance = MagicMock()
         mock_loop_instance.run.return_value = iter([])
 
-        with patch("sdk.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
+        with patch("sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
             client.run_loop("fix bug", on_confirm=confirm_fn)
             mock_cls.assert_called_once_with(
                 mock_backend,

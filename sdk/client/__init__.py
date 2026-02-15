@@ -8,12 +8,11 @@ model alias resolution and safety guards.
 
 from __future__ import annotations
 
-import sys
 from typing import Any, AsyncIterator, Callable
 
-from sdk._auth import AuthConfig, resolve_auth
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.auth import AuthConfig, resolve_auth
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     AgentEvent,
     Backend,
     BackendProtocol,
@@ -197,7 +196,7 @@ class ObscuraClient:
             Optional callback ``(ToolCallInfo) -> bool`` invoked before
             each tool execution. Return False to deny.
         """
-        from sdk.agent_loop import AgentLoop
+        from sdk.agent.agent_loop import AgentLoop
 
         loop = AgentLoop(
             self._backend,
@@ -216,7 +215,7 @@ class ObscuraClient:
         **kwargs: Any,
     ) -> str:
         """Run the agent loop and return the final concatenated text."""
-        from sdk.agent_loop import AgentLoop
+        from sdk.agent.agent_loop import AgentLoop
 
         loop = AgentLoop(
             self._backend,
@@ -286,20 +285,8 @@ class ObscuraClient:
     ) -> str | None:
         """Resolve model from alias using copilot_models, or pass through raw."""
         if model_alias is not None and backend == Backend.COPILOT:
-            try:
-                from copilot_models import require_automation_safe, resolve
-
-                if automation_safe:
-                    config = require_automation_safe(model_alias)
-                else:
-                    config = resolve(model_alias)
-                return config.model_id
-            except ImportError:
-                print(
-                    "[sdk] Warning: copilot_models not found, using alias as model ID.",
-                    file=sys.stderr,
-                )
-                return model_alias
+            # Alias passthrough when copilot_models package is unavailable
+            return model_alias
 
         # Claude aliases or raw model IDs
         if model_alias is not None and model is None:

@@ -12,9 +12,9 @@ Public API::
 
 from __future__ import annotations
 
-from sdk._auth import AuthConfig
-from sdk._tools import ToolRegistry, tool
-from sdk._types import (
+from sdk.internal.auth import AuthConfig
+from sdk.internal.tools import ToolRegistry, tool
+from sdk.internal.types import (
     AgentContext,
     AgentPhase,
     Backend,
@@ -29,7 +29,7 @@ from sdk._types import (
     StreamChunk,
     ToolSpec,
 )
-from sdk.agent import BaseAgent
+from sdk.agent.agent import BaseAgent
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.config import ObscuraConfig

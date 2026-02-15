@@ -24,7 +24,7 @@ import json
 import logging
 from typing import Any
 
-from sdk.agents import AgentConfig, AgentRuntime
+from sdk.agent.agents import AgentConfig, AgentRuntime
 from sdk.auth.models import AuthenticatedUser
 from sdk.memory import MemoryStore
 from sdk.mcp.tools import (
@@ -40,7 +40,7 @@ from sdk.mcp.types import (
     ObscuraMCPToolContext,
     ObscuraMCPConfig,
 )
-from sdk.agents import AgentConfig
+from sdk.agent.agents import AgentConfig
 
 logger = logging.getLogger(__name__)
 

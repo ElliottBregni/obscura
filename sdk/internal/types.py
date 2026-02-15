@@ -1,5 +1,5 @@
 """
-sdk._types — Shared data types for the unified SDK wrapper.
+sdk.internal.types — Shared data types for the unified SDK wrapper.
 
 Provides the normalized message format, streaming chunk type, tool specification,
 session references, hook definitions, and the BackendProtocol that each backend
@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from sdk._tools import ToolRegistry
+    from sdk.internal.tools import ToolRegistry
 
 
 # ---------------------------------------------------------------------------

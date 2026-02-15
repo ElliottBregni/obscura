@@ -1,4 +1,5 @@
 """Tests for sdk.mcp.server — ObscuraMCPServer."""
+# pyright: reportPrivateUsage=false, reportMissingParameterType=false, reportUnknownParameterType=false
 import json
 import pytest
 from datetime import datetime, UTC
@@ -504,7 +505,7 @@ class TestObscuraMCPServerToolHandlers:
         store = _make_memory_store()
         # search returns list of (MemoryKey, value) tuples
         mk = MagicMock()
-        mk.__str__ = lambda s: "default:config"
+        mk.__str__ = lambda: "default:config"
         store.search.return_value = [(mk, {"setting": True})]
 
         ctx = ObscuraMCPToolContext(user_id="test")
@@ -705,7 +706,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_initialize(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
 
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
@@ -724,7 +725,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_tools_list(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 2,
@@ -738,7 +739,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_tools_call(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 3,
@@ -755,7 +756,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_resources_list(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 4,
@@ -768,7 +769,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_resources_read_error(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 5,
@@ -781,7 +782,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_prompts_list(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 6,
@@ -794,7 +795,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_prompts_get(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 7,
@@ -808,7 +809,7 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_method_not_found(self):
-        client, server = _make_rpc_client()
+        client, __server = _make_rpc_client()
         resp = client.post("/mcp/rpc", json={
             "jsonrpc": "2.0",
             "id": 8,
@@ -822,8 +823,8 @@ class TestCreateMCPRouter:
 
     @pytest.mark.asyncio
     async def test_rpc_internal_error(self):
-        client, server = _make_rpc_client()
-        with patch.object(server, "handle_initialize", side_effect=RuntimeError("boom")):
+        client, __server = _make_rpc_client()
+        with patch.object(__server, "handle_initialize", side_effect=RuntimeError("boom")):
             resp = client.post("/mcp/rpc", json={
                 "jsonrpc": "2.0",
                 "id": 9,

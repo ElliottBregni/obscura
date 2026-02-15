@@ -13,10 +13,10 @@ from __future__ import annotations
 import inspect
 from typing import Any, AsyncIterator, Callable
 
-from sdk._auth import AuthConfig
-from sdk._sessions import SessionStore
-from sdk._tools import ToolRegistry
-from sdk._types import (
+from sdk.internal.auth import AuthConfig
+from sdk.internal.sessions import SessionStore
+from sdk.internal.tools import ToolRegistry
+from sdk.internal.types import (
     AgentEvent,
     Backend,
     ChunkKind,
@@ -250,7 +250,7 @@ class LocalLLMBackend:
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with tool execution."""
-        from sdk.agent_loop import AgentLoop
+        from sdk.agent.agent_loop import AgentLoop
 
         loop = AgentLoop(
             self,

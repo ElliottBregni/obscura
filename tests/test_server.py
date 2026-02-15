@@ -77,7 +77,7 @@ class TestSendEndpoint:
     @patch("sdk.deps.ClientFactory.create")
     def test_send_success(self, mock_create: AsyncMock) -> None:
         """Successful send should return text and backend."""
-        from sdk._types import ContentBlock, Message, Role
+        from sdk.internal.types import ContentBlock, Message, Role
 
         mock_client = AsyncMock()
         mock_client.send.return_value = Message(
