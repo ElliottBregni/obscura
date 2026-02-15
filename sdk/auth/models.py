@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict
 VALID_ROLES: frozenset[str] = frozenset(
     {
         "admin",
+        "operator",
+        "tier:privileged",
         "agent:copilot",
         "agent:claude",
         "agent:localllm",

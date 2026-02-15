@@ -88,6 +88,28 @@ class ObscuraClient:
         for t in tools or []:
             self._tool_registry.register(t)
 
+        # Resolve capability tier and generate token (identity-based, not prompt-based)
+        self._capability_token = None
+        if user is not None:
+            try:
+                from sdk.auth.capability import generate_capability_token
+                from sdk.auth.models import AuthenticatedUser as _AuthUser
+                from sdk.auth.system_prompts import get_tier_system_prompt
+                import uuid as _uuid
+
+                if isinstance(user, _AuthUser):
+                    session_id = _uuid.uuid4().hex
+                    self._capability_token = generate_capability_token(
+                        user, session_id
+                    )
+                    # Inject tier-appropriate system prompt
+                    system_prompt = get_tier_system_prompt(
+                        self._capability_token.tier,
+                        additional=system_prompt,
+                    )
+            except Exception:
+                pass  # Degrade gracefully if capability module not available
+
         # Create backend
         self._backend = self._create_backend(
             backend=backend,
@@ -100,8 +122,13 @@ class ObscuraClient:
             streaming=streaming,
         )
 
-        # Register tools with backend
-        for t in self._tool_registry.all():
+        # Register tools with backend (filtered by capability tier)
+        tier_value = (
+            self._capability_token.tier.value
+            if self._capability_token is not None
+            else "public"
+        )
+        for t in self._tool_registry.for_tier(tier_value):
             self._backend.register_tool(t)
 
     # -- Lifecycle -----------------------------------------------------------
@@ -127,6 +154,9 @@ class ObscuraClient:
         """Send prompt, wait for full response."""
         import time as _time
 
+        # Apply prompt injection filter
+        prompt = self._filter_prompt(prompt)
+
         tracer = _get_client_tracer()
         with tracer.start_as_current_span("obscura.client.send") as span:
             _set_span_attr(span, "obscura.backend", self._backend_type.value)
@@ -147,6 +177,9 @@ class ObscuraClient:
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send prompt, yield streaming chunks."""
         import time as _time
+
+        # Apply prompt injection filter
+        prompt = self._filter_prompt(prompt)
 
         tracer = _get_client_tracer()
         with tracer.start_as_current_span("obscura.client.stream") as span:
@@ -207,6 +240,7 @@ class ObscuraClient:
             self._tool_registry,
             max_turns=max_turns,
             on_confirm=on_confirm,
+            capability_token=self._capability_token,
         )
         return loop.run(prompt, **kwargs)
 
@@ -226,6 +260,7 @@ class ObscuraClient:
             self._tool_registry,
             max_turns=max_turns,
             on_confirm=on_confirm,
+            capability_token=self._capability_token,
         )
         return await loop.run_to_completion(prompt, **kwargs)
 
@@ -277,6 +312,37 @@ class ObscuraClient:
     def backend_type(self) -> Backend:
         """Which backend is active."""
         return self._backend_type
+
+    @property
+    def capability_tier(self) -> str | None:
+        """Return the resolved capability tier, or None if not applicable."""
+        if self._capability_token is not None:
+            return self._capability_token.tier.value
+        return None
+
+    def _filter_prompt(self, prompt: str) -> str:
+        """Apply prompt injection filter based on capability tier.
+
+        Fails secure: if the filter module cannot be loaded, the prompt
+        is returned unmodified only for PRIVILEGED tier.  For PUBLIC tier
+        an import failure raises so callers know filtering was skipped.
+        """
+        if self._capability_token is None:
+            return prompt
+        try:
+            from sdk.auth.prompt_filter import filter_prompt
+
+            result = filter_prompt(prompt, self._capability_token.tier)
+            if result.was_modified:
+                _audit_prompt_filtered(self._capability_token, result.flags)
+            return result.filtered
+        except ImportError:
+            # Fail secure: only skip filtering for privileged tier
+            from sdk.auth.capability import CapabilityTier
+
+            if self._capability_token.tier == CapabilityTier.PRIVILEGED:
+                return prompt
+            raise
 
     # -- Internals -----------------------------------------------------------
 
@@ -410,5 +476,30 @@ def _record_stream_chunk(backend: str, chunk_kind: str) -> None:
 
         m = get_metrics()
         m.stream_chunks_total.add(1, {"backend": backend, "chunk_kind": chunk_kind})
+    except Exception:
+        pass
+
+
+def _audit_prompt_filtered(token: Any, flags: tuple[str, ...] | list[str]) -> None:
+    """Emit an audit event when a prompt is modified by injection filters."""
+    try:
+        from sdk.telemetry.audit import AuditEvent, emit_audit_event
+
+        emit_audit_event(
+            AuditEvent(
+                event_type="prompt.filtered",
+                user_id=getattr(token, "user_id", "unknown"),
+                user_email="",
+                resource="prompt",
+                action="filter",
+                outcome="modified",
+                details={
+                    "flags": list(flags),
+                    "tier": getattr(token, "tier", None)
+                    and token.tier.value
+                    or "unknown",
+                },
+            )
+        )
     except Exception:
         pass

@@ -3,6 +3,7 @@ sdk.routes -- FastAPI route modules for the Obscura API.
 """
 
 from sdk.routes.admin import router as admin_router
+from sdk.routes.capabilities import router as capabilities_router
 from sdk.routes.agent_groups import router as agent_groups_router
 from sdk.routes.agents import router as agents_router
 from sdk.routes.health import router as health_router
@@ -32,4 +33,5 @@ all_routers = [
     admin_router,
     heartbeat_router,
     heartbeat_ws_router,
+    capabilities_router,
 ]

@@ -8,7 +8,6 @@ with status icons indicating accepted/rejected/pending state.
 from __future__ import annotations
 
 from pathlib import Path
-
 from typing import override
 
 from textual.app import ComposeResult

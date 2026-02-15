@@ -123,6 +123,10 @@ class ToolSpec:
 
     Parameters should be a JSON Schema object. The optional _pydantic_model
     is used by the Copilot backend for native Pydantic integration.
+
+    The ``required_tier`` field declares the minimum capability tier
+    needed to execute this tool (``"public"`` or ``"privileged"``).
+    Defaults to ``"public"`` for backward compatibility.
     """
 
     name: str
@@ -130,6 +134,7 @@ class ToolSpec:
     parameters: dict[str, Any]
     handler: Callable[..., Any]
     _pydantic_model: type | None = None
+    required_tier: str = "public"
 
 
 # Hook config type for Copilot backend

@@ -14,12 +14,11 @@ Launch via::
 
 from __future__ import annotations
 
-from typing import Any, override
+from typing import Any, Callable, override, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
-from typing import Any, Callable, override, cast
 
 from sdk.tui.backend_bridge import BackendBridge
 from sdk.tui.modes import ModeManager, Plan, TUIMode

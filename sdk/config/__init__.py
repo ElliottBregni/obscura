@@ -41,6 +41,10 @@ class ObscuraConfig(BaseModel):
     # Backends
     default_backend: str = "copilot"
 
+    # Capability system
+    capability_secret: str = ""  # HMAC signing key; empty = random per-process
+    capability_ttl: int = 3600  # Token lifetime in seconds
+
     @model_validator(mode="after")
     def _set_jwks_uri(self) -> Self:
         if not self.auth_jwks_uri:
@@ -69,4 +73,7 @@ class ObscuraConfig(BaseModel):
             log_format=os.environ.get("OBSCURA_LOG_FORMAT", "json"),
             # Backends
             default_backend=os.environ.get("OBSCURA_DEFAULT_BACKEND", "copilot"),
+            # Capability system
+            capability_secret=os.environ.get("OBSCURA_CAPABILITY_SECRET", ""),
+            capability_ttl=int(os.environ.get("OBSCURA_CAPABILITY_TTL", "3600")),
         )

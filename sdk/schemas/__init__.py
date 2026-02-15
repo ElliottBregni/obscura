@@ -26,6 +26,7 @@ class SendResponse(BaseModel):
     text: str
     backend: str
     session_id: str | None = None
+    capability_tier: str | None = None
 
 
 class StreamRequest(BaseModel):
