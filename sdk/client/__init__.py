@@ -99,9 +99,7 @@ class ObscuraClient:
 
                 if isinstance(user, _AuthUser):
                     session_id = _uuid.uuid4().hex
-                    self._capability_token = generate_capability_token(
-                        user, session_id
-                    )
+                    self._capability_token = generate_capability_token(user, session_id)
                     # Inject tier-appropriate system prompt
                     system_prompt = get_tier_system_prompt(
                         self._capability_token.tier,
