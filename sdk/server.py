@@ -139,13 +139,14 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     # -- global exception handler ------------------------------------------
 
-    @app.exception_handler(Exception)
-    async def _global_exception_handler(request: Request, exc: Exception):
+    async def _handle_exception(request: Request, exc: Exception) -> JSONResponse:
         logger.error(f"Unhandled error: {exc}")
         return JSONResponse(
             status_code=500,
             content={"detail": str(exc)},
         )
+
+    app.add_exception_handler(Exception, _handle_exception)
 
     # -- MCP routes --------------------------------------------------------
 

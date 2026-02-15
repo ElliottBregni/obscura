@@ -6,7 +6,6 @@ hooks, sessions, send/stream, and server management.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,9 +15,7 @@ from sdk._tools import ToolRegistry
 from sdk._types import (
     HookContext,
     HookPoint,
-    Message,
     SessionRef,
-    StreamChunk,
     ToolSpec,
 )
 from sdk.backends.mcp_backend import MCPBackend, MCPBackendMixin

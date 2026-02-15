@@ -18,8 +18,8 @@ Roles
 
 from __future__ import annotations
 
-from typing import Callable
 import os
+from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
 
@@ -48,15 +48,15 @@ _MOCK_USER = AuthenticatedUser(
 
 # API Keys - loaded from env var OBSCURA_API_KEYS (comma-separated key:name:role1,role2)
 # Example: OBSCURA_API_KEYS="key1:dev-user:admin,agent:copilot;key2:readonly-user:agent:read"
-_API_KEYS: dict[str, dict] = {}
+_api_keys: dict[str, dict[str, str | list[str]]] = {}
 
-def _load_api_keys():
+def _load_api_keys() -> None:
     """Load API keys from environment."""
-    global _API_KEYS
+    global _api_keys
     keys_env = os.environ.get("OBSCURA_API_KEYS", "")
     if not keys_env:
         # Default test key for convenience
-        _API_KEYS = {
+        _api_keys = {
             "obscura-dev-key-123": {
                 "user_id": "dev-user",
                 "email": "dev@obscura.local",
@@ -65,13 +65,13 @@ def _load_api_keys():
         }
         return
     
-    _API_KEYS = {}
+    _api_keys = {}
     for key_def in keys_env.split(";"):
         parts = key_def.split(":")
         if len(parts) >= 3:
             key, user_id, roles_str = parts[0], parts[1], parts[2]
             roles = roles_str.split(",") if roles_str else ["agent:read"]
-            _API_KEYS[key] = {
+            _api_keys[key] = {
                 "user_id": user_id,
                 "email": f"{user_id}@obscura.local",
                 "roles": roles
@@ -101,15 +101,19 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     
     # 1. Check API key header (works even when auth is enabled)
     api_key = request.headers.get("X-API-Key")
-    if api_key and api_key in _API_KEYS:
-        key_data = _API_KEYS[api_key]
+    if api_key and api_key in _api_keys:
+        key_data = _api_keys[api_key]
+        user_id = str(key_data["user_id"])
+        email = str(key_data["email"])
+        roles_val = key_data["roles"]
+        roles = tuple(roles_val) if isinstance(roles_val, list) else (str(roles_val),)
         return AuthenticatedUser(
-            user_id=key_data["user_id"],
-            email=key_data["email"],
-            roles=tuple(key_data["roles"]),
+            user_id=user_id,
+            email=email,
+            roles=roles,
             org_id="local",
             token_type="api_key",
-            raw_token=api_key
+            raw_token=api_key,
         )
     
     # 2. If auth is disabled, return mock user
@@ -127,7 +131,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
 # Role enforcement
 # ---------------------------------------------------------------------------
 
-def require_role(role: str) -> Callable:
+def require_role(role: str) -> Callable[..., Awaitable[AuthenticatedUser]]:
     """Return a FastAPI dependency that enforces *role*.
 
     ``admin`` always passes.  Otherwise the user must hold *role*
@@ -156,7 +160,7 @@ def require_role(role: str) -> Callable:
     return _enforcer
 
 
-def require_any_role(*roles: str) -> Callable:
+def require_any_role(*roles: str) -> Callable[..., Awaitable[AuthenticatedUser]]:
     """Return a FastAPI dependency that passes if the user holds *any* of the listed roles.
 
     ``admin`` always passes.

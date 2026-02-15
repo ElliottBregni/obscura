@@ -1,6 +1,5 @@
 """Tests for sdk.telemetry — init_telemetry and helpers."""
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from sdk.config import ObscuraConfig
 
 

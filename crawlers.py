@@ -32,7 +32,8 @@ import urllib.request
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, override
+from urllib.error import HTTPError
 
 from sdk._types import AgentContext
 from sdk.agent import BaseAgent
@@ -128,7 +129,7 @@ class CrawlResult:
     """Result of crawling a repository."""
     repo_name: str
     repo_path: Path
-    files: list[FileEntry] = field(default_factory=list)
+    files: list[FileEntry] = field(default_factory=lambda: list[FileEntry]())
     skipped_dirs: int = 0
     skipped_files: int = 0
     skipped_size: int = 0
@@ -310,8 +311,8 @@ def _render_svg_with_kroki(mermaid: str) -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             svg = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Kroki HTTP {e.code}: {e.reason}\n{body[:500]}") from e
 
     if "<svg" not in svg:
@@ -486,6 +487,7 @@ class DiagramCrawlerAgent(BaseAgent):
         self._kroki_sem = asyncio.Semaphore(kroki_concurrent)
         self._dry_run = dry_run
 
+    @override
     async def analyze(self, ctx: AgentContext) -> None:
         """Walk the repo, discover source files."""
         ctx.analysis = crawl_repo(
@@ -494,6 +496,7 @@ class DiagramCrawlerAgent(BaseAgent):
             max_size=self._max_size,
         )
 
+    @override
     async def plan(self, ctx: AgentContext) -> None:
         """Determine which files need processing."""
         result: CrawlResult = ctx.analysis
@@ -505,6 +508,7 @@ class DiagramCrawlerAgent(BaseAgent):
                 to_process.append(entry)
         ctx.plan = to_process
 
+    @override
     async def execute(self, ctx: AgentContext) -> None:
         """Generate diagrams for all planned files via SDK."""
         to_process: list[FileEntry] = ctx.plan
@@ -550,6 +554,7 @@ class DiagramCrawlerAgent(BaseAgent):
         print(f"  Processing {total} files via copilot-sdk (max {self._copilot_sem._value} concurrent)...")
         ctx.results = await asyncio.gather(*[process_one(e) for e in to_process])
 
+    @override
     async def respond(self, ctx: AgentContext) -> None:
         """Write all results to disk and generate index."""
         result: CrawlResult = ctx.analysis

@@ -48,7 +48,7 @@ class ToolRegistry:
 # Schema inference
 # ---------------------------------------------------------------------------
 
-_TYPE_MAP: dict[type, str] = {
+_TYPE_MAP: dict[type[Any], str] = {
     str: "string",
     int: "integer",
     float: "number",
@@ -56,7 +56,7 @@ _TYPE_MAP: dict[type, str] = {
 }
 
 
-def _infer_schema_from_hints(fn: Callable) -> dict[str, Any]:
+def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """Basic JSON Schema inference from function type hints.
 
     Handles simple types (str, int, float, bool). For anything more complex,
@@ -95,8 +95,8 @@ def tool(
     description: str,
     parameters: dict[str, Any] | None = None,
     *,
-    pydantic_model: type | None = None,
-) -> Callable:
+    pydantic_model: type[Any] | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to define a tool that works with both backends.
 
     Usage::
@@ -116,7 +116,7 @@ def tool(
     is generated from the Pydantic model. If both are omitted, a basic schema
     is inferred from type hints.
     """
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         schema = parameters
         if schema is None and pydantic_model is not None:
             schema = pydantic_model.model_json_schema()
@@ -147,7 +147,7 @@ def tool(
 # Traced tool execution
 # ---------------------------------------------------------------------------
 
-def _traced_tool_call(tool_name: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+def _traced_tool_call(tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Execute a tool handler wrapped in an OTel span."""
     try:
         from sdk.telemetry.traces import get_tracer
@@ -175,7 +175,7 @@ def _traced_tool_call(tool_name: str, fn: Callable, *args: Any, **kwargs: Any) -
             raise
 
 
-async def _traced_tool_call_async(tool_name: str, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+async def _traced_tool_call_async(tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Execute an async tool handler wrapped in an OTel span."""
     try:
         from sdk.telemetry.traces import get_tracer

@@ -86,7 +86,7 @@ class AgentHeartbeatClient:
         )
         
         self._running = False
-        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task[None]] = None
         self._http_client: Optional[httpx.AsyncClient] = None
         self._start_time: float = 0.0
         self._last_heartbeat_time: Optional[float] = None
@@ -98,7 +98,7 @@ class AgentHeartbeatClient:
         # psutil availability
         self._psutil_available = False
         try:
-            import psutil
+            __import__("psutil")
             self._psutil_available = True
             logger.debug("psutil available for system metrics collection")
         except ImportError:

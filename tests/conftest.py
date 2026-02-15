@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sync import LOCK_FILE, SyncProfile, VariantSelector, VaultSync, VaultWatcher
+from sync import VaultSync
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,6 @@ def vault_root(tmp_path: Path) -> Path:
     ))
 
     # --- repos/TestRepo/ (in-repo vault content) ---
-    repo_vault = vault / "repos" / "TestRepo"
     _mk(vault, "repos/TestRepo/agent.md", "# Agent config\n")
     _mk(vault, "repos/TestRepo/config.json", "{}\n")
     _mk(vault, "repos/TestRepo/copilot-instructions.md", "# Copilot instructions\n")

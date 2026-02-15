@@ -16,6 +16,7 @@ from sdk._tools import ToolRegistry
 from sdk._types import (
     AgentEvent,
     Backend,
+    BackendProtocol,
     HookPoint,
     Message,
     SessionRef,
@@ -169,7 +170,7 @@ class ObscuraClient:
         prompt: str,
         *,
         max_turns: int = 10,
-        on_confirm: Any = None,
+        on_confirm: Callable[..., Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with automatic tool execution.
@@ -211,7 +212,7 @@ class ObscuraClient:
         prompt: str,
         *,
         max_turns: int = 10,
-        on_confirm: Any = None,
+        on_confirm: Callable[..., Any] | None = None,
         **kwargs: Any,
     ) -> str:
         """Run the agent loop and return the final concatenated text."""
@@ -259,7 +260,7 @@ class ObscuraClient:
     # -- Backend access (escape hatch) --------------------------------------
 
     @property
-    def backend_impl(self) -> Any:
+    def backend_impl(self) -> BackendProtocol:
         """Direct access to the underlying backend for SDK-specific features.
 
         Example::
@@ -316,7 +317,7 @@ class ObscuraClient:
         permission_mode: str,
         cwd: str | None,
         streaming: bool,
-    ) -> Any:
+    ) -> BackendProtocol:
         """Instantiate the appropriate backend."""
         if backend == Backend.COPILOT:
             from sdk.backends.copilot import CopilotBackend
@@ -368,10 +369,10 @@ class ObscuraClient:
 # Lazy telemetry helpers (no-op when OTel is unavailable)
 # ---------------------------------------------------------------------------
 
-from sdk.telemetry.traces import NoOpTracer
+from sdk.telemetry.traces import NoOpSpan, NoOpTracer
 
 
-def _get_client_tracer() -> Any:
+def _get_client_tracer() -> NoOpTracer:
     try:
         from sdk.telemetry.traces import get_tracer
         return get_tracer("obscura.client")
@@ -379,7 +380,7 @@ def _get_client_tracer() -> Any:
         return NoOpTracer()
 
 
-def _set_span_attr(span: Any, key: str, value: Any) -> None:
+def _set_span_attr(span: NoOpSpan, key: str, value: Any) -> None:
     try:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)

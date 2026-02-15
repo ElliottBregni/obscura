@@ -69,7 +69,7 @@ dev = [
 
 # Package discovery - explicitly define what to include
 [tool.setuptools]
-packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.heartbeat", "sdk.mcp", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets", "obscura"]
+packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.heartbeat", "sdk.mcp", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets"]
 py-modules = ["obscura_cli"]
 
 [tool.setuptools.package-data]

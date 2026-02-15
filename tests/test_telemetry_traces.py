@@ -1,6 +1,6 @@
 """Tests for sdk.telemetry.traces — get_tracer, traced decorator, NoOp classes."""
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from sdk.telemetry.traces import (
     get_tracer,

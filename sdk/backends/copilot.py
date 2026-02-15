@@ -8,7 +8,7 @@ via ``EventToIteratorBridge``.
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 from typing import Any, AsyncIterator, Callable
 
 from sdk._auth import AuthConfig
@@ -58,7 +58,7 @@ class CopilotBackend:
         # Tool and hook registries
         self._tools: list[ToolSpec] = []
         self._tool_registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
 
         # Session tracking
         self._session_store = SessionStore()
@@ -74,7 +74,7 @@ class CopilotBackend:
         if self._auth.byok_provider:
             client_opts["provider"] = self._auth.byok_provider
 
-        self._client = CopilotClient(client_opts if client_opts else None)
+        self._client = CopilotClient(client_opts if client_opts else None)  # type: ignore[arg-type]
         await self._client.start()
 
         # Create default session
@@ -108,7 +108,7 @@ class CopilotBackend:
         bridge = EventToIteratorBridge()
 
         # Register event handlers
-        unsub_fns: list[Callable] = []
+        unsub_fns: list[Callable[..., Any]] = []
 
         _got_deltas = False
 
@@ -217,7 +217,7 @@ class CopilotBackend:
 
     # -- Hooks ---------------------------------------------------------------
 
-    def register_hook(self, hook: HookPoint, callback: Callable) -> None:
+    def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None:
         """Register a lifecycle hook callback."""
         self._hooks[hook].append(callback)
 
@@ -228,7 +228,7 @@ class CopilotBackend:
         prompt: str,
         *,
         max_turns: int = 10,
-        on_confirm: Callable | None = None,
+        on_confirm: Callable[..., Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with tool execution.
@@ -305,10 +305,10 @@ class CopilotBackend:
                     result[copilot_key] = callbacks[0]
                 elif copilot_key:
                     # Chain multiple callbacks
-                    async def _chained(*args: Any, cbs: list[Callable] = callbacks, **kw: Any) -> Any:
-                        last_result = None
+                    async def _chained(*args: Any, cbs: list[Callable[..., Any]] = callbacks, **kw: Any) -> Any:
+                        last_result: Any = None
                         for cb in cbs:
-                            last_result = await cb(*args, **kw) if asyncio.iscoroutinefunction(cb) else cb(*args, **kw)
+                            last_result = await cb(*args, **kw) if inspect.iscoroutinefunction(cb) else cb(*args, **kw)
                         return last_result
                     result[copilot_key] = _chained
 
@@ -339,7 +339,7 @@ class CopilotBackend:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_handler(event_type: str, callback: Callable) -> Callable:
+def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[..., Any]:
     """Create a Copilot event handler that filters by event type.
 
     Copilot's session.on() passes ALL events to every handler.

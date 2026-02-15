@@ -61,7 +61,7 @@ class Heartbeat:
     message: Optional[str] = None
     ttl: int = 30  # seconds
     version: str = "0.1.0"
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=lambda: list[str]())
     
     def to_dict(self) -> dict[str, Any]:
         """Convert heartbeat to dictionary for serialization."""

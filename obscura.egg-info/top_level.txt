@@ -1,3 +1,2 @@
-obscura
 obscura_cli
 sdk

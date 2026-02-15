@@ -21,7 +21,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any
+from collections.abc import Generator
+from typing import Any, cast
 
 import click
 import httpx
@@ -31,24 +32,31 @@ from rich.table import Table
 from rich.panel import Panel
 
 # Default configuration
-DEFAULT_URL = os.environ.get("OBSCURA_URL", "http://localhost:8080")
-DEFAULT_TOKEN = os.environ.get("OBSCURA_TOKEN", "local-dev-token")
+DEFAULT_URL: str = os.environ.get("OBSCURA_URL", "http://localhost:8080")
+DEFAULT_TOKEN: str = os.environ.get("OBSCURA_TOKEN", "local-dev-token")
 
-console = Console()
+console: Console = Console()
+
+
+def _get_client(ctx: click.Context) -> ObscuraCLI:
+    """Extract the ObscuraCLI client from click context."""
+    obj: dict[str, Any] = cast(dict[str, Any], ctx.ensure_object(dict))
+    client: ObscuraCLI = obj["client"]
+    return client
 
 
 class ObscuraCLI:
     """CLI client for Obscura API."""
-    
-    def __init__(self, base_url: str = DEFAULT_URL, token: str = DEFAULT_TOKEN):
-        self.base_url = base_url
-        self.token = token
-        self.client = httpx.Client(
+
+    def __init__(self, base_url: str = DEFAULT_URL, token: str = DEFAULT_TOKEN) -> None:
+        self.base_url: str = base_url
+        self.token: str = token
+        self.client: httpx.Client = httpx.Client(
             base_url=base_url,
             headers={"Authorization": f"Bearer {token}"},
             timeout=300.0,
         )
-    
+
     def spawn_agent(
         self,
         name: str,
@@ -57,7 +65,7 @@ class ObscuraCLI:
         memory_namespace: str = "cli",
     ) -> dict[str, Any]:
         """Spawn a new agent."""
-        resp = self.client.post(
+        resp: httpx.Response = self.client.post(
             "/api/v1/agents",
             json={
                 "name": name,
@@ -67,39 +75,41 @@ class ObscuraCLI:
             }
         )
         resp.raise_for_status()
-        return resp.json()
-    
-    def run_agent(self, agent_id: str, prompt: str, **context) -> dict[str, Any]:
+        result: Any = resp.json()
+        return result
+    def run_agent(self, agent_id: str, prompt: str, **context: Any) -> dict[str, Any]:
         """Run a task on an agent."""
-        resp = self.client.post(
+        resp: httpx.Response = self.client.post(
             f"/api/v1/agents/{agent_id}/run",
             json={"prompt": prompt, "context": context},
         )
         resp.raise_for_status()
-        return resp.json()
-    
+        result: Any = resp.json()
+        return result
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         """Get agent status."""
-        resp = self.client.get(f"/api/v1/agents/{agent_id}")
+        resp: httpx.Response = self.client.get(f"/api/v1/agents/{agent_id}")
         resp.raise_for_status()
-        return resp.json()
-    
+        result: Any = resp.json()
+        return result
     def list_agents(self, status: str | None = None) -> list[dict[str, Any]]:
         """List all agents."""
-        params = {}
+        params: dict[str, str] = {}
         if status:
             params["status"] = status
-        resp = self.client.get("/api/v1/agents", params=params)
+        resp: httpx.Response = self.client.get("/api/v1/agents", params=params)
         resp.raise_for_status()
-        return resp.json().get("agents", [])
-    
+        result: Any = resp.json()
+        agents: list[dict[str, Any]] = result.get("agents", [])
+        return agents
+
     def stop_agent(self, agent_id: str) -> dict[str, Any]:
         """Stop an agent."""
-        resp = self.client.delete(f"/api/v1/agents/{agent_id}")
+        resp: httpx.Response = self.client.delete(f"/api/v1/agents/{agent_id}")
         resp.raise_for_status()
-        return resp.json()
-    
-    def stream_agent(self, agent_id: str, prompt: str, **context):
+        result: Any = resp.json()
+        return result
+    def stream_agent(self, agent_id: str, prompt: str, **context: Any) -> Generator[str, None, None]:
         """Stream agent output."""
         with self.client.stream(
             "POST",
@@ -110,85 +120,92 @@ class ObscuraCLI:
             for line in resp.iter_lines():
                 if line:
                     yield line
-    
+
     def set_memory(self, key: str, value: Any, namespace: str = "cli") -> None:
         """Store a value."""
-        resp = self.client.post(
+        resp: httpx.Response = self.client.post(
             f"/api/v1/memory/{namespace}/{key}",
             json={"value": value},
         )
         resp.raise_for_status()
-    
+
     def get_memory(self, key: str, namespace: str = "cli") -> Any | None:
         """Get a value."""
-        resp = self.client.get(f"/api/v1/memory/{namespace}/{key}")
+        resp: httpx.Response = self.client.get(f"/api/v1/memory/{namespace}/{key}")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
-        return resp.json().get("value")
-    
+        result: Any = resp.json()
+        return result.get("value")
+
     def delete_memory(self, key: str, namespace: str = "cli") -> bool:
         """Delete a value."""
-        resp = self.client.delete(f"/api/v1/memory/{namespace}/{key}")
+        resp: httpx.Response = self.client.delete(f"/api/v1/memory/{namespace}/{key}")
         return resp.status_code == 200
-    
-    def list_memory(self, namespace: str | None = None) -> list[dict]:
+
+    def list_memory(self, namespace: str | None = None) -> list[dict[str, Any]]:
         """List memory keys."""
-        params = {}
+        params: dict[str, str] = {}
         if namespace:
             params["namespace"] = namespace
-        resp = self.client.get("/api/v1/memory", params=params)
+        resp: httpx.Response = self.client.get("/api/v1/memory", params=params)
         resp.raise_for_status()
-        return resp.json().get("keys", [])
-    
-    def search_memory(self, query: str) -> list[dict]:
+        result: Any = resp.json()
+        keys: list[dict[str, Any]] = result.get("keys", [])
+        return keys
+
+    def search_memory(self, query: str) -> list[dict[str, Any]]:
         """Search memory."""
-        resp = self.client.get("/api/v1/memory/search", params={"q": query})
+        resp: httpx.Response = self.client.get("/api/v1/memory/search", params={"q": query})
         resp.raise_for_status()
-        return resp.json().get("results", [])
-    
+        result: Any = resp.json()
+        results: list[dict[str, Any]] = result.get("results", [])
+        return results
+
     def remember(self, text: str, key: str | None = None, namespace: str = "semantic") -> str:
         """Store text with semantic embedding."""
         if key is None:
             import time
             key = f"mem_{int(time.time())}"
-        resp = self.client.post(
+        resp: httpx.Response = self.client.post(
             f"/api/v1/vector-memory/{namespace}/{key}",
             json={"text": text, "metadata": {"source": "cli"}},
         )
         resp.raise_for_status()
         return key
-    
-    def recall(self, query: str, top_k: int = 3) -> list[dict]:
+
+    def recall(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
         """Semantic search."""
-        resp = self.client.get(
+        resp: httpx.Response = self.client.get(
             "/api/v1/vector-memory/search",
             params={"q": query, "top_k": top_k},
         )
         resp.raise_for_status()
-        return resp.json().get("results", [])
-    
+        result: Any = resp.json()
+        results: list[dict[str, Any]] = result.get("results", [])
+        return results
+
     def health(self) -> dict[str, Any]:
         """Check server health."""
-        resp = self.client.get("/health")
+        resp: httpx.Response = self.client.get("/health")
         resp.raise_for_status()
-        return resp.json()
-
+        result: Any = resp.json()
+        return result
 
 # Create CLI group
 @click.group()
 @click.option("--url", default=DEFAULT_URL, help="Obscura API URL")
 @click.option("--token", default=DEFAULT_TOKEN, help="Auth token")
 @click.pass_context
-def cli(ctx: click.Context, url: str, token: str):
+def cli(ctx: click.Context, url: str, token: str) -> None:
     """Obscura CLI — Manage agents and memory."""
-    ctx.ensure_object(dict)
-    ctx.obj["client"] = ObscuraCLI(url, token)
+    obj: dict[str, Any] = cast(dict[str, Any], ctx.ensure_object(dict))
+    obj["client"] = ObscuraCLI(url, token)
 
 
 # Agent commands
 @cli.group()
-def agent():
+def agent() -> None:
     """Agent management commands."""
     pass
 
@@ -199,13 +216,13 @@ def agent():
 @click.option("--system-prompt", "-s", default="", help="System instructions")
 @click.option("--namespace", default="cli", help="Memory namespace")
 @click.pass_context
-def agent_spawn(ctx, name, model, system_prompt, namespace):
+def agent_spawn(ctx: click.Context, name: str, model: str, system_prompt: str, namespace: str) -> None:
     """Spawn a new agent."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
     with console.status(f"[bold green]Spawning agent '{name}'..."):
-        result = client.spawn_agent(name, model, system_prompt, namespace)
-    
+        result: dict[str, Any] = client.spawn_agent(name, model, system_prompt, namespace)
+
     console.print(Panel(
         f"[bold green]Agent spawned successfully![/]\n\n"
         f"[cyan]ID:[/] {result['agent_id']}\n"
@@ -215,7 +232,7 @@ def agent_spawn(ctx, name, model, system_prompt, namespace):
         title="Agent Created",
         border_style="green"
     ))
-    
+
     # Copy to clipboard hint
     console.print(f"\n[dim]Run: [bold]obscura agent run {result['agent_id']} --prompt 'your task'[/][/dim]")
 
@@ -225,20 +242,20 @@ def agent_spawn(ctx, name, model, system_prompt, namespace):
 @click.option("--prompt", "-p", required=True, help="Task prompt")
 @click.option("--stream", is_flag=True, help="Stream output")
 @click.pass_context
-def agent_run(ctx, agent_id, prompt, stream):
+def agent_run(ctx: click.Context, agent_id: str, prompt: str, stream: bool) -> None:
     """Run a task on an agent."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
     if stream:
         console.print(f"[bold cyan]Running agent {agent_id}...[/]\n")
         # TODO: Implement streaming
         console.print("[yellow]Streaming not yet implemented in CLI[/]")
     else:
         with console.status("[bold green]Running task..."):
-            result = client.run_agent(agent_id, prompt)
-        
+            result: dict[str, Any] = client.run_agent(agent_id, prompt)
+
         console.print(Panel(
-            result.get("result", "No result"),
+            str(result.get("result", "No result")),
             title=f"Agent Result ({result.get('status', 'unknown')})",
             border_style="blue"
         ))
@@ -247,44 +264,44 @@ def agent_run(ctx, agent_id, prompt, stream):
 @agent.command("list")
 @click.option("--status", help="Filter by status")
 @click.pass_context
-def agent_list(ctx, status):
+def agent_list(ctx: click.Context, status: str | None) -> None:
     """List all agents."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    agents = client.list_agents(status)
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    agents: list[dict[str, Any]] = client.list_agents(status)
+
     if not agents:
         console.print("[yellow]No agents found.[/]")
         return
-    
-    table = Table(title="Agents")
+
+    table: Table = Table(title="Agents")
     table.add_column("ID", style="cyan")
     table.add_column("Name", style="green")
     table.add_column("Status", style="yellow")
     table.add_column("Model", style="magenta")
     table.add_column("Created", style="dim")
-    
+
     for a in agents:
         table.add_row(
-            a["agent_id"][:12],
-            a["name"],
-            a["status"],
-            a["model"],
-            a["created_at"][:19],
+            str(a["agent_id"])[:12],
+            str(a["name"]),
+            str(a["status"]),
+            str(a["model"]),
+            str(a["created_at"])[:19],
         )
-    
+
     console.print(table)
 
 
 @agent.command("status")
 @click.argument("agent_id")
 @click.pass_context
-def agent_status(ctx, agent_id):
+def agent_status(ctx: click.Context, agent_id: str) -> None:
     """Get agent status."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    result = client.get_agent(agent_id)
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    result: dict[str, Any] = client.get_agent(agent_id)
+
     console.print(Panel(
         f"[cyan]ID:[/] {result['agent_id']}\n"
         f"[cyan]Name:[/] {result['name']}\n"
@@ -300,13 +317,13 @@ def agent_status(ctx, agent_id):
 @agent.command("stop")
 @click.argument("agent_id")
 @click.pass_context
-def agent_stop(ctx, agent_id):
+def agent_stop(ctx: click.Context, agent_id: str) -> None:
     """Stop an agent."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
     with console.status(f"[bold yellow]Stopping agent {agent_id}..."):
-        result = client.stop_agent(agent_id)
-    
+        client.stop_agent(agent_id)
+
     console.print(f"[bold green]Agent {agent_id} stopped.[/]")
 
 
@@ -315,20 +332,20 @@ def agent_stop(ctx, agent_id):
 @click.option("--model", "-m", default="copilot", help="Model")
 @click.option("--prompt", "-p", required=True, help="Task prompt")
 @click.pass_context
-def agent_quick(ctx, name, model, prompt):
+def agent_quick(ctx: click.Context, name: str, model: str, prompt: str) -> None:
     """Quick one-off agent: spawn, run, stop."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
     with console.status("[bold green]Spawning agent..."):
-        agent = client.spawn_agent(name, model)
-        agent_id = agent["agent_id"]
-    
+        spawned: dict[str, Any] = client.spawn_agent(name, model)
+        agent_id: str = str(spawned["agent_id"])
+
     try:
         with console.status("[bold blue]Running task..."):
-            result = client.run_agent(agent_id, prompt)
-        
+            result: dict[str, Any] = client.run_agent(agent_id, prompt)
+
         console.print(Panel(
-            result.get("result", "No result"),
+            str(result.get("result", "No result")),
             title=f"Result from {name}",
             border_style="green"
         ))
@@ -338,7 +355,7 @@ def agent_quick(ctx, name, model, prompt):
 
 # Memory commands
 @cli.group()
-def memory():
+def memory() -> None:
     """Memory management commands."""
     pass
 
@@ -349,14 +366,15 @@ def memory():
 @click.option("--namespace", "-n", default="cli", help="Namespace")
 @click.option("--json", "is_json", is_flag=True, help="Parse value as JSON")
 @click.pass_context
-def memory_set(ctx, key, value, namespace, is_json):
+def memory_set(ctx: click.Context, key: str, value: str, namespace: str, is_json: bool) -> None:
     """Store a value in memory."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    parsed_value: Any = value
     if is_json:
-        value = json.loads(value)
-    
-    client.set_memory(key, value, namespace)
+        parsed_value = json.loads(value)
+
+    client.set_memory(key, parsed_value, namespace)
     console.print(f"[bold green]Set {namespace}:{key}[/]")
 
 
@@ -364,12 +382,12 @@ def memory_set(ctx, key, value, namespace, is_json):
 @click.argument("key")
 @click.option("--namespace", "-n", default="cli", help="Namespace")
 @click.pass_context
-def memory_get(ctx, key, namespace):
+def memory_get(ctx: click.Context, key: str, namespace: str) -> None:
     """Get a value from memory."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    value = client.get_memory(key, namespace)
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    value: Any | None = client.get_memory(key, namespace)
+
     if value is None:
         console.print(f"[yellow]Key {namespace}:{key} not found.[/]")
     else:
@@ -380,10 +398,10 @@ def memory_get(ctx, key, namespace):
 @click.argument("key")
 @click.option("--namespace", "-n", default="cli", help="Namespace")
 @click.pass_context
-def memory_delete(ctx, key, namespace):
+def memory_delete(ctx: click.Context, key: str, namespace: str) -> None:
     """Delete a value from memory."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
     if client.delete_memory(key, namespace):
         console.print(f"[bold green]Deleted {namespace}:{key}[/]")
     else:
@@ -393,39 +411,39 @@ def memory_delete(ctx, key, namespace):
 @memory.command("list")
 @click.option("--namespace", "-n", help="Filter by namespace")
 @click.pass_context
-def memory_list(ctx, namespace):
+def memory_list(ctx: click.Context, namespace: str | None) -> None:
     """List all memory keys."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    keys = client.list_memory(namespace)
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    keys: list[dict[str, Any]] = client.list_memory(namespace)
+
     if not keys:
         console.print("[yellow]No keys found.[/]")
         return
-    
-    table = Table(title="Memory Keys")
+
+    table: Table = Table(title="Memory Keys")
     table.add_column("Namespace", style="cyan")
     table.add_column("Key", style="green")
-    
+
     for k in keys:
-        table.add_row(k["namespace"], k["key"])
-    
+        table.add_row(str(k["namespace"]), str(k["key"]))
+
     console.print(table)
 
 
 @memory.command("search")
 @click.argument("query")
 @click.pass_context
-def memory_search(ctx, query):
+def memory_search(ctx: click.Context, query: str) -> None:
     """Search memory."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    results = client.search_memory(query)
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    results: list[dict[str, Any]] = client.search_memory(query)
+
     if not results:
         console.print("[yellow]No results found.[/]")
         return
-    
+
     for r in results:
         console.print(Panel(
             str(r.get("value", "")),
@@ -436,7 +454,7 @@ def memory_search(ctx, query):
 
 # Vector memory commands
 @cli.group(name="vector")
-def vector_cmd():
+def vector_cmd() -> None:
     """Vector/semantic memory commands."""
     pass
 
@@ -446,11 +464,11 @@ def vector_cmd():
 @click.option("--key", "-k", help="Optional key")
 @click.option("--namespace", "-n", default="semantic", help="Namespace")
 @click.pass_context
-def vector_remember(ctx, text, key, namespace):
+def vector_remember(ctx: click.Context, text: str, key: str | None, namespace: str) -> None:
     """Store text with semantic embedding."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    result_key = client.remember(text, key, namespace)
+    client: ObscuraCLI = _get_client(ctx)
+
+    result_key: str = client.remember(text, key, namespace)
     console.print(f"[bold green]Remembered as {namespace}:{result_key}[/]")
 
 
@@ -458,20 +476,20 @@ def vector_remember(ctx, text, key, namespace):
 @click.argument("query")
 @click.option("--top-k", "-k", default=3, help="Number of results")
 @click.pass_context
-def vector_recall(ctx, query, top_k):
+def vector_recall(ctx: click.Context, query: str, top_k: int) -> None:
     """Recall semantically similar memories."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
-    results = client.recall(query, top_k)
-    
+    client: ObscuraCLI = _get_client(ctx)
+
+    results: list[dict[str, Any]] = client.recall(query, top_k)
+
     if not results:
         console.print("[yellow]No memories found.[/]")
         return
-    
+
     for i, r in enumerate(results, 1):
-        score = r.get("score", 0)
+        score: Any = r.get("score", 0)
         console.print(Panel(
-            r.get("text", ""),
+            str(r.get("text", "")),
             title=f"#{i} ({score:.2f}) {r['namespace']}:{r['key']}",
             border_style="green" if score > 0.8 else "yellow" if score > 0.5 else "red"
         ))
@@ -483,16 +501,16 @@ def vector_recall(ctx, query, top_k):
 @click.option("--port", "-p", default=8080, help="Bind port")
 @click.option("--reload", is_flag=True, help="Auto-reload on code changes")
 @click.option("--workers", "-w", default=1, help="Number of workers")
-def serve(host, port, reload, workers):
+def serve(host: str, port: int, reload: bool, workers: int) -> None:
     """Start the Obscura server."""
     try:
         import uvicorn
     except ImportError:
         console.print("[bold red]Error:[/] uvicorn not installed. Run: pip install uvicorn")
         sys.exit(1)
-    
+
     console.print(f"[bold green]Starting Obscura server on {host}:{port}...[/]")
-    
+
     uvicorn.run(
         "sdk.server:create_app",
         factory=True,
@@ -510,7 +528,7 @@ def serve(host, port, reload, workers):
 @click.option("--cwd", default=".", help="Working directory")
 @click.option("--session", "-s", default=None, help="Resume a saved session by ID")
 @click.option("--mode", default="ask", type=click.Choice(["ask", "plan", "code", "diff"]), help="Initial mode")
-def tui(backend, model, cwd, session, mode):
+def tui(backend: str, model: str | None, cwd: str, session: str | None, mode: str) -> None:
     """Launch interactive TUI."""
     try:
         from dotenv import load_dotenv
@@ -536,20 +554,20 @@ def tui(backend, model, cwd, session, mode):
 # Health check
 @cli.command("health")
 @click.pass_context
-def health_check(ctx):
+def health_check(ctx: click.Context) -> None:
     """Check server health."""
-    client: ObscuraCLI = ctx.obj["client"]
-    
+    client: ObscuraCLI = _get_client(ctx)
+
     try:
-        result = client.health()
-        console.print(f"[bold green]✓ Server is healthy:[/] {result}")
+        result: dict[str, Any] = client.health()
+        console.print(f"[bold green]Server is healthy:[/] {result}")
     except Exception as e:
-        console.print(f"[bold red]✗ Server error:[/] {e}")
+        console.print(f"[bold red]Server error:[/] {e}")
         sys.exit(1)
 
 
 # Main entry point
-def main():
+def main() -> None:
     """Entry point for the CLI."""
     try:
         cli()

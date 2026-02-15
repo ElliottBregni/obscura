@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import pytest
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sdk.agents import (
     Agent,
@@ -234,15 +233,15 @@ class TestAgentRuntime:
 
         agent = _make_agent(runtime, "test")
 
-        # Put a bad message that will cause _enqueue_message to fail
+        # Put a bad message that will cause enqueue_message to fail
         bad_message = AgentMessage(
             source=agent.id,
             target=agent.id,
             content="test",
         )
 
-        # Patch _enqueue_message to raise
-        with patch.object(Agent, "_enqueue_message", side_effect=RuntimeError("boom")):
+        # Patch enqueue_message to raise
+        with patch.object(Agent, "enqueue_message", side_effect=RuntimeError("boom")):
             await runtime.route_message(bad_message)
             await asyncio.sleep(0.1)
 
@@ -1037,7 +1036,7 @@ class TestAgentMessages:
             target=agent.id,
             content="hello agent",
         )
-        agent._enqueue_message(msg)
+        agent.enqueue_message(msg)
 
         # Set agent to completed so the iterator stops after timeout
         agent.status = AgentStatus.COMPLETED
@@ -1073,14 +1072,14 @@ class TestAgentMessages:
 
         assert len(messages) == 0
 
-    def test_enqueue_message_success(self, runtime: AgentRuntime) -> None:
+    def testenqueue_message_success(self, runtime: AgentRuntime) -> None:
         """Cover line 520: normal enqueue."""
         agent = _make_agent(runtime, "enq-test")
         msg = AgentMessage(source="user", target=agent.id, content="test")
-        agent._enqueue_message(msg)
+        agent.enqueue_message(msg)
         assert not agent._message_queue.empty()
 
-    def test_enqueue_message_full_queue(self, runtime: AgentRuntime) -> None:
+    def testenqueue_message_full_queue(self, runtime: AgentRuntime) -> None:
         """Cover lines 521-522: queue full warning."""
         agent = _make_agent(runtime, "enq-full")
         # Replace with a tiny queue
@@ -1089,9 +1088,9 @@ class TestAgentMessages:
         msg1 = AgentMessage(source="user", target=agent.id, content="first")
         msg2 = AgentMessage(source="user", target=agent.id, content="second")
 
-        agent._enqueue_message(msg1)  # fills the queue
+        agent.enqueue_message(msg1)  # fills the queue
         # This should trigger the warning, not raise
-        agent._enqueue_message(msg2)
+        agent.enqueue_message(msg2)
 
         # Queue should still have only 1 message
         assert agent._message_queue.qsize() == 1

@@ -286,7 +286,7 @@ class TestDiffEngineSelectiveHunkAcceptance:
         """Rejecting all hunks keeps the original content."""
         original = "keep this\n"
         modified = "change this\n"
-        hunks = engine.compute(original, modified)
+        engine.compute(original, modified)
         result = engine.apply_hunks(original, [])
         assert result == original
 

@@ -7,8 +7,6 @@ at test time, simulating the Zitadel JWKS flow without a running server.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

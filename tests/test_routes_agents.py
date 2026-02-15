@@ -136,7 +136,6 @@ class TestAgentGet:
     @patch("sdk.routes.agents.get_runtime")
     def test_get_agent_found(self, mock_get_runtime, client):
         """Lines 73-86: happy path."""
-        from sdk.agents import AgentStatus
         state = MagicMock()
         state.agent_id = "agent-1"
         state.name = "my-agent"

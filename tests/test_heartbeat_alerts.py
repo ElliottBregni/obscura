@@ -8,7 +8,6 @@ from sdk.heartbeat.alerts import (
     AlertRule,
     LoggingAlertChannel,
     WebhookAlertChannel,
-    SlackAlertChannel,
     get_default_alert_manager,
     set_default_alert_manager,
 )

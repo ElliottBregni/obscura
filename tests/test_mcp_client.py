@@ -1,17 +1,15 @@
 """Tests for sdk.mcp.client — MCPClient and transports."""
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 
 from sdk.mcp.types import (
     MCPConnectionConfig,
     MCPError,
     MCPErrorCode,
-    MCPPrompt,
     MCPPromptMessage,
     MCPPromptResult,
-    MCPResource,
     MCPResourceContent,
     MCPTool,
     MCPToolResult,
@@ -507,7 +505,7 @@ class TestMCPClientProtocol:
         import sdk.mcp.client as _client_mod
         _client_mod.MCPPromptMessage = MCPPromptMessage
         with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result) as mock_req:
-            result = await client.get_prompt("simple")
+            await client.get_prompt("simple")
         # Should not include arguments key in params
         call_params = mock_req.call_args[0][1]
         assert "arguments" not in call_params

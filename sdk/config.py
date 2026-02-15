@@ -9,6 +9,7 @@ to this unified config.
 from __future__ import annotations
 
 import os
+from typing import Self
 
 from pydantic import BaseModel, model_validator
 
@@ -41,7 +42,7 @@ class ObscuraConfig(BaseModel):
     default_backend: str = "copilot"
 
     @model_validator(mode="after")
-    def _set_jwks_uri(self) -> "ObscuraConfig":
+    def _set_jwks_uri(self) -> Self:
         if not self.auth_jwks_uri:
             self.auth_jwks_uri = f"{self.auth_issuer.rstrip('/')}/.well-known/jwks.json"
         return self

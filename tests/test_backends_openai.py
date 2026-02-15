@@ -4,7 +4,6 @@ Covers initialization, lifecycle, send/stream, sessions, tools, and hooks.
 All OpenAI SDK interactions are mocked via AsyncMock/MagicMock.
 """
 
-import json
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,13 +12,11 @@ from sdk._auth import AuthConfig
 from sdk._types import (
     Backend,
     ChunkKind,
-    ContentBlock,
     HookContext,
     HookPoint,
     Message,
     Role,
     SessionRef,
-    StreamChunk,
     ToolSpec,
 )
 from sdk._tools import ToolRegistry

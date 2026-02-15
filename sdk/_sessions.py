@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Mapping, cast
 
 from sdk._types import Backend, SessionRef
 
@@ -27,7 +28,7 @@ class SessionStore:
     file-based checkpoints).
     """
 
-    _sessions: dict[str, SessionRef] = field(default_factory=dict)
+    _sessions: dict[str, SessionRef] = field(default_factory=lambda: {})
 
     def add(self, ref: SessionRef) -> None:
         """Register a session reference."""
@@ -78,7 +79,7 @@ class PersistentSessionStore(SessionStore):
         """Serialise current sessions to disk."""
         import json
 
-        data = []
+        data: list[dict[str, str]] = []
         for ref in self._sessions.values():
             data.append({
                 "session_id": ref.session_id,
@@ -99,9 +100,20 @@ class PersistentSessionStore(SessionStore):
         if not raw.strip():
             return
 
-        for item in json.loads(raw):
+        for raw_item in json.loads(raw):
+            if not isinstance(raw_item, Mapping):
+                continue
+            item = cast(Mapping[str, object], raw_item)
+            session_id_obj = item.get("session_id")
+            backend_name_obj = item.get("backend")
+            if not isinstance(session_id_obj, str) or not isinstance(backend_name_obj, str):
+                continue
+            session_id = session_id_obj
+            backend_name = backend_name_obj
+            if not session_id or not backend_name:
+                continue
             ref = SessionRef(
-                session_id=item["session_id"],
-                backend=Backend(item["backend"]),
+                session_id=session_id,
+                backend=Backend(backend_name),
             )
             self._sessions[ref.session_id] = ref

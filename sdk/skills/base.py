@@ -52,7 +52,7 @@ class SkillCapability:
     parameters: List[CapabilityParameter]
     returns: CapabilityReturn
     capability_type: CapabilityType = CapabilityType.ACTION
-    examples: List[Dict[str, Any]] = field(default_factory=list)
+    examples: List[Dict[str, Any]] = field(default_factory=lambda: [])
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert capability to dictionary for serialization."""
@@ -87,7 +87,7 @@ class SkillMetadata:
     license: str = "MIT"
     homepage: Optional[str] = None
     repository: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=lambda: [])
     category: str = "general"  # web, filesystem, communication, etc.
     icon: Optional[str] = None  # Icon name or URL
 
@@ -99,7 +99,7 @@ class SkillHealth:
     message: str
     last_check: Optional[str] = None
     latency_ms: Optional[float] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: Dict[str, Any] = field(default_factory=lambda: {})
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -266,7 +266,7 @@ class Skill(ABC):
         if not cap:
             return [f"Unknown capability: {capability_name}"]
         
-        errors = []
+        errors: List[str] = []
         provided_params = set(params.keys())
         required_params = {p.name for p in cap.parameters if p.required}
         

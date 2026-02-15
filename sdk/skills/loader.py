@@ -13,9 +13,10 @@ import importlib
 import importlib.util
 import inspect
 import logging
+import pkgutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import List
 
 from sdk.skills.base import Skill
 
@@ -60,12 +61,12 @@ class SkillLoader:
         Returns:
             List of loaded skill instances
         """
-        skills = []
-        
+        skills: List[Skill] = []
+
         try:
             # Import the module
             module = importlib.import_module(module_path)
-            
+
             # Find all Skill subclasses in the module
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if (
@@ -80,10 +81,10 @@ class SkillLoader:
                         logger.info(f"Loaded skill '{skill.name}' from {module_path}")
                     except Exception as e:
                         logger.error(f"Failed to instantiate skill '{name}' from {module_path}: {e}")
-            
+
             # Check for submodules (packages)
             if hasattr(module, "__path__"):
-                for _, submod_name, ispkg in importlib.iter_modules(module.__path__):
+                for _importer, submod_name, ispkg in pkgutil.iter_modules(module.__path__):
                     if not ispkg and not submod_name.startswith("_"):
                         full_path = f"{module_path}.{submod_name}"
                         try:
@@ -91,12 +92,12 @@ class SkillLoader:
                             skills.extend(sub_skills)
                         except Exception as e:
                             logger.error(f"Failed to load submodule {full_path}: {e}")
-            
+
         except ImportError as e:
             logger.error(f"Failed to import module {module_path}: {e}")
         except Exception as e:
             logger.error(f"Error loading skills from {module_path}: {e}")
-        
+
         return skills
     
     def load_from_file(self, file_path: str | Path) -> List[Skill]:

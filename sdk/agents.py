@@ -33,7 +33,7 @@ import os
 import uuid
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +43,10 @@ from sdk._types import AgentEvent, AgentEventKind
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.memory import MemoryStore
+
+if TYPE_CHECKING:
+    from sdk.backends.mcp_backend import MCPBackend
+    from sdk.heartbeat.client import AgentHeartbeatClient
 
 
 class AgentStatus(Enum):
@@ -130,10 +134,10 @@ class Agent:
         self.updated_at = self.created_at
         self.iteration_count = 0
         self._client: ObscuraClient | None = None
-        self._mcp_backend: Any = None  # Optional MCP backend for external tools
+        self._mcp_backend: MCPBackend | None = None
         self._message_queue: asyncio.Queue[AgentMessage] = asyncio.Queue()
-        self._task: asyncio.Task | None = None
-        self._heartbeat_client: Any | None = None
+        self._task: asyncio.Task[Any] | None = None
+        self._heartbeat_client: AgentHeartbeatClient | None = None
         self._heartbeat_enabled: bool = True
         self._current_prompt: str = ""
         self._result: Any = None
@@ -158,7 +162,7 @@ class Agent:
             from sdk.mcp.types import MCPConnectionConfig, MCPTransportType
             from sdk.backends.mcp_backend import MCPBackend
             
-            mcp_configs = []
+            mcp_configs: list[MCPConnectionConfig] = []
             for server_config in self.config.mcp.servers:
                 transport = MCPTransportType(server_config.get("transport", "stdio"))
                 config = MCPConnectionConfig(
@@ -187,9 +191,10 @@ class Agent:
     async def run(self, prompt: str, **context: Any) -> Any:
         """
         Execute the agent on a task.
-        
+
         Stores context in memory, runs the agent, captures result.
         """
+        assert self._client is not None, "Agent.start() must be called before run()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -249,6 +254,7 @@ class Agent:
 
     async def stream(self, prompt: str, **context: Any) -> AsyncIterator[str]:
         """Stream the agent's response."""
+        assert self._client is not None, "Agent.start() must be called before stream()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -286,7 +292,7 @@ class Agent:
         prompt: str,
         *,
         max_turns: int | None = None,
-        on_confirm: Any = None,
+        on_confirm: Callable[..., Any] | None = None,
         **context: Any,
     ) -> str:
         """Run the agent in an iterative loop with automatic tool execution.
@@ -298,6 +304,7 @@ class Agent:
 
         Returns the concatenated text output from all turns.
         """
+        assert self._client is not None, "Agent.start() must be called before run_loop()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -362,7 +369,7 @@ class Agent:
         prompt: str,
         *,
         max_turns: int | None = None,
-        on_confirm: Any = None,
+        on_confirm: Callable[..., Any] | None = None,
         **context: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Stream agent loop events including tool calls and results.
@@ -371,6 +378,7 @@ class Agent:
         that happens: text deltas, tool calls, tool results, turn
         boundaries, and final completion.
         """
+        assert self._client is not None, "Agent.start() must be called before stream_loop()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -426,12 +434,14 @@ class Agent:
 
     def _load_relevant_memory(self, prompt: str) -> dict[str, Any]:
         """Load memory relevant to the current task."""
-        relevant = {}
+        relevant: dict[str, Any] = {}
 
         # Use vector search with reranking if available
         if hasattr(self, 'vector_memory'):
             try:
-                memories = self.recall(
+                from sdk.vector_memory import VectorMemoryEntry
+                recall_fn: Callable[..., list[VectorMemoryEntry]] = getattr(self, "recall")
+                memories = recall_fn(
                     prompt,
                     top_k=5,
                     use_reranking=True,
@@ -470,7 +480,7 @@ class Agent:
         context: dict[str, Any]
     ) -> str:
         """Build the full prompt with memory and context."""
-        parts = []
+        parts: list[str] = []
         
         # Add memory context
         if memory:
@@ -514,8 +524,8 @@ class Agent:
                 if self.status in (AgentStatus.COMPLETED, AgentStatus.FAILED, AgentStatus.STOPPED):
                     break
     
-    def _enqueue_message(self, message: AgentMessage) -> None:
-        """Internal: add message to queue."""
+    def enqueue_message(self, message: AgentMessage) -> None:
+        """Add message to queue."""
         try:
             self._message_queue.put_nowait(message)
         except asyncio.QueueFull:
@@ -631,7 +641,7 @@ class AgentRuntime:
         self._agents: dict[str, Agent] = {}
         self._lock = asyncio.Lock()
         self._message_bus: asyncio.Queue[AgentMessage] = asyncio.Queue()
-        self._bus_task: asyncio.Task | None = None
+        self._bus_task: asyncio.Task[None] | None = None
     
     async def start(self) -> None:
         """Start the message bus."""
@@ -677,6 +687,8 @@ class AgentRuntime:
             **config_kwargs
         )
         
+        if self.user is None:
+            raise RuntimeError("AgentRuntime requires a user to spawn agents")
         agent = Agent(agent_id, config, self.user, self)
         
         # Store reference
@@ -767,12 +779,12 @@ class AgentRuntime:
                     # Send to all agents except sender
                     for agent_id, agent in self._agents.items():
                         if agent_id != message.source:
-                            agent._enqueue_message(message)
+                            agent.enqueue_message(message)
                 else:
                     # Send to specific agent
                     target_agent = self._agents.get(message.target)
                     if target_agent:
-                        target_agent._enqueue_message(message)
+                        target_agent.enqueue_message(message)
                     else:
                         logger.warning(
                             "Message target agent %s not found (from %s)",

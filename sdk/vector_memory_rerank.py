@@ -22,7 +22,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from sdk.vector_memory import VectorMemoryEntry
@@ -123,7 +123,7 @@ class MetadataReranker:
     Give bonus points when specific metadata keys are present and truthy.
     """
 
-    boost_keys: dict[str, float] = field(default_factory=dict)
+    boost_keys: dict[str, float] = field(default_factory=lambda: dict[str, float]())
 
     def score(
         self,

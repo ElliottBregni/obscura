@@ -1,7 +1,6 @@
 """Tests for sdk.heartbeat.client — AgentHeartbeatClient and HeartbeatClientPool."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
 from sdk.heartbeat.client import (
     AgentHeartbeatClient,

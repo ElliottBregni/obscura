@@ -1,7 +1,7 @@
 """Tests for sdk.cli -- CLI entry point, subcommands, and async runner."""
 import pytest
 import sys
-from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from sdk.cli import build_parser, main, _AGENT_COMMANDS, _StderrLogger, _run
 
 
@@ -206,8 +206,6 @@ class TestRunServe:
         # Temporarily hide uvicorn if it exists
         with patch.dict("sys.modules", {"uvicorn": None}):
             # Need to force re-import to trigger the ImportError
-            import importlib
-            import sdk.cli as cli_module
             # Call _run_serve which does `import uvicorn` internally
             # We need to make the import fail
             original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__

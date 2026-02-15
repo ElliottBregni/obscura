@@ -8,10 +8,8 @@ during streaming, and manual scroll override.
 
 from __future__ import annotations
 
-from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
-from textual.widget import Widget
 from textual.widgets import Static
 
 from sdk.tui.widgets.message_bubble import MessageBubble

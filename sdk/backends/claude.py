@@ -59,7 +59,7 @@ class ClaudeBackend:
         # Tool and hook registries
         self._tools: list[ToolSpec] = []
         self._tool_registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
 
         # Session tracking
         self._session_store = SessionStore()
@@ -177,7 +177,7 @@ class ClaudeBackend:
 
     # -- Hooks ---------------------------------------------------------------
 
-    def register_hook(self, hook: HookPoint, callback: Callable) -> None:
+    def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None:
         """Register a lifecycle hook callback."""
         self._hooks[hook].append(callback)
 
@@ -203,7 +203,7 @@ class ClaudeBackend:
         prompt: str,
         *,
         max_turns: int = 10,
-        on_confirm: Callable | None = None,
+        on_confirm: Callable[..., Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with tool execution.
@@ -246,12 +246,11 @@ class ClaudeBackend:
             opts["mcp_servers"] = self._build_mcp_tools()
         if self._mcp_servers:
             # Merge external MCP servers
-            existing = opts.get("mcp_servers", {})
-            if isinstance(existing, dict):
-                for server in self._mcp_servers:
-                    name = server.get("name", f"mcp_{len(existing)}")
-                    existing[name] = server
-                opts["mcp_servers"] = existing
+            existing: dict[str, Any] = opts.get("mcp_servers", {})
+            for server in self._mcp_servers:
+                name: str = server.get("name", f"mcp_{len(existing)}")
+                existing[name] = server
+            opts["mcp_servers"] = existing
 
         # Hooks
         hooks = self._build_hooks_config()
@@ -270,7 +269,7 @@ class ClaudeBackend:
         """Convert registered ToolSpecs to a Claude in-process MCP server."""
         from claude_agent_sdk import tool as claude_tool
         from claude_agent_sdk import create_sdk_mcp_server
-        claude_tools = []
+        claude_tools: list[Any] = []
         for spec in self._tools:
             # Create a claude @tool-decorated function for each ToolSpec
             decorated = claude_tool(

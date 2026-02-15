@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -418,7 +418,7 @@ class TestRunLoop:
         mock_loop_instance.run.return_value = iter([])  # returns an iterator
 
         with patch("sdk.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
-            result = client.run_loop("fix bug", max_turns=5)
+            client.run_loop("fix bug", max_turns=5)
 
             mock_cls.assert_called_once_with(
                 mock_backend,
@@ -528,7 +528,6 @@ class TestTelemetryHelpers:
     def test_get_client_tracer_returns_noop_on_failure(self) -> None:
         """_get_client_tracer should return NoOpTracer when OTel is unavailable."""
         from sdk.client import _get_client_tracer
-        from sdk.telemetry.traces import NoOpTracer
 
         tracer = _get_client_tracer()
         # Should be usable (either real or NoOp)

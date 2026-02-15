@@ -21,13 +21,16 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from sdk._types import AgentContext, AgentPhase, HookPoint
 
 if TYPE_CHECKING:
     from sdk.client import ObscuraClient
     from sdk.context import ContextLoader
+
+
+HookCallback = Callable[[AgentContext], Awaitable[Any] | Any]
 
 
 class BaseAgent:
@@ -48,11 +51,11 @@ class BaseAgent:
         self._client = client
         self._name = name
         self._context_loader = context_loader
-        self._hooks: dict[HookPoint, list[Callable]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[HookCallback]] = {hp: [] for hp in HookPoint}
 
     # -- Hook registration ---------------------------------------------------
 
-    def on(self, hook: HookPoint, callback: Callable) -> None:
+    def on(self, hook: HookPoint, callback: HookCallback) -> None:
         """Register a lifecycle hook callback."""
         self._hooks[hook].append(callback)
 

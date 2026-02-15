@@ -1,5 +1,4 @@
 """Tests for sdk.telemetry.context."""
-import pytest
 from unittest.mock import MagicMock
 from sdk.telemetry.context import enrich_span_with_user, get_user_id, get_user_email
 from sdk.auth.models import AuthenticatedUser

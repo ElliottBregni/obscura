@@ -17,6 +17,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 from typing import Any, Callable, TypeVar
@@ -24,11 +25,16 @@ from typing import Any, Callable, TypeVar
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def get_tracer(name: str) -> Any:
-    """Return an OTel tracer, or a no-op stub if OTel is unavailable."""
+def get_tracer(name: str) -> NoOpTracer:
+    """Return an OTel tracer, or a no-op stub if OTel is unavailable.
+
+    The return type is ``NoOpTracer`` to give callers a concrete type for
+    ``start_as_current_span`` / ``start_span``.  When OTel is installed
+    the real tracer is duck-type compatible.
+    """
     try:
         from opentelemetry import trace
-        return trace.get_tracer(name)
+        return trace.get_tracer(name)  # type: ignore[return-value]
     except ImportError:
         return NoOpTracer()
 
@@ -148,18 +154,14 @@ class NoOpSpan:
     def is_recording(self) -> bool:
         return False
 
-    def __enter__(self) -> NoOpSpan:
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        pass
-
 
 class NoOpTracer:
     """Minimal no-op tracer for when OTel is unavailable."""
 
-    def start_as_current_span(self, name: str, **kwargs: Any) -> NoOpSpan:
-        return NoOpSpan()
+    def start_as_current_span(
+        self, name: str, *args: Any, **kwargs: Any
+    ) -> contextlib.AbstractContextManager[NoOpSpan]:
+        return contextlib.nullcontext(NoOpSpan())
 
-    def start_span(self, name: str, **kwargs: Any) -> NoOpSpan:
+    def start_span(self, name: str, *args: Any, **kwargs: Any) -> NoOpSpan:
         return NoOpSpan()

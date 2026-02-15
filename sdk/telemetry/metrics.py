@@ -23,10 +23,41 @@ obscura_stream_chunks_total              Counter       backend, chunk_kind
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol, overload, runtime_checkable
 
 
-def _get_meter() -> Any:
+# ---------------------------------------------------------------------------
+# Protocols
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class MetricInstrument(Protocol):
+    """Structural type for an OTel-style metric instrument.
+
+    Both ``add`` and ``record`` are provided so a single no-op type can
+    stand in for counters *and* histograms.
+    """
+
+    def add(self, amount: float = 1, attributes: dict[str, str] | None = None) -> None: ...
+
+    def record(self, amount: float, attributes: dict[str, str] | None = None) -> None: ...
+
+
+class Meter(Protocol):
+    """Structural type for an OTel-style Meter.
+
+    Parameters are keyword-only to stay compatible with OTel regardless
+    of its positional argument order.
+    """
+
+    def create_counter(self, name: str, *, unit: str = "", description: str = "") -> Any: ...
+
+    def create_histogram(self, name: str, *, unit: str = "", description: str = "") -> Any: ...
+
+    def create_up_down_counter(self, name: str, *, unit: str = "", description: str = "") -> Any: ...
+
+
+def _get_meter() -> Meter | None:
     """Return an OTel meter, or None if OTel is unavailable."""
     try:
         from opentelemetry import metrics
@@ -48,15 +79,22 @@ class _LazyMetric:
     def __set_name__(self, owner: type, name: str) -> None:
         self._attr = f"_lazy_{name}"
 
-    def __get__(self, obj: Any, objtype: type | None = None) -> Any:
+    @overload
+    def __get__(self, obj: None, objtype: type) -> _LazyMetric: ...
+
+    @overload
+    def __get__(self, obj: object, objtype: type | None = None) -> MetricInstrument: ...
+
+    def __get__(self, obj: object | None, objtype: type | None = None) -> _LazyMetric | MetricInstrument:
         if obj is None:
             return self
 
-        cached = getattr(obj, self._attr, None)
+        cached: MetricInstrument | None = getattr(obj, self._attr, None)
         if cached is not None:
             return cached
 
         meter = _get_meter()
+        instrument: MetricInstrument
         if meter is None:
             instrument = _NoOpInstrument()
         else:
@@ -160,10 +198,17 @@ def get_metrics() -> ObscuraMetrics:
 # ---------------------------------------------------------------------------
 
 class _NoOpInstrument:
-    """No-op metric instrument when OTel is unavailable."""
+    """No-op metric instrument when OTel is unavailable.
+
+    Structurally satisfies :class:`MetricInstrument`.
+    """
 
     def add(self, amount: float = 1, attributes: dict[str, str] | None = None) -> None:
         pass
 
     def record(self, amount: float, attributes: dict[str, str] | None = None) -> None:
         pass
+
+
+# Ensure structural compatibility at module level.
+_noop_check: MetricInstrument = _NoOpInstrument()

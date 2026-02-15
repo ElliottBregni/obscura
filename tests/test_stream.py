@@ -1,6 +1,5 @@
 """Tests for sdk._stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
 import pytest
-import asyncio
 from unittest.mock import MagicMock
 
 from sdk._stream import EventToIteratorBridge, ClaudeIteratorAdapter

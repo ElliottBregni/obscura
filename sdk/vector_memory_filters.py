@@ -17,7 +17,7 @@ Usage::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
@@ -119,27 +119,26 @@ class FilterBuilder:
             # Uses json_extract on the metadata column to check tags
             # Expects metadata to have a "tags" key with a JSON array
             if f.mode == "any":
-                conditions = []
-                params = []
+                conditions: list[str] = []
+                params_list: list[Any] = []
                 for tag in f.tags:
                     conditions.append("metadata LIKE ?")
-                    params.append(f'%"{tag}"%')
-                return "(" + " OR ".join(conditions) + ")", params
+                    params_list.append(f'%"{tag}"%')
+                return "(" + " OR ".join(conditions) + ")", params_list
             else:  # "all"
-                conditions = []
-                params = []
+                conditions_all: list[str] = []
+                params_all: list[Any] = []
                 for tag in f.tags:
-                    conditions.append("metadata LIKE ?")
-                    params.append(f'%"{tag}"%')
-                return "(" + " AND ".join(conditions) + ")", params
+                    conditions_all.append("metadata LIKE ?")
+                    params_all.append(f'%"{tag}"%')
+                return "(" + " AND ".join(conditions_all) + ")", params_all
 
-        if isinstance(f, KeyValueFilter):
-            json_path = f"$.{f.key}"
-            if f.operator == "contains":
-                return "json_extract(metadata, ?) LIKE ?", [json_path, f"%{f.value}%"]
-            op = cls._OP_MAP.get(f.operator)
-            if op is None:
-                raise ValueError(f"Unknown operator: {f.operator}")
-            return f"json_extract(metadata, ?) {op} ?", [json_path, f.value]
-
-        raise TypeError(f"Unknown filter type: {type(f)}")
+        # Must be KeyValueFilter at this point (exhaustive union check)
+        assert isinstance(f, KeyValueFilter)
+        json_path = f"$.{f.key}"
+        if f.operator == "contains":
+            return "json_extract(metadata, ?) LIKE ?", [json_path, f"%{f.value}%"]
+        op = cls._OP_MAP.get(f.operator)
+        if op is None:
+            raise ValueError(f"Unknown operator: {f.operator}")
+        return f"json_extract(metadata, ?) {op} ?", [json_path, f.value]

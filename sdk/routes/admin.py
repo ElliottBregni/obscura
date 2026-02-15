@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -15,7 +16,7 @@ from sdk.deps import audit_logs, get_runtime
 router = APIRouter(prefix="/api/v1", tags=["admin"])
 
 # In-memory rate limit store
-_rate_limits: dict[str, dict] = {}
+_rate_limits: dict[str, dict[str, Any]] = {}
 
 
 # -- audit logs ------------------------------------------------------------
@@ -34,7 +35,7 @@ async def audit_logs_list(
     user: AuthenticatedUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """Query audit logs. Admin only."""
-    logs = list(audit_logs)
+    logs: list[dict[str, Any]] = list(audit_logs)
 
     if start:
         logs = [l for l in logs if l.get("timestamp", "") >= start]
@@ -67,11 +68,11 @@ async def audit_logs_summary(
     user: AuthenticatedUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """Get audit log summary. Admin only."""
-    actions = Counter(l.get("action") for l in audit_logs)
-    outcomes = Counter(l.get("outcome") for l in audit_logs)
+    actions: Counter[str | None] = Counter(l.get("action") for l in audit_logs)
+    outcomes: Counter[str | None] = Counter(l.get("outcome") for l in audit_logs)
 
     cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
-    recent = [l for l in audit_logs if l.get("timestamp", "") > cutoff]
+    recent: list[dict[str, Any]] = [l for l in audit_logs if l.get("timestamp", "") > cutoff]
 
     return JSONResponse(content={
         "total_logs": len(audit_logs),
@@ -92,17 +93,19 @@ async def metrics_get(
     runtime = await get_runtime(user)
 
     agents = runtime.list_agents()
-    agent_stats: dict = {
+    agent_stats: dict[str, Any] = {
         "total": len(agents),
         "by_status": {},
         "by_model": {},
     }
 
+    by_status: dict[str, int] = agent_stats["by_status"]
+    by_model: dict[str, int] = agent_stats["by_model"]
     for agent in agents:
         status = agent.status.name
         model = agent.config.model
-        agent_stats["by_status"][status] = agent_stats["by_status"].get(status, 0) + 1
-        agent_stats["by_model"][model] = agent_stats["by_model"].get(model, 0) + 1
+        by_status[status] = by_status.get(status, 0) + 1
+        by_model[model] = by_model.get(model, 0) + 1
 
     from sdk.memory import MemoryStore
     store = MemoryStore.for_user(user)
@@ -175,11 +178,11 @@ async def rate_limits_get(
 
 @router.post("/rate-limits")
 async def rate_limits_set(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """Set rate limits for an API key. Admin only."""
-    api_key = body.get("api_key")
+    api_key: str | None = body.get("api_key")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key is required")
 

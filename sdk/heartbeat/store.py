@@ -11,7 +11,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, override
 
 from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
 
@@ -85,6 +85,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         self._heartbeats: dict[str, Heartbeat] = {}
         logger.debug("Initialized InMemoryHeartbeatStore")
     
+    @override
     async def register(self, agent_id: str, expected_interval: int = 30) -> None:
         """Register a new agent for monitoring."""
         now = datetime.now()
@@ -96,6 +97,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         )
         logger.debug(f"Registered agent {agent_id} with interval {expected_interval}s")
     
+    @override
     async def unregister(self, agent_id: str) -> bool:
         """Unregister an agent from monitoring."""
         if agent_id in self._records:
@@ -106,6 +108,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
             return True
         return False
     
+    @override
     async def save(self, heartbeat: Heartbeat) -> None:
         """Save a heartbeat from an agent."""
         agent_id = heartbeat.agent_id
@@ -125,22 +128,27 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         
         logger.debug(f"Saved heartbeat from agent {agent_id}")
     
+    @override
     async def get_last(self, agent_id: str) -> Optional[Heartbeat]:
         """Get the last heartbeat for an agent."""
         return self._heartbeats.get(agent_id)
-    
+
+    @override
     async def get_record(self, agent_id: str) -> Optional[HealthRecord]:
         """Get the full health record for an agent."""
         return self._records.get(agent_id)
-    
+
+    @override
     async def list_agents(self) -> list[str]:
         """List all registered agent IDs."""
         return list(self._records.keys())
-    
+
+    @override
     async def list_records(self) -> list[HealthRecord]:
         """List all health records."""
         return list(self._records.values())
-    
+
+    @override
     async def update_computed_status(self, agent_id: str, status: HealthStatus) -> None:
         """Update the computed health status for an agent."""
         if agent_id in self._records:
@@ -148,13 +156,15 @@ class InMemoryHeartbeatStore(HeartbeatStore):
             self._records[agent_id].last_updated = datetime.now()
             logger.debug(f"Updated computed status for agent {agent_id} to {status.value}")
     
+    @override
     async def increment_missed_count(self, agent_id: str) -> int:
         """Increment the missed heartbeat count for an agent."""
         if agent_id in self._records:
             self._records[agent_id].missed_count += 1
             return self._records[agent_id].missed_count
         return 0
-    
+
+    @override
     async def reset_missed_count(self, agent_id: str) -> None:
         """Reset the missed heartbeat count for an agent."""
         if agent_id in self._records:

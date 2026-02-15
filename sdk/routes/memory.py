@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -15,7 +16,7 @@ from sdk.deps import audit
 router = APIRouter(prefix="/api/v1", tags=["memory"])
 
 # In-memory namespace config (lateral move from server.py)
-_memory_namespaces: dict[str, dict] = {}
+_memory_namespaces: dict[str, dict[str, Any]] = {}
 
 
 # -- list / search / stats ------------------------------------------------
@@ -87,13 +88,13 @@ async def memory_namespace_list(
 
 @router.post("/memory/namespaces")
 async def memory_namespace_create(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create a new memory namespace with configuration."""
-    namespace_id = body.get("name", str(uuid.uuid4()))
+    namespace_id: str = body.get("name", str(uuid.uuid4()))
 
-    namespace = {
+    namespace: dict[str, Any] = {
         "namespace_id": namespace_id,
         "description": body.get("description", ""),
         "ttl_days": body.get("ttl_days"),
@@ -166,28 +167,28 @@ async def memory_namespace_stats(
 
 @router.post("/memory/transaction")
 async def memory_transaction(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Execute multiple memory operations atomically."""
     from sdk.memory import MemoryStore
     store = MemoryStore.for_user(user)
 
-    operations = body.get("operations", [])
+    operations: list[dict[str, Any]] = body.get("operations", [])
     if not operations:
         raise HTTPException(status_code=400, detail="No operations provided")
 
-    results = []
-    errors = []
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
 
     for idx, op in enumerate(operations):
         try:
-            op_type = op.get("op")
-            ns = op.get("namespace", "default")
-            key = op.get("key")
+            op_type: str | None = op.get("op")
+            ns: str = op.get("namespace", "default")
+            key: str | None = op.get("key")
 
             if op_type == "set":
-                value = op.get("value")
+                value: Any = op.get("value")
                 store.set(key, value, namespace=ns)
                 results.append({"idx": idx, "op": "set", "status": "ok"})
             elif op_type == "get":
@@ -222,7 +223,7 @@ async def memory_export(
     store = MemoryStore.for_user(user)
 
     keys = store.list_keys(namespace=namespace)
-    data: dict[str, dict] = {}
+    data: dict[str, dict[str, Any]] = {}
 
     for key in keys:
         value = store.get(key.key, namespace=key.namespace)
@@ -242,7 +243,7 @@ async def memory_export(
 
 @router.post("/memory/import")
 async def memory_import(
-    body: dict,
+    body: dict[str, Any],
     overwrite: bool = True,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
@@ -250,13 +251,13 @@ async def memory_import(
     from sdk.memory import MemoryStore
     store = MemoryStore.for_user(user)
 
-    import_data = body.get("data", {})
+    import_data: dict[str, Any] = body.get("data", {})
     if not import_data:
         raise HTTPException(status_code=400, detail="No data provided")
 
     imported = 0
     skipped = 0
-    errors = []
+    errors: list[dict[str, Any]] = []
 
     for ns, ks in import_data.items():
         for key, value in ks.items():
@@ -304,14 +305,14 @@ async def memory_get(
 async def memory_set(
     namespace: str,
     key: str,
-    body: dict,
+    body: dict[str, Any],
     ttl: int | None = None,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Store a value in the user's memory store."""
     from sdk.memory import MemoryStore
     store = MemoryStore.for_user(user)
-    value = body.get("value")
+    value: Any = body.get("value")
     ttl_delta = timedelta(seconds=ttl) if ttl else None
     store.set(key, value, namespace=namespace, ttl=ttl_delta)
     audit("memory.set", user, f"memory:{namespace}:{key}", "write", "success")

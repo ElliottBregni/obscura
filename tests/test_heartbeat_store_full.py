@@ -11,7 +11,7 @@ from sdk.heartbeat.store import (
     get_default_store,
     set_default_store,
 )
-from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus, SystemMetrics
+from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
 
 
 class TestInMemoryHeartbeatStore:

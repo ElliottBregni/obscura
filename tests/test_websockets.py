@@ -1,7 +1,6 @@
 """Tests for sdk.routes.websockets — broadcast_event, notify_memory_change, and helpers."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, UTC
+from unittest.mock import AsyncMock
 
 from sdk.routes import websockets as ws_mod
 

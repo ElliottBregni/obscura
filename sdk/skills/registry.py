@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from sdk.skills.base import (
-    CapabilityNotFoundError,
     Skill,
-    SkillCapability,
     SkillError,
     SkillHealth,
     SkillNotFoundError,

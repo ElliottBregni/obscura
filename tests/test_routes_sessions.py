@@ -1,6 +1,6 @@
 """Tests for sdk.routes.sessions — Session management endpoints."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 from starlette.testclient import TestClient
 from sdk.config import ObscuraConfig
 from sdk._types import Backend, SessionRef

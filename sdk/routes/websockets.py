@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -25,7 +26,7 @@ _memory_watch_clients: dict[str, list[WebSocket]] = {}
 async def agent_websocket(
     websocket: WebSocket,
     agent_id: str,
-):
+) -> None:
     """WebSocket for real-time agent communication."""
     user = await authenticate_websocket(websocket)
     if user is None:
@@ -47,11 +48,11 @@ async def agent_websocket(
             return
 
         while True:
-            message = await websocket.receive_json()
+            message: dict[str, Any] = await websocket.receive_json()
 
             if message.get("type") == "run":
-                prompt = message.get("prompt", "")
-                context = message.get("context", {})
+                prompt: str = message.get("prompt", "")
+                context: dict[str, Any] = message.get("context", {})
                 try:
                     async for chunk in agent.stream(prompt, **context):
                         await websocket.send_json({
@@ -97,7 +98,7 @@ async def agent_websocket(
 
 
 @router.websocket("/ws/monitor")
-async def monitor_websocket(websocket: WebSocket):
+async def monitor_websocket(websocket: WebSocket) -> None:
     """WebSocket for monitoring all agents."""
     user = await authenticate_websocket(websocket)
     if user is None:
@@ -149,7 +150,7 @@ async def monitor_websocket(websocket: WebSocket):
 
 
 @router.websocket("/ws/broadcast")
-async def broadcast_websocket(websocket: WebSocket):
+async def broadcast_websocket(websocket: WebSocket) -> None:
     """WebSocket for system-wide broadcast events."""
     user = await authenticate_websocket(websocket)
     if user is None:
@@ -172,15 +173,15 @@ async def broadcast_websocket(websocket: WebSocket):
             _broadcast_clients.remove(websocket)
 
 
-async def broadcast_event(event_type: str, data: dict) -> None:
+async def broadcast_event(event_type: str, data: dict[str, Any]) -> None:
     """Broadcast an event to all connected clients."""
-    message = {
+    message: dict[str, Any] = {
         "type": event_type,
         "timestamp": datetime.now(UTC).isoformat(),
         "data": data,
     }
 
-    disconnected = []
+    disconnected: list[WebSocket] = []
     for client in _broadcast_clients:
         try:
             await client.send_json(message)
@@ -199,7 +200,7 @@ async def broadcast_event(event_type: str, data: dict) -> None:
 async def memory_watch_websocket(
     websocket: WebSocket,
     namespace: str,
-):
+) -> None:
     """WebSocket for watching memory changes in a namespace."""
     user = await authenticate_websocket(websocket)
     if user is None:
@@ -243,14 +244,14 @@ async def notify_memory_change(namespace: str, event_type: str, key: str) -> Non
     if namespace not in _memory_watch_clients:
         return
 
-    message = {
+    message: dict[str, Any] = {
         "type": event_type,
         "namespace": namespace,
         "key": key,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
-    disconnected = []
+    disconnected: list[WebSocket] = []
     for client in _memory_watch_clients[namespace]:
         try:
             await client.send_json(message)

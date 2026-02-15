@@ -23,7 +23,7 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from sdk.auth.models import AuthenticatedUser
 
@@ -34,6 +34,7 @@ class MemoryKey:
     namespace: str  # e.g., "session", "project", "user", "global"
     key: str        # e.g., "context", "preferences", "history"
     
+    @override
     def __str__(self) -> str:
         return f"{self.namespace}:{self.key}"
 
@@ -227,11 +228,11 @@ class MemoryStore:
             (pattern, pattern)
         ).fetchall()
         
-        results = []
+        results: list[tuple[MemoryKey, Any]] = []
         for row in rows:
             key = MemoryKey(namespace=row['namespace'], key=row['key'])
             try:
-                value = json.loads(row['value'])
+                value: Any = json.loads(row['value'])
             except json.JSONDecodeError:
                 value = row['value']
             results.append((key, value))
@@ -296,24 +297,25 @@ class GlobalMemoryStore(MemoryStore):
     _instance: GlobalMemoryStore | None = None
     _lock = threading.Lock()
     
-    def __init__(self):
+    def __init__(self) -> None:
         # Don't call super().__init__ to avoid auth requirement
         self._db_id = "global"
         self.db_path = Path.home() / ".obscura" / "memory" / "global.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self._local = threading.local()
         self._init_db()
     
     @classmethod
-    def get(cls) -> GlobalMemoryStore:
+    def get_instance(cls) -> GlobalMemoryStore:
         """Get the singleton global memory store."""
         with cls._lock:
             if cls._instance is None:
                 cls._instance = cls()
             return cls._instance
     
-    def set(self, *args, **kwargs) -> None:
+    @override
+    def set(self, *args: Any, **kwargs: Any) -> None:
         """Override to add audit logging for global writes."""
         # TODO: Add audit logging
         super().set(*args, **kwargs)

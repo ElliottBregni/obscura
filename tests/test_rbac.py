@@ -8,7 +8,6 @@ when wired into a FastAPI application.
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import pytest
 from fastapi import Depends, FastAPI

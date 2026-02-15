@@ -14,18 +14,16 @@ Launch via::
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
-from typing import Any
+from typing import Any, override
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
 
 from sdk.tui.backend_bridge import BackendBridge
-from sdk.tui.modes import FileChange, ModeManager, Plan, TUIMode
-from sdk.tui.session import ConversationTurn, TUISession
-from sdk.tui.themes import DARK_THEME, LIGHT_THEME
+from sdk.tui.modes import ModeManager, Plan, TUIMode
+from sdk.tui.session import TUISession
+from sdk.tui.themes import DARK_THEME
 from sdk.tui.widgets.diff_view import DiffView
 from sdk.tui.widgets.input_area import PromptInput, SlashCommand
 from sdk.tui.widgets.message_bubble import MessageBubble
@@ -179,6 +177,7 @@ class ObscuraTUI(App):
 
     # -- Mode switching -----------------------------------------------------
 
+    @override
     def action_switch_mode(self, mode: str) -> None:
         """Switch between ask/plan/code/diff modes."""
         try:
@@ -681,7 +680,7 @@ class ObscuraTUI(App):
     async def _cmd_quit(self, args: list[str]) -> None:
         """Handle /quit."""
         await self._shutdown()
-        self.exit()
+        self.exit(result=None)
 
     # -- Actions ------------------------------------------------------------
 

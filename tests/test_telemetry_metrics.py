@@ -7,7 +7,6 @@ when OTel is unavailable, and record correctly with InMemoryMetricReader.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -111,7 +110,7 @@ class TestMetricExport:
     @pytest.fixture(autouse=True)
     def _check_otel(self) -> None:
         try:
-            import opentelemetry.sdk.metrics
+            import opentelemetry.sdk.metrics  # noqa: F401
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 

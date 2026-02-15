@@ -12,7 +12,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional, override
 
 import httpx
 
@@ -34,7 +34,7 @@ class AlertRule:
         channels: Channel names to send alerts to
     """
     name: str
-    condition: callable = field(compare=False)
+    condition: Callable[..., Any] = field(compare=False)
     severity: HealthStatus = HealthStatus.WARNING
     cooldown: int = 300  # 5 minutes
     channels: list[str] = field(default_factory=lambda: ["default"])
@@ -64,18 +64,20 @@ class AlertChannel(ABC):
 
 class LoggingAlertChannel(AlertChannel):
     """Alert channel that logs alerts."""
-    
+
     name = "logging"
-    
+
     def __init__(self, log_level: int = logging.WARNING) -> None:
         self.log_level = log_level
-    
+
+    @override
     async def send(self, alert: Alert) -> bool:
         """Log the alert."""
         message = f"[ALERT] Agent {alert.agent_id}: {alert.message} (status: {alert.status.value})"
         logger.log(self.log_level, message)
         return True
-    
+
+    @override
     async def test(self) -> bool:
         """Test the channel."""
         return True
@@ -104,6 +106,7 @@ class WebhookAlertChannel(AlertChannel):
         self.retries = retries
         self.secret = secret
     
+    @override
     async def send(self, alert: Alert) -> bool:
         """Send alert via webhook POST request."""
         payload = {
@@ -151,6 +154,7 @@ class WebhookAlertChannel(AlertChannel):
         logger.error(f"Failed to send alert to webhook after {self.retries} attempts")
         return False
     
+    @override
     async def test(self) -> bool:
         """Test the webhook with a ping message."""
         try:
@@ -184,6 +188,7 @@ class SlackAlertChannel(AlertChannel):
         self.emoji = emoji
         self._http = WebhookAlertChannel(webhook_url)
     
+    @override
     async def send(self, alert: Alert) -> bool:
         """Send alert to Slack webhook."""
         # Format message based on severity
@@ -225,6 +230,7 @@ class SlackAlertChannel(AlertChannel):
             logger.warning(f"Slack alert failed: {e}")
             return False
     
+    @override
     async def test(self) -> bool:
         """Test the Slack webhook."""
         try:
@@ -416,7 +422,7 @@ class AlertManager:
     
     async def test_all_channels(self) -> dict[str, bool]:
         """Test all alert channels."""
-        results = {}
+        results: dict[str, bool] = {}
         for name, channel in self._channels.items():
             results[name] = await channel.test()
         return results

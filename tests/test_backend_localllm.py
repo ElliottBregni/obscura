@@ -136,7 +136,6 @@ class TestLocalLLMSessions:
     @pytest.mark.asyncio
     async def test_resume_session(self):
         from sdk.backends.localllm import LocalLLMBackend
-        from sdk._types import SessionRef
         b = LocalLLMBackend(_make_auth())
         b._client = MagicMock()
         ref = await b.create_session()

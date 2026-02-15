@@ -50,14 +50,14 @@ class ClientFactory:
 # Global agent runtime registry (keyed by user_id)
 # ---------------------------------------------------------------------------
 
-_runtimes: dict[str, Any] = {}
+from sdk.agents import AgentRuntime
+
+_runtimes: dict[str, AgentRuntime] = {}
 _runtimes_lock = asyncio.Lock()
 
 
-async def get_runtime(user: AuthenticatedUser) -> Any:
+async def get_runtime(user: AuthenticatedUser) -> AgentRuntime:
     """Get or create a persistent AgentRuntime for the given user."""
-    from sdk.agents import AgentRuntime
-
     async with _runtimes_lock:
         if user.user_id not in _runtimes:
             runtime = AgentRuntime(user)

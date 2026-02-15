@@ -20,19 +20,19 @@ from sdk.deps import audit
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
 
 # In-memory webhook store
-_webhooks: dict[str, dict] = {}
+_webhooks: dict[str, dict[str, Any]] = {}
 
 
 @router.post("/webhooks")
 async def webhook_create(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create a webhook for events."""
     webhook_id = str(uuid.uuid4())
     secret = secrets.token_urlsafe(32)
 
-    webhook = {
+    webhook: dict[str, Any] = {
         "webhook_id": webhook_id,
         "url": body.get("url"),
         "events": body.get("events", []),
@@ -62,7 +62,7 @@ async def webhook_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all webhooks."""
-    webhooks = [
+    webhooks: list[dict[str, Any]] = [
         {k: v for k, v in w.items() if k != "secret"}
         for w in _webhooks.values()
     ]
@@ -115,23 +115,25 @@ async def webhook_test(
     if webhook is None:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
 
-    payload = {
+    payload: dict[str, Any] = {
         "event": "test",
         "timestamp": datetime.now(UTC).isoformat(),
         "data": {"message": "This is a test event"},
     }
 
     payload_json = json.dumps(payload, separators=(',', ':'))
+    webhook_secret: str = webhook["secret"]
     signature = hmac.new(
-        webhook["secret"].encode(),
+        webhook_secret.encode(),
         payload_json.encode(),
         hashlib.sha256
     ).hexdigest()
 
     try:
         async with httpx.AsyncClient() as client:
+            webhook_url: str = webhook["url"]
             resp = await client.post(
-                webhook["url"],
+                webhook_url,
                 json=payload,
                 headers={
                     "X-Webhook-Signature": f"sha256={signature}",
@@ -160,7 +162,7 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
     """Trigger all webhooks subscribed to an event."""
     import httpx
 
-    payload = {
+    payload: dict[str, Any] = {
         "event": event_type,
         "timestamp": datetime.now(UTC).isoformat(),
         "data": data,
@@ -170,23 +172,27 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
     for webhook in _webhooks.values():
         if not webhook.get("active", True):
             continue
-        if event_type not in webhook.get("events", []):
+        events: list[str] = webhook.get("events", [])
+        if event_type not in events:
             continue
 
+        webhook_secret: str = webhook["secret"]
         signature = hmac.new(
-            webhook["secret"].encode(),
+            webhook_secret.encode(),
             payload_json.encode(),
             hashlib.sha256
         ).hexdigest()
 
         try:
             async with httpx.AsyncClient() as client:
+                webhook_url: str = webhook["url"]
+                webhook_id: str = webhook["webhook_id"]
                 await client.post(
-                    webhook["url"],
+                    webhook_url,
                     json=payload,
                     headers={
                         "X-Webhook-Signature": f"sha256={signature}",
-                        "X-Webhook-ID": webhook["webhook_id"],
+                        "X-Webhook-ID": webhook_id,
                         "Content-Type": "application/json",
                     },
                     timeout=30.0

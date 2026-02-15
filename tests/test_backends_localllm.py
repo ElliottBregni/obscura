@@ -7,7 +7,6 @@ without a local LLM server.
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,13 +16,11 @@ from sdk._tools import ToolRegistry
 from sdk._types import (
     Backend,
     ChunkKind,
-    ContentBlock,
     HookContext,
     HookPoint,
     Message,
     Role,
     SessionRef,
-    StreamChunk,
     ToolSpec,
 )
 from sdk.backends.localllm import LocalLLMBackend
@@ -565,7 +562,7 @@ class TestLocalLLMSessions:
         b = _backend()
         b._client.chat.completions.create.return_value = _mock_completion("resp1")
 
-        ref = await b.create_session()
+        await b.create_session()
         await b.send("first message")
 
         # Reset mock for second call

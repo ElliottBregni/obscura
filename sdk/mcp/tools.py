@@ -5,11 +5,9 @@ Converts between Obscura ToolSpec and MCP tool definitions,
 and handles execution of MCP tools.
 """
 
-from __future__ import annotations
-
 import json
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from sdk._types import ToolSpec
 from sdk.mcp.types import (
@@ -30,20 +28,20 @@ logger = logging.getLogger(__name__)
 def obscura_tool_to_mcp(tool: ToolSpec) -> MCPTool:
     """
     Convert an Obscura ToolSpec to an MCP Tool definition.
-    
+
     Args:
         tool: Obscura ToolSpec to convert
-        
+
     Returns:
         MCPTool definition for MCP protocol
     """
     # Convert parameters to JSON Schema format
-    schema = {
+    schema: dict[str, Any] = {
         "type": "object",
         "properties": tool.parameters.get("properties", {}),
         "required": tool.parameters.get("required", []),
     }
-    
+
     return MCPTool(
         name=tool.name,
         description=tool.description,
@@ -57,11 +55,11 @@ def mcp_tool_to_obscura(
 ) -> ToolSpec:
     """
     Convert an MCP Tool definition to an Obscura ToolSpec.
-    
+
     Args:
         tool: MCP Tool definition
         execute_fn: Function to execute the tool
-        
+
     Returns:
         Obscura ToolSpec
     """
@@ -80,45 +78,48 @@ def mcp_tool_to_obscura(
 def obscura_result_to_mcp(result: Any) -> MCPToolResult:
     """
     Convert an Obscura tool execution result to MCP ToolResult.
-    
+
     Args:
         result: Result from Obscura tool execution
-        
+
     Returns:
         MCPToolResult for MCP protocol
     """
     if result is None:
         return MCPToolResult(content=[])
-    
+
     if isinstance(result, dict):
-        if "error" in result:
+        result_dict = cast(dict[str, Any], result)
+        if "error" in result_dict:
             return MCPToolResult(
-                content=[{"type": "text", "text": str(result["error"])}],
+                content=[{"type": "text", "text": str(result_dict["error"])}],
                 isError=True,
             )
-    
+
     if isinstance(result, str):
         return MCPToolResult(
             content=[{"type": "text", "text": result}],
         )
-    
+
     if isinstance(result, list):
-        content = []
-        for item in result:
+        result_list = cast(list[Any], result)
+        content: list[dict[str, Any]] = []
+        for item in result_list:
             if isinstance(item, str):
                 content.append({"type": "text", "text": item})
             elif isinstance(item, dict):
-                if item.get("type") in ["text", "image", "resource"]:
-                    content.append(item)
+                item_dict = cast(dict[str, Any], item)
+                if item_dict.get("type") in ["text", "image", "resource"]:
+                    content.append(item_dict)
                 else:
                     content.append({
                         "type": "text",
-                        "text": json.dumps(item, indent=2),
+                        "text": json.dumps(item_dict, indent=2),
                     })
             else:
                 content.append({"type": "text", "text": str(item)})
         return MCPToolResult(content=content)
-    
+
     # Default: convert to JSON
     try:
         return MCPToolResult(
@@ -129,43 +130,43 @@ def obscura_result_to_mcp(result: Any) -> MCPToolResult:
         )
     except Exception as e:
         logger.warning(f"Failed to serialize result to JSON: {e}")
+        fallback: dict[str, Any] = {"type": "text", "text": str(result)}
         return MCPToolResult(
-            content=[{"type": "text", "text": str(result)}],
+            content=[fallback],
         )
 
 
 def mcp_result_to_obscura(result: MCPToolResult) -> Any:
     """
     Convert an MCP ToolResult to an Obscura-friendly result.
-    
+
     Args:
         result: MCP ToolResult
-        
+
     Returns:
         Result suitable for Obscura
     """
     if result.isError:
         return {"error": result.content}
-    
+
     if not result.content:
         return None
-    
+
     # Extract text from content
-    texts = []
+    texts: list[str] = []
     for item in result.content:
-        if isinstance(item, dict):
-            if item.get("type") == "text":
-                texts.append(item.get("text", ""))
-            elif item.get("type") == "image":
-                # Handle image content
-                texts.append(f"[Image: {item.get('mimeType', 'unknown')}]")
-            elif item.get("type") == "resource":
-                # Handle resource reference
-                resource = item.get("resource", {})
-                texts.append(f"[Resource: {resource.get('uri', 'unknown')}]")
+        if item.get("type") == "text":
+            texts.append(str(item.get("text", "")))
+        elif item.get("type") == "image":
+            # Handle image content
+            texts.append(f"[Image: {item.get('mimeType', 'unknown')}]")
+        elif item.get("type") == "resource":
+            # Handle resource reference
+            resource: dict[str, Any] = item.get("resource", {})
+            texts.append(f"[Resource: {resource.get('uri', 'unknown')}]")
         else:
             texts.append(str(item))
-    
+
     if len(texts) == 1:
         return texts[0]
     return texts
@@ -178,14 +179,14 @@ def mcp_result_to_obscura(result: MCPToolResult) -> Any:
 class ObscuraMCPToolRegistry:
     """
     Registry for Obscura-specific MCP tools.
-    
+
     These tools expose Obscura functionality via the MCP protocol.
     """
-    
-    def __init__(self):
+
+    def __init__(self) -> None:
         self._tools: dict[str, Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]]] = {}
         self._schemas: dict[str, dict[str, Any]] = {}
-    
+
     def register(
         self,
         name: str,
@@ -195,7 +196,7 @@ class ObscuraMCPToolRegistry:
     ) -> None:
         """
         Register an Obscura MCP tool.
-        
+
         Args:
             name: Tool name
             description: Tool description
@@ -213,11 +214,11 @@ class ObscuraMCPToolRegistry:
             },
         }
         logger.debug(f"Registered Obscura MCP tool: {name}")
-    
+
     def get_tool(self, name: str) -> Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]] | None:
         """Get a tool handler by name."""
         return self._tools.get(name)
-    
+
     def list_tools(self) -> list[MCPTool]:
         """List all registered tools as MCP Tool definitions."""
         return [
@@ -228,7 +229,7 @@ class ObscuraMCPToolRegistry:
             )
             for schema in self._schemas.values()
         ]
-    
+
     async def execute(
         self,
         name: str,
@@ -237,12 +238,12 @@ class ObscuraMCPToolRegistry:
     ) -> MCPToolResult:
         """
         Execute a tool by name.
-        
+
         Args:
             name: Tool name
             context: Tool execution context
             arguments: Tool arguments
-            
+
         Returns:
             MCP ToolResult
         """
@@ -252,7 +253,7 @@ class ObscuraMCPToolRegistry:
                 code=MCPErrorCode.TOOL_NOT_FOUND.value,
                 message=f"Tool not found: {name}",
             )
-        
+
         try:
             result = await handler(context, arguments)
             return obscura_result_to_mcp(result)
@@ -286,13 +287,13 @@ def create_tool_context(
 ) -> ObscuraMCPToolContext:
     """
     Create a tool execution context.
-    
+
     Args:
         user_id: User ID
         agent_id: Optional agent ID
         session_id: Optional session ID
         request_id: Optional request ID
-        
+
     Returns:
         Tool execution context
     """
@@ -314,7 +315,7 @@ def create_string_property(
     default: str | None = None,
 ) -> dict[str, Any]:
     """Create a string property schema."""
-    prop = {"type": "string", "description": description}
+    prop: dict[str, Any] = {"type": "string", "description": description}
     if enum:
         prop["enum"] = enum
     if default is not None:
@@ -329,7 +330,7 @@ def create_integer_property(
     default: int | None = None,
 ) -> dict[str, Any]:
     """Create an integer property schema."""
-    prop = {"type": "integer", "description": description}
+    prop: dict[str, Any] = {"type": "integer", "description": description}
     if minimum is not None:
         prop["minimum"] = minimum
     if maximum is not None:
@@ -352,7 +353,7 @@ def create_array_property(
     items: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create an array property schema."""
-    prop = {"type": "array", "description": description}
+    prop: dict[str, Any] = {"type": "array", "description": description}
     if items:
         prop["items"] = items
     return prop
@@ -363,7 +364,7 @@ def create_object_property(
     properties: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create an object property schema."""
-    prop = {"type": "object", "description": description}
+    prop: dict[str, Any] = {"type": "object", "description": description}
     if properties:
         prop["properties"] = properties
     return prop

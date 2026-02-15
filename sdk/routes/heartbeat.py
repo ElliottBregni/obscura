@@ -21,24 +21,24 @@ ws_router = APIRouter()
 
 async def _get_heartbeat_monitor(request: Request) -> Any:
     """Get or create the heartbeat monitor."""
-    if request.app.state._heartbeat_monitor is None:
+    if request.app.state._heartbeat_monitor is None:  # pyright: ignore[reportPrivateUsage]
         from sdk.heartbeat import get_default_monitor
         monitor = get_default_monitor()
         await monitor.start()
-        request.app.state._heartbeat_monitor = monitor
-    return request.app.state._heartbeat_monitor
+        request.app.state._heartbeat_monitor = monitor  # pyright: ignore[reportPrivateUsage]
+    return request.app.state._heartbeat_monitor  # pyright: ignore[reportPrivateUsage]
 
 
 @router.post("/heartbeat")
 async def heartbeat_receive(
-    body: dict,
+    body: dict[str, Any],
     request: Request,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Receive a heartbeat from an agent."""
     from sdk.heartbeat.types import Heartbeat, HealthStatus, SystemMetrics
 
-    monitor = await _get_heartbeat_monitor(request)
+    monitor: Any = await _get_heartbeat_monitor(request)
 
     try:
         heartbeat = Heartbeat(
@@ -76,9 +76,9 @@ async def heartbeat_get_agent(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get health status for a specific agent."""
-    monitor = await _get_heartbeat_monitor(request)
+    monitor: Any = await _get_heartbeat_monitor(request)
 
-    record = await monitor.get_agent_record(agent_id)
+    record: Any = await monitor.get_agent_record(agent_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found in health records")
 
@@ -99,8 +99,8 @@ async def health_list_all(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List health status for all agents."""
-    monitor = await _get_heartbeat_monitor(request)
-    summary = await monitor.get_health_summary()
+    monitor: Any = await _get_heartbeat_monitor(request)
+    summary: dict[str, Any] = await monitor.get_health_summary()
 
     return JSONResponse(content=summary)
 
@@ -109,7 +109,7 @@ async def health_list_all(
 
 
 @ws_router.websocket("/ws/health")
-async def health_websocket(websocket: WebSocket):
+async def health_websocket(websocket: WebSocket) -> None:
     """WebSocket for real-time health updates."""
     user = await authenticate_websocket(websocket)
     if user is None:
@@ -117,18 +117,19 @@ async def health_websocket(websocket: WebSocket):
         return
 
     await websocket.accept()
-    websocket.app.state._health_ws_clients.append(websocket)
+    ws_clients: list[WebSocket] = websocket.app.state._health_ws_clients  # pyright: ignore[reportPrivateUsage]
+    ws_clients.append(websocket)
 
     try:
-        if websocket.app.state._heartbeat_monitor is None:
+        if websocket.app.state._heartbeat_monitor is None:  # pyright: ignore[reportPrivateUsage]
             from sdk.heartbeat import get_default_monitor
             monitor = get_default_monitor()
             await monitor.start()
-            websocket.app.state._heartbeat_monitor = monitor
+            websocket.app.state._heartbeat_monitor = monitor  # pyright: ignore[reportPrivateUsage]
         else:
-            monitor = websocket.app.state._heartbeat_monitor
+            monitor = websocket.app.state._heartbeat_monitor  # pyright: ignore[reportPrivateUsage]
 
-        summary = await monitor.get_health_summary()
+        summary: dict[str, Any] = await monitor.get_health_summary()
         await websocket.send_json({
             "type": "init",
             "data": summary,
@@ -137,7 +138,7 @@ async def health_websocket(websocket: WebSocket):
         while True:
             await asyncio.sleep(5)
 
-            if websocket not in websocket.app.state._health_ws_clients:
+            if websocket not in ws_clients:
                 break
 
             try:
@@ -150,26 +151,27 @@ async def health_websocket(websocket: WebSocket):
     except Exception:
         pass
     finally:
-        if websocket in websocket.app.state._health_ws_clients:
-            websocket.app.state._health_ws_clients.remove(websocket)
+        if websocket in ws_clients:
+            ws_clients.remove(websocket)
 
 
 async def _broadcast_health_update(request: Request, agent_id: str, status: str) -> None:
     """Broadcast health update to all connected WebSocket clients."""
-    message = {
+    message: dict[str, Any] = {
         "type": "update",
         "agent_id": agent_id,
         "status": status,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
-    disconnected = []
-    for client in request.app.state._health_ws_clients:
+    ws_clients: list[WebSocket] = request.app.state._health_ws_clients  # pyright: ignore[reportPrivateUsage]
+    disconnected: list[WebSocket] = []
+    for client in ws_clients:
         try:
             await client.send_json(message)
         except Exception:
             disconnected.append(client)
 
     for client in disconnected:
-        if client in request.app.state._health_ws_clients:
-            request.app.state._health_ws_clients.remove(client)
+        if client in ws_clients:
+            ws_clients.remove(client)

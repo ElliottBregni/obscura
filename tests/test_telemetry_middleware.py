@@ -1,5 +1,4 @@
 """Tests for sdk.telemetry.middleware."""
-import pytest
 from unittest.mock import patch, MagicMock
 from fastapi import FastAPI
 from starlette.testclient import TestClient

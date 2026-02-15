@@ -1,11 +1,10 @@
 """Tests for sdk.heartbeat.monitor — HeartbeatMonitor."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timedelta
 
 from sdk.heartbeat.monitor import HeartbeatMonitor, get_default_monitor, set_default_monitor
 from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus, HealthStatusTransition
-from sdk.heartbeat.store import HeartbeatStore
 
 
 class TestHeartbeatMonitorInit:

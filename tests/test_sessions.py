@@ -1,5 +1,4 @@
 """Tests for sdk._sessions — SessionStore and PersistentSessionStore."""
-import pytest
 import json
 import tempfile
 from pathlib import Path

@@ -18,8 +18,8 @@ import sys
 import os
 
 
-def generate_api_key(name: str = "app", roles: list[str] = None) -> str:
-    """Generate a new API key."""
+def generate_api_key(name: str = "app", roles: list[str] | None = None) -> tuple[str, str]:
+    """Generate a new API key and its OBSCURA_API_KEYS entry."""
     if roles is None:
         roles = ["agent:read", "agent:copilot"]
     

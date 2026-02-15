@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import uuid
@@ -38,6 +39,7 @@ from sdk._tools import ToolRegistry
 from sdk._types import (
     AgentEvent,
     AgentEventKind,
+    BackendProtocol,
     ChunkKind,
     StreamChunk,
     ToolCallInfo,
@@ -74,7 +76,7 @@ class AgentLoop:
 
     def __init__(
         self,
-        backend: Any,
+        backend: BackendProtocol,
         tool_registry: ToolRegistry,
         *,
         max_turns: int = 10,
@@ -247,7 +249,7 @@ class AgentLoop:
     async def _call_handler(spec: ToolSpec, inputs: dict[str, Any]) -> Any:
         """Call a tool handler (sync or async)."""
         handler = spec.handler
-        if asyncio.iscoroutinefunction(handler):
+        if inspect.iscoroutinefunction(handler):
             return await handler(**inputs)
         return handler(**inputs)
 

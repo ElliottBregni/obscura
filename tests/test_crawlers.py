@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import textwrap
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -33,7 +32,6 @@ from crawlers import (
     MAX_FILE_SIZE,
     MAX_COPILOT_CONCURRENT,
     MAX_KROKI_CONCURRENT,
-    COPILOT_ALIAS,
 )
 
 

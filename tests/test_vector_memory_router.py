@@ -1,5 +1,4 @@
 """Tests for sdk.vector_memory_router."""
-import pytest
 from unittest.mock import MagicMock
 from datetime import UTC, datetime
 from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery, RoutedResult

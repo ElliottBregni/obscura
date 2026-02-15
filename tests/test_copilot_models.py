@@ -15,8 +15,6 @@ from copilot_models import (
     guard_automation,
     list_aliases,
     AUTOMATION,
-    INTERACTIVE,
-    PREMIUM,
     _ALIAS_REGISTRY,
     _AUTOMATION_SAFE_MODELS,
 )
@@ -121,7 +119,6 @@ class TestEnvOverride:
 
     def test_env_override_not_set(self):
         # Ensure no override env var exists
-        env_key = "COPILOT_MODEL_COPILOT_BATCH_DIAGRAMMER"
         with patch.dict(os.environ, {}, clear=True):
             config = resolve("copilot_batch_diagrammer")
             assert config.model_id == "gpt-5-mini"

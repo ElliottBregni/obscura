@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -17,7 +17,7 @@ from sdk.deps import audit, get_runtime
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
 # In-memory template store
-_agent_templates: dict[str, dict] = {}
+_agent_templates: dict[str, dict[str, Any]] = {}
 
 
 # -- CRUD -----------------------------------------------------------------
@@ -25,20 +25,20 @@ _agent_templates: dict[str, dict] = {}
 
 @router.post("/agents")
 async def agent_spawn(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn a new agent."""
-    model = body.get("model", "copilot")
+    model: str = body.get("model", "copilot")
     valid_models = ("copilot", "claude", "localllm", "openai")
     if model not in valid_models:
         raise HTTPException(status_code=400, detail=f"Invalid model '{model}'. Must be one of: {valid_models}")
 
     runtime = await get_runtime(user)
 
-    mcp_config = body.get("mcp", {})
-    mcp_enabled = mcp_config.get("enabled", False)
-    mcp_servers = mcp_config.get("servers", [])
+    mcp_config: dict[str, Any] = body.get("mcp", {})
+    mcp_enabled: bool = mcp_config.get("enabled", False)
+    mcp_servers: list[dict[str, Any]] = mcp_config.get("servers", [])
 
     from sdk.agents import MCPConfig
     agent = runtime.spawn(
@@ -90,7 +90,7 @@ async def agent_get(
 @router.post("/agents/{agent_id}/run")
 async def agent_run(
     agent_id: str,
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Run a task on an existing agent."""
@@ -100,8 +100,8 @@ async def agent_run(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    prompt = body.get("prompt", "")
-    context = body.get("context", {})
+    prompt: str = body.get("prompt", "")
+    context: dict[str, Any] = body.get("context", {})
 
     try:
         result = await agent.run(prompt, **context)
@@ -190,20 +190,20 @@ async def agent_list(
 
 @router.post("/agents/bulk")
 async def agents_bulk_spawn(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn multiple agents in one request."""
     runtime = await get_runtime(user)
-    agents_config = body.get("agents", [])
+    agents_config: list[dict[str, Any]] = body.get("agents", [])
 
     if not agents_config:
         raise HTTPException(status_code=400, detail="No agents provided")
     if len(agents_config) > 100:
         raise HTTPException(status_code=400, detail="Cannot spawn more than 100 agents at once")
 
-    created = []
-    errors = []
+    created: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
 
     for idx, cfg in enumerate(agents_config):
         try:
@@ -236,18 +236,18 @@ async def agents_bulk_spawn(
 
 @router.post("/agents/bulk/stop")
 async def agents_bulk_stop(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Stop multiple agents in one request."""
     runtime = await get_runtime(user)
-    agent_ids = body.get("agent_ids", [])
+    agent_ids: list[str] = body.get("agent_ids", [])
 
     if not agent_ids:
         raise HTTPException(status_code=400, detail="No agent_ids provided")
 
-    stopped = []
-    errors = []
+    stopped: list[str] = []
+    errors: list[dict[str, Any]] = []
 
     for agent_id in agent_ids:
         try:
@@ -271,21 +271,21 @@ async def agents_bulk_stop(
 
 @router.post("/agents/bulk/tag")
 async def agents_bulk_tag(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Add tags to multiple agents."""
     runtime = await get_runtime(user)
-    agent_ids = body.get("agent_ids", [])
-    tags = body.get("tags", [])
+    agent_ids: list[str] = body.get("agent_ids", [])
+    tags: list[str] = body.get("tags", [])
 
     if not agent_ids:
         raise HTTPException(status_code=400, detail="No agent_ids provided")
     if not tags:
         raise HTTPException(status_code=400, detail="No tags provided")
 
-    tagged = []
-    errors = []
+    tagged: list[str] = []
+    errors: list[dict[str, Any]] = []
 
     for agent_id in agent_ids:
         try:
@@ -293,7 +293,7 @@ async def agents_bulk_tag(
             if agent is None:
                 errors.append({"agent_id": agent_id, "error": "Agent not found"})
                 continue
-            current_tags = getattr(agent.config, "tags", [])
+            current_tags: list[str] = getattr(agent.config, "tags", [])
             new_tags = list(set(current_tags + tags))
             agent.config.tags = new_tags
             tagged.append(agent_id)
@@ -312,12 +312,12 @@ async def agents_bulk_tag(
 
 @router.post("/agent-templates")
 async def template_create(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create an agent template."""
     template_id = str(uuid.uuid4())
-    template = {
+    template: dict[str, Any] = {
         "template_id": template_id,
         "name": body.get("name", "unnamed-template"),
         "model": body.get("model", "claude"),
@@ -343,7 +343,7 @@ async def template_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agent templates."""
-    templates = list(_agent_templates.values())
+    templates: list[dict[str, Any]] = list(_agent_templates.values())
     return JSONResponse(content={
         "templates": templates,
         "count": len(templates),
@@ -380,12 +380,12 @@ async def template_delete(
 
 @router.post("/agents/from-template")
 async def agent_spawn_from_template(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn an agent from a template."""
     runtime = await get_runtime(user)
-    template_id = body.get("template_id")
+    template_id: str | None = body.get("template_id")
 
     if not template_id:
         raise HTTPException(status_code=400, detail="template_id is required")
@@ -423,7 +423,7 @@ async def agent_spawn_from_template(
 @router.post("/agents/{agent_id}/tags")
 async def agent_add_tags(
     agent_id: str,
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Add tags to an agent."""
@@ -433,7 +433,7 @@ async def agent_add_tags(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    tags = body.get("tags", [])
+    tags: list[str] = body.get("tags", [])
     if not tags:
         raise HTTPException(status_code=400, detail="No tags provided")
 
@@ -454,7 +454,7 @@ async def agent_add_tags(
 @router.post("/agents/{agent_id}/tags/remove")
 async def agent_remove_tags(
     agent_id: str,
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Remove tags from an agent."""
@@ -464,7 +464,7 @@ async def agent_remove_tags(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    tags = body.get("tags", [])
+    tags: list[str] = body.get("tags", [])
     if not tags:
         raise HTTPException(status_code=400, detail="No tags provided")
 
@@ -494,7 +494,7 @@ async def agent_get_tags(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    tags = getattr(agent.config, "tags", [])
+    tags: list[str] = getattr(agent.config, "tags", [])
 
     return JSONResponse(content={
         "agent_id": agent_id,
@@ -508,7 +508,7 @@ async def agent_get_tags(
 @router.post("/agents/{agent_id}/stream")
 async def agent_stream(
     agent_id: str,
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> EventSourceResponse:
     """Stream an agent's response as SSE events."""
@@ -518,8 +518,8 @@ async def agent_stream(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    prompt = body.get("prompt", "")
-    context = body.get("context", {})
+    prompt: str = body.get("prompt", "")
+    context: dict[str, Any] = body.get("context", {})
 
     async def _event_generator() -> AsyncGenerator[dict[str, str], None]:
         try:

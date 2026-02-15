@@ -1,8 +1,5 @@
 """Tests for sdk.vector_memory_rerank."""
-import math
-import pytest
 from datetime import UTC, datetime, timedelta
-from dataclasses import dataclass, field
 from sdk.vector_memory_rerank import (
     BM25Reranker, RecencyReranker, MetadataReranker, CompositeReranker, _tokenize,
 )

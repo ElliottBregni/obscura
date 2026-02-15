@@ -35,7 +35,8 @@ from typing import Any, Callable
 import numpy as np
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.memory import MemoryKey, MemoryStore
+from sdk.memory import MemoryKey
+from sdk.vector_memory_filters import MetadataFilter
 
 
 # Simple embedding function (in production, use OpenAI, sentence-transformers, etc.)
@@ -52,7 +53,7 @@ def simple_embedding(text: str, dim: int = 384) -> list[float]:
     hash_bytes = hashlib.sha256(text.encode()).digest()
     
     # Convert to float array
-    floats = []
+    floats: list[float] = []
     for i in range(0, len(hash_bytes), 4):
         chunk = hash_bytes[i:i+4]
         val = int.from_bytes(chunk, 'little', signed=True)
@@ -197,7 +198,8 @@ class VectorMemoryStore:
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
         """Apply schema migrations for existing databases."""
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        row = conn.execute("PRAGMA user_version").fetchone()
+        version: int = row[0] if row else 0
 
         if version < 1:
             # Add memory_type and updated_at columns if missing
@@ -310,7 +312,7 @@ class VectorMemoryStore:
         top_k: int = 5,
         threshold: float = -1.0,
         memory_types: list[str] | None = None,
-        metadata_filters: list | None = None,
+        metadata_filters: list[MetadataFilter] | None = None,
         date_range: tuple[datetime, datetime] | None = None,
     ) -> list[VectorMemoryEntry]:
         """
@@ -339,7 +341,7 @@ class VectorMemoryStore:
 
         # Build SQL with pre-filters
         base_sql = "SELECT * FROM vector_memory WHERE 1=1"
-        params: list = []
+        params: list[Any] = []
 
         if namespace:
             base_sql += " AND namespace = ?"
@@ -350,7 +352,7 @@ class VectorMemoryStore:
         params.append(datetime.now(UTC).isoformat())
 
         # Apply structured filters
-        filters = list(metadata_filters or [])
+        filters: list[MetadataFilter] = list(metadata_filters or [])
         if memory_types:
             filters.append(MemoryTypeFilter(memory_types=memory_types))
         if date_range:
@@ -364,7 +366,7 @@ class VectorMemoryStore:
         rows = conn.execute(base_sql, params).fetchall()
 
         # Compute similarities
-        results = []
+        results: list[VectorMemoryEntry] = []
         for row in rows:
             embedding = json.loads(row['embedding'])
             score = cosine_similarity(query_embedding, embedding)
@@ -394,7 +396,7 @@ class VectorMemoryStore:
         first_stage_k: int = 50,
         threshold: float = -1.0,
         memory_types: list[str] | None = None,
-        metadata_filters: list | None = None,
+        metadata_filters: list[MetadataFilter] | None = None,
         date_range: tuple[datetime, datetime] | None = None,
         reranker: Any | None = None,
         recency_weight: float = 0.2,
@@ -514,7 +516,12 @@ class VectorMemoryStore:
 class SemanticMemoryMixin:
     """Mixin to add semantic memory capabilities to agents."""
 
-    def __init__(self, *args, **kwargs):
+    # Attributes expected from the host class (e.g., Agent)
+    user: AuthenticatedUser
+    id: str
+    config: Any  # AgentConfig — avoids circular import
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._vector_memory: VectorMemoryStore | None = None
 
@@ -530,7 +537,7 @@ class SemanticMemoryMixin:
         text: str,
         key: str | None = None,
         memory_type: str = "general",
-        **metadata,
+        **metadata: Any,
     ) -> None:
         """Store a memory with semantic embedding."""
         if key is None:

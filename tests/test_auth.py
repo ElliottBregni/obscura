@@ -53,7 +53,6 @@ class TestResolveGithubToken:
 
     def test_gh_cli_not_found(self):
         with patch.dict(os.environ, {}, clear=True):
-            import subprocess
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 with pytest.raises(ValueError, match="Copilot auth"):
                     _resolve_github_token(None)
@@ -165,7 +164,7 @@ class TestTokenRefresher:
     @pytest.mark.asyncio
     async def test_invalidate(self):
         refresher = TokenRefresher(Backend.LOCALLLM)
-        auth1 = await refresher.get_valid_auth()
+        await refresher.get_valid_auth()
         refresher.invalidate()
         assert refresher._cached is None
         auth2 = await refresher.get_valid_auth()
@@ -177,7 +176,7 @@ class TestTokenRefresher:
             Backend.LOCALLLM,
             refresh_interval=0,  # Always refresh
         )
-        auth1 = await refresher.get_valid_auth()
+        await refresher.get_valid_auth()
         auth2 = await refresher.get_valid_auth()
         # With interval=0, should re-resolve each time
         assert auth2 is not None

@@ -7,7 +7,6 @@ users, and API applications needed by the Obscura platform.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 

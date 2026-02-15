@@ -36,12 +36,6 @@ from sdk.mcp.tools import (
 from sdk.mcp.types import (
     MCPError,
     MCPErrorCode,
-    MCPPrompt,
-    MCPPromptMessage,
-    MCPPromptResult,
-    MCPResource,
-    MCPResourceContent,
-    MCPTool,
     MCPToolResult,
     ObscuraMCPToolContext,
     ObscuraMCPConfig,

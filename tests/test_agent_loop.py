@@ -6,11 +6,9 @@ import asyncio
 import json
 import pytest
 from typing import Any, AsyncIterator
-from unittest.mock import AsyncMock, MagicMock
 
 from sdk._tools import ToolRegistry
 from sdk._types import (
-    AgentEvent,
     AgentEventKind,
     ChunkKind,
     StreamChunk,

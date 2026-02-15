@@ -153,7 +153,7 @@ Read the analysis from memory first, then write doc updates to 'docs_{pr_number}
                 return "doc_writer", doc_writer.get_state()
             
             # Run in parallel
-            test_result, doc_result = await asyncio.gather(
+            await asyncio.gather(
                 run_test_gen(),
                 run_doc_writer()
             )

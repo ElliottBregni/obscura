@@ -1,6 +1,5 @@
 """Tests for sdk._tools — ToolRegistry, @tool decorator, schema inference."""
 import pytest
-from unittest.mock import patch, MagicMock
 
 from sdk._tools import ToolRegistry, tool, _infer_schema_from_hints
 from sdk._types import ToolSpec

@@ -8,9 +8,8 @@ Sessions are stored as JSON in ~/.obscura/tui_sessions/<id>.json.
 from __future__ import annotations
 
 import json
-import os
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any

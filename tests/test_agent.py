@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -47,7 +47,7 @@ class TestAPERLoop:
     async def test_phases_execute_in_order(self):
         client = MagicMock()
         agent = StubAgent(client)
-        result = await agent.run()
+        await agent.run()
         assert agent.call_order == ["analyze", "plan", "execute", "respond"]
 
     @pytest.mark.asyncio

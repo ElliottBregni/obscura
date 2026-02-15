@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from sync import (
-    SyncProfile,
     VariantSelector,
     VaultSync,
     parse_sync_profile,

@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, override
 
 import httpx
 try:
     from jose import JWTError, jwt
     from jose.exceptions import ExpiredSignatureError
-    _JOSE_AVAILABLE = True
+    _jose_available = True
 except Exception:  # pragma: no cover - optional dependency may be missing in some environments
     # Provide fallbacks so the module can be imported even when the optional
     # `python-jose` dependency is not installed. Runtime checks will raise an
@@ -25,7 +25,7 @@ except Exception:  # pragma: no cover - optional dependency may be missing in so
     JWTError = Exception
     ExpiredSignatureError = Exception
     jwt = None
-    _JOSE_AVAILABLE = False
+    _jose_available = False
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -101,7 +101,7 @@ def _extract_roles(payload: dict[str, Any]) -> list[str]:
             "agent:copilot": {"<org_id>": "<org_domain>"},
         }
     """
-    roles_obj = payload.get(_ZITADEL_ROLES_CLAIM, {})
+    roles_obj: dict[str, Any] | None = payload.get(_ZITADEL_ROLES_CLAIM)
     if isinstance(roles_obj, dict):
         return list(roles_obj.keys())
     return []
@@ -197,6 +197,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         self._issuer = issuer
         self._audience = audience
 
+    @override
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Skip auth for non-API routes
         if not request.url.path.startswith("/api/"):
@@ -235,8 +236,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     )
                 },
             )
-        except (JWTError, ValueError) as exc:
-            logger.warning("JWT validation failed: %s", exc)
+        except (JWTError, ValueError) as exc:  # pyright: ignore[reportUnknownVariableType]
+            logger.warning("JWT validation failed: %s", str(exc))  # pyright: ignore[reportUnknownArgumentType]
             _emit_auth_audit(request.url.path, "unknown", "", "denied", reason="invalid_token")
             return JSONResponse(
                 status_code=401,

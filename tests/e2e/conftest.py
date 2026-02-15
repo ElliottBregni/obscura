@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, AsyncIterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient

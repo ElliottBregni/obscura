@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -16,17 +17,17 @@ from sdk.deps import audit, get_runtime
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
 # In-memory group store
-_agent_groups: dict[str, dict] = {}
+_agent_groups: dict[str, dict[str, Any]] = {}
 
 
 @router.post("/agent-groups")
 async def agent_group_create(
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create an agent group."""
     group_id = str(uuid.uuid4())
-    group = {
+    group: dict[str, Any] = {
         "group_id": group_id,
         "name": body.get("name", "unnamed-group"),
         "agents": body.get("agents", []),
@@ -47,7 +48,7 @@ async def agent_group_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agent groups."""
-    groups = list(_agent_groups.values())
+    groups: list[dict[str, Any]] = list(_agent_groups.values())
     return JSONResponse(content={
         "groups": groups,
         "count": len(groups),
@@ -85,7 +86,7 @@ async def agent_group_delete(
 @router.post("/agent-groups/{group_id}/broadcast")
 async def agent_group_broadcast(
     group_id: str,
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Broadcast a message to all agents in a group."""
@@ -95,13 +96,14 @@ async def agent_group_broadcast(
     if group is None:
         raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
 
-    message = body.get("message", "")
-    context = body.get("context", {})
+    message: str = body.get("message", "")
+    context: dict[str, Any] = body.get("context", {})
 
-    results = []
-    errors = []
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
 
-    for agent_id in group.get("agents", []):
+    agent_ids: list[str] = group.get("agents", [])
+    for agent_id in agent_ids:
         try:
             agent = runtime.get_agent(agent_id)
             if agent is None:
@@ -127,7 +129,7 @@ async def agent_group_broadcast(
 async def agent_send_message(
     from_agent: str,
     to_agent: str,
-    body: dict,
+    body: dict[str, Any],
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Send a message from one agent to another."""
@@ -141,7 +143,7 @@ async def agent_send_message(
     if target is None:
         raise HTTPException(status_code=404, detail=f"Target agent {to_agent} not found")
 
-    message = body.get("message", "")
+    message: str = body.get("message", "")
 
     await source.send_message(to_agent, message)
 
@@ -169,7 +171,7 @@ async def agent_get_messages(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    messages: list[dict] = []
+    messages: list[dict[str, Any]] = []
 
     return JSONResponse(content={
         "agent_id": agent_id,

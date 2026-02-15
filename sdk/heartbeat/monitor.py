@@ -8,6 +8,7 @@ and triggers alerts on health changes.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime
 from typing import Any, Optional, Callable
@@ -74,7 +75,7 @@ class HeartbeatMonitor:
         self._critical_threshold = critical_threshold
         
         self._running = False
-        self._monitor_task: Optional[asyncio.Task] = None
+        self._monitor_task: Optional[asyncio.Task[None]] = None
         self._transitions: dict[str, HealthStatusTransition] = {}
         self._callbacks: list[Callable[[str, HealthStatus, HealthStatus], None]] = []
         
@@ -215,7 +216,7 @@ class HeartbeatMonitor:
         # Notify callbacks
         for callback in self._callbacks:
             try:
-                if asyncio.iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     await callback(agent_id, old_status, new_status)
                 else:
                     callback(agent_id, old_status, new_status)
@@ -316,28 +317,29 @@ class HeartbeatMonitor:
     async def get_health_summary(self) -> dict[str, Any]:
         """Get a summary of all agent health statuses."""
         records = await self._store.list_records()
-        
-        summary = {
+
+        counts: dict[str, int] = {
             "total": len(records),
             "healthy": 0,
             "warning": 0,
             "critical": 0,
             "unknown": 0,
-            "agents": [],
         }
-        
+        agents_list: list[dict[str, Any]] = []
+
         for record in records:
             status = record.computed_status.value
-            if status in summary:
-                summary[status] += 1
-            
-            summary["agents"].append({
+            if status in counts:
+                counts[status] += 1
+
+            agents_list.append({
                 "agent_id": record.agent_id,
                 "status": status,
                 "last_heartbeat": record.last_heartbeat.timestamp.isoformat() if record.last_heartbeat else None,
                 "missed_count": record.missed_count,
             })
-        
+
+        summary: dict[str, Any] = {**counts, "agents": agents_list}
         return summary
     
     def on_status_change(
