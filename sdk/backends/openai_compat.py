@@ -30,6 +30,13 @@ from sdk._types import (
     StreamChunk,
     ToolSpec,
 )
+from sdk.backends.models import (
+    ChatMessage,
+    CompletionParams,
+    MCPServerConfig,
+    ModelInfo,
+    ToolCallDefinition,
+)
 
 
 class OpenAIBackend:
@@ -59,7 +66,9 @@ class OpenAIBackend:
         self._base_url = auth.openai_base_url  # None = OpenAI default
         self._model = model or "gpt-4o"
         self._system_prompt = system_prompt
-        self._mcp_servers = mcp_servers or []
+        self._mcp_servers: list[MCPServerConfig] = [
+            MCPServerConfig.from_dict(s) for s in (mcp_servers or [])
+        ]
 
         # SDK client (set on start())
         self._client: Any = None
@@ -71,7 +80,7 @@ class OpenAIBackend:
 
         # Session tracking
         self._session_store = SessionStore()
-        self._conversations: dict[str, list[dict[str, Any]]] = {}
+        self._conversations: dict[str, list[ChatMessage]] = {}
         self._active_session: str | None = None
 
     # -- Lifecycle -----------------------------------------------------------
@@ -117,8 +126,8 @@ class OpenAIBackend:
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
-                self._conversations[self._active_session].append({"role": "user", "content": prompt})
-                self._conversations[self._active_session].append({"role": "assistant", "content": msg.text})
+                self._conversations[self._active_session].append(ChatMessage(role="user", content=prompt))
+                self._conversations[self._active_session].append(ChatMessage(role="assistant", content=msg.text))
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
@@ -177,8 +186,8 @@ class OpenAIBackend:
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
-                self._conversations[self._active_session].append({"role": "user", "content": prompt})
-                self._conversations[self._active_session].append({"role": "assistant", "content": accumulated_text})
+                self._conversations[self._active_session].append(ChatMessage(role="user", content=prompt))
+                self._conversations[self._active_session].append(ChatMessage(role="assistant", content=accumulated_text))
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
@@ -270,7 +279,7 @@ class OpenAIBackend:
         """List models available from the provider."""
         self._ensure_client()
         models = await self._client.models.list()
-        return [{"id": m.id, "object": m.object} for m in models.data]
+        return [ModelInfo.from_openai(m).to_dict() for m in models.data]
 
     # -- Internals -----------------------------------------------------------
 
@@ -285,38 +294,23 @@ class OpenAIBackend:
             messages.append({"role": "system", "content": self._system_prompt})
 
         if self._active_session and self._active_session in self._conversations:
-            messages.extend(self._conversations[self._active_session])
+            messages.extend([m.to_dict() for m in self._conversations[self._active_session]])
 
         messages.append({"role": "user", "content": prompt})
         return messages
 
     def _build_create_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Build kwargs for chat.completions.create, including tool defs."""
-        result: dict[str, Any] = {}
-
-        # Pass through valid completion params
-        valid = {
-            "temperature", "top_p", "max_tokens", "stop",
-            "frequency_penalty", "presence_penalty", "seed",
-            "response_format",
-        }
-        for k, v in kwargs.items():
-            if k in valid:
-                result[k] = v
+        params = CompletionParams.from_kwargs(kwargs)
+        result: dict[str, Any] = params.to_dict()
 
         # Register tools as OpenAI function calling format
         if self._tools:
-            result["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": t.parameters,
-                    },
-                }
+            tool_defs = [
+                ToolCallDefinition(t.name, t.description, t.parameters).to_openai_function()
                 for t in self._tools
             ]
+            result["tools"] = tool_defs
 
         return result
 

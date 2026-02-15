@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+from typing import Any, override
 
 import pytest
 
@@ -17,22 +18,26 @@ from sdk.agent import BaseAgent
 class StubAgent(BaseAgent):
     """Minimal agent for testing the APER loop."""
 
-    def __init__(self, client: MagicMock, **kwargs):
+    def __init__(self, client: MagicMock, **kwargs: Any):
         super().__init__(client, **kwargs)
         self.call_order: list[str] = []
 
+    @override
     async def analyze(self, ctx: AgentContext) -> None:
         self.call_order.append("analyze")
         ctx.analysis = {"items": [1, 2, 3]}
 
+    @override
     async def plan(self, ctx: AgentContext) -> None:
         self.call_order.append("plan")
         ctx.plan = ctx.analysis["items"]
 
+    @override
     async def execute(self, ctx: AgentContext) -> None:
         self.call_order.append("execute")
         ctx.results = [x * 2 for x in ctx.plan]
 
+    @override
     async def respond(self, ctx: AgentContext) -> None:
         self.call_order.append("respond")
         ctx.response = ctx.results
@@ -44,31 +49,35 @@ class StubAgent(BaseAgent):
 
 class TestAPERLoop:
     @pytest.mark.asyncio
-    async def test_phases_execute_in_order(self):
+    async def test_phases_execute_in_order(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         await agent.run()
         assert agent.call_order == ["analyze", "plan", "execute", "respond"]
 
     @pytest.mark.asyncio
-    async def test_context_flows_through_phases(self):
+    async def test_context_flows_through_phases(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         result = await agent.run()
         assert result == [2, 4, 6]
 
     @pytest.mark.asyncio
-    async def test_input_data_passed_to_context(self):
+    async def test_input_data_passed_to_context(self) -> None:
         client = MagicMock()
 
         class InputAgent(BaseAgent):
-            async def analyze(self, ctx):
+            @override
+            async def analyze(self, ctx: AgentContext) -> None:
                 ctx.analysis = ctx.input_data
-            async def plan(self, ctx):
+            @override
+            async def plan(self, ctx: AgentContext) -> None:
                 ctx.plan = ctx.analysis
-            async def execute(self, ctx):
+            @override
+            async def execute(self, ctx: AgentContext) -> None:
                 ctx.results = ctx.plan
-            async def respond(self, ctx):
+            @override
+            async def respond(self, ctx: AgentContext) -> None:
                 ctx.response = ctx.results
 
         agent = InputAgent(client)
@@ -82,7 +91,7 @@ class TestAPERLoop:
 
 class TestHooks:
     @pytest.mark.asyncio
-    async def test_hooks_fire_at_boundaries(self):
+    async def test_hooks_fire_at_boundaries(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         fired: list[str] = []
@@ -97,12 +106,12 @@ class TestHooks:
         assert fired == ["pre_analyze", "post_plan", "pre_execute", "post_respond"]
 
     @pytest.mark.asyncio
-    async def test_async_hooks(self):
+    async def test_async_hooks(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         fired: list[str] = []
 
-        async def async_hook(ctx):
+        async def async_hook(ctx: AgentContext) -> None:
             fired.append(f"async_{ctx.phase.value}")
 
         agent.on(HookPoint.PRE_ANALYZE, async_hook)
@@ -111,7 +120,7 @@ class TestHooks:
         assert "async_analyze" in fired
 
     @pytest.mark.asyncio
-    async def test_multiple_hooks_per_point(self):
+    async def test_multiple_hooks_per_point(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         fired: list[str] = []
@@ -124,7 +133,7 @@ class TestHooks:
         assert fired[:2] == ["first", "second"]
 
     @pytest.mark.asyncio
-    async def test_hook_receives_correct_phase(self):
+    async def test_hook_receives_correct_phase(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         phases: list[AgentPhase] = []
@@ -143,7 +152,7 @@ class TestHooks:
 
 class TestContextLoader:
     @pytest.mark.asyncio
-    async def test_context_loader_populates_metadata(self):
+    async def test_context_loader_populates_metadata(self) -> None:
         client = MagicMock()
         loader = MagicMock()
         loader.load_system_prompt.return_value = "You are an architect."
@@ -160,14 +169,14 @@ class TestContextLoader:
 
 class TestEdgeCases:
     @pytest.mark.asyncio
-    async def test_not_implemented_raises(self):
+    async def test_not_implemented_raises(self) -> None:
         client = MagicMock()
         agent = BaseAgent(client)
         with pytest.raises(NotImplementedError):
             await agent.run()
 
     @pytest.mark.asyncio
-    async def test_agent_name(self):
+    async def test_agent_name(self) -> None:
         client = MagicMock()
         agent = StubAgent(client, name="my_agent")
-        assert agent._name == "my_agent"
+        assert agent.name == "my_agent"

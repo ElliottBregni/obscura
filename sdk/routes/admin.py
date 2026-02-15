@@ -127,7 +127,7 @@ async def metrics_get(
         },
         "webhooks": {
             "total": len(get_webhooks_store()),
-            "active": sum(1 for w in get_webhooks_store().values() if w.get("active", True)),
+            "active": sum(1 for w in get_webhooks_store().values() if w.active),
         },
         "timestamp": datetime.now(UTC).isoformat(),
     })

@@ -142,6 +142,75 @@ class Agent:
         self._current_prompt: str = ""
         self._result: Any = None
         self._error: Exception | None = None
+
+    # -- Observability/test accessors -----------------------------------
+    @property
+    def client(self) -> ObscuraClient | None:
+        """Testing/observability: injected client (read/write)."""
+        return self._client
+
+    @client.setter
+    def client(self, value: ObscuraClient | None) -> None:
+        self._client = value
+
+    @property
+    def mcp_backend(self) -> MCPBackend | None:
+        """Read-only MCP backend reference for tests."""
+        return self._mcp_backend
+
+    @mcp_backend.setter
+    def mcp_backend(self, backend: MCPBackend | None) -> None:
+        self._mcp_backend = backend
+
+    @property
+    def heartbeat_client(self) -> AgentHeartbeatClient | None:
+        """Read-only heartbeat client."""
+        return self._heartbeat_client
+
+    @heartbeat_client.setter
+    def heartbeat_client(self, client: AgentHeartbeatClient | None) -> None:
+        self._heartbeat_client = client
+
+    @property
+    def heartbeat_enabled(self) -> bool:
+        """Flag controlling heartbeat startup (settable for tests)."""
+        return self._heartbeat_enabled
+
+    @heartbeat_enabled.setter
+    def heartbeat_enabled(self, enabled: bool) -> None:
+        self._heartbeat_enabled = enabled
+
+    @property
+    def message_queue(self) -> asyncio.Queue[AgentMessage]:
+        """Access to the inbound message queue for test inspection."""
+        return self._message_queue
+
+    @message_queue.setter
+    def message_queue(self, queue: asyncio.Queue[AgentMessage]) -> None:
+        self._message_queue = queue
+
+    @property
+    def task(self) -> asyncio.Task[Any] | None:
+        """Access to the in-flight asyncio task (if any)."""
+        return self._task
+
+    @task.setter
+    def task(self, value: asyncio.Task[Any] | None) -> None:
+        self._task = value
+
+    @property
+    def result(self) -> Any:
+        """Latest result produced by the agent."""
+        return self._result
+
+    @property
+    def error(self) -> Exception | None:
+        """Latest error captured by the agent."""
+        return self._error
+
+    @error.setter
+    def error(self, err: Exception | None) -> None:
+        self._error = err
     
     @property
     def memory(self) -> MemoryStore:
@@ -624,6 +693,20 @@ class Agent:
             error_message=str(self._error) if self._error else None,
         )
 
+    def refresh_state(self) -> AgentState:
+        """Recalculate and return the current state (testing/observability)."""
+        self._update_state()
+        return self.get_state()
+
+    # Public wrappers for internal helpers (used in tests/observability)
+    def build_prompt(self, prompt: str, relevant_memory: dict[str, Any], context: dict[str, Any]) -> str:
+        """Public wrapper around _build_prompt."""
+        return self._build_prompt(prompt, relevant_memory, context)
+
+    def load_relevant_memory(self, prompt: str) -> dict[str, Any]:
+        """Public wrapper around _load_relevant_memory."""
+        return self._load_relevant_memory(prompt)
+
 
 class AgentRuntime:
     """
@@ -642,6 +725,22 @@ class AgentRuntime:
         self._lock = asyncio.Lock()
         self._message_bus: asyncio.Queue[AgentMessage] = asyncio.Queue()
         self._bus_task: asyncio.Task[None] | None = None
+
+    # Public observability helpers
+    @property
+    def agents(self) -> dict[str, Agent]:
+        """Read-only view of managed agents."""
+        return self._agents
+
+    @property
+    def bus_task(self) -> asyncio.Task[None] | None:
+        """Access the running message-bus task."""
+        return self._bus_task
+
+    @property
+    def message_bus(self) -> asyncio.Queue[AgentMessage]:
+        """Access the message bus queue for testing."""
+        return self._message_bus
     
     async def start(self) -> None:
         """Start the message bus."""

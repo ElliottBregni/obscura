@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -244,17 +245,17 @@ class TestVaultSyncProfileLoading:
     def test_no_profile_file_defaults(self, variant_vault: Path) -> None:
         """VaultSync with no .sync-profile.yml uses empty profile."""
         vs = VaultSync(vault_path=variant_vault)
-        assert vs._global_profile.model is None
-        assert vs._global_profile.role is None
+        assert vs.global_profile.model is None
+        assert vs.global_profile.role is None
 
     def test_global_profile_loaded(self, variant_vault: Path) -> None:
         """VaultSync reads .sync-profile.yml from vault root."""
         (variant_vault / SYNC_PROFILE_FILE).write_text("model: opus\nrole: reviewer\n")
         vs = VaultSync(vault_path=variant_vault)
-        assert vs._global_profile.model == "opus"
-        assert vs._global_profile.role == "reviewer"
-        assert vs._selector.model == "opus"
-        assert vs._selector.role == "reviewer"
+        assert vs.global_profile.model == "opus"
+        assert vs.global_profile.role == "reviewer"
+        assert vs.selector.model == "opus"
+        assert vs.selector.role == "reviewer"
 
     def test_per_repo_profile_overrides(self, variant_vault: Path) -> None:
         """Per-repo profile overrides global values."""
@@ -264,7 +265,7 @@ class TestVaultSyncProfileLoading:
         (repo_dir / SYNC_PROFILE_FILE).write_text("model: sonnet\n")
 
         vs = VaultSync(vault_path=variant_vault)
-        repo_sel = vs._get_selector("TestRepo")
+        repo_sel = vs.get_selector("TestRepo")
         assert repo_sel.model == "sonnet"
         # Role inherits from global
         assert repo_sel.role == "reviewer"
@@ -273,7 +274,7 @@ class TestVaultSyncProfileLoading:
         """No per-repo profile → uses global selector."""
         (variant_vault / SYNC_PROFILE_FILE).write_text("model: haiku\n")
         vs = VaultSync(vault_path=variant_vault)
-        sel = vs._get_selector("NonExistentRepo")
+        sel = vs.get_selector("NonExistentRepo")
         assert sel.model == "haiku"
 
 
@@ -290,10 +291,13 @@ class TestVariantIntegration:
         """System sync with model=opus swaps base files for opus variants."""
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
-        _orig = os.path.expanduser
-        monkeypatch.setattr(os.path, "expanduser",
-                            lambda p: str(home) + p[1:] if p.startswith("~") else _orig(p))
+        def _home() -> Path:
+            return home
+        monkeypatch.setattr(Path, "home", staticmethod(_home))
+        _orig: Callable[[str], str] = os.path.expanduser
+        def _expanduser(p: str) -> str:
+            return str(home) + p[1:] if p.startswith("~") else _orig(p)
+        monkeypatch.setattr(os.path, "expanduser", _expanduser)
 
         (variant_vault / SYNC_PROFILE_FILE).write_text("model: opus\n")
         vs = VaultSync(vault_path=variant_vault)
@@ -315,10 +319,13 @@ class TestVariantIntegration:
         """System sync with no profile keeps base files, strips model variants."""
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
-        _orig = os.path.expanduser
-        monkeypatch.setattr(os.path, "expanduser",
-                            lambda p: str(home) + p[1:] if p.startswith("~") else _orig(p))
+        def _home() -> Path:
+            return home
+        monkeypatch.setattr(Path, "home", staticmethod(_home))
+        _orig: Callable[[str], str] = os.path.expanduser
+        def _expanduser(p: str) -> str:
+            return str(home) + p[1:] if p.startswith("~") else _orig(p)
+        monkeypatch.setattr(os.path, "expanduser", _expanduser)
 
         # No .sync-profile.yml
         vs = VaultSync(vault_path=variant_vault)
@@ -339,10 +346,13 @@ class TestVariantIntegration:
         """System sync with role=reviewer includes only reviewer role files."""
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
-        _orig = os.path.expanduser
-        monkeypatch.setattr(os.path, "expanduser",
-                            lambda p: str(home) + p[1:] if p.startswith("~") else _orig(p))
+        def _home() -> Path:
+            return home
+        monkeypatch.setattr(Path, "home", staticmethod(_home))
+        _orig: Callable[[str], str] = os.path.expanduser
+        def _expanduser(p: str) -> str:
+            return str(home) + p[1:] if p.startswith("~") else _orig(p)
+        monkeypatch.setattr(os.path, "expanduser", _expanduser)
 
         (variant_vault / SYNC_PROFILE_FILE).write_text("role: reviewer\n")
         vs = VaultSync(vault_path=variant_vault)

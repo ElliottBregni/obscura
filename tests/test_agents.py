@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any, AsyncIterator
 import pytest
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -38,7 +39,7 @@ def runtime(test_user: AuthenticatedUser) -> AgentRuntime:
     return AgentRuntime(user=test_user)
 
 
-def _make_agent(runtime: AgentRuntime, name: str = "test-agent", **kwargs) -> Agent:
+def _make_agent(runtime: AgentRuntime, name: str = "test-agent", **kwargs: Any) -> Agent:
     """Helper to spawn an agent with heartbeat disabled."""
     with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
         return runtime.spawn(name, model="claude", **kwargs)
@@ -192,7 +193,7 @@ class TestAgentRuntime:
         await asyncio.sleep(0.1)
 
         # Check agent2 received it
-        assert not agent2._message_queue.empty()
+        assert not agent2.message_queue.empty()
 
         await runtime.stop()
 
@@ -208,10 +209,10 @@ class TestAgentRuntime:
         await asyncio.sleep(0.1)
 
         # Both listeners should have message, not broadcaster
-        assert not agent2._message_queue.empty()
-        assert not agent3._message_queue.empty()
+        assert not agent2.message_queue.empty()
+        assert not agent3.message_queue.empty()
         # Sender shouldn't get their own broadcast
-        assert agent1._message_queue.empty()
+        assert agent1.message_queue.empty()
 
         await runtime.stop()
 
@@ -246,8 +247,8 @@ class TestAgentRuntime:
             await asyncio.sleep(0.1)
 
         # Bus should still be running after the exception
-        assert runtime._bus_task is not None
-        assert not runtime._bus_task.done()
+        assert runtime.bus_task is not None
+        assert not runtime.bus_task.done()
 
         await runtime.stop()
 
@@ -257,10 +258,10 @@ class TestAgentRuntime:
         await runtime.start()
 
         agent = _make_agent(runtime, "waiter")
-        agent._update_state()
+        agent.refresh_state()
         # Set to completed so wait resolves immediately
         agent.status = AgentStatus.COMPLETED
-        agent._update_state()
+        agent.refresh_state()
 
         states = await runtime.wait_for_agents([agent.id])
         assert len(states) == 1
@@ -277,7 +278,7 @@ class TestAgentRuntime:
         agent2 = _make_agent(runtime, "slow-agent")
 
         agent1.status = AgentStatus.COMPLETED
-        agent1._update_state()
+        agent1.refresh_state()
         # agent2 stays PENDING so it will timeout
 
         states = await runtime.wait_for_agents(
@@ -297,11 +298,11 @@ class TestAgentRuntime:
         a1 = _make_agent(runtime, "a1")
         a2 = _make_agent(runtime, "a2")
         # Give them mock clients so stop() doesn't error
-        a1._client = AsyncMock()
-        a2._client = AsyncMock()
+        a1.client = AsyncMock()
+        a2.client = AsyncMock()
 
         await runtime.stop()
-        assert len(runtime._agents) == 0
+        assert len(runtime.agents) == 0
 
 
 class TestAgentStart:
@@ -309,7 +310,7 @@ class TestAgentStart:
     async def test_start_initializes_client(self, runtime: AgentRuntime) -> None:
         """Cover lines 149-185: Agent.start() sets up client, heartbeat, MCP."""
         agent = _make_agent(runtime, "start-test")
-        agent._heartbeat_enabled = False
+        agent.heartbeat_enabled = False
 
         with patch("sdk.agents.ObscuraClient") as MockClient:
             instance = AsyncMock()
@@ -334,7 +335,7 @@ class TestAgentStart:
                 model="claude",
                 mcp=mcp_config,
             )
-        agent._heartbeat_enabled = False
+        agent.heartbeat_enabled = False
 
         mock_tool = MagicMock()
         mock_tool.name = "my_tool"
@@ -355,13 +356,13 @@ class TestAgentStart:
 
                 mcp_instance.start.assert_awaited_once()
                 client_instance.register_tool.assert_called_once_with(mock_tool)
-                assert agent._mcp_backend is mcp_instance
+                assert agent.mcp_backend is mcp_instance
 
     @pytest.mark.asyncio
     async def test_start_with_heartbeat(self, runtime: AgentRuntime) -> None:
         """Cover lines 180-185, 557-572: heartbeat initialization."""
         agent = _make_agent(runtime, "hb-test")
-        agent._heartbeat_enabled = True
+        agent.heartbeat_enabled = True
 
         with patch("sdk.agents.ObscuraClient") as MockClient:
             client_instance = AsyncMock()
@@ -381,7 +382,7 @@ class TestAgentStart:
     async def test_start_heartbeat_failure(self, runtime: AgentRuntime) -> None:
         """Cover lines 570-572: heartbeat start failure is non-fatal."""
         agent = _make_agent(runtime, "hb-fail")
-        agent._heartbeat_enabled = True
+        agent.heartbeat_enabled = True
 
         with patch("sdk.agents.ObscuraClient") as MockClient:
             client_instance = AsyncMock()
@@ -393,7 +394,7 @@ class TestAgentStart:
             ):
                 await agent.start()
 
-            assert agent._heartbeat_client is None
+            assert agent.heartbeat_client is None
             assert agent.status == AgentStatus.WAITING
 
 
@@ -408,14 +409,14 @@ class TestAgentRun:
 
         mock_client = AsyncMock()
         mock_client.send = AsyncMock(return_value=mock_message)
-        agent._client = mock_client
+        agent.client = mock_client
 
         result = await agent.run("do something")
 
         assert result == "task completed"
         assert agent.status == AgentStatus.COMPLETED
         assert agent.iteration_count == 1
-        assert agent._result == "task completed"
+        assert agent.result == "task completed"
 
     @pytest.mark.asyncio
     async def test_run_with_context(self, runtime: AgentRuntime) -> None:
@@ -427,7 +428,7 @@ class TestAgentRun:
 
         mock_client = AsyncMock()
         mock_client.send = AsyncMock(return_value=mock_message)
-        agent._client = mock_client
+        agent.client = mock_client
 
         result = await agent.run("review code", repo="obscura", pr=42)
 
@@ -439,18 +440,18 @@ class TestAgentRun:
         with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
             agent = runtime.spawn("timeout-test", model="claude", timeout_seconds=0.01)
 
-        async def slow_send(*args, **kwargs):
+        async def slow_send(*args: Any, **kwargs: Any) -> None:
             await asyncio.sleep(10)
 
         mock_client = AsyncMock()
         mock_client.send = slow_send
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(TimeoutError, match="timed out"):
             await agent.run("something slow")
 
         assert agent.status == AgentStatus.FAILED
-        assert agent._error is not None
+        assert agent.error is not None
 
     @pytest.mark.asyncio
     async def test_run_general_exception(self, runtime: AgentRuntime) -> None:
@@ -459,13 +460,13 @@ class TestAgentRun:
 
         mock_client = AsyncMock()
         mock_client.send = AsyncMock(side_effect=ValueError("bad input"))
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(ValueError, match="bad input"):
             await agent.run("bad prompt")
 
         assert agent.status == AgentStatus.FAILED
-        assert isinstance(agent._error, ValueError)
+        assert isinstance(agent.error, ValueError)
 
     @pytest.mark.asyncio
     async def test_run_stores_task_and_result_in_memory(self, runtime: AgentRuntime) -> None:
@@ -477,7 +478,7 @@ class TestAgentRun:
 
         mock_client = AsyncMock()
         mock_client.send = AsyncMock(return_value=mock_message)
-        agent._client = mock_client
+        agent.client = mock_client
 
         await agent.run("store this")
 
@@ -498,15 +499,15 @@ class TestAgentStream:
         """Cover lines 252-282: successful stream() path."""
         agent = _make_agent(runtime, "stream-test")
 
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
             yield MagicMock(text="Hello ")
             yield MagicMock(text="world!")
 
         mock_client = AsyncMock()
         mock_client.stream = mock_stream
-        agent._client = mock_client
+        agent.client = mock_client
 
-        chunks = []
+        chunks: list[str] = []
         async for chunk in agent.stream("say hello"):
             chunks.append(chunk)
 
@@ -519,14 +520,14 @@ class TestAgentStream:
         """Cover line 273: chunk without .text attribute falls back to str()."""
         agent = _make_agent(runtime, "stream-str")
 
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
             yield "plain string"
 
         mock_client = AsyncMock()
         mock_client.stream = mock_stream
-        agent._client = mock_client
+        agent.client = mock_client
 
-        chunks = []
+        chunks: list[str] = []
         async for chunk in agent.stream("prompt"):
             chunks.append(chunk)
 
@@ -537,32 +538,32 @@ class TestAgentStream:
         """Cover lines 277-280: exception in stream()."""
         agent = _make_agent(runtime, "stream-err")
 
-        async def failing_stream(*args, **kwargs):
+        async def failing_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
             yield MagicMock(text="partial")
             raise ConnectionError("lost connection")
 
         mock_client = AsyncMock()
         mock_client.stream = failing_stream
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(ConnectionError, match="lost connection"):
             async for _ in agent.stream("will fail"):
                 pass
 
         assert agent.status == AgentStatus.FAILED
-        assert isinstance(agent._error, ConnectionError)
+        assert isinstance(agent.error, ConnectionError)
 
     @pytest.mark.asyncio
     async def test_stream_stores_task(self, runtime: AgentRuntime) -> None:
         """Cover lines 257-266: memory set for stream mode."""
         agent = _make_agent(runtime, "stream-mem")
 
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
             yield MagicMock(text="ok")
 
         mock_client = AsyncMock()
         mock_client.stream = mock_stream
-        agent._client = mock_client
+        agent.client = mock_client
 
         async for _ in agent.stream("stream task"):
             pass
@@ -580,7 +581,7 @@ class TestAgentRunLoop:
 
         mock_client = AsyncMock()
         mock_client.run_loop_to_completion = AsyncMock(return_value="loop result")
-        agent._client = mock_client
+        agent.client = mock_client
 
         result = await agent.run_loop("fix the bug")
 
@@ -595,7 +596,7 @@ class TestAgentRunLoop:
 
         mock_client = AsyncMock()
         mock_client.run_loop_to_completion = AsyncMock(return_value="done")
-        agent._client = mock_client
+        agent.client = mock_client
 
         await agent.run_loop("task", max_turns=3)
 
@@ -609,12 +610,12 @@ class TestAgentRunLoop:
         with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
             agent = runtime.spawn("loop-to", model="claude", timeout_seconds=0.01)
 
-        async def slow(*args, **kwargs):
+        async def slow(*args: Any, **kwargs: Any) -> None:
             await asyncio.sleep(10)
 
         mock_client = AsyncMock()
         mock_client.run_loop_to_completion = slow
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(TimeoutError, match="timed out"):
             await agent.run_loop("slow task")
@@ -630,7 +631,7 @@ class TestAgentRunLoop:
         mock_client.run_loop_to_completion = AsyncMock(
             side_effect=RuntimeError("model error")
         )
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(RuntimeError, match="model error"):
             await agent.run_loop("bad prompt")
@@ -644,7 +645,7 @@ class TestAgentRunLoop:
 
         mock_client = AsyncMock()
         mock_client.run_loop_to_completion = AsyncMock(return_value="loop done")
-        agent._client = mock_client
+        agent.client = mock_client
 
         await agent.run_loop("loop task")
 
@@ -670,21 +671,21 @@ class TestAgentStreamLoop:
             AgentEvent(kind=AgentEventKind.AGENT_DONE),
         ]
 
-        async def mock_run_loop(*args, **kwargs):
+        async def mock_run_loop(*args: Any, **kwargs: Any) -> AsyncIterator[AgentEvent]:
             for e in events:
                 yield e
 
         mock_client = MagicMock()
         mock_client.run_loop = mock_run_loop
-        agent._client = mock_client
+        agent.client = mock_client
 
-        collected = []
+        collected: list[AgentEvent] = []
         async for event in agent.stream_loop("do it"):
             collected.append(event)
 
         assert len(collected) == 4
         assert agent.status == AgentStatus.COMPLETED
-        assert agent._result == "Hello world"
+        assert agent.result == "Hello world"
         assert agent.iteration_count == 1
 
     @pytest.mark.asyncio
@@ -692,12 +693,12 @@ class TestAgentStreamLoop:
         """Cover lines 378-379: default max_turns from config."""
         agent = _make_agent(runtime, "sloop-turns")
 
-        async def mock_run_loop(*args, **kwargs):
+        async def mock_run_loop(*args: Any, **kwargs: Any) -> AsyncIterator[AgentEvent]:
             yield AgentEvent(kind=AgentEventKind.AGENT_DONE)
 
         mock_client = MagicMock()
         mock_client.run_loop = mock_run_loop
-        agent._client = mock_client
+        agent.client = mock_client
 
         async for _ in agent.stream_loop("task", max_turns=2):
             pass
@@ -707,13 +708,13 @@ class TestAgentStreamLoop:
         """Cover lines 420-423: exception in stream_loop."""
         agent = _make_agent(runtime, "sloop-err")
 
-        async def failing_loop(*args, **kwargs):
+        async def failing_loop(*args: Any, **kwargs: Any) -> AsyncIterator[AgentEvent]:
             yield AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="start")
             raise IOError("connection lost")
 
         mock_client = MagicMock()
         mock_client.run_loop = failing_loop
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(IOError, match="connection lost"):
             async for _ in agent.stream_loop("failing"):
@@ -726,12 +727,12 @@ class TestAgentStreamLoop:
         """Cover lines 381-414: memory storage in stream_loop."""
         agent = _make_agent(runtime, "sloop-mem")
 
-        async def mock_run_loop(*args, **kwargs):
+        async def mock_run_loop(*args: Any, **kwargs: Any) -> AsyncIterator[AgentEvent]:
             yield AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="result")
 
         mock_client = MagicMock()
         mock_client.run_loop = mock_run_loop
-        agent._client = mock_client
+        agent.client = mock_client
 
         async for _ in agent.stream_loop("stream loop task"):
             pass
@@ -751,7 +752,7 @@ class TestAgentStatePersistence:
         await runtime.start()
         agent = _make_agent(runtime, "state-test")
 
-        agent._update_state()
+        agent.refresh_state()
 
         # Check memory has the state
         state_data = agent.memory.get(f"agent_state_{agent.id}", namespace="agent:runtime")
@@ -764,7 +765,7 @@ class TestAgentStatePersistence:
     def test_get_agent_status_from_memory(self, runtime: AgentRuntime) -> None:
         # Create agent, it saves state
         agent = _make_agent(runtime, "memory-test")
-        agent._update_state()
+        agent.refresh_state()
 
         # Create new runtime instance (simulating restart)
         new_runtime = AgentRuntime(user=runtime.user)
@@ -786,7 +787,7 @@ class TestAgentStatePersistence:
     def test_get_state_with_error(self, runtime: AgentRuntime) -> None:
         """Cover error_message in get_state."""
         agent = _make_agent(runtime, "state-err")
-        agent._error = ValueError("something went wrong")
+        agent.error = ValueError("something went wrong")
         state = agent.get_state()
         assert state.error_message == "something went wrong"
 
@@ -798,7 +799,7 @@ class TestAgentPromptBuilding:
         # Add some memory
         agent.memory.set("context", {"repo": "test"}, namespace="default:tasks")
 
-        prompt = agent._build_prompt(
+        prompt = agent.build_prompt(
             "do something",
             {"memory:1": {"data": "value"}},
             {"extra": "context"}
@@ -810,14 +811,14 @@ class TestAgentPromptBuilding:
 
     def test_build_prompt_no_memory(self, runtime: AgentRuntime) -> None:
         agent = _make_agent(runtime, "prompt-no-mem")
-        prompt = agent._build_prompt("just a task", {}, {})
+        prompt = agent.build_prompt("just a task", {}, {})
         assert "just a task" in prompt
         assert "Relevant Context" not in prompt
         assert "Task Context" not in prompt
 
     def test_build_prompt_memory_only(self, runtime: AgentRuntime) -> None:
         agent = _make_agent(runtime, "prompt-mem-only")
-        prompt = agent._build_prompt(
+        prompt = agent.build_prompt(
             "the task",
             {"key": "val"},
             {},
@@ -852,7 +853,7 @@ class TestAgentMemoryIntegration:
                 namespace="default:tasks"
             )
 
-        memory = agent._load_relevant_memory("test prompt")
+        memory = agent.load_relevant_memory("test prompt")
 
         # Should have loaded tasks (up to 5)
         assert len(memory) > 0
@@ -864,7 +865,7 @@ class TestAgentMemoryIntegration:
         # Store something searchable
         agent.memory.set("searchable", "hello world data", namespace="default")
 
-        memory = agent._load_relevant_memory("hello")
+        memory = agent.load_relevant_memory("hello")
         # Should have results from search fallback (line 462)
         assert isinstance(memory, dict)
 
@@ -876,13 +877,13 @@ class TestAgentErrorHandling:
 
         mock_client = AsyncMock()
         mock_client.send = AsyncMock(side_effect=Exception("API error"))
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(Exception, match="API error"):
             await agent.run("test prompt")
 
         assert agent.status == AgentStatus.FAILED
-        assert agent._error is not None
+        assert agent.error is not None
 
 
 class TestAgentStreaming:
@@ -890,15 +891,15 @@ class TestAgentStreaming:
     async def test_stream_chunks(self, runtime: AgentRuntime) -> None:
         agent = _make_agent(runtime, "stream-test")
 
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
             yield MagicMock(text="Hello ")
             yield MagicMock(text="world!")
 
         mock_client = AsyncMock()
         mock_client.stream = mock_stream
-        agent._client = mock_client
+        agent.client = mock_client
 
-        chunks = []
+        chunks: list[str] = []
         async for chunk in agent.stream("say hello"):
             chunks.append(chunk)
 
@@ -912,12 +913,12 @@ class TestAgentStop:
     async def test_stop_basic(self, runtime: AgentRuntime) -> None:
         """Cover lines 578-583: stop with client, handling cancel scope errors."""
         agent = _make_agent(runtime, "stop-basic")
-        agent._client = AsyncMock()
+        agent.client = AsyncMock()
 
         await agent.stop()
 
         assert agent.status == AgentStatus.STOPPED
-        agent._client.stop.assert_awaited_once()
+        agent.client.stop.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_stop_with_cancel_scope_error(self, runtime: AgentRuntime) -> None:
@@ -927,7 +928,7 @@ class TestAgentStop:
         mock_client.stop = AsyncMock(
             side_effect=RuntimeError("cancel scope blah")
         )
-        agent._client = mock_client
+        agent.client = mock_client
 
         # Should not raise
         await agent.stop()
@@ -941,7 +942,7 @@ class TestAgentStop:
         mock_client.stop = AsyncMock(
             side_effect=RuntimeError("some other error")
         )
-        agent._client = mock_client
+        agent.client = mock_client
 
         with pytest.raises(RuntimeError, match="some other error"):
             await agent.stop()
@@ -950,52 +951,52 @@ class TestAgentStop:
     async def test_stop_with_mcp_backend(self, runtime: AgentRuntime) -> None:
         """Cover lines 584-586: stop cleans up MCP backend."""
         agent = _make_agent(runtime, "stop-mcp")
-        agent._client = AsyncMock()
+        agent.client = AsyncMock()
         mcp_mock = AsyncMock()
-        agent._mcp_backend = mcp_mock
+        agent.mcp_backend = mcp_mock
 
         await agent.stop()
 
         mcp_mock.stop.assert_awaited_once()
-        assert agent._mcp_backend is None
+        assert agent.mcp_backend is None
 
     @pytest.mark.asyncio
     async def test_stop_with_heartbeat_client(self, runtime: AgentRuntime) -> None:
         """Cover lines 587-589: stop cleans up heartbeat client."""
         agent = _make_agent(runtime, "stop-hb")
-        agent._client = AsyncMock()
+        agent.client = AsyncMock()
         hb_mock = AsyncMock()
-        agent._heartbeat_client = hb_mock
+        agent.heartbeat_client = hb_mock
 
         await agent.stop()
 
         hb_mock.stop.assert_awaited_once()
-        assert agent._heartbeat_client is None
+        assert agent.heartbeat_client is None
 
     @pytest.mark.asyncio
     async def test_stop_cancels_running_task(self, runtime: AgentRuntime) -> None:
         """Cover lines 590-591: stop cancels _task if running."""
         agent = _make_agent(runtime, "stop-task")
-        agent._client = AsyncMock()
+        agent.client = AsyncMock()
 
         # Create a dummy task
         async def dummy():
             await asyncio.sleep(100)
 
-        agent._task = asyncio.create_task(dummy())
+        agent.task = asyncio.create_task(dummy())
 
         await agent.stop()
         # Let the event loop process the cancellation
         await asyncio.sleep(0)
 
-        assert agent._task.cancelled() or agent._task.done()
+        assert agent.task is not None and (agent.task.cancelled() or agent.task.done())
         assert agent.status == AgentStatus.STOPPED
 
     @pytest.mark.asyncio
     async def test_stop_graceful_success(self, runtime: AgentRuntime) -> None:
         """Cover lines 596-597: graceful stop completes within timeout."""
         agent = _make_agent(runtime, "graceful-ok")
-        agent._client = AsyncMock()
+        agent.client = AsyncMock()
 
         await agent.stop_graceful(timeout=5.0)
         assert agent.status == AgentStatus.STOPPED
@@ -1009,20 +1010,20 @@ class TestAgentStop:
         async def slow_stop():
             await asyncio.sleep(100)
 
-        agent.stop = slow_stop  # type: ignore[assignment]
+        agent.stop = slow_stop
 
         # Create a mock task
         async def dummy():
             await asyncio.sleep(100)
 
-        agent._task = asyncio.create_task(dummy())
+        agent.task = asyncio.create_task(dummy())
 
         await agent.stop_graceful(timeout=0.05)
         # Let the event loop process the cancellation
         await asyncio.sleep(0)
 
         assert agent.status == AgentStatus.STOPPED
-        assert agent._task.cancelled() or agent._task.done()
+        assert agent.task is not None and (agent.task.cancelled() or agent.task.done())
 
 
 class TestAgentMessages:
@@ -1041,7 +1042,7 @@ class TestAgentMessages:
         # Set agent to completed so the iterator stops after timeout
         agent.status = AgentStatus.COMPLETED
 
-        messages = []
+        messages: list[AgentMessage] = []
         async for m in agent.receive_messages():
             messages.append(m)
 
@@ -1054,7 +1055,7 @@ class TestAgentMessages:
         agent = _make_agent(runtime, "recv-fail")
         agent.status = AgentStatus.FAILED
 
-        messages = []
+        messages: list[AgentMessage] = []
         async for m in agent.receive_messages():
             messages.append(m)
 
@@ -1066,7 +1067,7 @@ class TestAgentMessages:
         agent = _make_agent(runtime, "recv-stop")
         agent.status = AgentStatus.STOPPED
 
-        messages = []
+        messages: list[AgentMessage] = []
         async for m in agent.receive_messages():
             messages.append(m)
 
@@ -1077,13 +1078,13 @@ class TestAgentMessages:
         agent = _make_agent(runtime, "enq-test")
         msg = AgentMessage(source="user", target=agent.id, content="test")
         agent.enqueue_message(msg)
-        assert not agent._message_queue.empty()
+        assert not agent.message_queue.empty()
 
     def testenqueue_message_full_queue(self, runtime: AgentRuntime) -> None:
         """Cover lines 521-522: queue full warning."""
         agent = _make_agent(runtime, "enq-full")
         # Replace with a tiny queue
-        agent._message_queue = asyncio.Queue(maxsize=1)
+        agent.message_queue = asyncio.Queue(maxsize=1)
 
         msg1 = AgentMessage(source="user", target=agent.id, content="first")
         msg2 = AgentMessage(source="user", target=agent.id, content="second")
@@ -1093,7 +1094,7 @@ class TestAgentMessages:
         agent.enqueue_message(msg2)
 
         # Queue should still have only 1 message
-        assert agent._message_queue.qsize() == 1
+        assert agent.message_queue.qsize() == 1
 
 
 class TestAgentMessage:

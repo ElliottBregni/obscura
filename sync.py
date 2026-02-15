@@ -815,9 +815,23 @@ class VaultSync:
         return VariantSelector(model=profile.model, role=profile.role)
 
     # Public accessors for tests/observability
+    @property
+    def global_profile(self) -> SyncProfile:
+        """Read-only access to the current global sync profile."""
+        return self._global_profile
+
+    @property
+    def selector(self) -> VariantSelector:
+        """Read-only access to the global VariantSelector."""
+        return self._selector
+
     def load_profile(self, repo_name: str | None = None) -> SyncProfile:
         """Public wrapper around profile loading."""
         return self._load_profile(repo_name)
+
+    def get_selector(self, repo_name: str | None = None) -> VariantSelector:
+        """Public wrapper to retrieve a selector for a repo or global default."""
+        return self._get_selector(repo_name)
 
     def set_profile(self, profile: SyncProfile) -> None:
         """Update global profile and selector."""
