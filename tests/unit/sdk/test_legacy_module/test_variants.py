@@ -8,7 +8,7 @@ from typing import Callable
 
 import pytest
 
-from sync import (
+from scripts.sync import (
     VariantSelector,
     VaultSync,
     parse_sync_profile,

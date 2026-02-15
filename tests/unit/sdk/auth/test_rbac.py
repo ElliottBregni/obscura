@@ -19,7 +19,7 @@ from sdk.auth.models import AuthenticatedUser
 from sdk.auth.rbac import get_current_user, require_any_role, require_role
 
 # Re-use the test key infrastructure from test_auth_middleware
-from tests.test_auth_middleware import (
+from tests.unit.sdk.auth.test_auth_middleware import (
     _TEST_AUDIENCE,
     _TEST_ISSUER,
     _TEST_JWKS,

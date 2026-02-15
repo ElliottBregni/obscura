@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sync import VaultSync
+from scripts.sync import VaultSync
 
 
 class TestDomain2SystemSync:

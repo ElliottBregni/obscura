@@ -2,7 +2,7 @@ Metadata-Version: 2.4
 Name: obscura
 Version: 0.2.0
 Summary: Obscura - Multi-agent context management with TUI
-Requires-Python: >=3.12
+Requires-Python: >=3.13.5
 Requires-Dist: github-copilot-sdk>=0.1.0
 Requires-Dist: claude-agent-sdk>=0.1.0
 Requires-Dist: openai>=1.0.0

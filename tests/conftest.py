@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from sync import VaultSync
+from scripts.sync import VaultSync
 
 
 # ---------------------------------------------------------------------------

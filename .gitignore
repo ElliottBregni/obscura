@@ -53,3 +53,4 @@ scripts/test_private_key.pem
 scripts/test_jwks.json
 obscura.egg-info
 logs/
+audit.jsonl

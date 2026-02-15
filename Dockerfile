@@ -3,7 +3,7 @@
 # =============================================================================
 
 # Stage 1: Builder — install deps with uv, compile the venv
-FROM python:3.12-slim AS builder
+FROM python:3.13.5-slim AS builder
 
 WORKDIR /app
 
@@ -13,11 +13,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --extra server --extra telemetry
 
 COPY sdk/ sdk/
-COPY sync.py .
-COPY copilot_models.py .
+COPY scripts/ scripts/
 
 # Stage 2: Runtime — minimal image with only the venv + app code
-FROM python:3.12-slim AS runtime
+FROM python:3.13.5-slim AS runtime
 
 RUN groupadd -r obscura && useradd -r -g obscura -d /home/obscura -m obscura
 
@@ -25,8 +24,7 @@ WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/sdk sdk/
-COPY --from=builder /app/sync.py .
-COPY --from=builder /app/copilot_models.py .
+COPY --from=builder /app/scripts scripts/
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1

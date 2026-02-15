@@ -384,7 +384,7 @@ def generate_stub(entry: FileEntry) -> str:
     Deprecated: use DiagramCrawlerAgent for async SDK-based generation.
     """
     # Import here to avoid hard dependency when using the agent path
-    from copilot_models import guard_automation
+    from scripts.copilot_models import guard_automation
 
     code = Path(entry.absolute).read_text(encoding="utf-8")
     prompt = MERMAID_PROMPT + code

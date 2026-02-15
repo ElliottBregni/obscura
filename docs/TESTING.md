@@ -154,10 +154,9 @@ Tests should pass on:
 
 | Python | OS | Auth | OTel |
 |--------|-----|------|------|
-| 3.12 | macOS | enabled | enabled |
-| 3.12 | Linux | enabled | enabled |
-| 3.12 | Linux | disabled | disabled |
-| 3.13 | macOS | enabled | enabled |
+| 3.13.5 | macOS | enabled | enabled |
+| 3.13.5 | Linux | enabled | enabled |
+| 3.13.5 | Linux | disabled | disabled |
 
 ---
 

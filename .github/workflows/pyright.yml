@@ -15,13 +15,13 @@ jobs:
       # Once ModernizedAI/github-actions is public, replace steps below with:
       # - uses: ModernizedAI/github-actions/pyright@main
       #   with:
-      #     python-version: '3.12'
+      #     python-version: '3.13.5'
       #     install-command: 'pip install -e ".[dev,server,telemetry,tui]"'
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.13.5
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13.5'
           cache: 'pip'
 
       - name: Install dependencies

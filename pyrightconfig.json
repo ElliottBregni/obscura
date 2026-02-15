@@ -2,7 +2,7 @@
   "include": ["."],
   "exclude": ["**/__pycache__", "**/node_modules", "**/.venv", "**/web-ui", "tests"],
   "typeCheckingMode": "strict",
-  "pythonVersion": "3.12",
+  "pythonVersion": "3.13",
   "reportMissingTypeStubs": true,
   "reportUnknownParameterType": true,
   "reportUnknownMemberType": true,

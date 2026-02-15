@@ -61,7 +61,7 @@ Files to check:
 
 Update `.github/workflows/test.yml`:
 - Install with `pip install -e ".[dev,server,telemetry]"`
-- Use Python 3.12 (not 3.x)
+- Use Python 3.13.5 (not 3.x)
 - Add cache busting
 
 ---

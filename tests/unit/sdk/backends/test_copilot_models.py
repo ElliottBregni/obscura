@@ -7,17 +7,24 @@ from unittest.mock import patch
 
 import pytest
 
-from copilot_models import (
-    ModelConfig,
-    resolve,
-    get_model_id,
-    require_automation_safe,
-    guard_automation,
-    list_aliases,
-    AUTOMATION,
-    _ALIAS_REGISTRY,
-    _AUTOMATION_SAFE_MODELS,
-)
+import scripts.copilot_models as _cm
+
+# Re-export public symbols
+from scripts.copilot_models import *  # type: ignore  # noqa: F401,F403
+
+# Explicitly expose private registries used in tests
+_ALIAS_REGISTRY = _cm._ALIAS_REGISTRY
+_AUTOMATION_SAFE_MODELS = _cm._AUTOMATION_SAFE_MODELS
+
+__all__ = _cm.__all__ if hasattr(_cm, "__all__") else []
+# Ensure test-visible names are exported
+__all__ += [
+    "_ALIAS_REGISTRY",
+    "_AUTOMATION_SAFE_MODELS",
+]
+
+
+
 
 
 # ---------------------------------------------------------------------------

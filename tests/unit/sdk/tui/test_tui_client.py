@@ -3,7 +3,7 @@
 
 import asyncio
 import pytest
-from obscura.tui.client import TUIClient
+from sdk.tui.client import TUIClient
 
 
 @pytest.mark.e2e
