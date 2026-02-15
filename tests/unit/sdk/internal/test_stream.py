@@ -1,7 +1,7 @@
 """Tests for sdk.internal.stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
 
 import pytest
-from typing import Any
+from typing import Any, AsyncIterator
 from unittest.mock import MagicMock
 
 from sdk.internal.stream import EventToIteratorBridge, ClaudeIteratorAdapter
@@ -173,7 +173,7 @@ class TestClaudeIteratorAdapter:
         result_msg: Any = MagicMock()
         type(result_msg).__name__ = "ResultMessage"
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield result_msg
 
         adapter = ClaudeIteratorAdapter(source())
@@ -193,7 +193,7 @@ class TestClaudeIteratorAdapter:
         type(msg).__name__ = "AssistantMessage"
         msg.content = [text_block]
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield msg
 
         adapter = ClaudeIteratorAdapter(source())
@@ -214,7 +214,7 @@ class TestClaudeIteratorAdapter:
         type(msg).__name__ = "AssistantMessage"
         msg.content = [thinking_block]
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield msg
 
         adapter = ClaudeIteratorAdapter(source())
@@ -234,7 +234,7 @@ class TestClaudeIteratorAdapter:
         type(msg).__name__ = "AssistantMessage"
         msg.content = [tool_block]
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield msg
 
         adapter = ClaudeIteratorAdapter(source())
@@ -254,7 +254,7 @@ class TestClaudeIteratorAdapter:
         type(msg).__name__ = "AssistantMessage"
         msg.content = [result_block]
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield msg
 
         adapter = ClaudeIteratorAdapter(source())
@@ -272,7 +272,7 @@ class TestClaudeIteratorAdapter:
         result_msg: Any = MagicMock()
         type(result_msg).__name__ = "ResultMessage"
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield sys_msg
             yield result_msg
 
@@ -291,7 +291,7 @@ class TestClaudeIteratorAdapter:
         result_msg: Any = MagicMock()
         type(result_msg).__name__ = "ResultMessage"
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield user_msg
             yield result_msg
 
@@ -306,7 +306,7 @@ class TestClaudeIteratorAdapter:
     async def test_unknown_type_fallback(self) -> None:
         unknown = "just a string"
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield unknown
 
         adapter = ClaudeIteratorAdapter(source())
@@ -324,7 +324,7 @@ class TestClaudeIteratorAdapter:
             "delta": {"type": "text_delta", "text": "streamed"},
         }
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield event
 
         adapter = ClaudeIteratorAdapter(source())
@@ -343,7 +343,7 @@ class TestClaudeIteratorAdapter:
             "delta": {"type": "thinking_delta", "thinking": "hmm"},
         }
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield event
 
         adapter = ClaudeIteratorAdapter(source())
@@ -361,7 +361,7 @@ class TestClaudeIteratorAdapter:
             "delta": {"type": "input_json_delta", "partial_json": '{"key":'},
         }
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield event
 
         adapter = ClaudeIteratorAdapter(source())
@@ -379,7 +379,7 @@ class TestClaudeIteratorAdapter:
             "content_block": {"type": "tool_use", "name": "bash"},
         }
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield event
 
         adapter = ClaudeIteratorAdapter(source())
@@ -397,7 +397,7 @@ class TestClaudeIteratorAdapter:
         result_msg: Any = MagicMock()
         type(result_msg).__name__ = "ResultMessage"
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield event
             yield result_msg
 
@@ -422,7 +422,7 @@ class TestClaudeIteratorAdapter:
         type(msg).__name__ = "AssistantMessage"
         msg.content = [text_block, tool_block]
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield msg
 
         adapter = ClaudeIteratorAdapter(source())
@@ -441,7 +441,7 @@ class TestClaudeIteratorAdapter:
         result_msg: Any = MagicMock()
         type(result_msg).__name__ = "ResultMessage"
 
-        async def source() -> Any:
+        async def source() -> AsyncIterator[Any]:
             yield msg
             yield result_msg
 

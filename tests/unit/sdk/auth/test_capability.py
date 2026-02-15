@@ -22,7 +22,7 @@ from sdk.auth.capability import (
     CapabilityTier,
     CapabilityToken,
     PRIVILEGED_ROLES,
-    _reset_signing_key,
+    _reset_signing_key,  # pyright: ignore[reportPrivateUsage]
     generate_capability_token,
     resolve_tier,
     validate_capability_token,
@@ -59,7 +59,7 @@ def _make_user(
 
 
 @pytest.fixture(autouse=True)
-def _reset_key():
+def _reset_key() -> Any:  # pyright: ignore[reportUnusedFunction]
     """Reset the signing key between tests to ensure isolation."""
     _reset_signing_key()
     yield
@@ -131,7 +131,8 @@ class TestCapabilityTokenGeneration:
         user = _make_user()
         token = generate_capability_token(user, "s1", ttl_seconds=10)
         assert token.expires_at > token.issued_at
-        assert token.expires_at - token.issued_at == pytest.approx(10, abs=1)
+        _approx: Any = getattr(pytest, "approx")
+        assert token.expires_at - token.issued_at == _approx(10, abs=1)
 
     def test_nonce_is_unique(self) -> None:
         user = _make_user()
@@ -428,7 +429,8 @@ class TestToolTierGating:
         def my_tool(x: str) -> str:
             return x
 
-        assert my_tool.spec.required_tier == "privileged"
+        spec: Any = getattr(my_tool, "spec")
+        assert spec.required_tier == "privileged"
 
     def test_tool_decorator_default_tier(self) -> None:
         from sdk.internal.tools import tool
@@ -437,7 +439,8 @@ class TestToolTierGating:
         def my_tool2(x: str) -> str:
             return x
 
-        assert my_tool2.spec.required_tier == "public"
+        spec: Any = getattr(my_tool2, "spec")
+        assert spec.required_tier == "public"
 
 
 # ===========================================================================
@@ -477,7 +480,7 @@ class TestAgentLoopCapabilityEnforcement:
         )
 
         tc = ToolCallInfo(tool_use_id="tc1", name="admin_tool", input={})
-        results = await loop._execute_tools([tc], turn=1)
+        results = await loop._execute_tools([tc], turn=1)  # pyright: ignore[reportPrivateUsage]
 
         assert len(results) == 1
         _, result_text, is_error = results[0]
@@ -512,7 +515,7 @@ class TestAgentLoopCapabilityEnforcement:
         )
 
         tc = ToolCallInfo(tool_use_id="tc1", name="admin_tool", input={})
-        results = await loop._execute_tools([tc], turn=1)
+        results = await loop._execute_tools([tc], turn=1)  # pyright: ignore[reportPrivateUsage]
 
         assert len(results) == 1
         _, result_text, is_error = results[0]
@@ -546,7 +549,7 @@ class TestAgentLoopCapabilityEnforcement:
         )
 
         tc = ToolCallInfo(tool_use_id="tc1", name="safe_tool", input={})
-        results = await loop._execute_tools([tc], turn=1)
+        results = await loop._execute_tools([tc], turn=1)  # pyright: ignore[reportPrivateUsage]
 
         assert len(results) == 1
         _, result_text, is_error = results[0]
@@ -578,7 +581,7 @@ class TestAgentLoopCapabilityEnforcement:
         )
 
         tc = ToolCallInfo(tool_use_id="tc1", name="any_tool", input={})
-        results = await loop._execute_tools([tc], turn=1)
+        results = await loop._execute_tools([tc], turn=1)  # pyright: ignore[reportPrivateUsage]
 
         assert len(results) == 1
         _, result_text, is_error = results[0]
@@ -612,7 +615,7 @@ class TestAgentLoopCapabilityEnforcement:
         )
 
         tc = ToolCallInfo(tool_use_id="tc1", name="safe_tool", input={})
-        results = await loop._execute_tools([tc], turn=1)
+        results = await loop._execute_tools([tc], turn=1)  # pyright: ignore[reportPrivateUsage]
 
         assert len(results) == 1
         _, result_text, is_error = results[0]

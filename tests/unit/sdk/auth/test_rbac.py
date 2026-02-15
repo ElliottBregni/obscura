@@ -8,6 +8,7 @@ when wired into a FastAPI application.
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -19,10 +20,10 @@ from sdk.auth.rbac import get_current_user, require_any_role, require_role
 
 # Re-use the test key infrastructure from test_auth_middleware
 from tests.unit.sdk.auth.test_auth_middleware import (
-    _TEST_AUDIENCE,
-    _TEST_ISSUER,
-    _TEST_JWKS,
-    _forge_token,
+    _TEST_AUDIENCE as _TEST_AUDIENCE,  # pyright: ignore[reportPrivateUsage]
+    _TEST_ISSUER as _TEST_ISSUER,  # pyright: ignore[reportPrivateUsage]
+    _TEST_JWKS as _TEST_JWKS,  # pyright: ignore[reportPrivateUsage]
+    _forge_token as _forge_token,  # pyright: ignore[reportPrivateUsage]
 )
 
 
@@ -32,7 +33,7 @@ from tests.unit.sdk.auth.test_auth_middleware import (
 
 
 class TestAuthenticatedUser:
-    def _make_user(self, roles: list[str]) -> AuthenticatedUser:
+    def _make_user(self, roles: tuple[str, ...]) -> AuthenticatedUser:
         return AuthenticatedUser(
             user_id="u1",
             email="u@test.dev",
@@ -43,25 +44,25 @@ class TestAuthenticatedUser:
         )
 
     def test_has_role_exact_match(self) -> None:
-        user = self._make_user(["agent:copilot"])
+        user = self._make_user(("agent:copilot",))
         assert user.has_role("agent:copilot")
         assert not user.has_role("admin")
         assert not user.has_role("sync:write")
 
     def test_has_role_admin_override(self) -> None:
-        user = self._make_user(["admin"])
+        user = self._make_user(("admin",))
         assert user.has_role("agent:copilot")
         assert user.has_role("sync:write")
         assert user.has_role("sessions:manage")
         assert user.has_role("anything:unknown")
 
     def test_has_any_role(self) -> None:
-        user = self._make_user(["agent:read", "sync:write"])
+        user = self._make_user(("agent:read", "sync:write"))
         assert user.has_any_role("agent:read", "sessions:manage")
         assert not user.has_any_role("admin", "sessions:manage")
 
     def test_has_any_role_admin_override(self) -> None:
-        user = self._make_user(["admin"])
+        user = self._make_user(("admin",))
         assert user.has_any_role("foo", "bar", "baz")
 
 
@@ -75,8 +76,8 @@ def _create_test_app() -> FastAPI:
     app = FastAPI()
 
     jwks_cache = JWKSCache("http://fake", ttl=300)
-    jwks_cache._keys = _TEST_JWKS["keys"]
-    jwks_cache._fetched_at = time.monotonic()
+    jwks_cache._keys = _TEST_JWKS["keys"]  # pyright: ignore[reportPrivateUsage]
+    jwks_cache._fetched_at = time.monotonic()  # pyright: ignore[reportPrivateUsage]
 
     app.add_middleware(
         JWTAuthMiddleware,
@@ -86,31 +87,33 @@ def _create_test_app() -> FastAPI:
     )
 
     @app.get("/api/v1/me")
-    async def me(user: AuthenticatedUser = Depends(get_current_user)) -> dict:
+    async def me(  # pyright: ignore[reportUnusedFunction]
+        user: AuthenticatedUser = Depends(get_current_user),
+    ) -> dict[str, Any]:
         return {"user_id": user.user_id, "roles": user.roles}
 
     @app.get("/api/v1/admin-only")
-    async def admin_only(
+    async def admin_only(  # pyright: ignore[reportUnusedFunction]
         user: AuthenticatedUser = Depends(require_role("admin")),
-    ) -> dict:
+    ) -> dict[str, Any]:
         return {"ok": True}
 
     @app.post("/api/v1/sync")
-    async def sync(
+    async def sync(  # pyright: ignore[reportUnusedFunction]
         user: AuthenticatedUser = Depends(require_role("sync:write")),
-    ) -> dict:
+    ) -> dict[str, Any]:
         return {"synced": True}
 
     @app.post("/api/v1/agent")
-    async def agent(
+    async def agent(  # pyright: ignore[reportUnusedFunction]
         user: AuthenticatedUser = Depends(
             require_any_role("agent:copilot", "agent:claude", "agent:read"),
         ),
-    ) -> dict:
+    ) -> dict[str, Any]:
         return {"agent": True, "user_id": user.user_id}
 
     @app.get("/health")
-    async def health() -> dict:
+    async def health() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
         return {"status": "ok"}
 
     return app

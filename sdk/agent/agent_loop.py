@@ -76,7 +76,7 @@ class AgentLoop:
 
     def __init__(
         self,
-        backend: BackendProtocol,
+        backend: BackendProtocol | None,
         tool_registry: ToolRegistry,
         *,
         max_turns: int = 10,
@@ -121,6 +121,8 @@ class AgentLoop:
             _current_tool_input_json = ""
 
             try:
+                if self._backend is None:
+                    raise RuntimeError("No backend configured")
                 async for chunk in self._backend.stream(current_prompt, **kwargs):
                     event = self._map_chunk(chunk, turn)
                     if event is not None:
