@@ -16,13 +16,13 @@
 ### Recommended MCP Servers
 The vault includes MCP configuration for extended AI agent functionality.
 
-Current MCP config: `mcp-config.json`
+Current MCP config: `config/mcp-config.json`
 
 #### Installed MCP Servers
 - **github-mcp-server** - GitHub integration (repos, PRs, issues, actions)
 
 #### To Add More MCP Servers
-Manually edit `mcp-config.json` or use your agent's MCP configuration commands.
+Manually edit `config/mcp-config.json` or use your agent's MCP configuration commands.
 
 ### Python Tools (if working with Python services)
 ```bash
@@ -75,8 +75,8 @@ This creates per-file symlinks:
 
 ## MCP Configuration
 
-- **Location**: `mcp-config.json` (vault root)
-- **Template**: `mcp-config.template.json`
+- **Location**: `config/mcp-config.json` (vault root)
+- **Template**: `config/config/mcp-config.template.json`
 
 ## Notes
 

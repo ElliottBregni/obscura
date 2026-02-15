@@ -52,41 +52,6 @@ curl -X POST http://localhost:8080/api/v1/memory/session/context \
 obscura tui
 ```
 
-## Usage Examples
-
-### Python SDK
-
-```python
-from sdk import ObscuraClient
-
-async with ObscuraClient("claude") as client:
-    response = await client.send("Hello!")
-    print(response.text)
-```
-
-### CLI
-
-```bash
-# Quick agent command
-obscura claude -p "Explain Python async"
-
-# Spawn persistent agent
-obscura agent spawn --name reviewer --model claude
-
-# List agents
-obscura agent list
-
-# Memory operations
-obscura memory set mykey "my value"
-obscura memory get mykey
-```
-
-### Full Demo
-
-```bash
-python examples/working_demo.py
-```
-
 ## API Reference
 
 ### Health
@@ -117,7 +82,61 @@ Environment variables:
 
 ## Development
 
-### Running Tests
+### Running & Using
+
+**Install (dev):**
+```bash
+pip install -e "[dev,server,telemetry,tui]"
+# or
+uv pip install -e "[dev,server,telemetry,tui]"
+```
+
+**Run server (dev, auth off, telemetry off):**
+```bash
+export OBSCURA_AUTH_ENABLED=false
+export OTEL_ENABLED=false
+obscura serve --port 8080
+# or
+uv run python -m uvicorn sdk.server:create_app --factory --port 8080
+```
+
+**Use the CLI:**
+```bash
+# Quick ask
+obscura claude -p "Explain Python async"
+# Spawn/list agents
+obscura agent spawn --name reviewer --model claude
+obscura agent list
+# Memory ops
+obscura memory set mykey "value"
+obscura memory get mykey
+```
+
+**Python SDK:**
+```python
+from sdk import ObscuraClient
+
+async with ObscuraClient("claude") as client:
+    resp = await client.send("Hello!")
+    print(resp.text)
+```
+
+**TUI:**
+```bash
+obscura tui
+```
+
+**Tests:**
+- Unit: `pytest tests/unit -v`
+- E2E: `pytest tests/e2e -v` (starts temp server; ensure ports free)
+- All (if needed): `pytest tests -v`
+
+**Config & logs:**
+- MCP config: `config/mcp-config.json` (template in same folder)
+- Audit log: `logs/audit.jsonl`
+
+**Troubleshooting**
+
 
 ```bash
 # Unit tests
@@ -130,15 +149,26 @@ pytest tests/ -v -m "not e2e"
 pytest tests/ -v
 ```
 
-### Project Structure
+### Project Structure (updated)
 
 ```
 obscura/
-├── sdk/              # Core SDK
-├── obscura/tui/      # Terminal UI
-├── tests/            # Test suite
-├── examples/         # Usage examples
-└── docs/             # Documentation
+├── sdk/                  # Core SDK (agents, backends, telemetry, tui, mcp, etc.)
+│   ├── agent/            # Agent runtime, loop, base agent
+│   ├── backends/         # Copilot, Claude, OpenAI-compatible, LocalLLM
+│   ├── internal/         # Auth, tools, types, stream, sessions (internal APIs)
+│   ├── telemetry/        # traces, metrics, audit hooks
+│   ├── vector_memory/    # memory store, filters, router, rerank
+│   └── ...               # cli, client, config, routes, tui, mcp, etc.
+├── config/               # Runtime configs (e.g., mcp-config.json, templates)
+├── logs/                 # Runtime logs (e.g., audit.jsonl)
+├── scripts/              # Helper scripts (sync, crawlers, etc.)
+├── tests/
+│   ├── unit/             # Unit tests grouped by sdk sub-areas + scripts
+│   └── e2e/              # End-to-end tests
+├── docs/                 # Documentation
+├── examples/             # Usage examples
+└── web-ui/               # Frontend (excluded from pyright)
 ```
 
 ## Troubleshooting

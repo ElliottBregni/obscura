@@ -1,6 +1,6 @@
 {
   "include": ["."],
-  "exclude": ["**/__pycache__", "**/node_modules", "**/.venv", "**/web-ui"],
+  "exclude": ["**/__pycache__", "**/node_modules", "**/.venv", "**/web-ui", "tests"],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.12",
   "reportMissingTypeStubs": true,

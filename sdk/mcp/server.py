@@ -779,5 +779,13 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
                 }
         
         return EventSourceResponse(event_generator())
-    
+
+    # Fix forward refs for OpenAPI generation (FastAPI + __future__ annotations)
+    for route in router.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint and hasattr(endpoint, "__annotations__"):
+            ann = endpoint.__annotations__
+            if ann.get("request") == "Request":
+                ann["request"] = Request
+
     return router

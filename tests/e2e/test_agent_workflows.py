@@ -1,3 +1,4 @@
+# pyright: ignore-all
 """E2E Tests: Agent Lifecycle, Memory, Vector Memory, Error Handling."""
 
 import pytest

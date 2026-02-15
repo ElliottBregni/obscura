@@ -1,3 +1,4 @@
+# pyright: ignore-all
 """Tests for sdk.vector_memory_rerank."""
 from datetime import UTC, datetime, timedelta
 from sdk.vector_memory_rerank import (

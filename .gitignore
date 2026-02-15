@@ -49,3 +49,7 @@ infra/zitadel/machinekey.json
 # Helm dependencies (downloaded charts)
 helm/obscura/charts/
 helm/obscura/Chart.lock
+test_private_key.pem
+test_jwks.json
+obscura.egg-info
+logs/

@@ -246,7 +246,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph Vault["Obscura Vault"]
-        MC["mcp-config.json<br/>(canonical)"]
+        MC["config/mcp-config.json"]
     end
 
     MC -->|sync.py| C1[".claude/mcp.json"]

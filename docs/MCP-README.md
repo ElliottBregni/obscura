@@ -2,20 +2,20 @@
 
 ## Your Personal Config
 
-**Location**: `copilot-cli/mcp-config.json` (symlinked to `~/.copilot/mcp-config.json`)
+**Location**: `config/mcp-config.json` (symlinked to `~/.copilot/mcp-config.json`)
 
 This is your **personal** MCP config with your API keys and settings. It's gitignored for security.
 
 ## Team Template
 
-**Location**: `mcp-config.template.json`
+**Location**: `config/config/mcp-config.template.json`
 
 This is a **template** committed to the repo for your team. It shows which MCP servers are recommended but doesn't contain secrets.
 
 **To use the team template:**
 ```bash
 # Copy template to your personal config
-cp ~/FV-Copilot/mcp-config.template.json ~/.copilot/mcp-config.json
+cp ~/FV-Copilot/config/config/mcp-config.template.json ~/.copilot/mcp-config.json
 
 # Add your API keys
 # Edit ~/.copilot/mcp-config.json and replace ${VARIABLE} with actual values
@@ -32,11 +32,11 @@ cp ~/FV-Copilot/mcp-config.template.json ~/.copilot/mcp-config.json
 ```
 
 ### Manual Edit
-Edit `~/.copilot/mcp-config.json` or `copilot-cli/mcp-config.json` in Obsidian (they're the same file).
+Edit `~/.copilot/mcp-config.json` or `config/mcp-config.json` in Obsidian (they're the same file).
 
 ## Current Team Servers
 
-See `mcp-config.template.json` for:
+See `config/config/mcp-config.template.json` for:
 - Postman - API testing integration
 - Jira - Issue tracking
 - Auth0 - Authentication management
