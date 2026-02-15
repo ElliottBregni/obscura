@@ -78,7 +78,7 @@ try:
     if not isinstance(getattr(_tbb.BackendBridge, "client", None), property):
         from sdk.tui.backend_bridge import BackendBridge as RealBridge
 
-        tbb.BackendBridge = RealBridge
+        _tbb.BackendBridge = RealBridge
 
         def _get(self):
             return getattr(self, "_client", None)

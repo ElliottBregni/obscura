@@ -567,7 +567,9 @@ class TestOpenAISessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
-        to_dict = lambda m: m.to_dict() if hasattr(m, "to_dict") else m  # type: ignore
+        def to_dict(m):  # type: ignore[no-untyped-def]
+            return m.to_dict() if hasattr(m, "to_dict") else m
+
         assert to_dict(history[0]) == {"role": "user", "content": "Hello"}
         assert to_dict(history[1]) == {"role": "assistant", "content": "Reply 1"}
 
@@ -612,7 +614,9 @@ class TestOpenAISessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
-        to_dict = lambda m: m.to_dict() if hasattr(m, "to_dict") else m  # type: ignore
+        def to_dict(m):  # type: ignore[no-untyped-def]
+            return m.to_dict() if hasattr(m, "to_dict") else m
+
         assert to_dict(history[0]) == {"role": "user", "content": "Hello stream"}
         assert to_dict(history[1]) == {"role": "assistant", "content": "Hi there"}
 

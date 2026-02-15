@@ -6,7 +6,7 @@ symbols so pytest patches on `crawlers.*` take effect.
 
 from __future__ import annotations
 
-from typing import Any
+
 
 from scripts import crawlers as _c
 
