@@ -262,20 +262,21 @@ class AgentLoop:
                         )
                         continue
 
-                    token_tier = self._capability_token.tier.value
-                    if (
-                        spec.required_tier == "privileged"
-                        and token_tier != "privileged"
-                    ):
-                        _audit_tool_denied(tc.name, "insufficient_tier")
-                        results.append(
-                            (
-                                tc,
-                                f"Tool '{tc.name}' requires privileged tier.",
-                                True,
-                            )
-                        )
-                        continue
+                    # TODO: enforce tier restriction once tier differentiation is enabled
+                    # token_tier = self._capability_token.tier.value
+                    # if (
+                    #     spec.required_tier == "privileged"
+                    #     and token_tier != "privileged"
+                    # ):
+                    #     _audit_tool_denied(tc.name, "insufficient_tier")
+                    #     results.append(
+                    #         (
+                    #             tc,
+                    #             f"Tool '{tc.name}' requires privileged tier.",
+                    #             True,
+                    #         )
+                    #     )
+                    #     continue
                 except Exception:
                     pass  # Degrade gracefully if capability module unavailable
 

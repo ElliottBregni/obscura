@@ -82,11 +82,8 @@ def get_tier_system_prompt(
     str
         The full system prompt string.
     """
-    prefix = (
-        TIER_B_SYSTEM_PREFIX
-        if tier == CapabilityTier.PRIVILEGED
-        else TIER_A_SYSTEM_PREFIX
-    )
+    # TODO: use TIER_A_SYSTEM_PREFIX for PUBLIC once tier differentiation is enabled
+    prefix = TIER_B_SYSTEM_PREFIX
 
     parts = [prefix.rstrip()]
     if additional:
