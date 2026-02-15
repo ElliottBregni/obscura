@@ -57,6 +57,16 @@ class JWKSCache:
     def keys(self) -> list[dict[str, Any]]:
         return list(self._keys)
 
+    @property
+    def fetched_at(self) -> float:
+        """Timestamp of the last JWKS fetch."""
+        return self._fetched_at
+
+    def clear(self) -> None:
+        """Clear cached keys (testing/observability)."""
+        self._keys = []
+        self._fetched_at = 0.0
+
     def is_stale(self) -> bool:
         return time.monotonic() - self._fetched_at >= self._ttl
 
@@ -91,7 +101,7 @@ class JWKSCache:
 # Token decoding
 # ---------------------------------------------------------------------------
 
-def _extract_roles(payload: dict[str, Any]) -> list[str]:
+def extract_roles(payload: dict[str, Any]) -> list[str]:
     """Extract flat role list from Zitadel's nested roles claim.
 
     Zitadel encodes project roles as::
@@ -107,7 +117,7 @@ def _extract_roles(payload: dict[str, Any]) -> list[str]:
     return []
 
 
-def _detect_token_type(payload: dict[str, Any]) -> str:
+def detect_token_type(payload: dict[str, Any]) -> str:
     """Heuristic: detect whether the JWT represents a user, service account, or API key."""
     # Zitadel service users have urn:zitadel:iam:org:project:<id>:roles but no "email"
     if payload.get("urn:zitadel:iam:user:type") == "machine":
@@ -160,8 +170,8 @@ async def decode_and_validate(
             options={"verify_at_hash": False},
         )
 
-    roles = _extract_roles(payload)
-    token_type = _detect_token_type(payload)
+    roles = extract_roles(payload)
+    token_type = detect_token_type(payload)
 
     return AuthenticatedUser(
         user_id=payload.get("sub", ""),

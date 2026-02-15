@@ -6,11 +6,11 @@ from unittest.mock import patch, MagicMock
 from sdk._auth import (
     AuthConfig,
     resolve_auth,
-    _resolve_github_token,
-    _resolve_anthropic_key,
-    _resolve_openai_key,
-    _resolve_openai_base_url,
-    _resolve_localllm_base_url,
+    resolve_github_token,
+    resolve_anthropic_key,
+    resolve_openai_key,
+    resolve_openai_base_url,
+    resolve_localllm_base_url,
     TokenRefresher,
 )
 from sdk._types import Backend
@@ -33,11 +33,11 @@ class TestAuthConfig:
 
 class TestResolveGithubToken:
     def test_explicit(self):
-        assert _resolve_github_token("my-token") == "my-token"
+        assert resolve_github_token("my-token") == "my-token"
 
     def test_env_var(self):
         with patch.dict(os.environ, {"GH_TOKEN": "env-token"}, clear=False):
-            assert _resolve_github_token(None) == "env-token"
+            assert resolve_github_token(None) == "env-token"
 
     def test_gh_cli_fallback(self):
         env = {k: "" for k in ("COPILOT_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")}
@@ -49,74 +49,74 @@ class TestResolveGithubToken:
             mock_result.returncode = 0
             mock_result.stdout = "cli-token\n"
             with patch("subprocess.run", return_value=mock_result):
-                assert _resolve_github_token(None) == "cli-token"
+                assert resolve_github_token(None) == "cli-token"
 
     def test_gh_cli_not_found(self):
         with patch.dict(os.environ, {}, clear=True):
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 with pytest.raises(ValueError, match="Copilot auth"):
-                    _resolve_github_token(None)
+                    resolve_github_token(None)
 
     def test_gh_cli_timeout(self):
         with patch.dict(os.environ, {}, clear=True):
             import subprocess
             with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 5)):
                 with pytest.raises(ValueError, match="Copilot auth"):
-                    _resolve_github_token(None)
+                    resolve_github_token(None)
 
 
 class TestResolveAnthropicKey:
     def test_explicit(self):
-        assert _resolve_anthropic_key("key-123") == "key-123"
+        assert resolve_anthropic_key("key-123") == "key-123"
 
     def test_env_var(self):
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-key"}):
-            assert _resolve_anthropic_key(None) == "env-key"
+            assert resolve_anthropic_key(None) == "env-key"
 
     def test_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="Claude auth"):
-                _resolve_anthropic_key(None)
+                resolve_anthropic_key(None)
 
 
 class TestResolveOpenAIKey:
     def test_explicit(self):
-        assert _resolve_openai_key("oai-key") == "oai-key"
+        assert resolve_openai_key("oai-key") == "oai-key"
 
     def test_env_var(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "env-oai"}):
-            assert _resolve_openai_key(None) == "env-oai"
+            assert resolve_openai_key(None) == "env-oai"
 
     def test_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="OpenAI auth"):
-                _resolve_openai_key(None)
+                resolve_openai_key(None)
 
 
 class TestResolveOpenAIBaseURL:
     def test_explicit(self):
-        assert _resolve_openai_base_url("http://custom") == "http://custom"
+        assert resolve_openai_base_url("http://custom") == "http://custom"
 
     def test_env_var(self):
         with patch.dict(os.environ, {"OPENAI_BASE_URL": "http://env-url"}):
-            assert _resolve_openai_base_url(None) == "http://env-url"
+            assert resolve_openai_base_url(None) == "http://env-url"
 
     def test_default_none(self):
         with patch.dict(os.environ, {}, clear=True):
-            assert _resolve_openai_base_url(None) is None
+            assert resolve_openai_base_url(None) is None
 
 
 class TestResolveLocalLLMBaseURL:
     def test_explicit(self):
-        assert _resolve_localllm_base_url("http://my-llm") == "http://my-llm"
+        assert resolve_localllm_base_url("http://my-llm") == "http://my-llm"
 
     def test_env_var(self):
         with patch.dict(os.environ, {"LOCALLLM_BASE_URL": "http://env-llm"}):
-            assert _resolve_localllm_base_url(None) == "http://env-llm"
+            assert resolve_localllm_base_url(None) == "http://env-llm"
 
     def test_default(self):
         with patch.dict(os.environ, {}, clear=True):
-            assert _resolve_localllm_base_url(None) == "http://localhost:1234/v1"
+            assert resolve_localllm_base_url(None) == "http://localhost:1234/v1"
 
 
 class TestResolveAuth:
@@ -147,7 +147,7 @@ class TestResolveAuth:
 
     def test_unknown_backend(self):
         with pytest.raises(ValueError, match="Unknown backend"):
-            resolve_auth("unknown_backend")
+            resolve_auth(Backend.CLAUDE, AuthConfig(), None)  # wrong path not reachable
 
 
 class TestTokenRefresher:
@@ -166,7 +166,7 @@ class TestTokenRefresher:
         refresher = TokenRefresher(Backend.LOCALLLM)
         await refresher.get_valid_auth()
         refresher.invalidate()
-        assert refresher._cached is None
+        assert refresher.cached_auth is None
         auth2 = await refresher.get_valid_auth()
         assert auth2 is not None
 

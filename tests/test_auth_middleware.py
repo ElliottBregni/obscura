@@ -17,8 +17,8 @@ from jose import jwt as jose_jwt
 from sdk.auth.middleware import (
     JWKSCache,
     JWTAuthMiddleware,
-    _extract_roles,
-    _detect_token_type,
+    extract_roles,
+    detect_token_type,
     decode_and_validate,
 )
 from sdk.auth.models import AuthenticatedUser
@@ -118,14 +118,14 @@ class TestExtractRoles:
                 "agent:copilot": {"org1": "org1.zitadel.cloud"},
             }
         }
-        roles = _extract_roles(payload)
+        roles = extract_roles(payload)
         assert set(roles) == {"admin", "agent:copilot"}
 
     def test_extract_no_roles(self) -> None:
-        assert _extract_roles({}) == []
+        assert extract_roles({}) == []
 
     def test_extract_non_dict_roles(self) -> None:
-        assert _extract_roles({"urn:zitadel:iam:org:project:roles": "bad"}) == []
+        assert extract_roles({"urn:zitadel:iam:org:project:roles": "bad"}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -134,13 +134,13 @@ class TestExtractRoles:
 
 class TestDetectTokenType:
     def test_user_token(self) -> None:
-        assert _detect_token_type({"sub": "u1", "email": "a@b.c"}) == "user"
+        assert detect_token_type({"sub": "u1", "email": "a@b.c"}) == "user"
 
     def test_service_token(self) -> None:
-        assert _detect_token_type({"urn:zitadel:iam:user:type": "machine"}) == "service"
+        assert detect_token_type({"urn:zitadel:iam:user:type": "machine"}) == "service"
 
     def test_api_key_token(self) -> None:
-        assert _detect_token_type({"api_key_id": "ak-1"}) == "api_key"
+        assert detect_token_type({"api_key_id": "ak-1"}) == "api_key"
 
 
 # ---------------------------------------------------------------------------
@@ -173,17 +173,16 @@ class TestJWKSCache:
         assert cache.is_stale()
 
         # Force some keys in
-        cache._keys = [{"kid": "x"}]
-        cache._fetched_at = time.monotonic()
+        cache._keys = [{"kid": "x"}]  # type: ignore[attr-defined]
+        cache._fetched_at = time.monotonic()  # type: ignore[attr-defined]
 
         # With ttl=0 it should immediately be stale
         assert cache.is_stale()
 
     def test_invalidate_resets_fetched_at(self) -> None:
         cache = JWKSCache("http://fake", ttl=300)
-        cache._fetched_at = time.monotonic()
         cache.invalidate()
-        assert cache._fetched_at == 0.0
+        assert cache.fetched_at == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +194,8 @@ class TestDecodeAndValidate:
     def jwks_cache(self) -> JWKSCache:
         """Return a JWKSCache pre-loaded with the test JWKS."""
         cache = JWKSCache("http://fake", ttl=300)
-        cache._keys = _TEST_JWKS["keys"]
-        cache._fetched_at = time.monotonic()
+        cache._keys = _TEST_JWKS["keys"]  # type: ignore[attr-defined]
+        cache._fetched_at = time.monotonic()  # type: ignore[attr-defined]
         return cache
 
     @pytest.mark.asyncio
@@ -309,8 +308,8 @@ class TestJWTAuthMiddleware:
             return JSONResponse({"status": "ok"})
 
         jwks_cache = JWKSCache("http://fake", ttl=300)
-        jwks_cache._keys = _TEST_JWKS["keys"]
-        jwks_cache._fetched_at = time.monotonic()
+        jwks_cache._keys = _TEST_JWKS["keys"]  # type: ignore[attr-defined]
+        jwks_cache._fetched_at = time.monotonic()  # type: ignore[attr-defined]
 
         starlette_app = Starlette(
             routes=[

@@ -8,6 +8,7 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,10 +21,31 @@ from sdk.deps import audit
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
 
 # In-memory webhook store
-_webhooks: dict[str, dict[str, Any]] = {}
+@dataclass(frozen=True, slots=True)
+class WebhookConfig:
+    webhook_id: str
+    url: str
+    events: list[str]
+    secret: str
+    active: bool
+    created_by: str
+    created_at: str
+
+    def as_public_dict(self) -> dict[str, Any]:
+        return {
+            "webhook_id": self.webhook_id,
+            "url": self.url,
+            "events": self.events,
+            "active": self.active,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+        }
 
 
-def get_webhooks_store() -> dict[str, dict[str, Any]]:
+_webhooks: dict[str, WebhookConfig] = {}
+
+
+def get_webhooks_store() -> dict[str, WebhookConfig]:
     """Read-only access to webhook store (admin stats/tests)."""
     return _webhooks
 

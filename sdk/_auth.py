@@ -137,6 +137,27 @@ def _resolve_localllm_base_url(explicit: str | None) -> str:
     return "http://localhost:1234/v1"  # LM Studio default
 
 
+# Public helpers for testing/observability
+def resolve_github_token(explicit: str | None) -> str:
+    return _resolve_github_token(explicit)
+
+
+def resolve_anthropic_key(explicit: str | None) -> str:
+    return _resolve_anthropic_key(explicit)
+
+
+def resolve_openai_key(explicit: str | None) -> str:
+    return _resolve_openai_key(explicit)
+
+
+def resolve_openai_base_url(explicit: str | None) -> str | None:
+    return _resolve_openai_base_url(explicit)
+
+
+def resolve_localllm_base_url(explicit: str | None) -> str:
+    return _resolve_localllm_base_url(explicit)
+
+
 class TokenRefresher:
     """Auto-refreshing auth for long-running agents.
 
@@ -183,6 +204,11 @@ class TokenRefresher:
         """Force re-resolution on next call."""
         self._cached = None
         self._resolved_at = 0.0
+
+    @property
+    def cached_auth(self) -> AuthConfig | None:
+        """Read-only access to cached auth (for testing/observability)."""
+        return self._cached
 
 
 def resolve_auth(
