@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
+from typing import Any
 
 from sdk.auth.zitadel import ZitadelClient, bootstrap, DEFAULT_ROLES
 
@@ -10,7 +11,7 @@ from sdk.auth.zitadel import ZitadelClient, bootstrap, DEFAULT_ROLES
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _mock_response(json_data=None, status_code=200):
+def _mock_response(json_data: dict[str, Any] | None = None, status_code: int = 200) -> httpx.Response:
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status_code
     resp.json.return_value = json_data or {}
@@ -31,12 +32,12 @@ def _mock_response(json_data=None, status_code=200):
 class TestZitadelClientInit:
     def test_init(self):
         client = ZitadelClient("https://z.example.com", "my-token")
-        assert client._base_url == "https://z.example.com"
-        assert client._token == "my-token"
+        assert client.base_url == "https://z.example.com"
+        assert client.token == "my-token"
 
     def test_init_strips_trailing_slash(self):
         client = ZitadelClient("https://z.example.com/", "tok")
-        assert client._base_url == "https://z.example.com"
+        assert client.base_url == "https://z.example.com"
 
 
 class TestZitadelClientContextManager:
@@ -58,12 +59,13 @@ class TestZitadelClientHTTPHelpers:
     async def test_post(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"id": "123"})
-        client._client = AsyncMock()
-        client._client.post = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
-        result = await client._post("/projects", {"name": "Test"})
+        result = await client.post_mgmt("/projects", {"name": "Test"})
         assert result == {"id": "123"}
-        client._client.post.assert_awaited_once_with(
+        mock_client.post.assert_awaited_once_with(
             "/management/v1/projects", json={"name": "Test"}
         )
 
@@ -71,41 +73,45 @@ class TestZitadelClientHTTPHelpers:
     async def test_post_no_body(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"ok": True})
-        client._client = AsyncMock()
-        client._client.post = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
-        result = await client._post("/action")
+        result = await client.post_mgmt("/action")
         assert result == {"ok": True}
-        client._client.post.assert_awaited_once_with("/management/v1/action", json={})
+        mock_client.post.assert_awaited_once_with("/management/v1/action", json={})
 
     @pytest.mark.asyncio
     async def test_get(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"data": "val"})
-        client._client = AsyncMock()
-        client._client.get = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
-        result = await client._get("/orgs")
+        result = await client.get_mgmt("/orgs")
         assert result == {"data": "val"}
 
     @pytest.mark.asyncio
     async def test_put(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"updated": True})
-        client._client = AsyncMock()
-        client._client.put = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.put = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
-        result = await client._put("/orgs/1", {"name": "New"})
+        result = await client.put_mgmt("/orgs/1", {"name": "New"})
         assert result == {"updated": True}
 
     @pytest.mark.asyncio
     async def test_delete(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({})
-        client._client = AsyncMock()
-        client._client.delete = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.delete = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
-        result = await client._delete("/projects/1")
+        result = await client.delete_mgmt("/projects/1")
         assert result == {}
 
 
@@ -194,7 +200,7 @@ class TestZitadelClientRoles:
 
         call_count = 0
 
-        async def fake_add(proj_id, role):
+        async def fake_add(proj_id: str, role: str):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -210,7 +216,7 @@ class TestZitadelClientRoles:
     async def test_bulk_add_roles_raises_non_409(self):
         client = ZitadelClient("https://z.example.com", "tok")
 
-        async def fail_add(proj_id, role):
+        async def fail_add(proj_id: str, role: str):
             resp = MagicMock()
             resp.status_code = 500
             raise httpx.HTTPStatusError("Server Error", request=MagicMock(), response=resp)
@@ -243,8 +249,9 @@ class TestZitadelClientMachineUsers:
     async def test_create_machine_user(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"userId": "u-1"})
-        client._client = AsyncMock()
-        client._client.post = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
         uid = await client.create_machine_user("svc-user", "Service User")
         assert uid == "u-1"
@@ -253,8 +260,9 @@ class TestZitadelClientMachineUsers:
     async def test_create_machine_key(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"keyId": "k-1", "keyDetails": "..."})
-        client._client = AsyncMock()
-        client._client.post = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
         result = await client.create_machine_key("u-1")
         assert result["keyId"] == "k-1"
@@ -293,8 +301,9 @@ class TestZitadelClientMisc:
     async def test_create_pat(self):
         client = ZitadelClient("https://z.example.com", "tok")
         resp = _mock_response({"token": "pat-abc"})
-        client._client = AsyncMock()
-        client._client.post = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
         token = await client.create_pat("u-1")
         assert token == "pat-abc"
@@ -306,8 +315,9 @@ class TestZitadelClientMisc:
             "issuer": "https://z.example.com",
             "jwks_uri": "https://z.example.com/.well-known/jwks.json",
         })
-        client._client = AsyncMock()
-        client._client.get = AsyncMock(return_value=resp)
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=resp)
+        client.set_client_for_testing(mock_client)
 
         config = await client.get_oidc_config()
         assert config["issuer"] == "https://z.example.com"
@@ -315,9 +325,10 @@ class TestZitadelClientMisc:
     @pytest.mark.asyncio
     async def test_close(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        client._client = AsyncMock()
+        mock_client = AsyncMock()
+        client.set_client_for_testing(mock_client)
         await client.close()
-        client._client.aclose.assert_awaited_once()
+        mock_client.aclose.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

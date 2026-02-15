@@ -54,6 +54,23 @@ class ZitadelClient:
             timeout=30,
         )
 
+    # Read-only accessors (used in tests/observability)
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @property
+    def token(self) -> str:
+        return self._token
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        return self._client
+
+    # Testing hook: replace underlying client with a stub
+    def set_client_for_testing(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -84,6 +101,19 @@ class ZitadelClient:
         resp = await self._client.delete(f"{_MGMT_BASE}{path}")
         resp.raise_for_status()
         return resp.json()
+
+    # Public test/observability wrappers around HTTP helpers
+    async def post_mgmt(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._post(path, body)
+
+    async def get_mgmt(self, path: str) -> dict[str, Any]:
+        return await self._get(path)
+
+    async def put_mgmt(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._put(path, body)
+
+    async def delete_mgmt(self, path: str) -> dict[str, Any]:
+        return await self._delete(path)
 
     # -- projects ---------------------------------------------------------
 

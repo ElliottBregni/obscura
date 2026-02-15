@@ -122,23 +122,80 @@ async def _get_admin_token(base_url: str, username: str, password: str) -> str:
         )
 
 
+from dataclasses import dataclass
+from typing import Any, TypedDict, cast
+
+
+# ---------------------------------------------------------------------------
+# Data classes / typed payloads
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ProjectInfo:
+    project_id: str
+    name: str
+
+
+@dataclass
+class MachineKey:
+    key_id: str
+    key: str
+    user_id: str
+    key_details_b64: str | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> "MachineKey":
+        return cls(
+            key_id=str(data.get("keyId", "")),
+            key=str(data.get("key", "")),
+            user_id=str(data.get("userId", "")),
+            key_details_b64=str(data.get("keyDetails", "")) if data.get("keyDetails") else None,
+        )
+
+
+class OIDCConfig(TypedDict, total=False):
+    issuer: str
+    jwks_uri: str
+
+
+@dataclass
+class BootstrapResult:
+    project_id: str
+    user_id: str
+    machine_key: MachineKey | None
+    jwks_uri: str
+    audience: str
+    issuer: str
+
+
 async def _bootstrap(
     base_url: str,
     admin_token: str,
     project_name: str,
     roles: list[str],
     service_user_name: str,
-) -> dict:
+) -> BootstrapResult:
     """Run the full bootstrap using the sdk.auth.zitadel module."""
     # Import here so this script can also run standalone without the SDK installed
     try:
         from sdk.auth.zitadel import bootstrap
-        return await bootstrap(
+
+        result = await bootstrap(
             base_url,
             admin_token,
             project_name=project_name,
             roles=roles,
             service_user_name=service_user_name,
+        )
+        machine_key_dict = cast(dict[str, Any] | None, result.get("machine_key"))
+        machine_key = MachineKey.from_api(machine_key_dict) if machine_key_dict else None
+        return BootstrapResult(
+            project_id=cast(str, result.get("project_id", "")),
+            user_id=cast(str, result.get("user_id", "")),
+            machine_key=machine_key,
+            jwks_uri=cast(str, result.get("jwks_uri", f"{base_url}/.well-known/jwks.json")),
+            audience=cast(str, result.get("audience", "")),
+            issuer=cast(str, result.get("issuer", base_url)),
         )
     except ImportError:
         # Inline bootstrap for environments without the SDK
@@ -153,7 +210,7 @@ async def _inline_bootstrap(
     project_name: str,
     roles: list[str],
     service_user_name: str,
-) -> dict:
+) -> BootstrapResult:
     """Standalone bootstrap that does not depend on the SDK package."""
     headers = {
         "Authorization": f"Bearer {admin_token}",
@@ -165,16 +222,16 @@ async def _inline_bootstrap(
         resp = await c.post("/management/v1/projects/_search", json={"query": {}})
         resp.raise_for_status()
         projects = resp.json().get("result", [])
-        project_id = None
+        project_id: str | None = None
         for p in projects:
             if p.get("name") == project_name:
-                project_id = p["id"]
+                project_id = str(p["id"])
                 break
 
         if not project_id:
             resp = await c.post("/management/v1/projects", json={"name": project_name})
             resp.raise_for_status()
-            project_id = resp.json()["id"]
+            project_id = str(resp.json()["id"])
             print(f"Created project '{project_name}' -> {project_id}")
         else:
             print(f"Project '{project_name}' already exists -> {project_id}")
@@ -214,7 +271,7 @@ async def _inline_bootstrap(
                 raise
 
         # 4. Create machine key + grant
-        machine_key = {}
+        machine_key: MachineKey | None = None
         if user_id:
             resp = await c.post(
                 f"/management/v1/users/{user_id}/grants",
@@ -227,34 +284,34 @@ async def _inline_bootstrap(
                 json={"type": "KEY_TYPE_JSON"},
             )
             resp.raise_for_status()
-            machine_key = resp.json()
-            print(f"Generated machine key (id={machine_key.get('keyId', '?')})")
+            machine_key = MachineKey.from_api(resp.json())
+            print(f"Generated machine key (id={machine_key.key_id})")
 
         # 5. OIDC metadata
         resp = await c.get("/.well-known/openid-configuration")
         resp.raise_for_status()
-        oidc = resp.json()
+        oidc_raw = cast(OIDCConfig, resp.json())
 
-        return {
-            "project_id": project_id,
-            "user_id": user_id,
-            "machine_key": machine_key,
-            "jwks_uri": oidc.get("jwks_uri", f"{base_url}/.well-known/jwks.json"),
-            "audience": project_id,
-            "issuer": oidc.get("issuer", base_url),
-        }
+        return BootstrapResult(
+            project_id=project_id,
+            user_id=user_id,
+            machine_key=machine_key,
+            jwks_uri=oidc_raw.get("jwks_uri", f"{base_url}/.well-known/jwks.json"),
+            audience=project_id,
+            issuer=oidc_raw.get("issuer", base_url),
+        )
 
 
-async def _get_test_token(base_url: str, machine_key: dict) -> str:
+async def _get_test_token(base_url: str, machine_key: MachineKey) -> str:
     """Exchange a machine key for a JWT (for curl testing)."""
     # Decode the base64-encoded key details if present
-    key_details = machine_key.get("keyDetails", "")
-    if key_details:
+    key_data: dict[str, Any]
+    if machine_key.key_details_b64:
         import base64
-        decoded = base64.b64decode(key_details).decode()
+        decoded = base64.b64decode(machine_key.key_details_b64).decode()
         key_data = json.loads(decoded)
     else:
-        key_data = machine_key
+        key_data = {"keyId": machine_key.key_id, "key": machine_key.key, "userId": machine_key.user_id}
 
     # Build a JWT assertion signed with the machine key
     from jose import jwt as jose_jwt
@@ -270,7 +327,12 @@ async def _get_test_token(base_url: str, machine_key: dict) -> str:
     }
 
     private_key = key_data.get("key", "")
-    assertion = jose_jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": key_data.get("keyId", "")})
+    assertion = jose_jwt.encode(
+        claims,
+        private_key,
+        algorithm="RS256",
+        headers={"kid": key_data.get("keyId", "")},
+    )
 
     # Exchange for an access token
     async with httpx.AsyncClient(base_url=base_url, timeout=30) as c:
@@ -401,35 +463,46 @@ async def async_main(args: argparse.Namespace) -> int:
 
     # Output
     print("\n--- Bootstrap Result ---")
-    print(f"  Project ID:  {result['project_id']}")
-    print(f"  User ID:     {result.get('user_id', 'N/A')}")
-    print(f"  JWKS URI:    {result['jwks_uri']}")
-    print(f"  Audience:    {result['audience']}")
-    print(f"  Issuer:      {result['issuer']}")
+    print(f"  Project ID:  {result.project_id}")
+    print(f"  User ID:     {result.user_id or 'N/A'}")
+    print(f"  JWKS URI:    {result.jwks_uri}")
+    print(f"  Audience:    {result.audience}")
+    print(f"  Issuer:      {result.issuer}")
 
-    if result.get("machine_key"):
-        print(f"  Machine Key: (key_id={result['machine_key'].get('keyId', '?')})")
+    if result.machine_key:
+        print(f"  Machine Key: (key_id={result.machine_key.key_id})")
 
     # Write to file
     if args.output:
         with open(args.output, "w") as f:
-            json.dump(result, f, indent=2)
+            json.dump(
+                {
+                    "project_id": result.project_id,
+                    "user_id": result.user_id,
+                    "machine_key": result.machine_key.__dict__ if result.machine_key else None,
+                    "jwks_uri": result.jwks_uri,
+                    "audience": result.audience,
+                    "issuer": result.issuer,
+                },
+                f,
+                indent=2,
+            )
         print(f"\nResult written to {args.output}")
 
     # Get test token
-    if args.get_token and result.get("machine_key"):
+    if args.get_token and result.machine_key:
         print("\nExchanging machine key for JWT...")
         try:
-            token = await _get_test_token(base_url, result["machine_key"])
+            token = await _get_test_token(base_url, result.machine_key)
             print(f"\nTest JWT:\n{token}")
         except Exception as e:
             print(f"Error getting test token: {e}", file=sys.stderr)
 
     # Print env vars for easy configuration
     print("\n--- Environment Variables ---")
-    print(f"export OBSCURA_AUTH_ISSUER={result['issuer']}")
-    print(f"export OBSCURA_AUTH_JWKS_URI={result['jwks_uri']}")
-    print(f"export OBSCURA_AUTH_AUDIENCE={result['audience']}")
+    print(f"export OBSCURA_AUTH_ISSUER={result.issuer}")
+    print(f"export OBSCURA_AUTH_JWKS_URI={result.jwks_uri}")
+    print(f"export OBSCURA_AUTH_AUDIENCE={result.audience}")
 
     return 0
 

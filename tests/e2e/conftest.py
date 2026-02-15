@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 from unittest.mock import patch
 
 import pytest
@@ -57,7 +57,7 @@ class _FakeAgentConfig:
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
-    tags: list = field(default_factory=list)
+    tags: list[str] = field(default_factory=lambda: list[str]())
 
 
 @dataclass
@@ -176,7 +176,7 @@ class _FakeMemoryStore:
         return False
 
     def list_keys(self, namespace: str | None = None) -> list[_FakeMemoryKey]:
-        keys = []
+        keys: list[_FakeMemoryKey] = []
         for k in self._data:
             ns, name = k.split(":", 1)
             if namespace is None or ns == namespace:
@@ -184,7 +184,7 @@ class _FakeMemoryStore:
         return keys
 
     def search(self, query: str) -> list[tuple[_FakeMemoryKey, Any]]:
-        results = []
+        results: list[tuple[_FakeMemoryKey, Any]] = []
         for k, v in self._data.items():
             ns, name = k.split(":", 1)
             if query.lower() in str(v).lower() or query.lower() in k.lower():
@@ -225,11 +225,11 @@ class _FakeVectorMemoryStore:
     def reset(cls) -> None:
         cls._stores.clear()
 
-    def set(self, key: str, text: str, metadata: dict | None = None, namespace: str = "default", **kw: Any) -> None:
+    def set(self, key: str, text: str, metadata: dict[str, Any] | None = None, namespace: str = "default", **kw: Any) -> None:
         self._data[f"{namespace}:{key}"] = {"text": text, "metadata": metadata or {}, "memory_type": kw.get("memory_type", "general")}
 
     def _build_results(self, namespace: str | None = None, top_k: int = 5) -> list[_FakeVectorResult]:
-        results = []
+        results: list[_FakeVectorResult] = []
         for k, v in self._data.items():
             ns, name = k.split(":", 1)
             if namespace is None or ns == namespace:
@@ -273,7 +273,7 @@ async def _mock_get_runtime(user: Any) -> _FakeAgentRuntime:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _reset_fakes():
+def _reset_fakes() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
     """Reset all fake stores between tests."""
     global _shared_runtime
     _shared_runtime = _FakeAgentRuntime()
@@ -283,7 +283,7 @@ def _reset_fakes():
 
 
 @pytest.fixture
-def client():
+def client() -> Iterator[TestClient]:
     """TestClient with auth disabled and mocked backends."""
     config = ObscuraConfig(
         auth_enabled=False,
@@ -303,7 +303,7 @@ def client():
 
 
 @pytest.fixture
-def client_no_auth_override():
+def client_no_auth_override() -> Iterator[TestClient]:
     """TestClient with auth ENABLED but no dependency override.
 
     Use this to test actual auth behavior (API keys, JWT).

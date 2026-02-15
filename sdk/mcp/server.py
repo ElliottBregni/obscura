@@ -94,7 +94,7 @@ class ObscuraMCPServer:
                     "model": create_string_property(
                         "Model to use",
                         enum=["copilot", "claude"],
-                        default="claude",
+                        default="copilot",
                     ),
                     "system_prompt": create_string_property(
                         "System prompt for the agent",
