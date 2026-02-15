@@ -37,7 +37,9 @@ class TestResolveGithubToken:
         assert resolve_github_token("my-token") == "my-token"
 
     def test_env_var(self):
-        with patch.dict(os.environ, {"GH_TOKEN": "env-token", "COPILOT_API_KEY": ""}, clear=False):
+        with patch.dict(
+            os.environ, {"GH_TOKEN": "env-token", "COPILOT_API_KEY": ""}, clear=False
+        ):
             assert resolve_github_token(None) == "env-token"
 
     def test_gh_cli_fallback(self):

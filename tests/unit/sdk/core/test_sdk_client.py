@@ -143,7 +143,12 @@ class TestBackendSelection:
 class TestAuthResolution:
     def test_missing_copilot_auth_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing GitHub token should raise ValueError."""
-        for var in ("GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN", "COPILOT_API_KEY"):
+        for var in (
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "COPILOT_GITHUB_TOKEN",
+            "COPILOT_API_KEY",
+        ):
             monkeypatch.delenv(var, raising=False)
 
         # Mock gh CLI not found

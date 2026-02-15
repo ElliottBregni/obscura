@@ -46,8 +46,6 @@ class ChatMessage:
 
     def to_dict(self) -> dict[str, str]:
         return {"role": self.role, "content": self.content}
-    
-
 
 
 @dataclass(frozen=True, slots=True)

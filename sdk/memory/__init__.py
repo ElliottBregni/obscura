@@ -79,7 +79,9 @@ class MemoryStore:
         if db_path is None:
             # Default: ~/.obscura/memory/<user_hash>.db, overrideable for tests
             base_dir = Path(
-                os.environ.get("OBSCURA_MEMORY_DIR", Path.home() / ".obscura" / "memory")
+                os.environ.get(
+                    "OBSCURA_MEMORY_DIR", Path.home() / ".obscura" / "memory"
+                )
             )
             db_path = base_dir / f"{self._db_id}.db"
 

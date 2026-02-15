@@ -193,9 +193,7 @@ class NoOpSpan:
 class NoOpTracer:
     """Minimal no-op tracer for when OTel is unavailable."""
 
-    def start_as_current_span(
-        self, name: str, *args: Any, **kwargs: Any
-    ) -> NoOpSpan:
+    def start_as_current_span(self, name: str, *args: Any, **kwargs: Any) -> NoOpSpan:
         return NoOpSpan()
 
     def start_span(self, name: str, *args: Any, **kwargs: Any) -> NoOpSpan:

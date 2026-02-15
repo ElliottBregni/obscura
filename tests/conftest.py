@@ -19,6 +19,7 @@ from scripts.sync import VaultSync
 # Global test configuration
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force telemetry off so tests don't attempt OTLP export."""
@@ -66,6 +67,7 @@ try:
 
     if not isinstance(getattr(_tbb.BackendBridge, "client", None), property):
         from sdk.tui.backend_bridge import BackendBridge as RealBridge
+
         tbb.BackendBridge = RealBridge
 
         def _get(self):
@@ -156,8 +158,17 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
             raising=False,
         )
 
-        async def sp(self, prompt, on_text=None, on_thinking=None, on_tool_start=None,
-                     on_tool_result=None, on_done=None, on_error=None, **kwargs):
+        async def sp(
+            self,
+            prompt,
+            on_text=None,
+            on_thinking=None,
+            on_tool_start=None,
+            on_tool_result=None,
+            on_done=None,
+            on_error=None,
+            **kwargs,
+        ):
             client = getattr(self, "_client", None)
             if client is None:
                 raise RuntimeError("Not connected. Call connect() first.")
@@ -211,7 +222,11 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
 def pytest_collection_modifyitems(items):
     for item in items:
         if item.nodeid.startswith("tests/unit/sdk/tui/test_tui_backend_bridge.py"):
-            item.add_marker(pytest.mark.xfail(reason="TUI bridge shim not required for pipeline", strict=False))
+            item.add_marker(
+                pytest.mark.xfail(
+                    reason="TUI bridge shim not required for pipeline", strict=False
+                )
+            )
 
 
 # ---------------------------------------------------------------------------

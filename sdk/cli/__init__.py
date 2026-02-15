@@ -366,7 +366,6 @@ def _init_cli_telemetry() -> None:
         pass
 
 
-
 class _StderrLogger:
     """Minimal fallback logger that writes to stderr."""
 

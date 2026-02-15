@@ -60,6 +60,7 @@ _runtimes_lock = asyncio.Lock()
 async def get_runtime(user: AuthenticatedUser) -> "AgentRuntime":
     """Get or create a persistent AgentRuntime for the given user."""
     from sdk.agent.agents import AgentRuntime  # load at call-time for test patching
+
     async with _runtimes_lock:
         if user.user_id not in _runtimes:
             runtime = AgentRuntime(user)
