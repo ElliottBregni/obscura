@@ -5,16 +5,9 @@ Implements the MCP protocol types for communication between MCP clients and serv
 Based on the Model Context Protocol specification.
 """
 
-import sys
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        return fn
+from typing import Any, Literal, override
 
 
 # ---------------------------------------------------------------------------

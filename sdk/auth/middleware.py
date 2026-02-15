@@ -11,16 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-import sys
-from typing import Any
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        """No-op fallback for Python < 3.12."""
-        return fn
+from typing import Any, override
 
 import httpx
 

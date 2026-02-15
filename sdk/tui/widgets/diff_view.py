@@ -15,16 +15,9 @@ Keybindings (when focused):
 
 from __future__ import annotations
 
-import sys
-from typing import Any
+from typing import override
 
 from textual.app import ComposeResult
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        return fn
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message

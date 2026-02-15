@@ -20,18 +20,11 @@ import hashlib
 import os
 import json
 import sqlite3
-import sys
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        return fn
+from typing import Any, override
 
 from sdk.auth.models import AuthenticatedUser
 

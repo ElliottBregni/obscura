@@ -24,15 +24,8 @@ import asyncio
 import json
 import logging
 import subprocess
-import sys
 import types
-from typing import Any
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        return fn
+from typing import Any, override
 
 import httpx
 

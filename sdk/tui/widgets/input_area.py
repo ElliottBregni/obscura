@@ -12,10 +12,9 @@ Supports:
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import override
 
 from textual import events
 from textual.app import ComposeResult
@@ -24,12 +23,6 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        return fn
 
 from sdk.tui.modes import TUIMode
 

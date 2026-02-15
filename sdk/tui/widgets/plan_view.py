@@ -7,17 +7,9 @@ per-step approve/reject/edit controls and an overall summary bar.
 
 from __future__ import annotations
 
-import sys
-from typing import Any
+from typing import override
 
 from textual import events
-
-if sys.version_info >= (3, 12):
-    from typing import override
-else:
-    def override(fn: Any) -> Any:  # type: ignore[misc]
-        return fn
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
