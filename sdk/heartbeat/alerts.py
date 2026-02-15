@@ -192,8 +192,6 @@ class SlackAlertChannel(AlertChannel):
             HealthStatus.CRITICAL: "danger",   # red
         }.get(alert.severity, "#808080")
         
-        text = f"Agent *{alert.agent_id}* is {alert.status.value.upper()}"
-        
         attachment = {
             "color": color,
             "title": f"Health Alert: {alert.agent_id}",

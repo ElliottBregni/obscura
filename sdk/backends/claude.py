@@ -19,7 +19,6 @@ from sdk._types import (
     Backend,
     ChunkKind,
     ContentBlock,
-    HookContext,
     HookPoint,
     Message,
     Role,
@@ -69,8 +68,7 @@ class ClaudeBackend:
 
     async def start(self) -> None:
         """Initialize the Claude SDK client."""
-        from claude_agent_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
-
+        from claude_agent_sdk import ClaudeSDKClient
         options = self._build_options()
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
@@ -90,9 +88,9 @@ class ClaudeBackend:
         with tracer.start_as_current_span("claude.send") as span:
             _set_span_attr(span, "backend", "claude")
 
-            last_msg: Any = None
-            async for msg in self._client.receive_response():
-                last_msg = msg
+            # Drain any pending response before querying
+            async for _ in self._client.receive_response():
+                pass
 
             # Use query for a fresh exchange
             await self._client.query(prompt)
@@ -152,8 +150,7 @@ class ClaudeBackend:
         if self._client is not None:
             await self._client.disconnect()
 
-        from claude_agent_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
-
+        from claude_agent_sdk import ClaudeSDKClient
         options = self._build_options(resume=ref.session_id)
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
@@ -191,8 +188,7 @@ class ClaudeBackend:
         if self._client is not None:
             await self._client.disconnect()
 
-        from claude_agent_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
-
+        from claude_agent_sdk import ClaudeSDKClient
         options = self._build_options(resume=ref.session_id, fork_session=True)
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
@@ -233,8 +229,7 @@ class ClaudeBackend:
 
     def _build_options(self, **overrides: Any) -> Any:
         """Build ClaudeAgentOptions for the SDK."""
-        from claude_agent_sdk import ClaudeAgentOptions  # type: ignore[import-untyped]
-
+        from claude_agent_sdk import ClaudeAgentOptions
         opts: dict[str, Any] = {}
 
         if self._model:
@@ -273,9 +268,8 @@ class ClaudeBackend:
 
     def _build_mcp_tools(self) -> dict[str, Any]:
         """Convert registered ToolSpecs to a Claude in-process MCP server."""
-        from claude_agent_sdk import tool as claude_tool  # type: ignore[import-untyped]
-        from claude_agent_sdk import create_sdk_mcp_server  # type: ignore[import-untyped]
-
+        from claude_agent_sdk import tool as claude_tool
+        from claude_agent_sdk import create_sdk_mcp_server
         claude_tools = []
         for spec in self._tools:
             # Create a claude @tool-decorated function for each ToolSpec
@@ -312,7 +306,7 @@ class ClaudeBackend:
 
             # Wrap our callbacks in Claude's HookMatcher format
             try:
-                from claude_agent_sdk import HookMatcher  # type: ignore[import-untyped]
+                from claude_agent_sdk import HookMatcher
                 matchers = [HookMatcher(hooks=callbacks)]
                 result[claude_key] = matchers
             except ImportError:
@@ -376,7 +370,7 @@ class ClaudeBackend:
 # Lazy telemetry helpers
 # ---------------------------------------------------------------------------
 
-from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+from sdk.telemetry.traces import NoOpTracer
 
 
 def _get_backend_tracer() -> Any:
@@ -384,7 +378,7 @@ def _get_backend_tracer() -> Any:
         from sdk.telemetry.traces import get_tracer
         return get_tracer("obscura.claude_backend")
     except Exception:
-        return _NoOpTracer()
+        return NoOpTracer()
 
 
 def _set_span_attr(span: Any, key: str, value: Any) -> None:

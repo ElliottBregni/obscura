@@ -140,10 +140,10 @@ def _get_agent_tracer() -> Any:
         from sdk.telemetry.traces import get_tracer
         return get_tracer("obscura.agent")
     except Exception:
-        return _NoOpTracer()
+        return NoOpTracer()
 
 
-from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+from sdk.telemetry.traces import NoOpTracer
 
 
 def _set_span_attr(span: Any, key: str, value: Any) -> None:

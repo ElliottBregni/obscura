@@ -7,7 +7,7 @@ by the JWT validation middleware and consumed by RBAC dependencies.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict
 
 
 # ---------------------------------------------------------------------------
@@ -18,6 +18,8 @@ VALID_ROLES: frozenset[str] = frozenset({
     "admin",
     "agent:copilot",
     "agent:claude",
+    "agent:localllm",
+    "agent:openai",
     "agent:read",
     "sync:write",
     "sessions:manage",
@@ -28,13 +30,13 @@ VALID_ROLES: frozenset[str] = frozenset({
 # Authenticated user
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class AuthenticatedUser:
+class AuthenticatedUser(BaseModel):
     """Represents a validated user extracted from a JWT.
 
     Populated by :mod:`sdk.auth.middleware` and attached to
     ``request.state.user`` for downstream handlers.
     """
+    model_config = ConfigDict(frozen=True)
 
     user_id: str
     email: str

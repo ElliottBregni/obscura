@@ -15,7 +15,6 @@ Usage:
 
 import asyncio
 import httpx
-import json
 
 BASE_URL = "http://localhost:8080"
 

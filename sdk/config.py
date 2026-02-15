@@ -9,11 +9,11 @@ to this unified config.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, model_validator
 
 
-@dataclass
-class ObscuraConfig:
+class ObscuraConfig(BaseModel):
     """Unified configuration for the Obscura platform.
 
     Each subsystem reads its own section. Resolved from environment
@@ -40,9 +40,11 @@ class ObscuraConfig:
     # Backends
     default_backend: str = "copilot"
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def _set_jwks_uri(self) -> "ObscuraConfig":
         if not self.auth_jwks_uri:
             self.auth_jwks_uri = f"{self.auth_issuer.rstrip('/')}/.well-known/jwks.json"
+        return self
 
     @classmethod
     def from_env(cls) -> ObscuraConfig:

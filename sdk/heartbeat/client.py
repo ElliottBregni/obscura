@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Callable
+
+from pydantic import BaseModel
 
 import httpx
 
@@ -21,8 +22,7 @@ from sdk.heartbeat.types import Heartbeat, HealthStatus, SystemMetrics
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class HeartbeatClientConfig:
+class HeartbeatClientConfig(BaseModel):
     """Configuration for the heartbeat client."""
     agent_id: str
     monitor_url: str
@@ -34,12 +34,8 @@ class HeartbeatClientConfig:
     reconnect_delay: float = 1.0  # seconds between reconnection attempts
     collect_metrics: bool = True
     include_system_metrics: bool = True
-    tags: list[str] = None
+    tags: list[str] = []
     version: str = "0.1.0"
-    
-    def __post_init__(self):
-        if self.tags is None:
-            self.tags = []
 
 
 class AgentHeartbeatClient:

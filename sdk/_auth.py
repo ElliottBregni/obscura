@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass, field
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from sdk._types import Backend
 
@@ -19,18 +20,24 @@ from sdk._types import Backend
 # Auth configuration
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class AuthConfig:
+class AuthConfig(BaseModel):
     """Authentication credentials for one or both backends.
 
     Pass explicit values or leave as None to resolve from environment.
     """
+    model_config = ConfigDict(frozen=True)
+
     # Copilot
     github_token: str | None = None
     # Claude
     anthropic_api_key: str | None = None
     # Copilot BYOK (Bring Your Own Key)
     byok_provider: dict[str, Any] | None = None
+    # OpenAI-compatible (OpenAI, OpenRouter, Together, etc.)
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    # Local LLM (LM Studio, Ollama, etc.) — no key needed
+    localllm_base_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +46,9 @@ class AuthConfig:
 
 _COPILOT_ENV_VARS = ("COPILOT_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 _CLAUDE_ENV_VARS = ("ANTHROPIC_API_KEY",)
+_OPENAI_KEY_ENV_VARS = ("OPENAI_API_KEY",)
+_OPENAI_BASE_URL_ENV_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE")
+_LOCALLLM_BASE_URL_ENV_VARS = ("LOCALLLM_BASE_URL", "LM_STUDIO_URL", "OLLAMA_URL")
 
 
 def _resolve_github_token(explicit: str | None) -> str:
@@ -84,6 +94,47 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
     raise ValueError(
         "Claude auth requires ANTHROPIC_API_KEY env var."
     )
+
+
+def _resolve_openai_key(explicit: str | None) -> str:
+    """Resolve an OpenAI API key from explicit value or env var."""
+    if explicit:
+        return explicit
+
+    for var in _OPENAI_KEY_ENV_VARS:
+        key = os.environ.get(var)
+        if key:
+            return key
+
+    raise ValueError(
+        "OpenAI auth requires OPENAI_API_KEY env var."
+    )
+
+
+def _resolve_openai_base_url(explicit: str | None) -> str | None:
+    """Resolve an OpenAI base URL (optional — defaults to OpenAI's API)."""
+    if explicit:
+        return explicit
+
+    for var in _OPENAI_BASE_URL_ENV_VARS:
+        url = os.environ.get(var)
+        if url:
+            return url
+
+    return None  # defaults to https://api.openai.com/v1
+
+
+def _resolve_localllm_base_url(explicit: str | None) -> str:
+    """Resolve the local LLM base URL from explicit value or env var."""
+    if explicit:
+        return explicit
+
+    for var in _LOCALLLM_BASE_URL_ENV_VARS:
+        url = os.environ.get(var)
+        if url:
+            return url
+
+    return "http://localhost:1234/v1"  # LM Studio default
 
 
 class TokenRefresher:
@@ -172,5 +223,14 @@ def resolve_auth(
     if backend == Backend.CLAUDE:
         key = _resolve_anthropic_key(config.anthropic_api_key)
         return AuthConfig(anthropic_api_key=key)
+
+    if backend == Backend.OPENAI:
+        key = _resolve_openai_key(config.openai_api_key)
+        base_url = _resolve_openai_base_url(config.openai_base_url)
+        return AuthConfig(openai_api_key=key, openai_base_url=base_url)
+
+    if backend == Backend.LOCALLLM:
+        base_url = _resolve_localllm_base_url(config.localllm_base_url)
+        return AuthConfig(localllm_base_url=base_url)
 
     raise ValueError(f"Unknown backend: {backend}")

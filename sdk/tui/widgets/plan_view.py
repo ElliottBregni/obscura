@@ -177,7 +177,7 @@ class PlanView(Widget):
         self._container: Vertical | None = None
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="plan-view") as container:
+        with Vertical(classes="plan-view"):
             if self._plan:
                 yield Static(
                     self._plan.title,

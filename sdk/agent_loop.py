@@ -5,7 +5,7 @@ Drives the model in a loop: send prompt → stream response → detect tool
 calls → execute tools → feed results back → repeat until the model
 produces a final text response or *max_turns* is reached.
 
-Works with both Copilot and Claude backends.
+Works with all backends (Copilot, Claude, OpenAI, LocalLLM).
 
 Usage::
 

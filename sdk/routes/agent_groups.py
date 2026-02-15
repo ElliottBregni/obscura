@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from sdk.deps import audit, get_runtime
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -22,7 +22,7 @@ _agent_groups: dict[str, dict] = {}
 @router.post("/agent-groups")
 async def agent_group_create(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create an agent group."""
     group_id = str(uuid.uuid4())
@@ -44,7 +44,7 @@ async def agent_group_create(
 
 @router.get("/agent-groups")
 async def agent_group_list(
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agent groups."""
     groups = list(_agent_groups.values())
@@ -57,7 +57,7 @@ async def agent_group_list(
 @router.get("/agent-groups/{group_id}")
 async def agent_group_get(
     group_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific agent group."""
     group = _agent_groups.get(group_id)
@@ -69,7 +69,7 @@ async def agent_group_get(
 @router.delete("/agent-groups/{group_id}")
 async def agent_group_delete(
     group_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete an agent group."""
     if group_id not in _agent_groups:
@@ -86,7 +86,7 @@ async def agent_group_delete(
 async def agent_group_broadcast(
     group_id: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Broadcast a message to all agents in a group."""
     runtime = await get_runtime(user)
@@ -128,7 +128,7 @@ async def agent_send_message(
     from_agent: str,
     to_agent: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Send a message from one agent to another."""
     runtime = await get_runtime(user)
@@ -160,7 +160,7 @@ async def agent_send_message(
 async def agent_get_messages(
     agent_id: str,
     limit: int = 100,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get messages for an agent."""
     runtime = await get_runtime(user)

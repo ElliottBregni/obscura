@@ -20,7 +20,6 @@ from sdk._types import (
     Backend,
     ChunkKind,
     ContentBlock,
-    HookContext,
     HookPoint,
     Message,
     Role,
@@ -68,8 +67,7 @@ class CopilotBackend:
 
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
-        from copilot import CopilotClient  # type: ignore[import-untyped]
-
+        from copilot import CopilotClient
         client_opts: dict[str, Any] = {}
         if self._auth.github_token:
             client_opts["github_token"] = self._auth.github_token
@@ -364,7 +362,7 @@ def _make_handler(event_type: str, callback: Callable) -> Callable:
 # Lazy telemetry helpers
 # ---------------------------------------------------------------------------
 
-from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+from sdk.telemetry.traces import NoOpTracer
 
 
 def _get_backend_tracer() -> Any:
@@ -372,7 +370,7 @@ def _get_backend_tracer() -> Any:
         from sdk.telemetry.traces import get_tracer
         return get_tracer("obscura.copilot_backend")
     except Exception:
-        return _NoOpTracer()
+        return NoOpTracer()
 
 
 def _set_span_attr(span: Any, key: str, value: Any) -> None:

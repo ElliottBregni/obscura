@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from sdk._tools import ToolRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +24,8 @@ class Backend(enum.Enum):
     """Supported LLM backends."""
     COPILOT = "copilot"
     CLAUDE = "claude"
+    LOCALLLM = "localllm"
+    OPENAI = "openai"
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +49,7 @@ class ContentBlock:
     kind: str          # "text", "thinking", "tool_use", "tool_result"
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_input: dict[str, Any] = field(default_factory=lambda: {})
     tool_use_id: str = ""
     is_error: bool = False
 
@@ -143,9 +148,10 @@ class HookContext:
     """Context passed to hook callbacks."""
     hook: HookPoint
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_input: dict[str, Any] = field(default_factory=lambda: {})
     tool_output: Any = None
     message: Message | None = None
+    prompt: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +177,9 @@ class AgentContext:
     input_data: Any = None
     analysis: Any = None
     plan: Any = None
-    results: list[Any] = field(default_factory=list)
+    results: list[Any] = field(default_factory=lambda: [])
     response: Any = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
 
 
 # ---------------------------------------------------------------------------
@@ -196,9 +202,9 @@ class BackendProtocol(Protocol):
     async def delete_session(self, ref: SessionRef) -> None: ...
 
     def register_tool(self, spec: ToolSpec) -> None: ...
-    def register_hook(self, hook: HookPoint, callback: Callable) -> None: ...
+    def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None: ...
 
-    def get_tool_registry(self) -> Any: ...
+    def get_tool_registry(self) -> ToolRegistry: ...
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +229,7 @@ class ToolCallInfo:
     """Extracted tool call from a model response."""
     tool_use_id: str
     name: str
-    input: dict[str, Any] = field(default_factory=dict)
+    input: dict[str, Any] = field(default_factory=lambda: {})
     raw: Any = None
 
 
@@ -237,7 +243,7 @@ class AgentEvent:
     kind: AgentEventKind
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_input: dict[str, Any] = field(default_factory=lambda: {})
     tool_result: str = ""
     tool_use_id: str = ""
     is_error: bool = False

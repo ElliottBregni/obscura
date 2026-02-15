@@ -9,7 +9,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from sdk._types import Backend, SessionRef
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, require_any_role
 from sdk.deps import ClientFactory, audit
 from sdk.schemas import SendRequest, SendResponse, StreamRequest
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1", tags=["agent"])
 async def send(
     body: SendRequest,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> SendResponse:
     """Send a prompt and receive the full response."""
     factory: ClientFactory = request.app.state.client_factory
@@ -52,7 +52,7 @@ async def send(
 async def stream(
     body: StreamRequest,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> EventSourceResponse:
     """Send a prompt and receive an SSE event stream."""
 

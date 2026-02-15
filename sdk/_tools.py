@@ -8,7 +8,6 @@ JSON Schema inference from function type hints.
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import inspect
 from typing import Any, Callable

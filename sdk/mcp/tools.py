@@ -16,7 +16,6 @@ from sdk.mcp.types import (
     MCPError,
     MCPErrorCode,
     MCPTool,
-    MCPToolCall,
     MCPToolResult,
     ObscuraMCPToolContext,
 )

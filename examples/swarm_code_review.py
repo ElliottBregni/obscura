@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sdk.agents import AgentRuntime, AgentStatus
+from sdk.agents import AgentRuntime
 from sdk.auth.models import AuthenticatedUser
 from sdk.memory import MemoryStore
 

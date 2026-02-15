@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, require_any_role
 from sdk.deps import audit, authenticate_websocket
 
 router = APIRouter(prefix="/api/v1", tags=["heartbeat"])
@@ -33,7 +33,7 @@ async def _get_heartbeat_monitor(request: Request) -> Any:
 async def heartbeat_receive(
     body: dict,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Receive a heartbeat from an agent."""
     from sdk.heartbeat.types import Heartbeat, HealthStatus, SystemMetrics
@@ -73,7 +73,7 @@ async def heartbeat_receive(
 async def heartbeat_get_agent(
     agent_id: str,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get health status for a specific agent."""
     monitor = await _get_heartbeat_monitor(request)
@@ -96,7 +96,7 @@ async def heartbeat_get_agent(
 @router.get("/health")
 async def health_list_all(
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List health status for all agents."""
     monitor = await _get_heartbeat_monitor(request)

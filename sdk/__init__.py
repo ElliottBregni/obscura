@@ -1,5 +1,5 @@
 """
-sdk — Unified wrapper for GitHub Copilot SDK and Claude Agent SDK.
+sdk — Unified wrapper for Copilot, Claude, OpenAI, and LocalLLM backends.
 
 Public API::
 

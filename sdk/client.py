@@ -1,9 +1,9 @@
 """
-sdk.client — ObscuraClient: unified entry point for Copilot and Claude.
+sdk.client — ObscuraClient: unified entry point for all backends.
 
-Dispatches to the appropriate backend based on the ``backend`` parameter.
-Integrates with ``copilot_models`` for model alias resolution and safety
-guards.
+Dispatches to the appropriate backend (Copilot, Claude, OpenAI, LocalLLM)
+based on the ``backend`` parameter. Integrates with ``copilot_models`` for
+model alias resolution and safety guards.
 """
 
 from __future__ import annotations
@@ -12,12 +12,10 @@ import sys
 from typing import Any, AsyncIterator, Callable
 
 from sdk._auth import AuthConfig, resolve_auth
-from sdk._sessions import SessionStore
 from sdk._tools import ToolRegistry
 from sdk._types import (
     AgentEvent,
     Backend,
-    BackendProtocol,
     HookPoint,
     Message,
     SessionRef,
@@ -31,17 +29,22 @@ from sdk._types import (
 # ---------------------------------------------------------------------------
 
 class ObscuraClient:
-    """Unified SDK client that dispatches to Copilot or Claude.
+    """Unified SDK client that dispatches to any backend.
 
     Usage::
 
         async with ObscuraClient("copilot", model_alias="copilot_automation_safe") as client:
             response = await client.send("explain this code")
-            print(response.text)
 
         async with ObscuraClient("claude", model="claude-sonnet-4-5-20250929") as client:
             async for chunk in client.stream("count to 5"):
                 print(chunk.text, end="", flush=True)
+
+        async with ObscuraClient("openai", model="gpt-4o") as client:
+            response = await client.send("summarize this")
+
+        async with ObscuraClient("localllm") as client:
+            response = await client.send("hello from localhost")
     """
 
     def __init__(
@@ -249,7 +252,7 @@ class ObscuraClient:
 
     # -- Hooks ---------------------------------------------------------------
 
-    def on(self, hook: HookPoint, callback: Callable) -> None:
+    def on(self, hook: HookPoint, callback: Callable[..., Any]) -> None:
         """Register a hook callback."""
         self._backend.register_hook(hook, callback)
 
@@ -316,7 +319,7 @@ class ObscuraClient:
     ) -> Any:
         """Instantiate the appropriate backend."""
         if backend == Backend.COPILOT:
-            from sdk.copilot_backend import CopilotBackend
+            from sdk.backends.copilot import CopilotBackend
 
             return CopilotBackend(
                 auth=auth,
@@ -327,7 +330,7 @@ class ObscuraClient:
             )
 
         if backend == Backend.CLAUDE:
-            from sdk.claude_backend import ClaudeBackend
+            from sdk.backends.claude import ClaudeBackend
 
             return ClaudeBackend(
                 auth=auth,
@@ -338,6 +341,26 @@ class ObscuraClient:
                 cwd=cwd,
             )
 
+        if backend == Backend.LOCALLLM:
+            from sdk.backends.localllm import LocalLLMBackend
+
+            return LocalLLMBackend(
+                auth=auth,
+                model=model,
+                system_prompt=system_prompt,
+                mcp_servers=mcp_servers,
+            )
+
+        if backend == Backend.OPENAI:
+            from sdk.backends.openai_compat import OpenAIBackend
+
+            return OpenAIBackend(
+                auth=auth,
+                model=model,
+                system_prompt=system_prompt,
+                mcp_servers=mcp_servers,
+            )
+
         raise ValueError(f"Unknown backend: {backend}")
 
 
@@ -345,7 +368,7 @@ class ObscuraClient:
 # Lazy telemetry helpers (no-op when OTel is unavailable)
 # ---------------------------------------------------------------------------
 
-from sdk.telemetry.traces import _NoOpSpan, _NoOpTracer
+from sdk.telemetry.traces import NoOpTracer
 
 
 def _get_client_tracer() -> Any:
@@ -353,7 +376,7 @@ def _get_client_tracer() -> Any:
         from sdk.telemetry.traces import get_tracer
         return get_tracer("obscura.client")
     except Exception:
-        return _NoOpTracer()
+        return NoOpTracer()
 
 
 def _set_span_attr(span: Any, key: str, value: Any) -> None:

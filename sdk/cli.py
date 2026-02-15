@@ -5,6 +5,8 @@ Usage::
 
     obscura-sdk copilot -p "explain this code"
     obscura-sdk claude -p "summarize this file" --model claude-sonnet-4-5-20250929
+    obscura-sdk openai -p "summarize this" --model gpt-4o
+    obscura-sdk localllm -p "hello from localhost"
     cat file.py | obscura-sdk copilot --model-alias copilot_batch_diagrammer --automation-safe
     obscura-sdk claude --session abc123 -p "continue"
     obscura-sdk copilot --list-sessions
@@ -92,17 +94,23 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="obscura-sdk",
-        description="Unified CLI for Copilot and Claude SDK access.",
+        description="Unified CLI for Copilot, Claude, OpenAI, and LocalLLM backends.",
     )
 
     sub = p.add_subparsers(dest="command", help="Available commands")
 
-    # -- copilot / claude subcommands ------------------------------------
+    # -- backend subcommands ---------------------------------------------
     copilot_parser = sub.add_parser("copilot", help="Use Copilot backend")
     _add_agent_arguments(copilot_parser)
 
     claude_parser = sub.add_parser("claude", help="Use Claude backend")
     _add_agent_arguments(claude_parser)
+
+    openai_parser = sub.add_parser("openai", help="Use OpenAI backend (or compatible provider)")
+    _add_agent_arguments(openai_parser)
+
+    localllm_parser = sub.add_parser("localllm", help="Use local LLM backend (LM Studio, Ollama, etc.)")
+    _add_agent_arguments(localllm_parser)
 
     # -- serve subcommand ------------------------------------------------
     serve_parser = sub.add_parser("serve", help="Start the HTTP API server")
@@ -134,7 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
     tui_parser.add_argument(
         "--backend",
         default="copilot",
-        choices=["claude", "copilot"],
+        choices=["copilot", "claude", "openai", "localllm"],
         help="Backend to use (default: copilot).",
     )
     tui_parser.add_argument(
@@ -166,8 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
 # Async runner (agent commands)
 # ---------------------------------------------------------------------------
 
+_AGENT_COMMANDS: frozenset[str] = frozenset({"copilot", "claude", "openai", "localllm"})
+
+
 async def _run(args: argparse.Namespace) -> int:
-    backend = args.command  # "copilot" or "claude"
+    backend: str = args.command  # "copilot", "claude", "openai", or "localllm"
 
     # Initialize telemetry if available (CLI mode — text logging, no auth user)
     _init_cli_telemetry()
@@ -316,8 +327,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "tui":
         return _run_tui(args)
 
-    # copilot / claude
-    return asyncio.run(_run(args))
+    if args.command in _AGENT_COMMANDS:
+        return asyncio.run(_run(args))
+
+    parser.print_help()
+    return 1
 
 
 if __name__ == "__main__":

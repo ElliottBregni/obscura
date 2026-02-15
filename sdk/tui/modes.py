@@ -98,7 +98,7 @@ class Plan:
         steps: list[PlanStep] = []
 
         # Try to extract a title from the first non-numbered line
-        for i, line in enumerate(lines):
+        for _i, line in enumerate(lines):
             stripped = line.strip()
             if not stripped:
                 continue

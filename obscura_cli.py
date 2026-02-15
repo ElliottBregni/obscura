@@ -18,12 +18,9 @@ Environment:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
-from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 import click
@@ -32,8 +29,6 @@ from rich.console import Console
 from rich.json import JSON as RichJSON
 from rich.table import Table
 from rich.panel import Panel
-from rich.live import Live
-from rich.spinner import Spinner
 
 # Default configuration
 DEFAULT_URL = os.environ.get("OBSCURA_URL", "http://localhost:8080")

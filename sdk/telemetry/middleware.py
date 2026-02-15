@@ -59,7 +59,7 @@ if _HAS_STARLETTE:
 
 else:
 
-    class ObscuraTelemetryMiddleware:  # type: ignore[no-redef]
+    class ObscuraTelemetryMiddleware:  # pyright: ignore[reportRedeclaration]
         """Stub middleware when Starlette is not installed."""
 
         def __init__(self, app: Any) -> None:

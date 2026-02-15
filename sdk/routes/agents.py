@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from sdk.deps import audit, get_runtime
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -26,11 +26,11 @@ _agent_templates: dict[str, dict] = {}
 @router.post("/agents")
 async def agent_spawn(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn a new agent."""
     model = body.get("model", "copilot")
-    valid_models = ("copilot", "claude")
+    valid_models = ("copilot", "claude", "localllm", "openai")
     if model not in valid_models:
         raise HTTPException(status_code=400, detail=f"Invalid model '{model}'. Must be one of: {valid_models}")
 
@@ -67,7 +67,7 @@ async def agent_spawn(
 @router.get("/agents/{agent_id}")
 async def agent_get(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get agent status and details."""
     runtime = await get_runtime(user)
@@ -91,7 +91,7 @@ async def agent_get(
 async def agent_run(
     agent_id: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Run a task on an existing agent."""
     runtime = await get_runtime(user)
@@ -117,7 +117,7 @@ async def agent_run(
 @router.delete("/agents/{agent_id}")
 async def agent_stop(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Stop and cleanup an agent."""
     runtime = await get_runtime(user)
@@ -140,7 +140,7 @@ async def agent_list(
     status: str | None = None,
     tags: str | None = None,
     name: str | None = None,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agents for the user."""
     from sdk.agents import AgentStatus
@@ -191,7 +191,7 @@ async def agent_list(
 @router.post("/agents/bulk")
 async def agents_bulk_spawn(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn multiple agents in one request."""
     runtime = await get_runtime(user)
@@ -237,7 +237,7 @@ async def agents_bulk_spawn(
 @router.post("/agents/bulk/stop")
 async def agents_bulk_stop(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Stop multiple agents in one request."""
     runtime = await get_runtime(user)
@@ -272,7 +272,7 @@ async def agents_bulk_stop(
 @router.post("/agents/bulk/tag")
 async def agents_bulk_tag(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Add tags to multiple agents."""
     runtime = await get_runtime(user)
@@ -313,7 +313,7 @@ async def agents_bulk_tag(
 @router.post("/agent-templates")
 async def template_create(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create an agent template."""
     template_id = str(uuid.uuid4())
@@ -340,7 +340,7 @@ async def template_create(
 
 @router.get("/agent-templates")
 async def template_list(
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agent templates."""
     templates = list(_agent_templates.values())
@@ -353,7 +353,7 @@ async def template_list(
 @router.get("/agent-templates/{template_id}")
 async def template_get(
     template_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific agent template."""
     template = _agent_templates.get(template_id)
@@ -365,7 +365,7 @@ async def template_get(
 @router.delete("/agent-templates/{template_id}")
 async def template_delete(
     template_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete an agent template."""
     if template_id not in _agent_templates:
@@ -381,7 +381,7 @@ async def template_delete(
 @router.post("/agents/from-template")
 async def agent_spawn_from_template(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn an agent from a template."""
     runtime = await get_runtime(user)
@@ -424,7 +424,7 @@ async def agent_spawn_from_template(
 async def agent_add_tags(
     agent_id: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Add tags to an agent."""
     runtime = await get_runtime(user)
@@ -455,7 +455,7 @@ async def agent_add_tags(
 async def agent_remove_tags(
     agent_id: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Remove tags from an agent."""
     runtime = await get_runtime(user)
@@ -485,7 +485,7 @@ async def agent_remove_tags(
 @router.get("/agents/{agent_id}/tags")
 async def agent_get_tags(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get tags for an agent."""
     runtime = await get_runtime(user)
@@ -509,7 +509,7 @@ async def agent_get_tags(
 async def agent_stream(
     agent_id: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> EventSourceResponse:
     """Stream an agent's response as SSE events."""
     runtime = await get_runtime(user)

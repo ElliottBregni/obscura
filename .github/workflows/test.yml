@@ -36,9 +36,9 @@ jobs:
           python -c "import click; print('✓ click imports work')"
           python -c "import fastapi; print('✓ fastapi imports work')"
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         run: |
-          pytest tests/ -v --tb=short -m "not e2e" --ignore=tests/e2e/
+          pytest tests/ -v --tb=short -m "not e2e" --ignore=tests/e2e/ --cov=sdk --cov-report=term-missing --cov-fail-under=85
 
       - name: Run E2E tests
         run: |

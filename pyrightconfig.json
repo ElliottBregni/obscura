@@ -1,0 +1,22 @@
+{
+  "include": ["."],
+  "exclude": ["**/__pycache__", "**/node_modules", "**/.venv", "**/web-ui"],
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "reportMissingTypeStubs": true,
+  "reportUnknownParameterType": true,
+  "reportUnknownMemberType": true,
+  "reportUnknownVariableType": true,
+  "reportUnknownArgumentType": true,
+  "reportUntypedFunctionDecorator": true,
+  "reportUntypedClassDecorator": true,
+  "reportUntypedBaseClass": true,
+  "reportUntypedNamedTuple": true,
+  "reportPrivateUsage": true,
+  "reportImplicitOverride": true,
+  "reportUnusedImport": "error",
+  "reportUnusedVariable": "error",
+  "reportUnnecessaryTypeIgnoreComment": "warning",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "warning"
+}

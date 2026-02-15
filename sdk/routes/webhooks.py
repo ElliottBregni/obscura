@@ -8,12 +8,13 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from sdk.deps import audit
 
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
@@ -25,7 +26,7 @@ _webhooks: dict[str, dict] = {}
 @router.post("/webhooks")
 async def webhook_create(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create a webhook for events."""
     webhook_id = str(uuid.uuid4())
@@ -58,7 +59,7 @@ async def webhook_create(
 
 @router.get("/webhooks")
 async def webhook_list(
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all webhooks."""
     webhooks = [
@@ -74,7 +75,7 @@ async def webhook_list(
 @router.get("/webhooks/{webhook_id}")
 async def webhook_get(
     webhook_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific webhook."""
     webhook = _webhooks.get(webhook_id)
@@ -89,7 +90,7 @@ async def webhook_get(
 @router.delete("/webhooks/{webhook_id}")
 async def webhook_delete(
     webhook_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete a webhook."""
     if webhook_id not in _webhooks:
@@ -105,7 +106,7 @@ async def webhook_delete(
 @router.post("/webhooks/{webhook_id}/test")
 async def webhook_test(
     webhook_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Send a test event to a webhook."""
     import httpx
@@ -155,7 +156,7 @@ async def webhook_test(
 # -- webhook delivery (called from deps.audit) ----------------------------
 
 
-async def trigger_webhooks(event_type: str, data: dict) -> None:
+async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
     """Trigger all webhooks subscribed to an event."""
     import httpx
 

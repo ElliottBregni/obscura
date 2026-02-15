@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Optional, Callable
 
 from sdk.heartbeat.types import (
@@ -17,9 +17,8 @@ from sdk.heartbeat.types import (
     HealthRecord,
     HealthStatus,
     HealthStatusTransition,
-    SystemMetrics,
 )
-from sdk.heartbeat.store import HeartbeatStore, InMemoryHeartbeatStore, get_default_store
+from sdk.heartbeat.store import HeartbeatStore, get_default_store
 from sdk.heartbeat.alerts import AlertManager, get_default_alert_manager
 
 logger = logging.getLogger(__name__)

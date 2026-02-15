@@ -7,7 +7,6 @@ used by the heartbeat monitoring infrastructure.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum

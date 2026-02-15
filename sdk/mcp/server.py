@@ -22,28 +22,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
-from sdk.agents import AgentConfig, AgentRuntime, AgentStatus
+from sdk.agents import AgentConfig, AgentRuntime
 from sdk.auth.models import AuthenticatedUser
 from sdk.memory import MemoryStore
 from sdk.mcp.tools import (
-    ObscuraMCPToolRegistry,
     create_array_property,
     create_boolean_property,
     create_string_property,
     get_obscura_mcp_registry,
-    obscura_result_to_mcp,
 )
 from sdk.mcp.types import (
-    MCPClientCapabilities,
-    MCPConnectionConfig,
-    MCPCapabilities,
     MCPError,
     MCPErrorCode,
-    MCPImplementation,
-    MCPL loggingMessage,
     MCPPrompt,
     MCPPromptMessage,
     MCPPromptResult,
@@ -695,7 +687,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
     Returns:
         FastAPI router with MCP endpoints
     """
-    from fastapi import APIRouter, HTTPException, Request
+    from fastapi import APIRouter, Request
     from sse_starlette.sse import EventSourceResponse
     
     router = APIRouter(prefix="/mcp", tags=["MCP"])

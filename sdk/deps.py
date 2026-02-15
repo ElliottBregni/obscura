@@ -8,9 +8,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import Request, WebSocket
-
-from sdk._types import Backend, SessionRef
+from fastapi import WebSocket
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.config import ObscuraConfig
@@ -73,7 +71,7 @@ async def get_runtime(user: AuthenticatedUser) -> Any:
 # ---------------------------------------------------------------------------
 
 # In-memory audit log storage (used by admin routes)
-audit_logs: list[dict] = []
+audit_logs: list[dict[str, Any]] = []
 MAX_AUDIT_LOGS = 10000
 
 
@@ -158,10 +156,11 @@ async def authenticate_websocket(
     config: ObscuraConfig | None = getattr(websocket.app.state, "config", None)
 
     if config is None or not config.auth_enabled:
+        from sdk.auth.rbac import AGENT_READ_ROLES
         return AuthenticatedUser(
             user_id="local-dev",
             email="dev@obscura.dev",
-            roles=("agent:copilot", "agent:claude", "agent:read"),
+            roles=AGENT_READ_ROLES,
             org_id="local",
             token_type="user",
             raw_token=token,
@@ -172,7 +171,7 @@ async def authenticate_websocket(
         jwks: JWKSCache = websocket.app.state.jwks_cache
         payload = pyjwt.decode(
             token,
-            jwks.keys,
+            jwks.keys,  # type: ignore[arg-type]  # JWKS keys list accepted at runtime
             algorithms=["RS256"],
             audience=config.auth_audience,
             issuer=config.auth_issuer,

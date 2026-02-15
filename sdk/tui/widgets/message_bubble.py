@@ -63,7 +63,7 @@ class MessageBubble(Widget):
     # -- Compose ------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Vertical() as container:
+        with Vertical():
             # Role label
             role_display = "You" if self._role == "user" else "Assistant"
             yield Static(

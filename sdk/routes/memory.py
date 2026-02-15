@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from sdk.deps import audit
 
 router = APIRouter(prefix="/api/v1", tags=["memory"])
@@ -24,7 +24,7 @@ _memory_namespaces: dict[str, dict] = {}
 @router.get("/memory")
 async def memory_list(
     namespace: str | None = None,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all memory keys for the user."""
     from sdk.memory import MemoryStore
@@ -39,7 +39,7 @@ async def memory_list(
 @router.get("/memory/search")
 async def memory_search(
     q: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Search memory keys and values."""
     from sdk.memory import MemoryStore
@@ -53,7 +53,7 @@ async def memory_search(
 
 @router.get("/memory/stats")
 async def memory_stats(
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get memory usage statistics."""
     from sdk.memory import MemoryStore
@@ -67,7 +67,7 @@ async def memory_stats(
 
 @router.get("/memory/namespaces")
 async def memory_namespace_list(
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all memory namespaces."""
     from sdk.memory import MemoryStore
@@ -88,7 +88,7 @@ async def memory_namespace_list(
 @router.post("/memory/namespaces")
 async def memory_namespace_create(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create a new memory namespace with configuration."""
     namespace_id = body.get("name", str(uuid.uuid4()))
@@ -112,7 +112,7 @@ async def memory_namespace_create(
 async def memory_namespace_delete(
     namespace: str,
     delete_data: bool = False,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete a memory namespace. Optionally delete all data in it."""
     from sdk.memory import MemoryStore
@@ -141,7 +141,7 @@ async def memory_namespace_delete(
 @router.get("/memory/namespaces/{namespace}/stats")
 async def memory_namespace_stats(
     namespace: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get statistics for a specific namespace."""
     from sdk.memory import MemoryStore
@@ -167,7 +167,7 @@ async def memory_namespace_stats(
 @router.post("/memory/transaction")
 async def memory_transaction(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Execute multiple memory operations atomically."""
     from sdk.memory import MemoryStore
@@ -215,7 +215,7 @@ async def memory_transaction(
 @router.get("/memory/export")
 async def memory_export(
     namespace: str | None = None,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Export memory data as JSON."""
     from sdk.memory import MemoryStore
@@ -244,7 +244,7 @@ async def memory_export(
 async def memory_import(
     body: dict,
     overwrite: bool = True,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Import memory data from JSON."""
     from sdk.memory import MemoryStore
@@ -289,7 +289,7 @@ async def memory_import(
 async def memory_get(
     namespace: str,
     key: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a value from the user's memory store."""
     from sdk.memory import MemoryStore
@@ -306,7 +306,7 @@ async def memory_set(
     key: str,
     body: dict,
     ttl: int | None = None,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Store a value in the user's memory store."""
     from sdk.memory import MemoryStore
@@ -322,7 +322,7 @@ async def memory_set(
 async def memory_delete(
     namespace: str,
     key: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Delete a key from the user's memory store."""
     from sdk.memory import MemoryStore

@@ -11,7 +11,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
 

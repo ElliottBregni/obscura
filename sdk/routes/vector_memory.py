@@ -2,34 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, require_any_role
 from sdk.deps import audit
 
 router = APIRouter(prefix="/api/v1", tags=["vector-memory"])
 
 
-@router.post("/vector-memory/{namespace}/{key}")
-async def vector_memory_set(
-    namespace: str,
-    key: str,
-    body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
-) -> JSONResponse:
-    """Store text with semantic embedding for vector search."""
-    from sdk.vector_memory import VectorMemoryStore
-    store = VectorMemoryStore.for_user(user)
-    text = body.get("text", "")
-    metadata = body.get("metadata", {})
-    memory_type = body.get("memory_type", "general")
-    store.set(key, text, metadata=metadata, namespace=namespace, memory_type=memory_type)
-    audit("vector_memory.set", user, f"vector:{namespace}:{key}", "write", "success")
-    return JSONResponse(content={"namespace": namespace, "key": key, "stored": True, "type": "vector"})
+# NOTE: Specific routes MUST be registered before the catch-all
+# ``{namespace}/{key}`` pattern, otherwise FastAPI matches the generic
+# pattern first (e.g. namespace="search", key="routed").
 
 
 @router.get("/vector-memory/search")
@@ -43,7 +30,7 @@ async def vector_memory_search(
     first_stage_k: int = 50,
     date_from: str | None = None,
     date_to: str | None = None,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Semantic search over vector memories with optional reranking."""
     from datetime import datetime as dt
@@ -100,7 +87,7 @@ async def vector_memory_search(
 @router.post("/vector-memory/search/routed")
 async def vector_memory_search_routed(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Multi-query search with memory type routing and weighted merging."""
     from sdk.vector_memory import VectorMemoryStore
@@ -143,3 +130,22 @@ async def vector_memory_search_routed(
         "sources": result.sources,
         "count": len(result.entries),
     })
+
+
+# Catch-all route — MUST be last to avoid shadowing specific routes above.
+@router.post("/vector-memory/{namespace}/{key}")
+async def vector_memory_set(
+    namespace: str,
+    key: str,
+    body: dict,
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+) -> JSONResponse:
+    """Store text with semantic embedding for vector search."""
+    from sdk.vector_memory import VectorMemoryStore
+    store = VectorMemoryStore.for_user(user)
+    text = body.get("text", "")
+    metadata = body.get("metadata", {})
+    memory_type = body.get("memory_type", "general")
+    store.set(key, text, metadata=metadata, namespace=namespace, memory_type=memory_type)
+    audit("vector_memory.set", user, f"vector:{namespace}:{key}", "write", "success")
+    return JSONResponse(content={"namespace": namespace, "key": key, "stored": True, "type": "vector"})

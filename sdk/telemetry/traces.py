@@ -30,7 +30,7 @@ def get_tracer(name: str) -> Any:
         from opentelemetry import trace
         return trace.get_tracer(name)
     except ImportError:
-        return _NoOpTracer()
+        return NoOpTracer()
 
 
 def set_span_attribute(key: str, value: Any) -> None:
@@ -133,7 +133,7 @@ def traced(
 # No-op fallbacks
 # ---------------------------------------------------------------------------
 
-class _NoOpSpan:
+class NoOpSpan:
     """Minimal no-op span for when OTel is unavailable."""
 
     def set_attribute(self, key: str, value: Any) -> None:
@@ -148,18 +148,18 @@ class _NoOpSpan:
     def is_recording(self) -> bool:
         return False
 
-    def __enter__(self) -> _NoOpSpan:
+    def __enter__(self) -> NoOpSpan:
         return self
 
     def __exit__(self, *exc: Any) -> None:
         pass
 
 
-class _NoOpTracer:
+class NoOpTracer:
     """Minimal no-op tracer for when OTel is unavailable."""
 
-    def start_as_current_span(self, name: str, **kwargs: Any) -> _NoOpSpan:
-        return _NoOpSpan()
+    def start_as_current_span(self, name: str, **kwargs: Any) -> NoOpSpan:
+        return NoOpSpan()
 
-    def start_span(self, name: str, **kwargs: Any) -> _NoOpSpan:
-        return _NoOpSpan()
+    def start_span(self, name: str, **kwargs: Any) -> NoOpSpan:
+        return NoOpSpan()

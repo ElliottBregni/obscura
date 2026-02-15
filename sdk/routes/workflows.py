@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import require_any_role
+from sdk.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from sdk.deps import audit, get_runtime
 from sdk.routes.agents import _agent_templates
 
@@ -23,7 +23,7 @@ _workflow_executions: dict[str, dict] = {}
 @router.post("/workflows")
 async def workflow_create(
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Create a workflow with steps."""
     workflow_id = str(uuid.uuid4())
@@ -46,7 +46,7 @@ async def workflow_create(
 
 @router.get("/workflows")
 async def workflow_list(
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all workflows."""
     workflows = list(_workflows.values())
@@ -59,7 +59,7 @@ async def workflow_list(
 @router.get("/workflows/{workflow_id}")
 async def workflow_get(
     workflow_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific workflow."""
     workflow = _workflows.get(workflow_id)
@@ -71,7 +71,7 @@ async def workflow_get(
 @router.delete("/workflows/{workflow_id}")
 async def workflow_delete(
     workflow_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete a workflow."""
     if workflow_id not in _workflows:
@@ -88,7 +88,7 @@ async def workflow_delete(
 async def workflow_execute(
     workflow_id: str,
     body: dict,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Execute a workflow with inputs."""
     runtime = await get_runtime(user)
@@ -173,7 +173,7 @@ async def workflow_execute(
 @router.get("/workflows/{workflow_id}/executions")
 async def workflow_list_executions(
     workflow_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List executions for a workflow."""
     if workflow_id not in _workflows:
@@ -194,7 +194,7 @@ async def workflow_list_executions(
 @router.get("/workflows/executions/{execution_id}")
 async def workflow_get_execution(
     execution_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("agent:copilot", "agent:claude", "agent:read")),
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific execution."""
     execution = _workflow_executions.get(execution_id)

@@ -31,17 +31,18 @@ import asyncio
 import logging
 import os
 import uuid
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, AsyncIterator, Callable, Coroutine, Optional
+from typing import Any, AsyncIterator
+
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-from sdk._types import AgentEvent, AgentEventKind, Backend, Message, Role
+from sdk._types import AgentEvent, AgentEventKind
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
-from sdk.memory import MemoryKey, MemoryStore
+from sdk.memory import MemoryStore
 
 
 class AgentStatus(Enum):
@@ -54,11 +55,10 @@ class AgentStatus(Enum):
     STOPPED = auto()      # Manually stopped
 
 
-@dataclass
-class MCPConfig:
+class MCPConfig(BaseModel):
     """Configuration for MCP (Model Context Protocol) integration."""
     enabled: bool = False
-    servers: list[dict[str, Any]] = field(default_factory=list)
+    servers: list[dict[str, Any]] = []
     """List of MCP server configurations. Each server config should have:
     - transport: "stdio" or "sse"
     - command: str (for stdio)
@@ -68,23 +68,21 @@ class MCPConfig:
     """
 
 
-@dataclass
-class AgentConfig:
+class AgentConfig(BaseModel):
     """Configuration for an agent instance."""
     name: str
-    model: str  # "copilot" or "claude"
+    model: str  # "copilot", "claude", "localllm", or "openai"
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
     timeout_seconds: float = 300.0
-    tools: list[str] = field(default_factory=list)
+    tools: list[str] = []
     parent_agent_id: str | None = None
-    tags: list[str] = field(default_factory=list)
-    mcp: MCPConfig = field(default_factory=MCPConfig)
+    tags: list[str] = []
+    mcp: MCPConfig = MCPConfig()
 
 
-@dataclass
-class AgentState:
+class AgentState(BaseModel):
     """Serializable state of an agent."""
     agent_id: str
     name: str
@@ -92,17 +90,16 @@ class AgentState:
     created_at: datetime
     updated_at: datetime
     iteration_count: int = 0
-    memory_snapshot: dict[str, Any] = field(default_factory=dict)
+    memory_snapshot: dict[str, Any] = {}
     error_message: str | None = None
 
 
-@dataclass
-class AgentMessage:
+class AgentMessage(BaseModel):
     """Message passed between agents or from user to agent."""
     source: str  # agent_id or "user" or "system"
     target: str  # agent_id or "broadcast"
     content: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     message_type: str = "text"  # "text", "command", "result", "error"
 
 

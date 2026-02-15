@@ -9,6 +9,8 @@ Roles
 - ``admin``           -- full access, bypasses all role checks
 - ``agent:copilot``   -- may invoke the Copilot backend
 - ``agent:claude``    -- may invoke the Claude backend
+- ``agent:localllm``  -- may invoke the LocalLLM backend
+- ``agent:openai``    -- may invoke the OpenAI backend
 - ``agent:read``      -- read-only agent access (send / stream)
 - ``sync:write``      -- trigger vault sync
 - ``sessions:manage`` -- create / delete sessions
@@ -23,11 +25,22 @@ from fastapi import Depends, HTTPException, Request
 
 from sdk.auth.models import AuthenticatedUser
 
+# ---------------------------------------------------------------------------
+# Role constants — use these in route ``Depends()`` calls to keep role
+# lists in sync when new backends are added.
+# ---------------------------------------------------------------------------
+
+AGENT_WRITE_ROLES = ("agent:copilot", "agent:claude", "agent:localllm", "agent:openai")
+"""Roles that may spawn, run, stop, or mutate agents."""
+
+AGENT_READ_ROLES = (*AGENT_WRITE_ROLES, "agent:read")
+"""Roles that may send prompts or read agent state."""
+
 # Mock user for when auth is disabled
 _MOCK_USER = AuthenticatedUser(
     user_id="anonymous",
     email="anonymous@obscura.local",
-    roles=("admin", "agent:copilot", "agent:claude", "agent:read", "sync:write", "sessions:manage"),
+    roles=("admin", *AGENT_WRITE_ROLES, "agent:read", "sync:write", "sessions:manage"),
     org_id="local",
     token_type="anonymous",
     raw_token="",
@@ -47,7 +60,7 @@ def _load_api_keys():
             "obscura-dev-key-123": {
                 "user_id": "dev-user",
                 "email": "dev@obscura.local",
-                "roles": ["admin", "agent:copilot", "agent:claude", "agent:read", "sync:write", "sessions:manage"]
+                "roles": ["admin", *AGENT_WRITE_ROLES, "agent:read", "sync:write", "sessions:manage"]
             }
         }
         return

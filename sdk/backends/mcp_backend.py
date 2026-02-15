@@ -27,25 +27,24 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import json
+import inspect
 import logging
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+
+if TYPE_CHECKING:
+    from sdk._tools import ToolRegistry
 
 from sdk._types import (
-    Backend,
-    ChunkKind,
-    ContentBlock,
     HookContext,
     HookPoint,
     Message,
-    Role,
     SessionRef,
     StreamChunk,
     ToolSpec,
 )
-from sdk.mcp.client import MCPClient, MCPSessionManager
+from sdk.mcp.client import MCPSessionManager
 from sdk.mcp.tools import mcp_result_to_obscura
-from sdk.mcp.types import MCPConnectionConfig, MCPError, MCPToolResult
+from sdk.mcp.types import MCPConnectionConfig, MCPError
 
 logger = logging.getLogger(__name__)
 
@@ -53,21 +52,24 @@ logger = logging.getLogger(__name__)
 class MCPBackend:
     """
     BackendProtocol implementation that uses MCP servers for tools.
-    
+
     This backend doesn't have its own LLM - it expects to be used
     as a tool provider for other backends, or for direct tool calls.
     """
-    
+
     def __init__(
         self,
         mcp_servers: list[MCPConnectionConfig] | None = None,
         name: str = "mcp",
     ):
+        from sdk._tools import ToolRegistry
+
         self.name = name
         self.mcp_servers = mcp_servers or []
         self._session_manager = MCPSessionManager()
         self._tools: list[ToolSpec] = []
-        self._hooks: dict[HookPoint, list[callable]] = {hp: [] for hp in HookPoint}
+        self._tool_registry = ToolRegistry()
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
         self._initialized = False
     
     # -- Lifecycle -----------------------------------------------------------
@@ -101,14 +103,18 @@ class MCPBackend:
     
     async def _refresh_tools(self) -> None:
         """Refresh the list of available tools from all servers."""
+        from sdk._tools import ToolRegistry
+
         self._tools = []
-        
+        self._tool_registry = ToolRegistry()
+
         mcp_tools = await self._session_manager.aggregate_tools()
-        
+
         for mcp_tool in mcp_tools:
             tool_spec = self._mcp_tool_to_obscura(mcp_tool)
             self._tools.append(tool_spec)
-        
+            self._tool_registry.register(tool_spec)
+
         logger.info(f"Loaded {len(self._tools)} tools from MCP servers")
     
     def _mcp_tool_to_obscura(self, mcp_tool: Any) -> ToolSpec:
@@ -196,12 +202,17 @@ class MCPBackend:
     def register_tool(self, spec: ToolSpec) -> None:
         """
         Register a tool.
-        
+
         Note: Tools are automatically loaded from MCP servers.
         Manually registered tools will be added to the list.
         """
         self._tools.append(spec)
+        self._tool_registry.register(spec)
         logger.debug(f"Registered tool: {spec.name}")
+
+    def get_tool_registry(self) -> ToolRegistry:
+        """Return the tool registry."""
+        return self._tool_registry
     
     def list_tools(self) -> list[ToolSpec]:
         """List all available tools from MCP servers."""
@@ -246,7 +257,7 @@ class MCPBackend:
     
     # -- Hooks ---------------------------------------------------------------
     
-    def register_hook(self, hook: HookPoint, callback: callable) -> None:
+    def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None:
         """Register a hook callback."""
         if hook not in self._hooks:
             self._hooks[hook] = []
@@ -257,7 +268,7 @@ class MCPBackend:
         callbacks = self._hooks.get(context.hook, [])
         for callback in callbacks:
             try:
-                if asyncio.iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     await callback(context)
                 else:
                     callback(context)
@@ -307,7 +318,7 @@ class MCPBackend:
         Returns:
             Health status for each server
         """
-        health = {}
+        health: dict[str, dict[str, str]] = {}
         
         for name in self._session_manager.list_sessions():
             client = self._session_manager.get_session(name)
@@ -328,37 +339,41 @@ class MCPBackend:
 class MCPBackendMixin:
     """
     Mixin to add MCP capabilities to any backend.
-    
+
     This allows existing backends (Copilot, Claude) to use MCP tools
     alongside their native capabilities.
-    
+
     Usage::
-    
+
         class CopilotWithMCP(CopilotBackend, MCPBackendMixin):
             def __init__(self, *args, mcp_servers=None, **kwargs):
                 super().__init__(*args, **kwargs)
                 MCPBackendMixin.__init__(self, mcp_servers)
     """
-    
-    def __init__(self, mcp_servers: list[MCPConnectionConfig] | None = None):
+
+    def __init__(self, mcp_servers: list[MCPConnectionConfig] | None = None) -> None:
         self._mcp_backend = MCPBackend(mcp_servers or [])
         self._mcp_tools_added = False
-    
+
+    def _parent_register_tool(self, spec: ToolSpec) -> None:
+        """Call register_tool on the next class in MRO (the concrete backend)."""
+        # super() resolves at runtime via MRO to the concrete backend's register_tool.
+        # We wrap it here so pyright can see the typed signature.
+        super().register_tool(spec)  # type: ignore[misc]
+
     async def start(self) -> None:
         """Start the backend and MCP tools."""
-        # Start MCP backend
         await self._mcp_backend.start()
-        
-        # Register MCP tools with the parent backend
+
         if not self._mcp_tools_added:
             for tool in self._mcp_backend.list_tools():
-                super().register_tool(tool)
+                self._parent_register_tool(tool)
             self._mcp_tools_added = True
-    
+
     async def stop(self) -> None:
         """Stop the backend and MCP tools."""
         await self._mcp_backend.stop()
-    
+
     def register_mcp_tool(self, tool_spec: ToolSpec) -> None:
         """Register a tool from MCP backend."""
-        super().register_tool(tool_spec)
+        self._parent_register_tool(tool_spec)

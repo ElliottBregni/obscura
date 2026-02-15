@@ -28,7 +28,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import urllib.parse
 import urllib.request
 
 from dataclasses import dataclass, field

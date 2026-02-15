@@ -26,8 +26,7 @@ import asyncio
 import json
 import logging
 import subprocess
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
 import httpx
 
@@ -35,13 +34,11 @@ from sdk.mcp.types import (
     MCPConnectionConfig,
     MCPError,
     MCPErrorCode,
-    MCPLoggingMessage,
     MCPPrompt,
     MCPPromptResult,
     MCPResource,
     MCPResourceContent,
     MCPTool,
-    MCPToolCall,
     MCPToolResult,
     MCPTransportType,
 )
