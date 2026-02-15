@@ -136,4 +136,3 @@ class TestToolDecorator:
         assert "path" in read.spec.parameters["properties"]
 
 
-# pyright: ignore-all

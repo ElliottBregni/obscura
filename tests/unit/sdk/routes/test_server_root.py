@@ -4,7 +4,6 @@ Tests for sdk.server — FastAPI HTTP API integration tests.
 Uses FastAPI TestClient with mocked backends to verify all 8 routes,
 auth gating, and request/response schemas.
 """
-# pyright: ignore-all
 
 from __future__ import annotations
 
@@ -91,6 +90,7 @@ class TestSendEndpoint:
             role=Role.ASSISTANT,
             content=[ContentBlock(kind="text", text="Hello!")],
         )
+        mock_client.capability_tier = "B"
         mock_create.return_value = mock_client
 
         app = _make_app()

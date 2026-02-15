@@ -71,7 +71,7 @@ _TYPE_MAP: dict[type[Any], str] = {
 }
 
 
-def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
+def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """Basic JSON Schema inference from function type hints.
 
     Handles simple types (str, int, float, bool). For anything more complex,
@@ -139,7 +139,7 @@ def tool(
         if schema is None and pydantic_model is not None:
             schema = pydantic_model.model_json_schema()
         elif schema is None:
-            schema = _infer_schema_from_hints(fn)
+            schema = infer_schema_from_hints(fn)
 
         spec = ToolSpec(
             name=name,

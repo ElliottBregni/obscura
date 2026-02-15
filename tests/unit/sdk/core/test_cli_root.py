@@ -568,4 +568,3 @@ class TestCLIOptions:
                 assert call_args[1].get("token") == "custom-token"
 
 
-# pyright: ignore-all

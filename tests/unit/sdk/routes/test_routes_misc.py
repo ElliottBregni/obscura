@@ -192,6 +192,7 @@ class TestSendRoutes:
         mock_client = AsyncMock()
         mock_client.send.return_value = MagicMock(text="hello")
         mock_client.stop = AsyncMock()
+        mock_client.capability_tier = "B"
         mock_factory = AsyncMock()
         mock_factory.create.return_value = mock_client
         app.state.client_factory = mock_factory

@@ -90,4 +90,3 @@ class TestSimpleHandler:
         client.send.assert_called_once_with("42")
 
 
-# pyright: ignore-all

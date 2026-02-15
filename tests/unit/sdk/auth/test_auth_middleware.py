@@ -4,7 +4,6 @@ Tests for sdk.auth.middleware -- JWT validation, JWKS caching, error handling.
 Uses python-jose to forge test JWTs signed with an RSA key pair generated
 at test time, simulating the Zitadel JWKS flow without a running server.
 """
-# pyright: ignore-all
 
 from __future__ import annotations
 

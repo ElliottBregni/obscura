@@ -80,6 +80,47 @@ class LocalLLMBackend:
         self._conversations: dict[str, list[ChatMessage]] = {}
         self._active_session: str | None = None
 
+    # -- Testing/observability accessors ------------------------------------
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @property
+    def model(self) -> str | None:
+        return self._model
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    @property
+    def client(self) -> Any:
+        return self._client
+
+    @property
+    def tools(self) -> list[ToolSpec]:
+        return self._tools
+
+    @property
+    def hooks(self) -> dict[HookPoint, list[Callable[..., Any]]]:
+        return self._hooks
+
+    @property
+    def tool_registry(self) -> ToolRegistry:
+        return self._tool_registry
+
+    @property
+    def active_session(self) -> str | None:
+        return self._active_session
+
+    @property
+    def conversations(self) -> dict[str, list[ChatMessage]]:
+        return self._conversations
+
+    def set_client_for_testing(self, client: Any) -> None:
+        self._client = client
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:

@@ -1,4 +1,3 @@
-# pyright: ignore-all
 """Shared pytest fixtures for FV-Copilot test suite.
 
 All fixtures use tmp_path so tests are fully CI-safe — no real filesystem

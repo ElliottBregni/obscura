@@ -949,4 +949,3 @@ class TestSSETransport:
         assert result is None
 
 
-# pyright: ignore-all

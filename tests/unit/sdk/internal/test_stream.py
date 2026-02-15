@@ -452,4 +452,3 @@ class TestClaudeIteratorAdapter:
         assert chunks[0].kind == ChunkKind.DONE
 
 
-# pyright: ignore-all

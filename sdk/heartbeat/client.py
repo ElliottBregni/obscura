@@ -131,6 +131,31 @@ class AgentHeartbeatClient:
             return 0.0
         return time.time() - self._start_time
 
+    @property
+    def start_time(self) -> float:
+        return self._start_time
+
+    @property
+    def http_client(self) -> httpx.AsyncClient | None:
+        return self._http_client
+
+    @property
+    def consecutive_failures(self) -> int:
+        return self._consecutive_failures
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    def set_running_for_testing(self, running: bool) -> None:
+        self._running = running
+
+    def set_http_client_for_testing(self, client: Any) -> None:
+        self._http_client = client
+
+    def set_connected_for_testing(self, connected: bool) -> None:
+        self._connected = connected
+
     async def start(self) -> None:
         """Start the heartbeat client."""
         if self._running:

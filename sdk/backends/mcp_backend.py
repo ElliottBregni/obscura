@@ -74,6 +74,28 @@ class MCPBackend:
         }
         self._initialized = False
 
+    # -- Testing/observability accessors ------------------------------------
+
+    @property
+    def tools(self) -> list[ToolSpec]:
+        return self._tools
+
+    @property
+    def hooks(self) -> dict[HookPoint, list[Callable[..., Any]]]:
+        return self._hooks
+
+    @property
+    def tool_registry(self) -> ToolRegistry:
+        return self._tool_registry
+
+    @property
+    def initialized(self) -> bool:
+        return self._initialized
+
+    @property
+    def session_manager(self) -> MCPSessionManager:
+        return self._session_manager
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:

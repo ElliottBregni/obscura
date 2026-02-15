@@ -175,4 +175,3 @@ class TestAuthenticateWebsocket:
         assert user is not None
 
 
-# pyright: ignore-all

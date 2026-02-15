@@ -4,7 +4,6 @@ Tests for sdk.auth.rbac -- role-based access control dependencies.
 Verifies role hierarchy, admin override, and proper 401/403 behaviour
 when wired into a FastAPI application.
 """
-# pyright: ignore-all
 
 from __future__ import annotations
 

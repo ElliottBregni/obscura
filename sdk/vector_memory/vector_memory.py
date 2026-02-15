@@ -150,6 +150,12 @@ class VectorMemoryStore:
                 cls._instances[user.user_id] = cls(user, embedding_fn=embedding_fn)
             return cls._instances[user.user_id]
 
+    @classmethod
+    def reset_instances(cls) -> None:
+        """Clear singleton cache. For testing only."""
+        with cls._lock:
+            cls._instances.clear()
+
     def _get_conn(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
         if not hasattr(self._local, "conn") or self._local.conn is None:

@@ -103,4 +103,3 @@ class TestPersistentSessionStore:
             assert path.exists()
 
 
-# pyright: ignore-all

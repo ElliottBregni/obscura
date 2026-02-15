@@ -130,4 +130,3 @@ class TestNotifyMemoryChange:
             ws_mod.memory_watch_clients().update(original)
 
 
-# pyright: ignore-all

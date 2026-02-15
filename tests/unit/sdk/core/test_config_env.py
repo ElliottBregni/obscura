@@ -29,4 +29,3 @@ def test_auth_enabled_env_var():
 if __name__ == "__main__":
     test_auth_enabled_env_var()
     print("\nAll config tests passed!")
-# pyright: ignore-all

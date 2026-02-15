@@ -92,4 +92,3 @@ class TestDomain2SystemSync:
         assert settings.exists(), "~/.claude/settings.local.json should be preserved"
 
 
-# pyright: ignore-all

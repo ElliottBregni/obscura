@@ -85,6 +85,54 @@ class OpenAIBackend:
         self._conversations: dict[str, list[ChatMessage]] = {}
         self._active_session: str | None = None
 
+    # -- Testing/observability accessors ------------------------------------
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key
+
+    @property
+    def base_url(self) -> str | None:
+        return self._base_url
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    @property
+    def client(self) -> Any:
+        return self._client
+
+    @property
+    def tools(self) -> list[ToolSpec]:
+        return self._tools
+
+    @property
+    def hooks(self) -> dict[HookPoint, list[Callable[..., Any]]]:
+        return self._hooks
+
+    @property
+    def tool_registry(self) -> ToolRegistry:
+        return self._tool_registry
+
+    @property
+    def active_session(self) -> str | None:
+        return self._active_session
+
+    @property
+    def conversations(self) -> dict[str, list[ChatMessage]]:
+        return self._conversations
+
+    def set_client_for_testing(self, client: Any) -> None:
+        self._client = client
+
+    def set_active_session_for_testing(self, session_id: str | None) -> None:
+        self._active_session = session_id
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
@@ -117,8 +165,8 @@ class OpenAIBackend:
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
 
-            messages = self._build_messages(prompt)
-            create_kwargs = self._build_create_kwargs(kwargs)
+            messages = self.build_messages(prompt)
+            create_kwargs = self.build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -126,7 +174,7 @@ class OpenAIBackend:
                 **create_kwargs,
             )
 
-            msg = self._to_message(response)
+            msg = self.to_message(response)
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
@@ -153,8 +201,8 @@ class OpenAIBackend:
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
 
-            messages = self._build_messages(prompt)
-            create_kwargs = self._build_create_kwargs(kwargs)
+            messages = self.build_messages(prompt)
+            create_kwargs = self.build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -302,7 +350,7 @@ class OpenAIBackend:
         if self._client is None:
             raise RuntimeError("OpenAIBackend not started. Call start() first.")
 
-    def _build_messages(self, prompt: str) -> list[dict[str, str]]:
+    def build_messages(self, prompt: str) -> list[dict[str, str]]:
         """Build the messages list for the chat completions API."""
         messages: list[dict[str, str]] = []
         if self._system_prompt:
@@ -316,7 +364,7 @@ class OpenAIBackend:
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    def _build_create_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def build_create_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Build kwargs for chat.completions.create, including tool defs."""
         params = CompletionParams.from_kwargs(kwargs)
         result: dict[str, Any] = params.to_dict()
@@ -333,7 +381,7 @@ class OpenAIBackend:
 
         return result
 
-    def _to_message(self, response: Any) -> Message:
+    def to_message(self, response: Any) -> Message:
         """Convert an OpenAI response to a normalized Message."""
         choice = response.choices[0]
         msg = choice.message

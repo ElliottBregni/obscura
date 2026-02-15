@@ -183,4 +183,3 @@ class TestMemoryStore:
         assert store2.get("shared_key", namespace="test") == "user2_value"
 
 
-# pyright: ignore-all

@@ -910,4 +910,3 @@ class TestCreateMCPRouter:
         assert data["error"]["code"] == MCPErrorCode.INTERNAL_ERROR.value
 
 
-# pyright: ignore-all
