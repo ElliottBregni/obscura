@@ -273,7 +273,7 @@ class TestCLIMemoryCommands:
         mock_client.delete_memory.return_value = True
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["memory", "delete", "mykey"])
 
         assert result.exit_code == 0
@@ -284,7 +284,7 @@ class TestCLIMemoryCommands:
         mock_client.delete_memory.return_value = False
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["memory", "delete", "missing"])
 
         assert result.exit_code == 0
@@ -299,7 +299,7 @@ class TestCLIMemoryCommands:
         ]
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["memory", "list"])
 
         assert result.exit_code == 0
@@ -313,7 +313,7 @@ class TestCLIMemoryCommands:
         ]
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["memory", "search", "query"])
 
         assert result.exit_code == 0
@@ -328,7 +328,7 @@ class TestCLIVectorCommands:
         mock_client.remember.return_value = "mem_123456"
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(
                     cli,
                     [
@@ -349,7 +349,7 @@ class TestCLIVectorCommands:
         mock_client.remember.return_value = "mem_auto"
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(
                     cli,
                     [
@@ -383,7 +383,7 @@ class TestCLIVectorCommands:
         ]
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(
                     cli,
                     [
@@ -404,7 +404,7 @@ class TestCLIVectorCommands:
         mock_client.recall.return_value = []
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["vector", "recall", "unknown query"])
 
         assert result.exit_code == 0
@@ -454,7 +454,7 @@ class TestCLIHealthCommand:
         mock_client.health.return_value = {"status": "ok"}
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["health"])
 
         assert result.exit_code == 0
@@ -467,7 +467,7 @@ class TestCLIHealthCommand:
         mock_client.health.side_effect = HTTPError("Connection refused")
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["health"])
 
         assert result.exit_code == 1
@@ -515,7 +515,7 @@ class TestCLIErrorHandling:
         mock_client.list_agents.side_effect = error
 
         with patch.dict("os.environ", {"OBSCURA_URL": "http://test"}):
-            with patch("obscura_cli.ObscuraCLI", return_value=mock_client):
+            with patch("scripts.obscura_cli.ObscuraCLI", return_value=mock_client):
                 result = runner.invoke(cli, ["agent", "list"])
 
         # CLI catches exceptions and prints error, exits with code 1
@@ -553,7 +553,7 @@ class TestCLIOptions:
 
     def test_global_token_option(self, runner: CliRunner, mock_client: MagicMock):
         """Test --token global option."""
-        with patch("obscura_cli.ObscuraCLI") as mock_cli_class:
+        with patch("scripts.obscura_cli.ObscuraCLI") as mock_cli_class:
             mock_cli_class.return_value = mock_client
             mock_client.list_agents.return_value = []
 
@@ -562,9 +562,9 @@ class TestCLIOptions:
             assert result.exit_code == 0
             # Verify token was passed
             call_args = mock_cli_class.call_args
-            if len(call_args[0]) >= 2:
+            if call_args and len(call_args[0]) >= 2:
                 assert call_args[0][1] == "custom-token"
-            elif call_args[1]:
+            elif call_args and call_args[1]:
                 assert call_args[1].get("token") == "custom-token"
 
 

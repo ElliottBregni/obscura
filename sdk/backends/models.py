@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 
@@ -46,6 +46,8 @@ class ChatMessage:
 
     def to_dict(self) -> dict[str, str]:
         return {"role": self.role, "content": self.content}
+    
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +92,8 @@ class CompletionParams:
         return cls(**filtered)
 
     def to_dict(self) -> dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+        # dataclass with slots has no __dict__, so use asdict and drop Nones
+        return {k: v for k, v in asdict(self).items() if v is not None}
 
 
 @dataclass(frozen=True, slots=True)

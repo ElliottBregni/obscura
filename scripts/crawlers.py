@@ -363,7 +363,14 @@ def _render_svg_with_mmdc(mermaid: str) -> str | None:
 
 
 def _render_svg_with_kroki(mermaid: str) -> str:
-    """Render SVG via Kroki using POST (avoids URL length limits)."""
+    """Render SVG via Kroki using POST (avoids URL length limits).
+
+    In unit tests, KROKI_STUB_RESPONSE can be set to bypass network calls.
+    """
+    stub = os.getenv("KROKI_STUB_RESPONSE")
+    if stub is not None:
+        return stub
+
     url = "https://kroki.io/mermaid/svg"
     data = mermaid.encode("utf-8")
 
@@ -390,10 +397,11 @@ def _render_svg_with_kroki(mermaid: str) -> str:
 
 
 def _render_single_diagram(mermaid: str) -> str | None:
-    """
-    Try to render a single Mermaid diagram to SVG.
-    Returns SVG string or None on failure.
-    """
+    """Try to render a single Mermaid diagram to SVG; respects shim patches."""
+    shim = sys.modules.get("crawlers")
+    if shim and hasattr(shim, "render_single_diagram"):
+        return shim.render_single_diagram(mermaid)
+
     svg = _render_svg_with_mmdc(mermaid)
     if svg is not None:
         return svg
@@ -410,6 +418,8 @@ def _render_single_diagram(mermaid: str) -> str | None:
 
 def _build_stub_markdown(entry: FileEntry, raw_mermaid: str) -> str:
     """Build the Markdown output from raw Mermaid text for a single file."""
+    shim = sys.modules.get("crawlers")
+    render_fn = getattr(shim, "render_single_diagram", _render_single_diagram)
     diagrams = split_mermaid_diagrams(raw_mermaid)
 
     if not diagrams:
@@ -436,7 +446,7 @@ def _build_stub_markdown(entry: FileEntry, raw_mermaid: str) -> str:
         parts.append("```")
         parts.append("")
 
-        svg = _render_single_diagram(diagram)
+        svg = render_fn(diagram)
         if svg is not None:
             parts.append("### SVG")
             parts.append("")

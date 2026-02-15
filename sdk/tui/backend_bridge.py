@@ -93,6 +93,7 @@ class BackendBridge:
     @client.setter
     def client(self, value: ObscuraClient | None) -> None:
         self._client = value
+        self._connected = value is not None
 
     @property
     def last_duration(self) -> float:
@@ -130,6 +131,7 @@ class BackendBridge:
             finally:
                 self._client = None
                 self._connected = False
+                self._streaming = False
 
     async def reconnect(self) -> None:
         """Disconnect and reconnect (e.g., after backend switch)."""
@@ -194,10 +196,8 @@ class BackendBridge:
             on_done: Called when streaming completes.
             on_error: Called on errors.
         """
-        if not self._connected or not self._client:
-            if on_error:
-                on_error("Not connected to backend")
-            return
+        if not self._client:
+            raise RuntimeError("Not connected. Call connect() first.")
 
         self._streaming = True
         self._cancel_event.clear()

@@ -9,7 +9,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -202,20 +202,33 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
     payload_json = json.dumps(payload, separators=(",", ":"))
 
     for webhook in _webhooks.values():
-        if not webhook.active:
+        # Webhooks stored as dicts in tests; accept both dict and object forms
+        if isinstance(webhook, dict):
+            wdict = cast(dict[str, Any], webhook)
+            active: bool = bool(wdict.get("active"))
+            events_raw = cast(list[Any], wdict.get("events", []))
+            events: list[str] = [str(e) for e in events_raw]
+            webhook_secret: str = str(wdict.get("secret", ""))
+            webhook_id: str = str(wdict.get("webhook_id", ""))
+            webhook_url: str = str(wdict.get("url", ""))
+        else:
+            active = webhook.active
+            events = webhook.events
+            webhook_secret = webhook.secret
+            webhook_id = webhook.webhook_id
+            webhook_url = webhook.url
+
+        if not active:
             continue
-        if event_type not in webhook.events:
+        if event_type not in events:
             continue
 
-        webhook_secret: str = webhook.secret
         signature = hmac.new(
             webhook_secret.encode(), payload_json.encode(), hashlib.sha256
         ).hexdigest()
 
         try:
             async with httpx.AsyncClient() as client:
-                webhook_url: str = webhook.url
-                webhook_id: str = webhook.webhook_id
                 await client.post(
                     webhook_url,
                     json=payload,

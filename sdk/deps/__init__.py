@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastapi import WebSocket
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.config import ObscuraConfig
+
+if TYPE_CHECKING:
+    from sdk.agent.agents import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +53,13 @@ class ClientFactory:
 # Global agent runtime registry (keyed by user_id)
 # ---------------------------------------------------------------------------
 
-from sdk.agent.agents import AgentRuntime
-
-_runtimes: dict[str, AgentRuntime] = {}
+_runtimes: dict[str, "AgentRuntime"] = {}
 _runtimes_lock = asyncio.Lock()
 
 
-async def get_runtime(user: AuthenticatedUser) -> AgentRuntime:
+async def get_runtime(user: AuthenticatedUser) -> "AgentRuntime":
     """Get or create a persistent AgentRuntime for the given user."""
+    from sdk.agent.agents import AgentRuntime  # load at call-time for test patching
     async with _runtimes_lock:
         if user.user_id not in _runtimes:
             runtime = AgentRuntime(user)

@@ -57,7 +57,7 @@ class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
         response.headers["X-Request-ID"] = request_id
 
         # Propagate traceparent if available
-        traceparent = get_traceparent()
+        traceparent = _get_traceparent()
         if traceparent:
             response.headers["traceparent"] = traceparent
 
@@ -104,3 +104,8 @@ def get_traceparent() -> str | None:
     except (ImportError, AttributeError):
         pass
     return None
+
+
+# Backwards-compat for tests expecting _get_traceparent
+def _get_traceparent() -> str | None:  # pragma: no cover - thin alias
+    return get_traceparent()

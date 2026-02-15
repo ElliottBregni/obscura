@@ -22,9 +22,14 @@ import contextlib
 import importlib
 import functools
 import inspect
+import os
 from typing import Any, Callable, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _otel_enabled() -> bool:
+    return os.getenv("OTEL_ENABLED", "true").lower() not in {"0", "false", "no"}
 
 
 def get_tracer(name: str) -> Any:
@@ -34,6 +39,8 @@ def get_tracer(name: str) -> Any:
     ``start_as_current_span`` / ``start_span``.  When OTel is installed
     the real tracer is duck-type compatible.
     """
+    if not _otel_enabled():
+        return NoOpTracer()
     trace_mod = _trace_mod()
     if trace_mod is None:
         return NoOpTracer()
@@ -188,8 +195,8 @@ class NoOpTracer:
 
     def start_as_current_span(
         self, name: str, *args: Any, **kwargs: Any
-    ) -> contextlib.AbstractContextManager[NoOpSpan]:
-        return contextlib.nullcontext(NoOpSpan())
+    ) -> NoOpSpan:
+        return NoOpSpan()
 
     def start_span(self, name: str, *args: Any, **kwargs: Any) -> NoOpSpan:
         return NoOpSpan()
