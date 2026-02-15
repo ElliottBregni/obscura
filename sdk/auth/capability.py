@@ -119,7 +119,7 @@ def resolve_tier(user: AuthenticatedUser) -> CapabilityTier:
 # Signing key management
 # ---------------------------------------------------------------------------
 
-_SIGNING_KEY: bytes | None = None
+_signing_key: bytes | None = None
 
 
 def _get_signing_key() -> bytes:
@@ -128,20 +128,20 @@ def _get_signing_key() -> bytes:
     In production set ``OBSCURA_CAPABILITY_SECRET``.  If unset a random
     32-byte key is generated per-process (fine for dev, not for clusters).
     """
-    global _SIGNING_KEY
-    if _SIGNING_KEY is None:
+    global _signing_key  # noqa: PLW0603
+    if _signing_key is None:
         env_key = os.environ.get("OBSCURA_CAPABILITY_SECRET")
         if env_key:
-            _SIGNING_KEY = env_key.encode("utf-8")
+            _signing_key = env_key.encode("utf-8")
         else:
-            _SIGNING_KEY = secrets.token_bytes(32)
-    return _SIGNING_KEY
+            _signing_key = secrets.token_bytes(32)
+    return _signing_key
 
 
-def _reset_signing_key() -> None:
+def _reset_signing_key() -> None:  # pyright: ignore[reportUnusedFunction]
     """Reset the cached signing key (for testing only)."""
-    global _SIGNING_KEY
-    _SIGNING_KEY = None
+    global _signing_key  # noqa: PLW0603
+    _signing_key = None
 
 
 # ---------------------------------------------------------------------------

@@ -14,9 +14,7 @@ Covers:
 
 from __future__ import annotations
 
-import time
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -30,10 +28,8 @@ from sdk.auth.capability import (
     validate_capability_token,
 )
 from sdk.auth.models import AuthenticatedUser
-from sdk.auth.prompt_filter import FilterResult, filter_prompt
+from sdk.auth.prompt_filter import filter_prompt
 from sdk.auth.system_prompts import (
-    TIER_A_SYSTEM_PREFIX,
-    TIER_B_SYSTEM_PREFIX,
     get_tier_system_prompt,
 )
 
