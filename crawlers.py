@@ -70,13 +70,7 @@ def build_stub_markdown(entry: FileEntry, raw_mermaid: str) -> str:
     return "\n".join(parts).strip() + "\n"
 
 
-def render_svg_with_mmdc(*args: Any, **kwargs: Any) -> str | None:
-    return _c.render_svg_with_mmdc(*args, **kwargs)
-
-
-def render_svg_with_kroki(*args: Any, **kwargs: Any) -> str | None:
-    # honor optional stub env in scripts.crawlers
-    return _c.render_svg_with_kroki(*args, **kwargs)
+# keep names for backward compatibility; implementations above suffice
 
 
 __all__ = [
