@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 sdk._tools — Unified tool definitions for both backends.
 

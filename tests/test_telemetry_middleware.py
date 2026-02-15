@@ -4,21 +4,21 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 from sdk.telemetry.middleware import (
     ObscuraTelemetryMiddleware,
-    _enrich_request_span,
-    _get_traceparent,
+    enrich_request_span,
+    get_traceparent,
 )
 
 
-def _make_app():
+def _make_app() -> FastAPI:
     app = FastAPI()
-    app.add_middleware(ObscuraTelemetryMiddleware)
+    app.add_middleware(ObscuraTelemetryMiddleware)  # pyright: ignore[reportArgumentType]
 
     @app.get("/test")
-    async def test_endpoint():
+    async def test_endpoint():  # pyright: ignore[reportUnusedFunction]
         return {"ok": True}
 
     @app.post("/echo")
-    async def echo_endpoint():
+    async def echo_endpoint():  # pyright: ignore[reportUnusedFunction]
         return {"echo": True}
 
     return app
@@ -49,21 +49,21 @@ class TestTelemetryMiddleware:
         assert resp.json() == {"ok": True}
 
     @patch("sdk.telemetry.middleware._get_traceparent", return_value="00-abc-def-01")
-    def test_traceparent_header(self, mock_tp):
+    def test_traceparent_header(self, mock_tp: MagicMock) -> None:  # noqa: ARG002
         client = TestClient(_make_app())
         resp = client.get("/test")
         assert resp.headers.get("traceparent") == "00-abc-def-01"
 
     @patch("sdk.telemetry.middleware._get_traceparent", return_value=None)
-    def test_no_traceparent_when_none(self, mock_tp):
+    def test_no_traceparent_when_none(self, mock_tp: MagicMock) -> None:  # noqa: ARG002
         client = TestClient(_make_app())
         resp = client.get("/test")
         assert "traceparent" not in resp.headers
 
-    def test_unique_request_ids(self):
+    def test_unique_request_ids(self) -> None:
         """Each request should get a unique request ID."""
         client = TestClient(_make_app())
-        ids = set()
+        ids: set[str] = set()
         for _ in range(5):
             resp = client.get("/test")
             ids.add(resp.headers["X-Request-ID"])
@@ -90,7 +90,7 @@ class TestEnrichRequestSpan:
     def test_no_otel_import(self):
         """When opentelemetry is not available, should not raise."""
         request = MagicMock()
-        _enrich_request_span(request, "req-1")
+        enrich_request_span(request, "req-1")
 
     def test_with_recording_span(self):
         """When OTel is available and span is recording, should set attributes."""
@@ -108,7 +108,7 @@ class TestEnrichRequestSpan:
         mock_otel.trace = mock_trace_mod
 
         with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
-            _enrich_request_span(mock_request, "req-123")
+            enrich_request_span(mock_request, "req-123")
 
         mock_span.set_attribute.assert_called_with("http.request_id", "req-123")
 
@@ -123,7 +123,7 @@ class TestEnrichRequestSpan:
         mock_otel.trace = mock_trace_mod
 
         with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
-            _enrich_request_span(MagicMock(), "req-1")
+            enrich_request_span(MagicMock(), "req-1")
 
         mock_span.set_attribute.assert_not_called()
 
@@ -135,7 +135,7 @@ class TestEnrichRequestSpan:
         mock_otel.trace = mock_trace_mod
 
         with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
-            _enrich_request_span(MagicMock(), "req-1")
+            enrich_request_span(MagicMock(), "req-1")
 
     def test_with_user_enrichment(self):
         """When request has a user, should call enrich_span_with_user."""
@@ -153,13 +153,13 @@ class TestEnrichRequestSpan:
 
         with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
             with patch("sdk.telemetry.context.enrich_span_with_user") as mock_enrich:
-                _enrich_request_span(mock_request, "req-1")
+                enrich_request_span(mock_request, "req-1")
                 mock_enrich.assert_called_once_with(mock_span, mock_user)
 
     def test_request_without_state(self):
         """When request has no state attribute, should not raise."""
         mock_request = MagicMock(spec=[])  # No attributes
-        _enrich_request_span(mock_request, "req-1")
+        enrich_request_span(mock_request, "req-1")
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ class TestEnrichRequestSpan:
 class TestGetTraceparent:
     def test_no_otel(self):
         """When opentelemetry is not available, returns None."""
-        result = _get_traceparent()
+        result = get_traceparent()
         # If OTel is not configured, should return None
         assert result is None or isinstance(result, str)
 
@@ -190,7 +190,7 @@ class TestGetTraceparent:
         mock_otel.trace = mock_trace_mod
 
         with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
-            result = _get_traceparent()
+            result = get_traceparent()
 
         assert result is not None
         assert result.startswith("00-")
@@ -214,7 +214,7 @@ class TestGetTraceparent:
         mock_otel.trace = mock_trace_mod
 
         with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
-            result = _get_traceparent()
+            result = get_traceparent()
 
         assert result is None
 
@@ -222,13 +222,13 @@ class TestGetTraceparent:
         """When opentelemetry is not installed, returns None."""
         # Remove opentelemetry from sys.modules to simulate ImportError
         import sys
-        saved = {}
+        saved: dict[str, object] = {}
         for key in list(sys.modules.keys()):
             if key.startswith("opentelemetry"):
                 saved[key] = sys.modules.pop(key)
         try:
             with patch.dict("sys.modules", {"opentelemetry": None, "opentelemetry.trace": None}):
-                result = _get_traceparent()
+                result = get_traceparent()
             assert result is None
         finally:
-            sys.modules.update(saved)
+            sys.modules.update(saved)  # type: ignore[arg-type]

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 sdk.telemetry.audit — Compliance audit logger.
 
@@ -22,6 +23,7 @@ Usage::
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import threading
@@ -119,8 +121,7 @@ def _write_to_file(record: dict[str, Any]) -> None:
 def _emit_to_otel(record: dict[str, Any]) -> None:
     """Emit audit event as an OTel log record."""
     try:
-        from opentelemetry import trace
-
+        trace = importlib.import_module("opentelemetry.trace")
         span = trace.get_current_span()
         if span and span.is_recording():
             span.add_event(
@@ -159,11 +160,10 @@ def _emit_to_structlog(event: AuditEvent) -> None:
 def _current_trace_id() -> str:
     """Extract the current trace ID from OTel context, or return empty string."""
     try:
-        from opentelemetry import trace
-
+        trace = importlib.import_module("opentelemetry.trace")
         span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx and ctx.trace_id:
+        ctx = getattr(span, "get_span_context", lambda: None)()
+        if ctx and getattr(ctx, "trace_id", 0):
             return format(ctx.trace_id, "032x")
     except (ImportError, AttributeError):
         pass

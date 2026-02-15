@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 sdk.telemetry.metrics — Pre-defined metrics for the Obscura SDK.
 

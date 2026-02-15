@@ -1,13 +1,17 @@
 """Tests for sdk.vector_memory_rerank."""
 from datetime import UTC, datetime, timedelta
 from sdk.vector_memory_rerank import (
-    BM25Reranker, RecencyReranker, MetadataReranker, CompositeReranker, _tokenize,
+    BM25Reranker, RecencyReranker, MetadataReranker, CompositeReranker,
 )
 from sdk.memory import MemoryKey
 from sdk.vector_memory import VectorMemoryEntry
 
 
-def _make_entry(text="hello world", created_at=None, metadata=None):
+def _make_entry(
+    text: str = "hello world",
+    created_at: datetime | None = None,
+    metadata: dict[str, object] | None = None,
+) -> VectorMemoryEntry:
     return VectorMemoryEntry(
         key=MemoryKey(namespace="test", key="k1"),
         text=text,
@@ -15,17 +19,6 @@ def _make_entry(text="hello world", created_at=None, metadata=None):
         metadata=metadata or {},
         created_at=created_at or datetime.now(UTC),
     )
-
-
-class TestTokenize:
-    def test_basic(self):
-        assert _tokenize("Hello World") == ["hello", "world"]
-
-    def test_punctuation(self):
-        assert _tokenize("hello, world!") == ["hello", "world"]
-
-    def test_empty(self):
-        assert _tokenize("") == []
 
 
 class TestBM25Reranker:

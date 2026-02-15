@@ -1,13 +1,20 @@
 """Tests for sdk.vector_memory_router."""
 from unittest.mock import MagicMock
 from datetime import UTC, datetime
+
 from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery, RoutedResult
 from sdk.vector_memory import VectorMemoryEntry
 from sdk.memory import MemoryKey
 
 
-def _make_entry(ns="test", key="k1", text="hello", score=0.9):
-    e = VectorMemoryEntry(
+def _make_entry(
+    ns: str = "test",
+    key: str = "k1",
+    text: str = "hello",
+    score: float = 0.9,
+) -> VectorMemoryEntry:
+    """Helper to build a typed VectorMemoryEntry."""
+    return VectorMemoryEntry(
         key=MemoryKey(namespace=ns, key=key),
         text=text,
         embedding=[0.1],
@@ -15,7 +22,6 @@ def _make_entry(ns="test", key="k1", text="hello", score=0.9):
         created_at=datetime.now(UTC),
         final_score=score,
     )
-    return e
 
 
 class TestMemoryTypeQuery:
@@ -34,8 +40,8 @@ class TestRoutedResult:
 
 
 class TestMemoryRouter:
-    def test_single_route(self):
-        store = MagicMock()
+    def test_single_route(self) -> None:
+        store: MagicMock = MagicMock()
         e1 = _make_entry(key="k1", score=0.9)
         store.search_reranked.return_value = [e1]
 
@@ -47,8 +53,8 @@ class TestMemoryRouter:
         assert len(result.entries) == 1
         assert result.sources == {"fact": 1}
 
-    def test_multiple_routes(self):
-        store = MagicMock()
+    def test_multiple_routes(self) -> None:
+        store: MagicMock = MagicMock()
         e1 = _make_entry(ns="a", key="k1", score=0.9)
         e2 = _make_entry(ns="b", key="k2", score=0.8)
         store.search_reranked.side_effect = [[e1], [e2]]
@@ -64,8 +70,8 @@ class TestMemoryRouter:
         assert len(result.entries) == 2
         assert result.sources == {"fact": 1, "episode": 1}
 
-    def test_weight_applied(self):
-        store = MagicMock()
+    def test_weight_applied(self) -> None:
+        store: MagicMock = MagicMock()
         e1 = _make_entry(key="k1", score=1.0)
         store.search_reranked.return_value = [e1]
 
@@ -76,8 +82,8 @@ class TestMemoryRouter:
         )
         assert abs(result.entries[0].final_score - 0.5) < 1e-9
 
-    def test_final_top_k(self):
-        store = MagicMock()
+    def test_final_top_k(self) -> None:
+        store: MagicMock = MagicMock()
         entries = [_make_entry(key=f"k{i}", score=1.0 - i * 0.1) for i in range(5)]
         store.search_reranked.return_value = entries
 
@@ -89,29 +95,29 @@ class TestMemoryRouter:
         )
         assert len(result.entries) == 3
 
-    def test_dedup_keeps_highest(self):
+    def test_dedup_keeps_highest(self) -> None:
         # Same (namespace, key) with different scores
         e1 = _make_entry(ns="a", key="k1", score=0.5)
         e2 = _make_entry(ns="a", key="k1", score=0.9)
-        merged = MemoryRouter._dedupe_and_sort([e1, e2])
+        merged = MemoryRouter._dedupe_and_sort([e1, e2])  # type: ignore[reportPrivateUsage]
         assert len(merged) == 1
         assert merged[0].final_score == 0.9
 
-    def test_dedup_different_keys(self):
+    def test_dedup_different_keys(self) -> None:
         e1 = _make_entry(ns="a", key="k1", score=0.9)
         e2 = _make_entry(ns="a", key="k2", score=0.8)
-        merged = MemoryRouter._dedupe_and_sort([e1, e2])
+        merged = MemoryRouter._dedupe_and_sort([e1, e2])  # type: ignore[reportPrivateUsage]
         assert len(merged) == 2
 
-    def test_empty_routes(self):
-        store = MagicMock()
+    def test_empty_routes(self) -> None:
+        store: MagicMock = MagicMock()
         router = MemoryRouter(store)
         result = router.route_and_merge(query="test", routes=[])
         assert result.entries == []
         assert result.sources == {}
 
-    def test_search_reranked_params(self):
-        store = MagicMock()
+    def test_search_reranked_params(self) -> None:
+        store: MagicMock = MagicMock()
         store.search_reranked.return_value = []
 
         router = MemoryRouter(store)

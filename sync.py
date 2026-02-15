@@ -99,13 +99,15 @@ PRIORITY: dict[str, int] = {
 }
 
 
+def _empty_path_pairs() -> list[tuple[Path, Path]]:
+    return []
+
+
 @dataclass
 class SyncTarget:
     """A discovered location where agent dirs should be created."""
     repo_path: Path
-    files: list[tuple[Path, Path]] = field(
-        default_factory=lambda: cast(list[tuple[Path, Path]], [])
-    )
+    files: list[tuple[Path, Path]] = field(default_factory=_empty_path_pairs)
 
 
 @dataclass

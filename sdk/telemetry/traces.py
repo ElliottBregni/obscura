@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 sdk.telemetry.traces — Tracer setup and ``@traced`` decorator.
 
@@ -18,6 +19,7 @@ Usage::
 from __future__ import annotations
 
 import contextlib
+import importlib
 import functools
 import inspect
 from typing import Any, Callable, TypeVar
@@ -25,52 +27,62 @@ from typing import Any, Callable, TypeVar
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def get_tracer(name: str) -> NoOpTracer:
+def get_tracer(name: str) -> Any:
     """Return an OTel tracer, or a no-op stub if OTel is unavailable.
 
     The return type is ``NoOpTracer`` to give callers a concrete type for
     ``start_as_current_span`` / ``start_span``.  When OTel is installed
     the real tracer is duck-type compatible.
     """
-    try:
-        from opentelemetry import trace
-        return trace.get_tracer(name)  # type: ignore[return-value]
-    except ImportError:
+    trace_mod = _trace_mod()
+    if trace_mod is None:
         return NoOpTracer()
+    return trace_mod.get_tracer(name)
 
 
 def set_span_attribute(key: str, value: Any) -> None:
     """Set an attribute on the current active span (if any)."""
-    try:
-        from opentelemetry import trace
-        span = trace.get_current_span()
-        if span and span.is_recording():
-            span.set_attribute(key, value)
-    except ImportError:
-        pass
+    trace_mod = _trace_mod()
+    if trace_mod is None:
+        return
+    span = trace_mod.get_current_span()
+    if span and getattr(span, "is_recording", lambda: False)():
+        span.set_attribute(key, value)
 
 
 def set_span_status_error(description: str = "") -> None:
     """Mark the current span as errored."""
-    try:
-        from opentelemetry import trace
-        from opentelemetry.trace import StatusCode
-        span = trace.get_current_span()
-        if span and span.is_recording():
-            span.set_status(StatusCode.ERROR, description)
-    except ImportError:
-        pass
+    trace_mod = _trace_mod()
+    status_code = _status_code()
+    if trace_mod is None or status_code is None:
+        return
+    span = trace_mod.get_current_span()
+    if span and getattr(span, "is_recording", lambda: False)():
+        span.set_status(status_code.ERROR, description)
 
 
 def record_exception(exc: BaseException) -> None:
     """Record an exception on the current span."""
+    trace_mod = _trace_mod()
+    if trace_mod is None:
+        return
+    span = trace_mod.get_current_span()
+    if span and getattr(span, "is_recording", lambda: False)():
+        span.record_exception(exc)
+
+
+def _trace_mod() -> Any | None:
     try:
-        from opentelemetry import trace
-        span = trace.get_current_span()
-        if span and span.is_recording():
-            span.record_exception(exc)
+        return importlib.import_module("opentelemetry.trace")
     except ImportError:
-        pass
+        return None
+
+
+def _status_code() -> Any | None:
+    try:
+        return importlib.import_module("opentelemetry.trace").StatusCode
+    except ImportError:
+        return None
 
 
 def traced(

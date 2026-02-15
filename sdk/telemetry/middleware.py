@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 sdk.telemetry.middleware — ASGI middleware for request tracing.
 
@@ -17,6 +18,7 @@ Usage::
 
 from __future__ import annotations
 
+import importlib
 import uuid
 from typing import Any, Callable
 
@@ -42,7 +44,7 @@ class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
         request_id: str = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
         # Enrich the current OTel span
-        _enrich_request_span(request, request_id)
+        enrich_request_span(request, request_id)
 
         # Process request
         response: Any = await call_next(request)
@@ -51,7 +53,7 @@ class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
         response.headers["X-Request-ID"] = request_id
 
         # Propagate traceparent if available
-        traceparent = _get_traceparent()
+        traceparent = get_traceparent()
         if traceparent:
             response.headers["traceparent"] = traceparent
 
@@ -62,11 +64,10 @@ class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _enrich_request_span(request: Any, request_id: str) -> None:
+def enrich_request_span(request: Any, request_id: str) -> None:
     """Add user identity and request metadata to the active OTel span."""
     try:
-        from opentelemetry import trace
-
+        trace = importlib.import_module("opentelemetry.trace")
         span = trace.get_current_span()
         if not span or not span.is_recording():
             return
@@ -83,14 +84,13 @@ def _enrich_request_span(request: Any, request_id: str) -> None:
         pass
 
 
-def _get_traceparent() -> str | None:
+def get_traceparent() -> str | None:
     """Build a W3C traceparent header from the current OTel context."""
     try:
-        from opentelemetry import trace
-
+        trace = importlib.import_module("opentelemetry.trace")
         span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx and ctx.trace_id:
+        ctx = getattr(span, "get_span_context", lambda: None)()
+        if ctx and getattr(ctx, "trace_id", 0):
             trace_id = format(ctx.trace_id, "032x")
             span_id = format(ctx.span_id, "016x")
             flags = format(ctx.trace_flags, "02x")

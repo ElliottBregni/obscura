@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 sdk.telemetry.logging — Structured logging via structlog.
 
@@ -15,9 +16,10 @@ Usage::
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from sdk.config import ObscuraConfig
@@ -46,7 +48,7 @@ def configure_logging(config: ObscuraConfig) -> None:
         _configured = True
         return
 
-    processors: list[Any] = [
+    processors: list[Callable[..., Any]] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
@@ -96,11 +98,10 @@ def _add_otel_context(
 ) -> dict[str, Any]:
     """Structlog processor that injects trace_id and span_id from OTel context."""
     try:
-        from opentelemetry import trace
-
+        trace = importlib.import_module("opentelemetry.trace")
         span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx and ctx.trace_id:
+        ctx = getattr(span, "get_span_context", lambda: None)()
+        if ctx and getattr(ctx, "trace_id", 0):
             event_dict["trace_id"] = format(ctx.trace_id, "032x")
             event_dict["span_id"] = format(ctx.span_id, "016x")
     except (ImportError, AttributeError):
