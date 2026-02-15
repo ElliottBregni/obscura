@@ -22,51 +22,40 @@ from typing import Any, Callable
 
 try:
     from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.requests import Request
-    from starlette.responses import Response
-
-    _HAS_STARLETTE = True
+    _has_starlette = True
 except ImportError:
-    _HAS_STARLETTE = False
+    BaseHTTPMiddleware = Any
+    Request = Any
+    Response = Any
+    _has_starlette = False
 
+class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
+    """ASGI middleware that enriches OTel spans with user identity and request IDs."""
 
-if _HAS_STARLETTE:
+    async def dispatch(
+        self, request: Any, call_next: Callable[..., Any],
+    ) -> Any:
+        if not _has_starlette:
+            raise ImportError("Starlette is required for ObscuraTelemetryMiddleware")
 
-    class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):
-        """ASGI middleware that enriches OTel spans with user identity and request IDs."""
+        # Generate request ID
+        request_id: str = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
-        async def dispatch(
-            self, request: Request, call_next: Callable[..., Any],
-        ) -> Response:
-            # Generate request ID
-            request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        # Enrich the current OTel span
+        _enrich_request_span(request, request_id)
 
-            # Enrich the current OTel span
-            _enrich_request_span(request, request_id)
+        # Process request
+        response: Any = await call_next(request)
 
-            # Process request
-            response: Response = await call_next(request)
+        # Add response headers
+        response.headers["X-Request-ID"] = request_id
 
-            # Add response headers
-            response.headers["X-Request-ID"] = request_id
+        # Propagate traceparent if available
+        traceparent = _get_traceparent()
+        if traceparent:
+            response.headers["traceparent"] = traceparent
 
-            # Propagate traceparent if available
-            traceparent = _get_traceparent()
-            if traceparent:
-                response.headers["traceparent"] = traceparent
-
-            return response
-
-else:
-
-    class ObscuraTelemetryMiddleware:  # pyright: ignore[reportRedeclaration]
-        """Stub middleware when Starlette is not installed."""
-
-        def __init__(self, app: Any) -> None:
-            self.app = app
-
-        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-            await self.app(scope, receive, send)
+        return response
 
 
 # ---------------------------------------------------------------------------

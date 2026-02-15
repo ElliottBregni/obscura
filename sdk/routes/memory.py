@@ -187,6 +187,10 @@ async def memory_transaction(
             ns: str = op.get("namespace", "default")
             key: str | None = op.get("key")
 
+            if key is None:
+                errors.append({"idx": idx, "error": "Missing key"})
+                continue
+
             if op_type == "set":
                 value: Any = op.get("value")
                 store.set(key, value, namespace=ns)

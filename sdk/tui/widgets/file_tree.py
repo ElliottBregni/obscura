@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from typing import override
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.message import Message
@@ -58,6 +60,7 @@ class FileTree(Widget):
 
     # -- Compose ------------------------------------------------------------
 
+    @override
     def compose(self) -> ComposeResult:
         yield Vertical(classes="file-tree")
 

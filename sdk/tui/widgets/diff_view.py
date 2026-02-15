@@ -15,6 +15,8 @@ Keybindings (when focused):
 
 from __future__ import annotations
 
+from typing import override
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -104,6 +106,7 @@ class DiffView(Widget, can_focus=True):
 
     # -- Compose ------------------------------------------------------------
 
+    @override
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="diff-view"):
             with Vertical(id="diff-content"):

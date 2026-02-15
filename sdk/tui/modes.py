@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ class Plan:
     """A structured plan with numbered steps."""
 
     title: str
-    steps: list[PlanStep] = field(default_factory=list)
+    steps: list[PlanStep] = field(default_factory=lambda: cast(list[PlanStep], []))
     raw_text: str = ""
 
     @property

@@ -103,7 +103,9 @@ PRIORITY: dict[str, int] = {
 class SyncTarget:
     """A discovered location where agent dirs should be created."""
     repo_path: Path
-    files: list[tuple[Path, Path]] = field(default_factory=list)
+    files: list[tuple[Path, Path]] = field(
+        default_factory=lambda: cast(list[tuple[Path, Path]], [])
+    )
 
 
 @dataclass
@@ -810,6 +812,16 @@ class VaultSync:
             return self._selector
         return VariantSelector(model=profile.model, role=profile.role)
 
+    # Public accessors for tests/observability
+    def load_profile(self, repo_name: str | None = None) -> SyncProfile:
+        """Public wrapper around profile loading."""
+        return self._load_profile(repo_name)
+
+    def set_profile(self, profile: SyncProfile) -> None:
+        """Update global profile and selector."""
+        self._global_profile = profile
+        self._selector = VariantSelector(model=profile.model, role=profile.role)
+
     # -- Delegates (preserve public API) ---------------------------------
 
     def classify_file(
@@ -1055,6 +1067,15 @@ class VaultWatcher:
         cmd.extend(str(p) for p in paths)
         return cmd
 
+    # Expose read-only helpers for tests/observability
+    def get_watch_paths(self) -> list[Path]:
+        """Public accessor for watch paths (used in tests)."""
+        return self._get_watch_paths()
+
+    def build_fswatch_cmd(self, paths: list[Path]) -> list[str]:
+        """Public wrapper for fswatch command generation."""
+        return self._build_fswatch_cmd(paths)
+
     def _handle_change(self, changed_path: str) -> None:
         now = time.monotonic()
         if now - self._last_sync < DEBOUNCE_SECONDS:
@@ -1062,11 +1083,8 @@ class VaultWatcher:
         self._last_sync = now
         print(f"\nChange detected: {Path(changed_path).name}")
         # Reload profile so .sync-profile.yml changes take effect at runtime
-        self.sync._global_profile = self.sync._load_profile()
-        self.sync._selector = VariantSelector(
-            model=self.sync._global_profile.model,
-            role=self.sync._global_profile.role,
-        )
+        profile = self.sync.load_profile()
+        self.sync.set_profile(profile)
         print("Re-syncing...")
         try:
             self.sync.sync_all(agent=self.agent, repo=self.repo)
@@ -1110,10 +1128,11 @@ class VaultWatcher:
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 text=True, bufsize=1,
             )
-            for line in self._process.stdout:
-                changed = line.strip()
-                if changed:
-                    self._handle_change(changed)
+            if self._process.stdout is not None:
+                for line in self._process.stdout:
+                    changed = line.strip()
+                    if changed:
+                        self._handle_change(changed)
         except Exception as e:
             print(f"Watcher error: {e}", file=sys.stderr)
         finally:

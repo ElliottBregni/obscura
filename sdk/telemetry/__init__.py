@@ -52,6 +52,8 @@ def _reset() -> None:
     global _initialized
     _initialized = False
 
+_RESET_HOOK = _reset  # keep referenced for test utilities
+
 
 def _setup_logging(config: ObscuraConfig) -> None:
     """Configure structlog with JSON or console renderer."""
@@ -125,7 +127,7 @@ def _setup_fastapi_instrumentation(config: ObscuraConfig) -> None:
     if not config.otel_enabled:
         return
     try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # pyright: ignore[reportMissingTypeStubs]
         FastAPIInstrumentor().instrument()
     except ImportError:
         pass

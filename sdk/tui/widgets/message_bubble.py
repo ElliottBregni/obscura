@@ -7,6 +7,8 @@ syntax-highlighted code blocks, and inline thinking/tool widgets.
 
 from __future__ import annotations
 
+from typing import override
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widget import Widget
@@ -62,6 +64,7 @@ class MessageBubble(Widget):
 
     # -- Compose ------------------------------------------------------------
 
+    @override
     def compose(self) -> ComposeResult:
         with Vertical():
             # Role label
@@ -87,7 +90,7 @@ class MessageBubble(Widget):
 
     # -- Content rendering --------------------------------------------------
 
-    def _render_content(self) -> str:
+    def _render_content(self) -> str:  # pyright: ignore[reportIncompatibleMethodOverride,reportImplicitOverride]
         """Render message content with basic markup.
 
         Uses Textual's built-in Rich markup for formatting.

@@ -7,6 +7,10 @@ per-step approve/reject/edit controls and an overall summary bar.
 
 from __future__ import annotations
 
+from typing import override
+
+from textual import events
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
@@ -58,6 +62,7 @@ class PlanStepWidget(Widget):
         super().__init__(name=name, id=id, classes=base_classes)
         self._step = step
 
+    @override
     def compose(self) -> ComposeResult:
         with Horizontal():
             # Step number
@@ -89,7 +94,7 @@ class PlanStepWidget(Widget):
         }
         return status_map.get(self._step.status, "")
 
-    async def on_key(self, event: any) -> None:
+    async def on_key(self, event: events.Key) -> None:
         """Handle y/n keys for approve/reject."""
         if event.key == "y" and self._step.status == "pending":
             self._step.approve()
@@ -175,6 +180,7 @@ class PlanView(Widget):
         self._execute_btn: Button | None = None
         self._container: Vertical | None = None
 
+    @override
     def compose(self) -> ComposeResult:
         with Vertical(classes="plan-view"):
             if self._plan:

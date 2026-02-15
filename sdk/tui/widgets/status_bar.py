@@ -7,6 +7,8 @@ and streaming indicator.
 
 from __future__ import annotations
 
+from typing import override
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.reactive import reactive
@@ -52,6 +54,7 @@ class StatusBar(Widget):
         self._timing_widget: Static | None = None
         self._streaming_widget: Static | None = None
 
+    @override
     def compose(self) -> ComposeResult:
         with Horizontal():
             yield Static("", classes="status-mode", id="sb-mode")

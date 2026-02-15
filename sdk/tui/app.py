@@ -19,6 +19,7 @@ from typing import Any, override
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
+from typing import Any, Callable, override, cast
 
 from sdk.tui.backend_bridge import BackendBridge
 from sdk.tui.modes import ModeManager, Plan, TUIMode
@@ -37,7 +38,7 @@ from sdk.tui.widgets.status_bar import StatusBar
 # ObscuraTUI Application
 # ---------------------------------------------------------------------------
 
-class ObscuraTUI(App):
+class ObscuraTUI(App[None]):
     """Main Textual application for the Obscura TUI.
 
     Provides a Claude Code-style interactive experience with streaming
@@ -104,6 +105,7 @@ class ObscuraTUI(App):
 
     # -- Layout -------------------------------------------------------------
 
+    @override
     def compose(self) -> ComposeResult:
         yield Sidebar(id="sidebar")
         yield MessageList(id="message-list")
@@ -178,7 +180,7 @@ class ObscuraTUI(App):
     # -- Mode switching -----------------------------------------------------
 
     @override
-    def action_switch_mode(self, mode: str) -> None:
+    async def action_switch_mode(self, mode: str) -> None:
         """Switch between ask/plan/code/diff modes."""
         try:
             new_mode = TUIMode(mode)
@@ -303,8 +305,9 @@ class ObscuraTUI(App):
         self._assistant_text += text
         if self._current_bubble:
             self._current_bubble.append_text(text)
-        if self._message_list:
-            self._message_list.request_scroll_to_bottom()
+        ml = self._message_list
+        if isinstance(ml, MessageList):
+            cast(Any, ml).request_scroll_to_bottom()
 
     def _on_thinking_delta(self, text: str) -> None:
         """Handle thinking delta from stream."""
@@ -437,7 +440,7 @@ class ObscuraTUI(App):
                 "Usage: /mode <ask|plan|code|diff>"
             )
             return
-        self.action_switch_mode(args[0])
+        await self.action_switch_mode(args[0])
 
     async def _cmd_backend(self, args: list[str]) -> None:
         """Handle /backend <name>."""
@@ -680,7 +683,7 @@ class ObscuraTUI(App):
     async def _cmd_quit(self, args: list[str]) -> None:
         """Handle /quit."""
         await self._shutdown()
-        self.exit(result=None)
+        self._safe_exit(result=None)
 
     # -- Actions ------------------------------------------------------------
 
@@ -772,18 +775,25 @@ class ObscuraTUI(App):
         if self._message_list:
             self._message_list.add_system_message(text)
 
+    def _safe_exit(self, result: object | None = None, return_code: int = 0, message: object | None = None) -> None:
+        """Typed wrapper around Textual's exit to satisfy static analysis."""
+        exit_fn = cast(Callable[[object | None, int, object | None], None], getattr(self, "exit"))
+        exit_fn(result, return_code, message)
+
     # -- Shutdown -----------------------------------------------------------
 
+    @override
     async def _shutdown(self) -> None:
         """Clean shutdown: save session, disconnect backend."""
         if self._session and self._session.turns:
             self._session.save()
         await self._bridge.disconnect()
 
+    @override
     async def action_quit(self) -> None:
         """Quit the app gracefully."""
         await self._shutdown()
-        self.exit()
+        self._safe_exit()
 
 
 # ---------------------------------------------------------------------------

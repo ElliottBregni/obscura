@@ -10,7 +10,7 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ class DiffHunk:
     old_count: int
     new_start: int
     new_count: int
-    lines: list[DiffLine] = field(default_factory=list)
+    lines: list[DiffLine] = field(default_factory=lambda: cast(list[DiffLine], []))
     status: str = "pending"  # "pending" | "accepted" | "rejected"
     header: str = ""         # The @@ line
 
@@ -53,7 +53,7 @@ class FileChange:
     path: Path
     original: str
     modified: str
-    hunks: list[DiffHunk] = field(default_factory=list)
+    hunks: list[DiffHunk] = field(default_factory=lambda: cast(list[DiffHunk], []))
     status: str = "pending"  # "pending" | "accepted" | "rejected"
 
     def accept_all(self) -> None:

@@ -12,6 +12,9 @@ Displays:
 
 from __future__ import annotations
 
+from typing import override
+
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.message import Message
@@ -46,7 +49,7 @@ class Sidebar(Widget):
     model_name: reactive[str] = reactive("")
     session_id: reactive[str] = reactive("")
     turn_count: reactive[int] = reactive(0)
-    visible: reactive[bool] = reactive(True)
+    sidebar_visible: reactive[bool] = reactive(True)
 
     # -- Messages -----------------------------------------------------------
 
@@ -76,6 +79,7 @@ class Sidebar(Widget):
 
     # -- Compose ------------------------------------------------------------
 
+    @override
     def compose(self) -> ComposeResult:
         yield Static("OBSCURA", classes="sidebar-title")
 
@@ -132,7 +136,7 @@ class Sidebar(Widget):
 
     # -- Click handling for mode selection ----------------------------------
 
-    async def on_click(self, event: any) -> None:
+    async def on_click(self, event: events.Click) -> None:
         """Handle clicks on mode items."""
         # Check if a mode item was clicked
         for m in TUIMode:
@@ -166,11 +170,12 @@ class Sidebar(Widget):
         if self._turns_widget:
             self._turns_widget.update(f"  Turns: {value}")
 
-    def watch_visible(self, value: bool) -> None:
+    def watch_sidebar_visible(self, value: bool) -> None:
         if value:
             self.remove_class("hidden")
         else:
             self.add_class("hidden")
+        self.display = value
 
     # -- Internal -----------------------------------------------------------
 
@@ -223,4 +228,4 @@ class Sidebar(Widget):
 
     def toggle_visibility(self) -> None:
         """Toggle sidebar visibility."""
-        self.visible = not self.visible
+        self.sidebar_visible = not self.sidebar_visible

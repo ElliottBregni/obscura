@@ -7,6 +7,8 @@ Collapsed by default, toggled with the 't' key.
 
 from __future__ import annotations
 
+from typing import override
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.reactive import reactive
@@ -44,6 +46,7 @@ class ThinkingBlock(Widget):
         self._header_widget: Static | None = None
         self._content_widget: Static | None = None
 
+    @override
     def compose(self) -> ComposeResult:
         with Vertical(classes="thinking-block collapsed"):
             yield Static(

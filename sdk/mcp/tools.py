@@ -75,7 +75,7 @@ def mcp_tool_to_obscura(
 # Tool Result Conversion
 # ---------------------------------------------------------------------------
 
-def obscura_result_to_mcp(result: Any) -> MCPToolResult:
+def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
     """
     Convert an Obscura tool execution result to MCP ToolResult.
 
@@ -95,6 +95,12 @@ def obscura_result_to_mcp(result: Any) -> MCPToolResult:
                 content=[{"type": "text", "text": str(result_dict["error"])}],
                 isError=True,
             )
+        return MCPToolResult(
+            content=[{
+                "type": "text",
+                "text": json.dumps(result_dict, indent=2, default=str),
+            }],
+        )
 
     if isinstance(result, str):
         return MCPToolResult(
@@ -122,18 +128,12 @@ def obscura_result_to_mcp(result: Any) -> MCPToolResult:
 
     # Default: convert to JSON
     try:
-        return MCPToolResult(
-            content=[{
-                "type": "text",
-                "text": json.dumps(result, indent=2, default=str),
-            }],
-        )
+        payload = json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.warning(f"Failed to serialize result to JSON: {e}")
-        text = str(result)
-        return MCPToolResult(
-            content=[{"type": "text", "text": text}],
-        )
+        payload = str(result)
+
+    return MCPToolResult(content=[{"type": "text", "text": payload}])
 
 
 def mcp_result_to_obscura(result: MCPToolResult) -> Any:

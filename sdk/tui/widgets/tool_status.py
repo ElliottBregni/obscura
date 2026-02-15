@@ -7,6 +7,8 @@ while running and a status icon (check/cross) on completion.
 
 from __future__ import annotations
 
+from typing import override
+
 from textual.app import ComposeResult
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -50,6 +52,7 @@ class ToolStatus(Widget):
         self._name_widget: Static | None = None
         self._result_widget: Static | None = None
 
+    @override
     def compose(self) -> ComposeResult:
         yield Static(
             self._format_name_line(),

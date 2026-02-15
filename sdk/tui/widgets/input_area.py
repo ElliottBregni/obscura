@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import override
 
 from textual import events
 from textual.app import ComposeResult
@@ -36,6 +37,7 @@ class _PromptTextArea(TextArea):
     class EnterPressed(Message):
         """Emitted when Enter is pressed (without Shift)."""
 
+    @override
     async def _on_key(self, event: events.Key) -> None:
         if event.key == "enter":
             event.stop()
@@ -140,6 +142,7 @@ class PromptInput(Widget):
 
     # -- Compose ------------------------------------------------------------
 
+    @override
     def compose(self) -> ComposeResult:
         with Horizontal():
             yield Static(
@@ -330,6 +333,7 @@ class PromptInput(Widget):
         return ""
 
     @property
+    @override
     def is_empty(self) -> bool:
         """Check if the input is empty."""
         return not self.text.strip()

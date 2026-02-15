@@ -110,7 +110,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     if config.otel_enabled:
         try:
             from sdk.telemetry.middleware import ObscuraTelemetryMiddleware
-            app.add_middleware(ObscuraTelemetryMiddleware)
+            app.add_middleware(ObscuraTelemetryMiddleware)  # pyright: ignore[reportArgumentType]
         except ImportError:
             logger.debug("Telemetry middleware not available; skipping")
 

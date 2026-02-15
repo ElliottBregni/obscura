@@ -37,7 +37,7 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
     _tool_starts: dict[str, float] = {}
     _context_tokens: dict[str, object] = {}  # for context.detach()
 
-    agent_name = agent._name
+    agent_name = getattr(agent, "name", getattr(agent, "_name", "agent"))
 
     # -- Phase hooks -----------------------------------------------------------
 
@@ -103,6 +103,7 @@ def _start_phase_span(phase: str, agent_name: str, tokens: dict[str, object] | N
     """Start an OTel span for an agent phase."""
     try:
         from opentelemetry import trace
+        from opentelemetry import context
 
         tracer = trace.get_tracer("obscura.agent")
         span = tracer.start_span(
@@ -112,8 +113,6 @@ def _start_phase_span(phase: str, agent_name: str, tokens: dict[str, object] | N
                 "agent.phase": phase,
             },
         )
-        # Attach to context so nested operations become children
-        from opentelemetry import context
         ctx = trace.set_span_in_context(span)
         token = context.attach(ctx)
         if tokens is not None:
@@ -133,7 +132,7 @@ def _end_phase_span(phase: str, agent_name: str, start_time: float | None, token
         # Detach context token to prevent leaks
         token = tokens.pop(f"phase.{phase}", None) if tokens else None
         if token is not None:
-            context.detach(token)
+            context.detach(token)  # type: ignore[arg-type]
     except ImportError:
         pass
 
@@ -180,7 +179,7 @@ def _end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, o
         # Detach context token to prevent leaks
         token = tokens.pop(f"tool.{tool_name}", None) if tokens else None
         if token is not None:
-            context.detach(token)
+            context.detach(token)  # type: ignore[arg-type]
     except ImportError:
         pass
 

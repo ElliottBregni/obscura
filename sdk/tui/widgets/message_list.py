@@ -8,6 +8,8 @@ during streaming, and manual scroll override.
 
 from __future__ import annotations
 
+from typing import cast
+
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Static
@@ -128,8 +130,17 @@ class MessageList(VerticalScroll):
 
     def on_scroll_down(self) -> None:
         """User scrolled down -- re-enable auto-scroll if at bottom."""
-        if self.scroll_offset.y >= self.max_scroll_offset.y - 2:
+        offset_y = _get_y(self.scroll_offset)
+        max_y = _get_y(getattr(self, "max_scroll_offset", None))
+        if offset_y >= max_y - 2:
             self.auto_scroll_enabled = True
+
+
+def _get_y(offset: object) -> int:
+    """Extract y attribute from Textual offset objects safely."""
+    if offset is None:
+        return 0
+    return cast(int, getattr(offset, "y", 0))
 
     def request_scroll_to_bottom(self) -> None:
         """Explicitly scroll to bottom (e.g., new message posted)."""

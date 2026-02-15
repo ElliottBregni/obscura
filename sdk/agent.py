@@ -53,6 +53,11 @@ class BaseAgent:
         self._context_loader = context_loader
         self._hooks: dict[HookPoint, list[HookCallback]] = {hp: [] for hp in HookPoint}
 
+    @property
+    def name(self) -> str:
+        """Read-only agent name for telemetry and observability."""
+        return self._name
+
     # -- Hook registration ---------------------------------------------------
 
     def on(self, hook: HookPoint, callback: HookCallback) -> None:

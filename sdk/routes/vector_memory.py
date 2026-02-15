@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -93,12 +93,14 @@ async def vector_memory_search_routed(
     """Multi-query search with memory type routing and weighted merging."""
     from sdk.vector_memory import VectorMemoryStore
     from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery
+    from sdk.vector_memory_filters import MetadataFilter
 
     store = VectorMemoryStore.for_user(user)
     router_inst = MemoryRouter(store)
 
     query: str = body["query"]
     route_configs: list[dict[str, Any]] = body.get("routes", [])
+    metadata_filters_body = cast(list[MetadataFilter] | None, body.get("metadata_filters"))
     routes: list[MemoryTypeQuery] = [
         MemoryTypeQuery(
             memory_type=r["memory_type"],
@@ -115,6 +117,7 @@ async def vector_memory_search_routed(
         routes=routes,
         final_top_k=final_top_k,
         namespace=ns,
+        metadata_filters=metadata_filters_body,
     )
 
     return JSONResponse(content={

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sdk.skills.base import (
     Skill,
@@ -47,10 +47,10 @@ class SkillRegistry:
     """
     
     def __init__(self):
-        self._skills: Dict[str, Skill] = {}
-        self._capabilities: Dict[str, str] = {}  # capability_path -> skill_name
-        self._initialized: Dict[str, bool] = {}
-        self._configs: Dict[str, Dict[str, Any]] = {}
+        self._skills: dict[str, Skill] = {}
+        self._capabilities: dict[str, str] = {}  # capability_path -> skill_name
+        self._initialized: dict[str, bool] = {}
+        self._configs: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
     
     def register(self, skill: Skill) -> None:
@@ -100,7 +100,7 @@ class SkillRegistry:
         
         logger.info(f"Unregistered skill: {skill_name}")
     
-    async def initialize_skill(self, skill_name: str, config: Dict[str, Any]) -> None:
+    async def initialize_skill(self, skill_name: str, config: dict[str, Any]) -> None:
         """Initialize a specific skill.
         
         Args:
@@ -129,7 +129,7 @@ class SkillRegistry:
                 logger.error(f"Failed to initialize skill '{skill_name}': {e}")
                 raise
     
-    async def initialize_all(self, configs: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    async def initialize_all(self, configs: dict[str, dict[str, Any]] | None = None) -> None:
         """Initialize all registered skills.
         
         Args:
@@ -177,7 +177,7 @@ class SkillRegistry:
                 except Exception as e:
                     logger.error(f"Error shutting down skill '{skill_name}': {e}")
     
-    def get_skill(self, skill_name: str) -> Optional[Skill]:
+    def get_skill(self, skill_name: str) -> Skill | None:
         """Get a skill by name.
         
         Args:
@@ -188,7 +188,7 @@ class SkillRegistry:
         """
         return self._skills.get(skill_name)
     
-    def get_skill_health(self, skill_name: str) -> Optional[SkillHealth]:
+    def get_skill_health(self, skill_name: str) -> SkillHealth | None:
         """Get health status of a skill.
         
         Args:
@@ -244,11 +244,11 @@ class SkillRegistry:
                 message=f"Health check failed: {e}",
             )
     
-    def list_skills(self) -> List[Skill]:
+    def list_skills(self) -> list[Skill]:
         """List all registered skills."""
         return list(self._skills.values())
     
-    def list_capabilities(self, skill_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_capabilities(self, skill_name: str | None = None) -> list[dict[str, Any]]:
         """List all capabilities, optionally filtered by skill.
         
         Args:
@@ -257,9 +257,9 @@ class SkillRegistry:
         Returns:
             List of capability dictionaries with skill info
         """
-        results = []
+        results: list[dict[str, Any]] = []
         
-        skills_to_check = [self._skills[skill_name]] if skill_name else self._skills.values()
+        skills_to_check: list[Skill] = [self._skills[skill_name]] if skill_name else list(self._skills.values())
         
         for skill in skills_to_check:
             for cap in skill.capabilities:
@@ -272,7 +272,7 @@ class SkillRegistry:
         
         return results
     
-    def discover(self, query: str) -> List[Dict[str, Any]]:
+    def discover(self, query: str) -> list[dict[str, Any]]:
         """Search capabilities by query string.
         
         Searches across skill names, descriptions, capability names,
@@ -285,7 +285,7 @@ class SkillRegistry:
             List of matching capabilities
         """
         query = query.lower()
-        results = []
+        results: list[dict[str, Any]] = []
         
         for skill in self._skills.values():
             # Check skill-level match
@@ -309,7 +309,7 @@ class SkillRegistry:
                     })
         
         # Sort by relevance (exact matches first)
-        def relevance(item):
+        def relevance(item: dict[str, Any]) -> int:
             cap_name = item.get("name", "").lower()
             skill_name = item.get("skill", "").lower()
             if query == cap_name or query == skill_name:
@@ -324,7 +324,7 @@ class SkillRegistry:
     async def execute(
         self, 
         capability_path: str, 
-        params: Dict[str, Any]
+        params: dict[str, Any]
     ) -> Any:
         """Execute a capability by its full path (skill.capability).
         
@@ -369,7 +369,7 @@ class SkillRegistry:
         """Check if a skill is initialized."""
         return self._initialized.get(skill_name, False)
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get registry statistics."""
         return {
             "total_skills": len(self._skills),
@@ -387,7 +387,7 @@ class SkillRegistry:
 
 
 # Global registry instance (singleton pattern)
-_global_registry: Optional[SkillRegistry] = None
+_global_registry: SkillRegistry | None = None
 
 
 def get_global_registry() -> SkillRegistry:

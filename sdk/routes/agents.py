@@ -25,6 +25,16 @@ def get_agent_templates() -> dict[str, dict[str, Any]]:
     return _agent_templates
 
 
+def clear_agent_templates() -> None:
+    """Clear agent templates (testing helper)."""
+    _agent_templates.clear()
+
+
+def get_agent_templates_view() -> dict[str, dict[str, Any]]:
+    """Return a shallow copy for safe read access."""
+    return dict(_agent_templates)
+
+
 # -- CRUD -----------------------------------------------------------------
 
 

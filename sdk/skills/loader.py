@@ -16,8 +16,6 @@ import logging
 import pkgutil
 import sys
 from pathlib import Path
-from typing import List
-
 from sdk.skills.base import Skill
 
 logger = logging.getLogger(__name__)
@@ -44,7 +42,7 @@ class SkillLoader:
     def __init__(self):
         self._loaded_modules: set[str] = set()
     
-    def load_builtin_skills(self) -> List[Skill]:
+    def load_builtin_skills(self) -> list[Skill]:
         """Load all built-in skills from sdk.skills.builtin.
         
         Returns:
@@ -52,7 +50,7 @@ class SkillLoader:
         """
         return self.load_from_module(self.BUILTIN_MODULE)
     
-    def load_from_module(self, module_path: str) -> List[Skill]:
+    def load_from_module(self, module_path: str) -> list[Skill]:
         """Load all Skill subclasses from a module.
         
         Args:
@@ -61,7 +59,7 @@ class SkillLoader:
         Returns:
             List of loaded skill instances
         """
-        skills: List[Skill] = []
+        skills: list[Skill] = []
 
         try:
             # Import the module
@@ -100,7 +98,7 @@ class SkillLoader:
 
         return skills
     
-    def load_from_file(self, file_path: str | Path) -> List[Skill]:
+    def load_from_file(self, file_path: str | Path) -> list[Skill]:
         """Load skills from a Python file.
         
         Args:
@@ -117,7 +115,7 @@ class SkillLoader:
         if not file_path.suffix == ".py":
             raise ValueError(f"Skill file must be a Python file: {file_path}")
         
-        skills = []
+        skills: list[Skill] = []
         module_name = f"_skill_loader_{file_path.stem}_{id(file_path)}"
         
         try:
@@ -154,7 +152,7 @@ class SkillLoader:
         
         return skills
     
-    def load_from_directory(self, directory: str | Path) -> List[Skill]:
+    def load_from_directory(self, directory: str | Path) -> list[Skill]:
         """Load all skills from a directory.
         
         Args:
@@ -171,7 +169,7 @@ class SkillLoader:
         if not directory.is_dir():
             raise ValueError(f"Path is not a directory: {directory}")
         
-        skills = []
+        skills: list[Skill] = []
         
         for file_path in directory.glob("*.py"):
             if file_path.name.startswith("_"):
@@ -186,7 +184,7 @@ class SkillLoader:
         return skills
 
 
-def load_builtin_skills() -> List[Skill]:
+def load_builtin_skills() -> list[Skill]:
     """Convenience function to load all built-in skills.
     
     Returns:

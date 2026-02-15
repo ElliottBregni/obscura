@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sdk.tui.modes import TUIMode
 
@@ -40,7 +40,7 @@ class ConversationTurn:
     content: str
     timestamp: datetime
     mode: TUIMode
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: cast(dict[str, Any], {}))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict."""

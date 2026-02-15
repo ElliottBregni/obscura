@@ -78,11 +78,14 @@ class AgentHeartbeatClient:
             interval: Seconds between heartbeats
             **kwargs: Additional configuration options
         """
+        config_fields = set(getattr(HeartbeatClientConfig, "model_fields", getattr(HeartbeatClientConfig, "__fields__", {})).keys())
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
+
         self.config = HeartbeatClientConfig(
             agent_id=agent_id,
             monitor_url=monitor_url.rstrip("/"),
             interval=interval,
-            **{k: v for k, v in kwargs.items() if k in HeartbeatClientConfig.__dataclass_fields__},
+            **filtered_kwargs,
         )
         
         self._running = False
@@ -279,7 +282,7 @@ class AgentHeartbeatClient:
             return metrics
         
         try:
-            import psutil
+            import psutil  # pyright: ignore[reportMissingModuleSource]
             
             # CPU usage
             metrics.cpu_percent = psutil.cpu_percent(interval=0.1)

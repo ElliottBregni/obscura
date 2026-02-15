@@ -30,6 +30,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sdk.vector_memory import VectorMemoryEntry, VectorMemoryStore
     from sdk.vector_memory_rerank import Reranker
+    from sdk.vector_memory_filters import MetadataFilter
+else:
+    from sdk.vector_memory_filters import MetadataFilter
 
 
 @dataclass
@@ -62,7 +65,7 @@ class MemoryRouter:
         namespace: str | None = None,
         threshold: float = -1.0,
         first_stage_k: int = 50,
-        metadata_filters: list | None = None,
+        metadata_filters: list[MetadataFilter] | None = None,
     ) -> RoutedResult:
         """
         Execute separate queries per memory type and merge results.

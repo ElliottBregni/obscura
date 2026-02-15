@@ -113,3 +113,5 @@ def _reset() -> None:
     """Reset configuration state (testing only)."""
     global _configured
     _configured = False
+
+_RESET_HOOK = _reset  # keep referenced for tests
