@@ -13,8 +13,9 @@ import pytest
 
 from sdk.telemetry.metrics import (
     ObscuraMetrics,
-    _NoOpInstrument,
+    NoOpInstrument,
     get_metrics,
+    get_noop_instrument,
 )
 
 
@@ -24,20 +25,24 @@ from sdk.telemetry.metrics import (
 
 class TestNoOpInstrument:
     def test_add_noop(self) -> None:
-        inst = _NoOpInstrument()
+        inst = NoOpInstrument()
         inst.add(1, {"key": "val"})  # should not raise
 
     def test_record_noop(self) -> None:
-        inst = _NoOpInstrument()
+        inst = NoOpInstrument()
         inst.record(0.5, {"key": "val"})  # should not raise
 
     def test_add_no_attributes(self) -> None:
-        inst = _NoOpInstrument()
+        inst = NoOpInstrument()
         inst.add(1)  # should not raise
 
     def test_record_no_attributes(self) -> None:
-        inst = _NoOpInstrument()
+        inst = NoOpInstrument()
         inst.record(0.5)  # should not raise
+
+    def test_get_noop_instrument(self) -> None:
+        inst = get_noop_instrument()
+        inst.add(1)
 
 
 # ---------------------------------------------------------------------------
@@ -77,12 +82,12 @@ class TestObscuraMetrics:
         assert m.active_sessions is not None
 
     def test_noop_fallback_without_otel(self) -> None:
-        """Without OTel, lazy metrics should return _NoOpInstrument."""
+        """Without OTel, lazy metrics should return NoOpInstrument."""
         with patch("sdk.telemetry.metrics._get_meter", return_value=None):
             # Create a fresh instance to avoid cached lazy attrs
             fresh = ObscuraMetrics()
             inst = fresh.requests_total
-            assert isinstance(inst, _NoOpInstrument)
+            assert isinstance(inst, NoOpInstrument)
 
     def test_counter_add_is_callable(self) -> None:
         """Counter metrics should have an add() method."""
@@ -110,7 +115,7 @@ class TestMetricExport:
     @pytest.fixture(autouse=True)
     def _check_otel(self) -> None:
         try:
-            import opentelemetry.sdk.metrics  # noqa: F401
+            import opentelemetry.sdk.metrics  # pyright: ignore[reportUnusedImport]
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 

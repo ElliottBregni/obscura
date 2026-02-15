@@ -180,8 +180,25 @@ def _end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, o
         token = tokens.pop(f"tool.{tool_name}", None) if tokens else None
         if token is not None:
             context.detach(token)  # type: ignore[arg-type]
-    except ImportError:
-        pass
+        except ImportError:
+            pass
+
+
+# Public wrappers for testing/observability
+def start_phase_span(phase: str, agent_name: str, tokens: dict[str, object] | None = None) -> None:
+    _start_phase_span(phase, agent_name, tokens)
+
+
+def end_phase_span(phase: str, agent_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
+    _end_phase_span(phase, agent_name, start_time, tokens)
+
+
+def start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) -> None:
+    _start_tool_span(tool_name, tokens)
+
+
+def end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
+    _end_tool_span(tool_name, start_time, tokens)
 
     try:
         from sdk.telemetry.metrics import get_metrics

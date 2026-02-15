@@ -54,6 +54,31 @@ def _reset() -> None:
 
 _RESET_HOOK = _reset  # keep referenced for test utilities
 
+# Public test/observability helpers
+def reset_telemetry() -> None:
+    """Public wrapper to reset initialization state (testing)."""
+    _reset()
+
+
+def setup_logging(config: ObscuraConfig) -> None:
+    """Public wrapper around logging setup."""
+    _setup_logging(config)
+
+
+def setup_tracing(config: ObscuraConfig) -> None:
+    """Public wrapper around tracing setup."""
+    _setup_tracing(config)
+
+
+def setup_metrics(config: ObscuraConfig) -> None:
+    """Public wrapper around metrics setup."""
+    _setup_metrics(config)
+
+
+def setup_fastapi_instrumentation(config: ObscuraConfig) -> None:
+    """Public wrapper around FastAPI instrumentation setup."""
+    _setup_fastapi_instrumentation(config)
+
 
 def _setup_logging(config: ObscuraConfig) -> None:
     """Configure structlog with JSON or console renderer."""

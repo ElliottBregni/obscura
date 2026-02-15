@@ -128,13 +128,12 @@ class TestAuditLogPath:
         monkeypatch.setenv("OBSCURA_AUDIT_LOG", custom)
         # Reset internal state
         import sdk.telemetry.audit as mod
-        old = mod._audit_log_path
-        mod._audit_log_path = None
+        mod.reset_audit_log_path()
         try:
             path = get_audit_log_path()
             assert str(path) == custom
         finally:
-            mod._audit_log_path = old
+            mod.reset_audit_log_path()
 
 
 # ---------------------------------------------------------------------------

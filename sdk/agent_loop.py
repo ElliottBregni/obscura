@@ -87,6 +87,11 @@ class AgentLoop:
         self._max_turns = max_turns
         self._on_confirm = on_confirm
 
+    @property
+    def max_turns(self) -> int:
+        """Read-only max_turns (testing/observability)."""
+        return self._max_turns
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -314,3 +319,14 @@ class AgentLoop:
                 f"[/Tool Result]"
             )
         return "\n\n".join(parts)
+
+    # Public test/observability wrappers ---------------------------------
+    @staticmethod
+    def parse_tool_call(name: str, input_json: str, raw: Any) -> ToolCallInfo:
+        """Public wrapper to parse a tool call (testing)."""
+        return AgentLoop._parse_tool_call(name, input_json, raw)
+
+    @staticmethod
+    def format_tool_results(results: list[tuple[ToolCallInfo, str, bool]]) -> str:
+        """Public wrapper to format tool results (testing)."""
+        return AgentLoop._format_tool_results(results)

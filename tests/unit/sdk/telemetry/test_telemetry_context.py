@@ -1,12 +1,30 @@
 """Tests for sdk.telemetry.context."""
+from typing import TypedDict
 from unittest.mock import MagicMock
 from sdk.telemetry.context import enrich_span_with_user, get_user_id, get_user_email
 from sdk.auth.models import AuthenticatedUser
 
 
-def _make_user(**overrides):
-    defaults = dict(user_id="u1", email="a@b.com", roles=("admin",), org_id="org1", token_type="user", raw_token="tok")
-    defaults.update(overrides)
+class _UserKw(TypedDict, total=False):
+    user_id: str
+    email: str
+    roles: tuple[str, ...]
+    org_id: str | None
+    token_type: str
+    raw_token: str
+
+
+def _make_user(**overrides: object) -> AuthenticatedUser:
+    defaults: _UserKw = {
+        "user_id": "u1",
+        "email": "a@b.com",
+        "roles": ("admin",),
+        "org_id": "org1",
+        "token_type": "user",
+        "raw_token": "tok",
+    }
+    for k, v in overrides.items():
+        defaults[k] = v
     return AuthenticatedUser(**defaults)
 
 

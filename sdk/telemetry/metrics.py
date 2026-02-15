@@ -198,7 +198,7 @@ def get_metrics() -> ObscuraMetrics:
 # No-op fallback
 # ---------------------------------------------------------------------------
 
-class _NoOpInstrument:
+class NoOpInstrument:
     """No-op metric instrument when OTel is unavailable.
 
     Structurally satisfies :class:`MetricInstrument`.
@@ -212,4 +212,9 @@ class _NoOpInstrument:
 
 
 # Ensure structural compatibility at module level.
-_noop_check: MetricInstrument = _NoOpInstrument()
+_noop_check: MetricInstrument = NoOpInstrument()
+
+
+def get_noop_instrument() -> MetricInstrument:
+    """Return a reusable no-op instrument (testing/observability)."""
+    return _noop_check

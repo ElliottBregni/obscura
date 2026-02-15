@@ -130,23 +130,27 @@ class TestModeCommand:
     def test_mode_ask(self) -> None:
         """'/mode ask' parses correctly."""
         cmd = parse_slash_command("/mode ask")
+        assert cmd is not None
         assert cmd.name == "mode"
         assert cmd.args == ["ask"]
 
     def test_mode_plan(self) -> None:
         """'/mode plan' parses correctly."""
         cmd = parse_slash_command("/mode plan")
+        assert cmd is not None
         assert cmd.name == "mode"
         assert cmd.args == ["plan"]
 
     def test_mode_code(self) -> None:
         """'/mode code' parses correctly."""
         cmd = parse_slash_command("/mode code")
+        assert cmd is not None
         assert cmd.args == ["code"]
 
     def test_mode_diff(self) -> None:
         """'/mode diff' parses correctly."""
         cmd = parse_slash_command("/mode diff")
+        assert cmd is not None
         assert cmd.args == ["diff"]
 
     def test_mode_missing_arg_raises(self) -> None:
@@ -166,12 +170,14 @@ class TestBackendCommand:
     def test_backend_claude(self) -> None:
         """'/backend claude' parses correctly."""
         cmd = parse_slash_command("/backend claude")
+        assert cmd is not None
         assert cmd.name == "backend"
         assert cmd.args == ["claude"]
 
     def test_backend_copilot(self) -> None:
         """'/backend copilot' parses correctly."""
         cmd = parse_slash_command("/backend copilot")
+        assert cmd is not None
         assert cmd.args == ["copilot"]
 
     def test_backend_missing_arg_raises(self) -> None:
@@ -191,12 +197,14 @@ class TestModelCommand:
     def test_model_with_id(self) -> None:
         """'/model claude-sonnet-4-5-20250929' parses correctly."""
         cmd = parse_slash_command("/model claude-sonnet-4-5-20250929")
+        assert cmd is not None
         assert cmd.name == "model"
         assert cmd.args == ["claude-sonnet-4-5-20250929"]
 
     def test_model_any_string_accepted(self) -> None:
         """'/model' accepts any model ID string."""
         cmd = parse_slash_command("/model gpt-5-mini")
+        assert cmd is not None
         assert cmd.args == ["gpt-5-mini"]
 
     def test_model_missing_arg_raises(self) -> None:
@@ -211,17 +219,20 @@ class TestSessionCommand:
     def test_session_new(self) -> None:
         """'/session new' parses correctly."""
         cmd = parse_slash_command("/session new")
+        assert cmd is not None
         assert cmd.name == "session"
         assert cmd.args == ["new"]
 
     def test_session_list(self) -> None:
         """'/session list' parses correctly."""
         cmd = parse_slash_command("/session list")
+        assert cmd is not None
         assert cmd.args == ["list"]
 
     def test_session_load_with_id(self) -> None:
         """'/session load abc123' parses with two args."""
         cmd = parse_slash_command("/session load abc123")
+        assert cmd is not None
         assert cmd.name == "session"
         assert cmd.args == ["load", "abc123"]
 
@@ -237,12 +248,14 @@ class TestClearCommand:
     def test_clear_no_args(self) -> None:
         """'/clear' parses with no arguments."""
         cmd = parse_slash_command("/clear")
+        assert cmd is not None
         assert cmd.name == "clear"
         assert cmd.args == []
 
     def test_clear_raw_preserved(self) -> None:
         """The raw text is preserved in the parsed command."""
         cmd = parse_slash_command("/clear")
+        assert cmd is not None
         assert cmd.raw == "/clear"
 
 
@@ -252,12 +265,14 @@ class TestMemoryCommand:
     def test_memory_list(self) -> None:
         """'/memory list' parses correctly."""
         cmd = parse_slash_command("/memory list")
+        assert cmd is not None
         assert cmd.name == "memory"
         assert cmd.args == ["list"]
 
     def test_memory_get_with_key(self) -> None:
         """'/memory get my_key' parses with two args."""
         cmd = parse_slash_command("/memory get my_key")
+        assert cmd is not None
         assert cmd.args == ["get", "my_key"]
 
     def test_memory_missing_arg_raises(self) -> None:
@@ -272,17 +287,20 @@ class TestDiffCommand:
     def test_diff_show(self) -> None:
         """'/diff show' parses correctly."""
         cmd = parse_slash_command("/diff show")
+        assert cmd is not None
         assert cmd.name == "diff"
         assert cmd.args == ["show"]
 
     def test_diff_accept_all(self) -> None:
         """'/diff accept-all' parses correctly."""
         cmd = parse_slash_command("/diff accept-all")
+        assert cmd is not None
         assert cmd.args == ["accept-all"]
 
     def test_diff_reject_all(self) -> None:
         """'/diff reject-all' parses correctly."""
         cmd = parse_slash_command("/diff reject-all")
+        assert cmd is not None
         assert cmd.args == ["reject-all"]
 
     def test_diff_missing_arg_raises(self) -> None:
@@ -302,6 +320,7 @@ class TestHelpCommand:
     def test_help(self) -> None:
         """'/help' parses correctly."""
         cmd = parse_slash_command("/help")
+        assert cmd is not None
         assert cmd.name == "help"
         assert cmd.args == []
 
@@ -312,6 +331,7 @@ class TestQuitCommand:
     def test_quit(self) -> None:
         """'/quit' parses correctly."""
         cmd = parse_slash_command("/quit")
+        assert cmd is not None
         assert cmd.name == "quit"
         assert cmd.args == []
 
@@ -343,12 +363,14 @@ class TestExtraArguments:
         # /mode only expects 1 arg, but parsing doesn't reject extras
         # (the validator handles that separately)
         cmd = parse_slash_command("/mode ask extra")
+        assert cmd is not None
         assert cmd.name == "mode"
         assert "ask" in cmd.args
 
     def test_session_load_extra_preserved(self) -> None:
         """'/session load id extra' preserves extra args."""
         cmd = parse_slash_command("/session load myid")
+        assert cmd is not None
         assert cmd.args == ["load", "myid"]
 
 
@@ -358,11 +380,13 @@ class TestCommandRawText:
     def test_raw_text_preserved(self) -> None:
         """The original command text is stored in raw."""
         cmd = parse_slash_command("/mode ask")
+        assert cmd is not None
         assert cmd.raw == "/mode ask"
 
     def test_raw_text_with_whitespace(self) -> None:
         """Leading/trailing whitespace is stripped from raw."""
         cmd = parse_slash_command("  /help  ")
+        assert cmd is not None
         assert cmd.raw == "/help"
 
     def test_not_a_command_returns_none(self) -> None:
@@ -406,5 +430,6 @@ class TestAllCommandsParseSuccessfully:
     def test_command_parses(self, cmd_text: str, expected_name: str) -> None:
         """Each valid command from the plan spec parses without error."""
         cmd = parse_slash_command(cmd_text)
+        assert cmd is not None
         assert cmd is not None
         assert cmd.name == expected_name

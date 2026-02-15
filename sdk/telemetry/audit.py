@@ -88,6 +88,12 @@ def get_audit_log_path() -> Path:
     return Path(os.environ.get("OBSCURA_AUDIT_LOG", "audit.jsonl"))
 
 
+def reset_audit_log_path() -> None:
+    """Testing/observability helper to clear any configured audit log path."""
+    global _audit_log_path
+    _audit_log_path = None
+
+
 def emit_audit_event(event: AuditEvent) -> None:
     """Write audit event to JSONL file and OTel log exporter.
 

@@ -67,6 +67,11 @@ class BackendBridge:
         return self._connected
 
     @property
+    def is_connected(self) -> bool:
+        """Alias for connected (used in tests/UI)."""
+        return self._connected
+
+    @property
     def streaming(self) -> bool:
         return self._streaming
 
@@ -77,6 +82,16 @@ class BackendBridge:
     @property
     def model(self) -> str | None:
         return self._model
+
+    # Test/observability accessors
+    @property
+    def client(self) -> ObscuraClient | None:
+        """Access the underlying client (testing/observability)."""
+        return self._client
+
+    @client.setter
+    def client(self, value: ObscuraClient | None) -> None:
+        self._client = value
 
     @property
     def last_duration(self) -> float:

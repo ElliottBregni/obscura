@@ -166,6 +166,12 @@ class NoOpSpan:
     def is_recording(self) -> bool:
         return False
 
+    def __enter__(self) -> "NoOpSpan":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None
+
 
 class NoOpTracer:
     """Minimal no-op tracer for when OTel is unavailable."""

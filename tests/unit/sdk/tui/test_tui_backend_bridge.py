@@ -218,7 +218,7 @@ class TestBackendBridgeStreamPrompt:
             StreamChunk(kind=ChunkKind.DONE),
         ]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         received_text: list[str] = []
         done_called = []
@@ -244,7 +244,7 @@ class TestBackendBridgeStreamPrompt:
             StreamChunk(kind=ChunkKind.DONE),
         ]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         thinking: list[str] = []
 
@@ -268,7 +268,7 @@ class TestBackendBridgeStreamPrompt:
             StreamChunk(kind=ChunkKind.DONE),
         ]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         tools: list[str] = []
 
@@ -292,7 +292,7 @@ class TestBackendBridgeStreamPrompt:
             StreamChunk(kind=ChunkKind.DONE),
         ]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         results: list[str] = []
 
@@ -313,7 +313,7 @@ class TestBackendBridgeStreamPrompt:
         """DONE chunks are routed to the on_done callback."""
         chunks = [StreamChunk(kind=ChunkKind.DONE)]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         done_count = []
 
@@ -336,7 +336,7 @@ class TestBackendBridgeStreamPrompt:
             StreamChunk(kind=ChunkKind.ERROR, text="rate limit exceeded"),
         ]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         errors: list[str] = []
 
@@ -364,7 +364,7 @@ class TestBackendBridgeStreamPrompt:
             StreamChunk(kind=ChunkKind.DONE),
         ]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         texts: list[str] = []
         thinking: list[str] = []
@@ -431,7 +431,7 @@ class TestBackendBridgeStreamCancellation:
         bridge = BackendBridge()
         mock_client = MagicMock()
         mock_client.stream = MagicMock(return_value=_slow_async_iter(chunks))
-        bridge._client = mock_client
+        bridge.client = mock_client
 
         received: list[str] = []
 
@@ -467,7 +467,7 @@ class TestBackendBridgeStreamCancellation:
         """is_streaming is True while streaming and False after."""
         chunks = [StreamChunk(kind=ChunkKind.DONE)]
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(stream_chunks=chunks)
+        bridge.client = _make_mock_client(stream_chunks=chunks)
 
         streaming_during: list[bool] = []
 
@@ -502,7 +502,7 @@ class TestBackendBridgeErrorHandling:
             raise ConnectionError("connection lost")
 
         mock_client.stream = _failing_stream
-        bridge._client = mock_client
+        bridge.client = mock_client
 
         errors: list[str] = []
         texts: list[str] = []
@@ -532,7 +532,7 @@ class TestBackendBridgeErrorHandling:
             yield  # Make it a generator  # noqa: E501
 
         mock_client.stream = _failing_stream
-        bridge._client = mock_client
+        bridge.client = mock_client
 
         await bridge.stream_prompt(
             prompt="test",
@@ -557,7 +557,7 @@ class TestBackendBridgeErrorHandling:
             yield  # noqa: E501
 
         mock_client.stream = _timeout_stream
-        bridge._client = mock_client
+        bridge.client = mock_client
 
         errors: list[str] = []
 
@@ -583,7 +583,7 @@ class TestBackendBridgeDisconnect:
         """disconnect() calls client.stop() and sets client to None."""
         bridge = BackendBridge()
         mock_client = _make_mock_client()
-        bridge._client = mock_client
+        bridge.client = mock_client
 
         await bridge.disconnect()
 
@@ -602,7 +602,7 @@ class TestBackendBridgeDisconnect:
         """disconnect() resets the streaming flag."""
         bridge = BackendBridge()
         bridge._streaming = True
-        bridge._client = _make_mock_client()
+        bridge.client = _make_mock_client()
 
         await bridge.disconnect()
         assert bridge.is_streaming is False
@@ -612,7 +612,7 @@ class TestBackendBridgeDisconnect:
         """Calling disconnect() twice is safe."""
         bridge = BackendBridge()
         mock_client = _make_mock_client()
-        bridge._client = mock_client
+        bridge.client = mock_client
 
         await bridge.disconnect()
         await bridge.disconnect()
@@ -632,7 +632,7 @@ class TestBackendBridgeSendPrompt:
             content=[ContentBlock(kind="text", text="hello back")],
         )
         bridge = BackendBridge()
-        bridge._client = _make_mock_client(send_response=expected_msg)
+        bridge.client = _make_mock_client(send_response=expected_msg)
 
         result = await bridge.send_prompt("hello")
         assert result.text == "hello back"
@@ -648,7 +648,7 @@ class TestBackendBridgeSendPrompt:
     async def test_send_prompt_passes_prompt_to_client(self) -> None:
         """send_prompt() passes the prompt string to client.send()."""
         bridge = BackendBridge()
-        bridge._client = _make_mock_client()
+        bridge.client = _make_mock_client()
 
         await bridge.send_prompt("my question")
-        bridge._client.send.assert_awaited_once_with("my question")
+        bridge.client.send.assert_awaited_once_with("my question")

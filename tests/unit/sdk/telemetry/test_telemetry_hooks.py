@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, patch
 
 from sdk.telemetry.hooks import (
     register_telemetry_hooks,
-    _start_phase_span,
-    _end_phase_span,
-    _start_tool_span,
-    _end_tool_span,
+    start_phase_span,
+    end_phase_span,
+    start_tool_span,
+    end_tool_span,
 )
 from sdk._types import HookPoint
 
@@ -41,37 +41,37 @@ class TestRegisterTelemetryHooks:
 class TestPhaseSpanHelpers:
     def test_start_phase_span_no_otel(self):
         with patch.dict("sys.modules", {"opentelemetry": None}):
-            _start_phase_span("analyze", "agent1")  # Should not raise
+            start_phase_span("analyze", "agent1")  # Should not raise
 
     def test_end_phase_span_no_otel(self):
         with patch.dict("sys.modules", {"opentelemetry": None}):
-            _end_phase_span("analyze", "agent1", 100.0)  # Should not raise
+            end_phase_span("analyze", "agent1", 100.0)  # Should not raise
 
     def test_end_phase_span_no_start_time(self):
-        _end_phase_span("analyze", "agent1", None)  # Should not raise
+        end_phase_span("analyze", "agent1", None)  # Should not raise
 
     def test_end_phase_span_with_tokens(self):
-        tokens = {"phase.test": "fake_token"}
+        tokens: dict[str, object] = {"phase.test": "fake_token"}
         with patch.dict("sys.modules", {"opentelemetry": None}):
-            _end_phase_span("test", "agent1", 100.0, tokens)
+            end_phase_span("test", "agent1", 100.0, tokens)
 
 
 class TestToolSpanHelpers:
     def test_start_tool_span_no_otel(self):
         with patch.dict("sys.modules", {"opentelemetry": None}):
-            _start_tool_span("my_tool")  # Should not raise
+            start_tool_span("my_tool")  # Should not raise
 
     def test_end_tool_span_no_otel(self):
         with patch.dict("sys.modules", {"opentelemetry": None}):
-            _end_tool_span("my_tool", 100.0)  # Should not raise
+            end_tool_span("my_tool", 100.0)  # Should not raise
 
     def test_end_tool_span_no_start_time(self):
-        _end_tool_span("my_tool", None)
+        end_tool_span("my_tool", None)
 
     def test_end_tool_span_with_tokens(self):
         tokens = {"tool.test": "fake_token"}
         with patch.dict("sys.modules", {"opentelemetry": None}):
-            _end_tool_span("test", 100.0, tokens)
+            end_tool_span("test", 100.0, tokens)
 
 
 class TestHookCallbacks:
@@ -88,6 +88,7 @@ class TestHookCallbacks:
                 break
 
         ctx = MagicMock()
+        assert pre_analyze is not None
         pre_analyze(ctx)  # Should not raise
 
     def test_pre_tool_use_with_tool_name(self):
@@ -103,6 +104,7 @@ class TestHookCallbacks:
 
         ctx = MagicMock()
         ctx.tool_name = "read_file"
+        assert pre_tool is not None
         pre_tool(ctx)  # Should not raise
 
     def test_pre_tool_use_with_metadata(self):
@@ -118,6 +120,7 @@ class TestHookCallbacks:
 
         ctx = MagicMock(spec=[])
         ctx.metadata = {"tool_name": "write_file"}
+        assert pre_tool is not None
         pre_tool(ctx)  # Should not raise
 
     def test_post_respond_callback(self):
@@ -132,4 +135,5 @@ class TestHookCallbacks:
                 break
 
         ctx = MagicMock()
+        assert post_respond is not None
         post_respond(ctx)  # Should not raise

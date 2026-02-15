@@ -4,7 +4,7 @@
 #
 # Install: ln -sf ~/FV-Copilot/git-hooks/post-merge .git/hooks/post-merge
 
-VAULT_PATH="$HOME/FV-Copilot"
+VAULT_PATH="$HOME/obscura"
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 REPO_NAME=$(basename "$REPO_ROOT" 2>/dev/null)
 
