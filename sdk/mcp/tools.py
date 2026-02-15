@@ -130,9 +130,9 @@ def obscura_result_to_mcp(result: Any) -> MCPToolResult:
         )
     except Exception as e:
         logger.warning(f"Failed to serialize result to JSON: {e}")
-        fallback: dict[str, Any] = {"type": "text", "text": str(result)}
+        text = str(result)
         return MCPToolResult(
-            content=[fallback],
+            content=[{"type": "text", "text": text}],
         )
 
 

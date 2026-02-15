@@ -111,23 +111,23 @@ async def metrics_get(
     store = MemoryStore.for_user(user)
     memory_stats = store.get_stats()
 
-    from sdk.routes.agents import _agent_templates
-    from sdk.routes.workflows import _workflows, _workflow_executions
-    from sdk.routes.webhooks import _webhooks
+    from sdk.routes.agents import get_agent_templates
+    from sdk.routes.workflows import get_workflows_store, get_workflow_executions_store
+    from sdk.routes.webhooks import get_webhooks_store
 
     return JSONResponse(content={
         "agents": agent_stats,
         "memory": memory_stats,
         "templates": {
-            "total_templates": len(_agent_templates),
+            "total_templates": len(get_agent_templates()),
         },
         "workflows": {
-            "total_workflows": len(_workflows),
-            "total_executions": len(_workflow_executions),
+            "total_workflows": len(get_workflows_store()),
+            "total_executions": len(get_workflow_executions_store()),
         },
         "webhooks": {
-            "total": len(_webhooks),
-            "active": sum(1 for w in _webhooks.values() if w.get("active", True)),
+            "total": len(get_webhooks_store()),
+            "active": sum(1 for w in get_webhooks_store().values() if w.get("active", True)),
         },
         "timestamp": datetime.now(UTC).isoformat(),
     })

@@ -40,6 +40,7 @@ from sdk.mcp.types import (
     ObscuraMCPToolContext,
     ObscuraMCPConfig,
 )
+from sdk.agents import AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +229,7 @@ class ObscuraMCPServer:
         namespace = arguments.get("namespace")
         agents = self._runtime.list_agents()
         
-        result = []
+        result: list[dict[str, Any]] = []
         for agent in agents:
             agent_data = {
                 "id": agent.id,
@@ -265,7 +266,12 @@ class ObscuraMCPServer:
             tags=arguments.get("tags", []),
         )
         
-        agent = self._runtime.spawn(config, self.user)
+        agent = self._runtime.spawn(
+            name=config.name,
+            model=config.model,
+            system_prompt=config.system_prompt,
+            memory_namespace=config.memory_namespace,
+        )
         await agent.start()
         
         return {
@@ -292,7 +298,7 @@ class ObscuraMCPServer:
             return {"error": f"Agent not found: {agent_id}"}
         
         if force:
-            agent.stop()
+            await agent.stop()
         else:
             await agent.stop_graceful()
         
@@ -393,7 +399,7 @@ class ObscuraMCPServer:
         if namespace:
             # Search within specific namespace
             keys = memory.list_keys(namespace=namespace)
-            results = []
+            results: list[dict[str, Any]] = []
             for mk in keys:
                 if query.lower() in mk.key.lower():
                     value = memory.get(mk.key, namespace=mk.namespace)
@@ -467,7 +473,7 @@ class ObscuraMCPServer:
     async def shutdown(self) -> None:
         """Shutdown the MCP server."""
         if self._runtime:
-            await self._runtime.shutdown()
+            await self._runtime.stop()
             self._runtime = None
         
         self._initialized = False
@@ -526,11 +532,11 @@ class ObscuraMCPServer:
     async def handle_resources_list(self) -> list[dict[str, Any]]:
         """Handle MCP resources/list request."""
         # Return memory namespaces as resources
-        resources = []
+        resources: list[dict[str, Any]] = []
         
         if self.user:
             memory = MemoryStore.for_user(self.user)
-            namespaces = set()
+            namespaces: set[str] = set()
             for key in memory.list_keys():
                 namespaces.add(key.namespace)
             
@@ -687,7 +693,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
     router = APIRouter(prefix="/mcp", tags=["MCP"])
     
     @router.post("/rpc")
-    async def handle_rpc(request: Request):
+    async def handle_rpc(request: Request):  # pyright: ignore[reportUnusedFunction]
         """Handle MCP JSON-RPC requests."""
         body = await request.json()
         
@@ -755,7 +761,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
             }
     
     @router.get("/sse")
-    async def handle_sse(request: Request):
+    async def handle_sse(request: Request):  # pyright: ignore[reportUnusedFunction]
         """Handle MCP SSE (Server-Sent Events) connections."""
         async def event_generator():
             # Send initial endpoint event

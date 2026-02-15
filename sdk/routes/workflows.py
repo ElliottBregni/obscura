@@ -24,6 +24,16 @@ _workflows: dict[str, dict[str, Any]] = {}
 _workflow_executions: dict[str, dict[str, Any]] = {}
 
 
+def get_workflows_store() -> dict[str, dict[str, Any]]:
+    """Read-only access to workflows store (admin stats/tests)."""
+    return _workflows
+
+
+def get_workflow_executions_store() -> dict[str, dict[str, Any]]:
+    """Read-only access to workflow executions store (admin stats/tests)."""
+    return _workflow_executions
+
+
 @router.post("/workflows")
 async def workflow_create(
     body: dict[str, Any],

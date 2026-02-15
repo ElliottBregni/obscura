@@ -23,6 +23,11 @@ router = APIRouter(prefix="/api/v1", tags=["webhooks"])
 _webhooks: dict[str, dict[str, Any]] = {}
 
 
+def get_webhooks_store() -> dict[str, dict[str, Any]]:
+    """Read-only access to webhook store (admin stats/tests)."""
+    return _webhooks
+
+
 @router.post("/webhooks")
 async def webhook_create(
     body: dict[str, Any],

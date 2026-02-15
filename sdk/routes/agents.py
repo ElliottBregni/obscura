@@ -20,6 +20,11 @@ router = APIRouter(prefix="/api/v1", tags=["agents"])
 _agent_templates: dict[str, dict[str, Any]] = {}
 
 
+def get_agent_templates() -> dict[str, dict[str, Any]]:
+    """Read-only access to agent templates (for admin stats/tests)."""
+    return _agent_templates
+
+
 # -- CRUD -----------------------------------------------------------------
 
 

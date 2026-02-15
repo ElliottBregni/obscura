@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -21,12 +21,13 @@ ws_router = APIRouter()
 
 async def _get_heartbeat_monitor(request: Request) -> Any:
     """Get or create the heartbeat monitor."""
-    if request.app.state._heartbeat_monitor is None:  # pyright: ignore[reportPrivateUsage]
+    monitor = getattr(request.app.state, "heartbeat_monitor", None)
+    if monitor is None:
         from sdk.heartbeat import get_default_monitor
         monitor = get_default_monitor()
         await monitor.start()
-        request.app.state._heartbeat_monitor = monitor  # pyright: ignore[reportPrivateUsage]
-    return request.app.state._heartbeat_monitor  # pyright: ignore[reportPrivateUsage]
+        setattr(request.app.state, "heartbeat_monitor", monitor)
+    return monitor
 
 
 @router.post("/heartbeat")
@@ -117,17 +118,23 @@ async def health_websocket(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
-    ws_clients: list[WebSocket] = websocket.app.state._health_ws_clients  # pyright: ignore[reportPrivateUsage]
+    if not hasattr(websocket.app.state, "health_ws_clients"):
+        websocket.app.state.health_ws_clients = []
+    ws_clients_any = getattr(websocket.app.state, "health_ws_clients")
+    if isinstance(ws_clients_any, list):
+        ws_clients = cast(list[WebSocket], ws_clients_any)
+    else:
+        ws_clients: list[WebSocket] = []
+        websocket.app.state.health_ws_clients = ws_clients
     ws_clients.append(websocket)
 
     try:
-        if websocket.app.state._heartbeat_monitor is None:  # pyright: ignore[reportPrivateUsage]
+        monitor = getattr(websocket.app.state, "heartbeat_monitor", None)
+        if monitor is None:
             from sdk.heartbeat import get_default_monitor
             monitor = get_default_monitor()
             await monitor.start()
-            websocket.app.state._heartbeat_monitor = monitor  # pyright: ignore[reportPrivateUsage]
-        else:
-            monitor = websocket.app.state._heartbeat_monitor  # pyright: ignore[reportPrivateUsage]
+            setattr(websocket.app.state, "heartbeat_monitor", monitor)
 
         summary: dict[str, Any] = await monitor.get_health_summary()
         await websocket.send_json({
@@ -164,7 +171,7 @@ async def _broadcast_health_update(request: Request, agent_id: str, status: str)
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
-    ws_clients: list[WebSocket] = request.app.state._health_ws_clients  # pyright: ignore[reportPrivateUsage]
+    ws_clients: list[WebSocket] = getattr(request.app.state, "health_ws_clients", [])
     disconnected: list[WebSocket] = []
     for client in ws_clients:
         try:
