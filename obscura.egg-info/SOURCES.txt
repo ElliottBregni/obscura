@@ -26,10 +26,6 @@ sdk/memory.py
 sdk/py.typed
 sdk/schemas.py
 sdk/server.py
-sdk/vector_memory.py
-sdk/vector_memory_filters.py
-sdk/vector_memory_rerank.py
-sdk/vector_memory_router.py
 sdk/auth/__init__.py
 sdk/auth/middleware.py
 sdk/auth/models.py
@@ -162,3 +158,8 @@ tests/test_vector_memory_router.py
 tests/test_watcher.py
 tests/test_websockets.py
 tests/test_zitadel.py
+sdk/vector_memory/__init__.py
+sdk/vector_memory/vector_memory.py
+sdk/vector_memory/vector_memory_filters.py
+sdk/vector_memory/vector_memory_rerank.py
+sdk/vector_memory/vector_memory_router.py

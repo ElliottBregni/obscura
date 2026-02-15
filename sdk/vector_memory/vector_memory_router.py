@@ -6,7 +6,7 @@ then merges and deduplicates results.
 
 Usage::
 
-    from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery
+    from sdk.vector_memory.vector_memory_router import MemoryRouter, MemoryTypeQuery
 
     router = MemoryRouter(store)
     result = router.route_and_merge(
@@ -29,10 +29,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sdk.vector_memory import VectorMemoryEntry, VectorMemoryStore
-    from sdk.vector_memory_rerank import Reranker
-    from sdk.vector_memory_filters import MetadataFilter
+    from sdk.vector_memory.vector_memory_rerank import Reranker
+    from sdk.vector_memory.vector_memory_filters import MetadataFilter
 else:
-    from sdk.vector_memory_filters import MetadataFilter
+    from sdk.vector_memory.vector_memory_filters import MetadataFilter
 
 
 @dataclass

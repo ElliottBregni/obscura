@@ -92,8 +92,8 @@ async def vector_memory_search_routed(
 ) -> JSONResponse:
     """Multi-query search with memory type routing and weighted merging."""
     from sdk.vector_memory import VectorMemoryStore
-    from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery
-    from sdk.vector_memory_filters import MetadataFilter
+    from sdk.vector_memory.vector_memory_router import MemoryRouter, MemoryTypeQuery
+    from sdk.vector_memory import MetadataFilter
 
     store = VectorMemoryStore.for_user(user)
     router_inst = MemoryRouter(store)

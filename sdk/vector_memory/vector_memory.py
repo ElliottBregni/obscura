@@ -36,7 +36,7 @@ import numpy as np
 
 from sdk.auth.models import AuthenticatedUser
 from sdk.memory import MemoryKey
-from sdk.vector_memory_filters import MetadataFilter
+from sdk.vector_memory.vector_memory_filters import MetadataFilter
 
 
 # Simple embedding function (in production, use OpenAI, sentence-transformers, etc.)
@@ -330,7 +330,7 @@ class VectorMemoryStore:
         Returns:
             List of memories sorted by similarity (highest first)
         """
-        from sdk.vector_memory_filters import (
+        from sdk.vector_memory.vector_memory_filters import (
             DateRangeFilter,
             FilterBuilder,
             MemoryTypeFilter,
@@ -422,7 +422,7 @@ class VectorMemoryStore:
         Returns:
             List of memories sorted by final_score (highest first)
         """
-        from sdk.vector_memory_rerank import RecencyReranker
+        from sdk.vector_memory.vector_memory_rerank import RecencyReranker
 
         # Stage 1: get candidate pool
         candidates = self.search_similar(

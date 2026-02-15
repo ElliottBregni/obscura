@@ -54,6 +54,43 @@ class MemoryTypeFilter:
 MetadataFilter = DateRangeFilter | TagFilter | KeyValueFilter | MemoryTypeFilter
 
 
+def match_metadata_filters(filters: list[MetadataFilter], metadata: dict[str, Any]) -> bool:
+    """Lightweight in-memory filter matcher used in tests without SQL."""
+    for f in filters:
+        if isinstance(f, MemoryTypeFilter):
+            if metadata.get("memory_type") not in f.memory_types:
+                return False
+        elif isinstance(f, TagFilter):
+            tags = set(metadata.get("tags", []))
+            test = set(f.tags)
+            if f.mode == "all" and not test.issubset(tags):
+                return False
+            if f.mode == "any" and tags.isdisjoint(test):
+                return False
+        elif isinstance(f, KeyValueFilter):
+            val = metadata.get(f.key)
+            op = f.operator
+            if op == "eq" and val != f.value:
+                return False
+            if op == "ne" and val == f.value:
+                return False
+            if op == "gt" and not (isinstance(val, (int, float)) and val > f.value):
+                return False
+            if op == "lt" and not (isinstance(val, (int, float)) and val < f.value):
+                return False
+            if op == "gte" and not (isinstance(val, (int, float)) and val >= f.value):
+                return False
+            if op == "lte" and not (isinstance(val, (int, float)) and val <= f.value):
+                return False
+            if op == "contains" and f.value not in (val or []):
+                return False
+        if isinstance(f, DateRangeFilter):
+            created = metadata.get(f.field)
+            if not created:
+                return False
+    return True
+
+
 class FilterBuilder:
     """Build SQL WHERE clause fragments from filter objects."""
 

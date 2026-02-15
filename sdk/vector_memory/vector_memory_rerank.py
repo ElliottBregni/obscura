@@ -28,6 +28,18 @@ if TYPE_CHECKING:
     from sdk.vector_memory import VectorMemoryEntry
 
 
+@dataclass(frozen=True, slots=True)
+class RerankRequest:
+    query: str
+    entry: "VectorMemoryEntry"
+    query_embedding: list[float]
+
+
+@dataclass(frozen=True, slots=True)
+class RerankResponse:
+    score: float
+
+
 @runtime_checkable
 class Reranker(Protocol):
     """Protocol for second-stage reranking functions."""

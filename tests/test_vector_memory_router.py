@@ -1,8 +1,8 @@
-"""Tests for sdk.vector_memory_router."""
+"""Tests for sdk.vector_memory."""
 from unittest.mock import MagicMock
 from datetime import UTC, datetime
 
-from sdk.vector_memory_router import MemoryRouter, MemoryTypeQuery, RoutedResult
+from sdk.vector_memory import MemoryRouter, MemoryTypeQuery, RoutedResult
 from sdk.vector_memory import VectorMemoryEntry
 from sdk.memory import MemoryKey
 
