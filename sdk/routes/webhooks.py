@@ -59,28 +59,24 @@ async def webhook_create(
     webhook_id = str(uuid.uuid4())
     secret = secrets.token_urlsafe(32)
 
-    webhook: dict[str, Any] = {
-        "webhook_id": webhook_id,
-        "url": body.get("url"),
-        "events": body.get("events", []),
-        "secret": secret,
-        "active": True,
-        "created_by": user.user_id,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
+    webhook = WebhookConfig(
+        webhook_id=webhook_id,
+        url=str(body.get("url", "")),
+        events=list(body.get("events", [])),
+        secret=secret,
+        active=True,
+        created_by=user.user_id,
+        created_at=datetime.now(UTC).isoformat(),
+    )
 
     _webhooks[webhook_id] = webhook
 
     audit("webhook.create", user, f"webhook:{webhook_id}", "create", "success",
-          url=webhook["url"], events=webhook["events"])
+          url=webhook.url, events=webhook.events)
 
     return JSONResponse(content={
-        "webhook_id": webhook_id,
-        "url": webhook["url"],
-        "events": webhook["events"],
+        **webhook.as_public_dict(),
         "secret": secret,
-        "active": webhook["active"],
-        "created_at": webhook["created_at"],
     })
 
 
@@ -89,10 +85,7 @@ async def webhook_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all webhooks."""
-    webhooks: list[dict[str, Any]] = [
-        {k: v for k, v in w.items() if k != "secret"}
-        for w in _webhooks.values()
-    ]
+    webhooks: list[dict[str, Any]] = [w.as_public_dict() for w in _webhooks.values()]
     return JSONResponse(content={
         "webhooks": webhooks,
         "count": len(webhooks),
@@ -109,9 +102,7 @@ async def webhook_get(
     if webhook is None:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
 
-    return JSONResponse(content={
-        k: v for k, v in webhook.items() if k != "secret"
-    })
+    return JSONResponse(content=webhook.as_public_dict())
 
 
 @router.delete("/webhooks/{webhook_id}")
@@ -149,7 +140,7 @@ async def webhook_test(
     }
 
     payload_json = json.dumps(payload, separators=(',', ':'))
-    webhook_secret: str = webhook["secret"]
+    webhook_secret: str = webhook.secret
     signature = hmac.new(
         webhook_secret.encode(),
         payload_json.encode(),
@@ -158,7 +149,7 @@ async def webhook_test(
 
     try:
         async with httpx.AsyncClient() as client:
-            webhook_url: str = webhook["url"]
+            webhook_url: str = webhook.url
             resp = await client.post(
                 webhook_url,
                 json=payload,
@@ -197,13 +188,12 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
     payload_json = json.dumps(payload, separators=(',', ':'))
 
     for webhook in _webhooks.values():
-        if not webhook.get("active", True):
+        if not webhook.active:
             continue
-        events: list[str] = webhook.get("events", [])
-        if event_type not in events:
+        if event_type not in webhook.events:
             continue
 
-        webhook_secret: str = webhook["secret"]
+        webhook_secret: str = webhook.secret
         signature = hmac.new(
             webhook_secret.encode(),
             payload_json.encode(),
@@ -212,8 +202,8 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
 
         try:
             async with httpx.AsyncClient() as client:
-                webhook_url: str = webhook["url"]
-                webhook_id: str = webhook["webhook_id"]
+                webhook_url: str = webhook.url
+                webhook_id: str = webhook.webhook_id
                 await client.post(
                     webhook_url,
                     json=payload,
