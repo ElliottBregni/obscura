@@ -1,5 +1,9 @@
 """Tests for miscellaneous route modules."""
 
+from __future__ import annotations
+
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
@@ -7,7 +11,7 @@ from sdk.config import ObscuraConfig
 
 
 @pytest.fixture
-def app():
+def app() -> Any:
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
 
@@ -15,25 +19,24 @@ def app():
 
 
 @pytest.fixture
-def client(app):
+def client(app: Any) -> TestClient:
     return TestClient(app)
 
 
 class TestHealthRoute:
-    def test_health(self, client):
-        # /health is the liveness probe (no /api/v1 prefix)
+    def test_health(self, client: TestClient) -> None:
         resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    def test_ready(self, client):
+    def test_ready(self, client: TestClient) -> None:
         resp = client.get("/ready")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
 
 class TestWebhookRoutes:
-    def test_create_webhook(self, client):
+    def test_create_webhook(self, client: TestClient) -> None:
         resp = client.post(
             "/api/v1/webhooks",
             json={
@@ -45,14 +48,14 @@ class TestWebhookRoutes:
         data = resp.json()
         assert "webhook_id" in data
 
-    def test_list_webhooks(self, client):
+    def test_list_webhooks(self, client: TestClient) -> None:
         resp = client.get("/api/v1/webhooks")
         assert resp.status_code == 200
         data = resp.json()
         assert "webhooks" in data
         assert isinstance(data["webhooks"], list)
 
-    def test_get_webhook(self, client):
+    def test_get_webhook(self, client: TestClient) -> None:
         create = client.post(
             "/api/v1/webhooks",
             json={
@@ -64,11 +67,11 @@ class TestWebhookRoutes:
         resp = client.get(f"/api/v1/webhooks/{wid}")
         assert resp.status_code == 200
 
-    def test_get_webhook_not_found(self, client):
+    def test_get_webhook_not_found(self, client: TestClient) -> None:
         resp = client.get("/api/v1/webhooks/nonexistent")
         assert resp.status_code == 404
 
-    def test_delete_webhook(self, client):
+    def test_delete_webhook(self, client: TestClient) -> None:
         create = client.post(
             "/api/v1/webhooks",
             json={
@@ -82,7 +85,7 @@ class TestWebhookRoutes:
 
 
 class TestWorkflowRoutes:
-    def test_create_workflow(self, client):
+    def test_create_workflow(self, client: TestClient) -> None:
         resp = client.post(
             "/api/v1/workflows",
             json={
@@ -94,11 +97,11 @@ class TestWorkflowRoutes:
         assert resp.status_code == 200
         assert "workflow_id" in resp.json()
 
-    def test_list_workflows(self, client):
+    def test_list_workflows(self, client: TestClient) -> None:
         resp = client.get("/api/v1/workflows")
         assert resp.status_code == 200
 
-    def test_get_workflow(self, client):
+    def test_get_workflow(self, client: TestClient) -> None:
         create = client.post(
             "/api/v1/workflows",
             json={
@@ -110,11 +113,11 @@ class TestWorkflowRoutes:
         resp = client.get(f"/api/v1/workflows/{wid}")
         assert resp.status_code == 200
 
-    def test_get_workflow_not_found(self, client):
+    def test_get_workflow_not_found(self, client: TestClient) -> None:
         resp = client.get("/api/v1/workflows/nonexistent")
         assert resp.status_code == 404
 
-    def test_delete_workflow(self, client):
+    def test_delete_workflow(self, client: TestClient) -> None:
         create = client.post("/api/v1/workflows", json={"name": "wf3", "steps": []})
         wid = create.json()["workflow_id"]
         resp = client.delete(f"/api/v1/workflows/{wid}")
@@ -122,44 +125,44 @@ class TestWorkflowRoutes:
 
 
 class TestAdminRoutes:
-    def test_audit_logs(self, client):
+    def test_audit_logs(self, client: TestClient) -> None:
         resp = client.get("/api/v1/audit/logs")
         assert resp.status_code == 200
 
-    def test_audit_logs_summary(self, client):
+    def test_audit_logs_summary(self, client: TestClient) -> None:
         resp = client.get("/api/v1/audit/logs/summary")
         assert resp.status_code == 200
 
     @patch("sdk.routes.admin.get_runtime")
-    def test_metrics(self, mock_runtime, client):
-        mock_rt = AsyncMock()
+    def test_metrics(self, mock_runtime: Any, client: TestClient) -> None:
+        mock_rt: Any = AsyncMock()
         mock_rt.list_agents = MagicMock(return_value=[])
         mock_runtime.return_value = mock_rt
         resp = client.get("/api/v1/metrics")
         assert resp.status_code == 200
 
-    def test_rate_limits(self, client):
+    def test_rate_limits(self, client: TestClient) -> None:
         resp = client.get("/api/v1/rate-limits")
         assert resp.status_code == 200
 
 
 class TestSessionRoutes:
     @patch("sdk.routes.sessions.ClientFactory")
-    def test_list_sessions(self, mock_cf, client):
+    def test_list_sessions(self, mock_cf: Any, client: TestClient) -> None:
         resp = client.get("/api/v1/sessions")
         assert resp.status_code == 200
 
 
 class TestSyncRoutes:
     @patch("sdk.routes.sync.record_sync_metric")
-    def test_sync(self, mock_metric, client):
+    def test_sync(self, mock_metric: Any, client: TestClient) -> None:
         resp = client.post("/api/v1/sync", json={})
         # May fail due to missing vault setup, but should not 500
         assert resp.status_code in (200, 422, 500)
 
 
 class TestHeartbeatRoutes:
-    def test_post_heartbeat(self, client):
+    def test_post_heartbeat(self, client: TestClient) -> None:
         resp = client.post(
             "/api/v1/heartbeat",
             json={
@@ -169,7 +172,7 @@ class TestHeartbeatRoutes:
         )
         assert resp.status_code == 200
 
-    def test_get_agent_health(self, client):
+    def test_get_agent_health(self, client: TestClient) -> None:
         # Post one first
         client.post(
             "/api/v1/heartbeat",
@@ -181,19 +184,19 @@ class TestHeartbeatRoutes:
         resp = client.get("/api/v1/heartbeat/agent-2")
         assert resp.status_code in (200, 404)
 
-    def test_list_health(self, client):
+    def test_list_health(self, client: TestClient) -> None:
         resp = client.get("/api/v1/health")
         assert resp.status_code == 200
 
 
 class TestSendRoutes:
-    def test_send_endpoint_exists(self, app, client):
+    def test_send_endpoint_exists(self, app: Any, client: TestClient) -> None:
         # Mock the client factory on app state so the endpoint can resolve it
-        mock_client = AsyncMock()
+        mock_client: Any = AsyncMock()
         mock_client.send.return_value = MagicMock(text="hello")
         mock_client.stop = AsyncMock()
         mock_client.capability_tier = "B"
-        mock_factory = AsyncMock()
+        mock_factory: Any = AsyncMock()
         mock_factory.create.return_value = mock_client
         app.state.client_factory = mock_factory
 

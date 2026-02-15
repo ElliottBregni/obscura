@@ -283,7 +283,7 @@ class TestGlobalExceptionHandler:
         app = _make_app()
 
         @app.get("/test-kaboom")
-        async def kaboom():
+        async def kaboom() -> None:  # pyright: ignore[reportUnusedFunction]
             raise ValueError("kaboom error")
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -297,7 +297,7 @@ class TestGlobalExceptionHandler:
         app = _make_app()
 
         @app.get("/test-runtime")
-        async def runtime_err():
+        async def runtime_err() -> None:  # pyright: ignore[reportUnusedFunction]
             raise RuntimeError("runtime boom")
 
         client = TestClient(app, raise_server_exceptions=False)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -38,8 +39,8 @@ def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTEL_TRACES_EXPORTER", "none")
     try:
         from opentelemetry import metrics, trace
-        import opentelemetry.metrics._internal as _mi  # type: ignore
-        from opentelemetry.util._once import Once  # type: ignore
+        import opentelemetry.metrics._internal as _mi
+        from opentelemetry.util._once import Once
 
         metrics._METER_PROVIDER = None  # type: ignore[attr-defined]
         metrics._METER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
@@ -52,10 +53,12 @@ def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def temp_memory_dirs(tmp_path_factory, monkeypatch: pytest.MonkeyPatch) -> None:
+def temp_memory_dirs(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Route memory and vector memory storage to a writable temp dir."""
-    mem_dir = tmp_path_factory.mktemp("memory")
-    vec_dir = tmp_path_factory.mktemp("vector_memory")
+    mem_dir: Path = tmp_path_factory.mktemp("memory")
+    vec_dir: Path = tmp_path_factory.mktemp("vector_memory")
     monkeypatch.setenv("OBSCURA_MEMORY_DIR", str(mem_dir))
     monkeypatch.setenv("OBSCURA_VECTOR_MEMORY_DIR", str(vec_dir))
 
@@ -64,8 +67,8 @@ def temp_memory_dirs(tmp_path_factory, monkeypatch: pytest.MonkeyPatch) -> None:
         from sdk.memory import MemoryStore
         from sdk.vector_memory import VectorMemoryStore
 
-        MemoryStore._instances.clear()
-        VectorMemoryStore._instances.clear()
+        MemoryStore.reset_instances()
+        VectorMemoryStore.reset_instances()
     except Exception:
         pass
 
@@ -79,26 +82,26 @@ try:
 
         _tbb.BackendBridge = RealBridge
 
-        def _get(self):
+        def _get(self: Any) -> Any:
             return getattr(self, "_client", None)
 
-        def _set(self, val):
+        def _set(self: Any, val: Any) -> None:
             setattr(self, "_client", val)
 
         _tbb.BackendBridge.client = property(_get, _set)  # type: ignore[attr-defined]
 
     async def _patched_stream_prompt(
-        self,
-        prompt,
-        on_text=None,
-        on_thinking=None,
-        on_tool_start=None,
-        on_tool_result=None,
-        on_done=None,
-        on_error=None,
-        **kwargs,
-    ):
-        client = getattr(self, "_client", None) or getattr(self, "client", None)
+        self: Any,
+        prompt: Any,
+        on_text: Any = None,
+        on_thinking: Any = None,
+        on_tool_start: Any = None,
+        on_tool_result: Any = None,
+        on_done: Any = None,
+        on_error: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        client: Any = getattr(self, "_client", None) or getattr(self, "client", None)
         if client is None:
             raise RuntimeError("Not connected. Call connect() first.")
         self._streaming = True
@@ -106,7 +109,7 @@ try:
             async for chunk in client.stream(prompt):
                 if getattr(self, "_cancel_requested", False):
                     break
-                kind = getattr(chunk, "kind", None)
+                kind: Any = getattr(chunk, "kind", None)
                 if kind == getattr(_tbb, "ChunkKind").TEXT_DELTA:
                     if on_text:
                         on_text(chunk.text)
@@ -128,36 +131,36 @@ try:
         finally:
             self._streaming = False
 
-    async def _patched_send_prompt(self, prompt):
-        client = getattr(self, "_client", None) or getattr(self, "client", None)
+    async def _patched_send_prompt(self: Any, prompt: Any) -> Any:
+        client: Any = getattr(self, "_client", None) or getattr(self, "client", None)
         if client is None:
             raise RuntimeError("Not connected. Call connect() first.")
         return await client.send(prompt)
 
-    async def _patched_disconnect(self):
-        client = getattr(self, "_client", None) or getattr(self, "client", None)
+    async def _patched_disconnect(self: Any) -> None:
+        client: Any = getattr(self, "_client", None) or getattr(self, "client", None)
         if client is not None and hasattr(client, "stop"):
             await client.stop()
         self._client = None
         self._streaming = False
 
-    _tbb.BackendBridge.stream_prompt = _patched_stream_prompt  # type: ignore[attr-defined]
-    _tbb.BackendBridge.send_prompt = _patched_send_prompt  # type: ignore[attr-defined]
-    _tbb.BackendBridge.disconnect = _patched_disconnect  # type: ignore[attr-defined]
+    _tbb.BackendBridge.stream_prompt = _patched_stream_prompt  # type: ignore[reportAttributeAccessIssue]
+    _tbb.BackendBridge.send_prompt = _patched_send_prompt
+    _tbb.BackendBridge.disconnect = _patched_disconnect
 except Exception:
     pass
 
 
 @pytest.fixture(autouse=True)
-def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
+def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     """Re-apply BackendBridge patches after test module load."""
     try:
         from tests.unit.sdk.tui import test_tui_backend_bridge as tbb
 
-        def _get(self):
+        def _get(self: Any) -> Any:
             return getattr(self, "_client", None)
 
-        def _set(self, val):
+        def _set(self: Any, val: Any) -> None:
             setattr(self, "_client", val)
 
         monkeypatch.setattr(
@@ -168,17 +171,17 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
         )
 
         async def sp(
-            self,
-            prompt,
-            on_text=None,
-            on_thinking=None,
-            on_tool_start=None,
-            on_tool_result=None,
-            on_done=None,
-            on_error=None,
-            **kwargs,
-        ):
-            client = getattr(self, "_client", None)
+            self: Any,
+            prompt: Any,
+            on_text: Any = None,
+            on_thinking: Any = None,
+            on_tool_start: Any = None,
+            on_tool_result: Any = None,
+            on_done: Any = None,
+            on_error: Any = None,
+            **kwargs: Any,
+        ) -> None:
+            client: Any = getattr(self, "_client", None)
             if client is None:
                 raise RuntimeError("Not connected. Call connect() first.")
             self._streaming = True
@@ -186,7 +189,7 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
                 async for chunk in client.stream(prompt):
                     if getattr(self, "_cancel_requested", False):
                         break
-                    kind = getattr(chunk, "kind", None)
+                    kind: Any = getattr(chunk, "kind", None)
                     if kind == getattr(tbb, "ChunkKind").TEXT_DELTA:
                         if on_text:
                             on_text(chunk.text)
@@ -208,14 +211,14 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
             finally:
                 self._streaming = False
 
-        async def sendp(self, prompt):
-            client = getattr(self, "_client", None)
+        async def sendp(self: Any, prompt: Any) -> Any:
+            client: Any = getattr(self, "_client", None)
             if client is None:
                 raise RuntimeError("Not connected. Call connect() first.")
             return await client.send(prompt)
 
-        async def disc(self):
-            client = getattr(self, "_client", None)
+        async def disc(self: Any) -> None:
+            client: Any = getattr(self, "_client", None)
             if client is not None and hasattr(client, "stop"):
                 await client.stop()
             self._client = None
@@ -228,9 +231,9 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
         pass
 
 
-def pytest_collection_modifyitems(items):
-    config = items[0].config if items else None
-    run_e2e = bool(config.getoption("--run-e2e") if config else False)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    config: pytest.Config | None = items[0].config if items else None
+    run_e2e: bool = bool(config.getoption("--run-e2e") if config else False)
 
     for item in items:
         if item.nodeid.startswith("tests/unit/sdk/tui/test_tui_backend_bridge.py"):
