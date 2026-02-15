@@ -15,6 +15,16 @@ import pytest
 from scripts.sync import VaultSync
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Custom command-line options."""
+    parser.addoption(
+        "--run-e2e",
+        action="store_true",
+        default=False,
+        help="Include end-to-end tests (tests/e2e).",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Global test configuration
 # ---------------------------------------------------------------------------
@@ -220,6 +230,9 @@ def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch):
 
 
 def pytest_collection_modifyitems(items):
+    config = items[0].config if items else None
+    run_e2e = bool(config.getoption("--run-e2e") if config else False)
+
     for item in items:
         if item.nodeid.startswith("tests/unit/sdk/tui/test_tui_backend_bridge.py"):
             item.add_marker(
@@ -227,6 +240,8 @@ def pytest_collection_modifyitems(items):
                     reason="TUI bridge shim not required for pipeline", strict=False
                 )
             )
+        if not run_e2e and ("tests/e2e/" in item.nodeid or item.get_closest_marker("e2e")):
+            item.add_marker(pytest.mark.skip(reason="Use --run-e2e to include e2e tests"))
 
 
 # ---------------------------------------------------------------------------
