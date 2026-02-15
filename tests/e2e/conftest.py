@@ -66,6 +66,7 @@ class _FakeAgentConfig:
     memory_namespace: str = "default"
     max_iterations: int = 10
     tags: list[str] = field(default_factory=lambda: list[str]())
+    mcp: Any = field(default_factory=dict)
 
 
 @dataclass
