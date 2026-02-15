@@ -1,4 +1,5 @@
 """Tests for sdk.backends.copilot — CopilotBackend."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
@@ -101,6 +102,7 @@ class TestCopilotBackendSessions:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         from sdk.internal.types import SessionRef
+
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         await b.resume_session(ref)
         b.client.resume_session.assert_awaited_once_with("s1")
@@ -122,6 +124,7 @@ class TestCopilotBackendSessions:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         from sdk.internal.types import SessionRef
+
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         await b.delete_session(ref)
         b.client.delete_session.assert_awaited_once_with("s1")
@@ -130,7 +133,12 @@ class TestCopilotBackendSessions:
 class TestCopilotBackendTools:
     def test_register_tool(self):
         b = CopilotBackend(_make_auth())
-        spec = ToolSpec(name="test_tool", description="A test tool", parameters={}, handler=lambda: None)
+        spec = ToolSpec(
+            name="test_tool",
+            description="A test tool",
+            parameters={},
+            handler=lambda: None,
+        )
         b.register_tool(spec)
         assert len(b.tools) == 1
         assert b.get_tool_registry() is b.tool_registry

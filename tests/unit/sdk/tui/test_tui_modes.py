@@ -18,8 +18,10 @@ import pytest
 # These will be replaced by real imports once the module is implemented.
 # ---------------------------------------------------------------------------
 
+
 class TUIMode(Enum):
     """Modes available in the TUI."""
+
     ASK = "ask"
     PLAN = "plan"
     CODE = "code"
@@ -29,6 +31,7 @@ class TUIMode(Enum):
 @dataclass
 class PlanStep:
     """A single step in a plan."""
+
     index: int
     description: str
     status: str = "pending"  # "pending" | "approved" | "rejected"
@@ -37,6 +40,7 @@ class PlanStep:
 @dataclass
 class Plan:
     """A structured plan with numbered steps."""
+
     steps: list[PlanStep] = field(default_factory=list)
     summary: str = ""
 
@@ -52,6 +56,7 @@ class Plan:
 @dataclass
 class FileChange:
     """A file modification tracked in Code mode."""
+
     path: Path
     original: str
     modified: str
@@ -96,6 +101,7 @@ class ModeManager:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestTUIMode:
     """Verify TUIMode enum values and membership."""
@@ -257,7 +263,9 @@ class TestPendingChanges:
         """File changes can be added to pending_changes."""
         mgr = ModeManager(initial=TUIMode.CODE)
         change = FileChange(
-            path=Path("foo.py"), original="old", modified="new",
+            path=Path("foo.py"),
+            original="old",
+            modified="new",
         )
         mgr.pending_changes.append(change)
         assert len(mgr.pending_changes) == 1
@@ -343,35 +351,43 @@ class TestActivePlan:
 
     def test_plan_all_decided_false_when_pending(self) -> None:
         """all_decided is False when any step is still pending."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="pending"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="pending"),
+            ]
+        )
         assert plan.all_decided is False
 
     def test_plan_all_decided_true_when_all_approved(self) -> None:
         """all_decided is True when all steps are approved."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="approved"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="approved"),
+            ]
+        )
         assert plan.all_decided is True
 
     def test_plan_all_decided_true_with_mix_approved_rejected(self) -> None:
         """all_decided is True with mix of approved and rejected."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="rejected"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="rejected"),
+            ]
+        )
         assert plan.all_decided is True
 
     def test_plan_approved_count(self) -> None:
         """approved_count returns correct count of approved steps."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="rejected"),
-            PlanStep(index=3, description="S3", status="approved"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="rejected"),
+                PlanStep(index=3, description="S3", status="approved"),
+            ]
+        )
         assert plan.approved_count == 2
 
     def test_empty_plan_all_decided(self) -> None:

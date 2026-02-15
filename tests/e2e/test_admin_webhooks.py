@@ -10,11 +10,14 @@ class TestWebhooks:
 
     def test_create_webhook(self, client: TestClient):
         """Can create a webhook."""
-        resp = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/webhook",
-            "events": ["agent.spawn", "agent.stop"]
-        })
-        
+        resp = client.post(
+            "/api/v1/webhooks",
+            json={
+                "url": "https://example.com/webhook",
+                "events": ["agent.spawn", "agent.stop"],
+            },
+        )
+
         assert resp.status_code == 200
         data = resp.json()
         assert "webhook_id" in data
@@ -26,13 +29,13 @@ class TestWebhooks:
     def test_list_webhooks(self, client: TestClient):
         """Can list webhooks (without secrets)."""
         # Create webhook
-        client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/webhook1",
-            "events": ["agent.spawn"]
-        })
-        
+        client.post(
+            "/api/v1/webhooks",
+            json={"url": "https://example.com/webhook1", "events": ["agent.spawn"]},
+        )
+
         resp = client.get("/api/v1/webhooks")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert "webhooks" in data
@@ -43,14 +46,14 @@ class TestWebhooks:
     def test_get_webhook(self, client: TestClient):
         """Can get a specific webhook."""
         # Create webhook
-        create_resp = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/webhook-get",
-            "events": ["agent.stop"]
-        })
+        create_resp = client.post(
+            "/api/v1/webhooks",
+            json={"url": "https://example.com/webhook-get", "events": ["agent.stop"]},
+        )
         webhook_id = create_resp.json()["webhook_id"]
-        
+
         resp = client.get(f"/api/v1/webhooks/{webhook_id}")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["webhook_id"] == webhook_id
@@ -59,19 +62,19 @@ class TestWebhooks:
     def test_get_webhook_not_found(self, client: TestClient):
         """Getting non-existent webhook returns 404."""
         resp = client.get("/api/v1/webhooks/non-existent")
-        
+
         assert resp.status_code == 404
 
     def test_delete_webhook(self, client: TestClient):
         """Can delete a webhook."""
         # Create webhook
-        create_resp = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/webhook-delete"
-        })
+        create_resp = client.post(
+            "/api/v1/webhooks", json={"url": "https://example.com/webhook-delete"}
+        )
         webhook_id = create_resp.json()["webhook_id"]
-        
+
         resp = client.delete(f"/api/v1/webhooks/{webhook_id}")
-        
+
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
 
@@ -84,7 +87,7 @@ class TestAdminAuditLogs:
         """Audit logs require admin role."""
         # This test uses the default client which has admin role
         resp = client.get("/api/v1/audit/logs")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert "logs" in data
@@ -94,9 +97,9 @@ class TestAdminAuditLogs:
         """Can filter audit logs by action."""
         # Create some activity
         client.post("/api/v1/agents", json={"name": "audit-test"})
-        
+
         resp = client.get("/api/v1/audit/logs?action=create")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         # Should find at least our agent creation
@@ -106,7 +109,7 @@ class TestAdminAuditLogs:
     def test_audit_logs_pagination(self, client: TestClient):
         """Audit logs support pagination."""
         resp = client.get("/api/v1/audit/logs?limit=5&offset=0")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["limit"] == 5
@@ -116,7 +119,7 @@ class TestAdminAuditLogs:
     def test_audit_logs_summary(self, client: TestClient):
         """Can get audit log summary."""
         resp = client.get("/api/v1/audit/logs/summary")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert "total_logs" in data
@@ -133,9 +136,9 @@ class TestMetrics:
         """Can get system metrics."""
         # Create some data
         client.post("/api/v1/agents", json={"name": "metrics-test", "model": "claude"})
-        
+
         resp = client.get("/api/v1/metrics")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert "agents" in data
@@ -144,7 +147,7 @@ class TestMetrics:
         assert "workflows" in data
         assert "webhooks" in data
         assert "timestamp" in data
-        
+
         # Check agent metrics
         assert "total" in data["agents"]
         assert "by_status" in data["agents"]
@@ -153,10 +156,12 @@ class TestMetrics:
     def test_get_agent_metrics(self, client: TestClient):
         """Can get metrics for a specific agent."""
         # Create agent
-        agent = client.post("/api/v1/agents", json={"name": "agent-metrics-test"}).json()
-        
+        agent = client.post(
+            "/api/v1/agents", json={"name": "agent-metrics-test"}
+        ).json()
+
         resp = client.get(f"/api/v1/metrics/agents/{agent['agent_id']}")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["agent_id"] == agent["agent_id"]
@@ -167,7 +172,7 @@ class TestMetrics:
     def test_get_agent_metrics_not_found(self, client: TestClient):
         """Getting metrics for non-existent agent returns 404."""
         resp = client.get("/api/v1/metrics/agents/non-existent")
-        
+
         assert resp.status_code == 404
 
 
@@ -178,12 +183,12 @@ class TestRateLimits:
     def test_get_rate_limits_admin_only(self, client: TestClient):
         """Rate limits require admin role."""
         resp = client.get("/api/v1/rate-limits")
-        
+
         assert resp.status_code == 200
         data = resp.json()
         assert "default" in data
         assert "custom" in data
-        
+
         # Check default limits
         assert "requests_per_minute" in data["default"]
         assert "concurrent_agents" in data["default"]
@@ -191,13 +196,16 @@ class TestRateLimits:
 
     def test_set_rate_limit(self, client: TestClient):
         """Can set custom rate limits."""
-        resp = client.post("/api/v1/rate-limits", json={
-            "api_key": "test-key-123",
-            "requests_per_minute": 200,
-            "concurrent_agents": 20,
-            "memory_quota_mb": 2048
-        })
-        
+        resp = client.post(
+            "/api/v1/rate-limits",
+            json={
+                "api_key": "test-key-123",
+                "requests_per_minute": 200,
+                "concurrent_agents": 20,
+                "memory_quota_mb": 2048,
+            },
+        )
+
         assert resp.status_code == 200
         data = resp.json()
         assert "api_key" in data
@@ -206,22 +214,20 @@ class TestRateLimits:
 
     def test_set_rate_limit_missing_key(self, client: TestClient):
         """Setting rate limit without api_key returns error."""
-        resp = client.post("/api/v1/rate-limits", json={
-            "requests_per_minute": 100
-        })
-        
+        resp = client.post("/api/v1/rate-limits", json={"requests_per_minute": 100})
+
         assert resp.status_code == 400
         assert "api_key is required" in resp.json()["detail"]
 
     def test_delete_rate_limit(self, client: TestClient):
         """Can delete custom rate limits."""
         # Set a rate limit first
-        client.post("/api/v1/rate-limits", json={
-            "api_key": "delete-test-key",
-            "requests_per_minute": 50
-        })
-        
+        client.post(
+            "/api/v1/rate-limits",
+            json={"api_key": "delete-test-key", "requests_per_minute": 50},
+        )
+
         resp = client.delete("/api/v1/rate-limits/delete-test-key")
-        
+
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True

@@ -1,4 +1,5 @@
 """Tests for sdk.telemetry.context."""
+
 from typing import TypedDict
 from unittest.mock import MagicMock
 from sdk.telemetry.context import enrich_span_with_user, get_user_id, get_user_email
@@ -51,7 +52,9 @@ class TestEnrichSpanWithUser:
         user = _make_user(roles=())
         enrich_span_with_user(span, user)
         # Should NOT set user.roles when empty
-        role_calls = [c for c in span.set_attribute.call_args_list if c[0][0] == "user.roles"]
+        role_calls = [
+            c for c in span.set_attribute.call_args_list if c[0][0] == "user.roles"
+        ]
         assert len(role_calls) == 0
 
     def test_with_multiple_roles(self):

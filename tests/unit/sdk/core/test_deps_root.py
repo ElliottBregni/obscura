@@ -1,4 +1,5 @@
 """Tests for sdk.deps — Shared FastAPI dependencies and helpers."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.auth.models import AuthenticatedUser
@@ -20,6 +21,7 @@ class TestClientFactory:
     @pytest.mark.asyncio
     async def test_create_client(self):
         from sdk.deps import ClientFactory
+
         config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
         factory = ClientFactory(config)
 
@@ -35,6 +37,7 @@ class TestClientFactory:
     @pytest.mark.asyncio
     async def test_create_client_with_model(self):
         from sdk.deps import ClientFactory
+
         config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
         factory = ClientFactory(config)
 
@@ -97,6 +100,7 @@ class TestGetRuntime:
 class TestAudit:
     def test_audit_stores_log(self):
         from sdk.deps import audit, audit_logs
+
         user = _make_user()
         initial_count = len(audit_logs)
 
@@ -113,6 +117,7 @@ class TestAudit:
 
     def test_audit_max_logs_trimmed(self):
         from sdk.deps import MAX_AUDIT_LOGS, audit, audit_logs
+
         user = _make_user()
 
         # Fill beyond max
@@ -130,10 +135,13 @@ class TestRecordSyncMetric:
             mock_metrics = MagicMock()
             mock_get.return_value = mock_metrics
             record_sync_metric("success")
-            mock_metrics.sync_operations_total.add.assert_called_once_with(1, {"status": "success"})
+            mock_metrics.sync_operations_total.add.assert_called_once_with(
+                1, {"status": "success"}
+            )
 
     def test_record_sync_metric_no_telemetry(self):
         from sdk.deps import record_sync_metric
+
         # Should not raise even if telemetry is not available
         with patch("sdk.telemetry.metrics.get_metrics", side_effect=ImportError):
             record_sync_metric("error")
@@ -165,4 +173,6 @@ class TestAuthenticateWebsocket:
 
         user = await authenticate_websocket(mock_ws)
         assert user is not None
+
+
 # pyright: ignore-all

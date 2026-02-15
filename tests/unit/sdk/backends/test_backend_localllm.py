@@ -1,4 +1,5 @@
 """Tests for sdk.backends.localllm — LocalLLMBackend."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
@@ -12,6 +13,7 @@ def _make_auth(**kw):
 class TestLocalLLMInit:
     def test_defaults(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         assert b._base_url == "http://localhost:1234/v1"
         assert b._model is None
@@ -19,6 +21,7 @@ class TestLocalLLMInit:
 
     def test_with_model(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth(), model="llama-3", system_prompt="Be concise")
         assert b._model == "llama-3"
         assert b._system_prompt == "Be concise"
@@ -28,6 +31,7 @@ class TestLocalLLMLifecycle:
     @pytest.mark.asyncio
     async def test_start_discovers_model(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
 
         mock_client = AsyncMock()
@@ -43,6 +47,7 @@ class TestLocalLLMLifecycle:
     @pytest.mark.asyncio
     async def test_start_with_model_set(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth(), model="llama-3")
 
         mock_client = AsyncMock()
@@ -55,6 +60,7 @@ class TestLocalLLMLifecycle:
     @pytest.mark.asyncio
     async def test_stop(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         b._client = AsyncMock()
         await b.stop()
@@ -65,6 +71,7 @@ class TestLocalLLMSend:
     @pytest.mark.asyncio
     async def test_send(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth(), model="llama-3")
         mock_client = AsyncMock()
 
@@ -82,6 +89,7 @@ class TestLocalLLMSend:
     @pytest.mark.asyncio
     async def test_send_not_started(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         with pytest.raises(RuntimeError):
             await b.send("test")
@@ -91,6 +99,7 @@ class TestLocalLLMStream:
     @pytest.mark.asyncio
     async def test_stream(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth(), model="llama-3")
         mock_client = AsyncMock()
 
@@ -127,6 +136,7 @@ class TestLocalLLMSessions:
     @pytest.mark.asyncio
     async def test_create_session(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         b._client = MagicMock()
         ref = await b.create_session()
@@ -136,6 +146,7 @@ class TestLocalLLMSessions:
     @pytest.mark.asyncio
     async def test_resume_session(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         b._client = MagicMock()
         ref = await b.create_session()
@@ -147,6 +158,7 @@ class TestLocalLLMSessions:
     async def test_resume_unknown_session(self):
         from sdk.backends.localllm import LocalLLMBackend
         from sdk.internal.types import SessionRef
+
         b = LocalLLMBackend(_make_auth())
         b._client = MagicMock()
         ref = SessionRef(session_id="unknown", backend=Backend.LOCALLLM)
@@ -156,6 +168,7 @@ class TestLocalLLMSessions:
     @pytest.mark.asyncio
     async def test_delete_session(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         b._client = MagicMock()
         ref = await b.create_session()
@@ -167,13 +180,17 @@ class TestLocalLLMTools:
     def test_register_tool(self):
         from sdk.backends.localllm import LocalLLMBackend
         from sdk.internal.types import ToolSpec
+
         b = LocalLLMBackend(_make_auth())
-        spec = ToolSpec(name="t1", description="test", parameters={}, handler=lambda: None)
+        spec = ToolSpec(
+            name="t1", description="test", parameters={}, handler=lambda: None
+        )
         b.register_tool(spec)
         assert len(b._tools) == 1
 
     def test_register_hook(self):
         from sdk.backends.localllm import LocalLLMBackend
+
         b = LocalLLMBackend(_make_auth())
         cb = MagicMock()
         b.register_hook(HookPoint.PRE_TOOL_USE, cb)

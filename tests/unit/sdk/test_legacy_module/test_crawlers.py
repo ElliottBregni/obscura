@@ -56,6 +56,7 @@ from scripts.crawlers import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_message(text: str) -> MagicMock:
     """Create a mock Message with a .text attribute."""
     msg = MagicMock()
@@ -71,6 +72,7 @@ def _assert_crawl_result(result: CrawlResult) -> None:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_repo(tmp_path: Path) -> Path:
@@ -127,6 +129,7 @@ def file_entry(tmp_path: Path) -> FileEntry:
 # split_mermaid_diagrams
 # ---------------------------------------------------------------------------
 
+
 class TestSplitMermaidDiagrams:
     def test_single_graph(self):
         text = "graph TD\n    A --> B\n    B --> C"
@@ -141,12 +144,7 @@ class TestSplitMermaidDiagrams:
         assert "flowchart LR" in result[0]
 
     def test_two_graphs_glued(self):
-        text = (
-            "graph TD\n"
-            "    A --> B\n"
-            "graph LR\n"
-            "    C --> D"
-        )
+        text = "graph TD\n    A --> B\ngraph LR\n    C --> D"
         result = split_mermaid_diagrams(text)
         assert len(result) == 2
         assert "A --> B" in result[0]
@@ -189,12 +187,7 @@ class TestSplitMermaidDiagrams:
         assert len(result) == 2
 
     def test_trims_leading_prose(self):
-        text = (
-            "Here is the Mermaid diagram:\n"
-            "\n"
-            "graph TD\n"
-            "    A --> B"
-        )
+        text = "Here is the Mermaid diagram:\n\ngraph TD\n    A --> B"
         result = split_mermaid_diagrams(text)
         assert len(result) == 1
         assert result[0].startswith("graph TD")
@@ -262,6 +255,7 @@ class TestSplitMermaidDiagrams:
 # strip_markdown_fences
 # ---------------------------------------------------------------------------
 
+
 class TestStripMarkdownFences:
     def test_strips_mermaid_fences(self):
         text = "```mermaid\ngraph TD\n    A-->B\n```"
@@ -283,6 +277,7 @@ class TestStripMarkdownFences:
 # ---------------------------------------------------------------------------
 # trim_leading_prose
 # ---------------------------------------------------------------------------
+
 
 class TestTrimLeadingProse:
     def test_trims_prose(self):
@@ -307,6 +302,7 @@ class TestTrimLeadingProse:
 # ---------------------------------------------------------------------------
 # crawl_repo
 # ---------------------------------------------------------------------------
+
 
 class TestCrawlRepo:
     def test_finds_python_files(self, sample_repo: Path):
@@ -396,11 +392,14 @@ class TestCrawlRepo:
 # render_svg_with_kroki
 # ---------------------------------------------------------------------------
 
+
 class TestRenderSvgWithKroki:
     @patch("crawlers.urllib.request.urlopen")
     def test_returns_svg(self, mock_urlopen):
         mock_resp = MagicMock()
-        mock_resp.read.return_value = b'<svg xmlns="http://www.w3.org/2000/svg">test</svg>'
+        mock_resp.read.return_value = (
+            b'<svg xmlns="http://www.w3.org/2000/svg">test</svg>'
+        )
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
@@ -411,7 +410,9 @@ class TestRenderSvgWithKroki:
     @patch("crawlers.urllib.request.urlopen")
     def test_uses_post(self, mock_urlopen):
         mock_resp = MagicMock()
-        mock_resp.read.return_value = b'<svg xmlns="http://www.w3.org/2000/svg">test</svg>'
+        mock_resp.read.return_value = (
+            b'<svg xmlns="http://www.w3.org/2000/svg">test</svg>'
+        )
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
@@ -437,6 +438,7 @@ class TestRenderSvgWithKroki:
 # render_svg_with_mmdc
 # ---------------------------------------------------------------------------
 
+
 class TestRenderSvgWithMmdc:
     @patch("crawlers.subprocess.run")
     def test_returns_none_when_mmdc_not_found(self, mock_run):
@@ -448,6 +450,7 @@ class TestRenderSvgWithMmdc:
 # ---------------------------------------------------------------------------
 # render_single_diagram
 # ---------------------------------------------------------------------------
+
 
 class TestRenderSingleDiagram:
     @patch("crawlers.render_svg_with_mmdc")
@@ -479,6 +482,7 @@ class TestRenderSingleDiagram:
 # build_stub_markdown
 # ---------------------------------------------------------------------------
 
+
 class TestBuildStubMarkdown:
     @patch("crawlers.render_single_diagram")
     def test_single_diagram(self, mock_render, file_entry):
@@ -496,7 +500,7 @@ class TestBuildStubMarkdown:
 
     @patch("crawlers.render_single_diagram")
     def test_multiple_diagrams(self, mock_render, file_entry):
-        mock_render.return_value = '<svg>test</svg>'
+        mock_render.return_value = "<svg>test</svg>"
 
         md = build_stub_markdown(
             file_entry,
@@ -541,7 +545,7 @@ class TestBuildStubMarkdown:
     @patch("crawlers.render_single_diagram")
     def test_single_diagram_uses_mermaid_header(self, mock_render, file_entry):
         """When there's only one diagram, section header should be 'Mermaid' not 'Diagram 1'."""
-        mock_render.return_value = '<svg>ok</svg>'
+        mock_render.return_value = "<svg>ok</svg>"
 
         md = build_stub_markdown(file_entry, "graph TD\n    A --> B")
 
@@ -551,7 +555,7 @@ class TestBuildStubMarkdown:
     @patch("crawlers.render_single_diagram")
     def test_fenced_copilot_output(self, mock_render, file_entry):
         """Copilot wrapping output in fences should still work."""
-        mock_render.return_value = '<svg>ok</svg>'
+        mock_render.return_value = "<svg>ok</svg>"
 
         md = build_stub_markdown(file_entry, "```mermaid\ngraph TD\n    A --> B\n```")
         assert "```mermaid" in md
@@ -568,7 +572,7 @@ class TestBuildStubMarkdown:
             call_count += 1
             if call_count == 1:
                 return None  # First diagram fails
-            return '<svg>ok</svg>'
+            return "<svg>ok</svg>"
 
         mock_render.side_effect = render_side_effect
 
@@ -585,6 +589,7 @@ class TestBuildStubMarkdown:
 # ---------------------------------------------------------------------------
 # generate_index
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateIndex:
     def test_basic_index(self, sample_repo: Path):
@@ -632,14 +637,19 @@ class TestGenerateIndex:
 # DiagramCrawlerAgent
 # ---------------------------------------------------------------------------
 
+
 class TestDiagramCrawlerAgent:
     @pytest.mark.asyncio
     async def test_analyze_crawls_repo(self, sample_repo, tmp_path):
         client = MagicMock()
         agent = DiagramCrawlerAgent(
-            client, sample_repo, tmp_path / "out", extensions={".py"},
+            client,
+            sample_repo,
+            tmp_path / "out",
+            extensions={".py"},
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -654,9 +664,13 @@ class TestDiagramCrawlerAgent:
         client = MagicMock()
         output_dir = tmp_path / "out"
         agent = DiagramCrawlerAgent(
-            client, sample_repo, output_dir, extensions={".py"},
+            client,
+            sample_repo,
+            output_dir,
+            extensions={".py"},
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.PLAN)
 
         # Analyze first
@@ -680,10 +694,14 @@ class TestDiagramCrawlerAgent:
         client.send = AsyncMock(return_value=_make_message("graph TD\n    A --> B"))
 
         agent = DiagramCrawlerAgent(
-            client, sample_repo, tmp_path / "out",
-            extensions={".py"}, max_concurrent=2,
+            client,
+            sample_repo,
+            tmp_path / "out",
+            extensions={".py"},
+            max_concurrent=2,
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -702,10 +720,14 @@ class TestDiagramCrawlerAgent:
     async def test_execute_dry_run_skips(self, sample_repo, tmp_path):
         client = MagicMock()
         agent = DiagramCrawlerAgent(
-            client, sample_repo, tmp_path / "out",
-            extensions={".py"}, dry_run=True,
+            client,
+            sample_repo,
+            tmp_path / "out",
+            extensions={".py"},
+            dry_run=True,
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -714,16 +736,20 @@ class TestDiagramCrawlerAgent:
 
         assert ctx.results == []
         # SDK should never be called
-        assert not hasattr(client, 'send') or not client.send.called
+        assert not hasattr(client, "send") or not client.send.called
 
     @pytest.mark.asyncio
     async def test_respond_writes_files(self, sample_repo, tmp_path):
         client = MagicMock()
         output_dir = tmp_path / "out"
         agent = DiagramCrawlerAgent(
-            client, sample_repo, output_dir, extensions={".py"},
+            client,
+            sample_repo,
+            output_dir,
+            extensions={".py"},
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         # Simulate analyze
@@ -731,7 +757,9 @@ class TestDiagramCrawlerAgent:
         result: CrawlResult = ctx.analysis
 
         # Simulate execute results
-        ctx.results = [(entry, f"# Diagram: {entry.repo_relative}") for entry in result.files]
+        ctx.results = [
+            (entry, f"# Diagram: {entry.repo_relative}") for entry in result.files
+        ]
 
         await agent.respond(ctx)
 
@@ -747,10 +775,14 @@ class TestDiagramCrawlerAgent:
         client = MagicMock()
         output_dir = tmp_path / "out"
         agent = DiagramCrawlerAgent(
-            client, sample_repo, output_dir,
-            extensions={".py"}, dry_run=True,
+            client,
+            sample_repo,
+            output_dir,
+            extensions={".py"},
+            dry_run=True,
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
         await agent.analyze(ctx)
 
@@ -766,10 +798,14 @@ class TestDiagramCrawlerAgent:
         client.send = AsyncMock(side_effect=RuntimeError("SDK error"))
 
         agent = DiagramCrawlerAgent(
-            client, sample_repo, tmp_path / "out",
-            extensions={".py"}, max_concurrent=2,
+            client,
+            sample_repo,
+            tmp_path / "out",
+            extensions={".py"},
+            max_concurrent=2,
         )
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
 
         await agent.analyze(ctx)
@@ -788,8 +824,11 @@ class TestDiagramCrawlerAgent:
 
         output_dir = tmp_path / "out"
         agent = DiagramCrawlerAgent(
-            client, sample_repo, output_dir,
-            extensions={".py"}, max_concurrent=2,
+            client,
+            sample_repo,
+            output_dir,
+            extensions={".py"},
+            max_concurrent=2,
         )
 
         with patch("crawlers.render_single_diagram", return_value="<svg>ok</svg>"):
@@ -821,11 +860,15 @@ class TestDiagramCrawlerAgent:
         client.send = slow_send
 
         agent = DiagramCrawlerAgent(
-            client, sample_repo, tmp_path / "out",
-            extensions={".py"}, max_concurrent=1,
+            client,
+            sample_repo,
+            tmp_path / "out",
+            extensions={".py"},
+            max_concurrent=1,
         )
 
         from sdk.internal.types import AgentContext, AgentPhase
+
         ctx = AgentContext(phase=AgentPhase.ANALYZE)
         await agent.analyze(ctx)
         await agent.plan(ctx)
@@ -840,6 +883,7 @@ class TestDiagramCrawlerAgent:
 # ---------------------------------------------------------------------------
 # CLI / build_parser
 # ---------------------------------------------------------------------------
+
 
 class TestCLI:
     def test_build_parser_required_repo(self):
@@ -860,15 +904,23 @@ class TestCLI:
 
     def test_build_parser_all_args(self):
         parser = build_parser()
-        args = parser.parse_args([
-            "--repo", "/tmp/test",
-            "--output", "/tmp/out",
-            "--extensions", ".py", ".js",
-            "--max-size", "50000",
-            "--workers", "8",
-            "--dry-run",
-            "--stats",
-        ])
+        args = parser.parse_args(
+            [
+                "--repo",
+                "/tmp/test",
+                "--output",
+                "/tmp/out",
+                "--extensions",
+                ".py",
+                ".js",
+                "--max-size",
+                "50000",
+                "--workers",
+                "8",
+                "--dry-run",
+                "--stats",
+            ]
+        )
         assert args.repo == Path("/tmp/test")
         assert args.output == Path("/tmp/out")
         assert args.extensions == [".py", ".js"]
@@ -893,14 +945,19 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Crawl Stats" in captured.out
 
-    def test_main_custom_extensions(self, sample_repo: Path, capsys: pytest.CaptureFixture[str]):
-        ret = main(["--repo", str(sample_repo), "--extensions", "py", "js", "--dry-run"])
+    def test_main_custom_extensions(
+        self, sample_repo: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        ret = main(
+            ["--repo", str(sample_repo), "--extensions", "py", "js", "--dry-run"]
+        )
         assert ret == 0
 
 
 # ---------------------------------------------------------------------------
 # Constants / configuration
 # ---------------------------------------------------------------------------
+
 
 class TestConstants:
     def test_default_extensions_are_code(self):
@@ -935,16 +992,11 @@ class TestConstants:
 # Edge cases / integration
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     def test_split_diagram_with_subgraph(self):
         """Subgraph lines should not trigger a split."""
-        text = (
-            "graph TD\n"
-            "    subgraph cluster\n"
-            "        A --> B\n"
-            "    end\n"
-            "    C --> D"
-        )
+        text = "graph TD\n    subgraph cluster\n        A --> B\n    end\n    C --> D"
         result = split_mermaid_diagrams(text)
         assert len(result) == 1
 
@@ -956,11 +1008,7 @@ class TestEdgeCases:
 
     def test_split_graph_keyword_in_node_label(self):
         """'graph' inside a node label (indented) should not trigger a split."""
-        text = (
-            "graph TD\n"
-            "    A[\"graph visualization\"] --> B\n"
-            "    B --> C"
-        )
+        text = 'graph TD\n    A["graph visualization"] --> B\n    B --> C'
         result = split_mermaid_diagrams(text)
         assert len(result) == 1
 

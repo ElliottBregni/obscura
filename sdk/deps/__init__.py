@@ -90,15 +90,17 @@ def audit(
     try:
         from sdk.telemetry.audit import AuditEvent, emit_audit_event
 
-        emit_audit_event(AuditEvent(
-            event_type=event_type,
-            user_id=user.user_id,
-            user_email=user.email,
-            resource=resource,
-            action=action,
-            outcome=outcome,
-            details=details,
-        ))
+        emit_audit_event(
+            AuditEvent(
+                event_type=event_type,
+                user_id=user.user_id,
+                user_email=user.email,
+                resource=resource,
+                action=action,
+                outcome=outcome,
+                details=details,
+            )
+        )
     except Exception:
         pass
 
@@ -119,22 +121,33 @@ def audit(
 
     # Trigger webhooks for important events (best-effort)
     if outcome in ["success", "failure"] and event_type in [
-        "agent.spawn", "agent.stop", "agent.run",
-        "workflow.execute", "memory.set", "memory.delete",
+        "agent.spawn",
+        "agent.stop",
+        "agent.run",
+        "workflow.execute",
+        "memory.set",
+        "memory.delete",
     ]:
         from sdk.routes.webhooks import trigger_webhooks
-        asyncio.create_task(trigger_webhooks(event_type, {
-            "user_id": user.user_id,
-            "resource": resource,
-            "action": action,
-            "outcome": outcome,
-        }))
+
+        asyncio.create_task(
+            trigger_webhooks(
+                event_type,
+                {
+                    "user_id": user.user_id,
+                    "resource": resource,
+                    "action": action,
+                    "outcome": outcome,
+                },
+            )
+        )
 
 
 def record_sync_metric(status: str) -> None:
     """Record a sync_operations_total metric (best-effort)."""
     try:
         from sdk.telemetry.metrics import get_metrics
+
         m = get_metrics()
         m.sync_operations_total.add(1, {"status": status})
     except Exception:
@@ -157,6 +170,7 @@ async def authenticate_websocket(
 
     if config is None or not config.auth_enabled:
         from sdk.auth.rbac import AGENT_READ_ROLES
+
         return AuthenticatedUser(
             user_id="local-dev",
             email="dev@obscura.dev",
@@ -168,6 +182,7 @@ async def authenticate_websocket(
 
     try:
         import jwt as pyjwt
+
         jwks: JWKSCache = websocket.app.state.jwks_cache
         payload = pyjwt.decode(
             token,
@@ -179,7 +194,8 @@ async def authenticate_websocket(
         return AuthenticatedUser(
             user_id=payload.get("sub", "unknown"),
             email=payload.get("email", ""),
-            roles=tuple(payload.get("urn:zitadel:iam:org:project:roles", {}).keys()) or ("agent:read",),
+            roles=tuple(payload.get("urn:zitadel:iam:org:project:roles", {}).keys())
+            or ("agent:read",),
             org_id=payload.get("org_id", ""),
             token_type="user",
             raw_token=token,

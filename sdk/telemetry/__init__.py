@@ -52,7 +52,9 @@ def _reset() -> None:
     global _initialized
     _initialized = False
 
+
 _RESET_HOOK = _reset  # keep referenced for test utilities
+
 
 # Public test/observability helpers
 def reset_telemetry() -> None:
@@ -84,6 +86,7 @@ def _setup_logging(config: ObscuraConfig) -> None:
     """Configure structlog with JSON or console renderer."""
     try:
         from sdk.telemetry.logging import configure_logging
+
         configure_logging(config)
     except ImportError:
         pass
@@ -96,9 +99,11 @@ def _setup_tracing(config: ObscuraConfig) -> None:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.resources import Resource
 
-        resource = Resource.create({
-            "service.name": config.otel_service_name,
-        })
+        resource = Resource.create(
+            {
+                "service.name": config.otel_service_name,
+            }
+        )
 
         if config.otel_enabled:
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -125,9 +130,11 @@ def _setup_metrics(config: ObscuraConfig) -> None:
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.resources import Resource
 
-        resource = Resource.create({
-            "service.name": config.otel_service_name,
-        })
+        resource = Resource.create(
+            {
+                "service.name": config.otel_service_name,
+            }
+        )
 
         if config.otel_enabled:
             from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
@@ -153,6 +160,7 @@ def _setup_fastapi_instrumentation(config: ObscuraConfig) -> None:
         return
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # pyright: ignore[reportMissingTypeStubs]
+
         FastAPIInstrumentor().instrument()
     except ImportError:
         pass

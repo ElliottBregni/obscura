@@ -20,11 +20,13 @@ from sdk.internal.types import Backend
 # Auth configuration
 # ---------------------------------------------------------------------------
 
+
 class AuthConfig(BaseModel):
     """Authentication credentials for one or both backends.
 
     Pass explicit values or leave as None to resolve from environment.
     """
+
     model_config = ConfigDict(frozen=True)
 
     # Copilot
@@ -44,7 +46,12 @@ class AuthConfig(BaseModel):
 # Resolution
 # ---------------------------------------------------------------------------
 
-_COPILOT_ENV_VARS = ("COPILOT_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+_COPILOT_ENV_VARS = (
+    "COPILOT_API_KEY",
+    "COPILOT_GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+)
 _CLAUDE_ENV_VARS = ("ANTHROPIC_API_KEY",)
 _OPENAI_KEY_ENV_VARS = ("OPENAI_API_KEY",)
 _OPENAI_BASE_URL_ENV_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE")
@@ -91,9 +98,7 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
         if key:
             return key
 
-    raise ValueError(
-        "Claude auth requires ANTHROPIC_API_KEY env var."
-    )
+    raise ValueError("Claude auth requires ANTHROPIC_API_KEY env var.")
 
 
 def _resolve_openai_key(explicit: str | None) -> str:
@@ -106,9 +111,7 @@ def _resolve_openai_key(explicit: str | None) -> str:
         if key:
             return key
 
-    raise ValueError(
-        "OpenAI auth requires OPENAI_API_KEY env var."
-    )
+    raise ValueError("OpenAI auth requires OPENAI_API_KEY env var.")
 
 
 def _resolve_openai_base_url(explicit: str | None) -> str | None:
@@ -190,12 +193,17 @@ class TokenRefresher:
         import time
 
         now = time.monotonic()
-        if self._cached is not None and (now - self._resolved_at) < self._refresh_interval:
+        if (
+            self._cached is not None
+            and (now - self._resolved_at) < self._refresh_interval
+        ):
             return self._cached
 
         # Re-resolve in a thread to avoid blocking the event loop
         self._cached = await asyncio.to_thread(
-            resolve_auth, self._backend, self._explicit,
+            resolve_auth,
+            self._backend,
+            self._explicit,
         )
         self._resolved_at = time.monotonic()
         return self._cached

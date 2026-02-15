@@ -37,6 +37,7 @@ from typing import Any
 # Audit event dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class AuditEvent:
     """Immutable record of an auditable action.
@@ -46,12 +47,12 @@ class AuditEvent:
     - ``trace_id``: from current OTel context
     """
 
-    event_type: str       # "agent.send", "tool.execute", "sync.trigger", "session.create"
-    user_id: str          # From AuthenticatedUser (or "system" for CLI)
-    user_email: str       # From AuthenticatedUser (or "system" for CLI)
-    resource: str         # "backend:copilot", "tool:read_file", "sync:vault"
-    action: str           # "read", "write", "execute", "delete"
-    outcome: str          # "success", "denied", "error"
+    event_type: str  # "agent.send", "tool.execute", "sync.trigger", "session.create"
+    user_id: str  # From AuthenticatedUser (or "system" for CLI)
+    user_email: str  # From AuthenticatedUser (or "system" for CLI)
+    resource: str  # "backend:copilot", "tool:read_file", "sync:vault"
+    action: str  # "read", "write", "execute", "delete"
+    outcome: str  # "success", "denied", "error"
     details: dict[str, object] = field(default_factory=lambda: {})
     timestamp: str = ""
     trace_id: str = ""
@@ -60,7 +61,8 @@ class AuditEvent:
         # Frozen dataclass workaround for defaults
         if not self.timestamp:
             object.__setattr__(
-                self, "timestamp",
+                self,
+                "timestamp",
                 datetime.now(timezone.utc).isoformat(),
             )
         if not self.trace_id:
@@ -114,6 +116,7 @@ def emit_audit_event(event: AuditEvent) -> None:
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
+
 
 def _write_to_file(record: dict[str, Any]) -> None:
     """Append a JSON line to the audit log file."""

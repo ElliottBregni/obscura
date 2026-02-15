@@ -1,4 +1,5 @@
 """Tests for sdk.routes.workflows — Workflow CRUD and execution."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
@@ -9,6 +10,7 @@ from sdk.config import ObscuraConfig
 def app():
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
+
     return create_app(config)
 
 
@@ -32,18 +34,24 @@ class TestWorkflowExecution:
         mock_get_runtime.return_value = mock_runtime
 
         # Create workflow
-        create = client.post("/api/v1/workflows", json={
-            "name": "test-wf",
-            "steps": [
-                {"name": "step1", "input": "do something"},
-            ],
-        })
+        create = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "test-wf",
+                "steps": [
+                    {"name": "step1", "input": "do something"},
+                ],
+            },
+        )
         wid = create.json()["workflow_id"]
 
         # Execute
-        resp = client.post(f"/api/v1/workflows/{wid}/execute", json={
-            "inputs": {},
-        })
+        resp = client.post(
+            f"/api/v1/workflows/{wid}/execute",
+            json={
+                "inputs": {},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "completed"
@@ -53,9 +61,12 @@ class TestWorkflowExecution:
     def test_execute_workflow_not_found(self, mock_get_runtime, client):
         mock_runtime = AsyncMock()
         mock_get_runtime.return_value = mock_runtime
-        resp = client.post("/api/v1/workflows/nonexistent/execute", json={
-            "inputs": {},
-        })
+        resp = client.post(
+            "/api/v1/workflows/nonexistent/execute",
+            json={
+                "inputs": {},
+            },
+        )
         assert resp.status_code == 404
 
     @patch("sdk.routes.workflows.get_runtime")
@@ -69,17 +80,23 @@ class TestWorkflowExecution:
         mock_runtime.spawn = MagicMock(return_value=mock_agent)
         mock_get_runtime.return_value = mock_runtime
 
-        create = client.post("/api/v1/workflows", json={
-            "name": "input-wf",
-            "steps": [
-                {"name": "s1", "input": "Process {{data}}"},
-            ],
-        })
+        create = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "input-wf",
+                "steps": [
+                    {"name": "s1", "input": "Process {{data}}"},
+                ],
+            },
+        )
         wid = create.json()["workflow_id"]
 
-        resp = client.post(f"/api/v1/workflows/{wid}/execute", json={
-            "inputs": {"data": "hello world"},
-        })
+        resp = client.post(
+            f"/api/v1/workflows/{wid}/execute",
+            json={
+                "inputs": {"data": "hello world"},
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "completed"
 
@@ -94,10 +111,13 @@ class TestWorkflowExecution:
         mock_runtime.spawn = MagicMock(return_value=mock_agent)
         mock_get_runtime.return_value = mock_runtime
 
-        create = client.post("/api/v1/workflows", json={
-            "name": "fail-wf",
-            "steps": [{"name": "s1", "input": "do"}],
-        })
+        create = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "fail-wf",
+                "steps": [{"name": "s1", "input": "do"}],
+            },
+        )
         wid = create.json()["workflow_id"]
 
         resp = client.post(f"/api/v1/workflows/{wid}/execute", json={"inputs": {}})
@@ -122,13 +142,16 @@ class TestWorkflowExecution:
         mock_runtime.spawn = MagicMock(return_value=mock_agent)
         mock_get_runtime.return_value = mock_runtime
 
-        create = client.post("/api/v1/workflows", json={
-            "name": "multi-wf",
-            "steps": [
-                {"name": "s1", "input": "first"},
-                {"name": "s2", "input": "second with {{s1.output}}"},
-            ],
-        })
+        create = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "multi-wf",
+                "steps": [
+                    {"name": "s1", "input": "first"},
+                    {"name": "s2", "input": "second with {{s1.output}}"},
+                ],
+            },
+        )
         wid = create.json()["workflow_id"]
 
         resp = client.post(f"/api/v1/workflows/{wid}/execute", json={"inputs": {}})
@@ -151,10 +174,13 @@ class TestWorkflowExecutions:
         mock_runtime.spawn = MagicMock(return_value=mock_agent)
         mock_get_runtime.return_value = mock_runtime
 
-        create = client.post("/api/v1/workflows", json={
-            "name": "exec-wf",
-            "steps": [{"name": "s1", "input": "x"}],
-        })
+        create = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "exec-wf",
+                "steps": [{"name": "s1", "input": "x"}],
+            },
+        )
         wid = create.json()["workflow_id"]
 
         # Execute it

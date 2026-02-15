@@ -18,6 +18,7 @@ from sdk.tui.diff_engine import DiffEngine, DiffHunk, DiffLine, FileChange
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestDiffHunkStructure:
     """Verify DiffHunk and DiffLine dataclass fields."""
 

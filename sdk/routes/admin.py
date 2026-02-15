@@ -53,14 +53,16 @@ async def audit_logs_list(
     logs = sorted(logs, key=lambda x: x.get("timestamp", ""), reverse=True)
 
     total = len(logs)
-    logs = logs[offset:offset + limit]
+    logs = logs[offset : offset + limit]
 
-    return JSONResponse(content={
-        "logs": logs,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+    return JSONResponse(
+        content={
+            "logs": logs,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @router.get("/audit/logs/summary")
@@ -72,14 +74,18 @@ async def audit_logs_summary(
     outcomes: Counter[str | None] = Counter(l.get("outcome") for l in audit_logs)
 
     cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
-    recent: list[dict[str, Any]] = [l for l in audit_logs if l.get("timestamp", "") > cutoff]
+    recent: list[dict[str, Any]] = [
+        l for l in audit_logs if l.get("timestamp", "") > cutoff
+    ]
 
-    return JSONResponse(content={
-        "total_logs": len(audit_logs),
-        "actions": dict(actions),
-        "outcomes": dict(outcomes),
-        "last_24h": len(recent),
-    })
+    return JSONResponse(
+        content={
+            "total_logs": len(audit_logs),
+            "actions": dict(actions),
+            "outcomes": dict(outcomes),
+            "last_24h": len(recent),
+        }
+    )
 
 
 # -- metrics ---------------------------------------------------------------
@@ -108,6 +114,7 @@ async def metrics_get(
         by_model[model] = by_model.get(model, 0) + 1
 
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     memory_stats = store.get_stats()
 
@@ -115,22 +122,24 @@ async def metrics_get(
     from sdk.routes.workflows import get_workflows_store, get_workflow_executions_store
     from sdk.routes.webhooks import get_webhooks_store
 
-    return JSONResponse(content={
-        "agents": agent_stats,
-        "memory": memory_stats,
-        "templates": {
-            "total_templates": len(get_agent_templates()),
-        },
-        "workflows": {
-            "total_workflows": len(get_workflows_store()),
-            "total_executions": len(get_workflow_executions_store()),
-        },
-        "webhooks": {
-            "total": len(get_webhooks_store()),
-            "active": sum(1 for w in get_webhooks_store().values() if w.active),
-        },
-        "timestamp": datetime.now(UTC).isoformat(),
-    })
+    return JSONResponse(
+        content={
+            "agents": agent_stats,
+            "memory": memory_stats,
+            "templates": {
+                "total_templates": len(get_agent_templates()),
+            },
+            "workflows": {
+                "total_workflows": len(get_workflows_store()),
+                "total_executions": len(get_workflow_executions_store()),
+            },
+            "webhooks": {
+                "total": len(get_webhooks_store()),
+                "active": sum(1 for w in get_webhooks_store().values() if w.active),
+            },
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
 
 
 @router.get("/metrics/agents/{agent_id}")
@@ -147,15 +156,17 @@ async def metrics_agent_get(
 
     state = agent.get_state()
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "name": state.name,
-        "status": state.status.name,
-        "created_at": state.created_at.isoformat(),
-        "updated_at": state.updated_at.isoformat(),
-        "iteration_count": state.iteration_count,
-        "error_message": state.error_message,
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "name": state.name,
+            "status": state.status.name,
+            "created_at": state.created_at.isoformat(),
+            "updated_at": state.updated_at.isoformat(),
+            "iteration_count": state.iteration_count,
+            "error_message": state.error_message,
+        }
+    )
 
 
 # -- rate limits -----------------------------------------------------------
@@ -166,14 +177,16 @@ async def rate_limits_get(
     user: AuthenticatedUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """Get current rate limits. Admin only."""
-    return JSONResponse(content={
-        "default": {
-            "requests_per_minute": 100,
-            "concurrent_agents": 10,
-            "memory_quota_mb": 1024,
-        },
-        "custom": _rate_limits,
-    })
+    return JSONResponse(
+        content={
+            "default": {
+                "requests_per_minute": 100,
+                "concurrent_agents": 10,
+                "memory_quota_mb": 1024,
+            },
+            "custom": _rate_limits,
+        }
+    )
 
 
 @router.post("/rate-limits")
@@ -194,10 +207,12 @@ async def rate_limits_set(
         "set_at": datetime.now(UTC).isoformat(),
     }
 
-    return JSONResponse(content={
-        "api_key": api_key[:8] + "...",
-        "limits": _rate_limits[api_key],
-    })
+    return JSONResponse(
+        content={
+            "api_key": api_key[:8] + "...",
+            "limits": _rate_limits[api_key],
+        }
+    )
 
 
 @router.delete("/rate-limits/{api_key}")

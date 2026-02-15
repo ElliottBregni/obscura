@@ -6,7 +6,7 @@ to enable seamless Obscura integration.
 
 Usage in OpenClaw:
     from obscura_client import get_obscura
-    
+
     obscura = await get_obscura()
     agent = await obscura.spawn_agent("reviewer", "claude")
     result = await obscura.run_agent(agent["agent_id"], "Review this code")
@@ -31,20 +31,20 @@ OBSCURA_TOKEN = os.environ.get("OBSCURA_TOKEN", "local-dev-token")
 class ObscuraClient:
     """
     Client for interacting with Obscura from OpenClaw.
-    
+
     Provides methods to:
     - Spawn and manage agents
     - Store/retrieve memory
     - Semantic search
     - Stream agent output
     """
-    
+
     def __init__(self, token: str | None = None, base_url: str | None = None):
         self.token = token or OBSCURA_TOKEN
         self.base_url = base_url or OBSCURA_BASE
         self.ws_url = OBSCURA_WS
         self._client: httpx.AsyncClient | None = None
-    
+
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
@@ -54,11 +54,11 @@ class ObscuraClient:
                 timeout=300.0,
             )
         return self._client
-    
+
     # ====================================================================
     # Agent Management
     # ====================================================================
-    
+
     async def spawn_agent(
         self,
         name: str,
@@ -69,14 +69,14 @@ class ObscuraClient:
     ) -> dict[str, Any]:
         """
         Spawn a new agent.
-        
+
         Args:
             name: Human-readable name for the agent
             model: "claude" or "copilot"
             system_prompt: System instructions for the agent
             memory_namespace: Where agent stores its memory
             max_iterations: Safety limit for agent loops
-        
+
         Returns:
             Agent info including agent_id
         """
@@ -89,25 +89,22 @@ class ObscuraClient:
                 "system_prompt": system_prompt,
                 "memory_namespace": memory_namespace,
                 "max_iterations": max_iterations,
-            }
+            },
         )
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
 
     async def run_agent(
-        self,
-        agent_id: str,
-        prompt: str,
-        **context: Any
+        self, agent_id: str, prompt: str, **context: Any
     ) -> dict[str, Any]:
         """
         Run a task on an existing agent.
-        
+
         Args:
             agent_id: The agent's unique ID
             prompt: The task to execute
             **context: Additional context for the task
-        
+
         Returns:
             Result with status and output
         """
@@ -120,14 +117,11 @@ class ObscuraClient:
         return cast(dict[str, Any], resp.json())
 
     async def stream_agent(
-        self,
-        agent_id: str,
-        prompt: str,
-        **context: Any
+        self, agent_id: str, prompt: str, **context: Any
     ) -> AsyncIterator[str]:
         """
         Stream agent output in real-time.
-        
+
         Yields chunks of text as they're generated.
         """
         client = await self._get_client()
@@ -142,7 +136,7 @@ class ObscuraClient:
                     data = json.loads(line[6:])
                     if "text" in data:
                         yield data["text"]
-    
+
     async def get_agent_status(self, agent_id: str) -> dict[str, Any]:
         """Get current status of an agent."""
         client = await self._get_client()
@@ -160,7 +154,7 @@ class ObscuraClient:
         resp.raise_for_status()
         data = cast(dict[str, Any], resp.json())
         return cast(list[dict[str, Any]], data.get("agents", []))
-    
+
     async def stop_agent(self, agent_id: str) -> dict[str, Any]:
         """Stop and cleanup an agent."""
         client = await self._get_client()
@@ -171,7 +165,7 @@ class ObscuraClient:
     # ====================================================================
     # Memory Operations
     # ====================================================================
-    
+
     async def store_memory(
         self,
         key: str,
@@ -181,7 +175,7 @@ class ObscuraClient:
     ) -> None:
         """
         Store a value in shared memory.
-        
+
         Args:
             key: Unique key for this value
             value: Any JSON-serializable value
@@ -198,12 +192,8 @@ class ObscuraClient:
             json=body,
             params=params,
         )
-    
-    async def get_memory(
-        self,
-        key: str,
-        namespace: str = "openclaw"
-    ) -> Any | None:
+
+    async def get_memory(self, key: str, namespace: str = "openclaw") -> Any | None:
         """Get a value from shared memory. Returns None if not found."""
         client = await self._get_client()
         resp = await client.get(f"/api/v1/memory/{namespace}/{key}")
@@ -221,10 +211,9 @@ class ObscuraClient:
             return False
         resp.raise_for_status()
         return True
-    
+
     async def list_memory_keys(
-        self,
-        namespace: str | None = None
+        self, namespace: str | None = None
     ) -> list[dict[str, str]]:
         """List all memory keys."""
         client = await self._get_client()
@@ -235,7 +224,7 @@ class ObscuraClient:
         resp.raise_for_status()
         data = cast(dict[str, Any], resp.json())
         return cast(list[dict[str, str]], data.get("keys", []))
-    
+
     async def search_memory(self, query: str) -> list[dict[str, Any]]:
         """Search memory keys and values."""
         client = await self._get_client()
@@ -243,18 +232,18 @@ class ObscuraClient:
         resp.raise_for_status()
         data = cast(dict[str, Any], resp.json())
         return cast(list[dict[str, Any]], data.get("results", []))
-    
+
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get memory usage statistics."""
         client = await self._get_client()
         resp = await client.get("/api/v1/memory/stats")
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
-    
+
     # ====================================================================
     # Vector / Semantic Memory
     # ====================================================================
-    
+
     async def remember(
         self,
         text: str,
@@ -264,26 +253,26 @@ class ObscuraClient:
     ) -> str:
         """
         Store text with semantic embedding for later recall.
-        
+
         Args:
             text: The text to remember
             key: Optional key (auto-generated if not provided)
             metadata: Additional metadata
             namespace: Storage namespace
-        
+
         Returns:
             The key used to store this memory
         """
         if key is None:
             key = f"mem_{datetime.now().timestamp()}"
-        
+
         client = await self._get_client()
         await client.post(
             f"/api/v1/vector-memory/{namespace}/{key}",
             json={"text": text, "metadata": metadata or {}},
         )
         return key
-    
+
     async def recall(
         self,
         query: str,
@@ -292,12 +281,12 @@ class ObscuraClient:
     ) -> list[dict[str, Any]]:
         """
         Recall semantically similar memories.
-        
+
         Args:
             query: What to search for
             top_k: Number of results
             namespace: Filter by namespace
-        
+
         Returns:
             List of memories with similarity scores
         """
@@ -309,11 +298,11 @@ class ObscuraClient:
         resp.raise_for_status()
         data = cast(dict[str, Any], resp.json())
         return cast(list[dict[str, Any]], data.get("results", []))
-    
+
     # ====================================================================
     # High-Level Workflows
     # ====================================================================
-    
+
     async def quick_agent(
         self,
         name: str,
@@ -323,7 +312,7 @@ class ObscuraClient:
     ) -> str:
         """
         Convenience: Spawn, run, stop, and return result.
-        
+
         For one-off tasks where you don't need to keep the agent.
         """
         agent = await self.spawn_agent(name, model, system_prompt)
@@ -334,7 +323,7 @@ class ObscuraClient:
             return str(result.get("result", ""))
         finally:
             await self.stop_agent(agent_id)
-    
+
     async def multi_agent_workflow(
         self,
         tasks: list[tuple[str, str, str]],  # (name, system_prompt, prompt)
@@ -342,11 +331,11 @@ class ObscuraClient:
     ) -> list[dict[str, Any]]:
         """
         Run multiple agents in parallel and collect results.
-        
+
         Args:
             tasks: List of (name, system_prompt, prompt) tuples
             model: Which model to use for all agents
-        
+
         Returns:
             List of results in same order as tasks
         """
@@ -366,21 +355,25 @@ class ObscuraClient:
             except Exception as e:
                 return {"agent": agent, "result": None, "error": str(e)}
 
-        results: list[dict[str, Any]] = list(await asyncio.gather(*[
-            run_task(agent, prompt)
-            for agent, (_, _, prompt) in zip(agents, tasks)
-        ]))
+        results: list[dict[str, Any]] = list(
+            await asyncio.gather(
+                *[
+                    run_task(agent, prompt)
+                    for agent, (_, _, prompt) in zip(agents, tasks)
+                ]
+            )
+        )
 
         # Cleanup
         for agent in agents:
             await self.stop_agent(str(agent["agent_id"]))
 
         return results
-    
+
     # ====================================================================
     # Context Manager
     # ====================================================================
-    
+
     @asynccontextmanager
     async def session(self):
         """Async context manager for automatic cleanup."""
@@ -388,17 +381,18 @@ class ObscuraClient:
             yield self
         finally:
             await self.close()
-    
+
     async def close(self):
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
-    
+
     def __del__(self):
         """Cleanup on garbage collection."""
         if self._client and not self._client.is_closed:
             import asyncio
+
             try:
                 asyncio.get_event_loop().create_task(self._client.aclose())
             except Exception:
@@ -408,10 +402,11 @@ class ObscuraClient:
 # Singleton instance
 _obscura_client: ObscuraClient | None = None
 
+
 async def get_obscura() -> ObscuraClient:
     """
     Get or create the global Obscura client.
-    
+
     Usage:
         obscura = await get_obscura()
         result = await obscura.quick_agent("reviewer", "Review this code")
@@ -432,25 +427,30 @@ def reset_obscura():
 # Convenience functions for direct use
 # ====================================================================
 
+
 async def spawn(name: str, model: str = "claude", **kwargs: Any) -> dict[str, Any]:
     """Spawn an agent (convenience function)."""
     o = await get_obscura()
     return await o.spawn_agent(name, model, **kwargs)
+
 
 async def run(agent_id: str, prompt: str, **context: Any) -> dict[str, Any]:
     """Run a task (convenience function)."""
     o = await get_obscura()
     return await o.run_agent(agent_id, prompt, **context)
 
+
 async def remember(text: str, **kwargs: Any) -> str:
     """Store semantic memory (convenience function)."""
     o = await get_obscura()
     return await o.remember(text, **kwargs)
 
+
 async def recall(query: str, **kwargs: Any) -> list[dict[str, Any]]:
     """Recall semantic memory (convenience function)."""
     o = await get_obscura()
     return await o.recall(query, **kwargs)
+
 
 async def quick(name: str, prompt: str, **kwargs: Any) -> str:
     """Quick one-off agent (convenience function)."""

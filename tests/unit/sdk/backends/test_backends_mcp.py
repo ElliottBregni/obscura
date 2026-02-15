@@ -26,6 +26,7 @@ from sdk.mcp.types import MCPConnectionConfig, MCPError, MCPTransportType
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def echo_handler(**kwargs):
     """Simple async handler that echoes its keyword arguments."""
     return {"echo": kwargs}
@@ -49,6 +50,7 @@ def make_tool(name: str = "test_tool", handler=None) -> ToolSpec:
 # ===========================================================================
 # 1. TestMCPBackendInit
 # ===========================================================================
+
 
 class TestMCPBackendInit:
     """Verify MCPBackend constructor defaults and custom values."""
@@ -79,9 +81,7 @@ class TestMCPBackendInit:
         assert backend._initialized is False
 
     def test_with_servers(self):
-        config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="echo"
-        )
+        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         backend = MCPBackend(mcp_servers=[config])
         assert len(backend.mcp_servers) == 1
         assert backend.mcp_servers[0] is config
@@ -98,6 +98,7 @@ class TestMCPBackendInit:
 # ===========================================================================
 # 2. TestMCPBackendSendStream
 # ===========================================================================
+
 
 class TestMCPBackendSendStream:
     """send() and stream() should raise NotImplementedError."""
@@ -118,6 +119,7 @@ class TestMCPBackendSendStream:
 # ===========================================================================
 # 3. TestMCPBackendSessions
 # ===========================================================================
+
 
 class TestMCPBackendSessions:
     """Session operations are unsupported except list_sessions (returns [])."""
@@ -156,6 +158,7 @@ class TestMCPBackendSessions:
 # ===========================================================================
 # 4. TestMCPBackendTools
 # ===========================================================================
+
 
 class TestMCPBackendTools:
     """Tool registration, listing, and registry access."""
@@ -214,6 +217,7 @@ class TestMCPBackendTools:
 # ===========================================================================
 # 5. TestMCPBackendCallTool
 # ===========================================================================
+
 
 class TestMCPBackendCallTool:
     """Tool execution via call_tool()."""
@@ -287,6 +291,7 @@ class TestMCPBackendCallTool:
 # 6. TestMCPBackendHooks
 # ===========================================================================
 
+
 class TestMCPBackendHooks:
     """Hook registration and execution, including error resilience."""
 
@@ -344,7 +349,10 @@ class TestMCPBackendHooks:
             result = await backend.call_tool("t", {})
 
         assert result == {"echo": {}}
-        assert any("hook exploded" in r.message.lower() or "Hook failed" in r.message for r in caplog.records)
+        assert any(
+            "hook exploded" in r.message.lower() or "Hook failed" in r.message
+            for r in caplog.records
+        )
 
     @pytest.mark.asyncio
     async def test_async_hook_error_logged_not_raised(self, caplog):
@@ -362,7 +370,10 @@ class TestMCPBackendHooks:
             result = await backend.call_tool("t", {})
 
         assert result == {"echo": {}}
-        assert any("async hook exploded" in r.message.lower() or "Hook failed" in r.message for r in caplog.records)
+        assert any(
+            "async hook exploded" in r.message.lower() or "Hook failed" in r.message
+            for r in caplog.records
+        )
 
     def test_register_hook_multiple(self):
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
@@ -376,6 +387,7 @@ class TestMCPBackendHooks:
 # ===========================================================================
 # 7. TestMCPBackendLifecycle
 # ===========================================================================
+
 
 class TestMCPBackendLifecycle:
     """Start/stop lifecycle, idempotency, and cleanup."""
@@ -419,9 +431,7 @@ class TestMCPBackendLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_connects_servers(self):
-        config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="echo"
-        )
+        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         backend = MCPBackend(mcp_servers=[config], name="test-mcp")
         backend._session_manager = MagicMock()
         backend._session_manager.add_session = AsyncMock()
@@ -461,6 +471,7 @@ class TestMCPBackendLifecycle:
 # ===========================================================================
 # 8. TestMCPBackendServers
 # ===========================================================================
+
 
 class TestMCPBackendServers:
     """Server listing and health-check via mocked session manager."""
@@ -545,14 +556,13 @@ class TestMCPBackendServers:
         backend._session_manager.aggregate_tools = AsyncMock(return_value=[])
 
         await backend.remove_server("mcp_server_0")
-        backend._session_manager.remove_session.assert_awaited_once_with(
-            "mcp_server_0"
-        )
+        backend._session_manager.remove_session.assert_awaited_once_with("mcp_server_0")
 
 
 # ===========================================================================
 # 9. TestMCPBackendMCPToolConversion
 # ===========================================================================
+
 
 class TestMCPBackendMCPToolConversion:
     """_mcp_tool_to_obscura conversion logic."""
@@ -604,6 +614,7 @@ class TestMCPBackendMCPToolConversion:
 # 10. TestMCPBackendExecuteMCPTool
 # ===========================================================================
 
+
 class TestMCPBackendExecuteMCPTool:
     """_execute_mcp_tool session lookup and error handling."""
 
@@ -628,7 +639,9 @@ class TestMCPBackendExecuteMCPTool:
         backend._session_manager = MagicMock()
         backend._session_manager.get_session.return_value = mock_client
 
-        with patch("sdk.backends.mcp_backend.mcp_result_to_obscura", return_value="converted"):
+        with patch(
+            "sdk.backends.mcp_backend.mcp_result_to_obscura", return_value="converted"
+        ):
             result = await backend._execute_mcp_tool("srv", "tool_name", {"a": 1})
 
         mock_client.call_tool.assert_awaited_once_with("tool_name", {"a": 1})
@@ -638,6 +651,7 @@ class TestMCPBackendExecuteMCPTool:
 # ===========================================================================
 # 11. TestMCPBackendMixin
 # ===========================================================================
+
 
 class TestMCPBackendMixin:
     """MCPBackendMixin wiring for composite backends."""
@@ -649,9 +663,7 @@ class TestMCPBackendMixin:
         assert mixin._mcp_tools_added is False
 
     def test_mixin_passes_servers(self):
-        config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="echo"
-        )
+        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         mixin = MCPBackendMixin.__new__(MCPBackendMixin)
         MCPBackendMixin.__init__(mixin, mcp_servers=[config])
         assert len(mixin._mcp_backend.mcp_servers) == 1
@@ -666,6 +678,7 @@ class TestMCPBackendMixin:
 # 12. TestMCPBackendRefreshTools
 # ===========================================================================
 
+
 class TestMCPBackendRefreshTools:
     """_refresh_tools aggregates tools from the session manager."""
 
@@ -679,9 +692,7 @@ class TestMCPBackendRefreshTools:
         mcp_tool.inputSchema = {}
 
         backend._session_manager = MagicMock()
-        backend._session_manager.aggregate_tools = AsyncMock(
-            return_value=[mcp_tool]
-        )
+        backend._session_manager.aggregate_tools = AsyncMock(return_value=[mcp_tool])
 
         await backend._refresh_tools()
 

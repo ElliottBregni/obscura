@@ -23,9 +23,11 @@ from dataclasses import dataclass
 # Model registry
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ModelConfig:
     """A resolved model configuration."""
+
     alias: str
     model_id: str
     category: str  # "automation" | "interactive" | "premium"
@@ -53,7 +55,6 @@ _ALIAS_REGISTRY: dict[str, ModelConfig] = {
         category=AUTOMATION,
         max_requests_per_run=200,
     ),
-
     # --- Interactive / Exploration ---
     "copilot_interactive_reasoning": ModelConfig(
         alias="copilot_interactive_reasoning",
@@ -61,7 +62,6 @@ _ALIAS_REGISTRY: dict[str, ModelConfig] = {
         category=INTERACTIVE,
         max_requests_per_run=50,
     ),
-
     # --- Premium / Restricted ---
     "copilot_premium_manual_only": ModelConfig(
         alias="copilot_premium_manual_only",
@@ -82,6 +82,7 @@ _AUTOMATION_SAFE_MODELS: set[str] = {"gpt-5-mini", "gpt-4o-mini", "gpt-4o"}
 # ---------------------------------------------------------------------------
 # Environment override
 # ---------------------------------------------------------------------------
+
 
 def _apply_env_override(alias: str, config: ModelConfig) -> ModelConfig:
     """Allow env-var override of model ID, but only within the same category."""
@@ -109,6 +110,7 @@ def _apply_env_override(alias: str, config: ModelConfig) -> ModelConfig:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def resolve(alias: str) -> ModelConfig:
     """Resolve an alias to a ModelConfig. Raises ValueError for unknown aliases."""

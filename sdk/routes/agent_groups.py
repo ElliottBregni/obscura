@@ -37,8 +37,14 @@ async def agent_group_create(
 
     _agent_groups[group_id] = group
 
-    audit("agent_group.create", user, f"group:{group_id}", "create", "success",
-          name=group["name"])
+    audit(
+        "agent_group.create",
+        user,
+        f"group:{group_id}",
+        "create",
+        "success",
+        name=group["name"],
+    )
 
     return JSONResponse(content=group)
 
@@ -49,10 +55,12 @@ async def agent_group_list(
 ) -> JSONResponse:
     """List all agent groups."""
     groups: list[dict[str, Any]] = list(_agent_groups.values())
-    return JSONResponse(content={
-        "groups": groups,
-        "count": len(groups),
-    })
+    return JSONResponse(
+        content={
+            "groups": groups,
+            "count": len(groups),
+        }
+    )
 
 
 @router.get("/agent-groups/{group_id}")
@@ -114,12 +122,14 @@ async def agent_group_broadcast(
         except Exception as e:
             errors.append({"agent_id": agent_id, "error": str(e)})
 
-    return JSONResponse(content={
-        "group_id": group_id,
-        "message": message,
-        "queued": results,
-        "errors": errors,
-    })
+    return JSONResponse(
+        content={
+            "group_id": group_id,
+            "message": message,
+            "queued": results,
+            "errors": errors,
+        }
+    )
 
 
 # -- agent messaging -------------------------------------------------------
@@ -137,25 +147,38 @@ async def agent_send_message(
 
     source = runtime.get_agent(from_agent)
     if source is None:
-        raise HTTPException(status_code=404, detail=f"Source agent {from_agent} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Source agent {from_agent} not found"
+        )
 
     target = runtime.get_agent(to_agent)
     if target is None:
-        raise HTTPException(status_code=404, detail=f"Target agent {to_agent} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Target agent {to_agent} not found"
+        )
 
     message: str = body.get("message", "")
 
     await source.send_message(to_agent, message)
 
-    audit("agent.message", user, f"agent:{from_agent}", "send", "success",
-          to_agent=to_agent, message_preview=message[:100])
+    audit(
+        "agent.message",
+        user,
+        f"agent:{from_agent}",
+        "send",
+        "success",
+        to_agent=to_agent,
+        message_preview=message[:100],
+    )
 
-    return JSONResponse(content={
-        "from_agent": from_agent,
-        "to_agent": to_agent,
-        "message": message,
-        "sent": True,
-    })
+    return JSONResponse(
+        content={
+            "from_agent": from_agent,
+            "to_agent": to_agent,
+            "message": message,
+            "sent": True,
+        }
+    )
 
 
 @router.get("/agents/{agent_id}/messages")
@@ -173,8 +196,10 @@ async def agent_get_messages(
 
     messages: list[dict[str, Any]] = []
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "messages": messages,
-        "count": len(messages),
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "messages": messages,
+            "count": len(messages),
+        }
+    )

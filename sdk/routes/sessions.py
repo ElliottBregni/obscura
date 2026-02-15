@@ -29,8 +29,14 @@ async def create_session(
     client = await factory.create(body.backend, user=user)
     try:
         ref = await client.create_session()
-        audit("session.create", user, f"backend:{body.backend}", "write", "success",
-              session_id=ref.session_id)
+        audit(
+            "session.create",
+            user,
+            f"backend:{body.backend}",
+            "write",
+            "success",
+            session_id=ref.session_id,
+        )
         return SessionResponse(session_id=ref.session_id, backend=ref.backend.value)
     finally:
         await client.stop()
@@ -76,8 +82,14 @@ async def delete_session(
     try:
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
         await client.delete_session(ref)
-        audit("session.delete", user, f"session:{session_id}", "delete", "success",
-              backend=backend)
+        audit(
+            "session.delete",
+            user,
+            f"session:{session_id}",
+            "delete",
+            "success",
+            backend=backend,
+        )
         return JSONResponse(content={"deleted": True, "session_id": session_id})
     finally:
         await client.stop()

@@ -19,6 +19,7 @@ import pytest
 # Inline stubs — mirrors plan-related types from PLAN_TUI.md
 # ---------------------------------------------------------------------------
 
+
 class TUIMode(Enum):
     ASK = "ask"
     PLAN = "plan"
@@ -29,6 +30,7 @@ class TUIMode(Enum):
 @dataclass
 class PlanStep:
     """A single step in a plan."""
+
     index: int
     description: str
     status: str = "pending"  # "pending" | "approved" | "rejected"
@@ -46,6 +48,7 @@ class PlanStep:
 @dataclass
 class Plan:
     """A structured plan with numbered steps."""
+
     steps: list[PlanStep] = field(default_factory=list)
     summary: str = ""
 
@@ -99,6 +102,7 @@ def parse_plan_from_response(text: str) -> Plan:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestPlanStepCreation:
     """Verify PlanStep construction and defaults."""
@@ -167,11 +171,7 @@ class TestPlanParsing:
 
     def test_parse_paren_numbered_list(self) -> None:
         """Parses '1) Step' format."""
-        response = (
-            "Steps:\n"
-            "1) Read the config file\n"
-            "2) Validate inputs\n"
-        )
+        response = "Steps:\n1) Read the config file\n2) Validate inputs\n"
         plan = parse_plan_from_response(response)
         assert len(plan.steps) == 2
         assert plan.steps[0].index == 1
@@ -241,11 +241,13 @@ class TestPlanApprovalFlow:
     @pytest.fixture()
     def three_step_plan(self) -> Plan:
         """A plan with three pending steps."""
-        return Plan(steps=[
-            PlanStep(index=1, description="Step 1"),
-            PlanStep(index=2, description="Step 2"),
-            PlanStep(index=3, description="Step 3"),
-        ])
+        return Plan(
+            steps=[
+                PlanStep(index=1, description="Step 1"),
+                PlanStep(index=2, description="Step 2"),
+                PlanStep(index=3, description="Step 3"),
+            ]
+        )
 
     def test_initial_plan_all_pending(self, three_step_plan: Plan) -> None:
         """A fresh plan has all steps pending."""
@@ -316,34 +318,42 @@ class TestExecutePlanTrigger:
 
     def test_ready_to_execute_when_all_approved(self) -> None:
         """Plan is ready to execute when all steps are approved."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="approved"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="approved"),
+            ]
+        )
         assert plan.ready_to_execute is True
 
     def test_ready_to_execute_with_mix(self) -> None:
         """Plan is ready when all decided and at least one approved."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="rejected"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="rejected"),
+            ]
+        )
         assert plan.ready_to_execute is True
 
     def test_not_ready_when_pending(self) -> None:
         """Plan is not ready when any step is still pending."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="approved"),
-            PlanStep(index=2, description="S2", status="pending"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="approved"),
+                PlanStep(index=2, description="S2", status="pending"),
+            ]
+        )
         assert plan.ready_to_execute is False
 
     def test_not_ready_when_all_rejected(self) -> None:
         """Plan is not ready when all steps are rejected (nothing to execute)."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="S1", status="rejected"),
-            PlanStep(index=2, description="S2", status="rejected"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="S1", status="rejected"),
+                PlanStep(index=2, description="S2", status="rejected"),
+            ]
+        )
         assert plan.ready_to_execute is False
 
     def test_empty_plan_not_ready(self) -> None:
@@ -357,11 +367,13 @@ class TestPlanInSessionMemory:
 
     def test_plan_to_dict_roundtrip(self) -> None:
         """Plan data can be serialized to dict and reconstructed."""
-        original = Plan(steps=[
-            PlanStep(index=1, description="Create schema", status="approved"),
-            PlanStep(index=2, description="Write migrations", status="rejected"),
-            PlanStep(index=3, description="Add tests", status="pending"),
-        ])
+        original = Plan(
+            steps=[
+                PlanStep(index=1, description="Create schema", status="approved"),
+                PlanStep(index=2, description="Write migrations", status="rejected"),
+                PlanStep(index=3, description="Add tests", status="pending"),
+            ]
+        )
 
         # Simulate serialization
         data = {
@@ -385,10 +397,12 @@ class TestPlanInSessionMemory:
 
     def test_plan_stored_as_metadata(self) -> None:
         """A plan can be stored in turn metadata for session persistence."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="Do X"),
-            PlanStep(index=2, description="Do Y"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="Do X"),
+                PlanStep(index=2, description="Do Y"),
+            ]
+        )
         plan.steps[0].approve()
 
         metadata: dict[str, Any] = {
@@ -407,9 +421,11 @@ class TestPlanInSessionMemory:
 
     def test_modify_step_after_initial_decision(self) -> None:
         """User can change their mind and re-approve/reject a step."""
-        plan = Plan(steps=[
-            PlanStep(index=1, description="Step 1"),
-        ])
+        plan = Plan(
+            steps=[
+                PlanStep(index=1, description="Step 1"),
+            ]
+        )
         plan.steps[0].approve()
         assert plan.steps[0].status == "approved"
 

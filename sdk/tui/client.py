@@ -48,4 +48,3 @@ class TUIClient:
     async def stream(self, prompt: str) -> AsyncIterator[str]:
         if False:  # pragma: no cover
             yield prompt
-

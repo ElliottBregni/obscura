@@ -72,11 +72,12 @@ class ObscuraCLI:
                 "model": model,
                 "system_prompt": system_prompt,
                 "memory_namespace": memory_namespace,
-            }
+            },
         )
         resp.raise_for_status()
         result: Any = resp.json()
         return result
+
     def run_agent(self, agent_id: str, prompt: str, **context: Any) -> dict[str, Any]:
         """Run a task on an agent."""
         resp: httpx.Response = self.client.post(
@@ -86,12 +87,14 @@ class ObscuraCLI:
         resp.raise_for_status()
         result: Any = resp.json()
         return result
+
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         """Get agent status."""
         resp: httpx.Response = self.client.get(f"/api/v1/agents/{agent_id}")
         resp.raise_for_status()
         result: Any = resp.json()
         return result
+
     def list_agents(self, status: str | None = None) -> list[dict[str, Any]]:
         """List all agents."""
         params: dict[str, str] = {}
@@ -109,7 +112,10 @@ class ObscuraCLI:
         resp.raise_for_status()
         result: Any = resp.json()
         return result
-    def stream_agent(self, agent_id: str, prompt: str, **context: Any) -> Generator[str, None, None]:
+
+    def stream_agent(
+        self, agent_id: str, prompt: str, **context: Any
+    ) -> Generator[str, None, None]:
         """Stream agent output."""
         with self.client.stream(
             "POST",
@@ -156,16 +162,21 @@ class ObscuraCLI:
 
     def search_memory(self, query: str) -> list[dict[str, Any]]:
         """Search memory."""
-        resp: httpx.Response = self.client.get("/api/v1/memory/search", params={"q": query})
+        resp: httpx.Response = self.client.get(
+            "/api/v1/memory/search", params={"q": query}
+        )
         resp.raise_for_status()
         result: Any = resp.json()
         results: list[dict[str, Any]] = result.get("results", [])
         return results
 
-    def remember(self, text: str, key: str | None = None, namespace: str = "semantic") -> str:
+    def remember(
+        self, text: str, key: str | None = None, namespace: str = "semantic"
+    ) -> str:
         """Store text with semantic embedding."""
         if key is None:
             import time
+
             key = f"mem_{int(time.time())}"
         resp: httpx.Response = self.client.post(
             f"/api/v1/vector-memory/{namespace}/{key}",
@@ -192,6 +203,7 @@ class ObscuraCLI:
         result: Any = resp.json()
         return result
 
+
 # Create CLI group
 @click.group()
 @click.option("--url", default=DEFAULT_URL, help="Obscura API URL")
@@ -216,25 +228,33 @@ def agent() -> None:
 @click.option("--system-prompt", "-s", default="", help="System instructions")
 @click.option("--namespace", default="cli", help="Memory namespace")
 @click.pass_context
-def agent_spawn(ctx: click.Context, name: str, model: str, system_prompt: str, namespace: str) -> None:
+def agent_spawn(
+    ctx: click.Context, name: str, model: str, system_prompt: str, namespace: str
+) -> None:
     """Spawn a new agent."""
     client: ObscuraCLI = _get_client(ctx)
 
     with console.status(f"[bold green]Spawning agent '{name}'..."):
-        result: dict[str, Any] = client.spawn_agent(name, model, system_prompt, namespace)
+        result: dict[str, Any] = client.spawn_agent(
+            name, model, system_prompt, namespace
+        )
 
-    console.print(Panel(
-        f"[bold green]Agent spawned successfully![/]\n\n"
-        f"[cyan]ID:[/] {result['agent_id']}\n"
-        f"[cyan]Name:[/] {result['name']}\n"
-        f"[cyan]Status:[/] {result['status']}\n"
-        f"[cyan]Created:[/] {result['created_at']}",
-        title="Agent Created",
-        border_style="green"
-    ))
+    console.print(
+        Panel(
+            f"[bold green]Agent spawned successfully![/]\n\n"
+            f"[cyan]ID:[/] {result['agent_id']}\n"
+            f"[cyan]Name:[/] {result['name']}\n"
+            f"[cyan]Status:[/] {result['status']}\n"
+            f"[cyan]Created:[/] {result['created_at']}",
+            title="Agent Created",
+            border_style="green",
+        )
+    )
 
     # Copy to clipboard hint
-    console.print(f"\n[dim]Run: [bold]obscura agent run {result['agent_id']} --prompt 'your task'[/][/dim]")
+    console.print(
+        f"\n[dim]Run: [bold]obscura agent run {result['agent_id']} --prompt 'your task'[/][/dim]"
+    )
 
 
 @agent.command("run")
@@ -254,11 +274,13 @@ def agent_run(ctx: click.Context, agent_id: str, prompt: str, stream: bool) -> N
         with console.status("[bold green]Running task..."):
             result: dict[str, Any] = client.run_agent(agent_id, prompt)
 
-        console.print(Panel(
-            str(result.get("result", "No result")),
-            title=f"Agent Result ({result.get('status', 'unknown')})",
-            border_style="blue"
-        ))
+        console.print(
+            Panel(
+                str(result.get("result", "No result")),
+                title=f"Agent Result ({result.get('status', 'unknown')})",
+                border_style="blue",
+            )
+        )
 
 
 @agent.command("list")
@@ -302,16 +324,18 @@ def agent_status(ctx: click.Context, agent_id: str) -> None:
 
     result: dict[str, Any] = client.get_agent(agent_id)
 
-    console.print(Panel(
-        f"[cyan]ID:[/] {result['agent_id']}\n"
-        f"[cyan]Name:[/] {result['name']}\n"
-        f"[cyan]Status:[/] {result['status']}\n"
-        f"[cyan]Iterations:[/] {result['iteration_count']}\n"
-        f"[cyan]Created:[/] {result['created_at']}\n"
-        f"[cyan]Updated:[/] {result['updated_at']}",
-        title="Agent Status",
-        border_style="blue"
-    ))
+    console.print(
+        Panel(
+            f"[cyan]ID:[/] {result['agent_id']}\n"
+            f"[cyan]Name:[/] {result['name']}\n"
+            f"[cyan]Status:[/] {result['status']}\n"
+            f"[cyan]Iterations:[/] {result['iteration_count']}\n"
+            f"[cyan]Created:[/] {result['created_at']}\n"
+            f"[cyan]Updated:[/] {result['updated_at']}",
+            title="Agent Status",
+            border_style="blue",
+        )
+    )
 
 
 @agent.command("stop")
@@ -344,11 +368,13 @@ def agent_quick(ctx: click.Context, name: str, model: str, prompt: str) -> None:
         with console.status("[bold blue]Running task..."):
             result: dict[str, Any] = client.run_agent(agent_id, prompt)
 
-        console.print(Panel(
-            str(result.get("result", "No result")),
-            title=f"Result from {name}",
-            border_style="green"
-        ))
+        console.print(
+            Panel(
+                str(result.get("result", "No result")),
+                title=f"Result from {name}",
+                border_style="green",
+            )
+        )
     finally:
         client.stop_agent(agent_id)
 
@@ -366,7 +392,9 @@ def memory() -> None:
 @click.option("--namespace", "-n", default="cli", help="Namespace")
 @click.option("--json", "is_json", is_flag=True, help="Parse value as JSON")
 @click.pass_context
-def memory_set(ctx: click.Context, key: str, value: str, namespace: str, is_json: bool) -> None:
+def memory_set(
+    ctx: click.Context, key: str, value: str, namespace: str, is_json: bool
+) -> None:
     """Store a value in memory."""
     client: ObscuraCLI = _get_client(ctx)
 
@@ -445,11 +473,13 @@ def memory_search(ctx: click.Context, query: str) -> None:
         return
 
     for r in results:
-        console.print(Panel(
-            str(r.get("value", "")),
-            title=f"{r['namespace']}:{r['key']}",
-            border_style="blue"
-        ))
+        console.print(
+            Panel(
+                str(r.get("value", "")),
+                title=f"{r['namespace']}:{r['key']}",
+                border_style="blue",
+            )
+        )
 
 
 # Vector memory commands
@@ -464,7 +494,9 @@ def vector_cmd() -> None:
 @click.option("--key", "-k", help="Optional key")
 @click.option("--namespace", "-n", default="semantic", help="Namespace")
 @click.pass_context
-def vector_remember(ctx: click.Context, text: str, key: str | None, namespace: str) -> None:
+def vector_remember(
+    ctx: click.Context, text: str, key: str | None, namespace: str
+) -> None:
     """Store text with semantic embedding."""
     client: ObscuraCLI = _get_client(ctx)
 
@@ -488,11 +520,17 @@ def vector_recall(ctx: click.Context, query: str, top_k: int) -> None:
 
     for i, r in enumerate(results, 1):
         score: Any = r.get("score", 0)
-        console.print(Panel(
-            str(r.get("text", "")),
-            title=f"#{i} ({score:.2f}) {r['namespace']}:{r['key']}",
-            border_style="green" if score > 0.8 else "yellow" if score > 0.5 else "red"
-        ))
+        console.print(
+            Panel(
+                str(r.get("text", "")),
+                title=f"#{i} ({score:.2f}) {r['namespace']}:{r['key']}",
+                border_style="green"
+                if score > 0.8
+                else "yellow"
+                if score > 0.5
+                else "red",
+            )
+        )
 
 
 # Server command
@@ -506,7 +544,9 @@ def serve(host: str, port: int, reload: bool, workers: int) -> None:
     try:
         import uvicorn
     except ImportError:
-        console.print("[bold red]Error:[/] uvicorn not installed. Run: pip install uvicorn")
+        console.print(
+            "[bold red]Error:[/] uvicorn not installed. Run: pip install uvicorn"
+        )
         sys.exit(1)
 
     console.print(f"[bold green]Starting Obscura server on {host}:{port}...[/]")
@@ -523,21 +563,36 @@ def serve(host: str, port: int, reload: bool, workers: int) -> None:
 
 # TUI command
 @cli.command("tui")
-@click.option("--backend", "-b", default="copilot", type=click.Choice(["copilot", "claude"]), help="Backend to use")
+@click.option(
+    "--backend",
+    "-b",
+    default="copilot",
+    type=click.Choice(["copilot", "claude"]),
+    help="Backend to use",
+)
 @click.option("--model", default=None, help="Model ID override")
 @click.option("--cwd", default=".", help="Working directory")
 @click.option("--session", "-s", default=None, help="Resume a saved session by ID")
-@click.option("--mode", default="ask", type=click.Choice(["ask", "plan", "code", "diff"]), help="Initial mode")
-def tui(backend: str, model: str | None, cwd: str, session: str | None, mode: str) -> None:
+@click.option(
+    "--mode",
+    default="ask",
+    type=click.Choice(["ask", "plan", "code", "diff"]),
+    help="Initial mode",
+)
+def tui(
+    backend: str, model: str | None, cwd: str, session: str | None, mode: str
+) -> None:
     """Launch interactive TUI."""
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError:
         pass
 
     try:
         from sdk.tui.app import run_tui
+
         run_tui(
             backend=backend,
             model=model,

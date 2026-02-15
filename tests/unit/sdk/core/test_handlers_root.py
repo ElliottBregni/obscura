@@ -14,6 +14,7 @@ from sdk.handlers import RequestHandler, SimpleHandler
 # RequestHandler protocol
 # ---------------------------------------------------------------------------
 
+
 class TestRequestHandlerProtocol:
     def test_simple_handler_is_request_handler(self):
         client = MagicMock()
@@ -37,6 +38,7 @@ class TestRequestHandlerProtocol:
 # ---------------------------------------------------------------------------
 # SimpleHandler
 # ---------------------------------------------------------------------------
+
 
 class TestSimpleHandler:
     @pytest.mark.asyncio
@@ -86,4 +88,6 @@ class TestSimpleHandler:
         await handler.handle(42)
 
         client.send.assert_called_once_with("42")
+
+
 # pyright: ignore-all

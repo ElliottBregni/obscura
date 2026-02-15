@@ -11,20 +11,20 @@ Usage::
 
     # As MCP Server
     from sdk.mcp.server import ObscuraMCPServer
-    
+
     server = ObscuraMCPServer()
     await server.initialize()
-    
+
     # As MCP Client
     from sdk.mcp.client import MCPClient
     from sdk.mcp.types import MCPConnectionConfig, MCPTransportType
-    
+
     config = MCPConnectionConfig(
         transport=MCPTransportType.STDIO,
         command="npx",
         args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     )
-    
+
     async with MCPClient(config) as client:
         tools = await client.list_tools()
         result = await client.call_tool("read_file", {"path": "/tmp/test.txt"})

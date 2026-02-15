@@ -1,4 +1,5 @@
 """Tests for sdk.routes.sessions — Session management endpoints."""
+
 import pytest
 from unittest.mock import AsyncMock
 from starlette.testclient import TestClient
@@ -10,6 +11,7 @@ from sdk.internal.types import Backend, SessionRef
 def app():
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
+
     return create_app(config)
 
 
@@ -29,9 +31,12 @@ class TestSessionCreate:
         mock_factory.create.return_value = mock_client
         app.state.client_factory = mock_factory
 
-        resp = client.post("/api/v1/sessions", json={
-            "backend": "copilot",
-        })
+        resp = client.post(
+            "/api/v1/sessions",
+            json={
+                "backend": "copilot",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["session_id"] == "sess-1"

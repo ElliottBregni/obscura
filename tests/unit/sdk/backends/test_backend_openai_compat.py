@@ -1,4 +1,5 @@
 """Tests for sdk.backends.openai_compat — OpenAIBackend."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
@@ -15,6 +16,7 @@ def _make_auth(**kw):
 class TestOpenAIInit:
     def test_defaults(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         assert b._model == "gpt-4o"
         assert b._api_key == "sk-test"
@@ -22,11 +24,13 @@ class TestOpenAIInit:
 
     def test_custom_base_url(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth(base_url="https://openrouter.ai/api/v1"))
         assert b._base_url == "https://openrouter.ai/api/v1"
 
     def test_custom_model(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth(), model="gpt-4-turbo", system_prompt="test")
         assert b._model == "gpt-4-turbo"
         assert b._system_prompt == "test"
@@ -36,6 +40,7 @@ class TestOpenAILifecycle:
     @pytest.mark.asyncio
     async def test_start(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         mock_client = AsyncMock()
         with patch("openai.AsyncOpenAI", return_value=mock_client):
@@ -45,6 +50,7 @@ class TestOpenAILifecycle:
     @pytest.mark.asyncio
     async def test_start_with_base_url(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth(base_url="https://api.together.xyz/v1"))
         mock_client = AsyncMock()
         with patch("openai.AsyncOpenAI", return_value=mock_client) as MockOpenAI:
@@ -57,6 +63,7 @@ class TestOpenAILifecycle:
     @pytest.mark.asyncio
     async def test_stop(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         b._client = AsyncMock()
         await b.stop()
@@ -67,6 +74,7 @@ class TestOpenAISend:
     @pytest.mark.asyncio
     async def test_send(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         mock_client = AsyncMock()
 
@@ -84,6 +92,7 @@ class TestOpenAISend:
     @pytest.mark.asyncio
     async def test_send_not_started(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         with pytest.raises(RuntimeError):
             await b.send("test")
@@ -93,6 +102,7 @@ class TestOpenAIStream:
     @pytest.mark.asyncio
     async def test_stream_text(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         mock_client = AsyncMock()
 
@@ -118,6 +128,7 @@ class TestOpenAIStream:
     @pytest.mark.asyncio
     async def test_stream_tool_calls(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         mock_client = AsyncMock()
 
@@ -148,6 +159,7 @@ class TestOpenAISessions:
     @pytest.mark.asyncio
     async def test_create_and_resume(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         b._client = MagicMock()
 
@@ -161,6 +173,7 @@ class TestOpenAISessions:
     @pytest.mark.asyncio
     async def test_list_sessions(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         b._client = MagicMock()
         await b.create_session()
@@ -170,6 +183,7 @@ class TestOpenAISessions:
     @pytest.mark.asyncio
     async def test_delete_session(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         b._client = MagicMock()
         ref = await b.create_session()
@@ -181,13 +195,20 @@ class TestOpenAITools:
     def test_register_tool(self):
         from sdk.backends.openai_compat import OpenAIBackend
         from sdk.internal.types import ToolSpec
+
         b = OpenAIBackend(_make_auth())
-        spec = ToolSpec(name="tool1", description="desc", parameters={"type": "object"}, handler=lambda: None)
+        spec = ToolSpec(
+            name="tool1",
+            description="desc",
+            parameters={"type": "object"},
+            handler=lambda: None,
+        )
         b.register_tool(spec)
         assert len(b._tools) == 1
 
     def test_register_hook(self):
         from sdk.backends.openai_compat import OpenAIBackend
+
         b = OpenAIBackend(_make_auth())
         cb = MagicMock()
         b.register_hook(HookPoint.STOP, cb)

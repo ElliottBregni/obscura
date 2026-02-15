@@ -37,15 +37,20 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown lifecycle for the server."""
     config: ObscuraConfig = app.state.config
-    logger.info("Obscura SDK server starting (host=%s port=%d)", config.host, config.port)
+    logger.info(
+        "Obscura SDK server starting (host=%s port=%d)", config.host, config.port
+    )
 
     # Initialize telemetry (traces, metrics, structured logging)
     try:
         from sdk.telemetry import init_telemetry
+
         init_telemetry(config)
         logger.info("Telemetry initialized (otel_enabled=%s)", config.otel_enabled)
     except Exception:
-        logger.warning("Could not initialize telemetry; continuing without observability")
+        logger.warning(
+            "Could not initialize telemetry; continuing without observability"
+        )
 
     # Warm the JWKS cache
     if config.auth_enabled:
@@ -59,12 +64,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize heartbeat monitor
     try:
         from sdk.heartbeat import get_default_monitor
+
         monitor = get_default_monitor()
         await monitor.start()
         app.state._heartbeat_monitor = monitor
         logger.info("Heartbeat monitor started")
     except Exception:
-        logger.warning("Could not initialize heartbeat monitor; continuing without health monitoring")
+        logger.warning(
+            "Could not initialize heartbeat monitor; continuing without health monitoring"
+        )
         app.state._heartbeat_monitor = None
 
     yield
@@ -88,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     """Build and return the FastAPI application."""
     from dotenv import load_dotenv
+
     load_dotenv()
 
     if config is None:
@@ -110,6 +119,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     if config.otel_enabled:
         try:
             from sdk.telemetry.middleware import ObscuraTelemetryMiddleware
+
             app.add_middleware(ObscuraTelemetryMiddleware)  # pyright: ignore[reportArgumentType]
         except ImportError:
             logger.debug("Telemetry middleware not available; skipping")
@@ -152,6 +162,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     try:
         from sdk.mcp.server import ObscuraMCPServer, create_mcp_router
+
         mcp_server = ObscuraMCPServer()
         mcp_router = create_mcp_router(mcp_server)
         app.include_router(mcp_router)

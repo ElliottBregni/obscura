@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Protocol, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterator,
+    Callable,
+    Protocol,
+    runtime_checkable,
+)
 
 if TYPE_CHECKING:
     from sdk.internal.tools import ToolRegistry
@@ -20,8 +27,10 @@ if TYPE_CHECKING:
 # Backend enum
 # ---------------------------------------------------------------------------
 
+
 class Backend(enum.Enum):
     """Supported LLM backends."""
+
     COPILOT = "copilot"
     CLAUDE = "claude"
     LOCALLLM = "localllm"
@@ -32,8 +41,10 @@ class Backend(enum.Enum):
 # Message types
 # ---------------------------------------------------------------------------
 
+
 class Role(enum.Enum):
     """Normalized message roles."""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -46,7 +57,8 @@ class ContentBlock:
 
     Covers text, thinking/reasoning, tool invocations, and tool results.
     """
-    kind: str          # "text", "thinking", "tool_use", "tool_result"
+
+    kind: str  # "text", "thinking", "tool_use", "tool_result"
     text: str = ""
     tool_name: str = ""
     tool_input: dict[str, Any] = field(default_factory=lambda: {})
@@ -60,6 +72,7 @@ class Message:
 
     The ``raw`` field holds the original SDK object for escape-hatch access.
     """
+
     role: Role
     content: list[ContentBlock]
     raw: Any = None
@@ -75,8 +88,10 @@ class Message:
 # Streaming types
 # ---------------------------------------------------------------------------
 
+
 class ChunkKind(enum.Enum):
     """Normalized streaming event kinds."""
+
     TEXT_DELTA = "text_delta"
     THINKING_DELTA = "thinking_delta"
     TOOL_USE_START = "tool_use_start"
@@ -89,6 +104,7 @@ class ChunkKind(enum.Enum):
 @dataclass(frozen=True)
 class StreamChunk:
     """A single streaming event, normalized across backends."""
+
     kind: ChunkKind
     text: str = ""
     tool_name: str = ""
@@ -100,6 +116,7 @@ class StreamChunk:
 # Tool specification
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ToolSpec:
     """A tool definition that works with both backends.
@@ -107,6 +124,7 @@ class ToolSpec:
     Parameters should be a JSON Schema object. The optional _pydantic_model
     is used by the Copilot backend for native Pydantic integration.
     """
+
     name: str
     description: str
     parameters: dict[str, Any]
@@ -122,9 +140,11 @@ AgentHookConfig = dict[str, Callable[..., Any]]
 # Session reference
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SessionRef:
     """An opaque reference to a backend session."""
+
     session_id: str
     backend: Backend
     raw: Any = None
@@ -134,8 +154,10 @@ class SessionRef:
 # Hook types
 # ---------------------------------------------------------------------------
 
+
 class HookPoint(enum.Enum):
     """Lifecycle hook points common to both backends."""
+
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
     USER_PROMPT_SUBMITTED = "user_prompt_submitted"
@@ -150,6 +172,7 @@ class HookPoint(enum.Enum):
 @dataclass(frozen=True)
 class HookContext:
     """Context passed to hook callbacks."""
+
     hook: HookPoint
     tool_name: str = ""
     tool_input: dict[str, Any] = field(default_factory=lambda: {})
@@ -162,8 +185,10 @@ class HookContext:
 # Agent types (APER loop)
 # ---------------------------------------------------------------------------
 
+
 class AgentPhase(enum.Enum):
     """Phases in the Analyze → Plan → Execute → Respond agent loop."""
+
     ANALYZE = "analyze"
     PLAN = "plan"
     EXECUTE = "execute"
@@ -177,6 +202,7 @@ class AgentContext:
     Each phase reads from and writes to this context. The ``metadata``
     dict carries arbitrary data (system prompts, role context, etc.).
     """
+
     phase: AgentPhase
     input_data: Any = None
     analysis: Any = None
@@ -189,6 +215,7 @@ class AgentContext:
 # ---------------------------------------------------------------------------
 # Backend protocol
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class BackendProtocol(Protocol):
@@ -215,8 +242,10 @@ class BackendProtocol(Protocol):
 # Agent loop event types
 # ---------------------------------------------------------------------------
 
+
 class AgentEventKind(enum.Enum):
     """Events yielded by the agent loop."""
+
     TEXT_DELTA = "text_delta"
     THINKING_DELTA = "thinking_delta"
     TOOL_CALL = "tool_call"
@@ -231,6 +260,7 @@ class AgentEventKind(enum.Enum):
 @dataclass
 class ToolCallInfo:
     """Extracted tool call from a model response."""
+
     tool_use_id: str
     name: str
     input: dict[str, Any] = field(default_factory=lambda: {})
@@ -244,6 +274,7 @@ class AgentEvent:
     Events stream in order: TURN_START → TEXT_DELTA / THINKING_DELTA /
     TOOL_CALL / TOOL_RESULT → TURN_COMPLETE → ... → AGENT_DONE.
     """
+
     kind: AgentEventKind
     text: str = ""
     tool_name: str = ""

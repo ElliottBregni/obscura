@@ -1,4 +1,5 @@
 """Tests for sdk.routes.webhooks — Webhook CRUD and test/trigger delivery."""
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from starlette.testclient import TestClient
@@ -9,6 +10,7 @@ from sdk.config import ObscuraConfig
 def app():
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
+
     return create_app(config)
 
 
@@ -21,10 +23,13 @@ class TestWebhookTest:
     @patch("httpx.AsyncClient")
     def test_webhook_test_success(self, mock_async_cls, client):
         # Create a webhook first
-        create = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/test-hook",
-            "events": ["agent.spawn"],
-        })
+        create = client.post(
+            "/api/v1/webhooks",
+            json={
+                "url": "https://example.com/test-hook",
+                "events": ["agent.spawn"],
+            },
+        )
         wid = create.json()["webhook_id"]
 
         mock_response = MagicMock()
@@ -47,10 +52,13 @@ class TestWebhookTest:
 
     @patch("httpx.AsyncClient")
     def test_webhook_test_network_error(self, mock_async_cls, client):
-        create = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/fail-hook",
-            "events": ["agent.stop"],
-        })
+        create = client.post(
+            "/api/v1/webhooks",
+            json={
+                "url": "https://example.com/fail-hook",
+                "events": ["agent.stop"],
+            },
+        )
         wid = create.json()["webhook_id"]
 
         mock_async_client = AsyncMock()

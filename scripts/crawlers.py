@@ -44,50 +44,105 @@ from sdk.agent.agent import BaseAgent
 # ---------------------------------------------------------------------------
 
 DEFAULT_EXTENSIONS: set[str] = {
-    ".py", ".js", ".ts", ".jsx", ".tsx",
-    ".java", ".go", ".rs", ".rb", ".php",
-    ".c", ".cpp", ".h", ".hpp", ".cs",
-    ".swift", ".kt", ".scala", ".sh",
-    ".yml", ".yaml", ".toml",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".java",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".swift",
+    ".kt",
+    ".scala",
+    ".sh",
+    ".yml",
+    ".yaml",
+    ".toml",
 }
 
 SKIP_DIRS: set[str] = {
-    ".git", ".github", ".claude", ".cursor",
-    "node_modules", "__pycache__", ".pytest_cache",
-    ".venv", "venv", "env", ".env",
-    ".tox", ".mypy_cache", ".ruff_cache",
-    "dist", "build", "target", "out",
-    ".next", ".nuxt", ".svelte-kit",
-    "vendor", "Pods", ".gradle",
-    "coverage", "htmlcov", ".nyc_output",
-    ".idea", ".vscode",
+    ".git",
+    ".github",
+    ".claude",
+    ".cursor",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".venv",
+    "venv",
+    "env",
+    ".env",
+    ".tox",
+    ".mypy_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+    "target",
+    "out",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    "vendor",
+    "Pods",
+    ".gradle",
+    "coverage",
+    "htmlcov",
+    ".nyc_output",
+    ".idea",
+    ".vscode",
 }
 
 SKIP_FILES: set[str] = {
-    ".DS_Store", "Thumbs.db",
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "Pipfile.lock", "poetry.lock",
-    "Cargo.lock", "go.sum",
+    ".DS_Store",
+    "Thumbs.db",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Pipfile.lock",
+    "poetry.lock",
+    "Cargo.lock",
+    "go.sum",
 }
 
 # Skip doc/non-code files that produce garbage Mermaid
 SKIP_FILENAMES: set[str] = {
-    "README.md", "readme.md", "AGENTS.md",
-    "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE",
-    "LICENSE.md", "LICENSE.txt",
+    "README.md",
+    "readme.md",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "LICENSE.md",
+    "LICENSE.txt",
 }
 
 MAX_FILE_SIZE = 100_000  # 100KB — skip generated/minified files
-DEFAULT_WORKERS = 4      # Concurrency for async tasks
-MAX_COPILOT_CONCURRENT = 8   # Max concurrent SDK calls
-MAX_KROKI_CONCURRENT = 6     # Max concurrent Kroki HTTP requests
+DEFAULT_WORKERS = 4  # Concurrency for async tasks
+MAX_COPILOT_CONCURRENT = 8  # Max concurrent SDK calls
+MAX_KROKI_CONCURRENT = 6  # Max concurrent Kroki HTTP requests
 COPILOT_ALIAS = "copilot_batch_diagrammer"  # Alias for copilot model selection
 
 # Diagram type headers that start a valid Mermaid diagram
 DIAGRAM_STARTERS = (
-    "graph", "flowchart", "sequenceDiagram", "classDiagram",
-    "stateDiagram", "erDiagram", "journey", "gantt",
-    "pie", "mindmap", "timeline",
+    "graph",
+    "flowchart",
+    "sequenceDiagram",
+    "classDiagram",
+    "stateDiagram",
+    "erDiagram",
+    "journey",
+    "gantt",
+    "pie",
+    "mindmap",
+    "timeline",
 )
 
 # Regex to detect a line that starts a new Mermaid diagram
@@ -115,9 +170,11 @@ MERMAID_PROMPT = (
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FileEntry:
     """A source file discovered in the target repo."""
+
     repo_relative: Path
     absolute: Path
     extension: str
@@ -127,6 +184,7 @@ class FileEntry:
 @dataclass
 class CrawlResult:
     """Result of crawling a repository."""
+
     repo_name: str
     repo_path: Path
     files: list[FileEntry] = field(default_factory=lambda: list[FileEntry]())
@@ -137,12 +195,15 @@ class CrawlResult:
 
     @property
     def total_discovered(self) -> int:
-        return len(self.files) + self.skipped_files + self.skipped_size + self.skipped_ext
+        return (
+            len(self.files) + self.skipped_files + self.skipped_size + self.skipped_ext
+        )
 
 
 # ---------------------------------------------------------------------------
 # Crawler
 # ---------------------------------------------------------------------------
+
 
 def crawl_repo(
     repo_path: Path,
@@ -190,12 +251,14 @@ def crawl_repo(
                 result.skipped_files += 1
                 continue
 
-            result.files.append(FileEntry(
-                repo_relative=fpath.relative_to(repo_path),
-                absolute=fpath,
-                extension=ext,
-                size=size,
-            ))
+            result.files.append(
+                FileEntry(
+                    repo_relative=fpath.relative_to(repo_path),
+                    absolute=fpath,
+                    extension=ext,
+                    size=size,
+                )
+            )
 
     return result
 
@@ -203,6 +266,7 @@ def crawl_repo(
 # ---------------------------------------------------------------------------
 # Mermaid helpers
 # ---------------------------------------------------------------------------
+
 
 def _strip_markdown_fences(text: str) -> str:
     """Remove ```mermaid ... ``` fences that copilot sometimes adds."""
@@ -216,6 +280,7 @@ def _strip_markdown_fences(text: str) -> str:
             continue
         out.append(line)
     return "\n".join(out).strip()
+
 
 def _trim_leading_prose(text: str) -> str:
     """Trim any leading non-Mermaid prose before the first diagram header."""
@@ -265,12 +330,15 @@ def split_mermaid_diagrams(text: str) -> list[str]:
 # SVG rendering (sync — wrapped in asyncio.to_thread by the agent)
 # ---------------------------------------------------------------------------
 
+
 def _render_svg_with_mmdc(mermaid: str) -> str | None:
     """Render SVG using Mermaid CLI (mmdc). Returns SVG text or None."""
     try:
         subprocess.run(
             ["mmdc", "--version"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except FileNotFoundError:
         return None
@@ -284,7 +352,9 @@ def _render_svg_with_mmdc(mermaid: str) -> str | None:
 
         proc = subprocess.run(
             ["mmdc", "-i", str(in_path), "-o", str(out_path), "-b", "transparent"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if proc.returncode != 0 or not out_path.exists():
             return None
@@ -336,6 +406,7 @@ def _render_single_diagram(mermaid: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Stub/Markdown generation (pure function, no I/O)
 # ---------------------------------------------------------------------------
+
 
 def _build_stub_markdown(entry: FileEntry, raw_mermaid: str) -> str:
     """Build the Markdown output from raw Mermaid text for a single file."""
@@ -392,7 +463,9 @@ def generate_stub(entry: FileEntry) -> str:
 
     result = subprocess.run(
         ["copilot", "-p", prompt, "--model", model_id],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     raw_mermaid = (result.stdout or "").strip()
     if not raw_mermaid:
@@ -405,6 +478,7 @@ def generate_stub(entry: FileEntry) -> str:
 # ---------------------------------------------------------------------------
 # Index generation
 # ---------------------------------------------------------------------------
+
 
 def generate_index(result: CrawlResult) -> str:
     """Generate the INDEX.md for a crawled repository."""
@@ -433,19 +507,21 @@ def generate_index(result: CrawlResult) -> str:
             lines.append(f"  ({entry.size:,} bytes)\n")
         lines.append("\n")
 
-    lines.extend([
-        "---\n",
-        "\n",
-        "## Stats\n",
-        "\n",
-        "| Metric | Count |\n",
-        "|--------|-------|\n",
-        f"| Source files | {len(result.files)} |\n",
-        f"| Skipped (junk) | {result.skipped_files} |\n",
-        f"| Skipped (too large) | {result.skipped_size} |\n",
-        f"| Skipped (wrong ext) | {result.skipped_ext} |\n",
-        f"| Directories pruned | {result.skipped_dirs} |\n",
-    ])
+    lines.extend(
+        [
+            "---\n",
+            "\n",
+            "## Stats\n",
+            "\n",
+            "| Metric | Count |\n",
+            "|--------|-------|\n",
+            f"| Source files | {len(result.files)} |\n",
+            f"| Skipped (junk) | {result.skipped_files} |\n",
+            f"| Skipped (too large) | {result.skipped_size} |\n",
+            f"| Skipped (wrong ext) | {result.skipped_ext} |\n",
+            f"| Directories pruned | {result.skipped_dirs} |\n",
+        ]
+    )
 
     return "".join(lines)
 
@@ -453,6 +529,7 @@ def generate_index(result: CrawlResult) -> str:
 # ---------------------------------------------------------------------------
 # DiagramCrawlerAgent — APER agent using copilot-sdk
 # ---------------------------------------------------------------------------
+
 
 class DiagramCrawlerAgent(BaseAgent):
     """APER agent for crawling a repo and generating Mermaid diagrams.
@@ -535,7 +612,9 @@ class DiagramCrawlerAgent(BaseAgent):
 
                 # Render SVGs in thread pool (sync subprocess/HTTP calls)
                 content = await asyncio.to_thread(
-                    _build_stub_markdown, entry, raw_mermaid,
+                    _build_stub_markdown,
+                    entry,
+                    raw_mermaid,
                 )
 
                 counter += 1
@@ -543,14 +622,24 @@ class DiagramCrawlerAgent(BaseAgent):
                 return (entry, content)
             except asyncio.TimeoutError:
                 counter += 1
-                print(f"  ✗ [{counter}/{total}] {entry.repo_relative}: timeout", file=sys.stderr, flush=True)
+                print(
+                    f"  ✗ [{counter}/{total}] {entry.repo_relative}: timeout",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return (entry, None)
             except Exception as e:
                 counter += 1
-                print(f"  ✗ [{counter}/{total}] {entry.repo_relative}: {e}", file=sys.stderr, flush=True)
+                print(
+                    f"  ✗ [{counter}/{total}] {entry.repo_relative}: {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return (entry, None)
 
-        print(f"  Processing {total} files via copilot-sdk (max {self._copilot_sem._value} concurrent)...")
+        print(
+            f"  Processing {total} files via copilot-sdk (max {self._copilot_sem._value} concurrent)..."
+        )
         ctx.results = await asyncio.gather(*[process_one(e) for e in to_process])
 
     @override
@@ -591,25 +680,48 @@ class DiagramCrawlerAgent(BaseAgent):
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="crawlers",
         description="Crawl a codebase and generate Mermaid+SVG diagram markdown for Obsidian.",
     )
-    p.add_argument("--repo", required=True, type=Path,
-                    help="Path to the target repository to crawl.")
-    p.add_argument("--output", type=Path, default=None,
-                    help="Output directory. Defaults to ./crawlers next to this file.")
-    p.add_argument("--extensions", nargs="+", default=None,
-                    help="File extensions to include (e.g. .py .ts .js).")
-    p.add_argument("--max-size", type=int, default=MAX_FILE_SIZE,
-                    help=f"Max file size in bytes (default: {MAX_FILE_SIZE:,}).")
-    p.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
-                    help=f"Max concurrent SDK calls (default: {DEFAULT_WORKERS}).")
-    p.add_argument("--dry-run", action="store_true",
-                    help="Show what would be crawled without writing files.")
-    p.add_argument("--stats", action="store_true",
-                    help="Print crawl statistics.")
+    p.add_argument(
+        "--repo",
+        required=True,
+        type=Path,
+        help="Path to the target repository to crawl.",
+    )
+    p.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output directory. Defaults to ./crawlers next to this file.",
+    )
+    p.add_argument(
+        "--extensions",
+        nargs="+",
+        default=None,
+        help="File extensions to include (e.g. .py .ts .js).",
+    )
+    p.add_argument(
+        "--max-size",
+        type=int,
+        default=MAX_FILE_SIZE,
+        help=f"Max file size in bytes (default: {MAX_FILE_SIZE:,}).",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help=f"Max concurrent SDK calls (default: {DEFAULT_WORKERS}).",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be crawled without writing files.",
+    )
+    p.add_argument("--stats", action="store_true", help="Print crawl statistics.")
     return p
 
 

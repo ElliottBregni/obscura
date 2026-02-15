@@ -30,6 +30,7 @@ from sdk.backends.localllm import LocalLLMBackend
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _auth(base_url: str = "http://localhost:1234/v1") -> AuthConfig:
     """Shorthand for a LocalLLM AuthConfig."""
     return AuthConfig(localllm_base_url=base_url)
@@ -88,6 +89,7 @@ def _mock_stream_chunk(content: str | None = None, tool_calls=None) -> MagicMock
 # 1. Initialization
 # ===================================================================
 
+
 class TestLocalLLMInit:
     """Verify constructor defaults and parameter storage."""
 
@@ -143,6 +145,7 @@ class TestLocalLLMInit:
 # ===================================================================
 # 2. Lifecycle
 # ===================================================================
+
 
 class TestLocalLLMLifecycle:
     """Verify start(), stop(), and client creation behaviour."""
@@ -229,6 +232,7 @@ class TestLocalLLMLifecycle:
 # ===================================================================
 # 3. Send
 # ===================================================================
+
 
 class TestLocalLLMSend:
     """Tests for the non-streaming send() method."""
@@ -343,6 +347,7 @@ class TestLocalLLMSend:
 # ===================================================================
 # 4. Stream
 # ===================================================================
+
 
 class TestLocalLLMStream:
     """Tests for the streaming stream() method."""
@@ -479,6 +484,7 @@ class TestLocalLLMStream:
 # 5. Sessions
 # ===================================================================
 
+
 class TestLocalLLMSessions:
     """Tests for session lifecycle: create, resume, list, delete."""
 
@@ -613,6 +619,7 @@ class TestLocalLLMSessions:
 # 6. Tools
 # ===================================================================
 
+
 class TestLocalLLMTools:
     """Tests for tool registration and _build_create_kwargs output."""
 
@@ -675,18 +682,20 @@ class TestLocalLLMTools:
     def test_build_create_kwargs_filters_params(self):
         """Only valid params (temperature, max_tokens, etc.) pass through."""
         b = _backend()
-        result = b._build_create_kwargs({
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "max_tokens": 500,
-            "stop": ["\n"],
-            "frequency_penalty": 0.1,
-            "presence_penalty": 0.2,
-            "seed": 42,
-            # Invalid params that should be filtered out
-            "invalid_param": "should_not_appear",
-            "foo": "bar",
-        })
+        result = b._build_create_kwargs(
+            {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "max_tokens": 500,
+                "stop": ["\n"],
+                "frequency_penalty": 0.1,
+                "presence_penalty": 0.2,
+                "seed": 42,
+                # Invalid params that should be filtered out
+                "invalid_param": "should_not_appear",
+                "foo": "bar",
+            }
+        )
 
         assert result["temperature"] == 0.7
         assert result["top_p"] == 0.9
@@ -707,6 +716,7 @@ class TestLocalLLMTools:
 # ===================================================================
 # 7. Hooks
 # ===================================================================
+
 
 class TestLocalLLMHooks:
     """Tests for hook registration and firing."""
@@ -838,6 +848,7 @@ class TestLocalLLMHooks:
 # ===================================================================
 # 8. Escape-hatch methods (list_models, health_check)
 # ===================================================================
+
 
 class TestLocalLLMEscapeHatch:
     """Tests for list_models() and health_check()."""

@@ -47,7 +47,10 @@ async def agent_spawn(
     model: str = body.get("model", "copilot")
     valid_models = ("copilot", "claude", "localllm", "openai")
     if model not in valid_models:
-        raise HTTPException(status_code=400, detail=f"Invalid model '{model}'. Must be one of: {valid_models}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model '{model}'. Must be one of: {valid_models}",
+        )
 
     runtime = await get_runtime(user)
 
@@ -56,6 +59,7 @@ async def agent_spawn(
     mcp_servers: list[dict[str, Any]] = mcp_config.get("servers", [])
 
     from sdk.agent.agents import MCPConfig
+
     agent = runtime.spawn(
         name=body.get("name", "unnamed"),
         model=model,
@@ -67,16 +71,26 @@ async def agent_spawn(
 
     await agent.start()
 
-    audit("agent.spawn", user, f"agent:{agent.id}", "create", "success",
-          name=agent.config.name, model=agent.config.model, mcp_enabled=mcp_enabled)
+    audit(
+        "agent.spawn",
+        user,
+        f"agent:{agent.id}",
+        "create",
+        "success",
+        name=agent.config.name,
+        model=agent.config.model,
+        mcp_enabled=mcp_enabled,
+    )
 
-    return JSONResponse(content={
-        "agent_id": agent.id,
-        "name": agent.config.name,
-        "status": agent.status.name,
-        "created_at": agent.created_at.isoformat(),
-        "mcp_enabled": mcp_enabled,
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent.id,
+            "name": agent.config.name,
+            "status": agent.status.name,
+            "created_at": agent.created_at.isoformat(),
+            "mcp_enabled": mcp_enabled,
+        }
+    )
 
 
 @router.get("/agents/{agent_id}")
@@ -91,15 +105,17 @@ async def agent_get(
     if state is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    return JSONResponse(content={
-        "agent_id": state.agent_id,
-        "name": state.name,
-        "status": state.status.name,
-        "created_at": state.created_at.isoformat(),
-        "updated_at": state.updated_at.isoformat(),
-        "iteration_count": state.iteration_count,
-        "error_message": state.error_message,
-    })
+    return JSONResponse(
+        content={
+            "agent_id": state.agent_id,
+            "name": state.name,
+            "status": state.status.name,
+            "created_at": state.created_at.isoformat(),
+            "updated_at": state.updated_at.isoformat(),
+            "iteration_count": state.iteration_count,
+            "error_message": state.error_message,
+        }
+    )
 
 
 @router.post("/agents/{agent_id}/run")
@@ -120,11 +136,13 @@ async def agent_run(
 
     try:
         result = await agent.run(prompt, **context)
-        return JSONResponse(content={
-            "agent_id": agent_id,
-            "status": agent.status.name,
-            "result": result,
-        })
+        return JSONResponse(
+            content={
+                "agent_id": agent_id,
+                "status": agent.status.name,
+                "result": result,
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -144,10 +162,12 @@ async def agent_stop(
     await agent.stop()
     audit("agent.stop", user, f"agent:{agent_id}", "stop", "success")
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "status": "stopped",
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "status": "stopped",
+        }
+    )
 
 
 @router.get("/agents")
@@ -174,30 +194,30 @@ async def agent_list(
     if tags:
         tag_list = [t.strip() for t in tags.split(",")]
         agents = [
-            a for a in agents
+            a
+            for a in agents
             if any(t in getattr(a.config, "tags", []) for t in tag_list)
         ]
 
     if name:
-        agents = [
-            a for a in agents
-            if name.lower() in a.config.name.lower()
-        ]
+        agents = [a for a in agents if name.lower() in a.config.name.lower()]
 
-    return JSONResponse(content={
-        "agents": [
-            {
-                "agent_id": a.id,
-                "name": a.config.name,
-                "status": a.status.name,
-                "model": a.config.model,
-                "tags": getattr(a.config, "tags", []),
-                "created_at": a.created_at.isoformat(),
-            }
-            for a in agents
-        ],
-        "count": len(agents),
-    })
+    return JSONResponse(
+        content={
+            "agents": [
+                {
+                    "agent_id": a.id,
+                    "name": a.config.name,
+                    "status": a.status.name,
+                    "model": a.config.model,
+                    "tags": getattr(a.config, "tags", []),
+                    "created_at": a.created_at.isoformat(),
+                }
+                for a in agents
+            ],
+            "count": len(agents),
+        }
+    )
 
 
 # -- bulk operations -------------------------------------------------------
@@ -215,7 +235,9 @@ async def agents_bulk_spawn(
     if not agents_config:
         raise HTTPException(status_code=400, detail="No agents provided")
     if len(agents_config) > 100:
-        raise HTTPException(status_code=400, detail="Cannot spawn more than 100 agents at once")
+        raise HTTPException(
+            status_code=400, detail="Cannot spawn more than 100 agents at once"
+        )
 
     created: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -231,22 +253,34 @@ async def agents_bulk_spawn(
                 tags=cfg.get("tags", []),
             )
             await agent.start()
-            created.append({
-                "agent_id": agent.id,
-                "name": agent.config.name,
-                "status": agent.status.name,
-            })
-            audit("agent.spawn", user, f"agent:{agent.id}", "create", "success",
-                  name=agent.config.name, model=agent.config.model, bulk=True)
+            created.append(
+                {
+                    "agent_id": agent.id,
+                    "name": agent.config.name,
+                    "status": agent.status.name,
+                }
+            )
+            audit(
+                "agent.spawn",
+                user,
+                f"agent:{agent.id}",
+                "create",
+                "success",
+                name=agent.config.name,
+                model=agent.config.model,
+                bulk=True,
+            )
         except Exception as e:
             errors.append({"index": idx, "name": cfg.get("name"), "error": str(e)})
 
-    return JSONResponse(content={
-        "created": created,
-        "errors": errors,
-        "total_requested": len(agents_config),
-        "total_created": len(created),
-    })
+    return JSONResponse(
+        content={
+            "created": created,
+            "errors": errors,
+            "total_requested": len(agents_config),
+            "total_created": len(created),
+        }
+    )
 
 
 @router.post("/agents/bulk/stop")
@@ -276,12 +310,14 @@ async def agents_bulk_stop(
         except Exception as e:
             errors.append({"agent_id": agent_id, "error": str(e)})
 
-    return JSONResponse(content={
-        "stopped": stopped,
-        "errors": errors,
-        "total_requested": len(agent_ids),
-        "total_stopped": len(stopped),
-    })
+    return JSONResponse(
+        content={
+            "stopped": stopped,
+            "errors": errors,
+            "total_requested": len(agent_ids),
+            "total_stopped": len(stopped),
+        }
+    )
 
 
 @router.post("/agents/bulk/tag")
@@ -315,11 +351,13 @@ async def agents_bulk_tag(
         except Exception as e:
             errors.append({"agent_id": agent_id, "error": str(e)})
 
-    return JSONResponse(content={
-        "tagged": tagged,
-        "errors": errors,
-        "tags": tags,
-    })
+    return JSONResponse(
+        content={
+            "tagged": tagged,
+            "errors": errors,
+            "tags": tags,
+        }
+    )
 
 
 # -- templates -------------------------------------------------------------
@@ -347,8 +385,14 @@ async def template_create(
 
     _agent_templates[template_id] = template
 
-    audit("template.create", user, f"template:{template_id}", "create", "success",
-          name=template["name"])
+    audit(
+        "template.create",
+        user,
+        f"template:{template_id}",
+        "create",
+        "success",
+        name=template["name"],
+    )
 
     return JSONResponse(content=template)
 
@@ -359,10 +403,12 @@ async def template_list(
 ) -> JSONResponse:
     """List all agent templates."""
     templates: list[dict[str, Any]] = list(_agent_templates.values())
-    return JSONResponse(content={
-        "templates": templates,
-        "count": len(templates),
-    })
+    return JSONResponse(
+        content={
+            "templates": templates,
+            "count": len(templates),
+        }
+    )
 
 
 @router.get("/agent-templates/{template_id}")
@@ -420,16 +466,25 @@ async def agent_spawn_from_template(
 
     await agent.start()
 
-    audit("agent.spawn", user, f"agent:{agent.id}", "create", "success",
-          name=agent.config.name, template_id=template_id)
+    audit(
+        "agent.spawn",
+        user,
+        f"agent:{agent.id}",
+        "create",
+        "success",
+        name=agent.config.name,
+        template_id=template_id,
+    )
 
-    return JSONResponse(content={
-        "agent_id": agent.id,
-        "name": agent.config.name,
-        "status": agent.status.name,
-        "template_id": template_id,
-        "created_at": agent.created_at.isoformat(),
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent.id,
+            "name": agent.config.name,
+            "status": agent.status.name,
+            "template_id": template_id,
+            "created_at": agent.created_at.isoformat(),
+        }
+    )
 
 
 # -- tags ------------------------------------------------------------------
@@ -459,11 +514,13 @@ async def agent_add_tags(
     new_tags = set(tags)
     agent.config.tags = list(current_tags | new_tags)
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "tags": agent.config.tags,
-        "added": list(new_tags - current_tags),
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "tags": agent.config.tags,
+            "added": list(new_tags - current_tags),
+        }
+    )
 
 
 @router.post("/agents/{agent_id}/tags/remove")
@@ -490,11 +547,13 @@ async def agent_remove_tags(
     remove_tags = set(tags)
     agent.config.tags = list(current_tags - remove_tags)
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "tags": agent.config.tags,
-        "removed": list(remove_tags & current_tags),
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "tags": agent.config.tags,
+            "removed": list(remove_tags & current_tags),
+        }
+    )
 
 
 @router.get("/agents/{agent_id}/tags")
@@ -511,10 +570,12 @@ async def agent_get_tags(
 
     tags: list[str] = getattr(agent.config, "tags", [])
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "tags": tags,
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "tags": tags,
+        }
+    )
 
 
 # -- stream (SSE) ----------------------------------------------------------

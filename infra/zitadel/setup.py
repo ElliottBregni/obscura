@@ -54,6 +54,7 @@ DEFAULT_ADMIN_PASS = "Password1!"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _wait_for_zitadel(base_url: str, timeout: int = 120) -> None:
     """Block until Zitadel's health endpoint returns 200."""
     deadline = time.monotonic() + timeout
@@ -130,6 +131,7 @@ from typing import Any, TypedDict, cast
 # Data classes / typed payloads
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ProjectInfo:
     project_id: str
@@ -149,7 +151,9 @@ class MachineKey:
             key_id=str(data.get("keyId", "")),
             key=str(data.get("key", "")),
             user_id=str(data.get("userId", "")),
-            key_details_b64=str(data.get("keyDetails", "")) if data.get("keyDetails") else None,
+            key_details_b64=str(data.get("keyDetails", ""))
+            if data.get("keyDetails")
+            else None,
         )
 
 
@@ -188,19 +192,27 @@ async def _bootstrap(
             service_user_name=service_user_name,
         )
         machine_key_dict = cast(dict[str, Any] | None, result.get("machine_key"))
-        machine_key = MachineKey.from_api(machine_key_dict) if machine_key_dict else None
+        machine_key = (
+            MachineKey.from_api(machine_key_dict) if machine_key_dict else None
+        )
         return BootstrapResult(
             project_id=cast(str, result.get("project_id", "")),
             user_id=cast(str, result.get("user_id", "")),
             machine_key=machine_key,
-            jwks_uri=cast(str, result.get("jwks_uri", f"{base_url}/.well-known/jwks.json")),
+            jwks_uri=cast(
+                str, result.get("jwks_uri", f"{base_url}/.well-known/jwks.json")
+            ),
             audience=cast(str, result.get("audience", "")),
             issuer=cast(str, result.get("issuer", base_url)),
         )
     except ImportError:
         # Inline bootstrap for environments without the SDK
         return await _inline_bootstrap(
-            base_url, admin_token, project_name, roles, service_user_name,
+            base_url,
+            admin_token,
+            project_name,
+            roles,
+            service_user_name,
         )
 
 
@@ -308,10 +320,15 @@ async def _get_test_token(base_url: str, machine_key: MachineKey) -> str:
     key_data: dict[str, Any]
     if machine_key.key_details_b64:
         import base64
+
         decoded = base64.b64decode(machine_key.key_details_b64).decode()
         key_data = json.loads(decoded)
     else:
-        key_data = {"keyId": machine_key.key_id, "key": machine_key.key, "userId": machine_key.user_id}
+        key_data = {
+            "keyId": machine_key.key_id,
+            "key": machine_key.key,
+            "userId": machine_key.user_id,
+        }
 
     # Build a JWT assertion signed with the machine key
     from jose import jwt as jose_jwt
@@ -352,6 +369,7 @@ async def _get_test_token(base_url: str, machine_key: MachineKey) -> str:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -441,7 +459,9 @@ async def async_main(args: argparse.Namespace) -> int:
         print(f"Authenticating as {args.admin_user}...")
         try:
             admin_token = await _get_admin_token(
-                base_url, args.admin_user, args.admin_pass,
+                base_url,
+                args.admin_user,
+                args.admin_pass,
             )
         except Exception as e:
             print(f"Error getting admin token: {e}", file=sys.stderr)
@@ -479,7 +499,9 @@ async def async_main(args: argparse.Namespace) -> int:
                 {
                     "project_id": result.project_id,
                     "user_id": result.user_id,
-                    "machine_key": result.machine_key.__dict__ if result.machine_key else None,
+                    "machine_key": result.machine_key.__dict__
+                    if result.machine_key
+                    else None,
                     "jwks_uri": result.jwks_uri,
                     "audience": result.audience,
                     "issuer": result.issuer,

@@ -16,12 +16,15 @@ class TestAgentLifecycle:
 
     def test_spawn_agent(self, client):
         """Can spawn an agent."""
-        resp = client.post("/api/v1/agents", json={
-            "name": "e2e-test-agent",
-            "model": "claude",
-            "system_prompt": "You are a test agent",
-            "memory_namespace": "e2e"
-        })
+        resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "e2e-test-agent",
+                "model": "claude",
+                "system_prompt": "You are a test agent",
+                "memory_namespace": "e2e",
+            },
+        )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -34,18 +37,24 @@ class TestAgentLifecycle:
     def test_run_agent_task(self, client):
         """Can run a task on an agent."""
         # Spawn
-        spawn_resp = client.post("/api/v1/agents", json={
-            "name": "e2e-task-agent",
-            "model": "claude",
-        })
+        spawn_resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "e2e-task-agent",
+                "model": "claude",
+            },
+        )
         agent_id = spawn_resp.json()["agent_id"]
 
         try:
             # Run task
-            run_resp = client.post(f"/api/v1/agents/{agent_id}/run", json={
-                "prompt": "Say 'hello from e2e test' and nothing else",
-                "context": {}
-            })
+            run_resp = client.post(
+                f"/api/v1/agents/{agent_id}/run",
+                json={
+                    "prompt": "Say 'hello from e2e test' and nothing else",
+                    "context": {},
+                },
+            )
 
             assert run_resp.status_code == 200
             data = run_resp.json()
@@ -67,10 +76,13 @@ class TestAgentLifecycle:
     def test_agent_status_after_spawn(self, client):
         """Agent has correct status after spawning."""
         # Spawn
-        spawn_resp = client.post("/api/v1/agents", json={
-            "name": "e2e-status-agent",
-            "model": "claude",
-        })
+        spawn_resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "e2e-status-agent",
+                "model": "claude",
+            },
+        )
         agent_id = spawn_resp.json()["agent_id"]
 
         try:
@@ -88,10 +100,13 @@ class TestAgentLifecycle:
     def test_stop_agent(self, client):
         """Can stop an agent."""
         # Spawn
-        spawn_resp = client.post("/api/v1/agents", json={
-            "name": "e2e-stop-agent",
-            "model": "claude",
-        })
+        spawn_resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "e2e-stop-agent",
+                "model": "claude",
+            },
+        )
         agent_id = spawn_resp.json()["agent_id"]
 
         # Stop
@@ -108,9 +123,10 @@ class TestMemoryOperations:
     def test_set_and_get_memory(self, client):
         """Can set and retrieve memory."""
         # Set
-        set_resp = client.post("/api/v1/memory/e2e/test-key", json={
-            "value": {"test": "data", "number": 42}
-        })
+        set_resp = client.post(
+            "/api/v1/memory/e2e/test-key",
+            json={"value": {"test": "data", "number": 42}},
+        )
         assert set_resp.status_code == 200
 
         # Get
@@ -157,9 +173,10 @@ class TestMemoryOperations:
     def test_search_memory(self, client):
         """Can search memory."""
         # Set searchable content
-        client.post("/api/v1/memory/e2e/search-test", json={
-            "value": "This is a searchable value with Python code"
-        })
+        client.post(
+            "/api/v1/memory/e2e/search-test",
+            json={"value": "This is a searchable value with Python code"},
+        )
 
         # Search
         resp = client.get("/api/v1/memory/search", params={"q": "Python"})
@@ -179,17 +196,23 @@ class TestVectorMemory:
     def test_remember_and_recall(self, client):
         """Can store and semantically recall."""
         # Remember
-        resp = client.post("/api/v1/vector-memory/e2e/test-mem", json={
-            "text": "Python async uses event loops for concurrency",
-            "metadata": {"topic": "python"}
-        })
+        resp = client.post(
+            "/api/v1/vector-memory/e2e/test-mem",
+            json={
+                "text": "Python async uses event loops for concurrency",
+                "metadata": {"topic": "python"},
+            },
+        )
         assert resp.status_code == 200
 
         # Recall
-        recall_resp = client.get("/api/v1/vector-memory/search", params={
-            "q": "how to do concurrency",
-            "top_k": "3",
-        })
+        recall_resp = client.get(
+            "/api/v1/vector-memory/search",
+            params={
+                "q": "how to do concurrency",
+                "top_k": "3",
+            },
+        )
         assert recall_resp.status_code == 200
         data = recall_resp.json()
         assert "results" in data
@@ -226,11 +249,14 @@ class TestWorkflows:
     def test_full_agent_workflow(self, client):
         """Complete: spawn -> run -> check status -> stop."""
         # 1. Spawn
-        spawn = client.post("/api/v1/agents", json={
-            "name": "workflow-agent",
-            "model": "claude",
-            "memory_namespace": "e2e-workflow"
-        })
+        spawn = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "workflow-agent",
+                "model": "claude",
+                "memory_namespace": "e2e-workflow",
+            },
+        )
         agent_id = spawn.json()["agent_id"]
 
         try:
@@ -239,15 +265,19 @@ class TestWorkflows:
             assert status.status_code == 200
 
             # 3. Run task
-            run = client.post(f"/api/v1/agents/{agent_id}/run", json={
-                "prompt": "What is 2+2? Answer with just the number.",
-            })
+            run = client.post(
+                f"/api/v1/agents/{agent_id}/run",
+                json={
+                    "prompt": "What is 2+2? Answer with just the number.",
+                },
+            )
             assert run.status_code in [200, 500]
 
             # 4. Store memory
-            mem = client.post("/api/v1/memory/e2e-workflow/task", json={
-                "value": {"agent_id": agent_id, "completed": True}
-            })
+            mem = client.post(
+                "/api/v1/memory/e2e-workflow/task",
+                json={"value": {"agent_id": agent_id, "completed": True}},
+            )
             assert mem.status_code == 200
 
         finally:

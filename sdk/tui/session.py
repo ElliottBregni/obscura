@@ -21,6 +21,7 @@ from sdk.tui.modes import TUIMode
 # Session directory
 # ---------------------------------------------------------------------------
 
+
 def _sessions_dir() -> Path:
     """Return the sessions directory, creating it if necessary."""
     d = Path.home() / ".obscura" / "tui_sessions"
@@ -32,11 +33,12 @@ def _sessions_dir() -> Path:
 # Conversation turn
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ConversationTurn:
     """A single turn in the conversation."""
 
-    role: str                      # "user" or "assistant"
+    role: str  # "user" or "assistant"
     content: str
     timestamp: datetime
     mode: TUIMode
@@ -213,9 +215,7 @@ class TUISession:
         )
         session.created_at = datetime.fromisoformat(data["created_at"])
         session.updated_at = datetime.fromisoformat(data["updated_at"])
-        session.turns = [
-            ConversationTurn.from_dict(t) for t in data.get("turns", [])
-        ]
+        session.turns = [ConversationTurn.from_dict(t) for t in data.get("turns", [])]
         return session
 
     @classmethod
@@ -232,14 +232,16 @@ class TUISession:
         for path in sessions_dir.glob("*.json"):
             try:
                 data = json.loads(path.read_text())
-                results.append({
-                    "session_id": data["session_id"],
-                    "backend": data.get("backend", "unknown"),
-                    "model": data.get("model"),
-                    "created_at": data.get("created_at", ""),
-                    "updated_at": data.get("updated_at", ""),
-                    "turn_count": len(data.get("turns", [])),
-                })
+                results.append(
+                    {
+                        "session_id": data["session_id"],
+                        "backend": data.get("backend", "unknown"),
+                        "model": data.get("model"),
+                        "created_at": data.get("created_at", ""),
+                        "updated_at": data.get("updated_at", ""),
+                        "turn_count": len(data.get("turns", [])),
+                    }
+                )
             except (json.JSONDecodeError, KeyError):
                 continue
 

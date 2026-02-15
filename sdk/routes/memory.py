@@ -29,12 +29,15 @@ async def memory_list(
 ) -> JSONResponse:
     """List all memory keys for the user."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     keys = store.list_keys(namespace=namespace)
-    return JSONResponse(content={
-        "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
-        "count": len(keys),
-    })
+    return JSONResponse(
+        content={
+            "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
+            "count": len(keys),
+        }
+    )
 
 
 @router.get("/memory/search")
@@ -44,12 +47,17 @@ async def memory_search(
 ) -> JSONResponse:
     """Search memory keys and values."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     results = store.search(q)
-    return JSONResponse(content={
-        "results": [{"namespace": k.namespace, "key": k.key, "value": v} for k, v in results],
-        "count": len(results),
-    })
+    return JSONResponse(
+        content={
+            "results": [
+                {"namespace": k.namespace, "key": k.key, "value": v} for k, v in results
+            ],
+            "count": len(results),
+        }
+    )
 
 
 @router.get("/memory/stats")
@@ -58,6 +66,7 @@ async def memory_stats(
 ) -> JSONResponse:
     """Get memory usage statistics."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     stats = store.get_stats()
     return JSONResponse(content=stats)
@@ -72,6 +81,7 @@ async def memory_namespace_list(
 ) -> JSONResponse:
     """List all memory namespaces."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     keys = store.list_keys()
     namespaces = set(k.namespace for k in keys)
@@ -80,10 +90,12 @@ async def memory_namespace_list(
         if ns_data.get("created_by") == user.user_id:
             namespaces.add(ns_id)
 
-    return JSONResponse(content={
-        "namespaces": sorted(list(namespaces)),
-        "count": len(namespaces),
-    })
+    return JSONResponse(
+        content={
+            "namespaces": sorted(list(namespaces)),
+            "count": len(namespaces),
+        }
+    )
 
 
 @router.post("/memory/namespaces")
@@ -104,7 +116,13 @@ async def memory_namespace_create(
 
     _memory_namespaces[namespace_id] = namespace
 
-    audit("memory.namespace.create", user, f"memory:ns:{namespace_id}", "create", "success")
+    audit(
+        "memory.namespace.create",
+        user,
+        f"memory:ns:{namespace_id}",
+        "create",
+        "success",
+    )
 
     return JSONResponse(content=namespace)
 
@@ -129,14 +147,22 @@ async def memory_namespace_delete(
             store.delete(key.key, namespace=key.namespace)
             deleted_keys += 1
 
-    audit("memory.namespace.delete", user, f"memory:ns:{namespace}", "delete", "success",
-          deleted_keys=deleted_keys)
+    audit(
+        "memory.namespace.delete",
+        user,
+        f"memory:ns:{namespace}",
+        "delete",
+        "success",
+        deleted_keys=deleted_keys,
+    )
 
-    return JSONResponse(content={
-        "namespace": namespace,
-        "deleted": True,
-        "keys_deleted": deleted_keys,
-    })
+    return JSONResponse(
+        content={
+            "namespace": namespace,
+            "deleted": True,
+            "keys_deleted": deleted_keys,
+        }
+    )
 
 
 @router.get("/memory/namespaces/{namespace}/stats")
@@ -146,6 +172,7 @@ async def memory_namespace_stats(
 ) -> JSONResponse:
     """Get statistics for a specific namespace."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     keys = store.list_keys(namespace=namespace)
 
@@ -153,13 +180,15 @@ async def memory_namespace_stats(
     for key in keys:
         value = store.get(key.key, namespace=key.namespace)
         if value:
-            total_size += len(str(value).encode('utf-8'))
+            total_size += len(str(value).encode("utf-8"))
 
-    return JSONResponse(content={
-        "namespace": namespace,
-        "key_count": len(keys),
-        "total_size_bytes": total_size,
-    })
+    return JSONResponse(
+        content={
+            "namespace": namespace,
+            "key_count": len(keys),
+            "total_size_bytes": total_size,
+        }
+    )
 
 
 # -- transactions ----------------------------------------------------------
@@ -172,6 +201,7 @@ async def memory_transaction(
 ) -> JSONResponse:
     """Execute multiple memory operations atomically."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
 
     operations: list[dict[str, Any]] = body.get("operations", [])
@@ -197,21 +227,27 @@ async def memory_transaction(
                 results.append({"idx": idx, "op": "set", "status": "ok"})
             elif op_type == "get":
                 value = store.get(key, namespace=ns)
-                results.append({"idx": idx, "op": "get", "status": "ok", "value": value})
+                results.append(
+                    {"idx": idx, "op": "get", "status": "ok", "value": value}
+                )
             elif op_type == "delete":
                 deleted = store.delete(key, namespace=ns)
-                results.append({"idx": idx, "op": "delete", "status": "ok", "deleted": deleted})
+                results.append(
+                    {"idx": idx, "op": "delete", "status": "ok", "deleted": deleted}
+                )
             else:
                 errors.append({"idx": idx, "error": f"Unknown operation: {op_type}"})
         except Exception as e:
             errors.append({"idx": idx, "error": str(e)})
 
-    return JSONResponse(content={
-        "results": results,
-        "errors": errors,
-        "total_ops": len(operations),
-        "successful": len(results),
-    })
+    return JSONResponse(
+        content={
+            "results": results,
+            "errors": errors,
+            "total_ops": len(operations),
+            "successful": len(results),
+        }
+    )
 
 
 # -- import / export -------------------------------------------------------
@@ -224,6 +260,7 @@ async def memory_export(
 ) -> JSONResponse:
     """Export memory data as JSON."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
 
     keys = store.list_keys(namespace=namespace)
@@ -237,12 +274,14 @@ async def memory_export(
                 data[ns] = {}
             data[ns][key.key] = value
 
-    return JSONResponse(content={
-        "exported_at": datetime.now(UTC).isoformat(),
-        "namespaces": list(data.keys()),
-        "total_keys": sum(len(v) for v in data.values()),
-        "data": data,
-    })
+    return JSONResponse(
+        content={
+            "exported_at": datetime.now(UTC).isoformat(),
+            "namespaces": list(data.keys()),
+            "total_keys": sum(len(v) for v in data.values()),
+            "data": data,
+        }
+    )
 
 
 @router.post("/memory/import")
@@ -253,6 +292,7 @@ async def memory_import(
 ) -> JSONResponse:
     """Import memory data from JSON."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
 
     import_data: dict[str, Any] = body.get("data", {})
@@ -276,15 +316,24 @@ async def memory_import(
             except Exception as e:
                 errors.append({"namespace": ns, "key": key, "error": str(e)})
 
-    audit("memory.import", user, "memory", "import", "success",
-          imported=imported, skipped=skipped)
+    audit(
+        "memory.import",
+        user,
+        "memory",
+        "import",
+        "success",
+        imported=imported,
+        skipped=skipped,
+    )
 
-    return JSONResponse(content={
-        "imported": imported,
-        "skipped": skipped,
-        "errors": errors,
-        "total": imported + skipped,
-    })
+    return JSONResponse(
+        content={
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+            "total": imported + skipped,
+        }
+    )
 
 
 # -- key-value (catch-all, must be after specific /memory/ routes) ---------
@@ -298,10 +347,13 @@ async def memory_get(
 ) -> JSONResponse:
     """Get a value from the user's memory store."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     value = store.get(key, namespace=namespace)
     if value is None:
-        raise HTTPException(status_code=404, detail=f"Key '{namespace}:{key}' not found")
+        raise HTTPException(
+            status_code=404, detail=f"Key '{namespace}:{key}' not found"
+        )
     return JSONResponse(content={"namespace": namespace, "key": key, "value": value})
 
 
@@ -315,6 +367,7 @@ async def memory_set(
 ) -> JSONResponse:
     """Store a value in the user's memory store."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     value: Any = body.get("value")
     ttl_delta = timedelta(seconds=ttl) if ttl else None
@@ -331,9 +384,12 @@ async def memory_delete(
 ) -> JSONResponse:
     """Delete a key from the user's memory store."""
     from sdk.memory import MemoryStore
+
     store = MemoryStore.for_user(user)
     deleted = store.delete(key, namespace=namespace)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"Key '{namespace}:{key}' not found")
+        raise HTTPException(
+            status_code=404, detail=f"Key '{namespace}:{key}' not found"
+        )
     audit("memory.delete", user, f"memory:{namespace}:{key}", "delete", "success")
     return JSONResponse(content={"namespace": namespace, "key": key, "deleted": True})

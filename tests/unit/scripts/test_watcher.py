@@ -19,12 +19,15 @@ class TestVaultWatcher:
         watcher = VaultWatcher(vault_path=vault_root, sync=sync_instance)
         paths = watcher.get_watch_paths()
         path_names = [p.name for p in paths]
-        assert "repos" in path_names, \
+        assert "repos" in path_names, (
             f"repos/ should be in watch paths, got {path_names}"
-        assert "skills" in path_names, \
+        )
+        assert "skills" in path_names, (
             f"skills/ should be in watch paths, got {path_names}"
-        assert "instructions" in path_names, \
+        )
+        assert "instructions" in path_names, (
             f"instructions/ should be in watch paths, got {path_names}"
+        )
 
     def test_fswatch_command_structure(
         self, sync_instance: VaultSync, vault_root: Path
@@ -48,8 +51,7 @@ class TestVaultWatcher:
         watcher.handle_change("/some/changed/file.md")
         # Verify it didn't update last_sync (meaning no sync happened)
         elapsed = time.monotonic() - watcher.last_sync
-        assert elapsed < DEBOUNCE_SECONDS, \
-            "Debounced call should not update last_sync"
+        assert elapsed < DEBOUNCE_SECONDS, "Debounced call should not update last_sync"
 
     def test_lock_file_lifecycle(
         self, sync_instance: VaultSync, vault_root: Path, mock_lock_file: Path
@@ -58,8 +60,11 @@ class TestVaultWatcher:
         watcher = VaultWatcher(vault_path=vault_root, sync=sync_instance)
         watcher.acquire_lock()
         assert mock_lock_file.exists(), "Lock file should be created"
-        assert mock_lock_file.read_text().strip() == str(os.getpid()), \
+        assert mock_lock_file.read_text().strip() == str(os.getpid()), (
             "Lock file should contain current PID"
+        )
         watcher.release_lock()
         assert not mock_lock_file.exists(), "Lock file should be removed"
+
+
 # pyright: ignore-all

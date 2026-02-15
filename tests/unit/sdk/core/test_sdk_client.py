@@ -25,6 +25,7 @@ from sdk.client import ObscuraClient
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def mock_copilot_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set env vars so auth resolution doesn't fail for Copilot."""
@@ -41,12 +42,15 @@ def mock_claude_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # Model resolution
 # ---------------------------------------------------------------------------
 
+
 class TestModelResolution:
     def test_copilot_alias_resolves(self, mock_copilot_env: None) -> None:
         """Model alias should be resolved via copilot_models.resolve()."""
         client = ObscuraClient.__new__(ObscuraClient)
         model = client._resolve_model(
-            Backend.COPILOT, model=None, model_alias="copilot_automation_safe",
+            Backend.COPILOT,
+            model=None,
+            model_alias="copilot_automation_safe",
             automation_safe=False,
         )
         assert model == "gpt-5-mini"
@@ -55,17 +59,22 @@ class TestModelResolution:
         """Automation-safe flag should use require_automation_safe()."""
         client = ObscuraClient.__new__(ObscuraClient)
         model = client._resolve_model(
-            Backend.COPILOT, model=None, model_alias="copilot_automation_safe",
+            Backend.COPILOT,
+            model=None,
+            model_alias="copilot_automation_safe",
             automation_safe=True,
         )
         assert model == "gpt-5-mini"
 
-    def test_copilot_premium_blocked_by_automation_safe(self, mock_copilot_env: None) -> None:
+    def test_copilot_premium_blocked_by_automation_safe(
+        self, mock_copilot_env: None
+    ) -> None:
         """Premium alias should be rejected when automation_safe=True."""
         client = ObscuraClient.__new__(ObscuraClient)
         with pytest.raises(ValueError, match="NOT safe for automation"):
             client._resolve_model(
-                Backend.COPILOT, model=None,
+                Backend.COPILOT,
+                model=None,
                 model_alias="copilot_premium_manual_only",
                 automation_safe=True,
             )
@@ -74,7 +83,10 @@ class TestModelResolution:
         """Raw model ID should pass through unchanged."""
         client = ObscuraClient.__new__(ObscuraClient)
         model = client._resolve_model(
-            Backend.COPILOT, model="gpt-5", model_alias=None, automation_safe=False,
+            Backend.COPILOT,
+            model="gpt-5",
+            model_alias=None,
+            automation_safe=False,
         )
         assert model == "gpt-5"
 
@@ -82,7 +94,9 @@ class TestModelResolution:
         """For Claude, model_alias falls back to being the model ID."""
         client = ObscuraClient.__new__(ObscuraClient)
         model = client._resolve_model(
-            Backend.CLAUDE, model=None, model_alias="claude-sonnet-4-5-20250929",
+            Backend.CLAUDE,
+            model=None,
+            model_alias="claude-sonnet-4-5-20250929",
             automation_safe=False,
         )
         assert model == "claude-sonnet-4-5-20250929"
@@ -92,11 +106,13 @@ class TestModelResolution:
 # Backend selection
 # ---------------------------------------------------------------------------
 
+
 class TestBackendSelection:
     def test_copilot_backend_created(self, mock_copilot_env: None) -> None:
         """Backend.COPILOT should create a CopilotBackend."""
         client = ObscuraClient("copilot", model="gpt-5-mini")
         from sdk.backends.copilot import CopilotBackend
+
         assert isinstance(client.backend_impl, CopilotBackend)
         assert client.backend_type is Backend.COPILOT
 
@@ -104,6 +120,7 @@ class TestBackendSelection:
         """Backend.CLAUDE should create a ClaudeBackend."""
         client = ObscuraClient("claude")
         from sdk.backends.claude import ClaudeBackend
+
         assert isinstance(client.backend_impl, ClaudeBackend)
         assert client.backend_type is Backend.CLAUDE
 
@@ -121,6 +138,7 @@ class TestBackendSelection:
 # ---------------------------------------------------------------------------
 # Auth resolution
 # ---------------------------------------------------------------------------
+
 
 class TestAuthResolution:
     def test_missing_copilot_auth_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,6 +162,7 @@ class TestAuthResolution:
 # ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
+
 
 class TestToolRegistration:
     def test_tools_passed_at_init(self, mock_copilot_env: None) -> None:
@@ -177,6 +196,7 @@ class TestToolRegistration:
 # Hook registration
 # ---------------------------------------------------------------------------
 
+
 class TestHookRegistration:
     def test_register_hook(self, mock_copilot_env: None) -> None:
         """on() should register a hook with the backend."""
@@ -191,6 +211,7 @@ class TestHookRegistration:
 # ---------------------------------------------------------------------------
 # Helpers for mocked backend tests
 # ---------------------------------------------------------------------------
+
 
 def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     """Build an ObscuraClient with a fully mocked backend, bypassing __init__."""
@@ -218,6 +239,7 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
 # ---------------------------------------------------------------------------
 # Async context manager (lines 111, 114-115, 118)
 # ---------------------------------------------------------------------------
+
 
 class TestAsyncContextManager:
     async def test_aenter_calls_start(self) -> None:
@@ -251,6 +273,7 @@ class TestAsyncContextManager:
 # ---------------------------------------------------------------------------
 # send() (lines 124-141)
 # ---------------------------------------------------------------------------
+
 
 class TestSend:
     async def test_send_returns_message(self) -> None:
@@ -288,9 +311,7 @@ class TestSend:
     async def test_send_records_success_metric(self) -> None:
         """send() should record metrics on success (no-op without OTel)."""
         client, mock_backend = _make_client_with_mock_backend()
-        mock_backend.send.return_value = Message(
-            role=Role.ASSISTANT, content=[]
-        )
+        mock_backend.send.return_value = Message(role=Role.ASSISTANT, content=[])
         # Should not raise even if metrics aren't available
         result = await client.send("test")
         assert result.role == Role.ASSISTANT
@@ -299,6 +320,7 @@ class TestSend:
 # ---------------------------------------------------------------------------
 # stream() (lines 145-163)
 # ---------------------------------------------------------------------------
+
 
 class TestStream:
     async def test_stream_yields_chunks(self) -> None:
@@ -360,6 +382,7 @@ class TestStream:
 # Session lifecycle (lines 232, 236, 240, 244)
 # ---------------------------------------------------------------------------
 
+
 class TestSessionLifecycle:
     async def test_create_session(self) -> None:
         """create_session() should delegate to backend."""
@@ -409,6 +432,7 @@ class TestSessionLifecycle:
 # run_loop and run_loop_to_completion (lines 199-207, 218-226)
 # ---------------------------------------------------------------------------
 
+
 class TestRunLoop:
     def test_run_loop_returns_iterator(self) -> None:
         """run_loop() should create an AgentLoop and call .run()."""
@@ -417,7 +441,9 @@ class TestRunLoop:
         mock_loop_instance = MagicMock()
         mock_loop_instance.run.return_value = iter([])  # returns an iterator
 
-        with patch("sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
+        with patch(
+            "sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance
+        ) as mock_cls:
             client.run_loop("fix bug", max_turns=5)
 
             mock_cls.assert_called_once_with(
@@ -435,7 +461,9 @@ class TestRunLoop:
         mock_loop_instance = MagicMock()
         mock_loop_instance.run_to_completion = AsyncMock(return_value="done!")
 
-        with patch("sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
+        with patch(
+            "sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance
+        ) as mock_cls:
             result = await client.run_loop_to_completion("fix bug", max_turns=3)
 
             mock_cls.assert_called_once_with(
@@ -455,7 +483,9 @@ class TestRunLoop:
         mock_loop_instance = MagicMock()
         mock_loop_instance.run.return_value = iter([])
 
-        with patch("sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance) as mock_cls:
+        with patch(
+            "sdk.agent.agent_loop.AgentLoop", return_value=mock_loop_instance
+        ) as mock_cls:
             client.run_loop("fix bug", on_confirm=confirm_fn)
             mock_cls.assert_called_once_with(
                 mock_backend,
@@ -469,13 +499,15 @@ class TestRunLoop:
 # _resolve_model copilot_models ImportError fallback (lines 297-301)
 # ---------------------------------------------------------------------------
 
+
 class TestModelResolutionImportError:
     def test_copilot_alias_falls_back_when_copilot_models_missing(self) -> None:
         """When copilot_models is not importable, alias should be used as model ID."""
         with patch.dict("sys.modules", {"copilot_models": None}):
             client = ObscuraClient.__new__(ObscuraClient)
             model = client._resolve_model(
-                Backend.COPILOT, model=None,
+                Backend.COPILOT,
+                model=None,
                 model_alias="some_alias",
                 automation_safe=False,
             )
@@ -486,6 +518,7 @@ class TestModelResolutionImportError:
 # _create_backend for all backend types (lines 344-364)
 # ---------------------------------------------------------------------------
 
+
 class TestCreateBackend:
     def test_localllm_backend_created(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Backend.LOCALLLM should create a LocalLLMBackend."""
@@ -493,6 +526,7 @@ class TestCreateBackend:
         monkeypatch.setenv("LOCALLLM_BASE_URL", "http://localhost:1234")
         client = ObscuraClient("localllm")
         from sdk.backends.localllm import LocalLLMBackend
+
         assert isinstance(client.backend_impl, LocalLLMBackend)
         assert client.backend_type is Backend.LOCALLLM
 
@@ -501,6 +535,7 @@ class TestCreateBackend:
         monkeypatch.setenv("OPENAI_API_KEY", "fake-openai-key")
         client = ObscuraClient("openai", model="gpt-4o")
         from sdk.backends.openai_compat import OpenAIBackend
+
         assert isinstance(client.backend_impl, OpenAIBackend)
         assert client.backend_type is Backend.OPENAI
 
@@ -523,6 +558,7 @@ class TestCreateBackend:
 # ---------------------------------------------------------------------------
 # Telemetry helpers (lines 374-414)
 # ---------------------------------------------------------------------------
+
 
 class TestTelemetryHelpers:
     def test_get_client_tracer_returns_noop_on_failure(self) -> None:

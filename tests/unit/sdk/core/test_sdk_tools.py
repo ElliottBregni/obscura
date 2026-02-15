@@ -9,6 +9,7 @@ from sdk.internal.tools import ToolRegistry, _infer_schema_from_hints, tool
 # Schema inference
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaInference:
     def test_simple_types(self) -> None:
         def fn(name: str, count: int, ratio: float, flag: bool) -> str:
@@ -51,13 +52,18 @@ class TestSchemaInference:
 # @tool decorator
 # ---------------------------------------------------------------------------
 
+
 class TestToolDecorator:
     def test_basic(self) -> None:
-        @tool("greet", "Greet a user", {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        })
+        @tool(
+            "greet",
+            "Greet a user",
+            {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        )
         def greet(name: str) -> str:
             return f"Hello, {name}!"
 
@@ -82,7 +88,11 @@ class TestToolDecorator:
         assert "text" in echo.spec.parameters["required"]
 
     def test_explicit_schema_overrides_inference(self) -> None:
-        @tool("custom", "Custom tool", {"type": "object", "properties": {"x": {"type": "number"}}})
+        @tool(
+            "custom",
+            "Custom tool",
+            {"type": "object", "properties": {"x": {"type": "number"}}},
+        )
         def custom(x: str) -> str:  # type hint says str, but schema says number
             return x
 
@@ -100,6 +110,7 @@ class TestToolDecorator:
 # ---------------------------------------------------------------------------
 # ToolRegistry
 # ---------------------------------------------------------------------------
+
 
 class TestToolRegistry:
     def test_register_and_get(self) -> None:

@@ -34,6 +34,7 @@ from sdk.internal.types import (
 # Backend implementation
 # ---------------------------------------------------------------------------
 
+
 class CopilotBackend:
     """BackendProtocol implementation wrapping github-copilot-sdk."""
 
@@ -59,7 +60,9 @@ class CopilotBackend:
         # Tool and hook registries
         self._tools: list[ToolSpec] = []
         self._tool_registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
+            hp: [] for hp in HookPoint
+        }
 
         # Session tracking
         self._session_store = SessionStore()
@@ -122,6 +125,7 @@ class CopilotBackend:
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient
+
         client_opts: dict[str, Any] = {}
         if self._auth.github_token:
             client_opts["github_token"] = self._auth.github_token
@@ -175,8 +179,16 @@ class CopilotBackend:
             """Fallback for full assistant messages (only if no deltas received)."""
             if _got_deltas:
                 return  # Already streamed via deltas
-            if hasattr(event, "data") and hasattr(event.data, "content") and event.data.content:
-                bridge.push(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=event.data.content, raw=event))
+            if (
+                hasattr(event, "data")
+                and hasattr(event.data, "content")
+                and event.data.content
+            ):
+                bridge.push(
+                    StreamChunk(
+                        kind=ChunkKind.TEXT_DELTA, text=event.data.content, raw=event
+                    )
+                )
 
         def _on_thinking(event: Any) -> None:
             bridge.on_thinking_delta(event)
@@ -191,10 +203,18 @@ class CopilotBackend:
             bridge.error(event)
 
         # Subscribe to session events
-        unsub_fns.append(self._session.on(_make_handler("assistant.message_delta", _on_delta)))
-        unsub_fns.append(self._session.on(_make_handler("assistant.message", _on_message)))
-        unsub_fns.append(self._session.on(_make_handler("assistant.reasoning_delta", _on_thinking)))
-        unsub_fns.append(self._session.on(_make_handler("tool.execution_start", _on_tool_start)))
+        unsub_fns.append(
+            self._session.on(_make_handler("assistant.message_delta", _on_delta))
+        )
+        unsub_fns.append(
+            self._session.on(_make_handler("assistant.message", _on_message))
+        )
+        unsub_fns.append(
+            self._session.on(_make_handler("assistant.reasoning_delta", _on_thinking))
+        )
+        unsub_fns.append(
+            self._session.on(_make_handler("tool.execution_start", _on_tool_start))
+        )
         unsub_fns.append(self._session.on(_make_handler("session.idle", _on_idle)))
         unsub_fns.append(self._session.on(_make_handler("session.error", _on_error)))
 
@@ -314,7 +334,9 @@ class CopilotBackend:
     def _ensure_session(self) -> None:
         self._ensure_client()
         if self._session is None:
-            raise RuntimeError("No active session. Call start() or create_session() first.")
+            raise RuntimeError(
+                "No active session. Call start() or create_session() first."
+            )
 
     def build_session_config(self, **overrides: Any) -> dict[str, Any]:
         """Build a SessionConfig dict for the Copilot SDK."""
@@ -361,11 +383,19 @@ class CopilotBackend:
             if len(callbacks) == 1:
                 result[copilot_key] = callbacks[0]
             else:
-                async def _chained(*args: Any, cbs: list[Callable[..., Any]] = callbacks, **kw: Any) -> Any:
+
+                async def _chained(
+                    *args: Any, cbs: list[Callable[..., Any]] = callbacks, **kw: Any
+                ) -> Any:
                     last_result: Any = None
                     for cb in cbs:
-                        last_result = await cb(*args, **kw) if inspect.iscoroutinefunction(cb) else cb(*args, **kw)
+                        last_result = (
+                            await cb(*args, **kw)
+                            if inspect.iscoroutinefunction(cb)
+                            else cb(*args, **kw)
+                        )
                     return last_result
+
                 result[copilot_key] = _chained
 
         return result or None
@@ -395,12 +425,14 @@ class CopilotBackend:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[..., Any]:
     """Create a Copilot event handler that filters by event type.
 
     Copilot's session.on() passes ALL events to every handler.
     This wrapper filters so the callback only fires for matching types.
     """
+
     def handler(event: Any) -> None:
         if hasattr(event, "type"):
             etype = event.type
@@ -412,6 +444,7 @@ def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[...
     # Tag the handler so the SDK can identify it
     handler._event_type = event_type  # type: ignore[attr-defined]
     return handler
+
 
 # Export helper for tests
 public_make_handler = _make_handler
@@ -427,6 +460,7 @@ from sdk.telemetry.traces import NoOpTracer
 def _get_backend_tracer() -> Any:
     try:
         from sdk.telemetry.traces import get_tracer
+
         return get_tracer("obscura.copilot_backend")
     except Exception:
         return NoOpTracer()
@@ -438,6 +472,7 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
             span.set_attribute(key, value)
     except Exception:
         pass
+
 
 # Export telemetry helpers for tests
 public_get_backend_tracer = _get_backend_tracer

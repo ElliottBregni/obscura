@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional
 
 class HealthStatus(Enum):
     """Agent health status states."""
+
     HEALTHY = "healthy"
     WARNING = "warning"
     CRITICAL = "critical"
@@ -24,16 +25,17 @@ class HealthStatus(Enum):
 @dataclass
 class SystemMetrics:
     """System metrics collected by the heartbeat client."""
+
     cpu_percent: float = 0.0
     memory_percent: float = 0.0
     disk_usage_percent: float = 0.0
     queue_depth: int = 0
     active_tasks: int = 0
     uptime_seconds: float = 0.0
-    
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SystemMetrics:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
@@ -43,7 +45,7 @@ class SystemMetrics:
 class Heartbeat:
     """
     Heartbeat message sent by agents to report their health status.
-    
+
     Attributes:
         agent_id: Unique identifier for the agent
         timestamp: When the heartbeat was generated
@@ -54,6 +56,7 @@ class Heartbeat:
         version: Agent version string
         tags: Optional tags for categorization
     """
+
     agent_id: str
     timestamp: datetime
     status: HealthStatus
@@ -62,7 +65,7 @@ class Heartbeat:
     ttl: int = 30  # seconds
     version: str = "0.1.0"
     tags: list[str] = field(default_factory=lambda: list[str]())
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert heartbeat to dictionary for serialization."""
         return {
@@ -75,7 +78,7 @@ class Heartbeat:
             "version": self.version,
             "tags": self.tags,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Heartbeat:
         """Create heartbeat from dictionary."""
@@ -95,7 +98,7 @@ class Heartbeat:
 class HealthCheck:
     """
     Definition of a health check that can be performed.
-    
+
     Attributes:
         name: Unique identifier for this check
         check_fn: Function that returns HealthStatus
@@ -103,6 +106,7 @@ class HealthCheck:
         timeout: Maximum time to wait for check (seconds)
         description: Human-readable description
     """
+
     name: str
     check_fn: Callable[[], HealthStatus] = field(compare=False)
     interval: int = 30
@@ -114,9 +118,10 @@ class HealthCheck:
 class HealthRecord:
     """
     Stored health record for an agent.
-    
+
     Includes the latest heartbeat and computed health status.
     """
+
     agent_id: str
     last_heartbeat: Optional[Heartbeat] = None
     computed_status: HealthStatus = HealthStatus.UNKNOWN
@@ -125,12 +130,14 @@ class HealthRecord:
     registered_at: datetime = field(default_factory=lambda: datetime.now())
     last_updated: datetime = field(default_factory=lambda: datetime.now())
     alert_count: int = 0
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert health record to dictionary."""
         return {
             "agent_id": self.agent_id,
-            "last_heartbeat": self.last_heartbeat.to_dict() if self.last_heartbeat else None,
+            "last_heartbeat": self.last_heartbeat.to_dict()
+            if self.last_heartbeat
+            else None,
             "computed_status": self.computed_status.value,
             "expected_interval": self.expected_interval,
             "missed_count": self.missed_count,
@@ -144,7 +151,7 @@ class HealthRecord:
 class Alert:
     """
     Alert generated when health status changes or thresholds are crossed.
-    
+
     Attributes:
         alert_id: Unique identifier
         agent_id: Agent that triggered the alert
@@ -154,6 +161,7 @@ class Alert:
         timestamp: When the alert was generated
         acknowledged: Whether the alert has been acknowledged
     """
+
     alert_id: str
     agent_id: str
     severity: HealthStatus
@@ -163,7 +171,7 @@ class Alert:
     acknowledged: bool = False
     acknowledged_by: Optional[str] = None
     acknowledged_at: Optional[datetime] = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert alert to dictionary."""
         return {
@@ -175,26 +183,30 @@ class Alert:
             "timestamp": self.timestamp.isoformat(),
             "acknowledged": self.acknowledged,
             "acknowledged_by": self.acknowledged_by,
-            "acknowledged_at": self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            "acknowledged_at": self.acknowledged_at.isoformat()
+            if self.acknowledged_at
+            else None,
         }
 
 
 class HealthStatusTransition:
     """Tracks health status transitions for an agent."""
-    
+
     def __init__(self, agent_id: str):
         self.agent_id = agent_id
         self.transitions: list[tuple[datetime, HealthStatus, HealthStatus]] = []
         self.current_status = HealthStatus.UNKNOWN
-    
-    def record_transition(self, from_status: HealthStatus, to_status: HealthStatus) -> bool:
+
+    def record_transition(
+        self, from_status: HealthStatus, to_status: HealthStatus
+    ) -> bool:
         """Record a status transition if it's actually a change."""
         if from_status != to_status:
             self.transitions.append((datetime.now(), from_status, to_status))
             self.current_status = to_status
             return True
         return False
-    
+
     def get_history(self) -> list[dict[str, Any]]:
         """Get transition history as dictionaries."""
         return [

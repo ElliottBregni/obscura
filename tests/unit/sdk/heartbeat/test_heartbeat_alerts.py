@@ -1,4 +1,5 @@
 """Tests for sdk.heartbeat.alerts — AlertManager, channels, and rules."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
@@ -171,7 +172,9 @@ class TestAlertManager:
 
     def test_create_alert(self):
         mgr = AlertManager()
-        alert = mgr.create_alert("a1", HealthStatus.WARNING, HealthStatus.WARNING, "test msg")
+        alert = mgr.create_alert(
+            "a1", HealthStatus.WARNING, HealthStatus.WARNING, "test msg"
+        )
         assert alert.agent_id == "a1"
         assert alert.message == "test msg"
         assert len(mgr._alerts) == 1
@@ -218,7 +221,9 @@ class TestAlertManager:
     @pytest.mark.asyncio
     async def test_acknowledge_alert(self):
         mgr = AlertManager()
-        alert = mgr.create_alert("a1", HealthStatus.WARNING, HealthStatus.WARNING, "test")
+        alert = mgr.create_alert(
+            "a1", HealthStatus.WARNING, HealthStatus.WARNING, "test"
+        )
         ack = await mgr.acknowledge_alert(alert.alert_id, "admin")
         assert ack is not None
         assert ack.acknowledged is True

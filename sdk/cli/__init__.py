@@ -28,10 +28,12 @@ from sdk.client import ObscuraClient
 # Argument parser
 # ---------------------------------------------------------------------------
 
+
 def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the common agent arguments to a subparser."""
     parser.add_argument(
-        "-p", "--prompt",
+        "-p",
+        "--prompt",
         help="Prompt to send. Reads stdin if omitted.",
     )
     parser.add_argument(
@@ -106,10 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
     claude_parser = sub.add_parser("claude", help="Use Claude backend")
     _add_agent_arguments(claude_parser)
 
-    openai_parser = sub.add_parser("openai", help="Use OpenAI backend (or compatible provider)")
+    openai_parser = sub.add_parser(
+        "openai", help="Use OpenAI backend (or compatible provider)"
+    )
     _add_agent_arguments(openai_parser)
 
-    localllm_parser = sub.add_parser("localllm", help="Use local LLM backend (LM Studio, Ollama, etc.)")
+    localllm_parser = sub.add_parser(
+        "localllm", help="Use local LLM backend (LM Studio, Ollama, etc.)"
+    )
     _add_agent_arguments(localllm_parser)
 
     # -- serve subcommand ------------------------------------------------
@@ -204,7 +210,6 @@ async def _run(args: argparse.Namespace) -> int:
             permission_mode=args.permission_mode,
             cwd=args.cwd,
         ) as client:
-
             # List sessions mode
             if args.list_sessions:
                 sessions = await client.list_sessions()
@@ -254,6 +259,7 @@ async def _run(args: argparse.Namespace) -> int:
 # Serve runner
 # ---------------------------------------------------------------------------
 
+
 def _run_serve(args: argparse.Namespace) -> int:
     """Start the uvicorn server with the FastAPI app."""
     try:
@@ -281,10 +287,12 @@ def _run_serve(args: argparse.Namespace) -> int:
 # TUI runner
 # ---------------------------------------------------------------------------
 
+
 def _run_tui(args: argparse.Namespace) -> int:
     """Launch the interactive TUI."""
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError:
         pass
@@ -312,6 +320,7 @@ def _run_tui(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -341,6 +350,7 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # Telemetry helpers (no-op when dependencies are unavailable)
 # ---------------------------------------------------------------------------
+
 
 def _init_cli_telemetry() -> None:
     """Initialize telemetry for CLI mode with text logging."""
@@ -376,6 +386,7 @@ def _get_cli_logger(name: str) -> Any:
     """Return a structlog logger, or a stderr fallback."""
     try:
         from sdk.telemetry.logging import get_logger
+
         return get_logger(name)
     except Exception:
         return _StderrLogger()

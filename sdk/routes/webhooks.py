@@ -20,6 +20,7 @@ from sdk.deps import audit
 
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
 
+
 # In-memory webhook store
 @dataclass(frozen=True, slots=True)
 class WebhookConfig:
@@ -71,13 +72,22 @@ async def webhook_create(
 
     _webhooks[webhook_id] = webhook
 
-    audit("webhook.create", user, f"webhook:{webhook_id}", "create", "success",
-          url=webhook.url, events=webhook.events)
+    audit(
+        "webhook.create",
+        user,
+        f"webhook:{webhook_id}",
+        "create",
+        "success",
+        url=webhook.url,
+        events=webhook.events,
+    )
 
-    return JSONResponse(content={
-        **webhook.as_public_dict(),
-        "secret": secret,
-    })
+    return JSONResponse(
+        content={
+            **webhook.as_public_dict(),
+            "secret": secret,
+        }
+    )
 
 
 @router.get("/webhooks")
@@ -86,10 +96,12 @@ async def webhook_list(
 ) -> JSONResponse:
     """List all webhooks."""
     webhooks: list[dict[str, Any]] = [w.as_public_dict() for w in _webhooks.values()]
-    return JSONResponse(content={
-        "webhooks": webhooks,
-        "count": len(webhooks),
-    })
+    return JSONResponse(
+        content={
+            "webhooks": webhooks,
+            "count": len(webhooks),
+        }
+    )
 
 
 @router.get("/webhooks/{webhook_id}")
@@ -139,12 +151,10 @@ async def webhook_test(
         "data": {"message": "This is a test event"},
     }
 
-    payload_json = json.dumps(payload, separators=(',', ':'))
+    payload_json = json.dumps(payload, separators=(",", ":"))
     webhook_secret: str = webhook.secret
     signature = hmac.new(
-        webhook_secret.encode(),
-        payload_json.encode(),
-        hashlib.sha256
+        webhook_secret.encode(), payload_json.encode(), hashlib.sha256
     ).hexdigest()
 
     try:
@@ -158,19 +168,23 @@ async def webhook_test(
                     "X-Webhook-ID": webhook_id,
                     "Content-Type": "application/json",
                 },
-                timeout=30.0
+                timeout=30.0,
             )
-            return JSONResponse(content={
-                "webhook_id": webhook_id,
-                "status_code": resp.status_code,
-                "success": 200 <= resp.status_code < 300,
-            })
+            return JSONResponse(
+                content={
+                    "webhook_id": webhook_id,
+                    "status_code": resp.status_code,
+                    "success": 200 <= resp.status_code < 300,
+                }
+            )
     except Exception as e:
-        return JSONResponse(content={
-            "webhook_id": webhook_id,
-            "error": str(e),
-            "success": False,
-        })
+        return JSONResponse(
+            content={
+                "webhook_id": webhook_id,
+                "error": str(e),
+                "success": False,
+            }
+        )
 
 
 # -- webhook delivery (called from deps.audit) ----------------------------
@@ -185,7 +199,7 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
         "timestamp": datetime.now(UTC).isoformat(),
         "data": data,
     }
-    payload_json = json.dumps(payload, separators=(',', ':'))
+    payload_json = json.dumps(payload, separators=(",", ":"))
 
     for webhook in _webhooks.values():
         if not webhook.active:
@@ -195,9 +209,7 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
 
         webhook_secret: str = webhook.secret
         signature = hmac.new(
-            webhook_secret.encode(),
-            payload_json.encode(),
-            hashlib.sha256
+            webhook_secret.encode(), payload_json.encode(), hashlib.sha256
         ).hexdigest()
 
         try:
@@ -212,7 +224,7 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
                         "X-Webhook-ID": webhook_id,
                         "Content-Type": "application/json",
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
         except Exception:
             pass

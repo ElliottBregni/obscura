@@ -20,6 +20,7 @@ from scripts.sync import (
 # SyncProfile parsing
 # ---------------------------------------------------------------------------
 
+
 class TestSyncProfileParsing:
     """Parse .sync-profile.yml files."""
 
@@ -67,6 +68,7 @@ class TestSyncProfileParsing:
 # ---------------------------------------------------------------------------
 # VariantSelector — model swaps
 # ---------------------------------------------------------------------------
+
 
 class TestModelVariantSwaps:
     """VariantSelector model swap logic."""
@@ -118,18 +120,24 @@ class TestModelVariantSwaps:
         """Model variant without a base file: included when model matches."""
         selector = VariantSelector(model="opus", role=None)
         manifest = {
-            Path("skills/deep-analysis.opus.md"): Path("/vault/skills/deep-analysis.opus.md"),
+            Path("skills/deep-analysis.opus.md"): Path(
+                "/vault/skills/deep-analysis.opus.md"
+            ),
         }
         result = selector.select(manifest)
         # Should land at base dest (without model segment)
         assert Path("skills/deep-analysis.md") in result
-        assert result[Path("skills/deep-analysis.md")] == Path("/vault/skills/deep-analysis.opus.md")
+        assert result[Path("skills/deep-analysis.md")] == Path(
+            "/vault/skills/deep-analysis.opus.md"
+        )
 
     def test_model_variant_no_base_wrong_model(self) -> None:
         """Model variant without base: excluded when model doesn't match."""
         selector = VariantSelector(model="sonnet", role=None)
         manifest = {
-            Path("skills/deep-analysis.opus.md"): Path("/vault/skills/deep-analysis.opus.md"),
+            Path("skills/deep-analysis.opus.md"): Path(
+                "/vault/skills/deep-analysis.opus.md"
+            ),
         }
         result = selector.select(manifest)
         assert len(result) == 0
@@ -150,6 +158,7 @@ class TestModelVariantSwaps:
 # VariantSelector — role filtering
 # ---------------------------------------------------------------------------
 
+
 class TestRoleFiltering:
     """VariantSelector role filter logic."""
 
@@ -159,7 +168,9 @@ class TestRoleFiltering:
         manifest = {
             Path("skills/git-workflow.md"): Path("/vault/skills/git-workflow.md"),
             Path("skills/roles/reviewer.md"): Path("/vault/skills/roles/reviewer.md"),
-            Path("skills/roles/implementer.md"): Path("/vault/skills/roles/implementer.md"),
+            Path("skills/roles/implementer.md"): Path(
+                "/vault/skills/roles/implementer.md"
+            ),
         }
         result = selector.select(manifest)
         assert Path("skills/git-workflow.md") in result
@@ -172,7 +183,9 @@ class TestRoleFiltering:
         manifest = {
             Path("skills/git-workflow.md"): Path("/vault/skills/git-workflow.md"),
             Path("skills/roles/reviewer.md"): Path("/vault/skills/roles/reviewer.md"),
-            Path("skills/roles/implementer.md"): Path("/vault/skills/roles/implementer.md"),
+            Path("skills/roles/implementer.md"): Path(
+                "/vault/skills/roles/implementer.md"
+            ),
         }
         result = selector.select(manifest)
         assert Path("skills/git-workflow.md") in result
@@ -206,6 +219,7 @@ class TestRoleFiltering:
 # VariantSelector — combined model + role
 # ---------------------------------------------------------------------------
 
+
 class TestCombinedModelRole:
     """Both model and role active simultaneously."""
 
@@ -238,6 +252,7 @@ class TestCombinedModelRole:
 # ---------------------------------------------------------------------------
 # VaultSync profile loading
 # ---------------------------------------------------------------------------
+
 
 class TestVaultSyncProfileLoading:
     """Profile loading and per-repo override merging."""
@@ -282,21 +297,29 @@ class TestVaultSyncProfileLoading:
 # Integration: VariantSelector with real sync pipeline
 # ---------------------------------------------------------------------------
 
+
 class TestVariantIntegration:
     """End-to-end variant filtering through the sync pipeline."""
 
     def test_system_sync_with_model_opus(
-        self, variant_vault: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        variant_vault: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """System sync with model=opus swaps base files for opus variants."""
         home = tmp_path / "home"
         home.mkdir()
+
         def _home() -> Path:
             return home
+
         monkeypatch.setattr(Path, "home", staticmethod(_home))
         _orig: Callable[[str], str] = os.path.expanduser
+
         def _expanduser(p: str) -> str:
             return str(home) + p[1:] if p.startswith("~") else _orig(p)
+
         monkeypatch.setattr(os.path, "expanduser", _expanduser)
 
         (variant_vault / SYNC_PROFILE_FILE).write_text("model: opus\n")
@@ -314,17 +337,24 @@ class TestVariantIntegration:
         assert not (github_skills / "setup.opus.md").exists()
 
     def test_system_sync_no_profile_keeps_base(
-        self, variant_vault: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        variant_vault: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """System sync with no profile keeps base files, strips model variants."""
         home = tmp_path / "home"
         home.mkdir()
+
         def _home() -> Path:
             return home
+
         monkeypatch.setattr(Path, "home", staticmethod(_home))
         _orig: Callable[[str], str] = os.path.expanduser
+
         def _expanduser(p: str) -> str:
             return str(home) + p[1:] if p.startswith("~") else _orig(p)
+
         monkeypatch.setattr(os.path, "expanduser", _expanduser)
 
         # No .sync-profile.yml
@@ -341,17 +371,24 @@ class TestVariantIntegration:
         assert not (github_skills / "setup.sonnet.md").exists()
 
     def test_system_sync_with_role(
-        self, variant_vault: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        variant_vault: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """System sync with role=reviewer includes only reviewer role files."""
         home = tmp_path / "home"
         home.mkdir()
+
         def _home() -> Path:
             return home
+
         monkeypatch.setattr(Path, "home", staticmethod(_home))
         _orig: Callable[[str], str] = os.path.expanduser
+
         def _expanduser(p: str) -> str:
             return str(home) + p[1:] if p.startswith("~") else _orig(p)
+
         monkeypatch.setattr(os.path, "expanduser", _expanduser)
 
         (variant_vault / SYNC_PROFILE_FILE).write_text("role: reviewer\n")

@@ -3,11 +3,11 @@
 
 Usage:
     python scripts/generate_api_key.py [name] [roles...]
-    
+
 Examples:
     python scripts/generate_api_key.py my-app admin agent:copilot
     python scripts/generate_api_key.py readonly agent:read
-    
+
 Environment:
     Set OBSCURA_API_KEYS in your shell to use custom keys.
     Format: key1:user1:role1,role2;key2:user2:role3
@@ -18,18 +18,20 @@ import sys
 import os
 
 
-def generate_api_key(name: str = "app", roles: list[str] | None = None) -> tuple[str, str]:
+def generate_api_key(
+    name: str = "app", roles: list[str] | None = None
+) -> tuple[str, str]:
     """Generate a new API key and its OBSCURA_API_KEYS entry."""
     if roles is None:
         roles = ["agent:read", "agent:copilot"]
-    
+
     # Generate random key
     key = f"obscura_{secrets.token_urlsafe(32)}"
-    
+
     # Format for env var
     roles_str = ",".join(roles)
     env_entry = f"{key}:{name}:{roles_str}"
-    
+
     return key, env_entry
 
 
@@ -39,8 +41,8 @@ def main():
         print("Usage: python generate_api_key.py [name] [roles...]")
         print()
         print("Examples:")
-        print('  python generate_api_key.py my-app admin agent:copilot')
-        print('  python generate_api_key.py readonly agent:read')
+        print("  python generate_api_key.py my-app admin agent:copilot")
+        print("  python generate_api_key.py readonly agent:read")
         print()
         print("Available roles:")
         print("  admin - Full access")
@@ -50,12 +52,12 @@ def main():
         print("  sync:write - Trigger sync operations")
         print("  sessions:manage - Create/delete sessions")
         return
-    
+
     name = sys.argv[1]
     roles = sys.argv[2:] if len(sys.argv) > 2 else ["agent:read", "agent:copilot"]
-    
+
     key, env_entry = generate_api_key(name, roles)
-    
+
     print("=" * 70)
     print("✅ API KEY GENERATED")
     print("=" * 70)
@@ -65,12 +67,14 @@ def main():
     print("Usage:")
     print("-" * 70)
     print(f'  curl -H "X-API-Key: {key}" \\\\')
-    print('       http://localhost:8080/api/v1/agents')
+    print("       http://localhost:8080/api/v1/agents")
     print()
     print("Or with Python:")
     print("-" * 70)
     print(f'  headers = {{"X-API-Key": "{key}"}}')
-    print('  response = requests.get("http://localhost:8080/api/v1/agents", headers=headers)')
+    print(
+        '  response = requests.get("http://localhost:8080/api/v1/agents", headers=headers)'
+    )
     print()
     print("Environment Setup:")
     print("-" * 70)
@@ -80,12 +84,12 @@ def main():
     print("-" * 70)
     print('  export OBSCURA_API_KEYS="key1:app1:admin;key2:app2:agent:read"')
     print()
-    
+
     # Check if default key exists
     current_keys = os.environ.get("OBSCURA_API_KEYS", "")
     if current_keys:
         print("Current OBSCURA_API_KEYS env var is set.")
-        print(f"To add this key: export OBSCURA_API_KEYS=\"{current_keys};{env_entry}\"")
+        print(f'To add this key: export OBSCURA_API_KEYS="{current_keys};{env_entry}"')
     else:
         print("No custom API keys set. The default dev key is active.")
         print("To use this custom key, set the env var above.")

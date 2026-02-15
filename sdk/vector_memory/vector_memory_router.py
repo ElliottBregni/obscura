@@ -38,6 +38,7 @@ else:
 @dataclass
 class MemoryTypeQuery:
     """Configuration for querying a specific memory type."""
+
     memory_type: str
     weight: float = 1.0
     top_k: int = 10
@@ -47,6 +48,7 @@ class MemoryTypeQuery:
 @dataclass
 class RoutedResult:
     """Result from a routed multi-type search."""
+
     entries: list[VectorMemoryEntry]
     sources: dict[str, int]  # memory_type -> count of results from that type
 

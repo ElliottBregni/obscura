@@ -1,4 +1,5 @@
 """Tests for sdk.cli -- CLI entry point, subcommands, and async runner."""
+
 import pytest
 import sys
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -8,6 +9,7 @@ from sdk.cli import build_parser, main, _AGENT_COMMANDS, _StderrLogger, _run
 # ---------------------------------------------------------------------------
 # Parser construction
 # ---------------------------------------------------------------------------
+
 
 class TestBuildParser:
     def test_parser_created(self):
@@ -58,7 +60,9 @@ class TestBuildParser:
 
     def test_model_alias(self):
         parser = build_parser()
-        args = parser.parse_args(["copilot", "--model-alias", "copilot_automation_safe"])
+        args = parser.parse_args(
+            ["copilot", "--model-alias", "copilot_automation_safe"]
+        )
         assert args.model_alias == "copilot_automation_safe"
 
     def test_automation_safe(self):
@@ -98,7 +102,9 @@ class TestBuildParser:
 
     def test_system_prompt(self):
         parser = build_parser()
-        args = parser.parse_args(["copilot", "--system-prompt", "be helpful", "-p", "x"])
+        args = parser.parse_args(
+            ["copilot", "--system-prompt", "be helpful", "-p", "x"]
+        )
         assert args.system_prompt == "be helpful"
 
     def test_tui_defaults(self):
@@ -124,6 +130,7 @@ class TestBuildParser:
 # ---------------------------------------------------------------------------
 # main() dispatch
 # ---------------------------------------------------------------------------
+
 
 class TestMain:
     def test_no_command(self):
@@ -175,11 +182,13 @@ class TestMain:
 # _run_serve
 # ---------------------------------------------------------------------------
 
+
 class TestRunServe:
     @patch.dict("sys.modules", {"uvicorn": MagicMock()})
     def test_serve_calls_uvicorn(self):
         mock_uvicorn = sys.modules["uvicorn"]
         from sdk.cli import _run_serve, build_parser
+
         parser = build_parser()
         args = parser.parse_args(["serve", "--port", "9000"])
         result = _run_serve(args)
@@ -190,11 +199,27 @@ class TestRunServe:
     def test_serve_passes_args_to_uvicorn(self):
         mock_uvicorn = sys.modules["uvicorn"]
         from sdk.cli import _run_serve, build_parser
+
         parser = build_parser()
-        args = parser.parse_args(["serve", "--host", "127.0.0.1", "--port", "3000", "--reload", "--workers", "2"])
+        args = parser.parse_args(
+            [
+                "serve",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "3000",
+                "--reload",
+                "--workers",
+                "2",
+            ]
+        )
         _run_serve(args)
         call_kwargs = mock_uvicorn.run.call_args
-        assert call_kwargs[1]["host"] == "127.0.0.1" or call_kwargs.kwargs.get("host") == "127.0.0.1" or call_kwargs[0][0] == "sdk.server:create_app"
+        assert (
+            call_kwargs[1]["host"] == "127.0.0.1"
+            or call_kwargs.kwargs.get("host") == "127.0.0.1"
+            or call_kwargs[0][0] == "sdk.server:create_app"
+        )
 
     def test_serve_without_uvicorn(self):
         """Lines 261-267: missing uvicorn => returns 1."""
@@ -208,7 +233,12 @@ class TestRunServe:
             # Need to force re-import to trigger the ImportError
             # Call _run_serve which does `import uvicorn` internally
             # We need to make the import fail
-            original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+            original_import = (
+                __builtins__.__import__
+                if hasattr(__builtins__, "__import__")
+                else __import__
+            )
+
             def mock_import(name, *a, **kw):
                 if name == "uvicorn":
                     raise ImportError("No module named 'uvicorn'")
@@ -223,6 +253,7 @@ class TestRunServe:
 # _run_tui
 # ---------------------------------------------------------------------------
 
+
 class TestRunTui:
     def test_tui_missing_dependencies(self):
         """Lines 286-309: missing TUI deps => returns 1."""
@@ -231,7 +262,11 @@ class TestRunTui:
         parser = build_parser()
         args = parser.parse_args(["tui"])
 
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def mock_import(name, *a, **kw):
             if name == "sdk.tui.app":
@@ -254,6 +289,7 @@ class TestRunTui:
 # ---------------------------------------------------------------------------
 # _run (async agent runner)
 # ---------------------------------------------------------------------------
+
 
 class TestAsyncRun:
     @pytest.mark.asyncio
@@ -338,7 +374,9 @@ class TestAsyncRun:
     @patch("sdk.cli._get_cli_logger")
     @patch("sdk.cli._init_cli_telemetry")
     @patch("sdk.cli.ObscuraClient")
-    async def test_run_list_sessions_with_results(self, MockClient, mock_telemetry, mock_logger):
+    async def test_run_list_sessions_with_results(
+        self, MockClient, mock_telemetry, mock_logger
+    ):
         """Lines 214-215: sessions exist."""
         from sdk.internal.types import Backend
 
@@ -402,7 +440,9 @@ class TestAsyncRun:
         mock_logger.return_value = mock_log
 
         mock_client_instance = AsyncMock()
-        mock_client_instance.__aenter__ = AsyncMock(side_effect=ValueError("bad config"))
+        mock_client_instance.__aenter__ = AsyncMock(
+            side_effect=ValueError("bad config")
+        )
         mock_client_instance.__aexit__ = AsyncMock(return_value=False)
         MockClient.return_value = mock_client_instance
 
@@ -415,7 +455,9 @@ class TestAsyncRun:
     @patch("sdk.cli._get_cli_logger")
     @patch("sdk.cli._init_cli_telemetry")
     @patch("sdk.cli.ObscuraClient")
-    async def test_run_keyboard_interrupt(self, MockClient, mock_telemetry, mock_logger):
+    async def test_run_keyboard_interrupt(
+        self, MockClient, mock_telemetry, mock_logger
+    ):
         """Lines 246-248: KeyboardInterrupt => return 130."""
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -434,7 +476,9 @@ class TestAsyncRun:
     @patch("sdk.cli._get_cli_logger")
     @patch("sdk.cli._init_cli_telemetry")
     @patch("sdk.cli.ObscuraClient")
-    async def test_run_stream_thinking_delta(self, MockClient, mock_telemetry, mock_logger):
+    async def test_run_stream_thinking_delta(
+        self, MockClient, mock_telemetry, mock_logger
+    ):
         """Lines 231-233: thinking delta chunk."""
         from sdk.internal.types import ChunkKind
 
@@ -494,7 +538,9 @@ class TestAsyncRun:
     @patch("sdk.cli._get_cli_logger")
     @patch("sdk.cli._init_cli_telemetry")
     @patch("sdk.cli.ObscuraClient")
-    async def test_run_stream_error_chunk(self, MockClient, mock_telemetry, mock_logger):
+    async def test_run_stream_error_chunk(
+        self, MockClient, mock_telemetry, mock_logger
+    ):
         """Lines 236-237: error chunk in stream."""
         from sdk.internal.types import ChunkKind
 
@@ -524,7 +570,9 @@ class TestAsyncRun:
     @patch("sdk.cli._get_cli_logger")
     @patch("sdk.cli._init_cli_telemetry")
     @patch("sdk.cli.ObscuraClient")
-    async def test_run_empty_prompt_from_stdin(self, MockClient, mock_telemetry, mock_logger):
+    async def test_run_empty_prompt_from_stdin(
+        self, MockClient, mock_telemetry, mock_logger
+    ):
         """Lines 193-195: empty stdin prompt => return 1."""
         mock_log = MagicMock()
         mock_logger.return_value = mock_log
@@ -545,6 +593,7 @@ class TestAsyncRun:
 # ---------------------------------------------------------------------------
 # StderrLogger
 # ---------------------------------------------------------------------------
+
 
 class TestStderrLogger:
     def test_info(self, capsys):
@@ -587,6 +636,7 @@ class TestStderrLogger:
 # Agent commands set
 # ---------------------------------------------------------------------------
 
+
 class TestAgentCommands:
     def test_agent_commands_set(self):
         assert "copilot" in _AGENT_COMMANDS
@@ -603,16 +653,19 @@ class TestAgentCommands:
 # Telemetry helpers
 # ---------------------------------------------------------------------------
 
+
 class TestTelemetryHelpers:
     def test_init_cli_telemetry_no_crash(self):
         """Lines 347-356: _init_cli_telemetry should not raise."""
         from sdk.cli import _init_cli_telemetry
+
         # Even if dependencies are missing, it should silently pass
         _init_cli_telemetry()
 
     def test_get_cli_logger_returns_logger(self):
         """Lines 377-381: _get_cli_logger returns something with info/error."""
         from sdk.cli import _get_cli_logger
+
         log = _get_cli_logger("test")
         assert hasattr(log, "info")
         assert hasattr(log, "error")
@@ -621,7 +674,11 @@ class TestTelemetryHelpers:
         """When sdk.telemetry.logging is unavailable, falls back to _StderrLogger."""
         from sdk.cli import _get_cli_logger
 
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def mock_import(name, *a, **kw):
             if name == "sdk.telemetry.logging":
@@ -636,6 +693,7 @@ class TestTelemetryHelpers:
 # ---------------------------------------------------------------------------
 # main() edge case: unknown command (lines 333-334)
 # ---------------------------------------------------------------------------
+
 
 class TestMainUnknownCommand:
     def test_unknown_command_returns_1(self):

@@ -1,4 +1,5 @@
 """Tests for miscellaneous route modules."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
@@ -9,6 +10,7 @@ from sdk.config import ObscuraConfig
 def app():
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
+
     return create_app(config)
 
 
@@ -32,10 +34,13 @@ class TestHealthRoute:
 
 class TestWebhookRoutes:
     def test_create_webhook(self, client):
-        resp = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/hook",
-            "events": ["agent.spawn"],
-        })
+        resp = client.post(
+            "/api/v1/webhooks",
+            json={
+                "url": "https://example.com/hook",
+                "events": ["agent.spawn"],
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "webhook_id" in data
@@ -48,10 +53,13 @@ class TestWebhookRoutes:
         assert isinstance(data["webhooks"], list)
 
     def test_get_webhook(self, client):
-        create = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/hook2",
-            "events": ["agent.stop"],
-        })
+        create = client.post(
+            "/api/v1/webhooks",
+            json={
+                "url": "https://example.com/hook2",
+                "events": ["agent.stop"],
+            },
+        )
         wid = create.json()["webhook_id"]
         resp = client.get(f"/api/v1/webhooks/{wid}")
         assert resp.status_code == 200
@@ -61,10 +69,13 @@ class TestWebhookRoutes:
         assert resp.status_code == 404
 
     def test_delete_webhook(self, client):
-        create = client.post("/api/v1/webhooks", json={
-            "url": "https://example.com/hook3",
-            "events": ["agent.run"],
-        })
+        create = client.post(
+            "/api/v1/webhooks",
+            json={
+                "url": "https://example.com/hook3",
+                "events": ["agent.run"],
+            },
+        )
         wid = create.json()["webhook_id"]
         resp = client.delete(f"/api/v1/webhooks/{wid}")
         assert resp.status_code == 200
@@ -72,11 +83,14 @@ class TestWebhookRoutes:
 
 class TestWorkflowRoutes:
     def test_create_workflow(self, client):
-        resp = client.post("/api/v1/workflows", json={
-            "name": "test-wf",
-            "description": "A test workflow",
-            "steps": [{"type": "agent", "config": {"model": "copilot"}}],
-        })
+        resp = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "test-wf",
+                "description": "A test workflow",
+                "steps": [{"type": "agent", "config": {"model": "copilot"}}],
+            },
+        )
         assert resp.status_code == 200
         assert "workflow_id" in resp.json()
 
@@ -85,10 +99,13 @@ class TestWorkflowRoutes:
         assert resp.status_code == 200
 
     def test_get_workflow(self, client):
-        create = client.post("/api/v1/workflows", json={
-            "name": "wf2",
-            "steps": [],
-        })
+        create = client.post(
+            "/api/v1/workflows",
+            json={
+                "name": "wf2",
+                "steps": [],
+            },
+        )
         wid = create.json()["workflow_id"]
         resp = client.get(f"/api/v1/workflows/{wid}")
         assert resp.status_code == 200
@@ -143,18 +160,24 @@ class TestSyncRoutes:
 
 class TestHeartbeatRoutes:
     def test_post_heartbeat(self, client):
-        resp = client.post("/api/v1/heartbeat", json={
-            "agent_id": "agent-1",
-            "status": "healthy",
-        })
+        resp = client.post(
+            "/api/v1/heartbeat",
+            json={
+                "agent_id": "agent-1",
+                "status": "healthy",
+            },
+        )
         assert resp.status_code == 200
 
     def test_get_agent_health(self, client):
         # Post one first
-        client.post("/api/v1/heartbeat", json={
-            "agent_id": "agent-2",
-            "status": "healthy",
-        })
+        client.post(
+            "/api/v1/heartbeat",
+            json={
+                "agent_id": "agent-2",
+                "status": "healthy",
+            },
+        )
         resp = client.get("/api/v1/heartbeat/agent-2")
         assert resp.status_code in (200, 404)
 
@@ -173,9 +196,12 @@ class TestSendRoutes:
         mock_factory.create.return_value = mock_client
         app.state.client_factory = mock_factory
 
-        resp = client.post("/api/v1/send", json={
-            "backend": "copilot",
-            "prompt": "hello",
-        })
+        resp = client.post(
+            "/api/v1/send",
+            json={
+                "backend": "copilot",
+                "prompt": "hello",
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["text"] == "hello"

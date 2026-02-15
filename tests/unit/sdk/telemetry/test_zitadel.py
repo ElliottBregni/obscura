@@ -1,4 +1,5 @@
 """Tests for sdk.auth.zitadel — ZitadelClient and bootstrap."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
@@ -11,7 +12,10 @@ from sdk.auth.zitadel import ZitadelClient, bootstrap, DEFAULT_ROLES
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _mock_response(json_data: dict[str, Any] | None = None, status_code: int = 200) -> httpx.Response:
+
+def _mock_response(
+    json_data: dict[str, Any] | None = None, status_code: int = 200
+) -> httpx.Response:
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status_code
     resp.json.return_value = json_data or {}
@@ -28,6 +32,7 @@ def _mock_response(json_data: dict[str, Any] | None = None, status_code: int = 2
 # ---------------------------------------------------------------------------
 # ZitadelClient init and lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestZitadelClientInit:
     def test_init(self):
@@ -53,6 +58,7 @@ class TestZitadelClientContextManager:
 # ---------------------------------------------------------------------------
 # HTTP helpers (_post, _get, _put, _delete)
 # ---------------------------------------------------------------------------
+
 
 class TestZitadelClientHTTPHelpers:
     @pytest.mark.asyncio
@@ -119,20 +125,26 @@ class TestZitadelClientHTTPHelpers:
 # Projects
 # ---------------------------------------------------------------------------
 
+
 class TestZitadelClientProjects:
     @pytest.mark.asyncio
     async def test_create_project(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "_post", new_callable=AsyncMock,
-                          return_value={"id": "proj-1"}):
+        with patch.object(
+            client, "_post", new_callable=AsyncMock, return_value={"id": "proj-1"}
+        ):
             pid = await client.create_project("Obscura")
         assert pid == "proj-1"
 
     @pytest.mark.asyncio
     async def test_list_projects(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "_post", new_callable=AsyncMock,
-                          return_value={"result": [{"id": "p1", "name": "Test"}]}):
+        with patch.object(
+            client,
+            "_post",
+            new_callable=AsyncMock,
+            return_value={"result": [{"id": "p1", "name": "Test"}]},
+        ):
             projects = await client.list_projects()
         assert len(projects) == 1
         assert projects[0]["name"] == "Test"
@@ -140,24 +152,31 @@ class TestZitadelClientProjects:
     @pytest.mark.asyncio
     async def test_list_projects_empty(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "_post", new_callable=AsyncMock,
-                          return_value={}):
+        with patch.object(client, "_post", new_callable=AsyncMock, return_value={}):
             projects = await client.list_projects()
         assert projects == []
 
     @pytest.mark.asyncio
     async def test_find_project_by_name_found(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "list_projects", new_callable=AsyncMock,
-                          return_value=[{"name": "Obscura", "id": "p1"}]):
+        with patch.object(
+            client,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Obscura", "id": "p1"}],
+        ):
             pid = await client.find_project_by_name("Obscura")
         assert pid == "p1"
 
     @pytest.mark.asyncio
     async def test_find_project_by_name_not_found(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "list_projects", new_callable=AsyncMock,
-                          return_value=[{"name": "Other", "id": "p2"}]):
+        with patch.object(
+            client,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Other", "id": "p2"}],
+        ):
             pid = await client.find_project_by_name("Obscura")
         assert pid is None
 
@@ -165,6 +184,7 @@ class TestZitadelClientProjects:
 # ---------------------------------------------------------------------------
 # Roles
 # ---------------------------------------------------------------------------
+
 
 class TestZitadelClientRoles:
     @pytest.mark.asyncio
@@ -190,7 +210,9 @@ class TestZitadelClientRoles:
     @pytest.mark.asyncio
     async def test_bulk_add_roles(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "add_project_role", new_callable=AsyncMock) as mock_add:
+        with patch.object(
+            client, "add_project_role", new_callable=AsyncMock
+        ) as mock_add:
             await client.bulk_add_roles("proj-1", ["admin", "agent:read"])
         assert mock_add.await_count == 2
 
@@ -206,7 +228,9 @@ class TestZitadelClientRoles:
             if call_count == 1:
                 resp = MagicMock()
                 resp.status_code = 409
-                raise httpx.HTTPStatusError("Conflict", request=MagicMock(), response=resp)
+                raise httpx.HTTPStatusError(
+                    "Conflict", request=MagicMock(), response=resp
+                )
 
         with patch.object(client, "add_project_role", side_effect=fake_add):
             await client.bulk_add_roles("proj-1", ["admin", "agent:read"])
@@ -219,7 +243,9 @@ class TestZitadelClientRoles:
         async def fail_add(proj_id: str, role: str):
             resp = MagicMock()
             resp.status_code = 500
-            raise httpx.HTTPStatusError("Server Error", request=MagicMock(), response=resp)
+            raise httpx.HTTPStatusError(
+                "Server Error", request=MagicMock(), response=resp
+            )
 
         with patch.object(client, "add_project_role", side_effect=fail_add):
             with pytest.raises(httpx.HTTPStatusError):
@@ -230,12 +256,17 @@ class TestZitadelClientRoles:
 # API Applications
 # ---------------------------------------------------------------------------
 
+
 class TestZitadelClientAPIApps:
     @pytest.mark.asyncio
     async def test_create_api_app(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "_post", new_callable=AsyncMock,
-                          return_value={"clientId": "cid-1", "clientSecret": "sec"}):
+        with patch.object(
+            client,
+            "_post",
+            new_callable=AsyncMock,
+            return_value={"clientId": "cid-1", "clientSecret": "sec"},
+        ):
             result = await client.create_api_app("proj-1", "my-app")
         assert result["clientId"] == "cid-1"
 
@@ -243,6 +274,7 @@ class TestZitadelClientAPIApps:
 # ---------------------------------------------------------------------------
 # Machine users
 # ---------------------------------------------------------------------------
+
 
 class TestZitadelClientMachineUsers:
     @pytest.mark.asyncio
@@ -272,6 +304,7 @@ class TestZitadelClientMachineUsers:
 # Grants
 # ---------------------------------------------------------------------------
 
+
 class TestZitadelClientGrants:
     @pytest.mark.asyncio
     async def test_grant_project_roles(self):
@@ -286,8 +319,9 @@ class TestZitadelClientGrants:
     @pytest.mark.asyncio
     async def test_add_user_grant(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        with patch.object(client, "_post", new_callable=AsyncMock,
-                          return_value={"userGrantId": "g-1"}):
+        with patch.object(
+            client, "_post", new_callable=AsyncMock, return_value={"userGrantId": "g-1"}
+        ):
             gid = await client.add_user_grant("proj-1", "u-1", ["admin"])
         assert gid == "g-1"
 
@@ -295,6 +329,7 @@ class TestZitadelClientGrants:
 # ---------------------------------------------------------------------------
 # PAT and OIDC
 # ---------------------------------------------------------------------------
+
 
 class TestZitadelClientMisc:
     @pytest.mark.asyncio
@@ -311,10 +346,12 @@ class TestZitadelClientMisc:
     @pytest.mark.asyncio
     async def test_get_oidc_config(self):
         client = ZitadelClient("https://z.example.com", "tok")
-        resp = _mock_response({
-            "issuer": "https://z.example.com",
-            "jwks_uri": "https://z.example.com/.well-known/jwks.json",
-        })
+        resp = _mock_response(
+            {
+                "issuer": "https://z.example.com",
+                "jwks_uri": "https://z.example.com/.well-known/jwks.json",
+            }
+        )
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=resp)
         client.set_client_for_testing(mock_client)
@@ -334,6 +371,7 @@ class TestZitadelClientMisc:
 # ---------------------------------------------------------------------------
 # Bootstrap
 # ---------------------------------------------------------------------------
+
 
 class TestBootstrap:
     @pytest.mark.asyncio
@@ -400,7 +438,9 @@ class TestBootstrap:
             resp_409 = MagicMock()
             resp_409.status_code = 409
             mock_z.create_machine_user.side_effect = httpx.HTTPStatusError(
-                "Conflict", request=MagicMock(), response=resp_409,
+                "Conflict",
+                request=MagicMock(),
+                response=resp_409,
             )
 
             mock_z.get_oidc_config.return_value = {
@@ -427,7 +467,9 @@ class TestBootstrap:
             resp_500 = MagicMock()
             resp_500.status_code = 500
             mock_z.create_machine_user.side_effect = httpx.HTTPStatusError(
-                "Server Error", request=MagicMock(), response=resp_500,
+                "Server Error",
+                request=MagicMock(),
+                response=resp_500,
             )
 
             with pytest.raises(httpx.HTTPStatusError):

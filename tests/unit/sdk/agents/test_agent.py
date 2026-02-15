@@ -15,6 +15,7 @@ from sdk.agent.agent import BaseAgent
 # Concrete test agent
 # ---------------------------------------------------------------------------
 
+
 class StubAgent(BaseAgent):
     """Minimal agent for testing the APER loop."""
 
@@ -47,6 +48,7 @@ class StubAgent(BaseAgent):
 # APER loop execution order
 # ---------------------------------------------------------------------------
 
+
 class TestAPERLoop:
     @pytest.mark.asyncio
     async def test_phases_execute_in_order(self) -> None:
@@ -70,12 +72,15 @@ class TestAPERLoop:
             @override
             async def analyze(self, ctx: AgentContext) -> None:
                 ctx.analysis = ctx.input_data
+
             @override
             async def plan(self, ctx: AgentContext) -> None:
                 ctx.plan = ctx.analysis
+
             @override
             async def execute(self, ctx: AgentContext) -> None:
                 ctx.results = ctx.plan
+
             @override
             async def respond(self, ctx: AgentContext) -> None:
                 ctx.response = ctx.results
@@ -88,6 +93,7 @@ class TestAPERLoop:
 # ---------------------------------------------------------------------------
 # Hook firing
 # ---------------------------------------------------------------------------
+
 
 class TestHooks:
     @pytest.mark.asyncio
@@ -150,6 +156,7 @@ class TestHooks:
 # Context loader integration
 # ---------------------------------------------------------------------------
 
+
 class TestContextLoader:
     @pytest.mark.asyncio
     async def test_context_loader_populates_metadata(self) -> None:
@@ -166,6 +173,7 @@ class TestContextLoader:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     @pytest.mark.asyncio

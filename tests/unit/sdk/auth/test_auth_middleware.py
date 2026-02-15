@@ -79,6 +79,7 @@ _TEST_AUDIENCE = "obscura-test"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _forge_token(
     *,
     sub: str = "user-123",
@@ -104,12 +105,15 @@ def _forge_token(
     if extra_claims:
         claims.update(extra_claims)
 
-    return jose_jwt.encode(claims, _private_pem, algorithm="RS256", headers={"kid": _TEST_KID})
+    return jose_jwt.encode(
+        claims, _private_pem, algorithm="RS256", headers={"kid": _TEST_KID}
+    )
 
 
 # ---------------------------------------------------------------------------
 # Unit tests: role extraction
 # ---------------------------------------------------------------------------
+
 
 class TestExtractRoles:
     def test_extract_standard_roles(self) -> None:
@@ -133,6 +137,7 @@ class TestExtractRoles:
 # Unit tests: token type detection
 # ---------------------------------------------------------------------------
 
+
 class TestDetectTokenType:
     def test_user_token(self) -> None:
         assert detect_token_type({"sub": "u1", "email": "a@b.c"}) == "user"
@@ -147,6 +152,7 @@ class TestDetectTokenType:
 # ---------------------------------------------------------------------------
 # JWKS cache
 # ---------------------------------------------------------------------------
+
 
 class TestJWKSCache:
     @pytest.mark.asyncio
@@ -189,6 +195,7 @@ class TestJWKSCache:
 # ---------------------------------------------------------------------------
 # Token decoding
 # ---------------------------------------------------------------------------
+
 
 class TestDecodeAndValidate:
     @pytest.fixture
@@ -291,6 +298,7 @@ class TestDecodeAndValidate:
 # ---------------------------------------------------------------------------
 # Middleware integration (via starlette test client)
 # ---------------------------------------------------------------------------
+
 
 class TestJWTAuthMiddleware:
     """Test the middleware using starlette's TestClient."""

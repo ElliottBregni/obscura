@@ -50,6 +50,7 @@ _MOCK_USER = AuthenticatedUser(
 # Example: OBSCURA_API_KEYS="key1:dev-user:admin,agent:copilot;key2:readonly-user:agent:read"
 _api_keys: dict[str, dict[str, str | list[str]]] = {}
 
+
 def _load_api_keys() -> None:
     """Load API keys from environment."""
     global _api_keys
@@ -60,11 +61,17 @@ def _load_api_keys() -> None:
             "obscura-dev-key-123": {
                 "user_id": "dev-user",
                 "email": "dev@obscura.local",
-                "roles": ["admin", *AGENT_WRITE_ROLES, "agent:read", "sync:write", "sessions:manage"]
+                "roles": [
+                    "admin",
+                    *AGENT_WRITE_ROLES,
+                    "agent:read",
+                    "sync:write",
+                    "sessions:manage",
+                ],
             }
         }
         return
-    
+
     _api_keys = {}
     for key_def in keys_env.split(";"):
         parts = key_def.split(":")
@@ -74,8 +81,9 @@ def _load_api_keys() -> None:
             _api_keys[key] = {
                 "user_id": user_id,
                 "email": f"{user_id}@obscura.local",
-                "roles": roles
+                "roles": roles,
             }
+
 
 _load_api_keys()
 
@@ -83,6 +91,7 @@ _load_api_keys()
 # ---------------------------------------------------------------------------
 # Core dependency: extract user from request
 # ---------------------------------------------------------------------------
+
 
 async def get_current_user(request: Request) -> AuthenticatedUser:
     """FastAPI dependency that returns the authenticated user.
@@ -98,7 +107,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     # Check if auth is disabled via app config
     config = getattr(request.app.state, "config", None)
     auth_enabled = getattr(config, "auth_enabled", True) if config else True
-    
+
     # 1. Check API key header (works even when auth is enabled)
     api_key = request.headers.get("X-API-Key")
     if api_key and api_key in _api_keys:
@@ -115,11 +124,11 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
             token_type="api_key",
             raw_token=api_key,
         )
-    
+
     # 2. If auth is disabled, return mock user
     if not auth_enabled:
         return _MOCK_USER
-    
+
     # 3. Check JWT token from middleware
     user: AuthenticatedUser | None = getattr(request.state, "user", None)
     if user is None:
@@ -130,6 +139,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
 # ---------------------------------------------------------------------------
 # Role enforcement
 # ---------------------------------------------------------------------------
+
 
 def require_role(role: str) -> Callable[..., Awaitable[AuthenticatedUser]]:
     """Return a FastAPI dependency that enforces *role*.

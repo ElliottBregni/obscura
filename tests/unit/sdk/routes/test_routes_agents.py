@@ -1,4 +1,5 @@
 """Tests for sdk.routes.agents -- Agent CRUD, bulk ops, templates, tags, streaming."""
+
 import pytest
 from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,10 +13,12 @@ from sdk.config import ObscuraConfig
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _clear_templates() -> Generator[None, None, None]:  # pyright: ignore[reportUnusedFunction]
     """Reset the in-memory template store between tests."""
     from sdk.routes.agents import clear_agent_templates
+
     clear_agent_templates()
     yield
     clear_agent_templates()
@@ -25,6 +28,7 @@ def _clear_templates() -> Generator[None, None, None]:  # pyright: ignore[report
 def app() -> FastAPI:
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
+
     return create_app(config)
 
 
@@ -62,7 +66,9 @@ def _make_mock_runtime(agents: list[MagicMock] | None = None) -> AsyncMock:
     runtime: AsyncMock = AsyncMock()
     agents = agents or []
     # spawn returns an agent
-    runtime.spawn = MagicMock(return_value=(agents[0] if agents else _make_mock_agent()))
+    runtime.spawn = MagicMock(
+        return_value=(agents[0] if agents else _make_mock_agent())
+    )
     # get_agent looks up by id
     _agents_by_id: dict[str, MagicMock] = {a.id: a for a in agents}
 
@@ -81,9 +87,12 @@ def _make_mock_runtime(agents: list[MagicMock] | None = None) -> AsyncMock:
 # Agent spawn (POST /agents)
 # ---------------------------------------------------------------------------
 
+
 class TestAgentSpawn:
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_agent_defaults(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_agent_defaults(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
@@ -96,41 +105,56 @@ class TestAgentSpawn:
         assert data["mcp_enabled"] is False
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_agent_with_model(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_agent_with_model(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         agent = _make_mock_agent(model="claude")
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents", json={
-            "name": "claude-agent",
-            "model": "claude",
-        })
+        resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "claude-agent",
+                "model": "claude",
+            },
+        )
         assert resp.status_code == 200
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_agent_invalid_model(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_agent_invalid_model(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Line 35: invalid model raises 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents", json={
-            "name": "bad",
-            "model": "gpt-999",
-        })
+        resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "bad",
+                "model": "gpt-999",
+            },
+        )
         assert resp.status_code == 400
         assert "Invalid model" in resp.json()["detail"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_agent_with_mcp(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_agent_with_mcp(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents", json={
-            "name": "mcp-agent",
-            "model": "copilot",
-            "mcp": {"enabled": True, "servers": [{"transport": "stdio"}]},
-        })
+        resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "mcp-agent",
+                "model": "copilot",
+                "mcp": {"enabled": True, "servers": [{"transport": "stdio"}]},
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["mcp_enabled"] is True
 
@@ -139,9 +163,12 @@ class TestAgentSpawn:
 # Agent get (GET /agents/{agent_id})
 # ---------------------------------------------------------------------------
 
+
 class TestAgentGet:
     @patch("sdk.routes.agents.get_runtime")
-    def test_get_agent_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_get_agent_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 73-86: happy path."""
         state = MagicMock()
         state.agent_id = "agent-1"
@@ -164,7 +191,9 @@ class TestAgentGet:
         assert data["error_message"] is None
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_get_agent_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_get_agent_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 76-77: 404 path."""
         runtime = AsyncMock()
         runtime.get_agent_status = MagicMock(return_value=None)
@@ -179,26 +208,34 @@ class TestAgentGet:
 # Agent run (POST /agents/{agent_id}/run)
 # ---------------------------------------------------------------------------
 
+
 class TestAgentRun:
     @patch("sdk.routes.agents.get_runtime")
-    def test_run_agent_success(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_run_agent_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 97-112: happy path."""
         agent = _make_mock_agent()
         agent.run = AsyncMock(return_value="some result")
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/agent-1/run", json={
-            "prompt": "do something",
-            "context": {"key": "value"},
-        })
+        resp = client.post(
+            "/api/v1/agents/agent-1/run",
+            json={
+                "prompt": "do something",
+                "context": {"key": "value"},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["agent_id"] == "agent-1"
         assert data["result"] == "some result"
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_run_agent_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_run_agent_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 100-101: 404."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
@@ -208,7 +245,9 @@ class TestAgentRun:
         assert resp.status_code == 404
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_run_agent_exception(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_run_agent_exception(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 113-114: 500 on agent.run error."""
         agent = _make_mock_agent()
         agent.run = AsyncMock(side_effect=RuntimeError("boom"))
@@ -224,9 +263,12 @@ class TestAgentRun:
 # Agent stop (DELETE /agents/{agent_id})
 # ---------------------------------------------------------------------------
 
+
 class TestAgentStop:
     @patch("sdk.routes.agents.get_runtime")
-    def test_stop_agent_success(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_stop_agent_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 123-135."""
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -238,7 +280,9 @@ class TestAgentStop:
         agent.stop.assert_awaited_once()
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_stop_agent_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_stop_agent_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 126-127: 404."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
@@ -252,9 +296,12 @@ class TestAgentStop:
 # Agent list (GET /agents)
 # ---------------------------------------------------------------------------
 
+
 class TestAgentList:
     @patch("sdk.routes.agents.get_runtime")
-    def test_list_agents_empty(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_list_agents_empty(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         runtime = _make_mock_runtime()
         runtime.list_agents = MagicMock(return_value=[])
         mock_get_runtime.return_value = runtime
@@ -266,7 +313,9 @@ class TestAgentList:
         assert data["count"] == 0
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_list_agents_with_results(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_list_agents_with_results(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         a1 = _make_mock_agent("a1", "first", "copilot", tags=["prod"])
         a2 = _make_mock_agent("a2", "second", "claude", tags=["dev"])
         runtime = _make_mock_runtime([a1, a2])
@@ -277,7 +326,9 @@ class TestAgentList:
         assert resp.json()["count"] == 2
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_list_agents_filter_by_invalid_status(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_list_agents_filter_by_invalid_status(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 152-155: invalid status => 400."""
         runtime = _make_mock_runtime()
         runtime.list_agents = MagicMock(return_value=[])
@@ -288,7 +339,9 @@ class TestAgentList:
         assert "Invalid status" in resp.json()["detail"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_list_agents_filter_by_valid_status(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_list_agents_filter_by_valid_status(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 152-153: valid status passes through."""
         a1 = _make_mock_agent("a1", "first")
         runtime = _make_mock_runtime([a1])
@@ -298,7 +351,9 @@ class TestAgentList:
         assert resp.status_code == 200
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_list_agents_filter_by_tags(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_list_agents_filter_by_tags(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 160-164: tag filter."""
         a1 = _make_mock_agent("a1", "first", tags=["prod", "ml"])
         a2 = _make_mock_agent("a2", "second", tags=["dev"])
@@ -310,7 +365,9 @@ class TestAgentList:
         assert resp.json()["count"] == 1
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_list_agents_filter_by_name(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_list_agents_filter_by_name(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Line 167: name filter (case-insensitive substring)."""
         a1 = _make_mock_agent("a1", "ReviewerBot")
         a2 = _make_mock_agent("a2", "CodeWriter")
@@ -327,27 +384,35 @@ class TestAgentList:
 # Bulk spawn (POST /agents/bulk)
 # ---------------------------------------------------------------------------
 
+
 class TestBulkSpawn:
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_spawn_success(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_spawn_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 197-229: happy path."""
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk", json={
-            "agents": [
-                {"name": "a1", "model": "claude"},
-                {"name": "a2", "model": "copilot"},
-            ]
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk",
+            json={
+                "agents": [
+                    {"name": "a1", "model": "claude"},
+                    {"name": "a2", "model": "copilot"},
+                ]
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_requested"] == 2
         assert data["total_created"] == 2
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_spawn_empty(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_spawn_empty(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 200-201: empty list => 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
@@ -357,21 +422,27 @@ class TestBulkSpawn:
         assert "No agents provided" in resp.json()["detail"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_spawn_too_many(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_spawn_too_many(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 202-203: >100 agents => 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk", json={
-            "agents": [{"name": f"a{i}"} for i in range(101)]
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk",
+            json={"agents": [{"name": f"a{i}"} for i in range(101)]},
+        )
         assert resp.status_code == 400
         assert "Cannot spawn more than 100" in resp.json()["detail"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_spawn_partial_failure(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_spawn_partial_failure(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 226-227: one agent fails, others succeed."""
         call_count = 0
+
         def spawn_side_effect(**kwargs: object):
             nonlocal call_count
             call_count += 1
@@ -383,13 +454,16 @@ class TestBulkSpawn:
         runtime.spawn = MagicMock(side_effect=spawn_side_effect)
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk", json={
-            "agents": [
-                {"name": "a1"},
-                {"name": "a2"},
-                {"name": "a3"},
-            ]
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk",
+            json={
+                "agents": [
+                    {"name": "a1"},
+                    {"name": "a2"},
+                    {"name": "a3"},
+                ]
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_created"] == 2
@@ -401,25 +475,28 @@ class TestBulkSpawn:
 # Bulk stop (POST /agents/bulk/stop)
 # ---------------------------------------------------------------------------
 
+
 class TestBulkStop:
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_stop_success(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_stop_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 243-264."""
         a1 = _make_mock_agent("a1")
         a2 = _make_mock_agent("a2")
         runtime = _make_mock_runtime([a1, a2])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/stop", json={
-            "agent_ids": ["a1", "a2"]
-        })
+        resp = client.post("/api/v1/agents/bulk/stop", json={"agent_ids": ["a1", "a2"]})
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_stopped"] == 2
         assert data["stopped"] == ["a1", "a2"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_stop_empty(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_stop_empty(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 246-247: empty list => 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
@@ -428,31 +505,33 @@ class TestBulkStop:
         assert resp.status_code == 400
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_stop_agent_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_stop_agent_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 255-256: agent not found goes to errors."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/stop", json={
-            "agent_ids": ["nonexistent"]
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk/stop", json={"agent_ids": ["nonexistent"]}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_stopped"] == 0
         assert len(data["errors"]) == 1
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_stop_with_exception(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_stop_with_exception(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 261-262: stop raises exception."""
         agent = _make_mock_agent("a1")
         agent.stop = AsyncMock(side_effect=RuntimeError("cleanup failed"))
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/stop", json={
-            "agent_ids": ["a1"]
-        })
+        resp = client.post("/api/v1/agents/bulk/stop", json={"agent_ids": ["a1"]})
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["errors"]) == 1
@@ -463,59 +542,80 @@ class TestBulkStop:
 # Bulk tag (POST /agents/bulk/tag)
 # ---------------------------------------------------------------------------
 
+
 class TestBulkTag:
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_tag_success(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_tag_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 278-303."""
         a1 = _make_mock_agent("a1", tags=["existing"])
         a2 = _make_mock_agent("a2", tags=[])
         runtime = _make_mock_runtime([a1, a2])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/tag", json={
-            "agent_ids": ["a1", "a2"],
-            "tags": ["new-tag"],
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk/tag",
+            json={
+                "agent_ids": ["a1", "a2"],
+                "tags": ["new-tag"],
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "a1" in data["tagged"]
         assert "a2" in data["tagged"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_tag_no_agent_ids(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_tag_no_agent_ids(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 282-283: empty agent_ids => 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/tag", json={
-            "agent_ids": [],
-            "tags": ["t1"],
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk/tag",
+            json={
+                "agent_ids": [],
+                "tags": ["t1"],
+            },
+        )
         assert resp.status_code == 400
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_tag_no_tags(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_tag_no_tags(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 284-285: empty tags => 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/tag", json={
-            "agent_ids": ["a1"],
-            "tags": [],
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk/tag",
+            json={
+                "agent_ids": ["a1"],
+                "tags": [],
+            },
+        )
         assert resp.status_code == 400
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_bulk_tag_agent_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_bulk_tag_agent_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 293-294: agent not found goes to errors."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/bulk/tag", json={
-            "agent_ids": ["missing"],
-            "tags": ["x"],
-        })
+        resp = client.post(
+            "/api/v1/agents/bulk/tag",
+            json={
+                "agent_ids": ["missing"],
+                "tags": ["x"],
+            },
+        )
         assert resp.status_code == 200
         assert len(resp.json()["errors"]) == 1
 
@@ -524,13 +624,17 @@ class TestBulkTag:
 # Templates (CRUD)
 # ---------------------------------------------------------------------------
 
+
 class TestAgentTemplates:
     def test_create_template(self, client: TestClient) -> None:
-        resp = client.post("/api/v1/agent-templates", json={
-            "name": "reviewer",
-            "model": "copilot",
-            "system_prompt": "You review code.",
-        })
+        resp = client.post(
+            "/api/v1/agent-templates",
+            json={
+                "name": "reviewer",
+                "model": "copilot",
+                "system_prompt": "You review code.",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "reviewer"
@@ -546,7 +650,9 @@ class TestAgentTemplates:
         assert data["count"] >= 1
 
     def test_get_template(self, client: TestClient) -> None:
-        create_resp = client.post("/api/v1/agent-templates", json={"name": "t2", "model": "claude"})
+        create_resp = client.post(
+            "/api/v1/agent-templates", json={"name": "t2", "model": "claude"}
+        )
         tid = create_resp.json()["template_id"]
         resp = client.get(f"/api/v1/agent-templates/{tid}")
         assert resp.status_code == 200
@@ -557,7 +663,9 @@ class TestAgentTemplates:
         assert resp.status_code == 404
 
     def test_delete_template(self, client: TestClient) -> None:
-        create_resp = client.post("/api/v1/agent-templates", json={"name": "t3", "model": "copilot"})
+        create_resp = client.post(
+            "/api/v1/agent-templates", json={"name": "t3", "model": "copilot"}
+        )
         tid = create_resp.json()["template_id"]
         resp = client.delete(f"/api/v1/agent-templates/{tid}")
         assert resp.status_code == 200
@@ -573,31 +681,42 @@ class TestAgentTemplates:
 # Spawn from template (POST /agents/from-template)
 # ---------------------------------------------------------------------------
 
+
 class TestSpawnFromTemplate:
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_from_template_success(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_from_template_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 387-411."""
         # Create a template first
-        tmpl = client.post("/api/v1/agent-templates", json={
-            "name": "reviewer",
-            "model": "claude",
-            "system_prompt": "review code",
-        })
+        tmpl = client.post(
+            "/api/v1/agent-templates",
+            json={
+                "name": "reviewer",
+                "model": "claude",
+                "system_prompt": "review code",
+            },
+        )
         tid = tmpl.json()["template_id"]
 
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/from-template", json={
-            "template_id": tid,
-        })
+        resp = client.post(
+            "/api/v1/agents/from-template",
+            json={
+                "template_id": tid,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["template_id"] == tid
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_from_template_no_id(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_from_template_no_id(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 390-391: missing template_id => 400."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
@@ -607,20 +726,26 @@ class TestSpawnFromTemplate:
         assert "template_id is required" in resp.json()["detail"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_spawn_from_template_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_spawn_from_template_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 394-395: template not found => 404."""
         runtime = _make_mock_runtime()
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/from-template", json={
-            "template_id": "nonexistent",
-        })
+        resp = client.post(
+            "/api/v1/agents/from-template",
+            json={
+                "template_id": "nonexistent",
+            },
+        )
         assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
 # Tags (per-agent)
 # ---------------------------------------------------------------------------
+
 
 class TestAgentTags:
     @patch("sdk.routes.agents.get_runtime")
@@ -630,9 +755,12 @@ class TestAgentTags:
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/agent-1/tags", json={
-            "tags": ["new", "another"],
-        })
+        resp = client.post(
+            "/api/v1/agents/agent-1/tags",
+            json={
+                "tags": ["new", "another"],
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "new" in data["tags"]
@@ -640,7 +768,9 @@ class TestAgentTags:
         assert "existing" in data["tags"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_add_tags_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_add_tags_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 433-434: 404."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
@@ -650,7 +780,9 @@ class TestAgentTags:
         assert resp.status_code == 404
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_add_tags_empty(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_add_tags_empty(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 437-438: empty tags => 400."""
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -660,7 +792,9 @@ class TestAgentTags:
         assert resp.status_code == 400
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_add_tags_no_existing(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_add_tags_no_existing(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 440-441: agent.config has no tags attr."""
         agent = _make_mock_agent()
         del agent.config.tags  # simulate missing attr
@@ -677,16 +811,21 @@ class TestAgentTags:
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.post("/api/v1/agents/agent-1/tags/remove", json={
-            "tags": ["remove-me"],
-        })
+        resp = client.post(
+            "/api/v1/agents/agent-1/tags/remove",
+            json={
+                "tags": ["remove-me"],
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "remove-me" in data["removed"]
         assert "remove-me" not in data["tags"]
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_remove_tags_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_remove_tags_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 464-465: 404."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
@@ -696,7 +835,9 @@ class TestAgentTags:
         assert resp.status_code == 404
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_remove_tags_empty_list(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_remove_tags_empty_list(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 468-469: empty tags => 400."""
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -706,7 +847,9 @@ class TestAgentTags:
         assert resp.status_code == 400
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_remove_tags_no_existing(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_remove_tags_no_existing(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 471-472: agent has no tags attr => returns empty."""
         agent = _make_mock_agent()
         del agent.config.tags
@@ -731,7 +874,9 @@ class TestAgentTags:
         assert set(data["tags"]) == {"alpha", "beta"}
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_get_tags_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_get_tags_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 494-495: 404."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
@@ -745,9 +890,12 @@ class TestAgentTags:
 # Stream (POST /agents/{agent_id}/stream)
 # ---------------------------------------------------------------------------
 
+
 class TestAgentStream:
     @patch("sdk.routes.agents.get_runtime")
-    def test_stream_agent_not_found(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_stream_agent_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 518-519: 404."""
         runtime = _make_mock_runtime()
         runtime.get_agent = MagicMock(return_value=None)
@@ -757,7 +905,9 @@ class TestAgentStream:
         assert resp.status_code == 404
 
     @patch("sdk.routes.agents.get_runtime")
-    def test_stream_agent_returns_sse(self, mock_get_runtime: MagicMock, client: TestClient) -> None:
+    def test_stream_agent_returns_sse(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
         """Lines 515-532: SSE event source response."""
         agent = _make_mock_agent()
 

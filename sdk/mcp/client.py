@@ -184,7 +184,9 @@ class MCPClient:
             "params": params,
         }
 
-        future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[dict[str, Any]] = (
+            asyncio.get_event_loop().create_future()
+        )
         self._pending_requests[req_id] = future
 
         try:
@@ -242,11 +244,13 @@ class MCPClient:
 
         tools: list[MCPTool] = []
         for tool_data in result.get("tools", []):
-            tools.append(MCPTool(
-                name=tool_data["name"],
-                description=tool_data.get("description", ""),
-                inputSchema=tool_data.get("inputSchema", {}),
-            ))
+            tools.append(
+                MCPTool(
+                    name=tool_data["name"],
+                    description=tool_data.get("description", ""),
+                    inputSchema=tool_data.get("inputSchema", {}),
+                )
+            )
 
         return tools
 
@@ -275,12 +279,14 @@ class MCPClient:
 
         resources: list[MCPResource] = []
         for res_data in result.get("resources", []):
-            resources.append(MCPResource(
-                uri=res_data["uri"],
-                name=res_data["name"],
-                description=res_data.get("description"),
-                mimeType=res_data.get("mimeType"),
-            ))
+            resources.append(
+                MCPResource(
+                    uri=res_data["uri"],
+                    name=res_data["name"],
+                    description=res_data.get("description"),
+                    mimeType=res_data.get("mimeType"),
+                )
+            )
 
         return resources
 
@@ -317,11 +323,13 @@ class MCPClient:
 
         prompts: list[MCPPrompt] = []
         for prompt_data in result.get("prompts", []):
-            prompts.append(MCPPrompt(
-                name=prompt_data["name"],
-                description=prompt_data.get("description"),
-                arguments=prompt_data.get("arguments"),
-            ))
+            prompts.append(
+                MCPPrompt(
+                    name=prompt_data["name"],
+                    description=prompt_data.get("description"),
+                    arguments=prompt_data.get("arguments"),
+                )
+            )
 
         return prompts
 
@@ -339,10 +347,12 @@ class MCPClient:
 
         messages: list[MCPPromptMessage] = []
         for msg_data in result.get("messages", []):
-            messages.append(MCPPromptMessage(
-                role=msg_data["role"],
-                content=msg_data["content"],
-            ))
+            messages.append(
+                MCPPromptMessage(
+                    role=msg_data["role"],
+                    content=msg_data["content"],
+                )
+            )
 
         return MCPPromptResult(
             description=result.get("description"),
@@ -353,6 +363,7 @@ class MCPClient:
 # ---------------------------------------------------------------------------
 # Transport Implementations
 # ---------------------------------------------------------------------------
+
 
 class MCPTransport:
     """Base class for MCP transports."""
@@ -604,6 +615,7 @@ class SSETransport(MCPTransport):
 # ---------------------------------------------------------------------------
 # Session Management
 # ---------------------------------------------------------------------------
+
 
 class MCPSessionManager:
     """Manager for multiple MCP client sessions."""

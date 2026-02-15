@@ -1,4 +1,5 @@
 """Tests for sdk.telemetry.hooks — register_telemetry_hooks and helpers."""
+
 from unittest.mock import MagicMock, patch
 
 from sdk.telemetry.hooks import (

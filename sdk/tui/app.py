@@ -38,6 +38,7 @@ from sdk.tui.widgets.status_bar import StatusBar
 # ObscuraTUI Application
 # ---------------------------------------------------------------------------
 
+
 class ObscuraTUI(App[None]):
     """Main Textual application for the Obscura TUI.
 
@@ -138,9 +139,7 @@ class ObscuraTUI(App[None]):
             try:
                 self._session = TUISession.load(self._session_id_to_resume)
                 await self._restore_session()
-                self._show_system(
-                    f"Resumed session {self._session.session_id}"
-                )
+                self._show_system(f"Resumed session {self._session.session_id}")
             except FileNotFoundError:
                 self._show_system(
                     f"Session {self._session_id_to_resume} not found, "
@@ -169,9 +168,7 @@ class ObscuraTUI(App[None]):
     async def _connect_backend(self) -> None:
         """Connect to the backend asynchronously."""
         try:
-            self._show_system(
-                f"Connecting to {self._bridge.backend_name}..."
-            )
+            self._show_system(f"Connecting to {self._bridge.backend_name}...")
             await self._bridge.connect()
             self._show_system("Connected.")
         except Exception as e:
@@ -201,9 +198,7 @@ class ObscuraTUI(App[None]):
             self._status_bar.update_mode(new)
 
         # Update system prompt on bridge
-        self._bridge.update_system_prompt(
-            self._mode_manager.get_system_prompt()
-        )
+        self._bridge.update_system_prompt(self._mode_manager.get_system_prompt())
 
         # Show mode change in message list
         self._show_system(f"Switched to {new.value.upper()} mode")
@@ -214,9 +209,7 @@ class ObscuraTUI(App[None]):
 
     # -- Input handling -----------------------------------------------------
 
-    async def on_prompt_input_submitted(
-        self, event: PromptInput.Submitted
-    ) -> None:
+    async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         """Handle user prompt submission."""
         prompt = event.text
         if not prompt:
@@ -445,6 +438,7 @@ class ObscuraTUI(App[None]):
     async def _cmd_backend(self, args: list[str]) -> None:
         """Handle /backend <name>."""
         from sdk.internal.types import Backend
+
         supported = {b.value for b in Backend}
         if not args:
             self._show_system(
@@ -455,8 +449,7 @@ class ObscuraTUI(App[None]):
         backend = args[0]
         if backend not in supported:
             self._show_system(
-                f"Unknown backend: {backend}. "
-                f"Available: {', '.join(sorted(supported))}"
+                f"Unknown backend: {backend}. Available: {', '.join(sorted(supported))}"
             )
             return
         self._show_system(f"Switching to {backend}...")
@@ -481,17 +474,11 @@ class ObscuraTUI(App[None]):
         model_id = args[0]
         self._show_system(f"Switching model to {model_id}...")
         try:
-            await self._bridge.switch_backend(
-                self._bridge.backend_name, model=model_id
-            )
+            await self._bridge.switch_backend(self._bridge.backend_name, model=model_id)
             if self._sidebar:
-                self._sidebar.update_backend(
-                    self._bridge.backend_name, model_id
-                )
+                self._sidebar.update_backend(self._bridge.backend_name, model_id)
             if self._status_bar:
-                self._status_bar.update_backend(
-                    self._bridge.backend_name, model_id
-                )
+                self._status_bar.update_backend(self._bridge.backend_name, model_id)
             self._show_system(f"Model set to {model_id}.")
         except Exception as e:
             self._show_system(f"Error switching model: {e}")
@@ -515,9 +502,7 @@ class ObscuraTUI(App[None]):
                     turns = s.get("turn_count", 0)
                     sid = s["session_id"]
                     updated = s.get("updated_at", "")[:10]
-                    self._show_system(
-                        f"  {sid}  ({turns} turns, {updated})"
-                    )
+                    self._show_system(f"  {sid}  ({turns} turns, {updated})")
         elif subcmd == "load":
             if len(args) < 2:
                 self._show_system("Usage: /session load <id>")
@@ -567,7 +552,9 @@ class ObscuraTUI(App[None]):
 
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.get("http://localhost:8080/api/v1/memory/namespaces")
+                resp = await client.get(
+                    "http://localhost:8080/api/v1/memory/namespaces"
+                )
                 resp.raise_for_status()
                 data = resp.json()
             namespaces = data.get("namespaces", [])
@@ -593,9 +580,7 @@ class ObscuraTUI(App[None]):
                 resp.raise_for_status()
                 data = resp.json()
             value = data.get("value", data)
-            self._show_system(
-                f"{namespace}/{key} = {json.dumps(value, indent=2)}"
-            )
+            self._show_system(f"{namespace}/{key} = {json.dumps(value, indent=2)}")
         except Exception as e:
             self._show_system(f"Error reading memory: {e}")
 
@@ -647,6 +632,7 @@ class ObscuraTUI(App[None]):
     async def _cmd_help(self, args: list[str]) -> None:
         """Handle /help."""
         from sdk.internal.types import Backend
+
         backends = "|".join(sorted(b.value for b in Backend))
         modes = "|".join(m.value for m in TUIMode)
 
@@ -710,9 +696,7 @@ class ObscuraTUI(App[None]):
         if self._session and self._session.turns:
             self._session.save()
             TUISession.auto_rotate()
-            self._show_system(
-                f"Saved session {self._session.session_id}"
-            )
+            self._show_system(f"Saved session {self._session.session_id}")
 
         # Clear the UI
         if self._message_list:
@@ -724,9 +708,7 @@ class ObscuraTUI(App[None]):
             model=self._bridge.model,
         )
         self._update_session_display()
-        self._show_system(
-            f"New session: {self._session.session_id}"
-        )
+        self._show_system(f"New session: {self._session.session_id}")
 
     async def _restore_session(self) -> None:
         """Restore messages from a loaded session into the UI."""
@@ -738,9 +720,7 @@ class ObscuraTUI(App[None]):
             if turn.role == "user":
                 await self._message_list.add_user_message(turn.content)
             elif turn.role == "assistant":
-                bubble = await self._message_list.add_assistant_message(
-                    turn.content
-                )
+                bubble = await self._message_list.add_assistant_message(turn.content)
                 bubble.finalize()
 
         # Restore mode
@@ -762,9 +742,7 @@ class ObscuraTUI(App[None]):
 
     # -- Sidebar mode selection handler ------------------------------------
 
-    async def on_sidebar_mode_selected(
-        self, event: Sidebar.ModeSelected
-    ) -> None:
+    async def on_sidebar_mode_selected(self, event: Sidebar.ModeSelected) -> None:
         """Handle mode selection from the sidebar."""
         self._mode_manager.switch(event.mode)
 
@@ -775,9 +753,16 @@ class ObscuraTUI(App[None]):
         if self._message_list:
             self._message_list.add_system_message(text)
 
-    def _safe_exit(self, result: object | None = None, return_code: int = 0, message: object | None = None) -> None:
+    def _safe_exit(
+        self,
+        result: object | None = None,
+        return_code: int = 0,
+        message: object | None = None,
+    ) -> None:
         """Typed wrapper around Textual's exit to satisfy static analysis."""
-        exit_fn = cast(Callable[[object | None, int, object | None], None], getattr(self, "exit"))
+        exit_fn = cast(
+            Callable[[object | None, int, object | None], None], getattr(self, "exit")
+        )
         exit_fn(result, return_code, message)
 
     # -- Shutdown -----------------------------------------------------------
@@ -799,6 +784,7 @@ class ObscuraTUI(App[None]):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def run_tui(
     backend: str = "copilot",

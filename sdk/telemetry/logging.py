@@ -86,6 +86,7 @@ def get_logger(name: str) -> Any:
     """Return a structlog logger, or a stdlib logger if structlog is unavailable."""
     try:
         import structlog
+
         return structlog.get_logger(name)
     except ImportError:
         return logging.getLogger(name)
@@ -114,5 +115,6 @@ def _reset() -> None:
     """Reset configuration state (testing only)."""
     global _configured
     _configured = False
+
 
 _RESET_HOOK = _reset  # keep referenced for tests

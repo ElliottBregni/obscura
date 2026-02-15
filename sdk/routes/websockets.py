@@ -61,10 +61,9 @@ async def agent_websocket(
         agent = runtime.get_agent(agent_id)
 
         if agent is None:
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Agent {agent_id} not found"
-            })
+            await websocket.send_json(
+                {"type": "error", "message": f"Agent {agent_id} not found"}
+            )
             await websocket.close()
             return
 
@@ -76,41 +75,51 @@ async def agent_websocket(
                 context: dict[str, Any] = message.get("context", {})
                 try:
                     async for chunk in agent.stream(prompt, **context):
-                        await websocket.send_json({
-                            "type": "chunk",
-                            "text": chunk,
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "chunk",
+                                "text": chunk,
+                            }
+                        )
                     await websocket.send_json({"type": "done"})
                 except Exception as e:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": str(e),
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": str(e),
+                        }
+                    )
 
             elif message.get("type") == "status":
                 state = agent.get_state()
-                await websocket.send_json({
-                    "type": "status",
-                    "status": state.status.name,
-                    "iteration_count": state.iteration_count,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "status",
+                        "status": state.status.name,
+                        "iteration_count": state.iteration_count,
+                    }
+                )
 
             elif message.get("type") == "stop":
                 await agent.stop()
-                await websocket.send_json({
-                    "type": "status",
-                    "status": "STOPPED",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "status",
+                        "status": "STOPPED",
+                    }
+                )
                 break
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
         try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e),
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": str(e),
+                }
+            )
         except Exception:
             pass
 
@@ -132,24 +141,9 @@ async def monitor_websocket(websocket: WebSocket) -> None:
         runtime = await get_runtime(user)
 
         agents = runtime.list_agents()
-        await websocket.send_json({
-            "type": "init",
-            "agents": [
-                {
-                    "agent_id": a.id,
-                    "name": a.config.name,
-                    "status": a.status.name,
-                    "model": a.config.model,
-                }
-                for a in agents
-            ],
-        })
-
-        while True:
-            await asyncio.sleep(5)
-            agents = runtime.list_agents()
-            await websocket.send_json({
-                "type": "update",
+        await websocket.send_json(
+            {
+                "type": "init",
                 "agents": [
                     {
                         "agent_id": a.id,
@@ -159,7 +153,26 @@ async def monitor_websocket(websocket: WebSocket) -> None:
                     }
                     for a in agents
                 ],
-            })
+            }
+        )
+
+        while True:
+            await asyncio.sleep(5)
+            agents = runtime.list_agents()
+            await websocket.send_json(
+                {
+                    "type": "update",
+                    "agents": [
+                        {
+                            "agent_id": a.id,
+                            "name": a.config.name,
+                            "status": a.status.name,
+                            "model": a.config.model,
+                        }
+                        for a in agents
+                    ],
+                }
+            )
 
     except WebSocketDisconnect:
         pass
@@ -236,14 +249,17 @@ async def memory_watch_websocket(
 
     try:
         from sdk.memory import MemoryStore
+
         store = MemoryStore.for_user(user)
         keys = store.list_keys(namespace=namespace)
 
-        await websocket.send_json({
-            "type": "init",
-            "namespace": namespace,
-            "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
-        })
+        await websocket.send_json(
+            {
+                "type": "init",
+                "namespace": namespace,
+                "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
+            }
+        )
 
         while True:
             message = await websocket.receive_text()

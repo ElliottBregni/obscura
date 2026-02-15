@@ -191,9 +191,7 @@ class DiffView(Widget, can_focus=True):
         )
 
         if not change.hunks:
-            self._content_container.mount(
-                Static("(no changes)", classes="diff-empty")
-            )
+            self._content_container.mount(Static("(no changes)", classes="diff-empty"))
             return
 
         # Render each hunk

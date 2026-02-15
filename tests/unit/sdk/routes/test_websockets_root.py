@@ -1,4 +1,5 @@
 """Tests for sdk.routes.websockets — broadcast_event, notify_memory_change, and helpers."""
+
 import pytest
 from unittest.mock import AsyncMock
 
@@ -127,4 +128,6 @@ class TestNotifyMemoryChange:
         finally:
             ws_mod.clear_memory_watch_clients()
             ws_mod.memory_watch_clients().update(original)
+
+
 # pyright: ignore-all

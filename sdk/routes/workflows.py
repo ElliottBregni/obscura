@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/v1", tags=["workflows"])
 # Re-export with proper typing so the rest of the file is clean.
 agent_templates: dict[str, dict[str, Any]] = _imported_agent_templates
 
+
 # In-memory stores
 @dataclass(frozen=True, slots=True)
 class Workflow:
@@ -100,8 +101,14 @@ async def workflow_create(
 
     _workflows[workflow_id] = workflow
 
-    audit("workflow.create", user, f"workflow:{workflow_id}", "create", "success",
-          name=workflow.name)
+    audit(
+        "workflow.create",
+        user,
+        f"workflow:{workflow_id}",
+        "create",
+        "success",
+        name=workflow.name,
+    )
 
     return JSONResponse(content=workflow.as_dict())
 
@@ -112,10 +119,12 @@ async def workflow_list(
 ) -> JSONResponse:
     """List all workflows."""
     workflows: list[dict[str, Any]] = [wf.as_dict() for wf in _workflows.values()]
-    return JSONResponse(content={
-        "workflows": workflows,
-        "count": len(workflows),
-    })
+    return JSONResponse(
+        content={
+            "workflows": workflows,
+            "count": len(workflows),
+        }
+    )
 
 
 @router.get("/workflows/{workflow_id}")
@@ -202,7 +211,9 @@ async def workflow_execute(
         for key, value in inputs.items():
             prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
         for prev_step_name, prev_result in step_results.items():
-            prompt = prompt.replace(f"{{{{{prev_step_name}.output}}}}", str(prev_result))
+            prompt = prompt.replace(
+                f"{{{{{prev_step_name}.output}}}}", str(prev_result)
+            )
 
         try:
             result: Any = await agent.run(prompt)
@@ -245,16 +256,24 @@ async def workflow_execute(
 
     status_str: str = str(execution.status)
 
-    audit("workflow.execute", user, f"workflow:{workflow_id}", "execute", status_str,
-          execution_id=execution_id)
+    audit(
+        "workflow.execute",
+        user,
+        f"workflow:{workflow_id}",
+        "execute",
+        status_str,
+        execution_id=execution_id,
+    )
 
-    return JSONResponse(content={
-        "execution_id": execution.execution_id,
-        "workflow_id": execution.workflow_id,
-        "status": execution.status,
-        "outputs": execution.outputs,
-        "step_results": execution.step_results,
-    })
+    return JSONResponse(
+        content={
+            "execution_id": execution.execution_id,
+            "workflow_id": execution.workflow_id,
+            "status": execution.status,
+            "outputs": execution.outputs,
+            "step_results": execution.step_results,
+        }
+    )
 
 
 @router.get("/workflows/{workflow_id}/executions")
@@ -267,15 +286,18 @@ async def workflow_list_executions(
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
     executions: list[dict[str, Any]] = [
-        e.as_dict() for e in _workflow_executions.values()
+        e.as_dict()
+        for e in _workflow_executions.values()
         if e.workflow_id == workflow_id
     ]
 
-    return JSONResponse(content={
-        "workflow_id": workflow_id,
-        "executions": executions,
-        "count": len(executions),
-    })
+    return JSONResponse(
+        content={
+            "workflow_id": workflow_id,
+            "executions": executions,
+            "count": len(executions),
+        }
+    )
 
 
 @router.get("/workflows/executions/{execution_id}")
@@ -286,5 +308,7 @@ async def workflow_get_execution(
     """Get a specific execution."""
     execution = _workflow_executions.get(execution_id)
     if execution is None:
-        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Execution {execution_id} not found"
+        )
     return JSONResponse(content=execution.as_dict())

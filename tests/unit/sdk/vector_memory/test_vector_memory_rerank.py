@@ -1,8 +1,12 @@
 # pyright: ignore-all
 """Tests for sdk.vector_memory_rerank."""
+
 from datetime import UTC, datetime, timedelta
 from sdk.vector_memory.vector_memory_rerank import (
-    BM25Reranker, RecencyReranker, MetadataReranker, CompositeReranker,
+    BM25Reranker,
+    RecencyReranker,
+    MetadataReranker,
+    CompositeReranker,
 )
 from sdk.memory import MemoryKey
 from sdk.vector_memory import VectorMemoryEntry
@@ -103,10 +107,12 @@ class TestMetadataReranker:
 
 class TestCompositeReranker:
     def test_weighted_combination(self):
-        r = CompositeReranker(rerankers=[
-            (BM25Reranker(), 0.5),
-            (RecencyReranker(decay_days=30), 0.5),
-        ])
+        r = CompositeReranker(
+            rerankers=[
+                (BM25Reranker(), 0.5),
+                (RecencyReranker(decay_days=30), 0.5),
+            ]
+        )
         entry = _make_entry(text="hello world", created_at=datetime.now(UTC))
         score = r.score("hello world", entry, [])
         assert score > 0

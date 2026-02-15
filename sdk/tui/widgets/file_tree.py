@@ -91,9 +91,7 @@ class FileTree(Widget):
             child.remove()
 
         if not self._changes:
-            self._container.mount(
-                Static("  (no changes)", classes="file-entry")
-            )
+            self._container.mount(Static("  (no changes)", classes="file-entry"))
             return
 
         # Group by directory for a tree-like display

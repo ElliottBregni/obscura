@@ -20,6 +20,7 @@ from sdk.internal.types import ToolSpec
 # Tool registry
 # ---------------------------------------------------------------------------
 
+
 class ToolRegistry:
     """Central registry for tool specs. Backends read from this at start()."""
 
@@ -91,6 +92,7 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
 # @tool decorator
 # ---------------------------------------------------------------------------
 
+
 def tool(
     name: str,
     description: str,
@@ -117,6 +119,7 @@ def tool(
     is generated from the Pydantic model. If both are omitted, a basic schema
     is inferred from type hints.
     """
+
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         schema = parameters
         if schema is None and pydantic_model is not None:
@@ -148,10 +151,14 @@ def tool(
 # Traced tool execution
 # ---------------------------------------------------------------------------
 
-def _traced_tool_call(tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+
+def _traced_tool_call(
+    tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
     """Execute a tool handler wrapped in an OTel span."""
     try:
         from sdk.telemetry.traces import get_tracer
+
         tracer = get_tracer("obscura.tools")
     except Exception:
         return fn(*args, **kwargs)
@@ -169,6 +176,7 @@ def _traced_tool_call(tool_name: str, fn: Callable[..., Any], *args: Any, **kwar
             _record_tool_metric(tool_name, "error", time.monotonic() - start)
             try:
                 from opentelemetry.trace import StatusCode
+
                 span.set_status(StatusCode.ERROR, str(exc))
                 span.record_exception(exc)
             except ImportError:
@@ -176,10 +184,13 @@ def _traced_tool_call(tool_name: str, fn: Callable[..., Any], *args: Any, **kwar
             raise
 
 
-async def _traced_tool_call_async(tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+async def _traced_tool_call_async(
+    tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
     """Execute an async tool handler wrapped in an OTel span."""
     try:
         from sdk.telemetry.traces import get_tracer
+
         tracer = get_tracer("obscura.tools")
     except Exception:
         return await fn(*args, **kwargs)
@@ -197,6 +208,7 @@ async def _traced_tool_call_async(tool_name: str, fn: Callable[..., Any], *args:
             _record_tool_metric(tool_name, "error", time.monotonic() - start)
             try:
                 from opentelemetry.trace import StatusCode
+
                 span.set_status(StatusCode.ERROR, str(exc))
                 span.record_exception(exc)
             except ImportError:
@@ -208,6 +220,7 @@ def _record_tool_metric(tool_name: str, status: str, duration: float) -> None:
     """Record tool call metrics."""
     try:
         from sdk.telemetry.metrics import get_metrics
+
         m = get_metrics()
         m.tool_calls_total.add(1, {"tool_name": tool_name, "status": status})
         m.tool_duration_seconds.record(duration, {"tool_name": tool_name})

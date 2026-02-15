@@ -10,8 +10,7 @@ class TestAPIKeyAuth:
     def test_api_key_default_dev_key(self, client):
         """Default dev API key should work."""
         resp = client.get(
-            "/api/v1/agents",
-            headers={"X-API-Key": "obscura-dev-key-123"}
+            "/api/v1/agents", headers={"X-API-Key": "obscura-dev-key-123"}
         )
         assert resp.status_code == 200
 
@@ -25,8 +24,7 @@ class TestAPIKeyAuth:
     def test_api_key_invalid(self, client_no_auth_override):
         """Invalid API key should fail."""
         resp = client_no_auth_override.get(
-            "/api/v1/agents",
-            headers={"X-API-Key": "invalid-key"}
+            "/api/v1/agents", headers={"X-API-Key": "invalid-key"}
         )
         assert resp.status_code == 401
 
@@ -35,16 +33,16 @@ class TestAPIKeyAuth:
         resp = client.post(
             "/api/v1/agents",
             headers={"X-API-Key": "obscura-dev-key-123"},
-            json={"name": "api-key-test", "model": "claude"}
+            json={"name": "api-key-test", "model": "claude"},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert "agent_id" in data
-        
+
         # Cleanup
         client.delete(
             f"/api/v1/agents/{data['agent_id']}",
-            headers={"X-API-Key": "obscura-dev-key-123"}
+            headers={"X-API-Key": "obscura-dev-key-123"},
         )
 
     def test_health_no_auth_needed(self, client_no_auth_override):
@@ -67,11 +65,10 @@ class TestAuthBypass:
     def test_spawn_without_auth_when_disabled(self, client):
         """Can spawn agent without auth when disabled."""
         resp = client.post(
-            "/api/v1/agents",
-            json={"name": "no-auth-test", "model": "claude"}
+            "/api/v1/agents", json={"name": "no-auth-test", "model": "claude"}
         )
         assert resp.status_code == 200
         data = resp.json()
-        
+
         # Cleanup
         client.delete(f"/api/v1/agents/{data['agent_id']}")

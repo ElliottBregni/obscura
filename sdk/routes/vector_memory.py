@@ -37,9 +37,12 @@ async def vector_memory_search(
     from datetime import datetime as dt
 
     from sdk.vector_memory import VectorMemoryStore
+
     store = VectorMemoryStore.for_user(user)
 
-    memory_type_list: list[str] | None = memory_types.split(",") if memory_types else None
+    memory_type_list: list[str] | None = (
+        memory_types.split(",") if memory_types else None
+    )
     date_range: tuple[dt, dt] | None = None
     if date_from and date_to:
         date_range = (dt.fromisoformat(date_from), dt.fromisoformat(date_to))
@@ -67,22 +70,24 @@ async def vector_memory_search(
             date_range=date_range,
         )
 
-    return JSONResponse(content={
-        "query": q,
-        "results": [
-            {
-                "namespace": r.key.namespace,
-                "key": r.key.key,
-                "text": r.text,
-                "score": r.score,
-                "final_score": r.final_score,
-                "memory_type": r.memory_type,
-                "metadata": r.metadata,
-            }
-            for r in results
-        ],
-        "count": len(results),
-    })
+    return JSONResponse(
+        content={
+            "query": q,
+            "results": [
+                {
+                    "namespace": r.key.namespace,
+                    "key": r.key.key,
+                    "text": r.text,
+                    "score": r.score,
+                    "final_score": r.final_score,
+                    "memory_type": r.memory_type,
+                    "metadata": r.metadata,
+                }
+                for r in results
+            ],
+            "count": len(results),
+        }
+    )
 
 
 @router.post("/vector-memory/search/routed")
@@ -100,7 +105,9 @@ async def vector_memory_search_routed(
 
     query: str = body["query"]
     route_configs: list[dict[str, Any]] = body.get("routes", [])
-    metadata_filters_body = cast(list[MetadataFilter] | None, body.get("metadata_filters"))
+    metadata_filters_body = cast(
+        list[MetadataFilter] | None, body.get("metadata_filters")
+    )
     routes: list[MemoryTypeQuery] = [
         MemoryTypeQuery(
             memory_type=r["memory_type"],
@@ -120,23 +127,25 @@ async def vector_memory_search_routed(
         metadata_filters=metadata_filters_body,
     )
 
-    return JSONResponse(content={
-        "query": query,
-        "results": [
-            {
-                "namespace": r.key.namespace,
-                "key": r.key.key,
-                "text": r.text,
-                "score": r.score,
-                "final_score": r.final_score,
-                "memory_type": r.memory_type,
-                "metadata": r.metadata,
-            }
-            for r in result.entries
-        ],
-        "sources": result.sources,
-        "count": len(result.entries),
-    })
+    return JSONResponse(
+        content={
+            "query": query,
+            "results": [
+                {
+                    "namespace": r.key.namespace,
+                    "key": r.key.key,
+                    "text": r.text,
+                    "score": r.score,
+                    "final_score": r.final_score,
+                    "memory_type": r.memory_type,
+                    "metadata": r.metadata,
+                }
+                for r in result.entries
+            ],
+            "sources": result.sources,
+            "count": len(result.entries),
+        }
+    )
 
 
 # Catch-all route -- MUST be last to avoid shadowing specific routes above.
@@ -149,10 +158,15 @@ async def vector_memory_set(
 ) -> JSONResponse:
     """Store text with semantic embedding for vector search."""
     from sdk.vector_memory import VectorMemoryStore
+
     store = VectorMemoryStore.for_user(user)
     text: str = body.get("text", "")
     metadata: dict[str, Any] = body.get("metadata", {})
     memory_type: str = body.get("memory_type", "general")
-    store.set(key, text, metadata=metadata, namespace=namespace, memory_type=memory_type)
+    store.set(
+        key, text, metadata=metadata, namespace=namespace, memory_type=memory_type
+    )
     audit("vector_memory.set", user, f"vector:{namespace}:{key}", "write", "success")
-    return JSONResponse(content={"namespace": namespace, "key": key, "stored": True, "type": "vector"})
+    return JSONResponse(
+        content={"namespace": namespace, "key": key, "stored": True, "type": "vector"}
+    )

@@ -1,4 +1,5 @@
 """Tests for sdk.internal.tools — ToolRegistry, @tool decorator, schema inference."""
+
 import pytest
 
 from sdk.internal.tools import ToolRegistry, tool, _infer_schema_from_hints
@@ -8,7 +9,9 @@ from sdk.internal.types import ToolSpec
 class TestToolRegistry:
     def test_register_and_get(self):
         reg = ToolRegistry()
-        spec = ToolSpec(name="t1", description="desc", parameters={}, handler=lambda: None)
+        spec = ToolSpec(
+            name="t1", description="desc", parameters={}, handler=lambda: None
+        )
         reg.register(spec)
         assert reg.get("t1") is spec
 
@@ -18,24 +21,34 @@ class TestToolRegistry:
 
     def test_all(self):
         reg = ToolRegistry()
-        reg.register(ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None))
-        reg.register(ToolSpec(name="t2", description="d2", parameters={}, handler=lambda: None))
+        reg.register(
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+        )
+        reg.register(
+            ToolSpec(name="t2", description="d2", parameters={}, handler=lambda: None)
+        )
         assert len(reg.all()) == 2
 
     def test_names(self):
         reg = ToolRegistry()
-        reg.register(ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None))
+        reg.register(
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+        )
         assert "t1" in reg.names()
 
     def test_len(self):
         reg = ToolRegistry()
         assert len(reg) == 0
-        reg.register(ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None))
+        reg.register(
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+        )
         assert len(reg) == 1
 
     def test_contains(self):
         reg = ToolRegistry()
-        reg.register(ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None))
+        reg.register(
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+        )
         assert "t1" in reg
         assert "t2" not in reg
 
@@ -44,6 +57,7 @@ class TestInferSchema:
     def test_simple_types(self):
         def fn(name: str, count: int, ratio: float, flag: bool):
             pass
+
         schema = _infer_schema_from_hints(fn)
         assert schema["properties"]["name"]["type"] == "string"
         assert schema["properties"]["count"]["type"] == "integer"
@@ -54,6 +68,7 @@ class TestInferSchema:
     def test_optional_params(self):
         def fn(name: str, count: int = 5):
             pass
+
         schema = _infer_schema_from_hints(fn)
         assert "name" in schema["required"]
         assert "count" not in schema["required"]
@@ -61,6 +76,7 @@ class TestInferSchema:
     def test_no_hints(self):
         def fn(x, y):
             pass
+
         schema = _infer_schema_from_hints(fn)
         assert schema["properties"]["x"]["type"] == "string"
         assert schema["properties"]["y"]["type"] == "string"
@@ -68,7 +84,11 @@ class TestInferSchema:
 
 class TestToolDecorator:
     def test_explicit_schema(self):
-        @tool("read_file", "Read a file", {"type": "object", "properties": {"path": {"type": "string"}}})
+        @tool(
+            "read_file",
+            "Read a file",
+            {"type": "object", "properties": {"path": {"type": "string"}}},
+        )
         def read_file(path: str) -> str:
             return f"content of {path}"
 
@@ -114,4 +134,6 @@ class TestToolDecorator:
             return ""
 
         assert "path" in read.spec.parameters["properties"]
+
+
 # pyright: ignore-all

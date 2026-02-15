@@ -81,7 +81,9 @@ class TestFileClassification:
         fp = vault_root / "skills" / "skills.copilot" / "python.md"
         cls, dest = sync_instance.classify_file(fp, vault_root, "copilot")
         assert cls == "AGENT_DIR", f"Expected AGENT_DIR, got {cls}"
-        assert dest == Path("skills/python.md"), f"Expected skills/python.md, got {dest}"
+        assert dest == Path("skills/python.md"), (
+            f"Expected skills/python.md, got {dest}"
+        )
 
     def test_classify_vault_agent_dir_different_name(
         self, sync_instance: VaultSync, vault_root: Path
@@ -94,8 +96,9 @@ class TestFileClassification:
 
         cls, dest = sync_instance.classify_file(fp, vault_root, "copilot")
         assert cls == "AGENT_DIR", f"Expected AGENT_DIR, got {cls}"
-        assert dest == Path("instructions/setup/x.md"), \
+        assert dest == Path("instructions/setup/x.md"), (
             f"Expected instructions/setup/x.md, got {dest}"
+        )
 
     def test_classify_vault_agent_dir_skip(
         self, sync_instance: VaultSync, vault_root: Path

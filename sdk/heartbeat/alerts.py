@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class AlertRule:
     """
     Rule for triggering alerts based on health status.
-    
+
     Attributes:
         name: Rule identifier
         condition: Function that evaluates if alert should fire
@@ -33,12 +33,13 @@ class AlertRule:
         cooldown: Minimum seconds between repeated alerts for same agent
         channels: Channel names to send alerts to
     """
+
     name: str
     condition: Callable[..., Any] = field(compare=False)
     severity: HealthStatus = HealthStatus.WARNING
     cooldown: int = 300  # 5 minutes
     channels: list[str] = field(default_factory=lambda: ["default"])
-    
+
     def should_alert(self, record: HealthRecord) -> bool:
         """Check if this rule should trigger an alert."""
         if record.computed_status.value not in ("warning", "critical"):
@@ -48,14 +49,14 @@ class AlertRule:
 
 class AlertChannel(ABC):
     """Abstract base class for alert channels."""
-    
+
     name: str = "unknown"
-    
+
     @abstractmethod
     async def send(self, alert: Alert) -> bool:
         """Send an alert through this channel. Returns success status."""
         pass
-    
+
     @abstractmethod
     async def test(self) -> bool:
         """Test the channel configuration."""
@@ -86,12 +87,12 @@ class LoggingAlertChannel(AlertChannel):
 class WebhookAlertChannel(AlertChannel):
     """
     Alert channel that sends alerts via HTTP webhook.
-    
+
     Supports POST requests with JSON payloads.
     """
-    
+
     name = "webhook"
-    
+
     def __init__(
         self,
         webhook_url: str,
@@ -105,7 +106,7 @@ class WebhookAlertChannel(AlertChannel):
         self.timeout = timeout
         self.retries = retries
         self.secret = secret
-    
+
     @override
     async def send(self, alert: Alert) -> bool:
         """Send alert via webhook POST request."""
@@ -118,19 +119,18 @@ class WebhookAlertChannel(AlertChannel):
             "timestamp": alert.timestamp.isoformat(),
             "acknowledged": alert.acknowledged,
         }
-        
+
         headers = dict(self.headers)
         if self.secret:
             import hmac
             import hashlib
+
             payload_str = json.dumps(payload, sort_keys=True)
             signature = hmac.new(
-                self.secret.encode(),
-                payload_str.encode(),
-                hashlib.sha256
+                self.secret.encode(), payload_str.encode(), hashlib.sha256
             ).hexdigest()
             headers["X-Webhook-Signature"] = f"sha256={signature}"
-        
+
         for attempt in range(self.retries):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -147,13 +147,17 @@ class WebhookAlertChannel(AlertChannel):
                             f"Webhook returned {response.status_code}: {response.text}"
                         )
             except httpx.TimeoutException:
-                logger.warning(f"Webhook timeout (attempt {attempt + 1}/{self.retries})")
+                logger.warning(
+                    f"Webhook timeout (attempt {attempt + 1}/{self.retries})"
+                )
             except Exception as e:
-                logger.warning(f"Webhook error (attempt {attempt + 1}/{self.retries}): {e}")
-        
+                logger.warning(
+                    f"Webhook error (attempt {attempt + 1}/{self.retries}): {e}"
+                )
+
         logger.error(f"Failed to send alert to webhook after {self.retries} attempts")
         return False
-    
+
     @override
     async def test(self) -> bool:
         """Test the webhook with a ping message."""
@@ -172,9 +176,9 @@ class WebhookAlertChannel(AlertChannel):
 
 class SlackAlertChannel(AlertChannel):
     """Alert channel that sends alerts to Slack."""
-    
+
     name = "slack"
-    
+
     def __init__(
         self,
         webhook_url: str,
@@ -187,16 +191,16 @@ class SlackAlertChannel(AlertChannel):
         self.username = username
         self.emoji = emoji
         self._http = WebhookAlertChannel(webhook_url)
-    
+
     @override
     async def send(self, alert: Alert) -> bool:
         """Send alert to Slack webhook."""
         # Format message based on severity
         color = {
             HealthStatus.WARNING: "warning",  # yellow
-            HealthStatus.CRITICAL: "danger",   # red
+            HealthStatus.CRITICAL: "danger",  # red
         }.get(alert.severity, "#808080")
-        
+
         attachment = {
             "color": color,
             "title": f"Health Alert: {alert.agent_id}",
@@ -204,21 +208,25 @@ class SlackAlertChannel(AlertChannel):
             "fields": [
                 {"title": "Status", "value": alert.status.value, "short": True},
                 {"title": "Severity", "value": alert.severity.value, "short": True},
-                {"title": "Time", "value": alert.timestamp.strftime("%Y-%m-%d %H:%M:%S"), "short": True},
+                {
+                    "title": "Time",
+                    "value": alert.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "short": True,
+                },
             ],
             "footer": "Obscura Heartbeat",
             "ts": int(alert.timestamp.timestamp()),
         }
-        
+
         payload: dict[str, Any] = {
             "username": self.username,
             "icon_emoji": self.emoji,
             "attachments": [attachment],
         }
-        
+
         if self.channel:
             payload["channel"] = self.channel
-        
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -229,7 +237,7 @@ class SlackAlertChannel(AlertChannel):
         except Exception as e:
             logger.warning(f"Slack alert failed: {e}")
             return False
-    
+
     @override
     async def test(self) -> bool:
         """Test the Slack webhook."""
@@ -255,40 +263,40 @@ class SlackAlertChannel(AlertChannel):
 class AlertManager:
     """
     Manages health alerts and routing to channels.
-    
+
     Supports multiple alert channels and rules-based routing.
     """
-    
+
     def __init__(self) -> None:
         self._channels: dict[str, AlertChannel] = {}
         self._rules: list[AlertRule] = []
         self._alerts: list[Alert] = []
         self._last_alert_time: dict[str, datetime] = {}  # agent_id -> last alert time
-        
+
         # Add default logging channel
         self.add_channel("default", LoggingAlertChannel())
-    
+
     def add_channel(self, name: str, channel: AlertChannel) -> None:
         """Add an alert channel."""
         self._channels[name] = channel
         logger.debug(f"Added alert channel: {name} ({channel.name})")
-    
+
     def remove_channel(self, name: str) -> bool:
         """Remove an alert channel."""
         if name in self._channels:
             del self._channels[name]
             return True
         return False
-    
+
     def get_channel(self, name: str) -> Optional[AlertChannel]:
         """Get an alert channel by name."""
         return self._channels.get(name)
-    
+
     def add_rule(self, rule: AlertRule) -> None:
         """Add an alert rule."""
         self._rules.append(rule)
         logger.debug(f"Added alert rule: {rule.name}")
-    
+
     def remove_rule(self, name: str) -> bool:
         """Remove an alert rule by name."""
         for i, rule in enumerate(self._rules):
@@ -296,7 +304,7 @@ class AlertManager:
                 self._rules.pop(i)
                 return True
         return False
-    
+
     def create_alert(
         self,
         agent_id: str,
@@ -315,7 +323,7 @@ class AlertManager:
         )
         self._alerts.append(alert)
         return alert
-    
+
     async def trigger(
         self,
         record: HealthRecord,
@@ -323,12 +331,12 @@ class AlertManager:
     ) -> list[Alert]:
         """
         Trigger alerts for a health record.
-        
+
         Evaluates rules and sends alerts through appropriate channels.
         """
         triggered: list[Alert] = []
         agent_id = record.agent_id
-        
+
         # Check cooldown
         now = datetime.now()
         if agent_id in self._last_alert_time:
@@ -337,18 +345,20 @@ class AlertManager:
                 if (now - last_time).total_seconds() < rule.cooldown:
                     logger.debug(f"Alert cooldown active for {agent_id}")
                     continue
-        
+
         # Evaluate rules
         for rule in self._rules:
             if rule.should_alert(record):
-                alert_message = message or f"Agent {agent_id} is {record.computed_status.value}"
+                alert_message = (
+                    message or f"Agent {agent_id} is {record.computed_status.value}"
+                )
                 alert = self.create_alert(
                     agent_id=agent_id,
                     severity=rule.severity,
                     status=record.computed_status,
                     message=alert_message,
                 )
-                
+
                 # Send to configured channels
                 for channel_name in rule.channels:
                     channel = self._channels.get(channel_name)
@@ -360,10 +370,15 @@ class AlertManager:
                             record.alert_count += 1
                     else:
                         logger.warning(f"Alert channel not found: {channel_name}")
-        
+
         # Always send to default channel if no rules matched but status is bad
-        if not triggered and record.computed_status in (HealthStatus.WARNING, HealthStatus.CRITICAL):
-            alert_message = message or f"Agent {agent_id} is {record.computed_status.value}"
+        if not triggered and record.computed_status in (
+            HealthStatus.WARNING,
+            HealthStatus.CRITICAL,
+        ):
+            alert_message = (
+                message or f"Agent {agent_id} is {record.computed_status.value}"
+            )
             alert = self.create_alert(
                 agent_id=agent_id,
                 severity=record.computed_status,
@@ -377,9 +392,9 @@ class AlertManager:
                     triggered.append(alert)
                     self._last_alert_time[agent_id] = now
                     record.alert_count += 1
-        
+
         return triggered
-    
+
     async def acknowledge_alert(
         self,
         alert_id: str,
@@ -393,7 +408,7 @@ class AlertManager:
                 alert.acknowledged_at = datetime.now()
                 return alert
         return None
-    
+
     def get_alerts(
         self,
         agent_id: Optional[str] = None,
@@ -402,24 +417,24 @@ class AlertManager:
     ) -> list[Alert]:
         """Get alerts with optional filtering."""
         alerts = self._alerts
-        
+
         if agent_id:
             alerts = [a for a in alerts if a.agent_id == agent_id]
-        
+
         if acknowledged is not None:
             alerts = [a for a in alerts if a.acknowledged == acknowledged]
-        
+
         # Sort by timestamp (newest first) and limit
         alerts = sorted(alerts, key=lambda a: a.timestamp, reverse=True)[:limit]
         return alerts
-    
+
     async def test_channel(self, name: str) -> bool:
         """Test an alert channel."""
         channel = self._channels.get(name)
         if channel:
             return await channel.test()
         return False
-    
+
     async def test_all_channels(self) -> dict[str, bool]:
         """Test all alert channels."""
         results: dict[str, bool] = {}

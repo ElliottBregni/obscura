@@ -39,7 +39,9 @@ def runtime(test_user: AuthenticatedUser) -> AgentRuntime:
     return AgentRuntime(user=test_user)
 
 
-def _make_agent(runtime: AgentRuntime, name: str = "test-agent", **kwargs: Any) -> Agent:
+def _make_agent(
+    runtime: AgentRuntime, name: str = "test-agent", **kwargs: Any
+) -> Agent:
     """Helper to spawn an agent with heartbeat disabled."""
     with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
         return runtime.spawn(name, model="claude", **kwargs)
@@ -90,7 +92,9 @@ class TestMCPConfig:
 
 class TestAgentRuntime:
     @pytest.mark.asyncio
-    async def test_spawn_agent(self, runtime: AgentRuntime, test_user: AuthenticatedUser) -> None:
+    async def test_spawn_agent(
+        self, runtime: AgentRuntime, test_user: AuthenticatedUser
+    ) -> None:
         await runtime.start()
         agent = _make_agent(runtime)
 
@@ -469,7 +473,9 @@ class TestAgentRun:
         assert isinstance(agent.error, ValueError)
 
     @pytest.mark.asyncio
-    async def test_run_stores_task_and_result_in_memory(self, runtime: AgentRuntime) -> None:
+    async def test_run_stores_task_and_result_in_memory(
+        self, runtime: AgentRuntime
+    ) -> None:
         """Cover lines 198-230: memory set calls during run()."""
         agent = _make_agent(runtime, "mem-test")
 
@@ -755,7 +761,9 @@ class TestAgentStatePersistence:
         agent.refresh_state()
 
         # Check memory has the state
-        state_data = agent.memory.get(f"agent_state_{agent.id}", namespace="agent:runtime")
+        state_data = agent.memory.get(
+            f"agent_state_{agent.id}", namespace="agent:runtime"
+        )
         assert state_data is not None
         assert state_data["name"] == "state-test"
         assert state_data["status"] == "PENDING"
@@ -800,9 +808,7 @@ class TestAgentPromptBuilding:
         agent.memory.set("context", {"repo": "test"}, namespace="default:tasks")
 
         prompt = agent.build_prompt(
-            "do something",
-            {"memory:1": {"data": "value"}},
-            {"extra": "context"}
+            "do something", {"memory:1": {"data": "value"}}, {"extra": "context"}
         )
 
         assert "do something" in prompt
@@ -833,9 +839,7 @@ class TestAgentMemoryIntegration:
 
         # Manually store task (normally done in run())
         agent.memory.set(
-            "task_0",
-            {"prompt": "test task", "context": {}},
-            namespace="default:tasks"
+            "task_0", {"prompt": "test task", "context": {}}, namespace="default:tasks"
         )
 
         # Verify stored
@@ -848,9 +852,7 @@ class TestAgentMemoryIntegration:
         # Store some tasks
         for i in range(3):
             agent.memory.set(
-                f"task_{i}",
-                {"prompt": f"task {i}"},
-                namespace="default:tasks"
+                f"task_{i}", {"prompt": f"task {i}"}, namespace="default:tasks"
             )
 
         memory = agent.load_relevant_memory("test prompt")
@@ -858,7 +860,9 @@ class TestAgentMemoryIntegration:
         # Should have loaded tasks (up to 5)
         assert len(memory) > 0
 
-    def test_load_relevant_memory_with_search_fallback(self, runtime: AgentRuntime) -> None:
+    def test_load_relevant_memory_with_search_fallback(
+        self, runtime: AgentRuntime
+    ) -> None:
         """Cover lines 459-462: fallback text search when no semantic results."""
         agent = _make_agent(runtime, "search-fallback")
 
@@ -925,9 +929,7 @@ class TestAgentStop:
         """Cover lines 580-583: RuntimeError with 'cancel scope' is swallowed."""
         agent = _make_agent(runtime, "stop-cancel")
         mock_client = AsyncMock()
-        mock_client.stop = AsyncMock(
-            side_effect=RuntimeError("cancel scope blah")
-        )
+        mock_client.stop = AsyncMock(side_effect=RuntimeError("cancel scope blah"))
         agent.client = mock_client
 
         # Should not raise
@@ -939,9 +941,7 @@ class TestAgentStop:
         """Cover lines 580-583: non-cancel-scope RuntimeError is re-raised."""
         agent = _make_agent(runtime, "stop-reraise")
         mock_client = AsyncMock()
-        mock_client.stop = AsyncMock(
-            side_effect=RuntimeError("some other error")
-        )
+        mock_client.stop = AsyncMock(side_effect=RuntimeError("some other error"))
         agent.client = mock_client
 
         with pytest.raises(RuntimeError, match="some other error"):
@@ -1028,7 +1028,9 @@ class TestAgentStop:
 
 class TestAgentMessages:
     @pytest.mark.asyncio
-    async def test_receive_messages_yields_and_stops(self, runtime: AgentRuntime) -> None:
+    async def test_receive_messages_yields_and_stops(
+        self, runtime: AgentRuntime
+    ) -> None:
         """Cover lines 506-515: receive_messages iterator."""
         agent = _make_agent(runtime, "recv-test")
 
@@ -1050,7 +1052,9 @@ class TestAgentMessages:
         assert messages[0].content == "hello agent"
 
     @pytest.mark.asyncio
-    async def test_receive_messages_stops_on_failed(self, runtime: AgentRuntime) -> None:
+    async def test_receive_messages_stops_on_failed(
+        self, runtime: AgentRuntime
+    ) -> None:
         """Cover line 514: stops when status is FAILED."""
         agent = _make_agent(runtime, "recv-fail")
         agent.status = AgentStatus.FAILED
@@ -1062,7 +1066,9 @@ class TestAgentMessages:
         assert len(messages) == 0
 
     @pytest.mark.asyncio
-    async def test_receive_messages_stops_on_stopped(self, runtime: AgentRuntime) -> None:
+    async def test_receive_messages_stops_on_stopped(
+        self, runtime: AgentRuntime
+    ) -> None:
         """Cover line 514: stops when status is STOPPED."""
         agent = _make_agent(runtime, "recv-stop")
         agent.status = AgentStatus.STOPPED

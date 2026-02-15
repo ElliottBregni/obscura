@@ -20,6 +20,7 @@ from sdk.internal.types import (
 # Backend enum
 # ---------------------------------------------------------------------------
 
+
 class TestBackend:
     def test_values(self) -> None:
         assert Backend.COPILOT.value == "copilot"
@@ -33,6 +34,7 @@ class TestBackend:
 # ---------------------------------------------------------------------------
 # ContentBlock
 # ---------------------------------------------------------------------------
+
 
 class TestContentBlock:
     def test_frozen(self) -> None:
@@ -55,6 +57,7 @@ class TestContentBlock:
 # ---------------------------------------------------------------------------
 # Message
 # ---------------------------------------------------------------------------
+
 
 class TestMessage:
     def test_text_property_concatenates(self) -> None:
@@ -94,6 +97,7 @@ class TestMessage:
 # StreamChunk
 # ---------------------------------------------------------------------------
 
+
 class TestStreamChunk:
     def test_text_delta(self) -> None:
         chunk = StreamChunk(kind=ChunkKind.TEXT_DELTA, text="hello")
@@ -112,6 +116,7 @@ class TestStreamChunk:
 # ---------------------------------------------------------------------------
 # ToolSpec
 # ---------------------------------------------------------------------------
+
 
 class TestToolSpec:
     def test_creation(self) -> None:
@@ -141,6 +146,7 @@ class TestToolSpec:
 # SessionRef
 # ---------------------------------------------------------------------------
 
+
 class TestSessionRef:
     def test_creation(self) -> None:
         ref = SessionRef(session_id="abc-123", backend=Backend.CLAUDE)
@@ -152,6 +158,7 @@ class TestSessionRef:
 # ---------------------------------------------------------------------------
 # HookContext
 # ---------------------------------------------------------------------------
+
 
 class TestHookContext:
     def test_defaults(self) -> None:

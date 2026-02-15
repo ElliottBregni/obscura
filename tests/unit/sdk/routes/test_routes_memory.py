@@ -1,4 +1,5 @@
 """Tests for sdk.routes.memory — Memory CRUD endpoints."""
+
 import pytest
 from starlette.testclient import TestClient
 from sdk.config import ObscuraConfig
@@ -8,6 +9,7 @@ from sdk.config import ObscuraConfig
 def app():
     config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
     from sdk.server import create_app
+
     return create_app(config)
 
 
@@ -45,10 +47,13 @@ class TestMemoryNamespaces:
         assert resp.status_code == 200
 
     def test_create_namespace(self, client):
-        resp = client.post("/api/v1/memory/namespaces", json={
-            "name": "my-ns",
-            "description": "A test namespace",
-        })
+        resp = client.post(
+            "/api/v1/memory/namespaces",
+            json={
+                "name": "my-ns",
+                "description": "A test namespace",
+            },
+        )
         assert resp.status_code == 200
 
 
@@ -69,15 +74,21 @@ class TestMemoryBulk:
         assert resp.status_code == 200
 
     def test_import(self, client):
-        resp = client.post("/api/v1/memory/import", json={
-            "data": {"import-ns": {"k1": "v1"}},
-        })
+        resp = client.post(
+            "/api/v1/memory/import",
+            json={
+                "data": {"import-ns": {"k1": "v1"}},
+            },
+        )
         assert resp.status_code == 200
 
     def test_transaction(self, client):
-        resp = client.post("/api/v1/memory/transaction", json={
-            "operations": [
-                {"op": "set", "namespace": "tx-ns", "key": "tk1", "value": "tv1"},
-            ]
-        })
+        resp = client.post(
+            "/api/v1/memory/transaction",
+            json={
+                "operations": [
+                    {"op": "set", "namespace": "tx-ns", "key": "tk1", "value": "tv1"},
+                ]
+            },
+        )
         assert resp.status_code == 200

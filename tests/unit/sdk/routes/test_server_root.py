@@ -37,14 +37,19 @@ def _make_app(*, auth_enabled: bool = False, otel_enabled: bool = False) -> Any:
     """Create a FastAPI app with auth/otel disabled for testing."""
     config = ObscuraConfig.from_env()
     # Override config for test
-    object.__setattr__(config, "auth_enabled", auth_enabled) if hasattr(config, "__dataclass_fields__") else setattr(config, "auth_enabled", auth_enabled)
-    object.__setattr__(config, "otel_enabled", otel_enabled) if hasattr(config, "__dataclass_fields__") else setattr(config, "otel_enabled", otel_enabled)
+    object.__setattr__(config, "auth_enabled", auth_enabled) if hasattr(
+        config, "__dataclass_fields__"
+    ) else setattr(config, "auth_enabled", auth_enabled)
+    object.__setattr__(config, "otel_enabled", otel_enabled) if hasattr(
+        config, "__dataclass_fields__"
+    ) else setattr(config, "otel_enabled", otel_enabled)
     return create_app(config)
 
 
 # ---------------------------------------------------------------------------
 # Health / Ready
 # ---------------------------------------------------------------------------
+
 
 class TestHealthEndpoints:
     def test_health_returns_200(self) -> None:
@@ -74,6 +79,7 @@ class TestHealthEndpoints:
 # POST /api/v1/send
 # ---------------------------------------------------------------------------
 
+
 class TestSendEndpoint:
     @patch("sdk.deps.ClientFactory.create")
     def test_send_success(self, mock_create: AsyncMock) -> None:
@@ -93,7 +99,10 @@ class TestSendEndpoint:
         with patch("sdk.auth.rbac.require_any_role", return_value=lambda: _TEST_USER):
             # Override the dependency
             from sdk.auth.rbac import require_any_role
-            app.dependency_overrides[require_any_role("agent:copilot", "agent:claude", "agent:read")] = lambda: _TEST_USER
+
+            app.dependency_overrides[
+                require_any_role("agent:copilot", "agent:claude", "agent:read")
+            ] = lambda: _TEST_USER
 
             resp = client.post(
                 "/api/v1/send",
@@ -107,6 +116,7 @@ class TestSendEndpoint:
     def test_send_empty_prompt_rejected(self, mock_create: AsyncMock) -> None:
         """Empty prompt should fail validation (min_length=1)."""
         from sdk.auth.rbac import get_current_user
+
         app = _make_app()
         # Override auth dependency to bypass auth
         app.dependency_overrides[get_current_user] = lambda: _TEST_USER
@@ -122,6 +132,7 @@ class TestSendEndpoint:
 # POST /api/v1/stream
 # ---------------------------------------------------------------------------
 
+
 class TestStreamEndpoint:
     def test_stream_endpoint_exists(self) -> None:
         """Stream endpoint should be registered."""
@@ -133,6 +144,7 @@ class TestStreamEndpoint:
 # ---------------------------------------------------------------------------
 # Session endpoints
 # ---------------------------------------------------------------------------
+
 
 class TestSessionEndpoints:
     def test_sessions_routes_exist(self) -> None:
@@ -147,6 +159,7 @@ class TestSessionEndpoints:
 # POST /api/v1/sync
 # ---------------------------------------------------------------------------
 
+
 class TestSyncEndpoint:
     def test_sync_route_exists(self) -> None:
         """Sync route should be registered."""
@@ -159,10 +172,12 @@ class TestSyncEndpoint:
 # App factory
 # ---------------------------------------------------------------------------
 
+
 class TestAppFactory:
     def test_create_app_returns_fastapi(self) -> None:
         """create_app() should return a FastAPI instance."""
         from fastapi import FastAPI
+
         app = _make_app()
         assert isinstance(app, FastAPI)
 
@@ -185,6 +200,7 @@ class TestAppFactory:
     def test_create_app_stores_client_factory_on_state(self) -> None:
         """ClientFactory should be stored on app.state."""
         from sdk.deps import ClientFactory
+
         app = _make_app()
         assert isinstance(app.state.client_factory, ClientFactory)
 
@@ -198,7 +214,9 @@ class TestAppFactory:
         app = _make_app()
         assert app.state._health_ws_clients == []
 
-    def test_create_app_default_config_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_create_app_default_config_from_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """When config=None, create_app should build config from environment."""
         monkeypatch.setenv("OBSCURA_AUTH_ENABLED", "false")
         monkeypatch.setenv("OTEL_ENABLED", "false")
@@ -210,6 +228,7 @@ class TestAppFactory:
 # ---------------------------------------------------------------------------
 # OTel middleware conditional (lines 110-115)
 # ---------------------------------------------------------------------------
+
 
 class TestOtelMiddlewareConditional:
     def test_otel_middleware_skipped_when_disabled(self) -> None:
@@ -237,6 +256,7 @@ class TestOtelMiddlewareConditional:
 # Auth middleware conditional (from server.py lines 117-125)
 # ---------------------------------------------------------------------------
 
+
 class TestAuthMiddlewareConditional:
     def test_auth_middleware_skipped_when_disabled(self) -> None:
         """When auth_enabled=False, no jwks_cache should be on state."""
@@ -246,6 +266,7 @@ class TestAuthMiddlewareConditional:
     def test_auth_middleware_adds_jwks_cache_when_enabled(self) -> None:
         """When auth_enabled=True, jwks_cache should be on app.state."""
         from sdk.auth.middleware import JWKSCache
+
         app = _make_app(auth_enabled=True)
         assert hasattr(app.state, "jwks_cache")
         assert isinstance(app.state.jwks_cache, JWKSCache)
@@ -254,6 +275,7 @@ class TestAuthMiddlewareConditional:
 # ---------------------------------------------------------------------------
 # Global exception handler (lines 142-148)
 # ---------------------------------------------------------------------------
+
 
 class TestGlobalExceptionHandler:
     def test_unhandled_exception_returns_500_json(self) -> None:
@@ -288,6 +310,7 @@ class TestGlobalExceptionHandler:
 # MCP routes (lines 152-159)
 # ---------------------------------------------------------------------------
 
+
 class TestMCPRoutesMounting:
     def test_app_works_without_mcp_module(self) -> None:
         """App should be created even if MCP module fails to import."""
@@ -305,6 +328,7 @@ class TestMCPRoutesMounting:
 # ---------------------------------------------------------------------------
 # Route mounting (lines 163-167)
 # ---------------------------------------------------------------------------
+
 
 class TestAllRoutersMounting:
     def test_all_expected_routes_are_mounted(self) -> None:
@@ -326,6 +350,7 @@ class TestAllRoutersMounting:
 # ---------------------------------------------------------------------------
 # Lifespan (lines 39-80)
 # ---------------------------------------------------------------------------
+
 
 class TestLifespan:
     async def test_lifespan_startup_and_shutdown(self) -> None:
@@ -386,7 +411,10 @@ class TestLifespan:
         # Heartbeat import may fail in test env, which is fine
         async with lifespan(app):
             # _heartbeat_monitor is None when start fails
-            assert app.state._heartbeat_monitor is None or app.state._heartbeat_monitor is not None
+            assert (
+                app.state._heartbeat_monitor is None
+                or app.state._heartbeat_monitor is not None
+            )
 
     async def test_lifespan_heartbeat_stop_on_shutdown(self) -> None:
         """Lifespan should call stop() on the heartbeat monitor at shutdown."""

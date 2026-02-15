@@ -1,4 +1,5 @@
 """Tests for sdk.heartbeat.store — InMemoryHeartbeatStore and FileHeartbeatStore."""
+
 import asyncio
 import pytest
 import json
@@ -147,7 +148,9 @@ class TestInMemoryHeartbeatStore:
     @pytest.mark.asyncio
     async def test_unregister_with_heartbeat(self):
         store = InMemoryHeartbeatStore()
-        hb = Heartbeat(agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY)
+        hb = Heartbeat(
+            agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY
+        )
         await store.save(hb)
         await store.unregister("a1")
         assert await store.get_last("a1") is None
@@ -169,7 +172,9 @@ class TestFileHeartbeatStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             store = FileHeartbeatStore(path)
-            hb = Heartbeat(agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY)
+            hb = Heartbeat(
+                agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY
+            )
             await store.save(hb)
             data = json.loads(path.read_text())
             assert len(data["heartbeats"]) == 1
@@ -179,24 +184,28 @@ class TestFileHeartbeatStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             data: dict[str, list[dict[str, object]]] = {
-                "records": [{
-                    "agent_id": "a1",
-                    "expected_interval": 30,
-                    "missed_count": 0,
-                    "registered_at": datetime.now().isoformat(),
-                    "last_updated": datetime.now().isoformat(),
-                    "computed_status": "healthy",
-                    "alert_count": 0,
-                }],
-                "heartbeats": [{
-                    "agent_id": "a1",
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "healthy",
-                    "metrics": {},
-                    "ttl": 30,
-                    "version": "0.1.0",
-                    "tags": [],
-                }],
+                "records": [
+                    {
+                        "agent_id": "a1",
+                        "expected_interval": 30,
+                        "missed_count": 0,
+                        "registered_at": datetime.now().isoformat(),
+                        "last_updated": datetime.now().isoformat(),
+                        "computed_status": "healthy",
+                        "alert_count": 0,
+                    }
+                ],
+                "heartbeats": [
+                    {
+                        "agent_id": "a1",
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "healthy",
+                        "metrics": {},
+                        "ttl": 30,
+                        "version": "0.1.0",
+                        "tags": [],
+                    }
+                ],
             }
             path.write_text(json.dumps(data))
 

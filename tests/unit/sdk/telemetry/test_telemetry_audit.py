@@ -24,6 +24,7 @@ from sdk.telemetry.audit import (
 # AuditEvent dataclass
 # ---------------------------------------------------------------------------
 
+
 class TestAuditEvent:
     def test_default_timestamp(self) -> None:
         """Timestamp should be auto-populated if not provided."""
@@ -108,6 +109,7 @@ class TestAuditEvent:
 # Audit log path
 # ---------------------------------------------------------------------------
 
+
 class TestAuditLogPath:
     def test_default_path(self) -> None:
         """Default should be 'audit.jsonl' or OBSCURA_AUDIT_LOG env var."""
@@ -122,12 +124,15 @@ class TestAuditLogPath:
         # Reset
         set_audit_log_path(Path("audit.jsonl"))
 
-    def test_env_var_override(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_env_var_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """OBSCURA_AUDIT_LOG env var should override default."""
         custom = str(tmp_path / "env-audit.jsonl")
         monkeypatch.setenv("OBSCURA_AUDIT_LOG", custom)
         # Reset internal state
         import sdk.telemetry.audit as mod
+
         mod.reset_audit_log_path()
         try:
             path = get_audit_log_path()
@@ -139,6 +144,7 @@ class TestAuditLogPath:
 # ---------------------------------------------------------------------------
 # emit_audit_event — file output
 # ---------------------------------------------------------------------------
+
 
 class TestEmitAuditEvent:
     def test_writes_jsonl(self, tmp_path: Path) -> None:
@@ -180,14 +186,16 @@ class TestEmitAuditEvent:
 
         try:
             for i in range(3):
-                emit_audit_event(AuditEvent(
-                    event_type=f"test.event_{i}",
-                    user_id="u",
-                    user_email="e",
-                    resource="r",
-                    action="a",
-                    outcome="o",
-                ))
+                emit_audit_event(
+                    AuditEvent(
+                        event_type=f"test.event_{i}",
+                        user_id="u",
+                        user_email="e",
+                        resource="r",
+                        action="a",
+                        outcome="o",
+                    )
+                )
 
             lines = log_file.read_text().strip().split("\n")
             assert len(lines) == 3
@@ -204,14 +212,16 @@ class TestEmitAuditEvent:
         set_audit_log_path(log_file)
 
         try:
-            emit_audit_event(AuditEvent(
-                event_type="test",
-                user_id="u",
-                user_email="e",
-                resource="r",
-                action="a",
-                outcome="o",
-            ))
+            emit_audit_event(
+                AuditEvent(
+                    event_type="test",
+                    user_id="u",
+                    user_email="e",
+                    resource="r",
+                    action="a",
+                    outcome="o",
+                )
+            )
 
             assert log_file.exists()
         finally:
@@ -224,15 +234,17 @@ class TestEmitAuditEvent:
 
         try:
             for _ in range(5):
-                emit_audit_event(AuditEvent(
-                    event_type="test",
-                    user_id="u",
-                    user_email="e",
-                    resource="r",
-                    action="a",
-                    outcome="o",
-                    details={"key": "value", "nested": {"a": 1}},
-                ))
+                emit_audit_event(
+                    AuditEvent(
+                        event_type="test",
+                        user_id="u",
+                        user_email="e",
+                        resource="r",
+                        action="a",
+                        outcome="o",
+                        details={"key": "value", "nested": {"a": 1}},
+                    )
+                )
 
             for line in log_file.read_text().strip().split("\n"):
                 record = json.loads(line)

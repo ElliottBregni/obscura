@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 try:
     from starlette.middleware.base import BaseHTTPMiddleware
+
     _has_starlette = True
 except ImportError:
     BaseHTTPMiddleware = Any
@@ -31,11 +32,14 @@ except ImportError:
     Response = Any
     _has_starlette = False
 
+
 class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
     """ASGI middleware that enriches OTel spans with user identity and request IDs."""
 
     async def dispatch(
-        self, request: Any, call_next: Callable[..., Any],
+        self,
+        request: Any,
+        call_next: Callable[..., Any],
     ) -> Any:
         if not _has_starlette:
             raise ImportError("Starlette is required for ObscuraTelemetryMiddleware")
@@ -64,6 +68,7 @@ class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def enrich_request_span(request: Any, request_id: str) -> None:
     """Add user identity and request metadata to the active OTel span."""
     try:
@@ -78,6 +83,7 @@ def enrich_request_span(request: Any, request_id: str) -> None:
         user = getattr(getattr(request, "state", None), "user", None)
         if user is not None:
             from sdk.telemetry.context import enrich_span_with_user
+
             enrich_span_with_user(span, user)
 
     except (ImportError, AttributeError):

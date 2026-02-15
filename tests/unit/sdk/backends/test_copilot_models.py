@@ -24,12 +24,10 @@ __all__ += [
 ]
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # resolve
 # ---------------------------------------------------------------------------
+
 
 class TestResolve:
     def test_known_alias(self):
@@ -57,6 +55,7 @@ class TestResolve:
 # get_model_id
 # ---------------------------------------------------------------------------
 
+
 class TestGetModelId:
     def test_returns_string(self):
         model_id = get_model_id("copilot_automation_safe")
@@ -71,6 +70,7 @@ class TestGetModelId:
 # ---------------------------------------------------------------------------
 # require_automation_safe
 # ---------------------------------------------------------------------------
+
 
 class TestRequireAutomationSafe:
     def test_automation_alias_passes(self):
@@ -89,6 +89,7 @@ class TestRequireAutomationSafe:
 # ---------------------------------------------------------------------------
 # guard_automation
 # ---------------------------------------------------------------------------
+
 
 class TestGuardAutomation:
     def test_returns_model_id_for_safe_alias(self):
@@ -112,9 +113,12 @@ class TestGuardAutomation:
 # Environment overrides
 # ---------------------------------------------------------------------------
 
+
 class TestEnvOverride:
     def test_env_override_automation_safe_model(self):
-        with patch.dict(os.environ, {"COPILOT_MODEL_COPILOT_BATCH_DIAGRAMMER": "gpt-4o-mini"}):
+        with patch.dict(
+            os.environ, {"COPILOT_MODEL_COPILOT_BATCH_DIAGRAMMER": "gpt-4o-mini"}
+        ):
             config = resolve("copilot_batch_diagrammer")
             assert config.model_id == "gpt-4o-mini"
 
@@ -134,6 +138,7 @@ class TestEnvOverride:
 # ---------------------------------------------------------------------------
 # list_aliases
 # ---------------------------------------------------------------------------
+
 
 class TestListAliases:
     def test_returns_dict(self):
@@ -158,6 +163,7 @@ class TestListAliases:
 # ModelConfig
 # ---------------------------------------------------------------------------
 
+
 class TestModelConfig:
     def test_frozen(self):
         config = resolve("copilot_batch_diagrammer")
@@ -177,6 +183,7 @@ class TestModelConfig:
 # ---------------------------------------------------------------------------
 # Registry invariants
 # ---------------------------------------------------------------------------
+
 
 class TestRegistryInvariants:
     def test_all_automation_aliases_use_safe_models(self):

@@ -142,10 +142,12 @@ class BaseAgent:
 # Lazy telemetry helpers (no-op when OTel is unavailable)
 # ---------------------------------------------------------------------------
 
+
 def _get_agent_tracer() -> Any:
     """Return a tracer, falling back to no-op if telemetry is unavailable."""
     try:
         from sdk.telemetry.traces import get_tracer
+
         return get_tracer("obscura.agent")
     except Exception:
         return NoOpTracer()

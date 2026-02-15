@@ -1,4 +1,5 @@
 """Tests for sdk.heartbeat.client — AgentHeartbeatClient and HeartbeatClientPool."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -52,7 +53,9 @@ class TestAgentHeartbeatClientLifecycle:
     async def test_start_and_stop(self):
         client = AgentHeartbeatClient("agent-1", "http://localhost:8080", interval=10)
 
-        with patch.object(client, "_send_heartbeat", new_callable=AsyncMock) as mock_send:
+        with patch.object(
+            client, "_send_heartbeat", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.return_value = True
             await client.start()
             assert client.is_running is True
@@ -107,8 +110,10 @@ class TestAgentHeartbeatClientSend:
         mock_http.post.return_value = mock_response
         client._http_client = mock_http
         client.config = HeartbeatClientConfig(
-            agent_id="a1", monitor_url="http://localhost:8080",
-            max_retries=1, retry_delay=0.01,
+            agent_id="a1",
+            monitor_url="http://localhost:8080",
+            max_retries=1,
+            retry_delay=0.01,
         )
 
         result = await client._send_heartbeat()
@@ -118,13 +123,16 @@ class TestAgentHeartbeatClientSend:
     @pytest.mark.asyncio
     async def test_send_heartbeat_connection_error(self):
         import httpx
+
         client = AgentHeartbeatClient("a1", "http://localhost:8080", interval=10)
         mock_http = AsyncMock()
         mock_http.post.side_effect = httpx.TimeoutException("timeout")
         client._http_client = mock_http
         client.config = HeartbeatClientConfig(
-            agent_id="a1", monitor_url="http://localhost:8080",
-            max_retries=1, retry_delay=0.01,
+            agent_id="a1",
+            monitor_url="http://localhost:8080",
+            max_retries=1,
+            retry_delay=0.01,
         )
 
         result = await client._send_heartbeat()

@@ -31,6 +31,7 @@ from typing import Any, Protocol, overload, runtime_checkable
 # Protocols
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class MetricInstrument(Protocol):
     """Structural type for an OTel-style metric instrument.
@@ -39,9 +40,13 @@ class MetricInstrument(Protocol):
     stand in for counters *and* histograms.
     """
 
-    def add(self, amount: float = 1, attributes: dict[str, str] | None = None) -> None: ...
+    def add(
+        self, amount: float = 1, attributes: dict[str, str] | None = None
+    ) -> None: ...
 
-    def record(self, amount: float, attributes: dict[str, str] | None = None) -> None: ...
+    def record(
+        self, amount: float, attributes: dict[str, str] | None = None
+    ) -> None: ...
 
 
 class Meter(Protocol):
@@ -51,17 +56,24 @@ class Meter(Protocol):
     of its positional argument order.
     """
 
-    def create_counter(self, name: str, *, unit: str = "", description: str = "") -> Any: ...
+    def create_counter(
+        self, name: str, *, unit: str = "", description: str = ""
+    ) -> Any: ...
 
-    def create_histogram(self, name: str, *, unit: str = "", description: str = "") -> Any: ...
+    def create_histogram(
+        self, name: str, *, unit: str = "", description: str = ""
+    ) -> Any: ...
 
-    def create_up_down_counter(self, name: str, *, unit: str = "", description: str = "") -> Any: ...
+    def create_up_down_counter(
+        self, name: str, *, unit: str = "", description: str = ""
+    ) -> Any: ...
 
 
 def _get_meter() -> Meter | None:
     """Return an OTel meter, or None if OTel is unavailable."""
     try:
         from opentelemetry import metrics
+
         return metrics.get_meter("obscura-sdk")
     except ImportError:
         return None
@@ -70,7 +82,9 @@ def _get_meter() -> Meter | None:
 class _LazyMetric:
     """Descriptor that lazily creates an OTel metric instrument."""
 
-    def __init__(self, factory_name: str, metric_name: str, description: str, unit: str = "") -> None:
+    def __init__(
+        self, factory_name: str, metric_name: str, description: str, unit: str = ""
+    ) -> None:
         self._factory_name = factory_name
         self._metric_name = metric_name
         self._description = description
@@ -86,7 +100,9 @@ class _LazyMetric:
     @overload
     def __get__(self, obj: object, objtype: type | None = None) -> MetricInstrument: ...
 
-    def __get__(self, obj: object | None, objtype: type | None = None) -> _LazyMetric | MetricInstrument:
+    def __get__(
+        self, obj: object | None, objtype: type | None = None
+    ) -> _LazyMetric | MetricInstrument:
         if obj is None:
             return self
 
@@ -197,6 +213,7 @@ def get_metrics() -> ObscuraMetrics:
 # ---------------------------------------------------------------------------
 # No-op fallback
 # ---------------------------------------------------------------------------
+
 
 class _NoOpInstrument:
     """No-op metric instrument when OTel is unavailable.

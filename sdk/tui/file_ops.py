@@ -42,9 +42,7 @@ class FileOps:
         try:
             resolved.relative_to(self.cwd)
         except ValueError:
-            raise ValueError(
-                f"Path escapes working directory: {path}"
-            )
+            raise ValueError(f"Path escapes working directory: {path}")
 
         return resolved
 
@@ -160,9 +158,7 @@ class FileOps:
         )
 
         if not backups:
-            raise FileNotFoundError(
-                f"No backup found for: {path}"
-            )
+            raise FileNotFoundError(f"No backup found for: {path}")
 
         latest = backups[0]
         shutil.copy2(str(latest), str(resolved))
@@ -198,11 +194,15 @@ class FileOps:
             name = backup.name
             parts = name.rsplit(".", 1)
             if len(parts) >= 2:
-                results.append({
-                    "path": str(backup.relative_to(self.backup_dir)).rsplit(".", 1)[0],
-                    "backup_path": str(backup),
-                    "timestamp": parts[-1],
-                })
+                results.append(
+                    {
+                        "path": str(backup.relative_to(self.backup_dir)).rsplit(".", 1)[
+                            0
+                        ],
+                        "backup_path": str(backup),
+                        "timestamp": parts[-1],
+                    }
+                )
 
         results.sort(key=lambda x: x["timestamp"], reverse=True)
         return results

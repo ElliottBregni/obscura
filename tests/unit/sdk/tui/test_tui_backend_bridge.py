@@ -26,6 +26,7 @@ from sdk.internal.types import (
 # Inline stubs — mirrors sdk/tui/backend_bridge.py from PLAN_TUI.md
 # ---------------------------------------------------------------------------
 
+
 class BackendBridge:
     """Manages ObscuraClient lifecycle and routes stream chunks to callbacks."""
 
@@ -45,6 +46,7 @@ class BackendBridge:
     async def connect(self) -> None:
         """Initialize the ObscuraClient."""
         from sdk.client import ObscuraClient
+
         self._client = ObscuraClient(
             self._backend,
             model=self._model,
@@ -121,6 +123,7 @@ class BackendBridge:
 # Test helpers
 # ---------------------------------------------------------------------------
 
+
 async def _async_iter_chunks(chunks: list[StreamChunk]) -> AsyncIterator[StreamChunk]:
     """Create an async iterator from a list of StreamChunks."""
     for chunk in chunks:
@@ -142,18 +145,22 @@ def _make_mock_client(
         )
     else:
         client.stream = MagicMock(
-            return_value=_async_iter_chunks([
-                StreamChunk(kind=ChunkKind.DONE),
-            ]),
+            return_value=_async_iter_chunks(
+                [
+                    StreamChunk(kind=ChunkKind.DONE),
+                ]
+            ),
         )
 
     if send_response is not None:
         client.send = AsyncMock(return_value=send_response)
     else:
-        client.send = AsyncMock(return_value=Message(
-            role=Role.ASSISTANT,
-            content=[ContentBlock(kind="text", text="response")],
-        ))
+        client.send = AsyncMock(
+            return_value=Message(
+                role=Role.ASSISTANT,
+                content=[ContentBlock(kind="text", text="response")],
+            )
+        )
 
     return client
 
@@ -161,6 +168,7 @@ def _make_mock_client(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestBackendBridgeConnect:
     """Verify BackendBridge.connect() initializes ObscuraClient."""
@@ -497,7 +505,9 @@ class TestBackendBridgeErrorHandling:
         bridge = BackendBridge()
         mock_client = MagicMock()
 
-        async def _failing_stream(prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+        async def _failing_stream(
+            prompt: str, **kwargs: Any
+        ) -> AsyncIterator[StreamChunk]:
             yield StreamChunk(kind=ChunkKind.TEXT_DELTA, text="partial")
             raise ConnectionError("connection lost")
 
@@ -527,7 +537,9 @@ class TestBackendBridgeErrorHandling:
         bridge = BackendBridge()
         mock_client = MagicMock()
 
-        async def _failing_stream(prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+        async def _failing_stream(
+            prompt: str, **kwargs: Any
+        ) -> AsyncIterator[StreamChunk]:
             raise RuntimeError("boom")
             yield  # Make it a generator  # noqa: E501
 
@@ -552,7 +564,9 @@ class TestBackendBridgeErrorHandling:
         bridge = BackendBridge()
         mock_client = MagicMock()
 
-        async def _timeout_stream(prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+        async def _timeout_stream(
+            prompt: str, **kwargs: Any
+        ) -> AsyncIterator[StreamChunk]:
             raise TimeoutError("request timed out")
             yield  # noqa: E501
 

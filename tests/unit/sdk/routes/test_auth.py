@@ -1,4 +1,5 @@
 """Tests for sdk.internal.auth — Auth resolution and TokenRefresher."""
+
 import pytest
 import os
 from unittest.mock import patch, MagicMock
@@ -40,7 +41,15 @@ class TestResolveGithubToken:
             assert resolve_github_token(None) == "env-token"
 
     def test_gh_cli_fallback(self):
-        env = {k: "" for k in ("COPILOT_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")}
+        env = {
+            k: ""
+            for k in (
+                "COPILOT_API_KEY",
+                "COPILOT_GITHUB_TOKEN",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+            )
+        }
         with patch.dict(os.environ, env, clear=False):
             # Clear all env vars
             for k in env:
@@ -60,7 +69,10 @@ class TestResolveGithubToken:
     def test_gh_cli_timeout(self):
         with patch.dict(os.environ, {}, clear=True):
             import subprocess
-            with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 5)):
+
+            with patch(
+                "subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 5)
+            ):
                 with pytest.raises(ValueError, match="Copilot auth"):
                     resolve_github_token(None)
 

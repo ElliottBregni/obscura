@@ -133,7 +133,9 @@ class AgentLoop:
                         # Flush previous tool if any
                         if _current_tool_name:
                             tc = self._parse_tool_call(
-                                _current_tool_name, _current_tool_input_json, chunk.raw,
+                                _current_tool_name,
+                                _current_tool_input_json,
+                                chunk.raw,
                             )
                             tool_calls.append(tc)
                         _current_tool_name = chunk.tool_name
@@ -145,7 +147,9 @@ class AgentLoop:
                 # Flush last tool call
                 if _current_tool_name:
                     tc = self._parse_tool_call(
-                        _current_tool_name, _current_tool_input_json, None,
+                        _current_tool_name,
+                        _current_tool_input_json,
+                        None,
                     )
                     tool_calls.append(tc)
 
@@ -159,7 +163,9 @@ class AgentLoop:
                 return
 
             accumulated_text += turn_text
-            yield AgentEvent(kind=AgentEventKind.TURN_COMPLETE, turn=turn, text=turn_text)
+            yield AgentEvent(
+                kind=AgentEventKind.TURN_COMPLETE, turn=turn, text=turn_text
+            )
 
             # No tool calls → model is done
             if not tool_calls:
@@ -233,16 +239,22 @@ class AgentLoop:
 
             spec = self._tools.get(tc.name)
             if spec is None:
-                results.append((
-                    tc,
-                    f"Unknown tool: {tc.name}. Available: {', '.join(self._tools.names())}",
-                    True,
-                ))
+                results.append(
+                    (
+                        tc,
+                        f"Unknown tool: {tc.name}. Available: {', '.join(self._tools.names())}",
+                        True,
+                    )
+                )
                 continue
 
             try:
                 result = await self._call_handler(spec, tc.input)
-                result_text = result if isinstance(result, str) else json.dumps(result, default=str)
+                result_text = (
+                    result
+                    if isinstance(result, str)
+                    else json.dumps(result, default=str)
+                )
                 results.append((tc, result_text, False))
             except Exception as exc:
                 logger.warning("Tool %s failed: %s", tc.name, exc)
@@ -267,11 +279,17 @@ class AgentLoop:
         """Map a StreamChunk to an AgentEvent, or None to skip."""
         if chunk.kind == ChunkKind.TEXT_DELTA:
             return AgentEvent(
-                kind=AgentEventKind.TEXT_DELTA, text=chunk.text, turn=turn, raw=chunk.raw,
+                kind=AgentEventKind.TEXT_DELTA,
+                text=chunk.text,
+                turn=turn,
+                raw=chunk.raw,
             )
         if chunk.kind == ChunkKind.THINKING_DELTA:
             return AgentEvent(
-                kind=AgentEventKind.THINKING_DELTA, text=chunk.text, turn=turn, raw=chunk.raw,
+                kind=AgentEventKind.THINKING_DELTA,
+                text=chunk.text,
+                turn=turn,
+                raw=chunk.raw,
             )
         if chunk.kind == ChunkKind.TOOL_USE_START:
             return AgentEvent(
@@ -282,13 +300,18 @@ class AgentLoop:
             )
         if chunk.kind == ChunkKind.ERROR:
             return AgentEvent(
-                kind=AgentEventKind.ERROR, text=chunk.text, turn=turn, raw=chunk.raw,
+                kind=AgentEventKind.ERROR,
+                text=chunk.text,
+                turn=turn,
+                raw=chunk.raw,
             )
         return None
 
     @staticmethod
     def _parse_tool_call(
-        name: str, input_json: str, raw: Any,
+        name: str,
+        input_json: str,
+        raw: Any,
     ) -> ToolCallInfo:
         """Parse accumulated tool call data into a ToolCallInfo."""
         parsed_input: dict[str, Any] = {}

@@ -28,6 +28,7 @@ from sdk.internal.types import (
 # Unified client
 # ---------------------------------------------------------------------------
 
+
 class ObscuraClient:
     """Unified SDK client that dispatches to any backend.
 
@@ -73,7 +74,10 @@ class ObscuraClient:
 
         # Resolve model via copilot_models aliases
         resolved_model = self._resolve_model(
-            backend, model, model_alias, automation_safe,
+            backend,
+            model,
+            model_alias,
+            automation_safe,
         )
 
         # Resolve auth (pass user for per-identity scoping)
@@ -81,7 +85,7 @@ class ObscuraClient:
 
         # Build tool registry
         self._tool_registry = ToolRegistry()
-        for t in (tools or []):
+        for t in tools or []:
             self._tool_registry.register(t)
 
         # Create backend
@@ -362,6 +366,7 @@ from sdk.telemetry.traces import NoOpSpan, NoOpTracer
 def _get_client_tracer() -> NoOpTracer:
     try:
         from sdk.telemetry.traces import get_tracer
+
         return get_tracer("obscura.client")
     except Exception:
         return NoOpTracer()
@@ -378,8 +383,11 @@ def _set_span_attr(span: NoOpSpan, key: str, value: Any) -> None:
 def _record_request_metric(backend: str, method: str, status: str) -> None:
     try:
         from sdk.telemetry.metrics import get_metrics
+
         m = get_metrics()
-        m.requests_total.add(1, {"backend": backend, "method": method, "status": status})
+        m.requests_total.add(
+            1, {"backend": backend, "method": method, "status": status}
+        )
     except Exception:
         pass
 
@@ -387,8 +395,11 @@ def _record_request_metric(backend: str, method: str, status: str) -> None:
 def _record_request_duration(backend: str, method: str, duration: float) -> None:
     try:
         from sdk.telemetry.metrics import get_metrics
+
         m = get_metrics()
-        m.request_duration_seconds.record(duration, {"backend": backend, "method": method})
+        m.request_duration_seconds.record(
+            duration, {"backend": backend, "method": method}
+        )
     except Exception:
         pass
 
@@ -396,6 +407,7 @@ def _record_request_duration(backend: str, method: str, duration: float) -> None
 def _record_stream_chunk(backend: str, chunk_kind: str) -> None:
     try:
         from sdk.telemetry.metrics import get_metrics
+
         m = get_metrics()
         m.stream_chunks_total.add(1, {"backend": backend, "chunk_kind": chunk_kind})
     except Exception:

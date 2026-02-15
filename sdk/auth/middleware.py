@@ -14,11 +14,15 @@ import time
 from typing import Any, override
 
 import httpx
+
 try:
     from jose import JWTError, jwt
     from jose.exceptions import ExpiredSignatureError
+
     _jose_available = True
-except Exception:  # pragma: no cover - optional dependency may be missing in some environments
+except (
+    Exception
+):  # pragma: no cover - optional dependency may be missing in some environments
     # Provide fallbacks so the module can be imported even when the optional
     # `python-jose` dependency is not installed. Runtime checks will raise an
     # informative ImportError when JWT functionality is actually used.
@@ -85,7 +89,9 @@ class JWKSCache:
                 data = resp.json()
                 self._keys = data.get("keys", [])
                 self._fetched_at = time.monotonic()
-                logger.debug("JWKS refreshed from %s (%d keys)", self._jwks_uri, len(self._keys))
+                logger.debug(
+                    "JWKS refreshed from %s (%d keys)", self._jwks_uri, len(self._keys)
+                )
         except Exception:
             logger.exception("Failed to fetch JWKS from %s", self._jwks_uri)
             # Keep stale keys if we have them; raise if we have nothing
@@ -100,6 +106,7 @@ class JWKSCache:
 # ---------------------------------------------------------------------------
 # Token decoding
 # ---------------------------------------------------------------------------
+
 
 def extract_roles(payload: dict[str, Any]) -> list[str]:
     """Extract flat role list from Zitadel's nested roles claim.
@@ -187,6 +194,7 @@ async def decode_and_validate(
 # Starlette middleware
 # ---------------------------------------------------------------------------
 
+
 class JWTAuthMiddleware(BaseHTTPMiddleware):
     """Validates JWTs on ``/api/`` routes and sets ``request.state.user``.
 
@@ -208,14 +216,18 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         self._audience = audience
 
     @override
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         # Skip auth for non-API routes
         if not request.url.path.startswith("/api/"):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            _emit_auth_audit(request.url.path, "anonymous", "", "denied", reason="missing_header")
+            _emit_auth_audit(
+                request.url.path, "anonymous", "", "denied", reason="missing_header"
+            )
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Missing or malformed Authorization header"},
@@ -230,7 +242,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 audience=self._audience,
             )
         except ExpiredSignatureError:
-            _emit_auth_audit(request.url.path, "unknown", "", "denied", reason="expired_token")
+            _emit_auth_audit(
+                request.url.path, "unknown", "", "denied", reason="expired_token"
+            )
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Token has expired"},
@@ -248,7 +262,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             )
         except (JWTError, ValueError) as exc:  # pyright: ignore[reportUnknownVariableType]
             logger.warning("JWT validation failed: %s", str(exc))  # pyright: ignore[reportUnknownArgumentType]
-            _emit_auth_audit(request.url.path, "unknown", "", "denied", reason="invalid_token")
+            _emit_auth_audit(
+                request.url.path, "unknown", "", "denied", reason="invalid_token"
+            )
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid token"},
@@ -262,6 +278,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 # Auth audit helper
 # ---------------------------------------------------------------------------
 
+
 def _emit_auth_audit(
     path: str,
     user_id: str,
@@ -273,14 +290,16 @@ def _emit_auth_audit(
     try:
         from sdk.telemetry.audit import AuditEvent, emit_audit_event
 
-        emit_audit_event(AuditEvent(
-            event_type="auth.validate",
-            user_id=user_id,
-            user_email=email,
-            resource=f"endpoint:{path}",
-            action="authenticate",
-            outcome=outcome,
-            details=details,
-        ))
+        emit_audit_event(
+            AuditEvent(
+                event_type="auth.validate",
+                user_id=user_id,
+                user_email=email,
+                resource=f"endpoint:{path}",
+                action="authenticate",
+                outcome=outcome,
+                details=details,
+            )
+        )
     except Exception:
         pass

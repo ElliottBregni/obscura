@@ -18,6 +18,7 @@ from typing import Any, cast
 # Mode enum
 # ---------------------------------------------------------------------------
 
+
 class TUIMode(enum.Enum):
     """Available TUI interaction modes."""
 
@@ -31,6 +32,7 @@ class TUIMode(enum.Enum):
 # Plan step
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PlanStep:
     """A single step in a structured plan."""
@@ -38,7 +40,7 @@ class PlanStep:
     number: int
     description: str
     status: str = "pending"  # "pending" | "approved" | "rejected" | "edited"
-    original: str = ""       # Original text before edits
+    original: str = ""  # Original text before edits
 
     def approve(self) -> None:
         self.status = "approved"
@@ -63,10 +65,7 @@ class Plan:
 
     @property
     def approved_count(self) -> int:
-        return sum(
-            1 for s in self.steps
-            if s.status in ("approved", "edited")
-        )
+        return sum(1 for s in self.steps if s.status in ("approved", "edited"))
 
     @property
     def rejected_count(self) -> int:
@@ -118,10 +117,12 @@ class Plan:
             if match:
                 # Save previous step
                 if current_step_num > 0:
-                    steps.append(PlanStep(
-                        number=current_step_num,
-                        description=current_step_text.strip(),
-                    ))
+                    steps.append(
+                        PlanStep(
+                            number=current_step_num,
+                            description=current_step_text.strip(),
+                        )
+                    )
                 current_step_num = int(match.group(1))
                 current_step_text = match.group(2)
             elif current_step_num > 0 and line.strip():
@@ -130,10 +131,12 @@ class Plan:
 
         # Don't forget the last step
         if current_step_num > 0:
-            steps.append(PlanStep(
-                number=current_step_num,
-                description=current_step_text.strip(),
-            ))
+            steps.append(
+                PlanStep(
+                    number=current_step_num,
+                    description=current_step_text.strip(),
+                )
+            )
 
         if not title:
             title = "Implementation Plan"
@@ -167,6 +170,7 @@ _MODE_SYSTEM_PROMPTS: dict[TUIMode, str] = {
 # FileChange (used by Code/Diff modes -- re-exported from diff_engine)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FileChange:
     """A tracked file change from Code mode."""
@@ -180,6 +184,7 @@ class FileChange:
 # ---------------------------------------------------------------------------
 # ModeManager
 # ---------------------------------------------------------------------------
+
 
 class ModeManager:
     """State machine for TUI mode transitions.
@@ -238,13 +243,10 @@ class ModeManager:
         # In Code mode, include approved plan context if available
         if self._current == TUIMode.CODE and self._active_plan:
             approved = [
-                s for s in self._active_plan.steps
-                if s.status in ("approved", "edited")
+                s for s in self._active_plan.steps if s.status in ("approved", "edited")
             ]
             if approved:
-                plan_ctx = "\n".join(
-                    f"{s.number}. {s.description}" for s in approved
-                )
+                plan_ctx = "\n".join(f"{s.number}. {s.description}" for s in approved)
                 base += (
                     f"\n\nApproved plan to execute:\n{plan_ctx}\n\n"
                     "Implement these steps in order."
@@ -253,9 +255,7 @@ class ModeManager:
         # In Diff mode, include pending changes context
         if self._current == TUIMode.DIFF and self._pending_changes:
             files = [str(c.path) for c in self._pending_changes]
-            base += (
-                f"\n\nFiles with pending changes: {', '.join(files)}"
-            )
+            base += f"\n\nFiles with pending changes: {', '.join(files)}"
 
         return base
 

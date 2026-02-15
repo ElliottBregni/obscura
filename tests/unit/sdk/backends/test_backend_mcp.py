@@ -1,4 +1,5 @@
 """Tests for sdk.backends.mcp_backend — MCPBackend."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,7 +30,12 @@ class TestMCPBackendLifecycle:
     @pytest.mark.asyncio
     async def test_start_no_servers(self):
         b = MCPBackend()
-        with patch.object(b._session_manager, "aggregate_tools", new_callable=AsyncMock, return_value=[]):
+        with patch.object(
+            b._session_manager,
+            "aggregate_tools",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             await b.start()
             assert b._initialized is True
 
@@ -50,10 +56,24 @@ class TestMCPBackendLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_with_server_failure(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="nonexistent")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.STDIO, command="nonexistent"
+        )
         b = MCPBackend(mcp_servers=[config])
-        with patch.object(b._session_manager, "add_session", new_callable=AsyncMock, side_effect=Exception("failed")), \
-             patch.object(b._session_manager, "aggregate_tools", new_callable=AsyncMock, return_value=[]):
+        with (
+            patch.object(
+                b._session_manager,
+                "add_session",
+                new_callable=AsyncMock,
+                side_effect=Exception("failed"),
+            ),
+            patch.object(
+                b._session_manager,
+                "aggregate_tools",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
             await b.start()  # Should not raise, logs error
             assert b._initialized is True
 
@@ -82,6 +102,7 @@ class TestMCPBackendSessions:
     @pytest.mark.asyncio
     async def test_resume_session_not_implemented(self):
         from sdk.internal.types import SessionRef, Backend
+
         b = MCPBackend()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         with pytest.raises(NotImplementedError):
@@ -96,6 +117,7 @@ class TestMCPBackendSessions:
     @pytest.mark.asyncio
     async def test_delete_session_not_implemented(self):
         from sdk.internal.types import SessionRef, Backend
+
         b = MCPBackend()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         with pytest.raises(NotImplementedError):
@@ -105,14 +127,18 @@ class TestMCPBackendSessions:
 class TestMCPBackendTools:
     def test_register_tool(self):
         b = MCPBackend()
-        spec = ToolSpec(name="t1", description="test", parameters={}, handler=lambda: None)
+        spec = ToolSpec(
+            name="t1", description="test", parameters={}, handler=lambda: None
+        )
         b.register_tool(spec)
         assert len(b._tools) == 1
         assert len(b.list_tools()) == 1
 
     def test_list_tools_returns_copy(self):
         b = MCPBackend()
-        spec = ToolSpec(name="t1", description="test", parameters={}, handler=lambda: None)
+        spec = ToolSpec(
+            name="t1", description="test", parameters={}, handler=lambda: None
+        )
         b.register_tool(spec)
         tools = b.list_tools()
         tools.clear()
@@ -136,7 +162,9 @@ class TestMCPBackendTools:
         async def my_handler(**kwargs):
             return {"result": "ok"}
 
-        spec = ToolSpec(name="my_tool", description="test", parameters={}, handler=my_handler)
+        spec = ToolSpec(
+            name="my_tool", description="test", parameters={}, handler=my_handler
+        )
         b.register_tool(spec)
 
         result = await b.call_tool("my_tool", {})
@@ -161,7 +189,9 @@ class TestMCPBackendHooks:
         async def my_handler(**kwargs):
             return "ok"
 
-        spec = ToolSpec(name="t1", description="test", parameters={}, handler=my_handler)
+        spec = ToolSpec(
+            name="t1", description="test", parameters={}, handler=my_handler
+        )
         b.register_tool(spec)
 
         await b.call_tool("t1", {})
@@ -180,7 +210,9 @@ class TestMCPBackendHooks:
         async def my_handler(**kwargs):
             return "ok"
 
-        spec = ToolSpec(name="t1", description="test", parameters={}, handler=my_handler)
+        spec = ToolSpec(
+            name="t1", description="test", parameters={}, handler=my_handler
+        )
         b.register_tool(spec)
 
         await b.call_tool("t1", {})  # Should not raise

@@ -11,14 +11,14 @@ This module provides:
 Usage:
     # Monitor side
     from sdk.heartbeat import HeartbeatMonitor
-    
+
     monitor = HeartbeatMonitor()
     await monitor.start()
     await monitor.register_agent("agent-123")
-    
+
     # Agent side
     from sdk.heartbeat import AgentHeartbeatClient
-    
+
     client = AgentHeartbeatClient("agent-123", "http://localhost:8080")
     await client.start()
 """
@@ -71,14 +71,12 @@ __all__ = [
     "Alert",
     "SystemMetrics",
     "HealthStatusTransition",
-    
     # Storage
     "HeartbeatStore",
     "InMemoryHeartbeatStore",
     "FileHeartbeatStore",
     "get_default_store",
     "set_default_store",
-    
     # Alerts
     "AlertManager",
     "AlertChannel",
@@ -88,12 +86,10 @@ __all__ = [
     "SlackAlertChannel",
     "get_default_alert_manager",
     "set_default_alert_manager",
-    
     # Monitor
     "HeartbeatMonitor",
     "get_default_monitor",
     "set_default_monitor",
-    
     # Client
     "AgentHeartbeatClient",
     "HeartbeatClientConfig",

@@ -34,6 +34,7 @@ _MGMT_BASE = "/management/v1"
 # Client
 # ---------------------------------------------------------------------------
 
+
 class ZitadelClient:
     """Thin wrapper around the Zitadel Management REST API.
 
@@ -82,7 +83,9 @@ class ZitadelClient:
 
     # -- helpers ----------------------------------------------------------
 
-    async def _post(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _post(
+        self, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         resp = await self._client.post(f"{_MGMT_BASE}{path}", json=body or {})
         resp.raise_for_status()
         return resp.json()
@@ -92,7 +95,9 @@ class ZitadelClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def _put(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _put(
+        self, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         resp = await self._client.put(f"{_MGMT_BASE}{path}", json=body or {})
         resp.raise_for_status()
         return resp.json()
@@ -103,13 +108,17 @@ class ZitadelClient:
         return resp.json()
 
     # Public test/observability wrappers around HTTP helpers
-    async def post_mgmt(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def post_mgmt(
+        self, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         return await self._post(path, body)
 
     async def get_mgmt(self, path: str) -> dict[str, Any]:
         return await self._get(path)
 
-    async def put_mgmt(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def put_mgmt(
+        self, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         return await self._put(path, body)
 
     async def delete_mgmt(self, path: str) -> dict[str, Any]:
@@ -139,7 +148,9 @@ class ZitadelClient:
 
     # -- roles ------------------------------------------------------------
 
-    async def add_project_role(self, project_id: str, role_key: str, display_name: str = "") -> None:
+    async def add_project_role(
+        self, project_id: str, role_key: str, display_name: str = ""
+    ) -> None:
         """Add a role to a project."""
         await self._post(
             f"/projects/{project_id}/roles",
@@ -207,7 +218,9 @@ class ZitadelClient:
         )
         resp.raise_for_status()
         data = resp.json()
-        logger.info("Created machine key for user %s (key id=%s)", user_id, data.get("keyId"))
+        logger.info(
+            "Created machine key for user %s (key id=%s)", user_id, data.get("keyId")
+        )
         return data
 
     async def grant_project_roles(
@@ -221,7 +234,9 @@ class ZitadelClient:
             f"/projects/{project_id}/members",
             {"userId": user_id, "roles": roles},
         )
-        logger.info("Granted roles %s to user %s on project %s", roles, user_id, project_id)
+        logger.info(
+            "Granted roles %s to user %s on project %s", roles, user_id, project_id
+        )
 
     async def add_user_grant(
         self,
@@ -262,6 +277,7 @@ class ZitadelClient:
 # ---------------------------------------------------------------------------
 # Bootstrap helper
 # ---------------------------------------------------------------------------
+
 
 async def bootstrap(
     base_url: str,

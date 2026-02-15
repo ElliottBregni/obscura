@@ -23,6 +23,7 @@ from sdk.telemetry.metrics import (
 # NoOp fallback
 # ---------------------------------------------------------------------------
 
+
 class TestNoOpInstrument:
     def test_add_noop(self) -> None:
         inst = NoOpInstrument()
@@ -49,6 +50,7 @@ class TestNoOpInstrument:
 # Singleton
 # ---------------------------------------------------------------------------
 
+
 class TestGetMetrics:
     def test_returns_singleton(self) -> None:
         m1 = get_metrics()
@@ -63,6 +65,7 @@ class TestGetMetrics:
 # ---------------------------------------------------------------------------
 # Lazy metric attributes
 # ---------------------------------------------------------------------------
+
 
 class TestObscuraMetrics:
     def test_all_metrics_defined(self) -> None:
@@ -109,6 +112,7 @@ class TestObscuraMetrics:
 # InMemoryMetricReader (requires OTel SDK)
 # ---------------------------------------------------------------------------
 
+
 class TestMetricExport:
     """Tests that require opentelemetry-sdk installed."""
 
@@ -151,7 +155,7 @@ class TestMetricExport:
 
         reader = InMemoryMetricReader()
         provider = MeterProvider(metric_readers=[reader])
-        
+
         # Try to set provider, but don't fail if already set
         try:
             metrics.set_meter_provider(provider)

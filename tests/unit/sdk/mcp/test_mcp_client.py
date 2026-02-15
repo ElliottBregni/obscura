@@ -1,4 +1,5 @@
 """Tests for sdk.mcp.client — MCPClient and transports."""
+
 # pyright: reportPrivateUsage=false
 import json
 import pytest
@@ -24,6 +25,7 @@ from sdk.mcp.client import MCPClient, MCPSessionManager, StdioTransport, SSETran
 # MCPClient init / ID generation
 # ---------------------------------------------------------------------------
 
+
 class TestMCPClientInit:
     def test_init(self):
         config = MCPConnectionConfig(
@@ -47,13 +49,16 @@ class TestMCPClientInit:
 # Context manager
 # ---------------------------------------------------------------------------
 
+
 class TestMCPClientContextManager:
     @pytest.mark.asyncio
     async def test_aenter_aexit(self):
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
-        with patch.object(client, "connect", new_callable=AsyncMock) as mock_conn, \
-             patch.object(client, "disconnect", new_callable=AsyncMock) as mock_disc:
+        with (
+            patch.object(client, "connect", new_callable=AsyncMock) as mock_conn,
+            patch.object(client, "disconnect", new_callable=AsyncMock) as mock_disc,
+        ):
             async with client as c:
                 assert c is client
                 mock_conn.assert_awaited_once()
@@ -63,6 +68,7 @@ class TestMCPClientContextManager:
 # ---------------------------------------------------------------------------
 # Connect
 # ---------------------------------------------------------------------------
+
 
 class TestMCPClientConnect:
     @pytest.mark.asyncio
@@ -85,7 +91,12 @@ class TestMCPClientConnect:
 
         with patch("sdk.mcp.client.StdioTransport", return_value=mock_transport):
             # Mock _request to return init response, and _notification to do nothing
-            with patch.object(client, "_request", new_callable=AsyncMock, return_value={"protocolVersion": "2024-11-05"}):
+            with patch.object(
+                client,
+                "_request",
+                new_callable=AsyncMock,
+                return_value={"protocolVersion": "2024-11-05"},
+            ):
                 with patch.object(client, "_notification", new_callable=AsyncMock):
                     await client.connect()
 
@@ -93,7 +104,9 @@ class TestMCPClientConnect:
 
     @pytest.mark.asyncio
     async def test_connect_sse_creates_transport(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost:3000")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost:3000"
+        )
         client = MCPClient(config)
 
         mock_transport = AsyncMock()
@@ -101,7 +114,12 @@ class TestMCPClientConnect:
         mock_transport.send = AsyncMock()
 
         with patch("sdk.mcp.client.SSETransport", return_value=mock_transport):
-            with patch.object(client, "_request", new_callable=AsyncMock, return_value={"protocolVersion": "2024-11-05"}):
+            with patch.object(
+                client,
+                "_request",
+                new_callable=AsyncMock,
+                return_value={"protocolVersion": "2024-11-05"},
+            ):
                 with patch.object(client, "_notification", new_callable=AsyncMock):
                     await client.connect()
 
@@ -109,7 +127,9 @@ class TestMCPClientConnect:
 
     @pytest.mark.asyncio
     async def test_connect_unsupported_transport(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.WEBSOCKET, url="ws://localhost")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.WEBSOCKET, url="ws://localhost"
+        )
         client = MCPClient(config)
         with pytest.raises(MCPError) as exc_info:
             await client.connect()
@@ -119,6 +139,7 @@ class TestMCPClientConnect:
 # ---------------------------------------------------------------------------
 # Disconnect
 # ---------------------------------------------------------------------------
+
 
 class TestMCPClientDisconnect:
     @pytest.mark.asyncio
@@ -157,6 +178,7 @@ class TestMCPClientDisconnect:
 # Request / Notification
 # ---------------------------------------------------------------------------
 
+
 class TestMCPClientRequest:
     @pytest.mark.asyncio
     async def test_request_not_connected(self):
@@ -167,7 +189,9 @@ class TestMCPClientRequest:
 
     @pytest.mark.asyncio
     async def test_request_sends_and_waits(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo", timeout=5.0)
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.STDIO, command="echo", timeout=5.0
+        )
         client = MCPClient(config)
         mock_transport = AsyncMock()
         client.transport = mock_transport
@@ -176,10 +200,12 @@ class TestMCPClientRequest:
         async def fake_send(msg: dict[str, Any]):
             req_id = msg["id"]
             if req_id in client.pending_requests:
-                client.pending_requests[req_id].set_result({
-                    "id": req_id,
-                    "result": {"ok": True},
-                })
+                client.pending_requests[req_id].set_result(
+                    {
+                        "id": req_id,
+                        "result": {"ok": True},
+                    }
+                )
 
         mock_transport.send = fake_send
         result = await client.request("ping", {})
@@ -187,7 +213,9 @@ class TestMCPClientRequest:
 
     @pytest.mark.asyncio
     async def test_request_error_response(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo", timeout=5.0)
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.STDIO, command="echo", timeout=5.0
+        )
         client = MCPClient(config)
         mock_transport = AsyncMock()
         client.transport = mock_transport
@@ -195,10 +223,12 @@ class TestMCPClientRequest:
         async def fake_send(msg: dict[str, Any]):
             req_id = msg["id"]
             if req_id in client.pending_requests:
-                client.pending_requests[req_id].set_result({
-                    "id": req_id,
-                    "error": {"code": -32601, "message": "Not found"},
-                })
+                client.pending_requests[req_id].set_result(
+                    {
+                        "id": req_id,
+                        "error": {"code": -32601, "message": "Not found"},
+                    }
+                )
 
         mock_transport.send = fake_send
         with pytest.raises(MCPError) as exc_info:
@@ -207,7 +237,9 @@ class TestMCPClientRequest:
 
     @pytest.mark.asyncio
     async def test_request_timeout(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo", timeout=0.05)
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.STDIO, command="echo", timeout=0.05
+        )
         client = MCPClient(config)
         mock_transport = AsyncMock()
         mock_transport.send = AsyncMock()  # Does not resolve the future
@@ -243,6 +275,7 @@ class TestMCPClientNotification:
 # ---------------------------------------------------------------------------
 # Handle Response
 # ---------------------------------------------------------------------------
+
 
 class TestMCPClientHandleResponse:
     def test_handle_response_resolves_future(self):
@@ -284,6 +317,7 @@ class TestMCPClientHandleResponse:
 # Protocol methods: list_tools, call_tool, etc.
 # ---------------------------------------------------------------------------
 
+
 class TestMCPClientProtocol:
     @pytest.mark.asyncio
     async def test_ping(self):
@@ -300,11 +334,17 @@ class TestMCPClientProtocol:
 
         mock_result: dict[str, object] = {
             "tools": [
-                {"name": "read_file", "description": "Read a file", "inputSchema": {"type": "object"}},
+                {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "inputSchema": {"type": "object"},
+                },
                 {"name": "write_file", "description": "Write a file"},
             ]
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             tools = await client.list_tools()
 
         assert len(tools) == 2
@@ -330,7 +370,9 @@ class TestMCPClientProtocol:
             "content": [{"type": "text", "text": "file contents"}],
             "isError": False,
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             result = await client.call_tool("read_file", {"path": "/tmp/x"})
 
         assert isinstance(result, MCPToolResult)
@@ -346,7 +388,9 @@ class TestMCPClientProtocol:
             "content": [{"type": "text", "text": "fail"}],
             "isError": True,
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             result = await client.call_tool("bad_tool", {})
         assert result.isError is True
 
@@ -357,11 +401,18 @@ class TestMCPClientProtocol:
 
         mock_result = {
             "resources": [
-                {"uri": "file:///tmp/x", "name": "x.txt", "description": "test", "mimeType": "text/plain"},
+                {
+                    "uri": "file:///tmp/x",
+                    "name": "x.txt",
+                    "description": "test",
+                    "mimeType": "text/plain",
+                },
                 {"uri": "file:///tmp/y", "name": "y.txt"},
             ]
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             resources = await client.list_resources()
 
         assert len(resources) == 2
@@ -384,13 +435,17 @@ class TestMCPClientProtocol:
         client = MCPClient(config)
 
         mock_result = {
-            "contents": [{
-                "uri": "file:///tmp/x",
-                "mimeType": "text/plain",
-                "text": "hello world",
-            }]
+            "contents": [
+                {
+                    "uri": "file:///tmp/x",
+                    "mimeType": "text/plain",
+                    "text": "hello world",
+                }
+            ]
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             content = await client.read_resource("file:///tmp/x")
 
         assert isinstance(content, MCPResourceContent)
@@ -403,13 +458,17 @@ class TestMCPClientProtocol:
         client = MCPClient(config)
 
         mock_result = {
-            "contents": [{
-                "uri": "file:///img.png",
-                "mimeType": "image/png",
-                "blob": b"binary",
-            }]
+            "contents": [
+                {
+                    "uri": "file:///img.png",
+                    "mimeType": "image/png",
+                    "blob": b"binary",
+                }
+            ]
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             content = await client.read_resource("file:///img.png")
         assert content.blob == b"binary"
         assert content.text is None
@@ -419,7 +478,9 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value={"contents": []}):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value={"contents": []}
+        ):
             with pytest.raises(MCPError) as exc_info:
                 await client.read_resource("file:///missing")
         assert exc_info.value.code == MCPErrorCode.RESOURCE_NOT_FOUND.value
@@ -431,7 +492,9 @@ class TestMCPClientProtocol:
 
         with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
             await client.subscribe_resource("file:///tmp/x")
-        mock_req.assert_awaited_once_with("resources/subscribe", {"uri": "file:///tmp/x"})
+        mock_req.assert_awaited_once_with(
+            "resources/subscribe", {"uri": "file:///tmp/x"}
+        )
 
     @pytest.mark.asyncio
     async def test_unsubscribe_resource(self):
@@ -440,7 +503,9 @@ class TestMCPClientProtocol:
 
         with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
             await client.unsubscribe_resource("file:///tmp/x")
-        mock_req.assert_awaited_once_with("resources/unsubscribe", {"uri": "file:///tmp/x"})
+        mock_req.assert_awaited_once_with(
+            "resources/unsubscribe", {"uri": "file:///tmp/x"}
+        )
 
     @pytest.mark.asyncio
     async def test_list_prompts(self):
@@ -449,11 +514,17 @@ class TestMCPClientProtocol:
 
         mock_result = {
             "prompts": [
-                {"name": "code_review", "description": "Review code", "arguments": [{"name": "file"}]},
+                {
+                    "name": "code_review",
+                    "description": "Review code",
+                    "arguments": [{"name": "file"}],
+                },
                 {"name": "summarize"},
             ]
         }
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             prompts = await client.list_prompts()
 
         assert len(prompts) == 2
@@ -475,18 +546,27 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        mock_result = cast(dict[str, object], {
-            "description": "Code review prompt",
-            "messages": [
-                {"role": "user", "content": {"type": "text", "text": "Review this"}},
-            ],
-        })
+        mock_result = cast(
+            dict[str, object],
+            {
+                "description": "Code review prompt",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": {"type": "text", "text": "Review this"},
+                    },
+                ],
+            },
+        )
 
         # MCPPromptMessage is used but not imported at module level in client.py;
         # inject it so get_prompt can resolve the name.
         import sdk.mcp.client as client_mod
+
         client_mod.MCPPromptMessage = MCPPromptMessage
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result):
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ):
             result = await client.get_prompt("code_review", {"file": "main.py"})
 
         assert isinstance(result, MCPPromptResult)
@@ -499,14 +579,20 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        mock_result = cast(dict[str, object], {
-            "description": "Simple prompt",
-            "messages": [],
-        })
+        mock_result = cast(
+            dict[str, object],
+            {
+                "description": "Simple prompt",
+                "messages": [],
+            },
+        )
 
         import sdk.mcp.client as client_mod
+
         client_mod.MCPPromptMessage = MCPPromptMessage
-        with patch.object(client, "_request", new_callable=AsyncMock, return_value=mock_result) as mock_req:
+        with patch.object(
+            client, "_request", new_callable=AsyncMock, return_value=mock_result
+        ) as mock_req:
             await client.get_prompt("simple")
         # Should not include arguments key in params
         call_params = mock_req.call_args[0][1]
@@ -516,6 +602,7 @@ class TestMCPClientProtocol:
 # ---------------------------------------------------------------------------
 # Session Manager
 # ---------------------------------------------------------------------------
+
 
 class TestMCPSessionManager:
     @pytest.mark.asyncio
@@ -623,6 +710,7 @@ class TestMCPSessionManager:
 # StdioTransport
 # ---------------------------------------------------------------------------
 
+
 class TestStdioTransport:
     def test_init(self):
         config = MCPConnectionConfig(
@@ -669,7 +757,11 @@ class TestStdioTransport:
         mock_proc.stdout.readline = AsyncMock(return_value=b"")
         mock_proc.stdin = MagicMock()
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
             await transport.connect()
 
         assert transport.process is mock_proc
@@ -696,6 +788,7 @@ class TestStdioTransport:
         # Create a real cancelled task for the read_task
         async def noop():
             await asyncio.sleep(100)
+
         task = asyncio.create_task(noop())
         task.cancel()
         transport.read_task = task
@@ -727,6 +820,7 @@ class TestStdioTransport:
 # SSETransport
 # ---------------------------------------------------------------------------
 
+
 class TestSSETransport:
     def test_init(self):
         config = MCPConnectionConfig(
@@ -745,14 +839,18 @@ class TestSSETransport:
 
     @pytest.mark.asyncio
     async def test_send_not_connected(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost"
+        )
         transport = SSETransport(config)
         with pytest.raises(MCPError):
             await transport.send({"test": True})
 
     @pytest.mark.asyncio
     async def test_disconnect(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost"
+        )
         transport = SSETransport(config)
         mockclient = AsyncMock()
         transport.client = mockclient
@@ -761,7 +859,9 @@ class TestSSETransport:
 
     @pytest.mark.asyncio
     async def test_disconnect_withread_task(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost"
+        )
         transport = SSETransport(config)
         mockclient = AsyncMock()
         transport.client = mockclient
@@ -769,6 +869,7 @@ class TestSSETransport:
         # Create a real cancelled task
         async def noop():
             await asyncio.sleep(100)
+
         task = asyncio.create_task(noop())
         task.cancel()
         transport.read_task = task
@@ -778,14 +879,18 @@ class TestSSETransport:
 
     @pytest.mark.asyncio
     async def test_receive_timeout(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost"
+        )
         transport = SSETransport(config)
         result = await transport.receive()
         assert result is None
 
     @pytest.mark.asyncio
     async def test_connect_createsclient(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost:3000")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost:3000"
+        )
         transport = SSETransport(config)
 
         mock_response = MagicMock()
@@ -802,7 +907,9 @@ class TestSSETransport:
 
     @pytest.mark.asyncio
     async def test_send_post_with_id(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost:3000")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost:3000"
+        )
         transport = SSETransport(config)
 
         mock_response = MagicMock()
@@ -822,7 +929,9 @@ class TestSSETransport:
 
     @pytest.mark.asyncio
     async def test_send_post_notification_no_queue(self):
-        config = MCPConnectionConfig(transport=MCPTransportType.SSE, url="http://localhost:3000")
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE, url="http://localhost:3000"
+        )
         transport = SSETransport(config)
 
         mock_response = MagicMock()
@@ -838,4 +947,6 @@ class TestSSETransport:
         # Queue should be empty
         result = await transport.receive()
         assert result is None
+
+
 # pyright: ignore-all

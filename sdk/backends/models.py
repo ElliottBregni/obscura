@@ -9,6 +9,7 @@ from typing import Any, Mapping
 @dataclass(frozen=True, slots=True)
 class MCPServerConfig:
     """Configuration for an MCP server passed to backends."""
+
     transport: str
     command: list[str] | None = None
     env: dict[str, str] | None = None
@@ -18,9 +19,15 @@ class MCPServerConfig:
     def from_dict(cls, data: Mapping[str, Any]) -> "MCPServerConfig":
         return cls(
             transport=str(data.get("transport", "")),
-            command=list(data["command"]) if "command" in data and data["command"] is not None else None,
-            env=dict(data["env"]) if "env" in data and data["env"] is not None else None,
-            working_dir=str(data["working_dir"]) if "working_dir" in data and data["working_dir"] is not None else None,
+            command=list(data["command"])
+            if "command" in data and data["command"] is not None
+            else None,
+            env=dict(data["env"])
+            if "env" in data and data["env"] is not None
+            else None,
+            working_dir=str(data["working_dir"])
+            if "working_dir" in data and data["working_dir"] is not None
+            else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -57,6 +64,7 @@ class ModelInfo:
 @dataclass(frozen=True, slots=True)
 class CompletionParams:
     """Subset of OpenAI chat completion params we allow passthrough."""
+
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None

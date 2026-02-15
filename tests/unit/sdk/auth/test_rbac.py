@@ -31,6 +31,7 @@ from tests.unit.sdk.auth.test_auth_middleware import (
 # AuthenticatedUser model tests
 # ---------------------------------------------------------------------------
 
+
 class TestAuthenticatedUser:
     def _make_user(self, roles: list[str]) -> AuthenticatedUser:
         return AuthenticatedUser(
@@ -69,6 +70,7 @@ class TestAuthenticatedUser:
 # FastAPI dependency integration tests
 # ---------------------------------------------------------------------------
 
+
 def _create_test_app() -> FastAPI:
     """Build a FastAPI app with auth middleware and role-protected routes."""
     app = FastAPI()
@@ -89,11 +91,15 @@ def _create_test_app() -> FastAPI:
         return {"user_id": user.user_id, "roles": user.roles}
 
     @app.get("/api/v1/admin-only")
-    async def admin_only(user: AuthenticatedUser = Depends(require_role("admin"))) -> dict:
+    async def admin_only(
+        user: AuthenticatedUser = Depends(require_role("admin")),
+    ) -> dict:
         return {"ok": True}
 
     @app.post("/api/v1/sync")
-    async def sync(user: AuthenticatedUser = Depends(require_role("sync:write"))) -> dict:
+    async def sync(
+        user: AuthenticatedUser = Depends(require_role("sync:write")),
+    ) -> dict:
         return {"synced": True}
 
     @app.post("/api/v1/agent")
@@ -123,6 +129,7 @@ def _bearer(token: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestGetCurrentUser:
     def test_returns_user_for_valid_token(self, client: TestClient) -> None:

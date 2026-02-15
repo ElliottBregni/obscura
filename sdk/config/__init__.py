@@ -54,13 +54,16 @@ class ObscuraConfig(BaseModel):
             host=os.environ.get("OBSCURA_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_PORT", "8080")),
             # Auth
-            auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "true").lower() == "true",
+            auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "true").lower()
+            == "true",
             auth_issuer=os.environ.get("OBSCURA_AUTH_ISSUER", "http://zitadel:8080"),
             auth_jwks_uri=os.environ.get("OBSCURA_AUTH_JWKS_URI", ""),
             auth_audience=os.environ.get("OBSCURA_AUTH_AUDIENCE", "obscura-sdk"),
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
-            otel_endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"),
+            otel_endpoint=os.environ.get(
+                "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
+            ),
             otel_service_name=os.environ.get("OTEL_SERVICE_NAME", "obscura-sdk"),
             log_level=os.environ.get("OBSCURA_LOG_LEVEL", "INFO"),
             log_format=os.environ.get("OBSCURA_LOG_FORMAT", "json"),

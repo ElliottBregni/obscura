@@ -1,10 +1,20 @@
 """Tests for sdk.heartbeat.monitor — HeartbeatMonitor."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timedelta
 
-from sdk.heartbeat.monitor import HeartbeatMonitor, get_default_monitor, set_default_monitor
-from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus, HealthStatusTransition
+from sdk.heartbeat.monitor import (
+    HeartbeatMonitor,
+    get_default_monitor,
+    set_default_monitor,
+)
+from sdk.heartbeat.types import (
+    Heartbeat,
+    HealthRecord,
+    HealthStatus,
+    HealthStatusTransition,
+)
 
 
 class TestHeartbeatMonitorInit:
@@ -200,9 +210,13 @@ class TestHeartbeatMonitorQueries:
     @pytest.mark.asyncio
     async def test_get_health_summary(self):
         store = AsyncMock()
-        hb = Heartbeat(agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY)
+        hb = Heartbeat(
+            agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY
+        )
         store.list_records.return_value = [
-            HealthRecord(agent_id="a1", computed_status=HealthStatus.HEALTHY, last_heartbeat=hb),
+            HealthRecord(
+                agent_id="a1", computed_status=HealthStatus.HEALTHY, last_heartbeat=hb
+            ),
         ]
         monitor = HeartbeatMonitor(store=store)
         summary = await monitor.get_health_summary()
@@ -244,20 +258,26 @@ class TestHeartbeatMonitorAlertMessage:
     def test_critical_message(self):
         monitor = HeartbeatMonitor()
         record = HealthRecord(agent_id="a1", missed_count=5)
-        msg = monitor._generate_alert_message("a1", HealthStatus.WARNING, HealthStatus.CRITICAL, record)
+        msg = monitor._generate_alert_message(
+            "a1", HealthStatus.WARNING, HealthStatus.CRITICAL, record
+        )
         assert "CRITICAL" in msg
         assert "5" in msg
 
     def test_warning_message(self):
         monitor = HeartbeatMonitor()
         record = HealthRecord(agent_id="a1")
-        msg = monitor._generate_alert_message("a1", HealthStatus.HEALTHY, HealthStatus.WARNING, record)
+        msg = monitor._generate_alert_message(
+            "a1", HealthStatus.HEALTHY, HealthStatus.WARNING, record
+        )
         assert "WARNING" in msg
 
     def test_recovery_message(self):
         monitor = HeartbeatMonitor()
         record = HealthRecord(agent_id="a1")
-        msg = monitor._generate_alert_message("a1", HealthStatus.WARNING, HealthStatus.HEALTHY, record)
+        msg = monitor._generate_alert_message(
+            "a1", HealthStatus.WARNING, HealthStatus.HEALTHY, record
+        )
         assert "recovered" in msg
 
 

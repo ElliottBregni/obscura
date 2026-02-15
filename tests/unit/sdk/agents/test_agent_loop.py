@@ -30,6 +30,7 @@ from sdk.internal.types import BackendProtocol
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_text_chunks(text: str) -> list[StreamChunk]:
     """Split text into word-level TEXT_DELTA chunks + DONE."""
     chunks: list[StreamChunk] = []
@@ -50,7 +51,9 @@ def _make_tool_call_chunks(
         chunks.append(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=preceding_text))
     chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name=tool_name))
     input_json = json.dumps(tool_input)
-    chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta=input_json))
+    chunks.append(
+        StreamChunk(kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta=input_json)
+    )
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
     return chunks
 
@@ -128,6 +131,7 @@ def _make_registry(*specs: ToolSpec) -> ToolRegistry:
 # Tests: Basic loop behaviour
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLoopBasic:
     @pytest.mark.asyncio
     async def test_single_turn_text_only(self) -> None:
@@ -190,10 +194,12 @@ class TestAgentLoopBasic:
 # Tests: Tool execution loop
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLoopToolExecution:
     @pytest.mark.asyncio
     async def test_tool_call_and_result(self) -> None:
         """Model calls a tool → loop executes it → feeds result back."""
+
         def read_handler(path: str) -> str:
             return f"contents of {path}"
 
@@ -229,6 +235,7 @@ class TestAgentLoopToolExecution:
     @pytest.mark.asyncio
     async def test_multiple_tool_calls_in_one_turn(self) -> None:
         """Model calls two tools in the same turn."""
+
         def handler_a() -> str:
             return "result_a"
 
@@ -236,11 +243,15 @@ class TestAgentLoopToolExecution:
             return "result_b"
 
         spec_a = ToolSpec(
-            name="tool_a", description="A", parameters={},
+            name="tool_a",
+            description="A",
+            parameters={},
             handler=handler_a,
         )
         spec_b = ToolSpec(
-            name="tool_b", description="B", parameters={},
+            name="tool_b",
+            description="B",
+            parameters={},
             handler=handler_b,
         )
 
@@ -267,12 +278,14 @@ class TestAgentLoopToolExecution:
     @pytest.mark.asyncio
     async def test_async_tool_handler(self) -> None:
         """Async tool handlers should be awaited properly."""
+
         async def async_handler(query: str) -> str:
             await asyncio.sleep(0.01)
             return f"searched for {query}"
 
         spec = ToolSpec(
-            name="search", description="Search",
+            name="search",
+            description="Search",
             parameters={"type": "object", "properties": {"query": {"type": "string"}}},
             handler=async_handler,
         )
@@ -304,10 +317,13 @@ class TestAgentLoopToolExecution:
     @pytest.mark.asyncio
     async def test_tool_handler_exception(self) -> None:
         """If a tool handler raises, the result should be an error."""
+
         def failing_handler() -> str:
             raise RuntimeError("disk full")
 
-        spec = ToolSpec(name="write", description="Write", parameters={}, handler=failing_handler)
+        spec = ToolSpec(
+            name="write", description="Write", parameters={}, handler=failing_handler
+        )
         turn1 = _make_tool_call_chunks("write", {})
         turn2 = _make_text_chunks("Write failed.")
         backend = MockBackend([turn1, turn2])
@@ -324,15 +340,19 @@ class TestAgentLoopToolExecution:
 # Tests: Max turns
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLoopMaxTurns:
     @pytest.mark.asyncio
     async def test_max_turns_respected(self) -> None:
         """Loop should stop after max_turns even if model keeps calling tools."""
+
         def loop_handler() -> str:
             return "ok"
 
         spec = ToolSpec(
-            name="loop_tool", description="Loops", parameters={},
+            name="loop_tool",
+            description="Loops",
+            parameters={},
             handler=loop_handler,
         )
 
@@ -359,16 +379,20 @@ class TestAgentLoopMaxTurns:
 # Tests: Confirmation callback
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLoopConfirmation:
     @pytest.mark.asyncio
     async def test_confirm_approve(self) -> None:
         """When on_confirm returns True, tool is executed normally."""
+
         def deploy_handler() -> str:
             return "deployed"
 
         spec = ToolSpec(
-            name="deploy", description="Deploy",
-            parameters={}, handler=deploy_handler,
+            name="deploy",
+            description="Deploy",
+            parameters={},
+            handler=deploy_handler,
         )
 
         confirmations: list[ToolCallInfo] = []
@@ -393,12 +417,15 @@ class TestAgentLoopConfirmation:
     @pytest.mark.asyncio
     async def test_confirm_deny(self) -> None:
         """When on_confirm returns False, tool is denied."""
+
         def delete_handler() -> str:
             return "deleted everything"
 
         spec = ToolSpec(
-            name="rm_rf", description="Delete",
-            parameters={}, handler=delete_handler,
+            name="rm_rf",
+            description="Delete",
+            parameters={},
+            handler=delete_handler,
         )
 
         turn1 = _make_tool_call_chunks("rm_rf", {})
@@ -419,12 +446,15 @@ class TestAgentLoopConfirmation:
     @pytest.mark.asyncio
     async def test_async_confirm_callback(self) -> None:
         """Async confirmation callbacks should be awaited."""
+
         def action_handler() -> str:
             return "done"
 
         spec = ToolSpec(
-            name="action", description="Action",
-            parameters={}, handler=action_handler,
+            name="action",
+            description="Action",
+            parameters={},
+            handler=action_handler,
         )
 
         async def async_confirm(tc: ToolCallInfo) -> bool:
@@ -446,37 +476,49 @@ class TestAgentLoopConfirmation:
 # Tests: Error handling
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLoopErrors:
     @pytest.mark.asyncio
     async def test_backend_stream_error(self) -> None:
         """If the backend stream raises, an ERROR event is yielded."""
+
         class FailingBackend(BackendProtocol):
             @override
             async def start(self) -> None: ...
             @override
             async def stop(self) -> None: ...
             @override
-            async def send(self, prompt: str, **kwargs: Any) -> Message:  # pragma: no cover - not used
+            async def send(
+                self, prompt: str, **kwargs: Any
+            ) -> Message:  # pragma: no cover - not used
                 raise NotImplementedError
+
             @override
             async def create_session(self, **kwargs: Any) -> SessionRef:
                 return SessionRef(session_id="sess", backend=Backend.COPILOT)
+
             @override
             async def resume_session(self, ref: SessionRef) -> None: ...
             @override
             async def list_sessions(self) -> list[SessionRef]:
                 return []
+
             @override
             async def delete_session(self, ref: SessionRef) -> None: ...
             @override
             def register_tool(self, spec: ToolSpec) -> None: ...
             @override
-            def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None: ...
+            def register_hook(
+                self, hook: HookPoint, callback: Callable[..., Any]
+            ) -> None: ...
             @override
             def get_tool_registry(self) -> ToolRegistry:
                 return ToolRegistry()
+
             @override
-            async def stream(self, prompt: str, **kw: Any) -> AsyncIterator[StreamChunk]:
+            async def stream(
+                self, prompt: str, **kw: Any
+            ) -> AsyncIterator[StreamChunk]:
                 raise ConnectionError("backend down")
                 yield  # make it a generator  # noqa: E501
 
@@ -491,15 +533,19 @@ class TestAgentLoopErrors:
 # Tests: Turn tracking
 # ---------------------------------------------------------------------------
 
+
 class TestAgentLoopTurnTracking:
     @pytest.mark.asyncio
     async def test_turn_numbers_increment(self) -> None:
         """Turn numbers should increment across tool-call iterations."""
+
         def step_handler() -> str:
             return "stepped"
 
         spec = ToolSpec(
-            name="step", description="Step", parameters={},
+            name="step",
+            description="Step",
+            parameters={},
             handler=step_handler,
         )
 
@@ -516,11 +562,14 @@ class TestAgentLoopTurnTracking:
     @pytest.mark.asyncio
     async def test_agent_done_has_accumulated_text(self) -> None:
         """AGENT_DONE event should contain all text from all turns."""
+
         def fetch_handler() -> str:
             return "data"
 
         spec = ToolSpec(
-            name="fetch", description="Fetch", parameters={},
+            name="fetch",
+            description="Fetch",
+            parameters={},
             handler=fetch_handler,
         )
 
@@ -544,6 +593,7 @@ class TestAgentLoopTurnTracking:
 # ---------------------------------------------------------------------------
 # Tests: ToolCallInfo parsing
 # ---------------------------------------------------------------------------
+
 
 class TestToolCallParsing:
     def test_parse_valid_json(self) -> None:

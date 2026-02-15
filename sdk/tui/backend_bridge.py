@@ -33,6 +33,7 @@ OnErrorCallback = Callable[[str], None]
 # BackendBridge
 # ---------------------------------------------------------------------------
 
+
 class BackendBridge:
     """Manages ObscuraClient lifecycle and streams chunks to TUI widgets.
 

@@ -16,9 +16,11 @@ import pytest
 # Inline stubs — mirrors sdk/tui/file_ops.py from PLAN_TUI.md
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FileChange:
     """A file modification tracked by FileOps."""
+
     path: Path
     original: str
     modified: str
@@ -102,6 +104,7 @@ class FileOps:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestFileOpsRead:
     """Verify FileOps.read() for existing and missing files."""
@@ -293,6 +296,7 @@ class TestFileOpsRestore:
 
         # Remove the original directory structure
         import shutil
+
         shutil.rmtree(tmp_path / "pkg")
 
         ops.restore("pkg/sub/mod.py")

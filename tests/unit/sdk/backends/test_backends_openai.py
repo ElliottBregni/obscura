@@ -4,7 +4,6 @@ Covers initialization, lifecycle, send/stream, sessions, tools, and hooks.
 All OpenAI SDK interactions are mocked via AsyncMock/MagicMock.
 """
 
-
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +25,7 @@ from sdk.backends.openai_compat import OpenAIBackend
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _auth(**kw) -> AuthConfig:
     """Build an AuthConfig for OpenAI tests."""
@@ -107,6 +107,7 @@ def _backend(**kw) -> OpenAIBackend:
 # 1. TestOpenAIInit
 # ===================================================================
 
+
 class TestOpenAIInit:
     """Verify constructor stores config correctly."""
 
@@ -143,6 +144,7 @@ class TestOpenAIInit:
 # 2. TestOpenAILifecycle
 # ===================================================================
 
+
 class TestOpenAILifecycle:
     """Verify start/stop lifecycle and client management."""
 
@@ -154,8 +156,10 @@ class TestOpenAILifecycle:
             await b.start()
             MockCtor.assert_called_once()
             call_kwargs = MockCtor.call_args
-            assert call_kwargs.kwargs.get("api_key") == "sk-lifecycle" or \
-                   call_kwargs[1].get("api_key") == "sk-lifecycle"
+            assert (
+                call_kwargs.kwargs.get("api_key") == "sk-lifecycle"
+                or call_kwargs[1].get("api_key") == "sk-lifecycle"
+            )
             assert b._client is mock_client
 
     @pytest.mark.asyncio
@@ -213,6 +217,7 @@ class TestOpenAILifecycle:
 # ===================================================================
 # 3. TestOpenAISend
 # ===================================================================
+
 
 class TestOpenAISend:
     """Verify send() produces correct Message objects."""
@@ -346,6 +351,7 @@ class TestOpenAISend:
 # ===================================================================
 # 4. TestOpenAIStream
 # ===================================================================
+
 
 class TestOpenAIStream:
     """Verify stream() yields correct StreamChunk objects."""
@@ -483,6 +489,7 @@ class TestOpenAIStream:
 # 5. TestOpenAISessions
 # ===================================================================
 
+
 class TestOpenAISessions:
     """Verify session create/resume/list/delete and conversation history."""
 
@@ -567,9 +574,7 @@ class TestOpenAISessions:
         """Previous conversation history is sent in subsequent requests."""
         b = _backend(model="gpt-4o-test")
         b._client = AsyncMock()
-        b._client.chat.completions.create.return_value = _make_response(
-            content="Reply"
-        )
+        b._client.chat.completions.create.return_value = _make_response(content="Reply")
 
         await b.create_session()
         await b.send("First message")
@@ -626,6 +631,7 @@ class TestOpenAISessions:
 # 6. TestOpenAITools
 # ===================================================================
 
+
 class TestOpenAITools:
     """Verify tool registration and _build_create_kwargs formatting."""
 
@@ -676,7 +682,9 @@ class TestOpenAITools:
         assert tool_def["type"] == "function"
         assert tool_def["function"]["name"] == "weather"
         assert tool_def["function"]["description"] == "Get weather for a city"
-        assert tool_def["function"]["parameters"]["properties"]["city"]["type"] == "string"
+        assert (
+            tool_def["function"]["parameters"]["properties"]["city"]["type"] == "string"
+        )
 
     def test_build_create_kwargs_no_tools(self):
         """Without tools registered, 'tools' key should not appear."""
@@ -732,6 +740,7 @@ class TestOpenAITools:
 # ===================================================================
 # 7. TestOpenAIHooks
 # ===================================================================
+
 
 class TestOpenAIHooks:
     """Verify hook registration and execution during send/stream."""
@@ -849,9 +858,7 @@ class TestOpenAIHooks:
         """An async hook that raises is also silenced."""
         b = _backend(model="gpt-4o-test")
         b._client = AsyncMock()
-        b._client.chat.completions.create.return_value = _make_response(
-            content="fine"
-        )
+        b._client.chat.completions.create.return_value = _make_response(content="fine")
 
         async def bad_async_hook(ctx):
             raise RuntimeError("async hook exploded")
@@ -886,6 +893,7 @@ class TestOpenAIHooks:
 # ===================================================================
 # 8. TestOpenAIBuildMessages (internal helper)
 # ===================================================================
+
 
 class TestOpenAIBuildMessages:
     """Verify _build_messages() constructs the correct message list."""
@@ -933,6 +941,7 @@ class TestOpenAIBuildMessages:
 # ===================================================================
 # 9. TestOpenAIToMessage (internal helper)
 # ===================================================================
+
 
 class TestOpenAIToMessage:
     """Verify _to_message() correctly normalizes OpenAI responses."""

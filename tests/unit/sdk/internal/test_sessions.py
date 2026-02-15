@@ -1,4 +1,5 @@
 """Tests for sdk.internal.sessions — SessionStore and PersistentSessionStore."""
+
 import json
 import tempfile
 from pathlib import Path
@@ -100,4 +101,6 @@ class TestPersistentSessionStore:
             store.add(SessionRef(session_id="s1", backend=Backend.COPILOT))
             store.save()
             assert path.exists()
+
+
 # pyright: ignore-all

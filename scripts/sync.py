@@ -58,7 +58,9 @@ from typing import Callable, Literal
 # Type aliases
 # ---------------------------------------------------------------------------
 
-Classification = Literal["UNIVERSAL", "AGENT_NAMED", "AGENT_NESTED", "AGENT_DIR", "SKIP"]
+Classification = Literal[
+    "UNIVERSAL", "AGENT_NAMED", "AGENT_NESTED", "AGENT_DIR", "SKIP"
+]
 _AgentTargetFn = Callable[[str], str]
 
 
@@ -106,6 +108,7 @@ def _empty_path_pairs() -> list[tuple[Path, Path]]:
 @dataclass
 class SyncTarget:
     """A discovered location where agent dirs should be created."""
+
     repo_path: Path
     files: list[tuple[Path, Path]] = field(default_factory=_empty_path_pairs)
 
@@ -113,6 +116,7 @@ class SyncTarget:
 @dataclass
 class SyncProfile:
     """Active model/role variant for manifest filtering."""
+
     model: str | None = None
     role: str | None = None
 
@@ -141,6 +145,7 @@ def parse_sync_profile(path: Path) -> SyncProfile:
 # FileClassifier — agent-specific file classification
 # ---------------------------------------------------------------------------
 
+
 class FileClassifier:
     """Classify vault files by agent ownership."""
 
@@ -148,7 +153,10 @@ class FileClassifier:
         self._agents = agents
 
     def classify(
-        self, filepath: Path, base_path: Path, agent: str,
+        self,
+        filepath: Path,
+        base_path: Path,
+        agent: str,
     ) -> tuple[Classification, Path]:
         """Classify a file for a given agent.
 
@@ -177,7 +185,9 @@ class FileClassifier:
 
         # Agent name as word segment in filename
         for a in self._agents:
-            if re.search(rf"(^|[-_.]){re.escape(a)}([-_.]|$)", filepath.name, re.IGNORECASE):
+            if re.search(
+                rf"(^|[-_.]){re.escape(a)}([-_.]|$)", filepath.name, re.IGNORECASE
+            ):
                 if a == agent:
                     return ("AGENT_NAMED", rel)
                 return ("SKIP", rel)
@@ -185,7 +195,10 @@ class FileClassifier:
         return ("UNIVERSAL", rel)
 
     def classify_with_dest(
-        self, source_abs: Path, dest_rel: Path, agent: str,
+        self,
+        source_abs: Path,
+        dest_rel: Path,
+        agent: str,
     ) -> tuple[Classification, Path]:
         """Classify a file using its destination-relative path."""
         filename = source_abs.name
@@ -237,11 +250,14 @@ class FileClassifier:
 # TargetDiscovery — recursive directory-matching discovery
 # ---------------------------------------------------------------------------
 
+
 class TargetDiscovery:
     """Walk vault tree and discover sync targets by matching against repo dirs."""
 
     def discover(
-        self, vault_dir: Path, repo_dir: Path,
+        self,
+        vault_dir: Path,
+        repo_dir: Path,
         repo_root: Path | None = None,
     ) -> list[SyncTarget]:
         """Recursively discover where to create agent dirs."""
@@ -284,23 +300,36 @@ class TargetDiscovery:
                         new_target = SyncTarget(repo_path=real_counterpart)
                         all_targets.append(new_target)
                         self._walk_vault(
-                            entry, real_counterpart, repo_root,
-                            new_target, all_targets, Path(), 0,
+                            entry,
+                            real_counterpart,
+                            repo_root,
+                            new_target,
+                            all_targets,
+                            Path(),
+                            0,
                         )
                         continue
 
                 in_content = content_prefix != Path()
-                new_prefix = content_prefix / entry.name if in_content else Path(entry.name)
+                new_prefix = (
+                    content_prefix / entry.name if in_content else Path(entry.name)
+                )
                 new_depth = content_depth + 1 if content_depth > 0 else 1
                 self._walk_vault(
-                    entry, repo_dir, repo_root,
-                    current_target, all_targets, new_prefix, new_depth,
+                    entry,
+                    repo_dir,
+                    repo_root,
+                    current_target,
+                    all_targets,
+                    new_prefix,
+                    new_depth,
                 )
 
 
 # ---------------------------------------------------------------------------
 # ManifestBuilder — build agent-filtered file manifests
 # ---------------------------------------------------------------------------
+
 
 class ManifestBuilder:
     """Build classified file manifests from discovered targets or vault content."""
@@ -309,8 +338,11 @@ class ManifestBuilder:
         self._classifier = classifier
 
     def for_target(
-        self, agent: str, target: SyncTarget,
-        vault_repo_root: Path, repo_root: Path,
+        self,
+        agent: str,
+        target: SyncTarget,
+        vault_repo_root: Path,
+        repo_root: Path,
     ) -> dict[Path, Path]:
         """Build classified manifest for a discovered target.
 
@@ -320,7 +352,9 @@ class ManifestBuilder:
 
         for source_abs, dest_rel in target.files:
             cls, classified_dest = self._classifier.classify_with_dest(
-                source_abs, dest_rel, agent,
+                source_abs,
+                dest_rel,
+                agent,
             )
             if cls == "SKIP":
                 continue
@@ -334,7 +368,9 @@ class ManifestBuilder:
                 if not f.is_file():
                     continue
                 cls, classified_dest = self._classifier.classify_with_dest(
-                    f, Path(f.name), agent,
+                    f,
+                    Path(f.name),
+                    agent,
                 )
                 if cls == "SKIP":
                     continue
@@ -371,6 +407,7 @@ class ManifestBuilder:
 # ---------------------------------------------------------------------------
 # VariantSelector — model/role filtering on manifests
 # ---------------------------------------------------------------------------
+
 
 class VariantSelector:
     """Filter manifest entries by active model and role profile.
@@ -419,7 +456,9 @@ class VariantSelector:
         base files remain.
         """
         # First pass: identify model-variant entries and their base paths
-        variants: dict[Path, dict[str, tuple[Path, Path]]] = {}  # base_dest → {model → (dest, src)}
+        variants: dict[
+            Path, dict[str, tuple[Path, Path]]
+        ] = {}  # base_dest → {model → (dest, src)}
         regular: dict[Path, Path] = {}
 
         for dest, source in manifest.items():
@@ -475,10 +514,14 @@ class VariantSelector:
         """
         name = dest.name
         # Replace .model. with . (e.g. "setup.claude.opus.md" → "setup.claude.md")
-        stripped = re.sub(rf"\.{re.escape(model_name)}\.", ".", name, count=1, flags=re.IGNORECASE)
+        stripped = re.sub(
+            rf"\.{re.escape(model_name)}\.", ".", name, count=1, flags=re.IGNORECASE
+        )
         if stripped == name:
             # model might be last before extension: "thing.opus.md" → "thing.md"
-            stripped = re.sub(rf"\.{re.escape(model_name)}\b", "", name, count=1, flags=re.IGNORECASE)
+            stripped = re.sub(
+                rf"\.{re.escape(model_name)}\b", "", name, count=1, flags=re.IGNORECASE
+            )
         return dest.parent / stripped if dest.parent != Path() else Path(stripped)
 
     # -- Role filter --------------------------------------------------------
@@ -527,6 +570,7 @@ class VariantSelector:
 # SymlinkManager — filesystem operations (create/remove symlinks)
 # ---------------------------------------------------------------------------
 
+
 class SymlinkManager:
     """Create and remove per-file symlinks in agent target directories."""
 
@@ -536,7 +580,9 @@ class SymlinkManager:
     # -- Shared primitives -----------------------------------------------
 
     def apply_manifest(
-        self, target_dir: Path, manifest: dict[Path, Path],
+        self,
+        target_dir: Path,
+        manifest: dict[Path, Path],
     ) -> tuple[int, int, set[Path]]:
         """Apply a file manifest as symlinks. Returns (new, skip, created)."""
         created: set[Path] = set()
@@ -569,7 +615,9 @@ class SymlinkManager:
         return count_new, count_skip, created
 
     def prune_stale(
-        self, root_dir: Path, created: set[Path],
+        self,
+        root_dir: Path,
+        created: set[Path],
         restrict_to: list[str] | None = None,
     ) -> int:
         """Remove stale symlinks and empty dirs.
@@ -581,8 +629,7 @@ class SymlinkManager:
 
         if restrict_to:
             dirs_to_prune = [
-                root_dir / name for name in restrict_to
-                if (root_dir / name).exists()
+                root_dir / name for name in restrict_to if (root_dir / name).exists()
             ]
         elif root_dir.exists():
             dirs_to_prune = [root_dir]
@@ -608,7 +655,11 @@ class SymlinkManager:
 
             if restrict_to:
                 try:
-                    if prune_dir.is_dir() and not any(prune_dir.iterdir()) and not self.dry_run:
+                    if (
+                        prune_dir.is_dir()
+                        and not any(prune_dir.iterdir())
+                        and not self.dry_run
+                    ):
                         prune_dir.rmdir()
                 except OSError:
                     pass
@@ -618,9 +669,12 @@ class SymlinkManager:
     # -- High-level operations -------------------------------------------
 
     def sync_target(
-        self, agent: str, target: SyncTarget,
+        self,
+        agent: str,
+        target: SyncTarget,
         manifest_builder: ManifestBuilder,
-        vault_repo_root: Path, repo_root: Path,
+        vault_repo_root: Path,
+        repo_root: Path,
         agent_target_name: str,
         selector: VariantSelector | None = None,
     ) -> None:
@@ -636,7 +690,9 @@ class SymlinkManager:
         if not self.dry_run:
             target_dir.mkdir(exist_ok=True)
 
-        manifest = manifest_builder.for_target(agent, target, vault_repo_root, repo_root)
+        manifest = manifest_builder.for_target(
+            agent, target, vault_repo_root, repo_root
+        )
         if selector is not None:
             manifest = selector.select(manifest)
         count_new, count_skip, created = self.apply_manifest(target_dir, manifest)
@@ -648,7 +704,9 @@ class SymlinkManager:
         )
 
     def sync_system(
-        self, agent: str, vault_path: Path,
+        self,
+        agent: str,
+        vault_path: Path,
         manifest_builder: ManifestBuilder,
         agent_target_name: str,
         selector: VariantSelector | None = None,
@@ -676,7 +734,10 @@ class SymlinkManager:
         )
 
     def remove_links(
-        self, repo_path: Path, agents: list[str], agent_target_fn: _AgentTargetFn,
+        self,
+        repo_path: Path,
+        agents: list[str],
+        agent_target_fn: _AgentTargetFn,
     ) -> None:
         """Remove all agent target directories from a repo."""
         for agent in agents:
@@ -690,14 +751,20 @@ class SymlinkManager:
             elif target_dir.is_dir():
                 count = self.prune_stale(target_dir, created=set())
                 try:
-                    if target_dir.is_dir() and not any(target_dir.iterdir()) and not self.dry_run:
+                    if (
+                        target_dir.is_dir()
+                        and not any(target_dir.iterdir())
+                        and not self.dry_run
+                    ):
                         target_dir.rmdir()
                 except OSError:
                     pass
                 print(f"  Removed {count} symlinks from {target_dir.name}/")
 
     def remove_system_links(
-        self, agents: list[str], agent_target_fn: _AgentTargetFn,
+        self,
+        agents: list[str],
+        agent_target_fn: _AgentTargetFn,
     ) -> None:
         """Remove vault-managed symlinks from system-level agent dirs."""
         for agent in agents:
@@ -705,7 +772,9 @@ class SymlinkManager:
             target_dir = Path.home() / target_name
             if not target_dir.is_dir():
                 continue
-            count = self.prune_stale(target_dir, created=set(), restrict_to=CONTENT_DIRS)
+            count = self.prune_stale(
+                target_dir, created=set(), restrict_to=CONTENT_DIRS
+            )
             if count > 0:
                 print(f"  Removed {count} symlinks from ~/{target_name}/")
 
@@ -713,6 +782,7 @@ class SymlinkManager:
 # ---------------------------------------------------------------------------
 # VaultSync — thin orchestrator
 # ---------------------------------------------------------------------------
+
 
 class VaultSync:
     """Orchestrator: coordinates config, classification, discovery, and sync."""
@@ -841,22 +911,33 @@ class VaultSync:
     # -- Delegates (preserve public API) ---------------------------------
 
     def classify_file(
-        self, filepath: Path, base_path: Path, agent: str,
+        self,
+        filepath: Path,
+        base_path: Path,
+        agent: str,
     ) -> tuple[Classification, Path]:
         return self._get_classifier().classify(filepath, base_path, agent)
 
     def discover_sync_targets(
-        self, vault_dir: Path, repo_dir: Path,
+        self,
+        vault_dir: Path,
+        repo_dir: Path,
         repo_root: Path | None = None,
     ) -> list[SyncTarget]:
         return self._discovery.discover(vault_dir, repo_dir, repo_root)
 
     def build_target_manifest(
-        self, agent: str, target: SyncTarget,
-        vault_repo_root: Path, repo_root: Path,
+        self,
+        agent: str,
+        target: SyncTarget,
+        vault_repo_root: Path,
+        repo_root: Path,
     ) -> dict[Path, Path]:
         return self._get_manifest_builder().for_target(
-            agent, target, vault_repo_root, repo_root,
+            agent,
+            target,
+            vault_repo_root,
+            repo_root,
         )
 
     def build_vault_manifest(self, agent: str) -> dict[Path, tuple[Path, int]]:
@@ -865,19 +946,28 @@ class VaultSync:
     # -- Sync operations -------------------------------------------------
 
     def sync_target(
-        self, agent: str, target: SyncTarget,
-        vault_repo_root: Path, repo_root: Path,
+        self,
+        agent: str,
+        target: SyncTarget,
+        vault_repo_root: Path,
+        repo_root: Path,
         selector: VariantSelector | None = None,
     ) -> None:
         sel = selector or self._selector
         self._linker.sync_target(
-            agent, target, self._get_manifest_builder(),
-            vault_repo_root, repo_root, self.get_agent_target(agent),
+            agent,
+            target,
+            self._get_manifest_builder(),
+            vault_repo_root,
+            repo_root,
+            self.get_agent_target(agent),
             selector=sel,
         )
 
     def sync_all(
-        self, agent: str | None = None, repo: str | None = None,
+        self,
+        agent: str | None = None,
+        repo: str | None = None,
     ) -> None:
         """Sync all (or specific) agents and repos."""
         agents = [agent] if agent else self.get_registered_agents()
@@ -913,7 +1003,10 @@ class VaultSync:
                             print(f"  Agent '{a}' not registered, skipping")
                             continue
                         self.sync_target(
-                            a, target, vault_repo, repo_path,
+                            a,
+                            target,
+                            vault_repo,
+                            repo_path,
                             selector=repo_selector,
                         )
 
@@ -929,8 +1022,10 @@ class VaultSync:
                 print(f"  Agent '{a}' not registered, skipping")
                 continue
             self._linker.sync_system(
-                a, self.vault_path,
-                self._get_manifest_builder(), self.get_agent_target(a),
+                a,
+                self.vault_path,
+                self._get_manifest_builder(),
+                self.get_agent_target(a),
                 selector=self._selector,
             )
 
@@ -938,12 +1033,15 @@ class VaultSync:
 
     def remove_links(self, repo_path: Path) -> None:
         self._linker.remove_links(
-            repo_path, self.get_registered_agents(), self.get_agent_target,
+            repo_path,
+            self.get_registered_agents(),
+            self.get_agent_target,
         )
 
     def remove_system_links(self) -> None:
         self._linker.remove_system_links(
-            self.get_registered_agents(), self.get_agent_target,
+            self.get_registered_agents(),
+            self.get_agent_target,
         )
 
     def remove_all(self, repo: str | None = None) -> None:
@@ -970,8 +1068,11 @@ class VaultSync:
         self.remove_system_links()
 
     def merge_and_relink(
-        self, target: SyncTarget, vault_repo_root: Path,
-        repo_root: Path, agent: str | None = None,
+        self,
+        target: SyncTarget,
+        vault_repo_root: Path,
+        repo_root: Path,
+        agent: str | None = None,
     ) -> None:
         """Post-git-merge: merge new files into vault, then re-sync."""
         agents = [agent] if agent else self.get_registered_agents()
@@ -984,8 +1085,7 @@ class VaultSync:
                 continue
 
             real_files = [
-                f for f in target_dir.rglob("*")
-                if f.is_file() and not f.is_symlink()
+                f for f in target_dir.rglob("*") if f.is_file() and not f.is_symlink()
             ]
             if not real_files:
                 continue
@@ -1025,8 +1125,11 @@ class VaultWatcher:
     """Watch vault directories and re-sync on changes (requires fswatch)."""
 
     def __init__(
-        self, vault_path: Path, sync: VaultSync,
-        agent: str | None = None, repo: str | None = None,
+        self,
+        vault_path: Path,
+        sync: VaultSync,
+        agent: str | None = None,
+        repo: str | None = None,
     ) -> None:
         self.vault_path = vault_path
         self.sync = sync
@@ -1037,8 +1140,10 @@ class VaultWatcher:
 
     def _check_fswatch(self) -> None:
         if shutil.which("fswatch") is None:
-            print("Error: fswatch not installed. Run: brew install fswatch",
-                  file=sys.stderr)
+            print(
+                "Error: fswatch not installed. Run: brew install fswatch",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     def _acquire_lock(self) -> None:
@@ -1046,8 +1151,9 @@ class VaultWatcher:
             try:
                 old_pid = int(LOCK_FILE.read_text().strip())
                 os.kill(old_pid, 0)
-                print(f"Error: Watcher already running (PID: {old_pid})",
-                      file=sys.stderr)
+                print(
+                    f"Error: Watcher already running (PID: {old_pid})", file=sys.stderr
+                )
                 sys.exit(1)
             except (ProcessLookupError, ValueError):
                 LOCK_FILE.unlink(missing_ok=True)
@@ -1161,8 +1267,11 @@ class VaultWatcher:
         cmd = self._build_fswatch_cmd(watch_paths)
         try:
             self._process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                text=True, bufsize=1,
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
             )
             if self._process.stdout is not None:
                 for line in self._process.stdout:
@@ -1178,6 +1287,7 @@ class VaultWatcher:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -1195,19 +1305,27 @@ Examples:
         """,
     )
     parser.add_argument(
-        "--mode", choices=["symlink"], default="symlink",
+        "--mode",
+        choices=["symlink"],
+        default="symlink",
         help="Sync mode (default: symlink)",
     )
     parser.add_argument("--agent", help="Specific agent to sync")
     parser.add_argument("--repo", help="Specific repo (name or path)")
-    parser.add_argument("--dry-run", action="store_true", help="Preview without changes")
-    parser.add_argument("--clean", action="store_true", help="Remove all agent directories")
     parser.add_argument(
-        "--merge", action="store_true",
+        "--dry-run", action="store_true", help="Preview without changes"
+    )
+    parser.add_argument(
+        "--clean", action="store_true", help="Remove all agent directories"
+    )
+    parser.add_argument(
+        "--merge",
+        action="store_true",
         help="Merge real dirs into vault and re-sync (post-git-merge)",
     )
     parser.add_argument(
-        "--watch", action="store_true",
+        "--watch",
+        action="store_true",
         help="Watch vault for changes and auto-sync (requires fswatch)",
     )
 

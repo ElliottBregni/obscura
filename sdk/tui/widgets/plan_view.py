@@ -24,6 +24,7 @@ from sdk.tui.modes import Plan, PlanStep
 # PlanStepWidget
 # ---------------------------------------------------------------------------
 
+
 class PlanStepWidget(Widget):
     """A single plan step with approve/reject controls."""
 
@@ -118,9 +119,7 @@ class PlanStepWidget(Widget):
 
         # Update status text
         try:
-            status = self.query_one(
-                f"#step-status-{self._step.number}", Static
-            )
+            status = self.query_one(f"#step-status-{self._step.number}", Static)
             status.update(self._status_text())
         except Exception:
             pass
@@ -133,6 +132,7 @@ class PlanStepWidget(Widget):
 # ---------------------------------------------------------------------------
 # PlanView
 # ---------------------------------------------------------------------------
+
 
 class PlanView(Widget):
     """Displays a structured plan with per-step approval UI.
@@ -229,11 +229,7 @@ class PlanView(Widget):
         approved = self._plan.approved_count
         rejected = self._plan.rejected_count
         pending = self._plan.pending_count
-        return (
-            f"{approved}/{total} approved, "
-            f"{rejected} rejected, "
-            f"{pending} pending"
-        )
+        return f"{approved}/{total} approved, {rejected} rejected, {pending} pending"
 
     # -- Event handlers -----------------------------------------------------
 
@@ -313,9 +309,7 @@ class PlanView(Widget):
             return
 
         # Title
-        self._container.mount(
-            Static(self._plan.title, classes="plan-title")
-        )
+        self._container.mount(Static(self._plan.title, classes="plan-title"))
 
         # Steps
         self._step_widgets.clear()

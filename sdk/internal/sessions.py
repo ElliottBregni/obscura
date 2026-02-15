@@ -19,6 +19,7 @@ from sdk.internal.types import Backend, SessionRef
 # Session store
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SessionStore:
     """In-memory session index.
@@ -83,10 +84,12 @@ class PersistentSessionStore(SessionStore):
 
         data: list[dict[str, str]] = []
         for ref in self._sessions.values():
-            data.append({
-                "session_id": ref.session_id,
-                "backend": ref.backend.value,
-            })
+            data.append(
+                {
+                    "session_id": ref.session_id,
+                    "backend": ref.backend.value,
+                }
+            )
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -108,7 +111,9 @@ class PersistentSessionStore(SessionStore):
             item = cast(Mapping[str, object], raw_item)
             session_id_obj = item.get("session_id")
             backend_name_obj = item.get("backend")
-            if not isinstance(session_id_obj, str) or not isinstance(backend_name_obj, str):
+            if not isinstance(session_id_obj, str) or not isinstance(
+                backend_name_obj, str
+            ):
                 continue
             session_id = session_id_obj
             backend_name = backend_name_obj

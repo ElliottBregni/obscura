@@ -13,10 +13,10 @@ from enum import Enum
 from typing import Any
 
 
-
 # ---------------------------------------------------------------------------
 # Inline stubs — mirrors sdk/tui/session.py and sdk/tui/modes.py
 # ---------------------------------------------------------------------------
+
 
 class TUIMode(Enum):
     ASK = "ask"
@@ -28,7 +28,8 @@ class TUIMode(Enum):
 @dataclass
 class ConversationTurn:
     """A single turn in the conversation history."""
-    role: str                    # "user" or "assistant"
+
+    role: str  # "user" or "assistant"
     content: str
     timestamp: datetime
     mode: TUIMode
@@ -63,6 +64,7 @@ class TUISession:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_turn(
     role: str = "user",
     content: str = "hello",
@@ -82,6 +84,7 @@ def _make_turn(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestConversationTurn:
     """Verify ConversationTurn creation and field access."""
@@ -113,11 +116,13 @@ class TestConversationTurn:
 
     def test_metadata_with_tool_uses(self) -> None:
         """Metadata can store tool_uses list."""
-        turn = _make_turn(metadata={
-            "tool_uses": [
-                {"name": "read_file", "input": {"path": "foo.py"}},
-            ],
-        })
+        turn = _make_turn(
+            metadata={
+                "tool_uses": [
+                    {"name": "read_file", "input": {"path": "foo.py"}},
+                ],
+            }
+        )
         assert len(turn.metadata["tool_uses"]) == 1
         assert turn.metadata["tool_uses"][0]["name"] == "read_file"
 
@@ -128,18 +133,22 @@ class TestConversationTurn:
 
     def test_metadata_with_timing(self) -> None:
         """Metadata can store timing information."""
-        turn = _make_turn(metadata={"timing_ms": 1234, "tokens_in": 50, "tokens_out": 200})
+        turn = _make_turn(
+            metadata={"timing_ms": 1234, "tokens_in": 50, "tokens_out": 200}
+        )
         assert turn.metadata["timing_ms"] == 1234
         assert turn.metadata["tokens_in"] == 50
         assert turn.metadata["tokens_out"] == 200
 
     def test_metadata_with_all_fields(self) -> None:
         """Metadata can store tool_uses, thinking, and timing together."""
-        turn = _make_turn(metadata={
-            "tool_uses": [{"name": "write_file"}],
-            "thinking": "Considering options...",
-            "timing_ms": 500,
-        })
+        turn = _make_turn(
+            metadata={
+                "tool_uses": [{"name": "write_file"}],
+                "thinking": "Considering options...",
+                "timing_ms": 500,
+            }
+        )
         assert "tool_uses" in turn.metadata
         assert "thinking" in turn.metadata
         assert "timing_ms" in turn.metadata

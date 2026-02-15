@@ -22,17 +22,19 @@ class TestManifestBuilding:
             "copilot", root, vault_repo, mock_repo
         )
 
-        assert Path("copilot-instructions.md") in manifest, \
+        assert Path("copilot-instructions.md") in manifest, (
             "copilot manifest should have copilot-instructions.md"
-        assert Path("agent.md") in manifest, \
-            "copilot manifest should have agent.md"
+        )
+        assert Path("agent.md") in manifest, "copilot manifest should have agent.md"
 
         # Nested override stripped
-        assert Path("skills/subagent/Models/skill.md") in manifest, \
+        assert Path("skills/subagent/Models/skill.md") in manifest, (
             "skill.md (from skill.copilot.md) should be in manifest"
+        )
         source = manifest[Path("skills/subagent/Models/skill.md")]
-        assert "skill.copilot.md" in str(source), \
+        assert "skill.copilot.md" in str(source), (
             f"skill.md should point to skill.copilot.md, got {source}"
+        )
 
     def test_build_target_manifest_claude(
         self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
@@ -46,10 +48,10 @@ class TestManifestBuilding:
             "claude", root, vault_repo, mock_repo
         )
 
-        assert Path("copilot-instructions.md") not in manifest, \
+        assert Path("copilot-instructions.md") not in manifest, (
             "Claude should not have copilot-instructions.md"
-        assert Path("agent.md") in manifest, \
-            "Claude should have agent.md"
+        )
+        assert Path("agent.md") in manifest, "Claude should have agent.md"
 
     def test_build_target_manifest_no_vault_content(
         self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
@@ -63,10 +65,12 @@ class TestManifestBuilding:
             "copilot", root, vault_repo, mock_repo
         )
 
-        assert Path("skills/git-workflow.md") not in manifest, \
+        assert Path("skills/git-workflow.md") not in manifest, (
             "Vault skill should NOT be in repo manifest"
-        assert Path("docs/AUTO-SYNC.md") not in manifest, \
+        )
+        assert Path("docs/AUTO-SYNC.md") not in manifest, (
             "Vault docs should NOT be in repo manifest"
+        )
 
     def test_child_target_inherits_root_files(
         self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
@@ -80,10 +84,12 @@ class TestManifestBuilding:
             "copilot", plat, vault_repo, mock_repo
         )
 
-        assert Path("agent.md") in manifest, \
+        assert Path("agent.md") in manifest, (
             "platform target should inherit agent.md from root"
-        assert Path("config.json") in manifest, \
+        )
+        assert Path("config.json") in manifest, (
             "platform target should inherit config.json from root"
+        )
 
     def test_child_no_content_cascade(
         self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
@@ -102,8 +108,9 @@ class TestManifestBuilding:
         key = Path("skills/changelog-generator/SKILL.md")
         if key in manifest:
             source = str(manifest[key])
-            assert "platform" in source, \
+            assert "platform" in source, (
                 f"Platform's changelog-generator should come from platform vault, got {source}"
+            )
 
     def test_vault_manifest_copilot(
         self, sync_instance: VaultSync, vault_root: Path
@@ -125,5 +132,6 @@ class TestManifestBuilding:
 
         assert Path("skills/database.md") in manifest
         assert Path("skills/python.md") in manifest
-        assert Path("skills/api-design.md") not in manifest, \
+        assert Path("skills/api-design.md") not in manifest, (
             "Claude should not have api-design.md (copilot-only)"
+        )

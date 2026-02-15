@@ -21,6 +21,7 @@ import pytest
 # Inline stubs — mirrors sdk/tui/session.py persistence from PLAN_TUI.md
 # ---------------------------------------------------------------------------
 
+
 class TUIMode(Enum):
     ASK = "ask"
     PLAN = "plan"
@@ -31,6 +32,7 @@ class TUIMode(Enum):
 @dataclass
 class ConversationTurn:
     """A single turn in the conversation history."""
+
     role: str
     content: str
     timestamp: datetime
@@ -93,9 +95,7 @@ class TUISession:
         data = {
             "session_id": self.session_id,
             "turns": [t.to_dict() for t in self.turns],
-            "created_at": (
-                self.turns[0].timestamp.isoformat() if self.turns else None
-            ),
+            "created_at": (self.turns[0].timestamp.isoformat() if self.turns else None),
             "updated_at": (
                 self.turns[-1].timestamp.isoformat() if self.turns else None
             ),
@@ -133,12 +133,14 @@ class TUISession:
         for path in sorted(sessions_dir.glob("*.json")):
             try:
                 data = json.loads(path.read_text())
-                results.append({
-                    "session_id": data["session_id"],
-                    "turn_count": len(data.get("turns", [])),
-                    "created_at": data.get("created_at"),
-                    "updated_at": data.get("updated_at"),
-                })
+                results.append(
+                    {
+                        "session_id": data["session_id"],
+                        "turn_count": len(data.get("turns", [])),
+                        "created_at": data.get("created_at"),
+                        "updated_at": data.get("updated_at"),
+                    }
+                )
             except (json.JSONDecodeError, KeyError):
                 continue  # Skip corrupted files
 
@@ -148,6 +150,7 @@ class TUISession:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_turn(
     role: str = "user",
@@ -168,6 +171,7 @@ def _make_turn(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestTUISessionSave:
     """Verify TUISession.save() writes JSON to disk."""
@@ -227,10 +231,14 @@ class TestTUISessionSave:
     def test_save_preserves_metadata(self, tmp_path: Path) -> None:
         """Turn metadata is preserved in the saved JSON."""
         session = TUISession(base_dir=tmp_path)
-        session.add_turn(_make_turn(metadata={
-            "thinking": "hmm",
-            "timing_ms": 1500,
-        }))
+        session.add_turn(
+            _make_turn(
+                metadata={
+                    "thinking": "hmm",
+                    "timing_ms": 1500,
+                }
+            )
+        )
         session.save()
         data = json.loads(session.file_path.read_text())
         meta = data["turns"][0]["metadata"]
@@ -407,9 +415,11 @@ class TestTUISessionListSessions:
     def test_list_sessions_includes_timestamps(self, tmp_path: Path) -> None:
         """list_sessions() includes created_at and updated_at."""
         s = TUISession(session_id="withts", base_dir=tmp_path)
-        s.add_turn(_make_turn(
-            timestamp=datetime(2025, 5, 1, 10, 0, 0, tzinfo=timezone.utc),
-        ))
+        s.add_turn(
+            _make_turn(
+                timestamp=datetime(2025, 5, 1, 10, 0, 0, tzinfo=timezone.utc),
+            )
+        )
         s.save()
 
         sessions = TUISession.list_sessions(base_dir=tmp_path)

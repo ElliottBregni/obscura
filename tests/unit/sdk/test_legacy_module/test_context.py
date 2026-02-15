@@ -15,6 +15,7 @@ from sdk.context import ContextLoader
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def vault(tmp_path: Path) -> Path:
     """Create a mock vault directory structure."""
@@ -45,6 +46,7 @@ def vault(tmp_path: Path) -> Path:
 # agent_dir
 # ---------------------------------------------------------------------------
 
+
 class TestAgentDir:
     def test_copilot_agent_dir(self, vault: Path):
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
@@ -58,6 +60,7 @@ class TestAgentDir:
 # ---------------------------------------------------------------------------
 # load_instructions
 # ---------------------------------------------------------------------------
+
 
 class TestLoadInstructions:
     def test_loads_all_instruction_files(self, vault: Path):
@@ -80,6 +83,7 @@ class TestLoadInstructions:
 # ---------------------------------------------------------------------------
 # load_skills
 # ---------------------------------------------------------------------------
+
 
 class TestLoadSkills:
     def test_loads_skill_files(self, vault: Path):
@@ -106,6 +110,7 @@ class TestLoadSkills:
 # load_role
 # ---------------------------------------------------------------------------
 
+
 class TestLoadRole:
     def test_loads_role_context(self, vault: Path):
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
@@ -121,6 +126,7 @@ class TestLoadRole:
 # ---------------------------------------------------------------------------
 # load_system_prompt
 # ---------------------------------------------------------------------------
+
 
 class TestLoadSystemPrompt:
     def test_combines_instructions_and_skills(self, vault: Path):

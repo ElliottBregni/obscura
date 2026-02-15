@@ -1,4 +1,5 @@
 """Tests for sdk.backends.claude — ClaudeBackend."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
@@ -12,6 +13,7 @@ def _make_auth(api_key: str = "sk-ant-test") -> AuthConfig:
 class TestClaudeBackendInit:
     def test_defaults(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         assert b.model == "claude-sonnet-4-5-20250929"
         assert b.permission_mode == "default"
@@ -20,6 +22,7 @@ class TestClaudeBackendInit:
 
     def test_custom_settings(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(
             _make_auth(),
             model="claude-3-haiku",
@@ -37,11 +40,14 @@ class TestClaudeLifecycle:
     @pytest.mark.asyncio
     async def test_start(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         mock_client = AsyncMock()
         # ClaudeSDKClient is imported locally from claude_agent_sdk
-        with patch("claude_agent_sdk.ClaudeSDKClient", return_value=mock_client), \
-             patch("claude_agent_sdk.ClaudeAgentOptions"):
+        with (
+            patch("claude_agent_sdk.ClaudeSDKClient", return_value=mock_client),
+            patch("claude_agent_sdk.ClaudeAgentOptions"),
+        ):
             await b.start()
             mock_client.connect.assert_awaited_once()
             assert b.client is mock_client
@@ -49,6 +55,7 @@ class TestClaudeLifecycle:
     @pytest.mark.asyncio
     async def test_stop(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         await b.stop()
@@ -57,6 +64,7 @@ class TestClaudeLifecycle:
     @pytest.mark.asyncio
     async def test_stop_when_not_started(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         await b.stop()  # Should not raise
 
@@ -65,6 +73,7 @@ class TestClaudeSend:
     @pytest.mark.asyncio
     async def test_send(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         mock_client = AsyncMock()
 
@@ -104,6 +113,7 @@ class TestClaudeSend:
     @pytest.mark.asyncio
     async def test_send_not_started(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             await b.send("test")
@@ -113,6 +123,7 @@ class TestClaudeSessions:
     @pytest.mark.asyncio
     async def test_create_session(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
 
@@ -134,6 +145,7 @@ class TestClaudeSessions:
     @pytest.mark.asyncio
     async def test_list_sessions(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
 
@@ -157,6 +169,7 @@ class TestClaudeSessions:
     async def test_delete_session(self):
         from sdk.backends.claude import ClaudeBackend
         from sdk.internal.types import SessionRef
+
         b = ClaudeBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
 
@@ -175,13 +188,17 @@ class TestClaudeTools:
     def test_register_tool(self):
         from sdk.backends.claude import ClaudeBackend
         from sdk.internal.types import ToolSpec
+
         b = ClaudeBackend(_make_auth())
-        spec = ToolSpec(name="t1", description="test tool", parameters={}, handler=lambda: None)
+        spec = ToolSpec(
+            name="t1", description="test tool", parameters={}, handler=lambda: None
+        )
         b.register_tool(spec)
         assert len(b.tools) == 1
 
     def test_register_hook(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         cb = MagicMock()
         b.register_hook(HookPoint.STOP, cb)
@@ -191,12 +208,14 @@ class TestClaudeTools:
 class TestClaudeInternals:
     def test_ensure_client_raises(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             b.ensure_client_started()
 
     def test_to_message_empty(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
         msg = b.to_message([])
         assert msg.role.value == "assistant"
@@ -204,6 +223,7 @@ class TestClaudeInternals:
 
     def test_to_message_with_assistant(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
 
         assistant_msg = MagicMock()
@@ -219,6 +239,7 @@ class TestClaudeInternals:
 
     def test_to_message_with_thinking(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
 
         assistant_msg = MagicMock()
@@ -234,6 +255,7 @@ class TestClaudeInternals:
 
     def test_to_message_with_tool_use(self):
         from sdk.backends.claude import ClaudeBackend
+
         b = ClaudeBackend(_make_auth())
 
         assistant_msg = MagicMock()

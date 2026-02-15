@@ -7,9 +7,9 @@ Think of it as a "process manager for AI agents."
 Usage::
 
     from sdk.agent.agents import AgentRuntime, Agent
-    
+
     runtime = AgentRuntime()
-    
+
     # Spawn an agent
     agent = runtime.spawn(
         name="code-reviewer",
@@ -17,10 +17,10 @@ Usage::
         system_prompt="You are a code reviewer...",
         memory_namespace="project:obscura"
     )
-    
+
     # Run the agent
     result = await agent.run("Review this PR: ...")
-    
+
     # Check what other agents are doing
     status = runtime.get_agent_status(agent.id)
 """
@@ -51,16 +51,18 @@ if TYPE_CHECKING:
 
 class AgentStatus(Enum):
     """Agent lifecycle states."""
-    PENDING = auto()      # Created but not started
-    RUNNING = auto()      # Currently executing
-    WAITING = auto()      # Blocked on I/O or memory
-    COMPLETED = auto()    # Finished successfully
-    FAILED = auto()       # Error occurred
-    STOPPED = auto()      # Manually stopped
+
+    PENDING = auto()  # Created but not started
+    RUNNING = auto()  # Currently executing
+    WAITING = auto()  # Blocked on I/O or memory
+    COMPLETED = auto()  # Finished successfully
+    FAILED = auto()  # Error occurred
+    STOPPED = auto()  # Manually stopped
 
 
 class MCPConfig(BaseModel):
     """Configuration for MCP (Model Context Protocol) integration."""
+
     enabled: bool = False
     servers: list[dict[str, Any]] = []
     """List of MCP server configurations. Each server config should have:
@@ -74,6 +76,7 @@ class MCPConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     """Configuration for an agent instance."""
+
     name: str
     model: str  # "copilot", "claude", "localllm", or "openai"
     system_prompt: str = ""
@@ -88,6 +91,7 @@ class AgentConfig(BaseModel):
 
 class AgentState(BaseModel):
     """Serializable state of an agent."""
+
     agent_id: str
     name: str
     status: AgentStatus
@@ -100,6 +104,7 @@ class AgentState(BaseModel):
 
 class AgentMessage(BaseModel):
     """Message passed between agents or from user to agent."""
+
     source: str  # agent_id or "user" or "system"
     target: str  # agent_id or "broadcast"
     content: str
@@ -110,14 +115,14 @@ class AgentMessage(BaseModel):
 class Agent:
     """
     A single agent instance with its own memory and lifecycle.
-    
+
     Agents can:
     - Run tasks and maintain conversation state
     - Read/write to shared memory (scoped by user)
     - Spawn child agents
     - Communicate with other agents via message bus
     """
-    
+
     def __init__(
         self,
         agent_id: str,
@@ -211,12 +216,12 @@ class Agent:
     @error.setter
     def error(self, err: Exception | None) -> None:
         self._error = err
-    
+
     @property
     def memory(self) -> MemoryStore:
         """Get the agent's memory store."""
         return MemoryStore.for_user(self.user)
-    
+
     async def start(self) -> None:
         """Initialize the agent and connect to backend."""
         self._client = ObscuraClient(
@@ -225,12 +230,12 @@ class Agent:
             user=self.user,
         )
         await self._client.start()
-        
+
         # Initialize MCP backend if configured
         if self.config.mcp.enabled and self.config.mcp.servers:
             from sdk.mcp.types import MCPConnectionConfig, MCPTransportType
             from sdk.backends.mcp_backend import MCPBackend
-            
+
             mcp_configs: list[MCPConnectionConfig] = []
             for server_config in self.config.mcp.servers:
                 transport = MCPTransportType(server_config.get("transport", "stdio"))
@@ -242,21 +247,21 @@ class Agent:
                     env=server_config.get("env", {}),
                 )
                 mcp_configs.append(config)
-            
+
             self._mcp_backend = MCPBackend(mcp_configs)
             await self._mcp_backend.start()
-            
+
             # Register MCP tools with the client
             for tool in self._mcp_backend.list_tools():
                 self._client.register_tool(tool)
-        
+
         # Initialize heartbeat client if enabled
         if self._heartbeat_enabled:
             await self._start_heartbeat()
-        
+
         self.status = AgentStatus.WAITING
         self._update_state()
-    
+
     async def run(self, prompt: str, **context: Any) -> Any:
         """
         Execute the agent on a task.
@@ -267,7 +272,7 @@ class Agent:
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
-        
+
         # Store task context in memory
         self.memory.set(
             f"task_{self.iteration_count}",
@@ -276,9 +281,9 @@ class Agent:
                 "context": context,
                 "started_at": datetime.now(UTC).isoformat(),
             },
-            namespace=f"{self.config.memory_namespace}:tasks"
+            namespace=f"{self.config.memory_namespace}:tasks",
         )
-        
+
         try:
             # Load relevant memory into context
             relevant_memory = self._load_relevant_memory(prompt)
@@ -292,7 +297,7 @@ class Agent:
                 timeout=self.config.timeout_seconds,
             )
             self._result = message.text
-            
+
             # Store result
             self.memory.set(
                 f"result_{self.iteration_count}",
@@ -300,14 +305,14 @@ class Agent:
                     "result": self._result,
                     "completed_at": datetime.now(UTC).isoformat(),
                 },
-                namespace=f"{self.config.memory_namespace}:tasks"
+                namespace=f"{self.config.memory_namespace}:tasks",
             )
-            
+
             self.status = AgentStatus.COMPLETED
             self.iteration_count += 1
-            
+
             return self._result
-            
+
         except asyncio.TimeoutError:
             self._error = TimeoutError(
                 f"Agent '{self.config.name}' timed out after {self.config.timeout_seconds}s"
@@ -337,7 +342,7 @@ class Agent:
                 "started_at": datetime.now(UTC).isoformat(),
                 "mode": "stream",
             },
-            namespace=f"{self.config.memory_namespace}:tasks"
+            namespace=f"{self.config.memory_namespace}:tasks",
         )
 
         try:
@@ -345,7 +350,7 @@ class Agent:
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
             async for chunk in self._client.stream(full_prompt):
-                yield chunk.text if hasattr(chunk, 'text') else str(chunk)
+                yield chunk.text if hasattr(chunk, "text") else str(chunk)
 
             self.status = AgentStatus.COMPLETED
             self.iteration_count += 1
@@ -355,7 +360,7 @@ class Agent:
             raise
         finally:
             self._update_state()
-    
+
     async def run_loop(
         self,
         prompt: str,
@@ -373,7 +378,9 @@ class Agent:
 
         Returns the concatenated text output from all turns.
         """
-        assert self._client is not None, "Agent.start() must be called before run_loop()"
+        assert self._client is not None, (
+            "Agent.start() must be called before run_loop()"
+        )
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -447,7 +454,9 @@ class Agent:
         that happens: text deltas, tool calls, tool results, turn
         boundaries, and final completion.
         """
-        assert self._client is not None, "Agent.start() must be called before stream_loop()"
+        assert self._client is not None, (
+            "Agent.start() must be called before stream_loop()"
+        )
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -506,10 +515,13 @@ class Agent:
         relevant: dict[str, Any] = {}
 
         # Use vector search with reranking if available
-        if hasattr(self, 'vector_memory'):
+        if hasattr(self, "vector_memory"):
             try:
                 from sdk.vector_memory import VectorMemoryEntry
-                recall_fn: Callable[..., list[VectorMemoryEntry]] = getattr(self, "recall")
+
+                recall_fn: Callable[..., list[VectorMemoryEntry]] = getattr(
+                    self, "recall"
+                )
                 memories = recall_fn(
                     prompt,
                     top_k=5,
@@ -541,58 +553,53 @@ class Agent:
                 relevant[str(key)] = value
 
         return relevant
-    
+
     def _build_prompt(
-        self,
-        prompt: str,
-        memory: dict[str, Any],
-        context: dict[str, Any]
+        self, prompt: str, memory: dict[str, Any], context: dict[str, Any]
     ) -> str:
         """Build the full prompt with memory and context."""
         parts: list[str] = []
-        
+
         # Add memory context
         if memory:
             parts.append("## Relevant Context from Memory:")
             for key, value in memory.items():
                 parts.append(f"- {key}: {value}")
             parts.append("")
-        
+
         # Add explicit context
         if context:
             parts.append("## Task Context:")
             for key, value in context.items():
                 parts.append(f"- {key}: {value}")
             parts.append("")
-        
+
         # Add the actual prompt
         parts.append(f"## Task:\n{prompt}")
-        
+
         return "\n".join(parts)
-    
+
     async def send_message(self, target: str, content: str) -> None:
         """Send a message to another agent or broadcast."""
         message = AgentMessage(
-            source=self.id,
-            target=target,
-            content=content,
-            message_type="text"
+            source=self.id, target=target, content=content, message_type="text"
         )
         await self.runtime.route_message(message)
-    
+
     async def receive_messages(self) -> AsyncIterator[AgentMessage]:
         """Receive messages sent to this agent."""
         while True:
             try:
-                message = await asyncio.wait_for(
-                    self._message_queue.get(),
-                    timeout=1.0
-                )
+                message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
                 yield message
             except asyncio.TimeoutError:
-                if self.status in (AgentStatus.COMPLETED, AgentStatus.FAILED, AgentStatus.STOPPED):
+                if self.status in (
+                    AgentStatus.COMPLETED,
+                    AgentStatus.FAILED,
+                    AgentStatus.STOPPED,
+                ):
                     break
-    
+
     def enqueue_message(self, message: AgentMessage) -> None:
         """Add message to queue."""
         try:
@@ -600,9 +607,10 @@ class Agent:
         except asyncio.QueueFull:
             logger.warning(
                 "Message queue full for agent %s, dropping message from %s",
-                self.id, message.source,
+                self.id,
+                message.source,
             )
-    
+
     def _update_state(self) -> None:
         """Persist agent state to memory."""
         self.updated_at = datetime.now(UTC)
@@ -627,17 +635,18 @@ class Agent:
                 "iteration_count": state.iteration_count,
                 "error_message": state.error_message,
             },
-            namespace="agent:runtime"
+            namespace="agent:runtime",
         )
-    
+
     async def _start_heartbeat(self) -> None:
         """Initialize and start the heartbeat client."""
         # Get monitor URL from environment or use default
         monitor_url = os.environ.get("OBSCURA_HEARTBEAT_URL", "http://localhost:8080")
         interval = int(os.environ.get("OBSCURA_HEARTBEAT_INTERVAL", "30"))
-        
+
         try:
             from sdk.heartbeat import AgentHeartbeatClient
+
             self._heartbeat_client = AgentHeartbeatClient(
                 agent_id=self.id,
                 monitor_url=monitor_url,
@@ -649,7 +658,7 @@ class Agent:
         except Exception as e:
             logger.warning(f"Failed to start heartbeat client for agent {self.id}: {e}")
             self._heartbeat_client = None
-    
+
     async def stop(self) -> None:
         """Stop the agent and cleanup."""
         self.status = AgentStatus.STOPPED
@@ -669,7 +678,7 @@ class Agent:
         if self._task and not self._task.done():
             self._task.cancel()
         self._update_state()
-    
+
     async def stop_graceful(self, timeout: float = 5.0) -> None:
         """Stop the agent gracefully with a timeout."""
         try:
@@ -680,7 +689,7 @@ class Agent:
                 self._task.cancel()
             self.status = AgentStatus.STOPPED
             self._update_state()
-    
+
     def get_state(self) -> AgentState:
         """Get current agent state."""
         return AgentState(
@@ -699,7 +708,9 @@ class Agent:
         return self.get_state()
 
     # Public wrappers for internal helpers (used in tests/observability)
-    def build_prompt(self, prompt: str, relevant_memory: dict[str, Any], context: dict[str, Any]) -> str:
+    def build_prompt(
+        self, prompt: str, relevant_memory: dict[str, Any], context: dict[str, Any]
+    ) -> str:
         """Public wrapper around _build_prompt."""
         return self._build_prompt(prompt, relevant_memory, context)
 
@@ -711,14 +722,14 @@ class Agent:
 class AgentRuntime:
     """
     Runtime environment for managing multiple agents.
-    
+
     Think of this as a "process manager" for AI agents:
     - Spawn new agents
     - Track running agents
     - Route messages between agents
     - Cleanup stopped agents
     """
-    
+
     def __init__(self, user: AuthenticatedUser | None = None):
         self.user = user
         self._agents: dict[str, Agent] = {}
@@ -741,11 +752,11 @@ class AgentRuntime:
     def message_bus(self) -> asyncio.Queue[AgentMessage]:
         """Access the message bus queue for testing."""
         return self._message_bus
-    
+
     async def start(self) -> None:
         """Start the message bus."""
         self._bus_task = asyncio.create_task(self._message_bus_loop())
-    
+
     async def stop(self) -> None:
         """Stop all agents and cleanup."""
         if self._bus_task:
@@ -754,12 +765,12 @@ class AgentRuntime:
                 await self._bus_task
             except asyncio.CancelledError:
                 pass
-        
+
         async with self._lock:
             for agent in list(self._agents.values()):
                 await agent.stop()
             self._agents.clear()
-    
+
     def spawn(
         self,
         name: str,
@@ -767,90 +778,95 @@ class AgentRuntime:
         system_prompt: str = "",
         memory_namespace: str = "default",
         parent_agent_id: str | None = None,
-        **config_kwargs: Any
+        **config_kwargs: Any,
     ) -> Agent:
         """
         Spawn a new agent with the given configuration.
-        
+
         Returns the agent instance immediately (not started yet).
         Call agent.start() then agent.run() to execute.
         """
         agent_id = f"agent-{uuid.uuid4().hex[:8]}"
-        
+
         config = AgentConfig(
             name=name,
             model=model,
             system_prompt=system_prompt,
             memory_namespace=memory_namespace,
             parent_agent_id=parent_agent_id,
-            **config_kwargs
+            **config_kwargs,
         )
-        
+
         if self.user is None:
             raise RuntimeError("AgentRuntime requires a user to spawn agents")
         agent = Agent(agent_id, config, self.user, self)
-        
+
         # Store reference
         self._agents[agent_id] = agent
-        
+
         # Register with heartbeat monitor if enabled
-        heartbeat_enabled = os.environ.get("OBSCURA_HEARTBEAT_ENABLED", "true").lower() == "true"
+        heartbeat_enabled = (
+            os.environ.get("OBSCURA_HEARTBEAT_ENABLED", "true").lower() == "true"
+        )
         if heartbeat_enabled:
             try:
                 from sdk.heartbeat import get_default_monitor
+
                 monitor = get_default_monitor()
                 # Schedule registration - can't be async in sync method
                 asyncio.create_task(monitor.register_agent(agent_id))
                 logger.debug(f"Registered agent {agent_id} with heartbeat monitor")
             except Exception as e:
-                logger.warning(f"Failed to register agent {agent_id} with heartbeat monitor: {e}")
-        
+                logger.warning(
+                    f"Failed to register agent {agent_id} with heartbeat monitor: {e}"
+                )
+
         return agent
-    
+
     async def spawn_and_run(
         self,
         name: str,
         prompt: str,
         model: str = "copilot",
         system_prompt: str = "",
-        **kwargs: Any
+        **kwargs: Any,
     ) -> tuple[Agent, Any]:
         """Convenience: spawn, start, run, and return result."""
         agent = self.spawn(name, model, system_prompt, **kwargs)
         await agent.start()
         result = await agent.run(prompt)
         return agent, result
-    
+
     def get_agent(self, agent_id: str) -> Agent | None:
         """Get an agent by ID."""
         return self._agents.get(agent_id)
-    
+
     def list_agents(
-        self,
-        status: AgentStatus | None = None,
-        name: str | None = None
+        self, status: AgentStatus | None = None, name: str | None = None
     ) -> list[Agent]:
         """List all agents, optionally filtered."""
         agents = list(self._agents.values())
-        
+
         if status:
             agents = [a for a in agents if a.status == status]
-        
+
         if name:
             agents = [a for a in agents if a.config.name == name]
-        
+
         return agents
-    
+
     def get_agent_status(self, agent_id: str) -> AgentState | None:
         """Get the current state of an agent."""
         agent = self._agents.get(agent_id)
         if agent:
             return agent.get_state()
-        
+
         # Try to load from memory (agent may have crashed/restarted)
         if self.user:
             memory = MemoryStore.for_user(self.user)
-            state_data = memory.get(f"agent_state_{agent_id}", namespace="agent:runtime")
+            state_data = memory.get(
+                f"agent_state_{agent_id}", namespace="agent:runtime"
+            )
             if state_data:
                 return AgentState(
                     agent_id=state_data["agent_id"],
@@ -861,19 +877,19 @@ class AgentRuntime:
                     iteration_count=state_data.get("iteration_count", 0),
                     error_message=state_data.get("error_message"),
                 )
-        
+
         return None
-    
+
     async def route_message(self, message: AgentMessage) -> None:
         """Route a message to its target agent(s)."""
         await self._message_bus.put(message)
-    
+
     async def _message_bus_loop(self) -> None:
         """Background task to route messages."""
         while True:
             try:
                 message = await self._message_bus.get()
-                
+
                 if message.target == "broadcast":
                     # Send to all agents except sender
                     for agent_id, agent in self._agents.items():
@@ -887,38 +903,42 @@ class AgentRuntime:
                     else:
                         logger.warning(
                             "Message target agent %s not found (from %s)",
-                            message.target, message.source,
+                            message.target,
+                            message.source,
                         )
 
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("Error in message bus loop")
-    
+
     async def wait_for_agents(
-        self,
-        agent_ids: list[str],
-        timeout: float | None = None
+        self, agent_ids: list[str], timeout: float | None = None
     ) -> list[AgentState]:
         """Wait for multiple agents to complete."""
+
         async def wait_one(agent_id: str) -> AgentState:
             while True:
                 state = self.get_agent_status(agent_id)
-                if state and state.status in (AgentStatus.COMPLETED, AgentStatus.FAILED, AgentStatus.STOPPED):
+                if state and state.status in (
+                    AgentStatus.COMPLETED,
+                    AgentStatus.FAILED,
+                    AgentStatus.STOPPED,
+                ):
                     return state
                 await asyncio.sleep(0.1)
-        
+
         tasks = [asyncio.create_task(wait_one(aid)) for aid in agent_ids]
-        
+
         if timeout:
             done, pending = await asyncio.wait(
-                tasks,
-                timeout=timeout,
-                return_when=asyncio.ALL_COMPLETED
+                tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED
             )
             for task in pending:
                 task.cancel()
-            return [task.result() for task in done if task.done() and not task.cancelled()]
+            return [
+                task.result() for task in done if task.done() and not task.cancelled()
+            ]
         else:
             results = await asyncio.gather(*tasks)
             return list(results)

@@ -1,4 +1,5 @@
 """Tests for sdk.mcp.server — ObscuraMCPServer."""
+
 # pyright: reportPrivateUsage=false, reportMissingParameterType=false, reportUnknownParameterType=false
 import json
 import pytest
@@ -6,12 +7,18 @@ from datetime import datetime, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sdk.mcp.server import ObscuraMCPServer, create_mcp_router
-from sdk.mcp.types import MCPError, MCPErrorCode, ObscuraMCPConfig, ObscuraMCPToolContext
+from sdk.mcp.types import (
+    MCPError,
+    MCPErrorCode,
+    ObscuraMCPConfig,
+    ObscuraMCPToolContext,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_user():
     """Create a mock AuthenticatedUser."""
@@ -25,8 +32,13 @@ def _make_user():
     return user
 
 
-def _make_agent(agent_id="agent-1", name="helper", model="claude",
-                namespace="default", status_name="RUNNING"):
+def _make_agent(
+    agent_id="agent-1",
+    name="helper",
+    model="claude",
+    namespace="default",
+    status_name="RUNNING",
+):
     agent = MagicMock()
     agent.id = agent_id
     agent.config.name = name
@@ -57,6 +69,7 @@ def _make_memory_store():
 # Init tests
 # ---------------------------------------------------------------------------
 
+
 class TestObscuraMCPServerInit:
     def test_defaults(self):
         server = ObscuraMCPServer()
@@ -78,6 +91,7 @@ class TestObscuraMCPServerInit:
 # ---------------------------------------------------------------------------
 # Lifecycle tests
 # ---------------------------------------------------------------------------
+
 
 class TestObscuraMCPServerLifecycle:
     @pytest.mark.asyncio
@@ -130,6 +144,7 @@ class TestObscuraMCPServerLifecycle:
 # ---------------------------------------------------------------------------
 # Protocol tests
 # ---------------------------------------------------------------------------
+
 
 class TestObscuraMCPServerProtocol:
     @pytest.mark.asyncio
@@ -251,6 +266,7 @@ class TestObscuraMCPServerProtocol:
 # Tool handlers with mocked runtime/user
 # ---------------------------------------------------------------------------
 
+
 class TestObscuraMCPServerToolHandlers:
     @pytest.mark.asyncio
     async def test_handle_list_agents_no_runtime(self):
@@ -302,7 +318,9 @@ class TestObscuraMCPServerToolHandlers:
     async def test_handle_spawn_agent_no_runtime(self):
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
-        result = await server._handle_spawn_agent(ctx, {"name": "a1", "model": "claude"})
+        result = await server._handle_spawn_agent(
+            ctx, {"name": "a1", "model": "claude"}
+        )
         assert "error" in result
 
     @pytest.mark.asyncio
@@ -310,7 +328,9 @@ class TestObscuraMCPServerToolHandlers:
         server = ObscuraMCPServer()
         server._runtime = MagicMock()
         ctx = ObscuraMCPToolContext(user_id="test")
-        result = await server._handle_spawn_agent(ctx, {"name": "a1", "model": "claude"})
+        result = await server._handle_spawn_agent(
+            ctx, {"name": "a1", "model": "claude"}
+        )
         assert "error" in result
 
     @pytest.mark.asyncio
@@ -325,13 +345,16 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.AgentConfig") as MockConfig:
             MockConfig.return_value = MagicMock()
-            result = await server._handle_spawn_agent(ctx, {
-                "name": "my-agent",
-                "model": "claude",
-                "system_prompt": "do stuff",
-                "memory_namespace": "proj",
-                "tags": ["a", "b"],
-            })
+            result = await server._handle_spawn_agent(
+                ctx,
+                {
+                    "name": "my-agent",
+                    "model": "claude",
+                    "system_prompt": "do stuff",
+                    "memory_namespace": "proj",
+                    "tags": ["a", "b"],
+                },
+            )
         assert result["agent_id"] == "agent-1"
         assert result["name"] == "helper"
         agent.start.assert_awaited_once()
@@ -377,7 +400,9 @@ class TestObscuraMCPServerToolHandlers:
         server._runtime = mock_runtime
 
         ctx = ObscuraMCPToolContext(user_id="test")
-        result = await server._handle_stop_agent(ctx, {"agent_id": "agent-1", "force": True})
+        result = await server._handle_stop_agent(
+            ctx, {"agent_id": "agent-1", "force": True}
+        )
         assert result["stopped"] is True
         agent.stop.assert_called_once()
 
@@ -398,7 +423,9 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
-            result = await server._handle_get_memory(ctx, {"key": "k1", "namespace": "proj"})
+            result = await server._handle_get_memory(
+                ctx, {"key": "k1", "namespace": "proj"}
+            )
         assert result["found"] is True
         assert result["key"] == "k1"
         assert result["value"] == {"data": "hello"}
@@ -432,11 +459,14 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
-            result = await server._handle_set_memory(ctx, {
-                "key": "k1",
-                "value": '{"x": 1}',
-                "namespace": "ns",
-            })
+            result = await server._handle_set_memory(
+                ctx,
+                {
+                    "key": "k1",
+                    "value": '{"x": 1}',
+                    "namespace": "ns",
+                },
+            )
         assert result["success"] is True
         store.set.assert_called_once_with("k1", {"x": 1}, namespace="ns")
 
@@ -449,10 +479,13 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
-            result = await server._handle_set_memory(ctx, {
-                "key": "k1",
-                "value": "not-json",
-            })
+            result = await server._handle_set_memory(
+                ctx,
+                {
+                    "key": "k1",
+                    "value": "not-json",
+                },
+            )
         assert result["success"] is True
         # Non-JSON string stays as string
         store.set.assert_called_once_with("k1", "not-json", namespace="default")
@@ -474,7 +507,9 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
-            result = await server._handle_delete_memory(ctx, {"key": "k1", "namespace": "ns"})
+            result = await server._handle_delete_memory(
+                ctx, {"key": "k1", "namespace": "ns"}
+            )
         assert result["success"] is True
         assert result["key"] == "k1"
 
@@ -528,10 +563,13 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
-            result = await server._handle_search_memory(ctx, {
-                "query": "myconfig",
-                "namespace": "proj",
-            })
+            result = await server._handle_search_memory(
+                ctx,
+                {
+                    "query": "myconfig",
+                    "namespace": "proj",
+                },
+            )
         assert result["count"] == 1
         assert result["results"][0]["key"] == "myconfig"
 
@@ -548,10 +586,13 @@ class TestObscuraMCPServerToolHandlers:
         ctx = ObscuraMCPToolContext(user_id="test")
         with patch("sdk.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
-            result = await server._handle_search_memory(ctx, {
-                "query": "missing",
-                "namespace": "proj",
-            })
+            result = await server._handle_search_memory(
+                ctx,
+                {
+                    "query": "missing",
+                    "namespace": "proj",
+                },
+            )
         assert result["count"] == 0
 
     @pytest.mark.asyncio
@@ -590,6 +631,7 @@ class TestObscuraMCPServerToolHandlers:
 # ---------------------------------------------------------------------------
 # Resources with mocked user/memory
 # ---------------------------------------------------------------------------
+
 
 class TestObscuraMCPServerResources:
     @pytest.mark.asyncio
@@ -674,6 +716,7 @@ class TestObscuraMCPServerResources:
 # create_mcp_router
 # ---------------------------------------------------------------------------
 
+
 def _make_rpc_client():
     """Create a TestClient with the MCP router, fixing forward-ref annotations."""
     from fastapi import FastAPI, Request
@@ -708,16 +751,19 @@ class TestCreateMCPRouter:
     async def test_rpc_initialize(self):
         client, __server = _make_rpc_client()
 
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "1.0"},
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1.0"},
+                },
             },
-        })
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == 1
@@ -726,12 +772,15 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_tools_list(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list",
-            "params": {},
-        })
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         tool_names = [t["name"] for t in data["result"]]
@@ -740,15 +789,18 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_tools_call(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "list_agents",
-                "arguments": {},
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "list_agents",
+                    "arguments": {},
+                },
             },
-        })
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "result" in data
@@ -757,12 +809,15 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_resources_list(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "resources/list",
-            "params": {},
-        })
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "resources/list",
+                "params": {},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "result" in data
@@ -770,12 +825,15 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_resources_read_error(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 5,
-            "method": "resources/read",
-            "params": {"uri": "unknown://x"},
-        })
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "resources/read",
+                "params": {"uri": "unknown://x"},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "error" in data
@@ -783,12 +841,15 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_prompts_list(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 6,
-            "method": "prompts/list",
-            "params": {},
-        })
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "prompts/list",
+                "params": {},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "result" in data
@@ -796,12 +857,15 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_prompts_get(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "prompts/get",
-            "params": {"name": "agent_task", "arguments": {"task": "hello"}},
-        })
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "prompts/get",
+                "params": {"name": "agent_task", "arguments": {"task": "hello"}},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "result" in data
@@ -810,12 +874,15 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_method_not_found(self):
         client, __server = _make_rpc_client()
-        resp = client.post("/mcp/rpc", json={
-            "jsonrpc": "2.0",
-            "id": 8,
-            "method": "nonexistent/method",
-            "params": {},
-        })
+        resp = client.post(
+            "/mcp/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "nonexistent/method",
+                "params": {},
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "error" in data
@@ -824,15 +891,22 @@ class TestCreateMCPRouter:
     @pytest.mark.asyncio
     async def test_rpc_internal_error(self):
         client, __server = _make_rpc_client()
-        with patch.object(__server, "handle_initialize", side_effect=RuntimeError("boom")):
-            resp = client.post("/mcp/rpc", json={
-                "jsonrpc": "2.0",
-                "id": 9,
-                "method": "initialize",
-                "params": {},
-            })
+        with patch.object(
+            __server, "handle_initialize", side_effect=RuntimeError("boom")
+        ):
+            resp = client.post(
+                "/mcp/rpc",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "initialize",
+                    "params": {},
+                },
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "error" in data
         assert data["error"]["code"] == MCPErrorCode.INTERNAL_ERROR.value
+
+
 # pyright: ignore-all

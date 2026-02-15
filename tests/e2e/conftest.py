@@ -33,7 +33,14 @@ from sdk.server import create_app
 _TEST_USER = AuthenticatedUser(
     user_id="test-user",
     email="test@obscura.dev",
-    roles=("admin", "agent:copilot", "agent:claude", "agent:read", "sync:write", "sessions:manage"),
+    roles=(
+        "admin",
+        "agent:copilot",
+        "agent:claude",
+        "agent:read",
+        "sync:write",
+        "sessions:manage",
+    ),
     org_id="test-org",
     token_type="user",
     raw_token="test-token",
@@ -43,6 +50,7 @@ _TEST_USER = AuthenticatedUser(
 # ---------------------------------------------------------------------------
 # Fake agent objects for mocking AgentRuntime
 # ---------------------------------------------------------------------------
+
 
 class _FakeAgentStatus(Enum):
     PENDING = auto()
@@ -74,7 +82,9 @@ class _FakeAgentState:
 class _FakeAgent:
     """Minimal fake Agent that satisfies the server endpoints."""
 
-    def __init__(self, name: str = "test-agent", model: str = "claude", **kwargs: Any) -> None:
+    def __init__(
+        self, name: str = "test-agent", model: str = "claude", **kwargs: Any
+    ) -> None:
         self.id = str(uuid.uuid4())
         self.config = _FakeAgentConfig(name=name, model=model, **kwargs)
         self.status = _FakeAgentStatus.RUNNING
@@ -115,7 +125,9 @@ class _FakeAgentRuntime:
     async def start(self) -> None:
         pass
 
-    def spawn(self, name: str = "unnamed", model: str = "claude", **kwargs: Any) -> _FakeAgent:
+    def spawn(
+        self, name: str = "unnamed", model: str = "claude", **kwargs: Any
+    ) -> _FakeAgent:
         agent = _FakeAgent(name=name, model=model, **kwargs)
         self._agents[agent.id] = agent
         return agent
@@ -129,13 +141,16 @@ class _FakeAgentRuntime:
             return None
         return agent.get_state()
 
-    def list_agents(self, status: Any = None, name: str | None = None) -> list[_FakeAgent]:
+    def list_agents(
+        self, status: Any = None, name: str | None = None
+    ) -> list[_FakeAgent]:
         return list(self._agents.values())
 
 
 # ---------------------------------------------------------------------------
 # Fake memory objects
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class _FakeMemoryKey:
@@ -162,7 +177,9 @@ class _FakeMemoryStore:
     def reset(cls) -> None:
         cls._stores.clear()
 
-    def set(self, key: str, value: Any, namespace: str = "default", ttl: Any = None) -> None:
+    def set(
+        self, key: str, value: Any, namespace: str = "default", ttl: Any = None
+    ) -> None:
         self._data[f"{namespace}:{key}"] = value
 
     def get(self, key: str, namespace: str = "default", default: Any = None) -> Any:
@@ -225,28 +242,47 @@ class _FakeVectorMemoryStore:
     def reset(cls) -> None:
         cls._stores.clear()
 
-    def set(self, key: str, text: str, metadata: dict[str, Any] | None = None, namespace: str = "default", **kw: Any) -> None:
-        self._data[f"{namespace}:{key}"] = {"text": text, "metadata": metadata or {}, "memory_type": kw.get("memory_type", "general")}
+    def set(
+        self,
+        key: str,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+        namespace: str = "default",
+        **kw: Any,
+    ) -> None:
+        self._data[f"{namespace}:{key}"] = {
+            "text": text,
+            "metadata": metadata or {},
+            "memory_type": kw.get("memory_type", "general"),
+        }
 
-    def _build_results(self, namespace: str | None = None, top_k: int = 5) -> list[_FakeVectorResult]:
+    def _build_results(
+        self, namespace: str | None = None, top_k: int = 5
+    ) -> list[_FakeVectorResult]:
         results: list[_FakeVectorResult] = []
         for k, v in self._data.items():
             ns, name = k.split(":", 1)
             if namespace is None or ns == namespace:
-                results.append(_FakeVectorResult(
-                    key=_FakeMemoryKey(namespace=ns, key=name),
-                    text=v["text"],
-                    score=0.9,
-                    metadata=v["metadata"],
-                    memory_type=v.get("memory_type", "general"),
-                    final_score=0.9,
-                ))
+                results.append(
+                    _FakeVectorResult(
+                        key=_FakeMemoryKey(namespace=ns, key=name),
+                        text=v["text"],
+                        score=0.9,
+                        metadata=v["metadata"],
+                        memory_type=v.get("memory_type", "general"),
+                        final_score=0.9,
+                    )
+                )
         return results[:top_k]
 
-    def search_similar(self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any) -> list[_FakeVectorResult]:
+    def search_similar(
+        self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any
+    ) -> list[_FakeVectorResult]:
         return self._build_results(namespace, top_k)
 
-    def search_reranked(self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any) -> list[_FakeVectorResult]:
+    def search_reranked(
+        self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any
+    ) -> list[_FakeVectorResult]:
         return self._build_results(namespace, top_k)
 
     def delete(self, key: str, namespace: str = "default") -> bool:
@@ -271,6 +307,7 @@ async def _mock_get_runtime(user: Any) -> _FakeAgentRuntime:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def _reset_fakes() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]

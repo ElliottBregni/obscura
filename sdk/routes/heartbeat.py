@@ -6,7 +6,14 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse
 
 from sdk.auth.models import AuthenticatedUser
@@ -24,6 +31,7 @@ async def _get_heartbeat_monitor(request: Request) -> Any:
     monitor = getattr(request.app.state, "heartbeat_monitor", None)
     if monitor is None:
         from sdk.heartbeat import get_default_monitor
+
         monitor = get_default_monitor()
         await monitor.start()
         setattr(request.app.state, "heartbeat_monitor", monitor)
@@ -44,7 +52,9 @@ async def heartbeat_receive(
     try:
         heartbeat = Heartbeat(
             agent_id=body["agent_id"],
-            timestamp=datetime.fromisoformat(body.get("timestamp", datetime.now(UTC).isoformat())),
+            timestamp=datetime.fromisoformat(
+                body.get("timestamp", datetime.now(UTC).isoformat())
+            ),
             status=HealthStatus(body.get("status", "unknown")),
             metrics=SystemMetrics(**body.get("metrics", {})),
             message=body.get("message"),
@@ -59,15 +69,23 @@ async def heartbeat_receive(
 
     await _broadcast_health_update(request, heartbeat.agent_id, heartbeat.status.value)
 
-    audit("heartbeat.receive", user, f"agent:{heartbeat.agent_id}", "heartbeat", "success",
-          status=heartbeat.status.value)
+    audit(
+        "heartbeat.receive",
+        user,
+        f"agent:{heartbeat.agent_id}",
+        "heartbeat",
+        "success",
+        status=heartbeat.status.value,
+    )
 
-    return JSONResponse(content={
-        "received": True,
-        "agent_id": heartbeat.agent_id,
-        "status": heartbeat.status.value,
-        "timestamp": datetime.now(UTC).isoformat(),
-    })
+    return JSONResponse(
+        content={
+            "received": True,
+            "agent_id": heartbeat.agent_id,
+            "status": heartbeat.status.value,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
 
 
 @router.get("/heartbeat/{agent_id}")
@@ -81,17 +99,23 @@ async def heartbeat_get_agent(
 
     record: Any = await monitor.get_agent_record(agent_id)
     if record is None:
-        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found in health records")
+        raise HTTPException(
+            status_code=404, detail=f"Agent {agent_id} not found in health records"
+        )
 
-    return JSONResponse(content={
-        "agent_id": agent_id,
-        "status": record.computed_status.value,
-        "last_heartbeat": record.last_heartbeat.to_dict() if record.last_heartbeat else None,
-        "expected_interval": record.expected_interval,
-        "missed_count": record.missed_count,
-        "registered_at": record.registered_at.isoformat(),
-        "alert_count": record.alert_count,
-    })
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "status": record.computed_status.value,
+            "last_heartbeat": record.last_heartbeat.to_dict()
+            if record.last_heartbeat
+            else None,
+            "expected_interval": record.expected_interval,
+            "missed_count": record.missed_count,
+            "registered_at": record.registered_at.isoformat(),
+            "alert_count": record.alert_count,
+        }
+    )
 
 
 @router.get("/health")
@@ -132,15 +156,18 @@ async def health_websocket(websocket: WebSocket) -> None:
         monitor = getattr(websocket.app.state, "heartbeat_monitor", None)
         if monitor is None:
             from sdk.heartbeat import get_default_monitor
+
             monitor = get_default_monitor()
             await monitor.start()
             setattr(websocket.app.state, "heartbeat_monitor", monitor)
 
         summary: dict[str, Any] = await monitor.get_health_summary()
-        await websocket.send_json({
-            "type": "init",
-            "data": summary,
-        })
+        await websocket.send_json(
+            {
+                "type": "init",
+                "data": summary,
+            }
+        )
 
         while True:
             await asyncio.sleep(5)
@@ -149,7 +176,9 @@ async def health_websocket(websocket: WebSocket) -> None:
                 break
 
             try:
-                await websocket.send_json({"type": "ping", "timestamp": datetime.now(UTC).isoformat()})
+                await websocket.send_json(
+                    {"type": "ping", "timestamp": datetime.now(UTC).isoformat()}
+                )
             except Exception:
                 break
 
@@ -162,7 +191,9 @@ async def health_websocket(websocket: WebSocket) -> None:
             ws_clients.remove(websocket)
 
 
-async def _broadcast_health_update(request: Request, agent_id: str, status: str) -> None:
+async def _broadcast_health_update(
+    request: Request, agent_id: str, status: str
+) -> None:
     """Broadcast health update to all connected WebSocket clients."""
     message: dict[str, Any] = {
         "type": "update",

@@ -47,19 +47,26 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
 
     def _on_post_plan(ctx: AgentContext) -> None:
         # End analyze span (covers analyze + plan)
-        _end_phase_span("analyze", agent_name, _phase_starts.pop("analyze", None), _context_tokens)
+        _end_phase_span(
+            "analyze", agent_name, _phase_starts.pop("analyze", None), _context_tokens
+        )
         _phase_starts["plan"] = time.monotonic()
 
     def _on_pre_execute(ctx: AgentContext) -> None:
-        _end_phase_span("plan", agent_name, _phase_starts.pop("plan", None), _context_tokens)
+        _end_phase_span(
+            "plan", agent_name, _phase_starts.pop("plan", None), _context_tokens
+        )
         _phase_starts["execute"] = time.monotonic()
         _start_phase_span("execute", agent_name, _context_tokens)
 
     def _on_post_respond(ctx: AgentContext) -> None:
-        _end_phase_span("execute", agent_name, _phase_starts.pop("execute", None), _context_tokens)
+        _end_phase_span(
+            "execute", agent_name, _phase_starts.pop("execute", None), _context_tokens
+        )
         # Record the full run as a metric
         try:
             from sdk.telemetry.metrics import get_metrics
+
             m = get_metrics()
             m.agent_runs_total.add(1, {"agent_name": agent_name, "status": "success"})
         except ImportError:
@@ -99,7 +106,10 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
 # Internal helpers — span lifecycle
 # ---------------------------------------------------------------------------
 
-def _start_phase_span(phase: str, agent_name: str, tokens: dict[str, object] | None = None) -> None:
+
+def _start_phase_span(
+    phase: str, agent_name: str, tokens: dict[str, object] | None = None
+) -> None:
     """Start an OTel span for an agent phase."""
     try:
         from opentelemetry import trace
@@ -121,7 +131,12 @@ def _start_phase_span(phase: str, agent_name: str, tokens: dict[str, object] | N
         pass
 
 
-def _end_phase_span(phase: str, agent_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
+def _end_phase_span(
+    phase: str,
+    agent_name: str,
+    start_time: float | None,
+    tokens: dict[str, object] | None = None,
+) -> None:
     """End the current phase span and record duration metric."""
     try:
         from opentelemetry import trace, context
@@ -140,9 +155,11 @@ def _end_phase_span(phase: str, agent_name: str, start_time: float | None, token
         duration = time.monotonic() - start_time
         try:
             from sdk.telemetry.metrics import get_metrics
+
             m = get_metrics()
             m.agent_phase_duration_seconds.record(
-                duration, {"agent_name": agent_name, "phase": phase},
+                duration,
+                {"agent_name": agent_name, "phase": phase},
             )
         except ImportError:
             pass
@@ -159,6 +176,7 @@ def _start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) ->
             attributes={"tool.name": tool_name},
         )
         from opentelemetry import context
+
         ctx = trace.set_span_in_context(span)
         token = context.attach(ctx)
         if tokens is not None:
@@ -167,7 +185,9 @@ def _start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) ->
         pass
 
 
-def _end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
+def _end_tool_span(
+    tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None
+) -> None:
     """End the current tool span and record metrics."""
     try:
         from opentelemetry import trace, context
@@ -184,11 +204,18 @@ def _end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, o
 
 
 # Public wrappers for testing/observability
-def start_phase_span(phase: str, agent_name: str, tokens: dict[str, object] | None = None) -> None:
+def start_phase_span(
+    phase: str, agent_name: str, tokens: dict[str, object] | None = None
+) -> None:
     _start_phase_span(phase, agent_name, tokens)
 
 
-def end_phase_span(phase: str, agent_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
+def end_phase_span(
+    phase: str,
+    agent_name: str,
+    start_time: float | None,
+    tokens: dict[str, object] | None = None,
+) -> None:
     _end_phase_span(phase, agent_name, start_time, tokens)
 
 
@@ -196,11 +223,14 @@ def start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) -> 
     _start_tool_span(tool_name, tokens)
 
 
-def end_tool_span(tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None) -> None:
+def end_tool_span(
+    tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None
+) -> None:
     _end_tool_span(tool_name, start_time, tokens)
     status = "success"
     try:
         from sdk.telemetry.metrics import get_metrics
+
         m = get_metrics()
         m.tool_calls_total.add(1, {"tool_name": tool_name, "status": status})
         if start_time is not None:

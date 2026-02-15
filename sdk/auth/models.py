@@ -14,21 +14,24 @@ from pydantic import BaseModel, ConfigDict
 # Roles
 # ---------------------------------------------------------------------------
 
-VALID_ROLES: frozenset[str] = frozenset({
-    "admin",
-    "agent:copilot",
-    "agent:claude",
-    "agent:localllm",
-    "agent:openai",
-    "agent:read",
-    "sync:write",
-    "sessions:manage",
-})
+VALID_ROLES: frozenset[str] = frozenset(
+    {
+        "admin",
+        "agent:copilot",
+        "agent:claude",
+        "agent:localllm",
+        "agent:openai",
+        "agent:read",
+        "sync:write",
+        "sessions:manage",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Authenticated user
 # ---------------------------------------------------------------------------
+
 
 class AuthenticatedUser(BaseModel):
     """Represents a validated user extracted from a JWT.
@@ -36,6 +39,7 @@ class AuthenticatedUser(BaseModel):
     Populated by :mod:`sdk.auth.middleware` and attached to
     ``request.state.user`` for downstream handlers.
     """
+
     model_config = ConfigDict(frozen=True)
 
     user_id: str

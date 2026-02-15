@@ -37,12 +37,24 @@ async def send(
             await client.resume_session(ref)
 
         msg = await client.send(body.prompt)
-        audit("agent.send", user, f"backend:{body.backend}", "execute", "success",
-              prompt_len=len(body.prompt))
+        audit(
+            "agent.send",
+            user,
+            f"backend:{body.backend}",
+            "execute",
+            "success",
+            prompt_len=len(body.prompt),
+        )
         return SendResponse(text=msg.text, backend=body.backend)
     except Exception:
-        audit("agent.send", user, f"backend:{body.backend}", "execute", "error",
-              prompt_len=len(body.prompt))
+        audit(
+            "agent.send",
+            user,
+            f"backend:{body.backend}",
+            "execute",
+            "error",
+            prompt_len=len(body.prompt),
+        )
         raise
     finally:
         await client.stop()
@@ -67,7 +79,9 @@ async def stream(
         )
         try:
             if body.session_id:
-                ref = SessionRef(session_id=body.session_id, backend=Backend(body.backend))
+                ref = SessionRef(
+                    session_id=body.session_id, backend=Backend(body.backend)
+                )
                 await client.resume_session(ref)
 
             async for chunk in client.stream(body.prompt):

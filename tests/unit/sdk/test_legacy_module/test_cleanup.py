@@ -11,8 +11,11 @@ class TestCleanup:
     """Cleanup: removing agent dirs, system links, and full remove_all."""
 
     def test_remove_links(
-        self, sync_instance: VaultSync, vault_root: Path,
-        mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """Remove links cleans up repo agent directories."""
         vault_repo = vault_root / "repos" / "TestRepo"
@@ -34,17 +37,17 @@ class TestCleanup:
         sync_instance.sync_system()
 
         github = mock_home / ".github"
-        assert (github / "skills").exists(), \
+        assert (github / "skills").exists(), (
             "~/.github/skills/ should exist before removal"
+        )
 
         sync_instance.remove_system_links()
 
-        assert not (github / "skills").exists(), \
-            "~/.github/skills/ should be removed"
-        assert not (github / "docs").exists(), \
-            "~/.github/docs/ should be removed"
-        assert not (github / "instructions").exists(), \
+        assert not (github / "skills").exists(), "~/.github/skills/ should be removed"
+        assert not (github / "docs").exists(), "~/.github/docs/ should be removed"
+        assert not (github / "instructions").exists(), (
             "~/.github/instructions/ should be removed"
+        )
 
     def test_remove_all_cleans_everything(
         self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
@@ -61,13 +64,18 @@ class TestCleanup:
 
         assert not (mock_repo / ".github").exists(), "Root .github should be removed"
         assert not (mock_repo / ".claude").exists(), "Root .claude should be removed"
-        assert not (mock_repo / "platform" / ".github").exists(), \
+        assert not (mock_repo / "platform" / ".github").exists(), (
             "platform/.github should be removed"
-        assert not (mock_repo / "platform" / ".claude").exists(), \
+        )
+        assert not (mock_repo / "platform" / ".claude").exists(), (
             "platform/.claude should be removed"
-        assert not (mock_repo / "platform" / "partview_core" / ".github").exists(), \
+        )
+        assert not (mock_repo / "platform" / "partview_core" / ".github").exists(), (
             "partview_core/.github should be removed"
-        assert not (mock_repo / "platform" / "partview_core" / ".claude").exists(), \
+        )
+        assert not (mock_repo / "platform" / "partview_core" / ".claude").exists(), (
             "partview_core/.claude should be removed"
-        assert not (mock_home / ".github" / "skills").exists(), \
+        )
+        assert not (mock_home / ".github" / "skills").exists(), (
             "~/.github/skills/ should be removed"
+        )

@@ -14,6 +14,7 @@ from sdk.internal.types import ChunkKind, StreamChunk
 # EventToIteratorBridge (Copilot adapter)
 # ---------------------------------------------------------------------------
 
+
 class TestEventToIteratorBridge:
     @pytest.mark.asyncio
     async def test_push_and_iterate(self) -> None:
@@ -87,6 +88,7 @@ class TestEventToIteratorBridge:
 # ---------------------------------------------------------------------------
 # ClaudeIteratorAdapter
 # ---------------------------------------------------------------------------
+
 
 class _FakeTextBlock:
     def __init__(self, text: str) -> None:
@@ -196,11 +198,13 @@ class TestClaudeIteratorAdapter:
 
     @pytest.mark.asyncio
     async def test_multiple_content_blocks(self) -> None:
-        msg = _FakeAssistantMessage([
-            _FakeThinkingBlock("hmm"),
-            _FakeTextBlock("here's the answer"),
-            _FakeToolUseBlock("search"),
-        ])
+        msg = _FakeAssistantMessage(
+            [
+                _FakeThinkingBlock("hmm"),
+                _FakeTextBlock("here's the answer"),
+                _FakeToolUseBlock("search"),
+            ]
+        )
         adapter = ClaudeIteratorAdapter(_async_iter([msg]))
 
         chunks: list[StreamChunk] = []

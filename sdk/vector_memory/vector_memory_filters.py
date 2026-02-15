@@ -25,6 +25,7 @@ from typing import Any, Literal
 @dataclass
 class DateRangeFilter:
     """Filter by a timestamp column range."""
+
     field: str = "created_at"  # "created_at" or "updated_at"
     start: datetime | None = None
     end: datetime | None = None
@@ -33,6 +34,7 @@ class DateRangeFilter:
 @dataclass
 class TagFilter:
     """Filter by tags stored in metadata JSON."""
+
     tags: list[str]
     mode: Literal["all", "any"] = "any"
 
@@ -40,6 +42,7 @@ class TagFilter:
 @dataclass
 class KeyValueFilter:
     """Filter by a metadata JSON key/value pair."""
+
     key: str
     value: Any
     operator: Literal["eq", "ne", "gt", "lt", "gte", "lte", "contains"] = "eq"
@@ -48,13 +51,16 @@ class KeyValueFilter:
 @dataclass
 class MemoryTypeFilter:
     """Filter by memory_type column."""
+
     memory_types: list[str]
 
 
 MetadataFilter = DateRangeFilter | TagFilter | KeyValueFilter | MemoryTypeFilter
 
 
-def match_metadata_filters(filters: list[MetadataFilter], metadata: dict[str, Any]) -> bool:
+def match_metadata_filters(
+    filters: list[MetadataFilter], metadata: dict[str, Any]
+) -> bool:
     """Lightweight in-memory filter matcher used in tests without SQL."""
     for f in filters:
         if isinstance(f, MemoryTypeFilter):
@@ -137,7 +143,9 @@ class FilterBuilder:
 
         if isinstance(f, DateRangeFilter):
             if f.field not in cls._ALLOWED_DATE_FIELDS:
-                raise ValueError(f"DateRangeFilter field must be one of {cls._ALLOWED_DATE_FIELDS}")
+                raise ValueError(
+                    f"DateRangeFilter field must be one of {cls._ALLOWED_DATE_FIELDS}"
+                )
             parts: list[str] = []
             params: list[Any] = []
             if f.start is not None:

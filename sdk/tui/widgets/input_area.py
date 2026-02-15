@@ -31,6 +31,7 @@ from sdk.tui.modes import TUIMode
 # Custom TextArea that delegates Enter to parent
 # ---------------------------------------------------------------------------
 
+
 class _PromptTextArea(TextArea):
     """TextArea subclass that emits Enter as a message instead of inserting a newline."""
 
@@ -52,13 +53,14 @@ class _PromptTextArea(TextArea):
 # Slash command definitions
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SlashCommand:
     """A parsed slash command."""
 
-    command: str       # e.g., "mode", "backend", "session"
-    args: list[str]    # e.g., ["ask"], ["claude"], ["load", "abc123"]
-    raw: str           # The original input string
+    command: str  # e.g., "mode", "backend", "session"
+    args: list[str]  # e.g., ["ask"], ["claude"], ["load", "abc123"]
+    raw: str  # The original input string
 
 
 def parse_slash_command(text: str) -> SlashCommand | None:
@@ -84,6 +86,7 @@ def parse_slash_command(text: str) -> SlashCommand | None:
 # ---------------------------------------------------------------------------
 # PromptInput widget
 # ---------------------------------------------------------------------------
+
 
 class PromptInput(Widget):
     """Multi-line prompt input area with mode indicator and slash commands.
@@ -268,7 +271,8 @@ class PromptInput(Widget):
                 stem = search.name
 
                 matches = [
-                    p.name for p in parent.iterdir()
+                    p.name
+                    for p in parent.iterdir()
                     if p.name.startswith(stem) and not p.name.startswith(".")
                 ]
 
@@ -276,13 +280,13 @@ class PromptInput(Widget):
                     completion = matches[0]
                     # Replace the prefix with the full match
                     if len(words) > 1:
-                        new_text = words[0] + " " + str(
-                            (parent / completion).relative_to(base)
+                        new_text = (
+                            words[0]
+                            + " "
+                            + str((parent / completion).relative_to(base))
                         )
                     else:
-                        new_text = str(
-                            (parent / completion).relative_to(base)
-                        )
+                        new_text = str((parent / completion).relative_to(base))
 
                     # Add trailing / for directories
                     if (parent / completion).is_dir():
@@ -296,13 +300,13 @@ class PromptInput(Widget):
                     common = os.path.commonprefix(matches)
                     if common and len(common) > len(stem):
                         if len(words) > 1:
-                            new_text = words[0] + " " + str(
-                                (parent / common).relative_to(base)
+                            new_text = (
+                                words[0]
+                                + " "
+                                + str((parent / common).relative_to(base))
                             )
                         else:
-                            new_text = str(
-                                (parent / common).relative_to(base)
-                            )
+                            new_text = str((parent / common).relative_to(base))
                         self._text_area.clear()
                         self._text_area.insert(new_text)
         except (OSError, ValueError):

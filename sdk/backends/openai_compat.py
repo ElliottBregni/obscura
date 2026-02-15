@@ -76,7 +76,9 @@ class OpenAIBackend:
         # Tool and hook registries
         self._tools: list[ToolSpec] = []
         self._tool_registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
+            hp: [] for hp in HookPoint
+        }
 
         # Session tracking
         self._session_store = SessionStore()
@@ -111,7 +113,9 @@ class OpenAIBackend:
             _set_span_attr(span, "backend", "openai")
             _set_span_attr(span, "model", self._model)
 
-            await self._run_hooks(HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt))
+            await self._run_hooks(
+                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+            )
 
             messages = self._build_messages(prompt)
             create_kwargs = self._build_create_kwargs(kwargs)
@@ -126,8 +130,12 @@ class OpenAIBackend:
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
-                self._conversations[self._active_session].append(ChatMessage(role="user", content=prompt))
-                self._conversations[self._active_session].append(ChatMessage(role="assistant", content=msg.text))
+                self._conversations[self._active_session].append(
+                    ChatMessage(role="user", content=prompt)
+                )
+                self._conversations[self._active_session].append(
+                    ChatMessage(role="assistant", content=msg.text)
+                )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
@@ -141,7 +149,9 @@ class OpenAIBackend:
             _set_span_attr(span, "backend", "openai")
             _set_span_attr(span, "model", self._model)
 
-            await self._run_hooks(HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt))
+            await self._run_hooks(
+                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+            )
 
             messages = self._build_messages(prompt)
             create_kwargs = self._build_create_kwargs(kwargs)
@@ -186,8 +196,12 @@ class OpenAIBackend:
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
-                self._conversations[self._active_session].append(ChatMessage(role="user", content=prompt))
-                self._conversations[self._active_session].append(ChatMessage(role="assistant", content=accumulated_text))
+                self._conversations[self._active_session].append(
+                    ChatMessage(role="user", content=prompt)
+                )
+                self._conversations[self._active_session].append(
+                    ChatMessage(role="assistant", content=accumulated_text)
+                )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
@@ -198,6 +212,7 @@ class OpenAIBackend:
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new conversation session."""
         import uuid
+
         session_id = str(uuid.uuid4())
         self._conversations[session_id] = []
         ref = SessionRef(
@@ -294,7 +309,9 @@ class OpenAIBackend:
             messages.append({"role": "system", "content": self._system_prompt})
 
         if self._active_session and self._active_session in self._conversations:
-            messages.extend([m.to_dict() for m in self._conversations[self._active_session]])
+            messages.extend(
+                [m.to_dict() for m in self._conversations[self._active_session]]
+            )
 
         messages.append({"role": "user", "content": prompt})
         return messages
@@ -307,7 +324,9 @@ class OpenAIBackend:
         # Register tools as OpenAI function calling format
         if self._tools:
             tool_defs = [
-                ToolCallDefinition(t.name, t.description, t.parameters).to_openai_function()
+                ToolCallDefinition(
+                    t.name, t.description, t.parameters
+                ).to_openai_function()
                 for t in self._tools
             ]
             result["tools"] = tool_defs
@@ -327,17 +346,20 @@ class OpenAIBackend:
         # Tool calls
         if msg.tool_calls:
             import json
+
             for tc in msg.tool_calls:
                 try:
                     tool_input = json.loads(tc.function.arguments)
                 except (json.JSONDecodeError, TypeError):
                     tool_input = {"raw": tc.function.arguments}
-                blocks.append(ContentBlock(
-                    kind="tool_use",
-                    tool_name=tc.function.name,
-                    tool_input=tool_input,
-                    tool_use_id=tc.id,
-                ))
+                blocks.append(
+                    ContentBlock(
+                        kind="tool_use",
+                        tool_name=tc.function.name,
+                        tool_input=tool_input,
+                        tool_use_id=tc.id,
+                    )
+                )
 
         if not blocks:
             blocks = [ContentBlock(kind="text", text="")]
@@ -360,6 +382,7 @@ from sdk.telemetry.traces import NoOpTracer
 def _get_backend_tracer() -> Any:
     try:
         from sdk.telemetry.traces import get_tracer
+
         return get_tracer("obscura.openai_backend")
     except Exception:
         return NoOpTracer()

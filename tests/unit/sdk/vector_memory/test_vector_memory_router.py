@@ -1,4 +1,5 @@
 """Tests for sdk.vector_memory."""
+
 from unittest.mock import MagicMock
 from datetime import UTC, datetime
 

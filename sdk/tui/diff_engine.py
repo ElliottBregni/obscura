@@ -17,6 +17,7 @@ from typing import Literal, cast
 # Data types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DiffLine:
     """A single line in a diff hunk."""
@@ -37,7 +38,7 @@ class DiffHunk:
     new_count: int
     lines: list[DiffLine] = field(default_factory=lambda: cast(list[DiffLine], []))
     status: str = "pending"  # "pending" | "accepted" | "rejected"
-    header: str = ""         # The @@ line
+    header: str = ""  # The @@ line
 
     def accept(self) -> None:
         self.status = "accepted"
@@ -89,6 +90,7 @@ class FileChange:
 # DiffEngine
 # ---------------------------------------------------------------------------
 
+
 class DiffEngine:
     """Compute diffs, parse hunks, format output, and apply patches."""
 
@@ -116,13 +118,15 @@ class DiffEngine:
         if new_lines and not new_lines[-1].endswith("\n"):
             new_lines[-1] += "\n"
 
-        diff = list(difflib.unified_diff(
-            old_lines,
-            new_lines,
-            fromfile="original",
-            tofile="modified",
-            n=self._context,
-        ))
+        diff = list(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile="original",
+                tofile="modified",
+                n=self._context,
+            )
+        )
 
         return self._parse_unified(diff)
 
@@ -191,28 +195,34 @@ class DiffEngine:
             content = content.rstrip("\n")
 
             if line.startswith("+"):
-                current_hunk.lines.append(DiffLine(
-                    tag="+",
-                    content=content,
-                    old_lineno=None,
-                    new_lineno=new_lineno,
-                ))
+                current_hunk.lines.append(
+                    DiffLine(
+                        tag="+",
+                        content=content,
+                        old_lineno=None,
+                        new_lineno=new_lineno,
+                    )
+                )
                 new_lineno += 1
             elif line.startswith("-"):
-                current_hunk.lines.append(DiffLine(
-                    tag="-",
-                    content=content,
-                    old_lineno=old_lineno,
-                    new_lineno=None,
-                ))
+                current_hunk.lines.append(
+                    DiffLine(
+                        tag="-",
+                        content=content,
+                        old_lineno=old_lineno,
+                        new_lineno=None,
+                    )
+                )
                 old_lineno += 1
             elif line.startswith(" "):
-                current_hunk.lines.append(DiffLine(
-                    tag=" ",
-                    content=content,
-                    old_lineno=old_lineno,
-                    new_lineno=new_lineno,
-                ))
+                current_hunk.lines.append(
+                    DiffLine(
+                        tag=" ",
+                        content=content,
+                        old_lineno=old_lineno,
+                        new_lineno=new_lineno,
+                    )
+                )
                 old_lineno += 1
                 new_lineno += 1
 

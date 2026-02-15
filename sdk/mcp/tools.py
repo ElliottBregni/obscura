@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Obscura -> MCP Tool Conversion
 # ---------------------------------------------------------------------------
 
+
 def obscura_tool_to_mcp(tool: ToolSpec) -> MCPTool:
     """
     Convert an Obscura ToolSpec to an MCP Tool definition.
@@ -50,8 +51,7 @@ def obscura_tool_to_mcp(tool: ToolSpec) -> MCPTool:
 
 
 def mcp_tool_to_obscura(
-    tool: MCPTool,
-    execute_fn: Callable[[dict[str, Any]], Awaitable[Any]]
+    tool: MCPTool, execute_fn: Callable[[dict[str, Any]], Awaitable[Any]]
 ) -> ToolSpec:
     """
     Convert an MCP Tool definition to an Obscura ToolSpec.
@@ -75,6 +75,7 @@ def mcp_tool_to_obscura(
 # Tool Result Conversion
 # ---------------------------------------------------------------------------
 
+
 def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
     """
     Convert an Obscura tool execution result to MCP ToolResult.
@@ -96,10 +97,12 @@ def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
                 isError=True,
             )
         return MCPToolResult(
-            content=[{
-                "type": "text",
-                "text": json.dumps(result_dict, indent=2, default=str),
-            }],
+            content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(result_dict, indent=2, default=str),
+                }
+            ],
         )
 
     if isinstance(result, str):
@@ -118,10 +121,12 @@ def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
                 if item_dict.get("type") in ["text", "image", "resource"]:
                     content.append(item_dict)
                 else:
-                    content.append({
-                        "type": "text",
-                        "text": json.dumps(item_dict, indent=2),
-                    })
+                    content.append(
+                        {
+                            "type": "text",
+                            "text": json.dumps(item_dict, indent=2),
+                        }
+                    )
             else:
                 content.append({"type": "text", "text": str(item)})
         return MCPToolResult(content=content)
@@ -176,6 +181,7 @@ def mcp_result_to_obscura(result: MCPToolResult) -> Any:
 # Obscura MCP Tools Registry
 # ---------------------------------------------------------------------------
 
+
 class ObscuraMCPToolRegistry:
     """
     Registry for Obscura-specific MCP tools.
@@ -184,7 +190,9 @@ class ObscuraMCPToolRegistry:
     """
 
     def __init__(self) -> None:
-        self._tools: dict[str, Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]]] = {}
+        self._tools: dict[
+            str, Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]]
+        ] = {}
         self._schemas: dict[str, dict[str, Any]] = {}
 
     def register(
@@ -215,7 +223,9 @@ class ObscuraMCPToolRegistry:
         }
         logger.debug(f"Registered Obscura MCP tool: {name}")
 
-    def get_tool(self, name: str) -> Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]] | None:
+    def get_tool(
+        self, name: str
+    ) -> Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]] | None:
         """Get a tool handler by name."""
         return self._tools.get(name)
 
@@ -279,6 +289,7 @@ def get_obscura_mcp_registry() -> ObscuraMCPToolRegistry:
 # Tool Execution Context Management
 # ---------------------------------------------------------------------------
 
+
 def create_tool_context(
     user_id: str,
     agent_id: str | None = None,
@@ -308,6 +319,7 @@ def create_tool_context(
 # ---------------------------------------------------------------------------
 # JSON Schema Helpers
 # ---------------------------------------------------------------------------
+
 
 def create_string_property(
     description: str,

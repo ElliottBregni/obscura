@@ -7,7 +7,7 @@ Usage::
 
     from sdk.backends.mcp_backend import MCPBackend
     from sdk.mcp.types import MCPConnectionConfig, MCPTransportType
-    
+
     backend = MCPBackend(
         mcp_servers=[
             MCPConnectionConfig(
@@ -17,9 +17,9 @@ Usage::
             ),
         ],
     )
-    
+
     await backend.start()
-    
+
     # Use like any backend
     message = await backend.send("Read the file /tmp/test.txt")
 """
@@ -69,16 +69,18 @@ class MCPBackend:
         self._session_manager = MCPSessionManager()
         self._tools: list[ToolSpec] = []
         self._tool_registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
+            hp: [] for hp in HookPoint
+        }
         self._initialized = False
-    
+
     # -- Lifecycle -----------------------------------------------------------
-    
+
     async def start(self) -> None:
         """Initialize the MCP backend and connect to all servers."""
         if self._initialized:
             return
-        
+
         # Connect to all MCP servers
         for i, config in enumerate(self.mcp_servers):
             session_name = f"mcp_server_{i}"
@@ -87,20 +89,20 @@ class MCPBackend:
                 logger.info(f"Connected to MCP server: {session_name}")
             except Exception as e:
                 logger.error(f"Failed to connect to MCP server {session_name}: {e}")
-        
+
         # Aggregate tools from all servers
         await self._refresh_tools()
-        
+
         self._initialized = True
         logger.info("MCP backend initialized")
-    
+
     async def stop(self) -> None:
         """Stop the MCP backend and disconnect from all servers."""
         await self._session_manager.close_all()
         self._tools = []
         self._initialized = False
         logger.info("MCP backend stopped")
-    
+
     async def _refresh_tools(self) -> None:
         """Refresh the list of available tools from all servers."""
         from sdk.internal.tools import ToolRegistry
@@ -116,7 +118,7 @@ class MCPBackend:
             self._tool_registry.register(tool_spec)
 
         logger.info(f"Loaded {len(self._tools)} tools from MCP servers")
-    
+
     def _mcp_tool_to_obscura(self, mcp_tool: Any) -> ToolSpec:
         """Convert an MCP tool to Obscura ToolSpec."""
         # Parse the prefixed name: "session_name.tool_name"
@@ -126,18 +128,18 @@ class MCPBackend:
         else:
             session_name = "unknown"
             tool_name = mcp_tool.name
-        
+
         async def tool_handler(**kwargs: Any) -> Any:
             """Execute the MCP tool."""
             return await self._execute_mcp_tool(session_name, tool_name, kwargs)
-        
+
         return ToolSpec(
             name=mcp_tool.name,
             description=mcp_tool.description,
             parameters=mcp_tool.inputSchema,
             handler=tool_handler,
         )
-    
+
     async def _execute_mcp_tool(
         self,
         session_name: str,
@@ -151,54 +153,54 @@ class MCPBackend:
                 code=-32000,
                 message=f"MCP session not found: {session_name}",
             )
-        
+
         result = await client.call_tool(tool_name, arguments)
         return mcp_result_to_obscura(result)
-    
+
     # -- BackendProtocol Implementation --------------------------------------
-    
+
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """
         Send a prompt - not supported directly.
-        
+
         This backend is for tools only, not direct LLM calls.
         """
         raise NotImplementedError(
             "MCPBackend does not support direct LLM calls. "
             "Use it as a tool provider for other backends."
         )
-    
+
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """
         Stream a response - not supported directly.
-        
+
         This backend is for tools only, not direct LLM calls.
         """
         raise NotImplementedError(
             "MCPBackend does not support direct LLM calls. "
             "Use it as a tool provider for other backends."
         )
-    
+
     # -- Sessions (not supported) --------------------------------------------
-    
+
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a session - not supported by MCP backend."""
         raise NotImplementedError("MCPBackend does not support sessions")
-    
+
     async def resume_session(self, ref: SessionRef) -> None:
         """Resume a session - not supported by MCP backend."""
         raise NotImplementedError("MCPBackend does not support sessions")
-    
+
     async def list_sessions(self) -> list[SessionRef]:
         """List sessions - not supported by MCP backend."""
         return []
-    
+
     async def delete_session(self, ref: SessionRef) -> None:
         """Delete a session - not supported by MCP backend."""
         raise NotImplementedError("MCPBackend does not support sessions")
-    
+
     # -- Tools ---------------------------------------------------------------
-    
+
     def register_tool(self, spec: ToolSpec) -> None:
         """
         Register a tool.
@@ -213,11 +215,11 @@ class MCPBackend:
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
         return self._tool_registry
-    
+
     def list_tools(self) -> list[ToolSpec]:
         """List all available tools from MCP servers."""
         return self._tools.copy()
-    
+
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool by name."""
         # Find the tool
@@ -226,13 +228,13 @@ class MCPBackend:
             if t.name == name:
                 tool = t
                 break
-        
+
         if tool is None:
             raise MCPError(
                 code=-32003,
                 message=f"Tool not found: {name}",
             )
-        
+
         # Execute hooks
         context = HookContext(
             hook=HookPoint.PRE_TOOL_USE,
@@ -240,10 +242,10 @@ class MCPBackend:
             tool_input=arguments,
         )
         await self._run_hooks(context)
-        
+
         # Execute tool
         result = await tool.handler(**arguments)
-        
+
         # Post-execution hooks
         context = HookContext(
             hook=HookPoint.POST_TOOL_USE,
@@ -252,17 +254,17 @@ class MCPBackend:
             tool_output=result,
         )
         await self._run_hooks(context)
-        
+
         return result
-    
+
     # -- Hooks ---------------------------------------------------------------
-    
+
     def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None:
         """Register a hook callback."""
         if hook not in self._hooks:
             self._hooks[hook] = []
         self._hooks[hook].append(callback)
-    
+
     async def _run_hooks(self, context: HookContext) -> None:
         """Run all registered hooks for a given point."""
         callbacks = self._hooks.get(context.hook, [])
@@ -274,65 +276,65 @@ class MCPBackend:
                     callback(context)
             except Exception as e:
                 logger.warning(f"Hook failed: {e}")
-    
+
     # -- Additional Methods --------------------------------------------------
-    
+
     async def add_server(self, config: MCPConnectionConfig) -> str:
         """
         Add a new MCP server dynamically.
-        
+
         Args:
             config: Connection configuration for the server
-            
+
         Returns:
             Session name for the new server
         """
         session_name = f"mcp_server_{len(self._session_manager.list_sessions())}"
         await self._session_manager.add_session(session_name, config)
-        
+
         # Refresh tools
         await self._refresh_tools()
-        
+
         return session_name
-    
+
     async def remove_server(self, session_name: str) -> None:
         """
         Remove an MCP server.
-        
+
         Args:
             session_name: Name of the session to remove
         """
         await self._session_manager.remove_session(session_name)
-        
+
         # Refresh tools
         await self._refresh_tools()
-    
+
     def list_servers(self) -> list[str]:
         """List all connected MCP server session names."""
         return self._session_manager.list_sessions()
-    
+
     async def health_check(self) -> dict[str, Any]:
         """
         Check health of all MCP connections.
-        
+
         Returns:
             Health status for each server
         """
         health: dict[str, dict[str, str]] = {}
-        
+
         for name in self._session_manager.list_sessions():
             client = self._session_manager.get_session(name)
             if client is None:
                 health[name] = {"status": "disconnected"}
                 continue
-            
+
             try:
                 # Try to ping the server
                 await asyncio.wait_for(client.ping(), timeout=5.0)
                 health[name] = {"status": "healthy"}
             except Exception as e:
                 health[name] = {"status": "unhealthy", "error": str(e)}
-        
+
         return health
 
 

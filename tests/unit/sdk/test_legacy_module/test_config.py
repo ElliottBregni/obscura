@@ -21,9 +21,7 @@ class TestConfigParsing:
         assert "copilot" in agents, f"copilot not in {agents}"
         assert "claude" in agents, f"claude not in {agents}"
 
-    def test_managed_repos(
-        self, sync_instance: VaultSync, mock_repo: Path
-    ) -> None:
+    def test_managed_repos(self, sync_instance: VaultSync, mock_repo: Path) -> None:
         repos = sync_instance.get_managed_repos()
         names = [r.name for r in repos]
         assert mock_repo.name in names, f"{mock_repo.name} not in {names}"

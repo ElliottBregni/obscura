@@ -19,6 +19,7 @@ from sdk.internal.types import ChunkKind, StreamChunk
 # Copilot: Event → AsyncIterator bridge
 # ---------------------------------------------------------------------------
 
+
 class EventToIteratorBridge:
     """Adapts Copilot's push-based events into an async iterator of StreamChunks.
 
@@ -44,11 +45,21 @@ class EventToIteratorBridge:
     def on_text_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.message_delta`` event."""
         delta = ""
-        if hasattr(event, "data") and hasattr(event.data, "delta_content") and event.data.delta_content:
+        if (
+            hasattr(event, "data")
+            and hasattr(event.data, "delta_content")
+            and event.data.delta_content
+        ):
             delta = event.data.delta_content
-        elif hasattr(event, "data") and hasattr(event.data, "content") and event.data.content:
+        elif (
+            hasattr(event, "data")
+            and hasattr(event.data, "content")
+            and event.data.content
+        ):
             delta = event.data.content
-        elif hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta:
+        elif (
+            hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta
+        ):
             delta = event.data.delta
         elif isinstance(event, str):
             delta = event
@@ -58,11 +69,21 @@ class EventToIteratorBridge:
     def on_thinking_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.reasoning_delta`` event."""
         delta = ""
-        if hasattr(event, "data") and hasattr(event.data, "delta_content") and event.data.delta_content:
+        if (
+            hasattr(event, "data")
+            and hasattr(event.data, "delta_content")
+            and event.data.delta_content
+        ):
             delta = event.data.delta_content
-        elif hasattr(event, "data") and hasattr(event.data, "reasoning_text") and event.data.reasoning_text:
+        elif (
+            hasattr(event, "data")
+            and hasattr(event.data, "reasoning_text")
+            and event.data.reasoning_text
+        ):
             delta = event.data.reasoning_text
-        elif hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta:
+        elif (
+            hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta
+        ):
             delta = event.data.delta
         elif isinstance(event, str):
             delta = event
@@ -71,7 +92,11 @@ class EventToIteratorBridge:
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
         name = ""
-        if hasattr(event, "data") and hasattr(event.data, "tool_name") and event.data.tool_name:
+        if (
+            hasattr(event, "data")
+            and hasattr(event.data, "tool_name")
+            and event.data.tool_name
+        ):
             name = event.data.tool_name
         elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
             name = event.data.name
@@ -102,6 +127,7 @@ class EventToIteratorBridge:
 # ---------------------------------------------------------------------------
 # Claude: Message iterator → StreamChunk iterator
 # ---------------------------------------------------------------------------
+
 
 class ClaudeIteratorAdapter:
     """Wraps Claude Agent SDK's ``AsyncIterator[Message]`` into
@@ -182,32 +208,40 @@ class ClaudeIteratorAdapter:
             delta = ev.get("delta", {})
             delta_type = delta.get("type", "")
             if delta_type == "text_delta":
-                return [StreamChunk(
-                    kind=ChunkKind.TEXT_DELTA,
-                    text=delta.get("text", ""),
-                    raw=event,
-                )]
+                return [
+                    StreamChunk(
+                        kind=ChunkKind.TEXT_DELTA,
+                        text=delta.get("text", ""),
+                        raw=event,
+                    )
+                ]
             if delta_type == "thinking_delta":
-                return [StreamChunk(
-                    kind=ChunkKind.THINKING_DELTA,
-                    text=delta.get("thinking", ""),
-                    raw=event,
-                )]
+                return [
+                    StreamChunk(
+                        kind=ChunkKind.THINKING_DELTA,
+                        text=delta.get("thinking", ""),
+                        raw=event,
+                    )
+                ]
             if delta_type == "input_json_delta":
-                return [StreamChunk(
-                    kind=ChunkKind.TOOL_USE_DELTA,
-                    tool_input_delta=delta.get("partial_json", ""),
-                    raw=event,
-                )]
+                return [
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_input_delta=delta.get("partial_json", ""),
+                        raw=event,
+                    )
+                ]
 
         if ev_type == "content_block_start":
             block = ev.get("content_block", {})
             if block.get("type") == "tool_use":
-                return [StreamChunk(
-                    kind=ChunkKind.TOOL_USE_START,
-                    tool_name=block.get("name", ""),
-                    raw=event,
-                )]
+                return [
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_START,
+                        tool_name=block.get("name", ""),
+                        raw=event,
+                    )
+                ]
 
         return []
 
@@ -221,31 +255,39 @@ class ClaudeIteratorAdapter:
             block_type = type(block).__name__
 
             if block_type == "TextBlock" and hasattr(block, "text"):
-                chunks.append(StreamChunk(
-                    kind=ChunkKind.TEXT_DELTA,
-                    text=block.text,
-                    raw=block,
-                ))
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TEXT_DELTA,
+                        text=block.text,
+                        raw=block,
+                    )
+                )
             elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
-                chunks.append(StreamChunk(
-                    kind=ChunkKind.THINKING_DELTA,
-                    text=block.thinking,
-                    raw=block,
-                ))
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.THINKING_DELTA,
+                        text=block.thinking,
+                        raw=block,
+                    )
+                )
             elif block_type == "ToolUseBlock":
-                chunks.append(StreamChunk(
-                    kind=ChunkKind.TOOL_USE_START,
-                    tool_name=getattr(block, "name", ""),
-                    raw=block,
-                ))
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_START,
+                        tool_name=getattr(block, "name", ""),
+                        raw=block,
+                    )
+                )
             elif block_type == "ToolResultBlock":
                 text = ""
                 if hasattr(block, "content") and isinstance(block.content, str):
                     text = block.content
-                chunks.append(StreamChunk(
-                    kind=ChunkKind.TOOL_RESULT,
-                    text=text,
-                    raw=block,
-                ))
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_RESULT,
+                        text=text,
+                        raw=block,
+                    )
+                )
 
         return chunks

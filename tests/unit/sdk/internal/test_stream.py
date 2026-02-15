@@ -1,4 +1,5 @@
 """Tests for sdk.internal.stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -449,4 +450,6 @@ class TestClaudeIteratorAdapter:
             chunks.append(c)
         assert len(chunks) == 1
         assert chunks[0].kind == ChunkKind.DONE
+
+
 # pyright: ignore-all

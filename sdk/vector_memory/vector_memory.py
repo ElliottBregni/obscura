@@ -7,12 +7,12 @@ Agents can store memories and retrieve semantically similar ones.
 Usage::
 
     from sdk.vector_memory import VectorMemoryStore
-    
+
     store = VectorMemoryStore.for_user(user)
-    
+
     # Store with automatic embedding
     store.set("python_async", "Async/await is Python's way to handle concurrency...")
-    
+
     # Semantic search
     results = store.search_similar(
         "how do I run multiple things at once?",
@@ -43,7 +43,7 @@ from sdk.vector_memory.vector_memory_filters import MetadataFilter
 def simple_embedding(text: str, dim: int = 384) -> list[float]:
     """
     Create a simple hash-based embedding for demo purposes.
-    
+
     In production, replace with:
     - OpenAI text-embedding-3-small
     - sentence-transformers/all-MiniLM-L6-v2
@@ -51,18 +51,18 @@ def simple_embedding(text: str, dim: int = 384) -> list[float]:
     """
     # Hash the text to get deterministic "embedding"
     hash_bytes = hashlib.sha256(text.encode()).digest()
-    
+
     # Convert to float array
     floats: list[float] = []
     for i in range(0, len(hash_bytes), 4):
-        chunk = hash_bytes[i:i+4]
-        val = int.from_bytes(chunk, 'little', signed=True)
+        chunk = hash_bytes[i : i + 4]
+        val = int.from_bytes(chunk, "little", signed=True)
         floats.append(val / 2**31)  # Normalize to [-1, 1]
-    
+
     # Pad or truncate to desired dimension
     if len(floats) < dim:
         floats = floats * (dim // len(floats) + 1)
-    
+
     return floats[:dim]
 
 
@@ -70,19 +70,20 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     a_arr = np.array(a)
     b_arr = np.array(b)
-    
+
     norm_a = np.linalg.norm(a_arr)
     norm_b = np.linalg.norm(b_arr)
-    
+
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    
+
     return float(np.dot(a_arr, b_arr) / (norm_a * norm_b))
 
 
 @dataclass
 class VectorMemoryEntry:
     """A memory entry with vector embedding."""
+
     key: MemoryKey
     text: str  # The raw text content
     embedding: list[float]
@@ -97,17 +98,17 @@ class VectorMemoryEntry:
 class VectorMemoryStore:
     """
     Semantic memory store with vector search.
-    
+
     Each user gets an isolated SQLite database with:
     - Text content
     - Vector embeddings
     - Metadata
     - Efficient similarity search
     """
-    
+
     _instances: dict[str, VectorMemoryStore] = {}
     _lock = threading.Lock()
-    
+
     def __init__(
         self,
         user: AuthenticatedUser,
@@ -117,19 +118,19 @@ class VectorMemoryStore:
         self.user = user
         self.user_id = user.user_id
         self._db_id = hashlib.sha256(self.user_id.encode()).hexdigest()[:16]
-        
+
         if db_path is None:
             db_path = Path.home() / ".obscura" / "vector_memory" / f"{self._db_id}.db"
-        
+
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self.embedding_fn = embedding_fn or simple_embedding
         self.embedding_dim = len(self.embedding_fn("test"))
-        
+
         self._local = threading.local()
         self._init_db()
-    
+
     @classmethod
     def for_user(
         cls,
@@ -141,14 +142,14 @@ class VectorMemoryStore:
             if user.user_id not in cls._instances:
                 cls._instances[user.user_id] = cls(user, embedding_fn=embedding_fn)
             return cls._instances[user.user_id]
-    
+
     def _get_conn(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
+        if not hasattr(self._local, "conn") or self._local.conn is None:
             self._local.conn = sqlite3.connect(self.db_path)
             self._local.conn.row_factory = sqlite3.Row
         return self._local.conn
-    
+
     def _init_db(self) -> None:
         """Initialize the database schema with vector support."""
         conn = self._get_conn()
@@ -203,18 +204,27 @@ class VectorMemoryStore:
 
         if version < 1:
             # Add memory_type and updated_at columns if missing
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(vector_memory)").fetchall()}
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(vector_memory)").fetchall()
+            }
 
             if "memory_type" not in columns:
-                conn.execute("ALTER TABLE vector_memory ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'general'")
+                conn.execute(
+                    "ALTER TABLE vector_memory ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'general'"
+                )
 
             if "updated_at" not in columns:
-                conn.execute("ALTER TABLE vector_memory ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-                conn.execute("UPDATE vector_memory SET updated_at = created_at WHERE updated_at IS NULL")
+                conn.execute(
+                    "ALTER TABLE vector_memory ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                )
+                conn.execute(
+                    "UPDATE vector_memory SET updated_at = created_at WHERE updated_at IS NULL"
+                )
 
             conn.execute("PRAGMA user_version = 1")
             conn.commit()
-    
+
     def set(
         self,
         key: str | MemoryKey,
@@ -267,11 +277,13 @@ class VectorMemoryStore:
                 json.dumps(metadata) if metadata else None,
                 memory_type,
                 expires_at,
-            )
+            ),
         )
         conn.commit()
-    
-    def get(self, key: str | MemoryKey, namespace: str = "default") -> VectorMemoryEntry | None:
+
+    def get(
+        self, key: str | MemoryKey, namespace: str = "default"
+    ) -> VectorMemoryEntry | None:
         """Retrieve a specific memory entry by key."""
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
@@ -283,28 +295,28 @@ class VectorMemoryStore:
             FROM vector_memory
             WHERE namespace = ? AND key = ?
             """,
-            (key.namespace, key.key)
+            (key.namespace, key.key),
         ).fetchone()
 
         if row is None:
             return None
 
         # Check expiration
-        if row['expires_at']:
-            expires = datetime.fromisoformat(row['expires_at'])
+        if row["expires_at"]:
+            expires = datetime.fromisoformat(row["expires_at"])
             if datetime.now(UTC) > expires:
                 self.delete(key)
                 return None
 
         return VectorMemoryEntry(
-            key=MemoryKey(namespace=row['namespace'], key=row['key']),
-            text=row['text'],
-            embedding=json.loads(row['embedding']),
-            metadata=json.loads(row['metadata']) if row['metadata'] else {},
-            created_at=datetime.fromisoformat(row['created_at']),
-            memory_type=row['memory_type'] or "general",
+            key=MemoryKey(namespace=row["namespace"], key=row["key"]),
+            text=row["text"],
+            embedding=json.loads(row["embedding"]),
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=datetime.fromisoformat(row["created_at"]),
+            memory_type=row["memory_type"] or "general",
         )
-    
+
     def search_similar(
         self,
         query: str,
@@ -356,7 +368,11 @@ class VectorMemoryStore:
         if memory_types:
             filters.append(MemoryTypeFilter(memory_types=memory_types))
         if date_range:
-            filters.append(DateRangeFilter(field="created_at", start=date_range[0], end=date_range[1]))
+            filters.append(
+                DateRangeFilter(
+                    field="created_at", start=date_range[0], end=date_range[1]
+                )
+            )
 
         if filters:
             extra_clause, extra_params = FilterBuilder.build_sql(filters)
@@ -368,17 +384,17 @@ class VectorMemoryStore:
         # Compute similarities
         results: list[VectorMemoryEntry] = []
         for row in rows:
-            embedding = json.loads(row['embedding'])
+            embedding = json.loads(row["embedding"])
             score = cosine_similarity(query_embedding, embedding)
 
             if score >= threshold:
                 entry = VectorMemoryEntry(
-                    key=MemoryKey(namespace=row['namespace'], key=row['key']),
-                    text=row['text'],
+                    key=MemoryKey(namespace=row["namespace"], key=row["key"]),
+                    text=row["text"],
                     embedding=embedding,
-                    metadata=json.loads(row['metadata']) if row['metadata'] else {},
-                    created_at=datetime.fromisoformat(row['created_at']),
-                    memory_type=row['memory_type'] or "general",
+                    metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    memory_type=row["memory_type"] or "general",
                     score=score,
                     final_score=score,
                 )
@@ -450,64 +466,65 @@ class VectorMemoryStore:
 
         candidates.sort(key=lambda x: x.final_score, reverse=True)
         return candidates[:top_k]
-    
+
     def delete(self, key: str | MemoryKey, namespace: str = "default") -> bool:
         """Delete a memory entry."""
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
-        
+
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM vector_memory WHERE namespace = ? AND key = ?",
-            (key.namespace, key.key)
+            (key.namespace, key.key),
         )
         conn.commit()
         return cursor.rowcount > 0
-    
+
     def list_keys(self, namespace: str | None = None) -> list[MemoryKey]:
         """List all memory keys."""
         conn = self._get_conn()
-        
+
         if namespace:
             rows = conn.execute(
                 "SELECT namespace, key FROM vector_memory WHERE namespace = ?",
-                (namespace,)
+                (namespace,),
             ).fetchall()
         else:
             rows = conn.execute("SELECT namespace, key FROM vector_memory").fetchall()
-        
-        return [MemoryKey(namespace=r['namespace'], key=r['key']) for r in rows]
-    
+
+        return [MemoryKey(namespace=r["namespace"], key=r["key"]) for r in rows]
+
     def clear_namespace(self, namespace: str) -> int:
         """Clear all memories in a namespace."""
         conn = self._get_conn()
         cursor = conn.execute(
-            "DELETE FROM vector_memory WHERE namespace = ?",
-            (namespace,)
+            "DELETE FROM vector_memory WHERE namespace = ?", (namespace,)
         )
         conn.commit()
         return cursor.rowcount
-    
+
     def get_stats(self) -> dict[str, Any]:
         """Get vector memory statistics."""
         conn = self._get_conn()
-        
-        total = conn.execute("SELECT COUNT(*) as count FROM vector_memory").fetchone()['count']
-        
+
+        total = conn.execute("SELECT COUNT(*) as count FROM vector_memory").fetchone()[
+            "count"
+        ]
+
         namespaces = conn.execute(
             "SELECT namespace, COUNT(*) as count FROM vector_memory GROUP BY namespace"
         ).fetchall()
-        
+
         return {
             "total_memories": total,
             "embedding_dim": self.embedding_dim,
-            "namespaces": {r['namespace']: r['count'] for r in namespaces},
+            "namespaces": {r["namespace"]: r["count"] for r in namespaces},
             "db_path": str(self.db_path),
         }
-    
+
     def close(self) -> None:
         """Close the database connection."""
-        if hasattr(self._local, 'conn') and self._local.conn:
+        if hasattr(self._local, "conn") and self._local.conn:
             self._local.conn.close()
             self._local.conn = None
 
@@ -546,11 +563,7 @@ class SemanticMemoryMixin:
         self.vector_memory.set(
             key,
             text,
-            metadata={
-                "agent_id": self.id,
-                "agent_name": self.config.name,
-                **metadata
-            },
+            metadata={"agent_id": self.id, "agent_name": self.config.name, **metadata},
             namespace=f"{self.config.memory_namespace}:semantic",
             memory_type=memory_type,
         )

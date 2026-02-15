@@ -95,15 +95,18 @@ def traced(
     Works with both sync and async functions. If OTel is not installed
     the original function is returned unchanged.
     """
+
     def decorator(fn: F) -> F:
         span_name = name or f"{fn.__module__}.{fn.__qualname__}"
         extra_attrs = attributes or {}
 
         if inspect.iscoroutinefunction(fn):
+
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 try:
                     from opentelemetry import trace
+
                     tracer = trace.get_tracer(fn.__module__)
                 except ImportError:
                     return await fn(*args, **kwargs)
@@ -116,16 +119,20 @@ def traced(
                         return result
                     except Exception as exc:
                         span.set_status(
-                            trace.StatusCode.ERROR, str(exc),
+                            trace.StatusCode.ERROR,
+                            str(exc),
                         )
                         span.record_exception(exc)
                         raise
+
             return async_wrapper  # type: ignore[return-value]
         else:
+
             @functools.wraps(fn)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 try:
                     from opentelemetry import trace
+
                     tracer = trace.get_tracer(fn.__module__)
                 except ImportError:
                     return fn(*args, **kwargs)
@@ -138,10 +145,12 @@ def traced(
                         return result
                     except Exception as exc:
                         span.set_status(
-                            trace.StatusCode.ERROR, str(exc),
+                            trace.StatusCode.ERROR,
+                            str(exc),
                         )
                         span.record_exception(exc)
                         raise
+
             return sync_wrapper  # type: ignore[return-value]
 
     return decorator
@@ -150,6 +159,7 @@ def traced(
 # ---------------------------------------------------------------------------
 # No-op fallbacks
 # ---------------------------------------------------------------------------
+
 
 class NoOpSpan:
     """Minimal no-op span for when OTel is unavailable."""

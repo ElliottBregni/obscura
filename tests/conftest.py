@@ -19,6 +19,7 @@ from scripts.sync import VaultSync
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _mk(base: Path, rel_path: str, content: str = "") -> Path:
     """Create a file at *base / rel_path*, creating parent dirs as needed."""
     fp = base / rel_path
@@ -31,6 +32,7 @@ def _mk(base: Path, rel_path: str, content: str = "") -> Path:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def vault_root(tmp_path: Path) -> Path:
     """Miniature vault under tmp_path/vault/ mirroring real vault structure."""
@@ -38,13 +40,11 @@ def vault_root(tmp_path: Path) -> Path:
     vault.mkdir()
 
     # --- agents/INDEX.md ---
-    _mk(vault, "agents/INDEX.md", (
-        "# Agent Registry\n"
-        "\n"
-        "## Active Agents\n"
-        "- copilot\n"
-        "- claude\n"
-    ))
+    _mk(
+        vault,
+        "agents/INDEX.md",
+        ("# Agent Registry\n\n## Active Agents\n- copilot\n- claude\n"),
+    )
 
     # --- repos/TestRepo/ (in-repo vault content) ---
     _mk(vault, "repos/TestRepo/agent.md", "# Agent config\n")
@@ -53,15 +53,31 @@ def vault_root(tmp_path: Path) -> Path:
 
     # Root-level skills
     _mk(vault, "repos/TestRepo/skills/subagent/Models/Skill.md", "# Universal skill\n")
-    _mk(vault, "repos/TestRepo/skills/subagent/Models/skill.copilot.md", "# Copilot skill\n")
+    _mk(
+        vault,
+        "repos/TestRepo/skills/subagent/Models/skill.copilot.md",
+        "# Copilot skill\n",
+    )
     _mk(vault, "repos/TestRepo/skills/changelog-generator/SKILL.md", "# Changelog\n")
 
     # platform/ — matches repo's platform/ dir for recursive discovery
-    _mk(vault, "repos/TestRepo/platform/skills/subagent/Models/Skill.md", "# Platform skill\n")
-    _mk(vault, "repos/TestRepo/platform/skills/changelog-generator/SKILL.md", "# Platform changelog\n")
+    _mk(
+        vault,
+        "repos/TestRepo/platform/skills/subagent/Models/Skill.md",
+        "# Platform skill\n",
+    )
+    _mk(
+        vault,
+        "repos/TestRepo/platform/skills/changelog-generator/SKILL.md",
+        "# Platform changelog\n",
+    )
 
     # platform/skills/partview_core/ — matches repo's platform/partview_core/
-    _mk(vault, "repos/TestRepo/platform/skills/partview_core/skills/pv-skill.md", "# PV skill\n")
+    _mk(
+        vault,
+        "repos/TestRepo/platform/skills/partview_core/skills/pv-skill.md",
+        "# PV skill\n",
+    )
 
     # --- repos/INDEX.md (will be updated by sync_instance to point to mock_repo) ---
     # Placeholder — sync_instance fixture overwrites with correct absolute path
@@ -142,15 +158,18 @@ def mock_lock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # Variant / profile fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def variant_vault(tmp_path: Path) -> Path:
     """Vault with model-variant and role files for VariantSelector tests."""
     vault = tmp_path / "variant_vault"
     vault.mkdir()
 
-    _mk(vault, "agents/INDEX.md", (
-        "# Agent Registry\n\n## Active Agents\n- copilot\n- claude\n"
-    ))
+    _mk(
+        vault,
+        "agents/INDEX.md",
+        ("# Agent Registry\n\n## Active Agents\n- copilot\n- claude\n"),
+    )
     _mk(vault, "repos/INDEX.md", "# placeholder\n")
 
     # Vault-wide skills with model variants

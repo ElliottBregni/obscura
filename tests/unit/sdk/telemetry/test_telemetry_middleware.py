@@ -1,4 +1,5 @@
 """Tests for sdk.telemetry.middleware."""
+
 from unittest.mock import patch, MagicMock
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -27,6 +28,7 @@ def _make_app() -> FastAPI:
 # ---------------------------------------------------------------------------
 # Middleware dispatch
 # ---------------------------------------------------------------------------
+
 
 class TestTelemetryMiddleware:
     def test_generates_request_id(self):
@@ -86,6 +88,7 @@ class TestTelemetryMiddleware:
 # _enrich_request_span
 # ---------------------------------------------------------------------------
 
+
 class TestEnrichRequestSpan:
     def test_no_otel_import(self):
         """When opentelemetry is not available, should not raise."""
@@ -107,7 +110,10 @@ class TestEnrichRequestSpan:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
+        with patch.dict(
+            "sys.modules",
+            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        ):
             enrich_request_span(mock_request, "req-123")
 
         mock_span.set_attribute.assert_called_with("http.request_id", "req-123")
@@ -122,7 +128,10 @@ class TestEnrichRequestSpan:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
+        with patch.dict(
+            "sys.modules",
+            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        ):
             enrich_request_span(MagicMock(), "req-1")
 
         mock_span.set_attribute.assert_not_called()
@@ -134,7 +143,10 @@ class TestEnrichRequestSpan:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
+        with patch.dict(
+            "sys.modules",
+            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        ):
             enrich_request_span(MagicMock(), "req-1")
 
     def test_with_user_enrichment(self):
@@ -151,7 +163,10 @@ class TestEnrichRequestSpan:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
+        with patch.dict(
+            "sys.modules",
+            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        ):
             with patch("sdk.telemetry.context.enrich_span_with_user") as mock_enrich:
                 enrich_request_span(mock_request, "req-1")
                 mock_enrich.assert_called_once_with(mock_span, mock_user)
@@ -166,6 +181,7 @@ class TestEnrichRequestSpan:
 # _get_traceparent
 # ---------------------------------------------------------------------------
 
+
 class TestGetTraceparent:
     def test_no_otel(self):
         """When opentelemetry is not available, returns None."""
@@ -175,6 +191,7 @@ class TestGetTraceparent:
 
     def test_with_valid_span_context(self):
         """When OTel span has a valid context, returns traceparent."""
+
         # Use a simple namespace object with real int values for format()
         class FakeCtx:
             trace_id = 0x1234567890ABCDEF1234567890ABCDEF
@@ -189,7 +206,10 @@ class TestGetTraceparent:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
+        with patch.dict(
+            "sys.modules",
+            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        ):
             result = get_traceparent()
 
         assert result is not None
@@ -200,6 +220,7 @@ class TestGetTraceparent:
 
     def test_with_no_trace_id(self):
         """When trace_id is 0, returns None."""
+
         class FakeCtx:
             trace_id = 0
             span_id = 0
@@ -213,7 +234,10 @@ class TestGetTraceparent:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict("sys.modules", {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod}):
+        with patch.dict(
+            "sys.modules",
+            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        ):
             result = get_traceparent()
 
         assert result is None
@@ -222,12 +246,15 @@ class TestGetTraceparent:
         """When opentelemetry is not installed, returns None."""
         # Remove opentelemetry from sys.modules to simulate ImportError
         import sys
+
         saved: dict[str, object] = {}
         for key in list(sys.modules.keys()):
             if key.startswith("opentelemetry"):
                 saved[key] = sys.modules.pop(key)
         try:
-            with patch.dict("sys.modules", {"opentelemetry": None, "opentelemetry.trace": None}):
+            with patch.dict(
+                "sys.modules", {"opentelemetry": None, "opentelemetry.trace": None}
+            ):
                 result = get_traceparent()
             assert result is None
         finally:

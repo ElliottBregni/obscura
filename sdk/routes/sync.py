@@ -41,8 +41,16 @@ async def trigger_sync(
         success = result.returncode == 0
         message = result.stdout.strip() if success else result.stderr.strip()
         status = "success" if success else "error"
-        audit("sync.trigger", user, "sync:vault", "execute", status,
-              agent=body.agent, repo=body.repo, dry_run=body.dry_run)
+        audit(
+            "sync.trigger",
+            user,
+            "sync:vault",
+            "execute",
+            status,
+            agent=body.agent,
+            repo=body.repo,
+            dry_run=body.dry_run,
+        )
         record_sync_metric(status)
         return SyncResponse(success=success, message=message or "sync completed")
     except subprocess.TimeoutExpired:

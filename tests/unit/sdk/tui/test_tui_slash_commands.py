@@ -18,6 +18,7 @@ import pytest
 # Inline stubs — mirrors slash command parsing from PLAN_TUI.md
 # ---------------------------------------------------------------------------
 
+
 class TUIMode(Enum):
     ASK = "ask"
     PLAN = "plan"
@@ -28,6 +29,7 @@ class TUIMode(Enum):
 @dataclass
 class ParsedCommand:
     """Result of parsing a slash command."""
+
     name: str
     args: list[str] = field(default_factory=list)
     raw: str = ""
@@ -49,7 +51,11 @@ _COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "session": {"min_args": 1, "max_args": 2, "choices": None},  # new|list|load <id>
     "clear": {"min_args": 0, "max_args": 0, "choices": None},
     "memory": {"min_args": 1, "max_args": 2, "choices": None},  # list|get <key>
-    "diff": {"min_args": 1, "max_args": 1, "choices": ["show", "accept-all", "reject-all"]},
+    "diff": {
+        "min_args": 1,
+        "max_args": 1,
+        "choices": ["show", "accept-all", "reject-all"],
+    },
     "help": {"min_args": 0, "max_args": 0, "choices": None},
     "quit": {"min_args": 0, "max_args": 0, "choices": None},
 }
@@ -99,6 +105,7 @@ def is_slash_command(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSlashCommandDetection:
     """Verify detection of slash commands vs regular text."""
@@ -407,26 +414,29 @@ class TestCommandRawText:
 class TestAllCommandsParseSuccessfully:
     """Smoke test: every valid command from the plan can be parsed."""
 
-    @pytest.mark.parametrize("cmd_text,expected_name", [
-        ("/mode ask", "mode"),
-        ("/mode plan", "mode"),
-        ("/mode code", "mode"),
-        ("/mode diff", "mode"),
-        ("/backend claude", "backend"),
-        ("/backend copilot", "backend"),
-        ("/model gpt-5", "model"),
-        ("/session new", "session"),
-        ("/session list", "session"),
-        ("/session load abc", "session"),
-        ("/clear", "clear"),
-        ("/memory list", "memory"),
-        ("/memory get mykey", "memory"),
-        ("/diff show", "diff"),
-        ("/diff accept-all", "diff"),
-        ("/diff reject-all", "diff"),
-        ("/help", "help"),
-        ("/quit", "quit"),
-    ])
+    @pytest.mark.parametrize(
+        "cmd_text,expected_name",
+        [
+            ("/mode ask", "mode"),
+            ("/mode plan", "mode"),
+            ("/mode code", "mode"),
+            ("/mode diff", "mode"),
+            ("/backend claude", "backend"),
+            ("/backend copilot", "backend"),
+            ("/model gpt-5", "model"),
+            ("/session new", "session"),
+            ("/session list", "session"),
+            ("/session load abc", "session"),
+            ("/clear", "clear"),
+            ("/memory list", "memory"),
+            ("/memory get mykey", "memory"),
+            ("/diff show", "diff"),
+            ("/diff accept-all", "diff"),
+            ("/diff reject-all", "diff"),
+            ("/help", "help"),
+            ("/quit", "quit"),
+        ],
+    )
     def test_command_parses(self, cmd_text: str, expected_name: str) -> None:
         """Each valid command from the plan spec parses without error."""
         cmd = parse_slash_command(cmd_text)

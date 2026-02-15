@@ -32,6 +32,7 @@ from sdk.internal.types import (
 # Backend implementation
 # ---------------------------------------------------------------------------
 
+
 class ClaudeBackend:
     """BackendProtocol implementation wrapping claude-agent-sdk."""
 
@@ -59,7 +60,9 @@ class ClaudeBackend:
         # Tool and hook registries
         self._tools: list[ToolSpec] = []
         self._tool_registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
+            hp: [] for hp in HookPoint
+        }
 
         # Session tracking
         self._session_store = SessionStore()
@@ -115,6 +118,7 @@ class ClaudeBackend:
     async def start(self) -> None:
         """Initialize the Claude SDK client."""
         from claude_agent_sdk import ClaudeSDKClient
+
         options = self._build_options()
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
@@ -197,6 +201,7 @@ class ClaudeBackend:
             await self._client.disconnect()
 
         from claude_agent_sdk import ClaudeSDKClient
+
         options = self._build_options(resume=ref.session_id)
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
@@ -235,6 +240,7 @@ class ClaudeBackend:
             await self._client.disconnect()
 
         from claude_agent_sdk import ClaudeSDKClient
+
         options = self._build_options(resume=ref.session_id, fork_session=True)
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
@@ -276,6 +282,7 @@ class ClaudeBackend:
     def _build_options(self, **overrides: Any) -> Any:
         """Build ClaudeAgentOptions for the SDK."""
         from claude_agent_sdk import ClaudeAgentOptions
+
         opts: dict[str, Any] = {}
 
         if self._model:
@@ -315,6 +322,7 @@ class ClaudeBackend:
         """Convert registered ToolSpecs to a Claude in-process MCP server."""
         from claude_agent_sdk import tool as claude_tool
         from claude_agent_sdk import create_sdk_mcp_server
+
         claude_tools: list[Any] = []
         for spec in self._tools:
             # Create a claude @tool-decorated function for each ToolSpec
@@ -352,6 +360,7 @@ class ClaudeBackend:
             # Wrap our callbacks in Claude's HookMatcher format
             try:
                 from claude_agent_sdk import HookMatcher
+
                 matchers = [HookMatcher(hooks=callbacks)]
                 result[claude_key] = matchers
             except ImportError:
@@ -374,24 +383,30 @@ class ClaudeBackend:
                     if block_type == "TextBlock" and hasattr(block, "text"):
                         blocks.append(ContentBlock(kind="text", text=block.text))
                     elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
-                        blocks.append(ContentBlock(kind="thinking", text=block.thinking))
+                        blocks.append(
+                            ContentBlock(kind="thinking", text=block.thinking)
+                        )
                     elif block_type == "ToolUseBlock":
-                        blocks.append(ContentBlock(
-                            kind="tool_use",
-                            tool_name=getattr(block, "name", ""),
-                            tool_input=getattr(block, "input", {}),
-                            tool_use_id=getattr(block, "id", ""),
-                        ))
+                        blocks.append(
+                            ContentBlock(
+                                kind="tool_use",
+                                tool_name=getattr(block, "name", ""),
+                                tool_input=getattr(block, "input", {}),
+                                tool_use_id=getattr(block, "id", ""),
+                            )
+                        )
                     elif block_type == "ToolResultBlock":
                         content = getattr(block, "content", "")
                         if not isinstance(content, str):
                             content = str(content)
-                        blocks.append(ContentBlock(
-                            kind="tool_result",
-                            text=content,
-                            tool_use_id=getattr(block, "tool_use_id", ""),
-                            is_error=getattr(block, "is_error", False),
-                        ))
+                        blocks.append(
+                            ContentBlock(
+                                kind="tool_result",
+                                text=content,
+                                tool_use_id=getattr(block, "tool_use_id", ""),
+                                is_error=getattr(block, "is_error", False),
+                            )
+                        )
 
             elif type_name == "ResultMessage":
                 # ResultMessage is metadata, not content — skip
@@ -421,6 +436,7 @@ from sdk.telemetry.traces import NoOpTracer
 def _get_backend_tracer() -> Any:
     try:
         from sdk.telemetry.traces import get_tracer
+
         return get_tracer("obscura.claude_backend")
     except Exception:
         return NoOpTracer()
