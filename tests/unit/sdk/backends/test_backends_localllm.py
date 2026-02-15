@@ -561,6 +561,7 @@ class TestLocalLLMSessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
+
         def to_dict(m):  # type: ignore[no-untyped-def]
             return m.to_dict() if hasattr(m, "to_dict") else m
 
@@ -616,6 +617,7 @@ class TestLocalLLMSessions:
 
         history = b._conversations[ref.session_id]
         assert len(history) == 2
+
         def to_dict(m):  # type: ignore[no-untyped-def]
             return m.to_dict() if hasattr(m, "to_dict") else m
 

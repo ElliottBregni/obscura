@@ -240,8 +240,12 @@ def pytest_collection_modifyitems(items):
                     reason="TUI bridge shim not required for pipeline", strict=False
                 )
             )
-        if not run_e2e and ("tests/e2e/" in item.nodeid or item.get_closest_marker("e2e")):
-            item.add_marker(pytest.mark.skip(reason="Use --run-e2e to include e2e tests"))
+        if not run_e2e and (
+            "tests/e2e/" in item.nodeid or item.get_closest_marker("e2e")
+        ):
+            item.add_marker(
+                pytest.mark.skip(reason="Use --run-e2e to include e2e tests")
+            )
 
 
 # ---------------------------------------------------------------------------
