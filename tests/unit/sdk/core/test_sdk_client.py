@@ -47,7 +47,7 @@ class TestModelResolution:
     def test_copilot_alias_resolves(self, mock_copilot_env: None) -> None:
         """Model alias should be resolved via copilot_models.resolve()."""
         client = ObscuraClient.__new__(ObscuraClient)
-        model = client._resolve_model(
+        model = client._resolve_model(  # pyright: ignore[reportPrivateUsage]
             Backend.COPILOT,
             model=None,
             model_alias="copilot_automation_safe",
@@ -58,7 +58,7 @@ class TestModelResolution:
     def test_copilot_alias_automation_safe(self, mock_copilot_env: None) -> None:
         """Automation-safe flag should use require_automation_safe()."""
         client = ObscuraClient.__new__(ObscuraClient)
-        model = client._resolve_model(
+        model = client._resolve_model(  # pyright: ignore[reportPrivateUsage]
             Backend.COPILOT,
             model=None,
             model_alias="copilot_automation_safe",
@@ -71,7 +71,7 @@ class TestModelResolution:
     ) -> None:
         """Premium alias should be rejected when automation_safe=True."""
         client = ObscuraClient.__new__(ObscuraClient)
-        model = client._resolve_model(
+        model = client._resolve_model(  # pyright: ignore[reportPrivateUsage]
             Backend.COPILOT,
             model=None,
             model_alias="copilot_premium_manual_only",
@@ -82,7 +82,7 @@ class TestModelResolution:
     def test_raw_model_passes_through(self, mock_copilot_env: None) -> None:
         """Raw model ID should pass through unchanged."""
         client = ObscuraClient.__new__(ObscuraClient)
-        model = client._resolve_model(
+        model = client._resolve_model(  # pyright: ignore[reportPrivateUsage]
             Backend.COPILOT,
             model="gpt-5",
             model_alias=None,
@@ -93,7 +93,7 @@ class TestModelResolution:
     def test_claude_alias_becomes_model(self, mock_claude_env: None) -> None:
         """For Claude, model_alias falls back to being the model ID."""
         client = ObscuraClient.__new__(ObscuraClient)
-        model = client._resolve_model(
+        model = client._resolve_model(  # pyright: ignore[reportPrivateUsage]
             Backend.CLAUDE,
             model=None,
             model_alias="claude-sonnet-4-5-20250929",
@@ -171,6 +171,8 @@ class TestAuthResolution:
 class TestToolRegistration:
     def test_tools_passed_at_init(self, mock_copilot_env: None) -> None:
         """Tools passed at init should be registered with the backend."""
+        from sdk.backends.copilot import CopilotBackend
+
         spec = ToolSpec(
             name="test_tool",
             description="A test",
@@ -179,11 +181,15 @@ class TestToolRegistration:
         )
         client = ObscuraClient("copilot", model="gpt-5-mini", tools=[spec])
         # Tool should be in the backend's tool list
-        assert len(client.backend_impl._tools) == 1
-        assert client.backend_impl._tools[0].name == "test_tool"
+        backend = client.backend_impl
+        assert isinstance(backend, CopilotBackend)
+        assert len(backend.tools) == 1
+        assert backend.tools[0].name == "test_tool"
 
     def test_register_tool_after_init(self, mock_copilot_env: None) -> None:
         """register_tool() should add to both registry and backend."""
+        from sdk.backends.copilot import CopilotBackend
+
         client = ObscuraClient("copilot", model="gpt-5-mini")
         spec = ToolSpec(
             name="late_tool",
@@ -192,8 +198,10 @@ class TestToolRegistration:
             handler=lambda: None,
         )
         client.register_tool(spec)
-        assert "late_tool" in client._tool_registry
-        assert len(client.backend_impl._tools) == 1
+        assert "late_tool" in client._tool_registry  # pyright: ignore[reportPrivateUsage]
+        backend = client.backend_impl
+        assert isinstance(backend, CopilotBackend)
+        assert len(backend.tools) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -204,12 +212,17 @@ class TestToolRegistration:
 class TestHookRegistration:
     def test_register_hook(self, mock_copilot_env: None) -> None:
         """on() should register a hook with the backend."""
+        from sdk.backends.copilot import CopilotBackend
+
         client = ObscuraClient("copilot", model="gpt-5-mini")
 
-        callback = lambda ctx: None  # noqa: E731
+        def callback(ctx: Any) -> None:
+            pass
         client.on(HookPoint.PRE_TOOL_USE, callback)
 
-        assert callback in client.backend_impl._hooks[HookPoint.PRE_TOOL_USE]
+        backend = client.backend_impl
+        assert isinstance(backend, CopilotBackend)
+        assert callback in backend.hooks[HookPoint.PRE_TOOL_USE]
 
 
 # ---------------------------------------------------------------------------
@@ -233,11 +246,11 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
 
     from sdk.internal.tools import ToolRegistry
 
-    client._backend = mock_backend
-    client._backend_type = Backend.COPILOT
-    client._tool_registry = ToolRegistry()
-    client._user = None
-    client._capability_token = None
+    client._backend = mock_backend  # pyright: ignore[reportPrivateUsage]
+    client._backend_type = Backend.COPILOT  # pyright: ignore[reportPrivateUsage]
+    client._tool_registry = ToolRegistry()  # pyright: ignore[reportPrivateUsage]
+    client._user = None  # pyright: ignore[reportPrivateUsage]
+    client._capability_token = None  # pyright: ignore[reportPrivateUsage]
     return client, mock_backend
 
 
@@ -453,7 +466,7 @@ class TestRunLoop:
 
             mock_cls.assert_called_once_with(
                 mock_backend,
-                client._tool_registry,
+                client._tool_registry,  # pyright: ignore[reportPrivateUsage]
                 max_turns=5,
                 on_confirm=None,
                 capability_token=None,
@@ -474,7 +487,7 @@ class TestRunLoop:
 
             mock_cls.assert_called_once_with(
                 mock_backend,
-                client._tool_registry,
+                client._tool_registry,  # pyright: ignore[reportPrivateUsage]
                 max_turns=3,
                 on_confirm=None,
                 capability_token=None,
@@ -485,7 +498,8 @@ class TestRunLoop:
     def test_run_loop_with_on_confirm(self) -> None:
         """run_loop() should pass on_confirm callback to AgentLoop."""
         client, mock_backend = _make_client_with_mock_backend()
-        confirm_fn = lambda info: True  # noqa: E731
+        def confirm_fn(info: Any) -> bool:
+            return True
 
         mock_loop_instance = MagicMock()
         mock_loop_instance.run.return_value = iter([])
@@ -496,7 +510,7 @@ class TestRunLoop:
             client.run_loop("fix bug", on_confirm=confirm_fn)
             mock_cls.assert_called_once_with(
                 mock_backend,
-                client._tool_registry,
+                client._tool_registry,  # pyright: ignore[reportPrivateUsage]
                 max_turns=10,
                 on_confirm=confirm_fn,
                 capability_token=None,
@@ -513,7 +527,7 @@ class TestModelResolutionImportError:
         """When copilot_models is not importable, alias should be used as model ID."""
         with patch.dict("sys.modules", {"copilot_models": None}):
             client = ObscuraClient.__new__(ObscuraClient)
-            model = client._resolve_model(
+            model = client._resolve_model(  # pyright: ignore[reportPrivateUsage]
                 Backend.COPILOT,
                 model=None,
                 model_alias="some_alias",
@@ -551,7 +565,7 @@ class TestCreateBackend:
         """An unrecognized backend enum should raise ValueError."""
         # Test the static method directly with a fake backend
         with pytest.raises(ValueError, match="Unknown backend"):
-            ObscuraClient._create_backend(
+            ObscuraClient._create_backend(  # pyright: ignore[reportPrivateUsage]
                 backend=MagicMock(value="nope"),
                 auth=MagicMock(),
                 model=None,
@@ -571,7 +585,7 @@ class TestCreateBackend:
 class TestTelemetryHelpers:
     def test_get_client_tracer_returns_noop_on_failure(self) -> None:
         """_get_client_tracer should return NoOpTracer when OTel is unavailable."""
-        from sdk.client import _get_client_tracer
+        from sdk.client import _get_client_tracer  # pyright: ignore[reportPrivateUsage]
 
         tracer = _get_client_tracer()
         # Should be usable (either real or NoOp)
@@ -580,35 +594,36 @@ class TestTelemetryHelpers:
 
     def test_set_span_attr_noop(self) -> None:
         """_set_span_attr should not raise on non-span objects."""
-        from sdk.client import _set_span_attr
+        from sdk.client import _set_span_attr  # pyright: ignore[reportPrivateUsage]
+        from sdk.telemetry.traces import NoOpSpan
 
-        _set_span_attr(object(), "key", "value")  # no set_attribute -> no-op
-        _set_span_attr(None, "key", "value")  # None -> no-op
+        _set_span_attr(NoOpSpan(), "key", "value")  # no set_attribute -> no-op
 
     def test_set_span_attr_with_set_attribute(self) -> None:
         """_set_span_attr should call set_attribute when available."""
-        from sdk.client import _set_span_attr
+        from sdk.client import _set_span_attr  # pyright: ignore[reportPrivateUsage]
+        from sdk.telemetry.traces import NoOpSpan
 
-        mock_span = MagicMock()
+        mock_span = NoOpSpan()
         mock_span.set_attribute = MagicMock()
         _set_span_attr(mock_span, "foo", "bar")
         mock_span.set_attribute.assert_called_once_with("foo", "bar")
 
     def test_record_request_metric_noop(self) -> None:
         """_record_request_metric should not raise when metrics unavailable."""
-        from sdk.client import _record_request_metric
+        from sdk.client import _record_request_metric  # pyright: ignore[reportPrivateUsage]
 
         # Should not raise
         _record_request_metric("copilot", "send", "success")
 
     def test_record_request_duration_noop(self) -> None:
         """_record_request_duration should not raise when metrics unavailable."""
-        from sdk.client import _record_request_duration
+        from sdk.client import _record_request_duration  # pyright: ignore[reportPrivateUsage]
 
         _record_request_duration("copilot", "send", 0.5)
 
     def test_record_stream_chunk_noop(self) -> None:
         """_record_stream_chunk should not raise when metrics unavailable."""
-        from sdk.client import _record_stream_chunk
+        from sdk.client import _record_stream_chunk  # pyright: ignore[reportPrivateUsage]
 
         _record_stream_chunk("copilot", "text_delta")

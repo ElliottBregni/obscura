@@ -1,13 +1,18 @@
 """E2E Tests: Advanced Memory Features (Phase 2)."""
 
+from __future__ import annotations
+
+from typing import Any
+
 import pytest
+from starlette.testclient import TestClient
 
 
 @pytest.mark.e2e
 class TestMemoryNamespaces:
     """Test memory namespace management."""
 
-    def test_list_namespaces(self, client):
+    def test_list_namespaces(self, client: TestClient) -> None:
         """Can list all memory namespaces."""
         # Create some data in different namespaces
         client.post("/api/v1/memory/session/key1", json={"value": "data1"})
@@ -16,12 +21,12 @@ class TestMemoryNamespaces:
         resp = client.get("/api/v1/memory/namespaces")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert "namespaces" in data
         assert "session" in data["namespaces"]
         assert "project" in data["namespaces"]
 
-    def test_create_namespace(self, client):
+    def test_create_namespace(self, client: TestClient) -> None:
         """Can create a memory namespace."""
         resp = client.post(
             "/api/v1/memory/namespaces",
@@ -33,12 +38,12 @@ class TestMemoryNamespaces:
         )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert data["namespace_id"] == "my-custom-namespace"
         assert data["description"] == "Custom namespace for testing"
         assert data["ttl_days"] == 30
 
-    def test_delete_namespace(self, client):
+    def test_delete_namespace(self, client: TestClient) -> None:
         """Can delete a memory namespace."""
         # Create namespace
         client.post("/api/v1/memory/namespaces", json={"name": "temp-namespace"})
@@ -49,10 +54,11 @@ class TestMemoryNamespaces:
         )
 
         assert resp.status_code == 200
-        assert resp.json()["deleted"] is True
-        assert resp.json()["keys_deleted"] == 0
+        data: Any = resp.json()
+        assert data["deleted"] is True
+        assert data["keys_deleted"] == 0
 
-    def test_delete_namespace_with_data(self, client):
+    def test_delete_namespace_with_data(self, client: TestClient) -> None:
         """Can delete namespace and all its data."""
         # Create namespace and data
         client.post("/api/v1/memory/namespaces", json={"name": "temp-with-data"})
@@ -65,10 +71,11 @@ class TestMemoryNamespaces:
         )
 
         assert resp.status_code == 200
-        assert resp.json()["deleted"] is True
-        assert resp.json()["keys_deleted"] == 2
+        data: Any = resp.json()
+        assert data["deleted"] is True
+        assert data["keys_deleted"] == 2
 
-    def test_namespace_stats(self, client):
+    def test_namespace_stats(self, client: TestClient) -> None:
         """Can get namespace statistics."""
         # Create data
         client.post("/api/v1/memory/stats-test-ns/key1", json={"value": "x" * 100})
@@ -77,7 +84,7 @@ class TestMemoryNamespaces:
         resp = client.get("/api/v1/memory/namespaces/stats-test-ns/stats")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert data["namespace"] == "stats-test-ns"
         assert data["key_count"] == 2
         assert data["total_size_bytes"] > 0
@@ -87,7 +94,7 @@ class TestMemoryNamespaces:
 class TestMemoryTransactions:
     """Test memory transaction operations."""
 
-    def test_transaction_set_and_get(self, client):
+    def test_transaction_set_and_get(self, client: TestClient) -> None:
         """Can execute set and get operations in transaction."""
         resp = client.post(
             "/api/v1/memory/transaction",
@@ -111,11 +118,11 @@ class TestMemoryTransactions:
         )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert data["successful"] == 3
         assert data["results"][1]["value"] == "value1"
 
-    def test_transaction_delete(self, client):
+    def test_transaction_delete(self, client: TestClient) -> None:
         """Can delete keys in transaction."""
         # Set up data
         client.post("/api/v1/memory/txn-del-test/key1", json={"value": "to-delete"})
@@ -131,18 +138,19 @@ class TestMemoryTransactions:
         )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert data["results"][0]["deleted"] is True
         assert data["results"][1]["value"] is None
 
-    def test_transaction_empty_operations(self, client):
+    def test_transaction_empty_operations(self, client: TestClient) -> None:
         """Transaction with empty operations returns error."""
         resp = client.post("/api/v1/memory/transaction", json={"operations": []})
 
         assert resp.status_code == 400
-        assert "No operations provided" in resp.json()["detail"]
+        data: Any = resp.json()
+        assert "No operations provided" in data["detail"]
 
-    def test_transaction_mixed_namespaces(self, client):
+    def test_transaction_mixed_namespaces(self, client: TestClient) -> None:
         """Can operate on multiple namespaces in one transaction."""
         resp = client.post(
             "/api/v1/memory/transaction",
@@ -157,7 +165,7 @@ class TestMemoryTransactions:
         )
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert data["successful"] == 4
         assert data["results"][2]["value"] == "v1"
         assert data["results"][3]["value"] == "v2"
@@ -167,7 +175,7 @@ class TestMemoryTransactions:
 class TestMemoryImportExport:
     """Test memory import and export."""
 
-    def test_export_all_memory(self, client):
+    def test_export_all_memory(self, client: TestClient) -> None:
         """Can export all memory data."""
         # Create test data
         client.post("/api/v1/memory/export-ns1/key1", json={"value": "data1"})
@@ -176,14 +184,14 @@ class TestMemoryImportExport:
         resp = client.get("/api/v1/memory/export")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert "exported_at" in data
         assert "export-ns1" in data["data"]
         assert "export-ns2" in data["data"]
         assert data["data"]["export-ns1"]["key1"] == "data1"
         assert data["total_keys"] >= 2
 
-    def test_export_single_namespace(self, client):
+    def test_export_single_namespace(self, client: TestClient) -> None:
         """Can export single namespace."""
         # Create test data
         client.post("/api/v1/memory/export-single/key1", json={"value": "ns-data"})
@@ -192,11 +200,11 @@ class TestMemoryImportExport:
         resp = client.get("/api/v1/memory/export?namespace=export-single")
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert list(data["data"].keys()) == ["export-single"]
         assert data["data"]["export-single"]["key1"] == "ns-data"
 
-    def test_import_memory(self, client):
+    def test_import_memory(self, client: TestClient) -> None:
         """Can import memory data."""
         import_data = {
             "import-test-ns": {
@@ -208,15 +216,16 @@ class TestMemoryImportExport:
         resp = client.post("/api/v1/memory/import", json={"data": import_data})
 
         assert resp.status_code == 200
-        data = resp.json()
+        data: Any = resp.json()
         assert data["imported"] == 2
         assert data["skipped"] == 0
 
         # Verify data was imported
         get_resp = client.get("/api/v1/memory/import-test-ns/key1")
-        assert get_resp.json()["value"] == "imported-value-1"
+        get_data: Any = get_resp.json()
+        assert get_data["value"] == "imported-value-1"
 
-    def test_import_with_overwrite(self, client):
+    def test_import_with_overwrite(self, client: TestClient) -> None:
         """Import can overwrite existing keys."""
         # Set initial value
         client.post("/api/v1/memory/import-overwrite/key1", json={"value": "original"})
@@ -228,13 +237,15 @@ class TestMemoryImportExport:
         )
 
         assert resp.status_code == 200
-        assert resp.json()["imported"] == 1
+        data: Any = resp.json()
+        assert data["imported"] == 1
 
         # Verify overwrite
         get_resp = client.get("/api/v1/memory/import-overwrite/key1")
-        assert get_resp.json()["value"] == "overwritten"
+        get_data: Any = get_resp.json()
+        assert get_data["value"] == "overwritten"
 
-    def test_import_without_overwrite(self, client):
+    def test_import_without_overwrite(self, client: TestClient) -> None:
         """Import can skip existing keys."""
         # Set initial value
         client.post("/api/v1/memory/import-skip/key1", json={"value": "original"})
@@ -246,21 +257,24 @@ class TestMemoryImportExport:
         )
 
         assert resp.status_code == 200
-        assert resp.json()["imported"] == 0
-        assert resp.json()["skipped"] == 1
+        data: Any = resp.json()
+        assert data["imported"] == 0
+        assert data["skipped"] == 1
 
         # Verify original preserved
         get_resp = client.get("/api/v1/memory/import-skip/key1")
-        assert get_resp.json()["value"] == "original"
+        get_data: Any = get_resp.json()
+        assert get_data["value"] == "original"
 
-    def test_import_empty_data(self, client):
+    def test_import_empty_data(self, client: TestClient) -> None:
         """Import with empty data returns error."""
         resp = client.post("/api/v1/memory/import", json={"data": {}})
 
         assert resp.status_code == 400
-        assert "No data provided" in resp.json()["detail"]
+        data: Any = resp.json()
+        assert "No data provided" in data["detail"]
 
-    def test_roundtrip_export_import(self, client):
+    def test_roundtrip_export_import(self, client: TestClient) -> None:
         """Can export and re-import data."""
         # Create data
         client.post("/api/v1/memory/roundtrip/key1", json={"value": "test-data"})
@@ -268,7 +282,7 @@ class TestMemoryImportExport:
 
         # Export
         export_resp = client.get("/api/v1/memory/export?namespace=roundtrip")
-        export_data = export_resp.json()["data"]
+        export_data: Any = export_resp.json()["data"]
 
         # Clear data
         client.delete(
@@ -279,8 +293,10 @@ class TestMemoryImportExport:
         import_resp = client.post("/api/v1/memory/import", json={"data": export_data})
 
         assert import_resp.status_code == 200
-        assert import_resp.json()["imported"] == 2
+        import_result: Any = import_resp.json()
+        assert import_result["imported"] == 2
 
         # Verify
         get_resp = client.get("/api/v1/memory/roundtrip/key1")
-        assert get_resp.json()["value"] == "test-data"
+        get_data: Any = get_resp.json()
+        assert get_data["value"] == "test-data"

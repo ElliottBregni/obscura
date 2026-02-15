@@ -394,7 +394,7 @@ def get_default_monitor() -> HeartbeatMonitor:
     return _default_monitor
 
 
-def set_default_monitor(monitor: HeartbeatMonitor) -> None:
+def set_default_monitor(monitor: HeartbeatMonitor | None) -> None:
     """Set the default heartbeat monitor."""
     global _default_monitor
     _default_monitor = monitor

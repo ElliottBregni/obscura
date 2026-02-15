@@ -455,7 +455,7 @@ def get_default_alert_manager() -> AlertManager:
     return _default_alert_manager
 
 
-def set_default_alert_manager(manager: AlertManager) -> None:
+def set_default_alert_manager(manager: Optional[AlertManager]) -> None:
     """Set the default alert manager."""
     global _default_alert_manager
     _default_alert_manager = manager
