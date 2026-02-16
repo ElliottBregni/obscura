@@ -11,9 +11,12 @@ sdk/agent/agent.py
 sdk/agent/agent_loop.py
 sdk/agent/agents.py
 sdk/auth/__init__.py
+sdk/auth/capability.py
 sdk/auth/middleware.py
 sdk/auth/models.py
+sdk/auth/prompt_filter.py
 sdk/auth/rbac.py
+sdk/auth/system_prompts.py
 sdk/auth/zitadel.py
 sdk/backends/__init__.py
 sdk/backends/claude.py
@@ -22,6 +25,8 @@ sdk/backends/localllm.py
 sdk/backends/mcp_backend.py
 sdk/backends/models.py
 sdk/backends/openai_compat.py
+sdk/cli/__init__.py
+sdk/cli/chat_cli.py
 sdk/heartbeat/__init__.py
 sdk/heartbeat/alerts.py
 sdk/heartbeat/client.py
@@ -30,6 +35,7 @@ sdk/heartbeat/store.py
 sdk/heartbeat/types.py
 sdk/mcp/__init__.py
 sdk/mcp/client.py
+sdk/mcp/file_tools.py
 sdk/mcp/server.py
 sdk/mcp/tools.py
 sdk/mcp/types.py
@@ -37,6 +43,7 @@ sdk/routes/__init__.py
 sdk/routes/admin.py
 sdk/routes/agent_groups.py
 sdk/routes/agents.py
+sdk/routes/capabilities.py
 sdk/routes/health.py
 sdk/routes/heartbeat.py
 sdk/routes/memory.py
@@ -53,6 +60,7 @@ sdk/skills/registry.py
 sdk/tui/__init__.py
 sdk/tui/app.py
 sdk/tui/backend_bridge.py
+sdk/tui/client.py
 sdk/tui/diff_engine.py
 sdk/tui/file_ops.py
 sdk/tui/modes.py

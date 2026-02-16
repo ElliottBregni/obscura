@@ -1061,22 +1061,37 @@ def chat(
 
 
 @cli.command("passthrough", context_settings={"ignore_unknown_options": True})
-@click.argument("vendor", type=click.Choice(["claude", "openai"]))
+@click.argument("vendor", type=click.Choice(["claude", "openai", "copilot"]))
 @click.argument("vendor_args", nargs=-1, type=click.UNPROCESSED)
-def passthrough(vendor: str, vendor_args: tuple[str, ...]) -> None:
+@click.option(
+    "--capture/--no-capture",
+    default=False,
+    help="Capture transcript (disables interactive mode).",
+)
+def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> None:
     """Run a vendor CLI, capturing transcript for memory.
 
     \b
-    Examples:
-        obscura passthrough claude -- chat --model sonnet
-        obscura passthrough openai -- api chat.completions.create -m gpt-4o
+    Interactive (default) — opens vendor CLI with full terminal access:
+        obscura passthrough copilot
+        obscura passthrough claude
+
+    \b
+    With args — still interactive, passes args through:
+        obscura passthrough copilot -- -p "hello"
+
+    \b
+    Captured mode — pipes output for transcript storage:
+        obscura passthrough --capture copilot -- -p "hello"
     """
-    import asyncio
+    import os
     import shutil
+    import subprocess
 
     vendor_cmds: dict[str, str] = {
         "claude": "claude",
         "openai": "openai",
+        "copilot": "copilot"
     }
 
     cmd_name = vendor_cmds[vendor]
@@ -1088,87 +1103,104 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...]) -> None:
         )
         sys.exit(1)
 
-    async def _run_passthrough() -> None:
-        import time
+    resolved = cmd_path or cmd_name
+    full_cmd: list[str] = [resolved, *vendor_args]
 
-        full_cmd: list[str] = [cmd_path or cmd_name, *vendor_args]
-        console.print(
-            f"[dim]Running: {' '.join(full_cmd)}[/]\n"
-        )
+    # --capture: pipe stdout/stderr for transcript storage
+    if capture:
+        import asyncio
 
-        proc = await asyncio.create_subprocess_exec(
-            *full_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        async def _run_captured() -> None:
+            import time
 
-        transcript_lines: list[str] = []
+            console.print(
+                f"[dim]Running (captured): {' '.join(full_cmd)}[/]\n"
+            )
 
-        async def _stream_output(
-            stream: asyncio.StreamReader | None, is_err: bool = False
-        ) -> None:
-            if stream is None:
-                return
-            while True:
-                line_bytes: bytes = await stream.readline()
-                if not line_bytes:
-                    break
-                line: str = line_bytes.decode("utf-8", errors="replace")
-                transcript_lines.append(line)
-                if is_err:
-                    console.print(f"[red]{line}[/]", end="")
-                else:
-                    console.print(line, end="")
+            proc = await asyncio.create_subprocess_exec(
+                *full_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-        await asyncio.gather(
-            _stream_output(proc.stdout),
-            _stream_output(proc.stderr, is_err=True),
-        )
+            transcript_lines: list[str] = []
 
-        await proc.wait()
-        console.print(f"\n[dim]Process exited with code {proc.returncode}[/]")
+            async def _stream_output(
+                stream: asyncio.StreamReader | None, is_err: bool = False
+            ) -> None:
+                if stream is None:
+                    return
+                while True:
+                    line_bytes: bytes = await stream.readline()
+                    if not line_bytes:
+                        break
+                    line: str = line_bytes.decode("utf-8", errors="replace")
+                    transcript_lines.append(line)
+                    if is_err:
+                        console.print(f"[red]{line}[/]", end="")
+                    else:
+                        console.print(line, end="")
 
-        # Session ID for tracking
-        ts = int(time.time())
-        session_id = f"passthrough_{vendor}_{ts}"
+            await asyncio.gather(
+                _stream_output(proc.stdout),
+                _stream_output(proc.stderr, is_err=True),
+            )
 
-        # Persist transcript to file (best-effort)
-        if transcript_lines:
-            try:
-                from pathlib import Path
+            await proc.wait()
+            console.print(f"\n[dim]Process exited with code {proc.returncode}[/]")
 
-                transcript_dir = Path.home() / ".obscura" / "transcripts"
-                transcript_dir.mkdir(parents=True, exist_ok=True)
-                path = transcript_dir / f"{session_id}.txt"
-                path.write_text("".join(transcript_lines)[:50000])
-                console.print(f"[dim]Transcript saved to {path}[/]")
-            except Exception:
-                pass
+            # Session ID for tracking
+            ts = int(time.time())
+            session_id = f"passthrough_{vendor}_{ts}"
 
-        # Persist to MemoryStore (best-effort)
-        if transcript_lines:
-            try:
-                from sdk.memory import MemoryStore
+            # Persist transcript to file (best-effort)
+            if transcript_lines:
+                try:
+                    from pathlib import Path
 
-                cli_user = _resolve_cli_user()
-                mem = MemoryStore.for_user(cli_user)
-                mem.set(
-                    f"passthrough:{session_id}",
-                    {
-                        "vendor": vendor,
-                        "command": " ".join(full_cmd),
-                        "transcript": "".join(transcript_lines)[:50000],
-                        "exit_code": proc.returncode,
-                        "timestamp": ts,
-                    },
-                    namespace="passthrough",
-                )
-                console.print(f"[dim]Transcript stored in memory ({session_id})[/]")
-            except Exception:
-                pass
+                    transcript_dir = Path.home() / ".obscura" / "transcripts"
+                    transcript_dir.mkdir(parents=True, exist_ok=True)
+                    path = transcript_dir / f"{session_id}.txt"
+                    path.write_text("".join(transcript_lines)[:50000])
+                    console.print(f"[dim]Transcript saved to {path}[/]")
+                except Exception:
+                    pass
 
+            # Persist to MemoryStore (best-effort)
+            if transcript_lines:
+                try:
+                    from sdk.memory import MemoryStore
+
+                    cli_user = _resolve_cli_user()
+                    mem = MemoryStore.for_user(cli_user)
+                    mem.set(
+                        f"passthrough:{session_id}",
+                        {
+                            "vendor": vendor,
+                            "command": " ".join(full_cmd),
+                            "transcript": "".join(transcript_lines)[:50000],
+                            "exit_code": proc.returncode,
+                            "timestamp": ts,
+                        },
+                        namespace="passthrough",
+                    )
+                    console.print(
+                        f"[dim]Transcript stored in memory ({session_id})[/]"
+                    )
+                except Exception:
+                    pass
+
+        try:
+            asyncio.run(_run_captured())
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Cancelled.[/]")
+        return
+
+    # Default: interactive mode — hand off the terminal directly
+    console.print(f"[dim]Launching: {' '.join(full_cmd)}[/]\n")
     try:
-        asyncio.run(_run_passthrough())
+        result = subprocess.run(full_cmd)
+        sys.exit(result.returncode)
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/]")
 

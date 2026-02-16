@@ -2,7 +2,7 @@
 name = "obscura"
 version = "0.2.0"
 description = "Obscura - Multi-agent context management with TUI"
-requires-python = ">=3.13.5"
+requires-python = ">=3.13"
 dependencies = [
     "github-copilot-sdk>=0.1.0",
     "claude-agent-sdk>=0.1.0",
@@ -53,7 +53,7 @@ tui = [
 ]
 
 [project.scripts]
-obscura = "obscura_cli:main"
+obscura = "sdk.cli.chat_cli:main"
 obscura-sdk = "sdk.cli:main"
 
 [dependency-groups]
@@ -74,8 +74,7 @@ dev = [
 
 # Package discovery - explicitly define what to include
 [tool.setuptools]
-packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.heartbeat", "sdk.mcp", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets"]
-py-modules = ["obscura_cli"]
+packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.cli", "sdk.heartbeat", "sdk.mcp", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets"]
 
 [tool.setuptools.package-data]
 sdk = ["py.typed"]
@@ -113,7 +112,6 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "infra/zitadel/setup.py" = ["E402"]
-"scripts/obscura_cli.py" = ["F541"]
 "scripts/sync.py" = ["F541"]
 "scripts/test_server.py" = ["F541"]
 "sdk/agent/agent.py" = ["E402"]
