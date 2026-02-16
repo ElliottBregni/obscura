@@ -622,6 +622,122 @@ def health_check(ctx: click.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Chat / Passthrough Helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_cli_user() -> Any:
+    """Synthetic AuthenticatedUser for CLI context (no auth server)."""
+    import getpass
+
+    from sdk.auth.models import AuthenticatedUser
+
+    return AuthenticatedUser(
+        user_id=f"cli:{getpass.getuser()}",
+        email="",
+        roles=("admin",),
+        org_id=None,
+        token_type="cli",
+        raw_token="",
+    )
+
+
+def _parse_tool_policy(raw: str) -> Any:
+    """Parse ``auto|none|required:<name>`` into a ToolChoice."""
+    from sdk.internal.types import ToolChoice
+
+    if raw == "none":
+        return ToolChoice.none()
+    if raw.startswith("required:"):
+        return ToolChoice.required(raw.split(":", 1)[1])
+    return ToolChoice.auto()
+
+
+def _render_event(event: Any) -> None:
+    """Render an AgentEvent to the Rich console."""
+    from sdk.internal.types import AgentEventKind
+
+    if event.kind == AgentEventKind.TEXT_DELTA:
+        console.print(event.text, end="")
+    elif event.kind == AgentEventKind.THINKING_DELTA:
+        console.print(f"[dim italic]{event.text}[/]", end="")
+    elif event.kind == AgentEventKind.TOOL_CALL:
+        console.print(f"\n[dim][tool] {event.tool_name}[/]", end="")
+    elif event.kind == AgentEventKind.TOOL_RESULT:
+        console.print(
+            f"\n[dim][result] {event.tool_result[:80]}[/]", end=""
+        )
+
+
+def _load_memory_context(user: Any, prompt: str) -> str:
+    """Best-effort memory context injection for a prompt."""
+    from sdk.memory import MemoryStore
+
+    parts: list[str] = []
+
+    # 1) Text search in MemoryStore
+    try:
+        mem = MemoryStore.for_user(user)
+        hits = mem.search(prompt)
+        for key, value in hits[:3]:
+            val_str = str(value)[:200] if not isinstance(value, str) else value[:200]
+            parts.append(f"- {key}: {val_str}")
+    except Exception:
+        pass
+
+    # 2) Semantic search via VectorMemoryStore (best-effort)
+    try:
+        from sdk.vector_memory import VectorMemoryStore
+
+        vmem = VectorMemoryStore.for_user(user)
+        similar = vmem.search_similar(prompt, top_k=3)
+        for entry in similar:
+            parts.append(f"- {entry.text[:200]}")
+    except Exception:
+        pass  # numpy/embedding not available
+
+    return "\n".join(parts)
+
+
+def _persist_transcript(
+    user: Any,
+    session_id: str,
+    transcript: list[dict[str, str]],
+    backend: str,
+) -> None:
+    """Dual persistence: MemoryStore + human-readable file."""
+    import time
+    from pathlib import Path
+
+    # 1) MemoryStore (structured, searchable)
+    try:
+        from sdk.memory import MemoryStore
+
+        mem = MemoryStore.for_user(user)
+        mem.set(
+            f"transcript:{session_id}",
+            transcript,
+            namespace="session",
+        )
+    except Exception:
+        pass
+
+    # 2) File system (human-readable)
+    try:
+        transcript_dir = Path.home() / ".obscura" / "transcripts"
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        ts = int(time.time())
+        path = transcript_dir / f"chat_{backend}_{ts}.txt"
+        lines: list[str] = []
+        for msg in transcript:
+            lines.append(f"[{msg.get('role', '?')}]\n{msg.get('content', '')}\n")
+        path.write_text("\n".join(lines)[:50000])
+        console.print(f"[dim]Transcript saved to {path}[/]")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Chat command (owned mode — direct backend, no server needed)
 # ---------------------------------------------------------------------------
 
@@ -642,6 +758,29 @@ def health_check(ctx: click.Context) -> None:
 @click.option("--json-output", "json_out", is_flag=True, help="Output as JSON")
 @click.option("--interactive", "-i", is_flag=True, help="Interactive multi-turn mode")
 @click.option("--max-turns", default=10, help="Max agent loop turns")
+@click.option(
+    "--mode",
+    default="unified",
+    type=click.Choice(["unified", "native"]),
+    help="Execution mode (unified = agent loop, native = raw SDK)",
+)
+@click.option(
+    "--tools",
+    default="on",
+    type=click.Choice(["on", "off"]),
+    help="Enable/disable tool calling",
+)
+@click.option(
+    "--tool-policy",
+    default="auto",
+    help="Tool policy: auto|none|required:<name>",
+)
+@click.option(
+    "--memory/--no-memory",
+    "memory_enabled",
+    default=True,
+    help="Enable/disable memory injection and persistence",
+)
 def chat(
     prompt: str | None,
     backend: str,
@@ -652,6 +791,10 @@ def chat(
     json_out: bool,
     interactive: bool,
     max_turns: int,
+    mode: str,
+    tools: str,
+    tool_policy: str,
+    memory_enabled: bool,
 ) -> None:
     """Chat directly with a backend (no server required).
 
@@ -660,6 +803,9 @@ def chat(
         obscura chat "explain this code" --backend openai
         obscura chat --backend claude --interactive
         obscura chat "hello" --backend localllm --no-stream
+        obscura chat "test" --mode native --backend openai
+        obscura chat "test" --tools off --no-stream
+        obscura chat "test" --tool-policy required:search
     """
     import asyncio
 
@@ -672,21 +818,69 @@ def chat(
 
     async def _run_chat() -> None:
         from sdk.client import ObscuraClient
-        from sdk.internal.types import AgentEventKind
+        from sdk.internal.types import (
+            AgentEventKind,
+            SessionRef,
+            Backend as BackendEnum,
+            ToolChoice,
+        )
 
+        # --- Step 4: Memory context injection ---
+        effective_system = system_prompt
+        cli_user: Any = None
+        if memory_enabled:
+            try:
+                cli_user = _resolve_cli_user()
+                ctx = _load_memory_context(cli_user, prompt or "")
+                if ctx:
+                    effective_system = (
+                        f"{system_prompt}\n\n[Relevant context from memory]\n{ctx}"
+                        if system_prompt
+                        else f"[Relevant context from memory]\n{ctx}"
+                    )
+            except Exception:
+                pass  # memory injection is best-effort
+
+        # --- Steps 1-2: Resolve + start backend ---
         async with ObscuraClient(
             backend,
             model=model,
-            system_prompt=system_prompt,
+            system_prompt=effective_system,
         ) as client:
-            # Resume session if provided
+            # --- Step 3: Resolve/create session ---
+            session_ref: SessionRef | None = None
             if session:
-                from sdk.internal.types import SessionRef, Backend as BackendEnum
-
-                ref = SessionRef(session_id=session, backend=BackendEnum(backend))
+                ref = SessionRef(
+                    session_id=session, backend=BackendEnum(backend)
+                )
                 await client.resume_session(ref)
+                session_ref = ref
+            else:
+                try:
+                    session_ref = await client.create_session()
+                except Exception:
+                    pass  # session creation is optional
 
-            if interactive:
+            # --- Step 5: Build kwargs ---
+            loop_kwargs: dict[str, Any] = {}
+            if tools == "off":
+                loop_kwargs["tool_choice"] = ToolChoice.none()
+            else:
+                tc = _parse_tool_policy(tool_policy)
+                if tc is not None:
+                    loop_kwargs["tool_choice"] = tc
+
+            # Transcript collection
+            transcript: list[dict[str, str]] = []
+
+            # --- Step 6: Route unified vs native ---
+            if mode == "native":
+                await _run_native(
+                    client, backend, model, prompt, no_stream, json_out,
+                    interactive, transcript,
+                )
+            elif interactive:
+                # --- Unified interactive mode ---
                 console.print(
                     f"[bold green]Obscura chat[/] ({backend}"
                     f"{', ' + model if model else ''})"
@@ -701,50 +895,159 @@ def chat(
                     if user_input.strip().lower() in ("exit", "quit"):
                         break
 
+                    transcript.append({"role": "user", "content": user_input})
                     console.print("[bold cyan]Assistant:[/] ", end="")
+
+                    turn_text = ""
                     async for event in client.run_loop(
-                        user_input, max_turns=max_turns
+                        user_input, max_turns=max_turns, **loop_kwargs
                     ):
+                        _render_event(event)
                         if event.kind == AgentEventKind.TEXT_DELTA:
-                            console.print(event.text, end="")
-                        elif event.kind == AgentEventKind.TOOL_CALL:
-                            console.print(
-                                f"\n[dim][tool] {event.tool_name}[/]", end=""
-                            )
-                        elif event.kind == AgentEventKind.TOOL_RESULT:
-                            console.print(
-                                f"\n[dim][result] {event.tool_result[:80]}[/]",
-                                end="",
-                            )
+                            turn_text += event.text
                     console.print()
+                    transcript.append({"role": "assistant", "content": turn_text})
 
             elif prompt:
+                # --- Unified single-shot ---
+                transcript.append({"role": "user", "content": prompt})
+
                 if no_stream:
-                    msg = await client.send(prompt)
+                    msg = await client.send(prompt, **loop_kwargs)
                     if json_out:
                         console.print_json(json.dumps({"text": msg.text}))
                     else:
                         console.print(msg.text)
+                    transcript.append({"role": "assistant", "content": msg.text})
                 else:
+                    turn_text = ""
                     async for event in client.run_loop(
-                        prompt, max_turns=max_turns
+                        prompt, max_turns=max_turns, **loop_kwargs
                     ):
+                        _render_event(event)
                         if event.kind == AgentEventKind.TEXT_DELTA:
-                            console.print(event.text, end="")
-                        elif event.kind == AgentEventKind.TOOL_CALL:
-                            console.print(
-                                f"\n[dim][tool] {event.tool_name}[/]", end=""
-                            )
-                        elif event.kind == AgentEventKind.TOOL_RESULT:
-                            console.print(
-                                f"\n[dim][result] {event.tool_result[:80]}[/]",
-                                end="",
-                            )
+                            turn_text += event.text
                     console.print()
+                    transcript.append({"role": "assistant", "content": turn_text})
             else:
                 console.print(
                     "[yellow]Provide a prompt or use --interactive mode.[/]"
                 )
+                return
+
+            # --- Steps 8-9: Persist transcript + update memory ---
+            if memory_enabled and transcript and cli_user is not None:
+                sid = session_ref.session_id if session_ref else "anonymous"
+                _persist_transcript(cli_user, sid, transcript, backend)
+
+                # Store last session metadata
+                try:
+                    import time as _time
+
+                    from sdk.memory import MemoryStore
+
+                    mem = MemoryStore.for_user(cli_user)
+                    last_text = transcript[-1].get("content", "")
+                    mem.set(
+                        "last_session",
+                        {
+                            "session_id": sid,
+                            "backend": backend,
+                            "model": model,
+                            "timestamp": int(_time.time()),
+                            "summary": last_text[:500],
+                        },
+                        namespace="session",
+                    )
+                except Exception:
+                    pass
+
+    async def _run_native(
+        client: Any,
+        backend: str,
+        model: str | None,
+        prompt: str | None,
+        no_stream: bool,
+        json_out: bool,
+        interactive: bool,
+        transcript: list[dict[str, str]],
+    ) -> None:
+        """Native mode: bypass agent loop, use raw SDK handle."""
+        handle = client.native
+        if handle.client is None:
+            console.print("[red]Native client not available for this backend.[/]")
+            return
+
+        console.print(f"[dim]Native mode: raw {backend} SDK[/]")
+
+        if not prompt and not interactive:
+            console.print("[yellow]Provide a prompt or use --interactive mode.[/]")
+            return
+
+        if backend in ("openai", "localllm"):
+            # AsyncOpenAI-compatible client
+            actual_model = model or "gpt-4o"
+
+            async def _native_openai_turn(user_msg: str) -> str:
+                transcript.append({"role": "user", "content": user_msg})
+                if no_stream:
+                    resp = await handle.client.chat.completions.create(
+                        model=actual_model,
+                        messages=[{"role": "user", "content": user_msg}],
+                        stream=False,
+                    )
+                    text: str = resp.choices[0].message.content or ""
+                    if json_out:
+                        console.print_json(json.dumps({"text": text}))
+                    else:
+                        console.print(text)
+                    transcript.append({"role": "assistant", "content": text})
+                    return text
+                else:
+                    resp_stream = await handle.client.chat.completions.create(
+                        model=actual_model,
+                        messages=[{"role": "user", "content": user_msg}],
+                        stream=True,
+                    )
+                    parts: list[str] = []
+                    async for chunk in resp_stream:
+                        delta = chunk.choices[0].delta
+                        if delta.content:
+                            console.print(delta.content, end="")
+                            parts.append(delta.content)
+                    console.print()
+                    text = "".join(parts)
+                    transcript.append({"role": "assistant", "content": text})
+                    return text
+
+            if interactive:
+                console.print(
+                    f"[bold green]Obscura native[/] ({backend}, {actual_model})"
+                )
+                console.print("[dim]Type 'exit' or Ctrl-C to quit.[/]\n")
+                while True:
+                    try:
+                        user_input = click.prompt("You", type=str)
+                    except (EOFError, click.Abort):
+                        break
+                    if user_input.strip().lower() in ("exit", "quit"):
+                        break
+                    console.print("[bold cyan]Assistant:[/] ", end="")
+                    await _native_openai_turn(user_input)
+            elif prompt:
+                await _native_openai_turn(prompt)
+
+        else:
+            # Claude / Copilot native — fallback to unified send()
+            console.print(
+                f"[dim]Native mode for {backend}: using backend.send() "
+                f"(raw SDK interactive mode not yet wired)[/]"
+            )
+            if prompt:
+                transcript.append({"role": "user", "content": prompt})
+                msg = await client.send(prompt)
+                console.print(msg.text)
+                transcript.append({"role": "assistant", "content": msg.text})
 
     try:
         asyncio.run(_run_chat())
@@ -786,6 +1089,8 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...]) -> None:
         sys.exit(1)
 
     async def _run_passthrough() -> None:
+        import time
+
         full_cmd: list[str] = [cmd_path or cmd_name, *vendor_args]
         console.print(
             f"[dim]Running: {' '.join(full_cmd)}[/]\n"
@@ -823,20 +1128,44 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...]) -> None:
         await proc.wait()
         console.print(f"\n[dim]Process exited with code {proc.returncode}[/]")
 
+        # Session ID for tracking
+        ts = int(time.time())
+        session_id = f"passthrough_{vendor}_{ts}"
+
         # Persist transcript to file (best-effort)
         if transcript_lines:
             try:
-                import time
                 from pathlib import Path
 
                 transcript_dir = Path.home() / ".obscura" / "transcripts"
                 transcript_dir.mkdir(parents=True, exist_ok=True)
-                ts = int(time.time())
-                path = transcript_dir / f"passthrough_{vendor}_{ts}.txt"
+                path = transcript_dir / f"{session_id}.txt"
                 path.write_text("".join(transcript_lines)[:50000])
                 console.print(f"[dim]Transcript saved to {path}[/]")
             except Exception:
-                pass  # transcript persistence is best-effort
+                pass
+
+        # Persist to MemoryStore (best-effort)
+        if transcript_lines:
+            try:
+                from sdk.memory import MemoryStore
+
+                cli_user = _resolve_cli_user()
+                mem = MemoryStore.for_user(cli_user)
+                mem.set(
+                    f"passthrough:{session_id}",
+                    {
+                        "vendor": vendor,
+                        "command": " ".join(full_cmd),
+                        "transcript": "".join(transcript_lines)[:50000],
+                        "exit_code": proc.returncode,
+                        "timestamp": ts,
+                    },
+                    namespace="passthrough",
+                )
+                console.print(f"[dim]Transcript stored in memory ({session_id})[/]")
+            except Exception:
+                pass
 
     try:
         asyncio.run(_run_passthrough())
