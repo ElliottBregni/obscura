@@ -267,10 +267,14 @@ class HookPoint(enum.Enum):
     POST_TOOL_USE = "post_tool_use"
     USER_PROMPT_SUBMITTED = "user_prompt_submitted"
     STOP = "stop"
-    # Agent-loop hooks (APER)
+    # Agent-loop hooks (APER) — symmetric PRE/POST for every phase
     PRE_ANALYZE = "pre_analyze"
+    POST_ANALYZE = "post_analyze"
+    PRE_PLAN = "pre_plan"
     POST_PLAN = "post_plan"
     PRE_EXECUTE = "pre_execute"
+    POST_EXECUTE = "post_execute"
+    PRE_RESPOND = "pre_respond"
     POST_RESPOND = "post_respond"
 
 

@@ -5,6 +5,10 @@ Provides a reusable agent abstraction. Subclasses override the four phase
 methods; each can be deterministic Python or call ``self._client.send()``
 for LLM-driven behaviour.
 
+Every phase boundary fires a pair of hooks (PRE_* before, POST_* after),
+giving callers eight interception points for validation, persistence,
+audit, or short-circuit logic.
+
 Usage::
 
     class MyCrawler(BaseAgent):
@@ -38,7 +42,14 @@ class BaseAgent:
 
     Subclasses override :meth:`analyze`, :meth:`plan`, :meth:`execute`,
     and :meth:`respond`. The :meth:`run` method orchestrates the loop and
-    fires hooks at phase boundaries.
+    fires hooks at every phase boundary.
+
+    Hook firing order::
+
+        PRE_ANALYZE → analyze() → POST_ANALYZE →
+        PRE_PLAN → plan() → POST_PLAN →
+        PRE_EXECUTE → execute() → POST_EXECUTE →
+        PRE_RESPOND → respond() → POST_RESPOND
     """
 
     def __init__(
@@ -92,7 +103,15 @@ class BaseAgent:
     # -- Orchestrator --------------------------------------------------------
 
     async def run(self, input_data: Any = None) -> Any:
-        """Execute the full APER loop and return ``ctx.response``."""
+        """Execute the full APER loop and return ``ctx.response``.
+
+        Hook firing order::
+
+            PRE_ANALYZE → analyze() → POST_ANALYZE →
+            PRE_PLAN → plan() → POST_PLAN →
+            PRE_EXECUTE → execute() → POST_EXECUTE →
+            PRE_RESPOND → respond() → POST_RESPOND
+        """
         ctx = AgentContext(phase=AgentPhase.ANALYZE, input_data=input_data)
 
         # Load context from vault if a loader was provided
@@ -113,9 +132,11 @@ class BaseAgent:
             with _tracer.start_as_current_span("agent.analyze") as span:
                 _set_span_attr(span, "agent.phase", "analyze")
                 await self.analyze(ctx)
+            await self._fire_hook(HookPoint.POST_ANALYZE, ctx)
 
             # Plan
             ctx.phase = AgentPhase.PLAN
+            await self._fire_hook(HookPoint.PRE_PLAN, ctx)
             with _tracer.start_as_current_span("agent.plan") as span:
                 _set_span_attr(span, "agent.phase", "plan")
                 await self.plan(ctx)
@@ -127,9 +148,11 @@ class BaseAgent:
             with _tracer.start_as_current_span("agent.execute") as span:
                 _set_span_attr(span, "agent.phase", "execute")
                 await self.execute(ctx)
+            await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
 
             # Respond
             ctx.phase = AgentPhase.RESPOND
+            await self._fire_hook(HookPoint.PRE_RESPOND, ctx)
             with _tracer.start_as_current_span("agent.respond") as span:
                 _set_span_attr(span, "agent.phase", "respond")
                 await self.respond(ctx)

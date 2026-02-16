@@ -97,19 +97,28 @@ class TestAPERLoop:
 
 class TestHooks:
     @pytest.mark.asyncio
-    async def test_hooks_fire_at_boundaries(self) -> None:
+    async def test_all_hooks_fire_in_order(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
         fired: list[str] = []
 
         agent.on(HookPoint.PRE_ANALYZE, lambda ctx: fired.append("pre_analyze"))
+        agent.on(HookPoint.POST_ANALYZE, lambda ctx: fired.append("post_analyze"))
+        agent.on(HookPoint.PRE_PLAN, lambda ctx: fired.append("pre_plan"))
         agent.on(HookPoint.POST_PLAN, lambda ctx: fired.append("post_plan"))
         agent.on(HookPoint.PRE_EXECUTE, lambda ctx: fired.append("pre_execute"))
+        agent.on(HookPoint.POST_EXECUTE, lambda ctx: fired.append("post_execute"))
+        agent.on(HookPoint.PRE_RESPOND, lambda ctx: fired.append("pre_respond"))
         agent.on(HookPoint.POST_RESPOND, lambda ctx: fired.append("post_respond"))
 
         await agent.run()
 
-        assert fired == ["pre_analyze", "post_plan", "pre_execute", "post_respond"]
+        assert fired == [
+            "pre_analyze", "post_analyze",
+            "pre_plan", "post_plan",
+            "pre_execute", "post_execute",
+            "pre_respond", "post_respond",
+        ]
 
     @pytest.mark.asyncio
     async def test_async_hooks(self) -> None:
@@ -142,14 +151,49 @@ class TestHooks:
     async def test_hook_receives_correct_phase(self) -> None:
         client = MagicMock()
         agent = StubAgent(client)
-        phases: list[AgentPhase] = []
+        phases: list[tuple[str, AgentPhase]] = []
 
-        agent.on(HookPoint.PRE_EXECUTE, lambda ctx: phases.append(ctx.phase))
+        agent.on(HookPoint.POST_ANALYZE, lambda ctx: phases.append(("post_analyze", ctx.phase)))
+        agent.on(HookPoint.PRE_PLAN, lambda ctx: phases.append(("pre_plan", ctx.phase)))
+        agent.on(HookPoint.PRE_EXECUTE, lambda ctx: phases.append(("pre_execute", ctx.phase)))
+        agent.on(HookPoint.POST_EXECUTE, lambda ctx: phases.append(("post_execute", ctx.phase)))
 
         await agent.run()
 
-        # PRE_EXECUTE fires after plan sets the phase, before execute runs
-        assert phases == [AgentPhase.EXECUTE]
+        # POST hooks see the phase they just completed; PRE hooks see the phase about to run
+        assert phases == [
+            ("post_analyze", AgentPhase.ANALYZE),
+            ("pre_plan", AgentPhase.PLAN),
+            ("pre_execute", AgentPhase.EXECUTE),
+            ("post_execute", AgentPhase.EXECUTE),
+        ]
+
+
+    @pytest.mark.asyncio
+    async def test_post_analyze_sees_analysis(self) -> None:
+        """POST_ANALYZE fires after analyze() sets ctx.analysis."""
+        client = MagicMock()
+        agent = StubAgent(client)
+        captured: list[Any] = []
+
+        agent.on(HookPoint.POST_ANALYZE, lambda ctx: captured.append(ctx.analysis))
+
+        await agent.run()
+
+        assert captured == [{"items": [1, 2, 3]}]
+
+    @pytest.mark.asyncio
+    async def test_post_execute_sees_results(self) -> None:
+        """POST_EXECUTE fires after execute() populates ctx.results."""
+        client = MagicMock()
+        agent = StubAgent(client)
+        captured: list[Any] = []
+
+        agent.on(HookPoint.POST_EXECUTE, lambda ctx: captured.append(list(ctx.results)))
+
+        await agent.run()
+
+        assert captured == [[2, 4, 6]]
 
 
 # ---------------------------------------------------------------------------
