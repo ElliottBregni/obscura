@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator
 
-from sdk.internal.types import ChunkKind, StreamChunk
+from sdk.internal.types import ChunkKind, StreamChunk, StreamMetadata
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,26 @@ class EventToIteratorBridge:
             name = event.data.name
         self.push(StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name=name, raw=event))
 
-    def finish(self, event: Any = None) -> None:
+    def on_tool_end(self, event: Any) -> None:
+        """Map tool execution end."""
+        name = ""
+        if (
+            hasattr(event, "data")
+            and hasattr(event.data, "tool_name")
+            and event.data.tool_name
+        ):
+            name = event.data.tool_name
+        elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
+            name = event.data.name
+        self.push(
+            StreamChunk(kind=ChunkKind.TOOL_USE_END, tool_name=name, raw=event)
+        )
+
+    def finish(
+        self, event: Any = None, *, metadata: StreamMetadata | None = None
+    ) -> None:
         """Signal end of stream."""
-        self.push(StreamChunk(kind=ChunkKind.DONE, raw=event))
+        self.push(StreamChunk(kind=ChunkKind.DONE, raw=event, metadata=metadata))
         self._queue.put_nowait(None)
 
     def error(self, err: Exception | Any) -> None:
@@ -172,9 +189,10 @@ class ClaudeIteratorAdapter:
         """Convert a Claude message/event to one or more StreamChunks."""
         type_name = type(item).__name__
 
-        # ResultMessage → done
+        # ResultMessage → done with metadata
         if type_name == "ResultMessage":
-            return [StreamChunk(kind=ChunkKind.DONE, raw=item)]
+            meta = self._extract_result_metadata(item)
+            return [StreamChunk(kind=ChunkKind.DONE, raw=item, metadata=meta)]
 
         # StreamEvent → partial deltas
         if type_name == "StreamEvent":
@@ -239,9 +257,18 @@ class ClaudeIteratorAdapter:
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_START,
                         tool_name=block.get("name", ""),
+                        tool_use_id=block.get("id", ""),
                         raw=event,
                     )
                 ]
+
+        if ev_type == "content_block_stop":
+            return [
+                StreamChunk(kind=ChunkKind.TOOL_USE_END, raw=event)
+            ]
+
+        if ev_type == "message_start":
+            return [StreamChunk(kind=ChunkKind.MESSAGE_START, raw=event)]
 
         return []
 
@@ -291,3 +318,20 @@ class ClaudeIteratorAdapter:
                 )
 
         return chunks
+
+    @staticmethod
+    def _extract_result_metadata(item: Any) -> StreamMetadata:
+        """Extract StreamMetadata from a Claude ResultMessage."""
+        usage: dict[str, int] | None = None
+        if hasattr(item, "usage") and item.usage is not None:
+            u = item.usage
+            usage = {
+                "input_tokens": getattr(u, "input_tokens", 0),
+                "output_tokens": getattr(u, "output_tokens", 0),
+            }
+        return StreamMetadata(
+            finish_reason=getattr(item, "stop_reason", "") or "",
+            usage=usage,
+            model_id=getattr(item, "model", "") or "",
+            session_id=getattr(item, "session_id", "") or "",
+        )

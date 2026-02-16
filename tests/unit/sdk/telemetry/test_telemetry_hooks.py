@@ -70,7 +70,7 @@ class TestToolSpanHelpers:
         end_tool_span("my_tool", None)
 
     def test_end_tool_span_with_tokens(self):
-        tokens = {"tool.test": "fake_token"}
+        tokens: dict[str, object] = {"tool.test": "fake_token"}
         with patch.dict("sys.modules", {"opentelemetry": None}):
             end_tool_span("test", 100.0, tokens)
 

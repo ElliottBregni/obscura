@@ -22,11 +22,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 from sdk.agent.agents import AgentConfig, AgentRuntime
 from sdk.auth.models import AuthenticatedUser
+from sdk.internal.sessions import SessionStore
+from sdk.internal.types import Backend, SessionRef
 from sdk.memory import MemoryStore
+from sdk.mcp.file_tools import read_file, search_files
 from sdk.mcp.tools import (
     create_array_property,
     create_boolean_property,
@@ -40,7 +44,6 @@ from sdk.mcp.types import (
     ObscuraMCPToolContext,
     ObscuraMCPConfig,
 )
-from sdk.agent.agents import AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ class ObscuraMCPServer:
         self.user = user
         self._runtime: AgentRuntime | None = None
         self._registry = get_obscura_mcp_registry()
+        self._session_store = SessionStore()
         self._initialized = False
 
         # Register Obscura-specific tools
@@ -211,6 +215,151 @@ class ObscuraMCPServer:
                 "required": ["agent_id"],
             },
             handler=self._handle_get_agent_status,
+        )
+
+        # --- Session tools ---
+
+        self._registry.register(
+            name="sessions.create",
+            description="Create a new standalone session",
+            parameters={
+                "properties": {
+                    "backend": create_string_property(
+                        "Backend to use",
+                        enum=["openai", "claude", "copilot", "localllm"],
+                        default="openai",
+                    ),
+                    "name": create_string_property(
+                        "Optional session name",
+                        default="",
+                    ),
+                },
+                "required": [],
+            },
+            handler=self._handle_sessions_create,
+        )
+
+        self._registry.register(
+            name="sessions.list",
+            description="List all tracked sessions",
+            parameters={
+                "properties": {},
+                "required": [],
+            },
+            handler=self._handle_sessions_list,
+        )
+
+        self._registry.register(
+            name="sessions.close",
+            description="Close/delete a session",
+            parameters={
+                "properties": {
+                    "session_id": create_string_property("Session ID to close"),
+                },
+                "required": ["session_id"],
+            },
+            handler=self._handle_sessions_close,
+        )
+
+        # --- File tools ---
+
+        self._registry.register(
+            name="files.read",
+            description="Read file content with optional line range",
+            parameters={
+                "properties": {
+                    "path": create_string_property("File path to read"),
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Start line (1-based, inclusive)",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "End line (1-based, inclusive)",
+                    },
+                },
+                "required": ["path"],
+            },
+            handler=self._handle_files_read,
+        )
+
+        self._registry.register(
+            name="files.search",
+            description="Search files by glob pattern and/or content",
+            parameters={
+                "properties": {
+                    "query": create_string_property(
+                        "Text to search for in file contents"
+                    ),
+                    "glob": create_string_property(
+                        "Glob pattern to filter files (e.g. '*.py')",
+                        default="*",
+                    ),
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return",
+                        "default": 20,
+                    },
+                },
+                "required": ["query"],
+            },
+            handler=self._handle_files_search,
+        )
+
+        # --- Memory enhancements ---
+
+        self._registry.register(
+            name="memory.append",
+            description="Append a message to a session transcript",
+            parameters={
+                "properties": {
+                    "session_id": create_string_property("Session ID"),
+                    "role": create_string_property(
+                        "Message role",
+                        enum=["user", "assistant", "system", "tool"],
+                    ),
+                    "content": create_string_property("Message content"),
+                },
+                "required": ["session_id", "role", "content"],
+            },
+            handler=self._handle_memory_append,
+        )
+
+        self._registry.register(
+            name="memory.get_session",
+            description="Retrieve the full transcript for a session",
+            parameters={
+                "properties": {
+                    "session_id": create_string_property("Session ID"),
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max messages to return",
+                        "default": 50,
+                    },
+                },
+                "required": ["session_id"],
+            },
+            handler=self._handle_memory_get_session,
+        )
+
+        self._registry.register(
+            name="memory.upsert",
+            description="Upsert a structured entity in memory",
+            parameters={
+                "properties": {
+                    "entity_type": create_string_property(
+                        "Entity type (e.g. 'project', 'task', 'note')"
+                    ),
+                    "entity_id": create_string_property("Unique entity ID"),
+                    "data": create_string_property("Entity data as JSON string"),
+                    "tags": create_array_property(
+                        "Optional tags for the entity",
+                        items={"type": "string"},
+                    ),
+                },
+                "required": ["entity_type", "entity_id", "data"],
+            },
+            handler=self._handle_memory_upsert,
         )
 
     # -----------------------------------------------------------------------
@@ -458,6 +607,225 @@ class ObscuraMCPServer:
             "updated_at": agent.updated_at.isoformat(),
             "iteration_count": agent.iteration_count,
             "tags": agent.config.tags,
+        }
+
+    # -----------------------------------------------------------------------
+    # Session Tool Handlers
+    # -----------------------------------------------------------------------
+
+    async def _handle_sessions_create(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle sessions.create tool call."""
+        backend_name = arguments.get("backend", "openai")
+        session_name = arguments.get("name", "")
+
+        try:
+            backend_enum = Backend(backend_name)
+        except ValueError:
+            return {"error": f"Unknown backend: {backend_name}"}
+
+        session_id = f"mcp-{uuid.uuid4().hex[:12]}"
+        ref = SessionRef(
+            session_id=session_id,
+            backend=backend_enum,
+        )
+        self._session_store.add(ref)
+
+        return {
+            "session_id": session_id,
+            "backend": backend_name,
+            "name": session_name,
+            "created": True,
+        }
+
+    async def _handle_sessions_list(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle sessions.list tool call."""
+        sessions = self._session_store.list_all()
+        return {
+            "sessions": [
+                {
+                    "session_id": s.session_id,
+                    "backend": s.backend.value,
+                }
+                for s in sessions
+            ],
+            "count": len(sessions),
+        }
+
+    async def _handle_sessions_close(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle sessions.close tool call."""
+        session_id = arguments["session_id"]
+
+        ref = self._session_store.get(session_id)
+        if ref is None:
+            return {"error": f"Session not found: {session_id}"}
+
+        self._session_store.remove(session_id)
+        return {
+            "session_id": session_id,
+            "closed": True,
+        }
+
+    # -----------------------------------------------------------------------
+    # File Tool Handlers
+    # -----------------------------------------------------------------------
+
+    async def _handle_files_read(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle files.read tool call."""
+        path = arguments["path"]
+        start_line = arguments.get("start_line")
+        end_line = arguments.get("end_line")
+
+        try:
+            return read_file(path, start_line=start_line, end_line=end_line)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    async def _handle_files_search(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle files.search tool call."""
+        query = arguments["query"]
+        glob_pattern = arguments.get("glob", "*")
+        limit = arguments.get("limit", 20)
+
+        try:
+            return search_files(query, glob_pattern, limit=limit)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    # -----------------------------------------------------------------------
+    # Memory Enhancement Handlers
+    # -----------------------------------------------------------------------
+
+    async def _handle_memory_append(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle memory.append — append to session transcript."""
+        if self.user is None:
+            return {"error": "User not authenticated"}
+
+        session_id = arguments["session_id"]
+        role = arguments["role"]
+        content = arguments["content"]
+
+        memory = MemoryStore.for_user(self.user)
+
+        # Transcript stored as a JSON array under namespace "transcript"
+        transcript_key = f"transcript:{session_id}"
+        raw = memory.get(transcript_key, namespace="transcript")
+
+        entries: list[dict[str, Any]] = []
+        if isinstance(raw, list):
+            entries = list(raw)  # type: ignore[arg-type]
+
+        entries.append({
+            "role": role,
+            "content": content,
+            "index": len(entries),
+        })
+
+        memory.set(transcript_key, entries, namespace="transcript")
+
+        return {
+            "session_id": session_id,
+            "message_index": len(entries) - 1,
+            "total_messages": len(entries),
+        }
+
+    async def _handle_memory_get_session(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle memory.get_session — retrieve full session transcript."""
+        if self.user is None:
+            return {"error": "User not authenticated"}
+
+        session_id = arguments["session_id"]
+        limit = arguments.get("limit", 50)
+
+        memory = MemoryStore.for_user(self.user)
+        transcript_key = f"transcript:{session_id}"
+        raw = memory.get(transcript_key, namespace="transcript")
+
+        messages: list[dict[str, Any]] = []
+        if isinstance(raw, list):
+            messages = list(raw)  # type: ignore[arg-type]
+
+        if not messages:
+            return {
+                "session_id": session_id,
+                "messages": [],
+                "count": 0,
+            }
+
+        # Apply limit (return the last N messages)
+        if len(messages) > limit:
+            messages = messages[-limit:]
+
+        return {
+            "session_id": session_id,
+            "messages": messages,
+            "count": len(messages),
+        }
+
+    async def _handle_memory_upsert(
+        self,
+        context: ObscuraMCPToolContext,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle memory.upsert — upsert a structured entity."""
+        if self.user is None:
+            return {"error": "User not authenticated"}
+
+        entity_type = arguments["entity_type"]
+        entity_id = arguments["entity_id"]
+        data_str = arguments["data"]
+        tags = arguments.get("tags", [])
+
+        # Parse JSON data
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError:
+            data = data_str
+
+        memory = MemoryStore.for_user(self.user)
+
+        # Store under namespace "entity:<type>" with key "<entity_id>"
+        namespace = f"entity:{entity_type}"
+        entity = {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "data": data,
+            "tags": tags,
+        }
+        memory.set(entity_id, entity, namespace=namespace)
+
+        return {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "tags": tags,
+            "upserted": True,
         }
 
     # -----------------------------------------------------------------------

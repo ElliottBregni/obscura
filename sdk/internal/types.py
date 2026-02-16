@@ -90,15 +90,35 @@ class Message:
 
 
 class ChunkKind(enum.Enum):
-    """Normalized streaming event kinds."""
+    """Normalized streaming event kinds.
 
+    All backends must emit the full lifecycle:
+    MESSAGE_START → TEXT_DELTA / THINKING_DELTA / TOOL_USE_START →
+    TOOL_USE_DELTA → TOOL_USE_END → TOOL_RESULT → DONE (with metadata).
+    """
+
+    MESSAGE_START = "message_start"
     TEXT_DELTA = "text_delta"
     THINKING_DELTA = "thinking_delta"
     TOOL_USE_START = "tool_use_start"
     TOOL_USE_DELTA = "tool_use_delta"
+    TOOL_USE_END = "tool_use_end"
     TOOL_RESULT = "tool_result"
     DONE = "done"
     ERROR = "error"
+
+
+@dataclass(frozen=True)
+class StreamMetadata:
+    """Metadata extracted from a completed stream.
+
+    Attached to the ``DONE`` chunk so callers never lose provider metadata.
+    """
+
+    finish_reason: str = ""
+    usage: dict[str, int] | None = None
+    model_id: str = ""
+    session_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,7 +129,9 @@ class StreamChunk:
     text: str = ""
     tool_name: str = ""
     tool_input_delta: str = ""
+    tool_use_id: str = ""
     raw: Any = None
+    metadata: StreamMetadata | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +175,84 @@ class SessionRef:
     session_id: str
     backend: Backend
     raw: Any = None
+
+
+# ---------------------------------------------------------------------------
+# Tool policy
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ToolChoice:
+    """Per-request tool selection policy.
+
+    Use the factory classmethods for clean construction::
+
+        ToolChoice.auto()
+        ToolChoice.none()
+        ToolChoice.required()
+        ToolChoice.required("my_tool")
+    """
+
+    mode: str = "auto"
+    function_name: str = ""
+
+    @classmethod
+    def auto(cls) -> ToolChoice:
+        """Let the model decide whether to call tools."""
+        return cls(mode="auto")
+
+    @classmethod
+    def none(cls) -> ToolChoice:
+        """Disable tool calling for this request."""
+        return cls(mode="none")
+
+    @classmethod
+    def required(cls, name: str = "") -> ToolChoice:
+        """Force tool calling. Optionally force a specific tool by name."""
+        if name:
+            return cls(mode="function", function_name=name)
+        return cls(mode="required")
+
+
+# ---------------------------------------------------------------------------
+# Backend capabilities
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BackendCapabilities:
+    """Declares what a backend supports in unified mode.
+
+    Agent runtime adapts behaviour based on these flags rather than
+    silently ignoring unsupported features.
+    """
+
+    supports_streaming: bool = True
+    supports_tool_calls: bool = False
+    supports_tool_choice: bool = False
+    supports_usage: bool = False
+    supports_reasoning: bool = False
+    supports_remote_sessions: bool = False
+    supports_multimodal: bool = False
+    supports_mcp: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Native mode handle
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NativeHandle:
+    """Stable accessor for raw provider SDK objects.
+
+    Use ``backend.native`` instead of reaching into private attributes.
+    """
+
+    client: Any = None
+    session: Any = None
+    meta: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +341,10 @@ class BackendProtocol(Protocol):
     def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None: ...
 
     def get_tool_registry(self) -> ToolRegistry: ...
+
+    @property
+    def native(self) -> NativeHandle: ...
+    def capabilities(self) -> BackendCapabilities: ...
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ class ParsedCommand:
     """Result of parsing a slash command."""
 
     name: str
-    args: list[str] = field(default_factory=list)
+    args: list[str] = field(default_factory=lambda: list[str]())
     raw: str = ""
 
 

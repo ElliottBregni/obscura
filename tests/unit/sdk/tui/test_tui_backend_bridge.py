@@ -111,6 +111,14 @@ class BackendBridge:
         self._streaming = False
 
     @property
+    def client(self) -> Any:
+        return self._client
+
+    @client.setter
+    def client(self, value: Any) -> None:
+        self._client = value
+
+    @property
     def is_connected(self) -> bool:
         return self._client is not None
 
@@ -229,7 +237,7 @@ class TestBackendBridgeStreamPrompt:
         bridge.client = _make_mock_client(stream_chunks=chunks)
 
         received_text: list[str] = []
-        done_called = []
+        done_called: list[bool] = []
 
         await bridge.stream_prompt(
             prompt="test",
@@ -323,7 +331,7 @@ class TestBackendBridgeStreamPrompt:
         bridge = BackendBridge()
         bridge.client = _make_mock_client(stream_chunks=chunks)
 
-        done_count = []
+        done_count: list[int] = []
 
         await bridge.stream_prompt(
             prompt="test",
@@ -443,14 +451,14 @@ class TestBackendBridgeStreamCancellation:
 
         received: list[str] = []
 
-        async def on_text(t: str) -> None:
+        async def on_text(t: str) -> None:  # pyright: ignore[reportUnusedFunction]
             received.append(t)
             if len(received) >= 2:
                 bridge.cancel_stream()
 
         # Note: on_text is sync in the bridge interface, but we can
         # still test the cancel_requested flag
-        call_count = []
+        call_count: list[str] = []
 
         def sync_on_text(t: str) -> None:
             call_count.append(t)
@@ -615,7 +623,7 @@ class TestBackendBridgeDisconnect:
     async def test_disconnect_resets_streaming_flag(self) -> None:
         """disconnect() resets the streaming flag."""
         bridge = BackendBridge()
-        bridge._streaming = True
+        bridge._streaming = True  # pyright: ignore[reportPrivateUsage]
         bridge.client = _make_mock_client()
 
         await bridge.disconnect()

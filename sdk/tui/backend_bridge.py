@@ -272,6 +272,8 @@ class BackendBridge:
             case ChunkKind.ERROR:
                 if on_error:
                     on_error(chunk.text)
+            case ChunkKind.MESSAGE_START | ChunkKind.TOOL_USE_END:
+                pass  # lifecycle markers, no TUI action needed
 
     # -- Send (non-streaming) -----------------------------------------------
 

@@ -13,8 +13,10 @@ from sdk.internal.types import (
     AgentEventKind,
     AgentEvent,
     Backend,
+    BackendCapabilities,
     ChunkKind,
     Message,
+    NativeHandle,
     Role,
     StreamChunk,
     SessionRef,
@@ -118,6 +120,15 @@ class MockBackend(BackendProtocol):
     @override
     def get_tool_registry(self) -> ToolRegistry:
         return self._registry
+
+    @property
+    @override
+    def native(self) -> NativeHandle:
+        return NativeHandle()
+
+    @override
+    def capabilities(self) -> BackendCapabilities:
+        return BackendCapabilities()
 
 
 def _make_registry(*specs: ToolSpec) -> ToolRegistry:
@@ -514,6 +525,15 @@ class TestAgentLoopErrors:
             @override
             def get_tool_registry(self) -> ToolRegistry:
                 return ToolRegistry()
+
+            @property
+            @override
+            def native(self) -> NativeHandle:
+                return NativeHandle()
+
+            @override
+            def capabilities(self) -> BackendCapabilities:
+                return BackendCapabilities()
 
             @override
             async def stream(

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -104,11 +106,11 @@ class _FakeToolUseBlock:
     def __init__(self, name: str) -> None:
         self.name = name
         self.id = "tool-123"
-        self.input = {"key": "value"}
+        self.input: dict[str, str] = {"key": "value"}
 
 
 class _FakeAssistantMessage:
-    def __init__(self, content: list) -> None:
+    def __init__(self, content: list[Any]) -> None:
         self.content = content
 
 
@@ -129,10 +131,10 @@ _FakeResultMessage.__name__ = "ResultMessage"
 _FakeSystemMessage.__name__ = "SystemMessage"
 
 
-async def _async_iter(items: list) -> None:
+async def _async_iter(items: list[Any]) -> AsyncIterator[Any]:
     """Helper: create an async iterator from a list."""
     for item in items:
-        yield item  # type: ignore[misc]
+        yield item
 
 
 class TestClaudeIteratorAdapter:
@@ -185,7 +187,7 @@ class TestClaudeIteratorAdapter:
 
     @pytest.mark.asyncio
     async def test_system_message_skipped(self) -> None:
-        messages = [_FakeSystemMessage(), _FakeAssistantMessage([_FakeTextBlock("hi")])]
+        messages: list[Any] = [_FakeSystemMessage(), _FakeAssistantMessage([_FakeTextBlock("hi")])]
         adapter = ClaudeIteratorAdapter(_async_iter(messages))
 
         chunks: list[StreamChunk] = []

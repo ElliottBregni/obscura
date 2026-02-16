@@ -122,7 +122,7 @@ class TestDiffEngineCompute:
         """Multiple scattered changes produce multiple hunks or a large hunk."""
         original = "\n".join(f"line {i}" for i in range(1, 21)) + "\n"
         lines = list(range(1, 21))
-        modified_lines = []
+        modified_lines: list[str] = []
         for i in lines:
             if i == 3:
                 modified_lines.append("changed line 3")

@@ -76,8 +76,9 @@ class TestPersistentSessionStore:
             store2 = PersistentSessionStore(path)
             store2.load()
             assert len(store2) == 2
-            assert store2.get("s1") is not None
-            assert store2.get("s1").backend == Backend.COPILOT
+            s1 = store2.get("s1")
+            assert s1 is not None
+            assert s1.backend == Backend.COPILOT
 
     def test_load_no_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:

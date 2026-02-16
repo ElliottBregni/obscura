@@ -15,9 +15,11 @@ from sdk.internal.tools import ToolRegistry
 from sdk.internal.types import (
     AgentEvent,
     Backend,
+    BackendCapabilities,
     BackendProtocol,
     HookPoint,
     Message,
+    NativeHandle,
     SessionRef,
     StreamChunk,
     ToolSpec,
@@ -317,6 +319,28 @@ class ObscuraClient:
         if self._capability_token is not None:
             return self._capability_token.tier.value
         return None
+
+    @property
+    def native(self) -> NativeHandle:
+        """Raw SDK access — passthrough to the active backend.
+
+        Usage::
+
+            handle = client.native
+            raw_openai = handle.client  # AsyncOpenAI instance
+        """
+        return self._backend.native
+
+    def capabilities(self) -> BackendCapabilities:
+        """Declare what the active backend supports.
+
+        Usage::
+
+            caps = client.capabilities()
+            if caps.supports_reasoning:
+                ...
+        """
+        return self._backend.capabilities()
 
     def _filter_prompt(self, prompt: str) -> str:
         """Apply prompt injection filter based on capability tier.

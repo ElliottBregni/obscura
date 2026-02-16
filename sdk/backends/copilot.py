@@ -19,10 +19,12 @@ from sdk.internal.types import (
     AgentHookConfig,
     AgentEvent,
     Backend,
+    BackendCapabilities,
     ChunkKind,
     ContentBlock,
     HookPoint,
     Message,
+    NativeHandle,
     Role,
     SessionRef,
     StreamChunk,
@@ -120,6 +122,23 @@ class CopilotBackend:
     def to_message(self, raw: Any) -> Message:
         return self._to_message(raw)
 
+    @property
+    def native(self) -> NativeHandle:
+        """Raw SDK access for escape-hatch usage."""
+        return NativeHandle(
+            client=self._client,
+            session=self._session,
+        )
+
+    def capabilities(self) -> BackendCapabilities:
+        """Declare what this backend supports."""
+        return BackendCapabilities(
+            supports_streaming=True,
+            supports_tool_calls=True,
+            supports_reasoning=True,
+            supports_remote_sessions=True,
+        )
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
@@ -196,6 +215,9 @@ class CopilotBackend:
         def _on_tool_start(event: Any) -> None:
             bridge.on_tool_start(event)
 
+        def _on_tool_end(event: Any) -> None:
+            bridge.on_tool_end(event)
+
         def _on_idle(event: Any = None) -> None:
             bridge.finish(event)
 
@@ -215,6 +237,9 @@ class CopilotBackend:
         unsub_fns.append(
             self._session.on(_make_handler("tool.execution_start", _on_tool_start))
         )
+        unsub_fns.append(
+            self._session.on(_make_handler("tool.execution_end", _on_tool_end))
+        )
         unsub_fns.append(self._session.on(_make_handler("session.idle", _on_idle)))
         unsub_fns.append(self._session.on(_make_handler("session.error", _on_error)))
 
@@ -222,6 +247,9 @@ class CopilotBackend:
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("copilot.stream") as span:
             _set_span_attr(span, "backend", "copilot")
+
+            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+
             msg_options: dict[str, Any] = {"prompt": prompt}
             if kwargs.get("options"):
                 msg_options.update(kwargs["options"])

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sdk.internal.tools import ToolRegistry, _infer_schema_from_hints, tool
+from typing import Any
+
+from sdk.internal.tools import ToolRegistry, infer_schema_from_hints, tool
 
 
 # ---------------------------------------------------------------------------
@@ -15,7 +17,7 @@ class TestSchemaInference:
         def fn(name: str, count: int, ratio: float, flag: bool) -> str:
             return ""
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert schema["type"] == "object"
         assert schema["properties"]["name"] == {"type": "string"}
         assert schema["properties"]["count"] == {"type": "integer"}
@@ -27,7 +29,7 @@ class TestSchemaInference:
         def fn(required_arg: str, optional_arg: str = "default") -> str:
             return ""
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert "required_arg" in schema["required"]
         assert "optional_arg" not in schema["required"]
 
@@ -35,15 +37,15 @@ class TestSchemaInference:
         def fn() -> None:
             pass
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert schema["properties"] == {}
         assert schema["required"] == []
 
     def test_skips_self(self) -> None:
-        def fn(self, x: str) -> str:  # noqa: N805
+        def fn(self: Any, x: str) -> str:  # noqa: N805
             return x
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert "self" not in schema["properties"]
         assert "x" in schema["properties"]
 
@@ -68,9 +70,10 @@ class TestToolDecorator:
             return f"Hello, {name}!"
 
         assert hasattr(greet, "spec")
-        assert greet.spec.name == "greet"
-        assert greet.spec.description == "Greet a user"
-        assert greet.spec.parameters["required"] == ["name"]
+        spec: Any = getattr(greet, "spec")
+        assert spec.name == "greet"
+        assert spec.description == "Greet a user"
+        assert spec.parameters["required"] == ["name"]
 
     def test_function_still_callable(self) -> None:
         @tool("add", "Add numbers")
@@ -84,8 +87,9 @@ class TestToolDecorator:
         def echo(text: str) -> str:
             return text
 
-        assert echo.spec.parameters["properties"]["text"] == {"type": "string"}
-        assert "text" in echo.spec.parameters["required"]
+        spec: Any = getattr(echo, "spec")
+        assert spec.parameters["properties"]["text"] == {"type": "string"}
+        assert "text" in spec.parameters["required"]
 
     def test_explicit_schema_overrides_inference(self) -> None:
         @tool(
@@ -96,7 +100,8 @@ class TestToolDecorator:
         def custom(x: str) -> str:  # type hint says str, but schema says number
             return x
 
-        assert custom.spec.parameters["properties"]["x"]["type"] == "number"
+        spec: Any = getattr(custom, "spec")
+        assert spec.parameters["properties"]["x"]["type"] == "number"
 
     def test_handler_reference(self) -> None:
         def my_fn(x: str) -> str:
@@ -104,7 +109,8 @@ class TestToolDecorator:
 
         decorated = tool("t", "d")(my_fn)
         # Handler points to the original function
-        assert decorated.spec.handler is my_fn
+        spec: Any = getattr(decorated, "spec")
+        assert spec.handler is my_fn
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +126,9 @@ class TestToolRegistry:
         def fn(x: str) -> str:
             return x
 
-        reg.register(fn.spec)
-        assert reg.get("test_tool") is fn.spec
+        spec: Any = getattr(fn, "spec")
+        reg.register(spec)
+        assert reg.get("test_tool") is spec
         assert reg.get("nonexistent") is None
 
     def test_all(self) -> None:
@@ -135,8 +142,8 @@ class TestToolRegistry:
         def b() -> None:
             pass
 
-        reg.register(a.spec)
-        reg.register(b.spec)
+        reg.register(getattr(a, "spec"))
+        reg.register(getattr(b, "spec"))
         assert len(reg.all()) == 2
 
     def test_names(self) -> None:
@@ -146,7 +153,7 @@ class TestToolRegistry:
         def alpha() -> None:
             pass
 
-        reg.register(alpha.spec)
+        reg.register(getattr(alpha, "spec"))
         assert reg.names() == ["alpha"]
 
     def test_contains(self) -> None:
@@ -156,7 +163,7 @@ class TestToolRegistry:
         def t() -> None:
             pass
 
-        reg.register(t.spec)
+        reg.register(getattr(t, "spec"))
         assert "t" in reg
         assert "missing" not in reg
 
@@ -168,5 +175,5 @@ class TestToolRegistry:
         def t() -> None:
             pass
 
-        reg.register(t.spec)
+        reg.register(getattr(t, "spec"))
         assert len(reg) == 1

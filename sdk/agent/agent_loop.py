@@ -41,6 +41,9 @@ from sdk.internal.types import (
     AgentEventKind,
     BackendProtocol,
     ChunkKind,
+    ContentBlock,
+    Message,
+    Role,
     StreamChunk,
     ToolCallInfo,
     ToolSpec,
@@ -134,7 +137,8 @@ class AgentLoop:
 
                     # Collect tool calls
                     if chunk.kind == ChunkKind.TOOL_USE_START:
-                        # Flush previous tool if any
+                        # Flush previous tool if any (fallback for backends
+                        # that don't emit TOOL_USE_END)
                         if _current_tool_name:
                             tc = self._parse_tool_call(
                                 _current_tool_name,
@@ -148,7 +152,19 @@ class AgentLoop:
                     if chunk.kind == ChunkKind.TOOL_USE_DELTA:
                         _current_tool_input_json += chunk.tool_input_delta
 
-                # Flush last tool call
+                    # TOOL_USE_END — flush accumulated tool immediately
+                    if chunk.kind == ChunkKind.TOOL_USE_END:
+                        if _current_tool_name:
+                            tc = self._parse_tool_call(
+                                _current_tool_name,
+                                _current_tool_input_json,
+                                chunk.raw,
+                            )
+                            tool_calls.append(tc)
+                            _current_tool_name = ""
+                            _current_tool_input_json = ""
+
+                # Flush last tool call (fallback if no TOOL_USE_END received)
                 if _current_tool_name:
                     tc = self._parse_tool_call(
                         _current_tool_name,
@@ -194,11 +210,16 @@ class AgentLoop:
                     turn=turn,
                 )
 
-            # Build the next prompt with tool results
+            # Build structured messages for backends that support it,
+            # with plain-text fallback as the prompt.
+            structured = self._build_structured_tool_messages(
+                tool_calls, tool_results, turn_text,
+            )
             current_prompt = self._format_tool_results(tool_results)
 
-            # Clear send-once kwargs after first turn
-            kwargs = {}
+            # Pass structured messages via kwargs so backends can
+            # persist full tool call/result history.
+            kwargs = {"messages": structured}
 
         # Hit max turns
         yield AgentEvent(
@@ -361,6 +382,57 @@ class AgentLoop:
             input=parsed_input,
             raw=raw,
         )
+
+    @staticmethod
+    def _build_structured_tool_messages(
+        tool_calls: list[ToolCallInfo],
+        tool_results: list[tuple[ToolCallInfo, str, bool]],
+        turn_text: str,
+    ) -> list[Message]:
+        """Build structured Message objects for tool call/result turns.
+
+        Returns two messages:
+        1. Assistant message with text (if any) + tool_use blocks
+        2. Tool result message with tool_result blocks
+
+        These are passed to ``backend.stream(prompt, messages=...)``
+        so backends can persist the full structured conversation.
+        """
+        # 1) Assistant message: any text + tool_use blocks
+        assistant_blocks: list[ContentBlock] = []
+        if turn_text:
+            assistant_blocks.append(ContentBlock(kind="text", text=turn_text))
+        for tc in tool_calls:
+            assistant_blocks.append(ContentBlock(
+                kind="tool_use",
+                tool_name=tc.name,
+                tool_input=tc.input,
+                tool_use_id=tc.tool_use_id,
+            ))
+        if not assistant_blocks:
+            assistant_blocks.append(ContentBlock(kind="text", text=""))
+
+        assistant_msg = Message(
+            role=Role.ASSISTANT,
+            content=assistant_blocks,
+        )
+
+        # 2) Tool result message
+        result_blocks: list[ContentBlock] = []
+        for tc, result_text, is_err in tool_results:
+            result_blocks.append(ContentBlock(
+                kind="tool_result",
+                text=result_text,
+                tool_use_id=tc.tool_use_id,
+                is_error=is_err,
+            ))
+
+        result_msg = Message(
+            role=Role.TOOL_RESULT,
+            content=result_blocks,
+        )
+
+        return [assistant_msg, result_msg]
 
     @staticmethod
     def _format_tool_results(

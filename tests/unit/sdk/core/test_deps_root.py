@@ -1,12 +1,13 @@
 """Tests for sdk.deps — Shared FastAPI dependencies and helpers."""
 
+# pyright: reportPrivateUsage=false
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.auth.models import AuthenticatedUser
 from sdk.config import ObscuraConfig
 
 
-def _make_user(user_id="test-user", email="test@example.com"):
+def _make_user(user_id: str = "test-user", email: str = "test@example.com") -> AuthenticatedUser:
     return AuthenticatedUser(
         user_id=user_id,
         email=email,

@@ -21,9 +21,9 @@ class TestRequestHandlerProtocol:
         handler = SimpleHandler(client)
         assert isinstance(handler, RequestHandler)
 
-    def test_custom_handler_satisfies_protocol(self):
+    def test_custom_handler_satisfies_protocol(self) -> None:
         class MyHandler:
-            async def handle(self, request):
+            async def handle(self, request: object) -> str:
                 return "ok"
 
         assert isinstance(MyHandler(), RequestHandler)

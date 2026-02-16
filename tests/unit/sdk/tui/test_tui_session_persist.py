@@ -37,7 +37,7 @@ class ConversationTurn:
     content: str
     timestamp: datetime
     mode: TUIMode
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
 
     def to_dict(self) -> dict[str, Any]:
         return {

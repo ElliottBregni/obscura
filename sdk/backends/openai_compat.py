@@ -20,14 +20,18 @@ from sdk.internal.tools import ToolRegistry
 from sdk.internal.types import (
     AgentEvent,
     Backend,
+    BackendCapabilities,
     ChunkKind,
     ContentBlock,
     HookContext,
     HookPoint,
     Message,
+    NativeHandle,
     Role,
     SessionRef,
     StreamChunk,
+    StreamMetadata,
+    ToolChoice,
     ToolSpec,
 )
 from sdk.backends.models import (
@@ -127,6 +131,20 @@ class OpenAIBackend:
     def conversations(self) -> dict[str, list[ChatMessage]]:
         return self._conversations
 
+    @property
+    def native(self) -> NativeHandle:
+        """Raw SDK access for escape-hatch usage."""
+        return NativeHandle(client=self._client)
+
+    def capabilities(self) -> BackendCapabilities:
+        """Declare what this backend supports."""
+        return BackendCapabilities(
+            supports_streaming=True,
+            supports_tool_calls=True,
+            supports_tool_choice=True,
+            supports_usage=True,
+        )
+
     def set_client_for_testing(self, client: Any) -> None:
         self._client = client
 
@@ -165,7 +183,10 @@ class OpenAIBackend:
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
 
-            messages = self.build_messages(prompt)
+            structured = kwargs.pop("messages", None)
+            messages = self.build_messages(
+                prompt, structured_messages=structured
+            )
             create_kwargs = self.build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
@@ -176,14 +197,38 @@ class OpenAIBackend:
 
             msg = self.to_message(response)
 
-            # Persist conversation history
+            # Persist conversation history (including tool calls)
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
                     ChatMessage(role="user", content=prompt)
                 )
-                self._conversations[self._active_session].append(
-                    ChatMessage(role="assistant", content=msg.text)
-                )
+                # Store tool_calls if present
+                tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
+                if tool_blocks:
+                    import json as _json
+
+                    tc_list = [
+                        {
+                            "id": b.tool_use_id,
+                            "type": "function",
+                            "function": {
+                                "name": b.tool_name,
+                                "arguments": _json.dumps(b.tool_input),
+                            },
+                        }
+                        for b in tool_blocks
+                    ]
+                    self._conversations[self._active_session].append(
+                        ChatMessage(
+                            role="assistant",
+                            content=msg.text,
+                            tool_calls=tc_list,
+                        )
+                    )
+                else:
+                    self._conversations[self._active_session].append(
+                        ChatMessage(role="assistant", content=msg.text)
+                    )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
@@ -201,7 +246,10 @@ class OpenAIBackend:
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
 
-            messages = self.build_messages(prompt)
+            structured = kwargs.pop("messages", None)
+            messages = self.build_messages(
+                prompt, structured_messages=structured
+            )
             create_kwargs = self.build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
@@ -211,19 +259,36 @@ class OpenAIBackend:
                 **create_kwargs,
             )
 
+            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+
             accumulated_text = ""
+            finish_reason = ""
+            _active_tool_name = ""
             async for chunk in response:
                 if not chunk.choices:
                     continue
-                delta = chunk.choices[0].delta
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # Track finish_reason from the final chunk
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
 
                 # Tool call deltas
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         if tc.function and tc.function.name:
+                            # Close previous tool if any
+                            if _active_tool_name:
+                                yield StreamChunk(
+                                    kind=ChunkKind.TOOL_USE_END,
+                                    tool_name=_active_tool_name,
+                                )
+                            _active_tool_name = tc.function.name
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_START,
                                 tool_name=tc.function.name,
+                                tool_use_id=tc.id or "",
                                 raw=chunk,
                             )
                         if tc.function and tc.function.arguments:
@@ -242,6 +307,13 @@ class OpenAIBackend:
                         raw=chunk,
                     )
 
+            # Close final tool if any
+            if _active_tool_name:
+                yield StreamChunk(
+                    kind=ChunkKind.TOOL_USE_END,
+                    tool_name=_active_tool_name,
+                )
+
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
@@ -253,7 +325,14 @@ class OpenAIBackend:
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
-            yield StreamChunk(kind=ChunkKind.DONE, raw=None)
+            yield StreamChunk(
+                kind=ChunkKind.DONE,
+                raw=None,
+                metadata=StreamMetadata(
+                    finish_reason=finish_reason,
+                    model_id=self._model,
+                ),
+            )
 
     # -- Sessions ------------------------------------------------------------
 
@@ -350,12 +429,26 @@ class OpenAIBackend:
         if self._client is None:
             raise RuntimeError("OpenAIBackend not started. Call start() first.")
 
-    def build_messages(self, prompt: str) -> list[dict[str, str]]:
-        """Build the messages list for the chat completions API."""
-        messages: list[dict[str, str]] = []
+    def build_messages(
+        self,
+        prompt: str,
+        *,
+        structured_messages: list[Message] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build the messages list for the chat completions API.
+
+        If *structured_messages* are provided they are converted and
+        prepended (after system prompt) before the current prompt.
+        """
+        messages: list[dict[str, Any]] = []
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})
 
+        # Structured multi-turn messages (from caller)
+        if structured_messages:
+            messages.extend(self._convert_messages(structured_messages))
+
+        # Conversation history from active session
         if self._active_session and self._active_session in self._conversations:
             messages.extend(
                 [m.to_dict() for m in self._conversations[self._active_session]]
@@ -369,6 +462,13 @@ class OpenAIBackend:
         params = CompletionParams.from_kwargs(kwargs)
         result: dict[str, Any] = params.to_dict()
 
+        # Convert structured ToolChoice if provided
+        tool_choice = kwargs.get("tool_choice")
+        if isinstance(tool_choice, ToolChoice):
+            result["tool_choice"] = self._convert_tool_choice(tool_choice)
+        elif tool_choice is not None:
+            result["tool_choice"] = tool_choice
+
         # Register tools as OpenAI function calling format
         if self._tools:
             tool_defs = [
@@ -379,6 +479,67 @@ class OpenAIBackend:
             ]
             result["tools"] = tool_defs
 
+        return result
+
+    @staticmethod
+    def _convert_tool_choice(choice: ToolChoice) -> Any:
+        """Convert a unified ToolChoice to OpenAI format."""
+        if choice.mode == "auto":
+            return "auto"
+        if choice.mode == "none":
+            return "none"
+        if choice.mode == "required":
+            return "required"
+        if choice.mode == "function":
+            return {
+                "type": "function",
+                "function": {"name": choice.function_name},
+            }
+        return "auto"
+
+    @staticmethod
+    def _convert_messages(messages: list[Message]) -> list[dict[str, Any]]:
+        """Convert unified Message objects to OpenAI dict format."""
+        result: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.role.value  # "user", "assistant", "system", "tool_result"
+            if role == "tool_result":
+                # OpenAI uses "tool" role for tool results
+                for block in msg.content:
+                    if block.kind == "tool_result":
+                        result.append({
+                            "role": "tool",
+                            "content": block.text,
+                            "tool_call_id": block.tool_use_id,
+                        })
+                continue
+
+            # Build content — simple text or list of blocks
+            text_parts = [b.text for b in msg.content if b.kind == "text"]
+            content: str | list[dict[str, Any]] = (
+                text_parts[0] if len(text_parts) == 1 else "\n".join(text_parts)
+            )
+
+            d: dict[str, Any] = {"role": role, "content": content}
+
+            # Include tool_calls if present
+            tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
+            if tool_blocks:
+                import json
+
+                d["tool_calls"] = [
+                    {
+                        "id": b.tool_use_id,
+                        "type": "function",
+                        "function": {
+                            "name": b.tool_name,
+                            "arguments": json.dumps(b.tool_input),
+                        },
+                    }
+                    for b in tool_blocks
+                ]
+
+            result.append(d)
         return result
 
     def to_message(self, response: Any) -> Message:

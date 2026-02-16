@@ -621,6 +621,229 @@ def health_check(ctx: click.Context) -> None:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Chat command (owned mode — direct backend, no server needed)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("chat")
+@click.argument("prompt", required=False)
+@click.option(
+    "--backend",
+    "-b",
+    default="openai",
+    type=click.Choice(["openai", "claude", "copilot", "localllm"]),
+    help="Backend to use",
+)
+@click.option("--model", "-m", default=None, help="Model ID override")
+@click.option("--system-prompt", "-s", default="", help="System instructions")
+@click.option("--session", default=None, help="Session ID to resume")
+@click.option("--no-stream", is_flag=True, help="Disable streaming (wait for full response)")
+@click.option("--json-output", "json_out", is_flag=True, help="Output as JSON")
+@click.option("--interactive", "-i", is_flag=True, help="Interactive multi-turn mode")
+@click.option("--max-turns", default=10, help="Max agent loop turns")
+def chat(
+    prompt: str | None,
+    backend: str,
+    model: str | None,
+    system_prompt: str,
+    session: str | None,
+    no_stream: bool,
+    json_out: bool,
+    interactive: bool,
+    max_turns: int,
+) -> None:
+    """Chat directly with a backend (no server required).
+
+    \b
+    Examples:
+        obscura chat "explain this code" --backend openai
+        obscura chat --backend claude --interactive
+        obscura chat "hello" --backend localllm --no-stream
+    """
+    import asyncio
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
+
+    async def _run_chat() -> None:
+        from sdk.client import ObscuraClient
+        from sdk.internal.types import AgentEventKind
+
+        async with ObscuraClient(
+            backend,
+            model=model,
+            system_prompt=system_prompt,
+        ) as client:
+            # Resume session if provided
+            if session:
+                from sdk.internal.types import SessionRef, Backend as BackendEnum
+
+                ref = SessionRef(session_id=session, backend=BackendEnum(backend))
+                await client.resume_session(ref)
+
+            if interactive:
+                console.print(
+                    f"[bold green]Obscura chat[/] ({backend}"
+                    f"{', ' + model if model else ''})"
+                )
+                console.print("[dim]Type 'exit' or Ctrl-C to quit.[/]\n")
+
+                while True:
+                    try:
+                        user_input: str = click.prompt("You", type=str)
+                    except (EOFError, click.Abort):
+                        break
+                    if user_input.strip().lower() in ("exit", "quit"):
+                        break
+
+                    console.print("[bold cyan]Assistant:[/] ", end="")
+                    async for event in client.run_loop(
+                        user_input, max_turns=max_turns
+                    ):
+                        if event.kind == AgentEventKind.TEXT_DELTA:
+                            console.print(event.text, end="")
+                        elif event.kind == AgentEventKind.TOOL_CALL:
+                            console.print(
+                                f"\n[dim][tool] {event.tool_name}[/]", end=""
+                            )
+                        elif event.kind == AgentEventKind.TOOL_RESULT:
+                            console.print(
+                                f"\n[dim][result] {event.tool_result[:80]}[/]",
+                                end="",
+                            )
+                    console.print()
+
+            elif prompt:
+                if no_stream:
+                    msg = await client.send(prompt)
+                    if json_out:
+                        console.print_json(json.dumps({"text": msg.text}))
+                    else:
+                        console.print(msg.text)
+                else:
+                    async for event in client.run_loop(
+                        prompt, max_turns=max_turns
+                    ):
+                        if event.kind == AgentEventKind.TEXT_DELTA:
+                            console.print(event.text, end="")
+                        elif event.kind == AgentEventKind.TOOL_CALL:
+                            console.print(
+                                f"\n[dim][tool] {event.tool_name}[/]", end=""
+                            )
+                        elif event.kind == AgentEventKind.TOOL_RESULT:
+                            console.print(
+                                f"\n[dim][result] {event.tool_result[:80]}[/]",
+                                end="",
+                            )
+                    console.print()
+            else:
+                console.print(
+                    "[yellow]Provide a prompt or use --interactive mode.[/]"
+                )
+
+    try:
+        asyncio.run(_run_chat())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/]")
+
+
+# ---------------------------------------------------------------------------
+# Passthrough command — delegates to a vendor CLI
+# ---------------------------------------------------------------------------
+
+
+@cli.command("passthrough", context_settings={"ignore_unknown_options": True})
+@click.argument("vendor", type=click.Choice(["claude", "openai"]))
+@click.argument("vendor_args", nargs=-1, type=click.UNPROCESSED)
+def passthrough(vendor: str, vendor_args: tuple[str, ...]) -> None:
+    """Run a vendor CLI, capturing transcript for memory.
+
+    \b
+    Examples:
+        obscura passthrough claude -- chat --model sonnet
+        obscura passthrough openai -- api chat.completions.create -m gpt-4o
+    """
+    import asyncio
+    import shutil
+
+    vendor_cmds: dict[str, str] = {
+        "claude": "claude",
+        "openai": "openai",
+    }
+
+    cmd_name = vendor_cmds[vendor]
+    cmd_path: str | None = shutil.which(cmd_name)
+    if cmd_path is None:
+        console.print(
+            f"[bold red]Error:[/] '{cmd_name}' CLI not found on PATH. "
+            f"Install it first."
+        )
+        sys.exit(1)
+
+    async def _run_passthrough() -> None:
+        full_cmd: list[str] = [cmd_path or cmd_name, *vendor_args]
+        console.print(
+            f"[dim]Running: {' '.join(full_cmd)}[/]\n"
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            *full_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        transcript_lines: list[str] = []
+
+        async def _stream_output(
+            stream: asyncio.StreamReader | None, is_err: bool = False
+        ) -> None:
+            if stream is None:
+                return
+            while True:
+                line_bytes: bytes = await stream.readline()
+                if not line_bytes:
+                    break
+                line: str = line_bytes.decode("utf-8", errors="replace")
+                transcript_lines.append(line)
+                if is_err:
+                    console.print(f"[red]{line}[/]", end="")
+                else:
+                    console.print(line, end="")
+
+        await asyncio.gather(
+            _stream_output(proc.stdout),
+            _stream_output(proc.stderr, is_err=True),
+        )
+
+        await proc.wait()
+        console.print(f"\n[dim]Process exited with code {proc.returncode}[/]")
+
+        # Persist transcript to file (best-effort)
+        if transcript_lines:
+            try:
+                import time
+                from pathlib import Path
+
+                transcript_dir = Path.home() / ".obscura" / "transcripts"
+                transcript_dir.mkdir(parents=True, exist_ok=True)
+                ts = int(time.time())
+                path = transcript_dir / f"passthrough_{vendor}_{ts}.txt"
+                path.write_text("".join(transcript_lines)[:50000])
+                console.print(f"[dim]Transcript saved to {path}[/]")
+            except Exception:
+                pass  # transcript persistence is best-effort
+
+    try:
+        asyncio.run(_run_passthrough())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/]")
+
+
 # Main entry point
 def main() -> None:
     """Entry point for the CLI."""

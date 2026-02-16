@@ -41,7 +41,7 @@ class PlanStep:
 class Plan:
     """A structured plan with numbered steps."""
 
-    steps: list[PlanStep] = field(default_factory=list)
+    steps: list[PlanStep] = field(default_factory=lambda: list[PlanStep]())
     summary: str = ""
 
     @property
@@ -90,7 +90,7 @@ class ModeManager:
         self.active_plan: Plan | None = None
 
     def switch(self, mode: TUIMode) -> None:
-        if not isinstance(mode, TUIMode):
+        if not isinstance(mode, TUIMode):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError(f"Invalid mode: {mode}")
         self.current = mode
 

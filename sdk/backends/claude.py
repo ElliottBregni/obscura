@@ -17,10 +17,12 @@ from sdk.internal.tools import ToolRegistry
 from sdk.internal.types import (
     AgentEvent,
     Backend,
+    BackendCapabilities,
     ChunkKind,
     ContentBlock,
     HookPoint,
     Message,
+    NativeHandle,
     Role,
     SessionRef,
     StreamChunk,
@@ -112,6 +114,23 @@ class ClaudeBackend:
     def to_message(self, raw_messages: list[Any]) -> Message:
         """Public wrapper for testing message conversion."""
         return self._to_message(raw_messages)
+
+    @property
+    def native(self) -> NativeHandle:
+        """Raw SDK access for escape-hatch usage."""
+        return NativeHandle(
+            client=self._client,
+            meta={"last_session_id": self._last_session_id},
+        )
+
+    def capabilities(self) -> BackendCapabilities:
+        """Declare what this backend supports."""
+        return BackendCapabilities(
+            supports_streaming=True,
+            supports_tool_calls=True,
+            supports_reasoning=True,
+            supports_remote_sessions=True,
+        )
 
     # -- Lifecycle -----------------------------------------------------------
 

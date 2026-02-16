@@ -541,7 +541,7 @@ class TestObscuraMCPServerToolHandlers:
         store = _make_memory_store()
         # search returns list of (MemoryKey, value) tuples
         mk = MagicMock()
-        mk.__str__.return_value = "default:config"
+        mk.__str__ = MagicMock(return_value="default:config")
         store.search.return_value = [(mk, {"setting": True})]
 
         ctx = ObscuraMCPToolContext(user_id="test")

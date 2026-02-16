@@ -49,7 +49,7 @@ class PlanStep:
 class Plan:
     """A structured plan with numbered steps."""
 
-    steps: list[PlanStep] = field(default_factory=list)
+    steps: list[PlanStep] = field(default_factory=lambda: list[PlanStep]())
     summary: str = ""
 
     @property
@@ -376,18 +376,23 @@ class TestPlanInSessionMemory:
         )
 
         # Simulate serialization
-        data = {
-            "steps": [
-                {"index": s.index, "description": s.description, "status": s.status}
-                for s in original.steps
-            ],
-            "summary": original.summary,
-        }
+        step_dicts: list[dict[str, Any]] = [
+            {"index": s.index, "description": s.description, "status": s.status}
+            for s in original.steps
+        ]
+        summary_str: str = original.summary
 
         # Simulate deserialization
         restored = Plan(
-            steps=[PlanStep(**s) for s in data["steps"]],
-            summary=data["summary"],
+            steps=[
+                PlanStep(
+                    index=s["index"],
+                    description=s["description"],
+                    status=s["status"],
+                )
+                for s in step_dicts
+            ],
+            summary=summary_str,
         )
 
         assert len(restored.steps) == 3

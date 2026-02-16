@@ -481,7 +481,7 @@ class TestOpenAIStream:
 
     @pytest.mark.asyncio
     async def test_stream_only_done_for_empty_response(self) -> None:
-        """Empty stream response should still yield DONE."""
+        """Empty stream response should still yield MESSAGE_START + DONE."""
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _aiter()  # no chunks
@@ -490,8 +490,11 @@ class TestOpenAIStream:
         async for chunk in b.stream("test"):
             chunks.append(chunk)
 
-        assert len(chunks) == 1
-        assert chunks[0].kind == ChunkKind.DONE
+        assert len(chunks) == 2
+        assert chunks[0].kind == ChunkKind.MESSAGE_START
+        assert chunks[1].kind == ChunkKind.DONE
+        assert chunks[1].metadata is not None
+        assert chunks[1].metadata.model_id == "gpt-4o-test"
 
 
 # ===================================================================

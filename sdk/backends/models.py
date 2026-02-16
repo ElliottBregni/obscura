@@ -41,11 +41,27 @@ class MCPServerConfig:
 
 @dataclass(frozen=True, slots=True)
 class ChatMessage:
-    role: str
-    content: str
+    """A message in a conversation history.
 
-    def to_dict(self) -> dict[str, str]:
-        return {"role": self.role, "content": self.content}
+    Extended to support tool call and tool result messages for correct
+    multi-turn conversation persistence.
+    """
+
+    role: str
+    content: str | list[dict[str, Any]] = ""
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.tool_calls is not None:
+            d["tool_calls"] = self.tool_calls
+        if self.tool_call_id is not None:
+            d["tool_call_id"] = self.tool_call_id
+        if self.name is not None:
+            d["name"] = self.name
+        return d
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +89,7 @@ class CompletionParams:
     presence_penalty: float | None = None
     seed: int | None = None
     response_format: Any | None = None
+    tool_choice: Any | None = None
 
     @classmethod
     def from_kwargs(cls, kwargs: Mapping[str, Any]) -> "CompletionParams":
@@ -85,6 +102,7 @@ class CompletionParams:
             "presence_penalty",
             "seed",
             "response_format",
+            "tool_choice",
         }
         filtered: dict[str, Any] = {k: v for k, v in kwargs.items() if k in valid_keys}
         return cls(**filtered)
@@ -92,6 +110,36 @@ class CompletionParams:
     def to_dict(self) -> dict[str, Any]:
         # dataclass with slots has no __dict__, so use asdict and drop Nones
         return {k: v for k, v in asdict(self).items() if v is not None}
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRequest:
+    """Unified request object for backend ``send`` / ``stream``.
+
+    Callers can build this explicitly or continue using ``prompt + **kwargs``.
+    Backends extract what they need via ``from_kwargs()``.
+    """
+
+    prompt: str = ""
+    messages: list[Any] | None = None
+    params: CompletionParams | None = None
+    tool_choice: Any | None = None
+    session: Any | None = None
+    metadata: dict[str, Any] | None = None
+    timeout_s: float | None = None
+
+    @classmethod
+    def from_kwargs(cls, prompt: str, kwargs: Mapping[str, Any]) -> "AgentRequest":
+        """Extract an ``AgentRequest`` from the legacy ``prompt + **kwargs`` pattern."""
+        return cls(
+            prompt=prompt,
+            messages=kwargs.get("messages"),
+            params=CompletionParams.from_kwargs(kwargs),
+            tool_choice=kwargs.get("tool_choice"),
+            session=kwargs.get("session"),
+            metadata=kwargs.get("request_metadata"),
+            timeout_s=kwargs.get("timeout_s"),
+        )
 
 
 @dataclass(frozen=True, slots=True)

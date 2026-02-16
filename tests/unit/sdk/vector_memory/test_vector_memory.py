@@ -1,5 +1,6 @@
 """Tests for sdk.vector_memory — Semantic memory with vector search."""
 
+# pyright: reportUnknownMemberType=false
 from __future__ import annotations
 
 from pathlib import Path
@@ -88,6 +89,7 @@ class TestVectorMemoryStore:
         store.set("key1", "updated text", metadata={"updated": True})
 
         entry = store.get("key1")
+        assert entry is not None
         assert entry.text == "updated text"
         assert entry.metadata == {"updated": True}
 

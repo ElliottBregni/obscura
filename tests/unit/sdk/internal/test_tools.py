@@ -1,13 +1,15 @@
 """Tests for sdk.internal.tools — ToolRegistry, @tool decorator, schema inference."""
 
+from typing import Any
+
 import pytest
 
-from sdk.internal.tools import ToolRegistry, tool, _infer_schema_from_hints
+from sdk.internal.tools import ToolRegistry, tool, infer_schema_from_hints
 from sdk.internal.types import ToolSpec
 
 
 class TestToolRegistry:
-    def test_register_and_get(self):
+    def test_register_and_get(self) -> None:
         reg = ToolRegistry()
         spec = ToolSpec(
             name="t1", description="desc", parameters={}, handler=lambda: None
@@ -15,11 +17,11 @@ class TestToolRegistry:
         reg.register(spec)
         assert reg.get("t1") is spec
 
-    def test_get_missing(self):
+    def test_get_missing(self) -> None:
         reg = ToolRegistry()
         assert reg.get("missing") is None
 
-    def test_all(self):
+    def test_all(self) -> None:
         reg = ToolRegistry()
         reg.register(
             ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
@@ -29,14 +31,14 @@ class TestToolRegistry:
         )
         assert len(reg.all()) == 2
 
-    def test_names(self):
+    def test_names(self) -> None:
         reg = ToolRegistry()
         reg.register(
             ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
         )
         assert "t1" in reg.names()
 
-    def test_len(self):
+    def test_len(self) -> None:
         reg = ToolRegistry()
         assert len(reg) == 0
         reg.register(
@@ -44,7 +46,7 @@ class TestToolRegistry:
         )
         assert len(reg) == 1
 
-    def test_contains(self):
+    def test_contains(self) -> None:
         reg = ToolRegistry()
         reg.register(
             ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
@@ -54,36 +56,36 @@ class TestToolRegistry:
 
 
 class TestInferSchema:
-    def test_simple_types(self):
-        def fn(name: str, count: int, ratio: float, flag: bool):
+    def test_simple_types(self) -> None:
+        def fn(name: str, count: int, ratio: float, flag: bool) -> None:
             pass
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert schema["properties"]["name"]["type"] == "string"
         assert schema["properties"]["count"]["type"] == "integer"
         assert schema["properties"]["ratio"]["type"] == "number"
         assert schema["properties"]["flag"]["type"] == "boolean"
         assert set(schema["required"]) == {"name", "count", "ratio", "flag"}
 
-    def test_optional_params(self):
-        def fn(name: str, count: int = 5):
+    def test_optional_params(self) -> None:
+        def fn(name: str, count: int = 5) -> None:
             pass
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert "name" in schema["required"]
         assert "count" not in schema["required"]
 
-    def test_no_hints(self):
-        def fn(x, y):
+    def test_no_hints(self) -> None:
+        def fn(x: Any, y: Any) -> None:
             pass
 
-        schema = _infer_schema_from_hints(fn)
+        schema: dict[str, Any] = infer_schema_from_hints(fn)
         assert schema["properties"]["x"]["type"] == "string"
         assert schema["properties"]["y"]["type"] == "string"
 
 
 class TestToolDecorator:
-    def test_explicit_schema(self):
+    def test_explicit_schema(self) -> None:
         @tool(
             "read_file",
             "Read a file",
@@ -93,18 +95,20 @@ class TestToolDecorator:
             return f"content of {path}"
 
         assert hasattr(read_file, "spec")
-        assert read_file.spec.name == "read_file"
-        assert read_file.spec.description == "Read a file"
+        spec: Any = getattr(read_file, "spec")
+        assert spec.name == "read_file"
+        assert spec.description == "Read a file"
 
-    def test_inferred_schema(self):
+    def test_inferred_schema(self) -> None:
         @tool("add", "Add two numbers")
         def add(a: int, b: int) -> int:
             return a + b
 
-        assert add.spec.parameters["properties"]["a"]["type"] == "integer"
-        assert add.spec.parameters["properties"]["b"]["type"] == "integer"
+        spec: Any = getattr(add, "spec")
+        assert spec.parameters["properties"]["a"]["type"] == "integer"
+        assert spec.parameters["properties"]["b"]["type"] == "integer"
 
-    def test_sync_wrapper_calls_fn(self):
+    def test_sync_wrapper_calls_fn(self) -> None:
         @tool("greet", "Greet someone")
         def greet(name: str) -> str:
             return f"Hello {name}"
@@ -114,7 +118,7 @@ class TestToolDecorator:
         assert result == "Hello World"
 
     @pytest.mark.asyncio
-    async def test_async_wrapper_calls_fn(self):
+    async def test_async_wrapper_calls_fn(self) -> None:
         @tool("async_greet", "Greet async")
         async def async_greet(name: str) -> str:
             return f"Hello {name}"
@@ -122,7 +126,7 @@ class TestToolDecorator:
         result = await async_greet(name="World")
         assert result == "Hello World"
 
-    def test_pydantic_model_schema(self):
+    def test_pydantic_model_schema(self) -> None:
         from pydantic import BaseModel
 
         class ReadParams(BaseModel):
@@ -133,6 +137,5 @@ class TestToolDecorator:
         def read(path: str, encoding: str = "utf-8") -> str:
             return ""
 
-        assert "path" in read.spec.parameters["properties"]
-
-
+        spec: Any = getattr(read, "spec")
+        assert "path" in spec.parameters["properties"]

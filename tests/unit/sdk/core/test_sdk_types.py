@@ -131,7 +131,7 @@ class TestToolSpec:
         )
         assert spec.name == "test_tool"
         assert spec.handler is my_handler
-        assert spec._pydantic_model is None
+        assert spec._pydantic_model is None  # pyright: ignore[reportPrivateUsage]
 
     def test_frozen(self) -> None:
         spec = ToolSpec(name="t", description="d", parameters={}, handler=lambda: None)

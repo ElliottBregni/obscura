@@ -33,7 +33,7 @@ class ConversationTurn:
     content: str
     timestamp: datetime
     mode: TUIMode
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
 
 
 class TUISession:
@@ -249,7 +249,9 @@ class TestTUISessionAddTurn:
         session = TUISession()
         session.add_turn(_make_turn(content="first"))
         session.add_turn(_make_turn(content="second"))
-        assert session.get_last_turn().content == "second"
+        last_turn = session.get_last_turn()
+        assert last_turn is not None
+        assert last_turn.content == "second"
 
     def test_alternating_user_assistant_turns(self) -> None:
         """User and assistant turns alternate correctly."""
@@ -333,7 +335,9 @@ class TestTUISessionMetadata:
         session = TUISession()
         session.add_turn(_make_turn(metadata=meta))
 
-        stored = session.get_last_turn().metadata
+        last = session.get_last_turn()
+        assert last is not None
+        stored = last.metadata
         assert stored["tool_uses"][0]["output"]["lines"] == 1
         assert stored["tokens"]["input"] == 50
 
@@ -366,4 +370,6 @@ class TestTUISessionClear:
         session.clear()
         session.add_turn(_make_turn(content="new"))
         assert session.turn_count == 1
-        assert session.get_last_turn().content == "new"
+        last = session.get_last_turn()
+        assert last is not None
+        assert last.content == "new"
