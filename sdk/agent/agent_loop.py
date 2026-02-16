@@ -218,8 +218,9 @@ class AgentLoop:
             current_prompt = self._format_tool_results(tool_results)
 
             # Pass structured messages via kwargs so backends can
-            # persist full tool call/result history.
-            kwargs = {"messages": structured}
+            # persist full tool call/result history.  Merge rather
+            # than replace so callers' kwargs (e.g. tool_choice) survive.
+            kwargs = {**kwargs, "messages": structured}
 
         # Hit max turns
         yield AgentEvent(
