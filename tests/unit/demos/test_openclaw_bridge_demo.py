@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from demos.openclaw_bridge.run import run_inproc_demo
+from demos.openclaw_bridge.run import diagnose_http_status, run_inproc_demo
 
 
 class TestOpenClawBridgeDemo:
@@ -17,6 +17,7 @@ class TestOpenClawBridgeDemo:
             task_type="review",
             goal="Review this patch.",
             prompt="Summarize key risks.",
+            run_timeout=5.0,
             namespace="openclaw-demo-test",
         )
 
@@ -29,3 +30,10 @@ class TestOpenClawBridgeDemo:
         assert isinstance(telemetry, list)
         assert len(telemetry) >= 1
         assert result["memory_value"] == "Review this patch."
+
+    def test_diagnose_http_status_token_and_gateway(self) -> None:
+        auth_diag = diagnose_http_status(401)
+        assert "token" in auth_diag["likely_cause"].lower()
+
+        gateway_diag = diagnose_http_status(502)
+        assert "gateway" in gateway_diag["likely_cause"].lower()

@@ -59,12 +59,14 @@ class A2AService:
         get_runtime: Callable[..., Any] | None = None,
         agent_model: str = "copilot",
         agent_system_prompt: str = "",
+        agent_max_turns: int = 10,
     ) -> None:
         self._store = store
         self._agent_card = agent_card
         self._get_runtime = get_runtime
         self._agent_model = agent_model
         self._agent_system_prompt = agent_system_prompt
+        self._agent_max_turns = agent_max_turns
 
         # Active tasks: task_id → asyncio.Task wrapping agent execution
         self._running: dict[str, asyncio.Task[Any]] = {}
@@ -363,7 +365,11 @@ class A2AService:
 
         on_confirm = self._make_on_confirm(task.id)
         try:
-            result = await agent.run(prompt, on_confirm=on_confirm)
+            result = await agent.run_loop(
+                prompt,
+                max_turns=self._agent_max_turns,
+                on_confirm=on_confirm,
+            )
             return str(result) if result else ""
         finally:
             await agent.stop()
@@ -393,7 +399,11 @@ class A2AService:
 
         on_confirm = self._make_on_confirm(task.id)
         try:
-            async for event in agent.stream_loop(prompt, on_confirm=on_confirm):
+            async for event in agent.stream_loop(
+                prompt,
+                max_turns=self._agent_max_turns,
+                on_confirm=on_confirm,
+            ):
                 yield event
         finally:
             await agent.stop()

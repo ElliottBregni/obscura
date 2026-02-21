@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from sdk.agent.agents import AgentRuntime
 from sdk.auth.models import AuthenticatedUser
+from sdk.demo.framework import DemoAgentConfig, make_demo_user, run_demo_prompt
 
 
 @dataclass(frozen=True)
@@ -40,61 +41,19 @@ async def run_backend_agent(
     run_timeout_seconds: float = 120.0,
 ) -> str:
     """Run one backend-specific agent task and return text output."""
-    import asyncio
-
-    runtime = AgentRuntime(user=make_demo_user(config.role))
-
-    try:
-        try:
-            await asyncio.wait_for(runtime.start(), timeout=start_timeout_seconds)
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"Timed out starting runtime after {start_timeout_seconds}s."
-            ) from exc
-
-        agent = runtime.spawn(
-            config.name,
-            model=config.backend_model,
-            system_prompt=config.system_prompt,
-            memory_namespace=config.memory_namespace,
-        )
-        agent.heartbeat_enabled = False
-        try:
-            await asyncio.wait_for(agent.start(), timeout=start_timeout_seconds)
-        except TimeoutError as exc:
-            raise TimeoutError(
-                "Timed out starting backend agent. "
-                f"backend={config.backend_model} timeout={start_timeout_seconds}s"
-            ) from exc
-
-        if stream:
-            async def _collect_stream() -> str:
-                chunks: list[str] = []
-                async for chunk in agent.stream(prompt):
-                    chunks.append(chunk)
-                return "".join(chunks)
-
-            try:
-                return await asyncio.wait_for(
-                    _collect_stream(),
-                    timeout=run_timeout_seconds,
-                )
-            except TimeoutError as exc:
-                raise TimeoutError(
-                    "Timed out waiting for streaming response. "
-                    f"backend={config.backend_model} timeout={run_timeout_seconds}s"
-                ) from exc
-
-        try:
-            result = await asyncio.wait_for(
-                agent.run(prompt),
-                timeout=run_timeout_seconds,
-            )
-        except TimeoutError as exc:
-            raise TimeoutError(
-                "Timed out waiting for response. "
-                f"backend={config.backend_model} timeout={run_timeout_seconds}s"
-            ) from exc
-        return str(result)
-    finally:
-        await runtime.stop()
+    demo_config = DemoAgentConfig(
+        name=config.name,
+        model=config.backend_model,
+        role=config.role,
+        system_prompt=config.system_prompt,
+        memory_namespace=config.memory_namespace,
+    )
+    return await run_demo_prompt(
+        demo_config,
+        prompt,
+        stream=stream,
+        user=make_demo_user(config.role),
+        runtime_cls=AgentRuntime,
+        start_timeout_seconds=start_timeout_seconds,
+        run_timeout_seconds=run_timeout_seconds,
+    )

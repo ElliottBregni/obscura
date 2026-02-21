@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -188,6 +189,45 @@ async def test_openclaw_bridge_sets_request_and_idempotency_headers() -> None:
 
     assert seen_headers["x-request-id"] == "req-123"
     assert seen_headers["x-idempotency-key"] == "idem-123"
+
+
+@pytest.mark.asyncio
+async def test_openclaw_bridge_run_agent_sends_timeout_and_cancellation() -> None:
+    seen_payload: dict[str, Any] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/run"):
+            payload = cast(
+                dict[str, Any],
+                json.loads(request.content.decode("utf-8")),
+            )
+            seen_payload.update(payload)
+            return httpx.Response(200, json={"agent_id": "a1", "status": "RUNNING", "result": "ok"})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        headers={"Authorization": "Bearer local-dev-token"},
+    ) as client:
+        bridge = OpenClawBridge(
+            OpenClawBridgeConfig(base_url="http://testserver"),
+            client=client,
+        )
+        result = await bridge.run_agent(
+            "a1",
+            RunAgentRequest(
+                prompt="hello",
+                context={"source": "smoke"},
+                timeout_seconds=9.5,
+                cancellation_token="cancel-123",
+            ),
+        )
+        assert result["result"] == "ok"
+
+    assert seen_payload["timeout_seconds"] == 9.5
+    assert seen_payload["cancellation_token"] == "cancel-123"
 
 
 @pytest.mark.asyncio

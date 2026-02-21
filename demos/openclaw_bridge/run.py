@@ -121,6 +121,39 @@ class _DemoRuntime:
         )
 
 
+def diagnose_http_status(status_code: int) -> dict[str, str]:
+    """Map HTTP status to likely cause and suggested operator action."""
+    if status_code == 401:
+        return {
+            "likely_cause": "Bad or missing token.",
+            "suggested_action": "Verify --token / OBSCURA_TOKEN and auth settings.",
+        }
+    if status_code == 403:
+        return {
+            "likely_cause": "Authenticated but forbidden (missing role/capability).",
+            "suggested_action": "Use a token with required roles or adjust RBAC.",
+        }
+    if status_code == 500:
+        return {
+            "likely_cause": "Server/backend runtime failure.",
+            "suggested_action": "Check server logs for backend auth/runtime errors.",
+        }
+    if status_code == 502:
+        return {
+            "likely_cause": "Upstream gateway/proxy failure.",
+            "suggested_action": "Check reverse proxy/upstream target health.",
+        }
+    if status_code == 504:
+        return {
+            "likely_cause": "Request timed out (agent run exceeded timeout).",
+            "suggested_action": "Increase --run-timeout or use a faster backend.",
+        }
+    return {
+        "likely_cause": "Unexpected HTTP failure.",
+        "suggested_action": "Check response body and server logs.",
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run OpenClaw bridge e2e demo")
     parser.add_argument(
@@ -135,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-type", default="review")
     parser.add_argument("--goal", default="Review a small patch.")
     parser.add_argument("--prompt", default="Summarize risks in this change.")
+    parser.add_argument(
+        "--run-timeout",
+        type=float,
+        default=45.0,
+        help="Server-side timeout_seconds for /agents/{id}/run.",
+    )
     parser.add_argument("--namespace", default="openclaw-demo")
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
     return parser
@@ -146,6 +185,7 @@ async def run_inproc_demo(
     task_type: str,
     goal: str,
     prompt: str,
+    run_timeout: float,
     namespace: str,
 ) -> dict[str, Any]:
     from sdk.server import create_app
@@ -183,7 +223,12 @@ async def run_inproc_demo(
             agent_id = str(spawned["agent_id"])
             run_result = await bridge.run_agent(
                 agent_id,
-                RunAgentRequest(prompt=prompt, context={"source": "inproc"}),
+                RunAgentRequest(
+                    prompt=prompt,
+                    context={"source": "inproc"},
+                    timeout_seconds=run_timeout,
+                    cancellation_token="openclaw-e2e-inproc",
+                ),
                 metadata=metadata,
             )
             status = await bridge.get_agent_status(agent_id, metadata=metadata)
@@ -227,6 +272,7 @@ async def run_live_demo(
     task_type: str,
     goal: str,
     prompt: str,
+    run_timeout: float,
     namespace: str,
 ) -> dict[str, Any]:
     bridge = OpenClawBridge(OpenClawBridgeConfig(base_url=base_url, token=token))
@@ -247,7 +293,12 @@ async def run_live_demo(
         agent_id = str(spawned["agent_id"])
         run_result = await bridge.run_agent(
             agent_id,
-            RunAgentRequest(prompt=prompt, context={"source": "live"}),
+            RunAgentRequest(
+                prompt=prompt,
+                context={"source": "live"},
+                timeout_seconds=run_timeout,
+                cancellation_token="openclaw-e2e-live",
+            ),
             metadata=metadata,
         )
         status = await bridge.get_agent_status(agent_id, metadata=metadata)
@@ -277,6 +328,7 @@ async def run_demo(args: argparse.Namespace) -> dict[str, Any]:
             task_type=args.task_type,
             goal=args.goal,
             prompt=args.prompt,
+            run_timeout=args.run_timeout,
             namespace=args.namespace,
         )
     return await run_live_demo(
@@ -286,13 +338,47 @@ async def run_demo(args: argparse.Namespace) -> dict[str, Any]:
         task_type=args.task_type,
         goal=args.goal,
         prompt=args.prompt,
+        run_timeout=args.run_timeout,
         namespace=args.namespace,
     )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    result = asyncio.run(run_demo(args))
+    try:
+        result = asyncio.run(run_demo(args))
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        diagnosis = diagnose_http_status(status)
+        error_payload = {
+            "error_type": "http_status_error",
+            "status_code": status,
+            "detail": exc.response.text,
+            **diagnosis,
+        }
+        if args.json:
+            print(json.dumps(error_payload, indent=2))
+            return
+        print(f"Request failed with HTTP {status}")
+        print(f"Likely cause: {diagnosis['likely_cause']}")
+        print(f"Suggested action: {diagnosis['suggested_action']}")
+        print(f"Response: {exc.response.text}")
+        return
+    except httpx.RequestError as exc:
+        error_payload = {
+            "error_type": "request_error",
+            "detail": str(exc),
+            "likely_cause": "Connection issue or unreachable server.",
+            "suggested_action": "Check --base-url and whether the server is running.",
+        }
+        if args.json:
+            print(json.dumps(error_payload, indent=2))
+            return
+        print("Request failed before receiving an HTTP response.")
+        print(f"Likely cause: {error_payload['likely_cause']}")
+        print(f"Suggested action: {error_payload['suggested_action']}")
+        print(f"Detail: {error_payload['detail']}")
+        return
     if args.json:
         print(json.dumps(result, indent=2, default=str))
         return

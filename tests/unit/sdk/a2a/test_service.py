@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -327,3 +328,66 @@ class TestProperties:
         card = _card()
         svc = A2AService(store=InMemoryTaskStore(), agent_card=card)
         assert svc.agent_card is card
+
+
+class TestAPERLoopIntegration:
+    @pytest.mark.asyncio
+    async def test_execute_agent_uses_run_loop(self) -> None:
+        fake_agent = MagicMock()
+        fake_agent.start = AsyncMock()
+        fake_agent.stop = AsyncMock()
+        fake_agent.run_loop = AsyncMock(return_value="loop-result")
+
+        fake_runtime = MagicMock()
+        fake_runtime.spawn = MagicMock(return_value=fake_agent)
+
+        svc = A2AService(
+            store=InMemoryTaskStore(),
+            agent_card=_card(),
+            get_runtime=lambda: fake_runtime,
+            agent_model="claude",
+            agent_max_turns=7,
+        )
+
+        task = await svc.store.create_task("ctx-1", _msg("hello"))
+        result = await svc._execute_agent(task, "hello")
+        assert result == "loop-result"
+        fake_agent.run_loop.assert_awaited_once()
+        assert fake_agent.run_loop.await_args.args == ("hello",)
+        run_loop_kwargs = fake_agent.run_loop.await_args.kwargs
+        assert run_loop_kwargs["max_turns"] == 7
+        assert callable(run_loop_kwargs["on_confirm"])
+
+    @pytest.mark.asyncio
+    async def test_execute_agent_stream_uses_stream_loop_max_turns(self) -> None:
+        from sdk.internal.types import AgentEvent, AgentEventKind
+
+        async def _event_stream():
+            yield AgentEvent(
+                kind=AgentEventKind.TEXT_DELTA,
+                text="chunk",
+            )
+
+        fake_agent = MagicMock()
+        fake_agent.start = AsyncMock()
+        fake_agent.stop = AsyncMock()
+        fake_agent.stream_loop = MagicMock(return_value=_event_stream())
+
+        fake_runtime = MagicMock()
+        fake_runtime.spawn = MagicMock(return_value=fake_agent)
+
+        svc = A2AService(
+            store=InMemoryTaskStore(),
+            agent_card=_card(),
+            get_runtime=lambda: fake_runtime,
+            agent_max_turns=5,
+        )
+
+        task = await svc.store.create_task("ctx-1", _msg("hello"))
+        events = [event async for event in svc._execute_agent_stream(task, "hello")]
+        assert len(events) == 1
+        assert events[0].kind == AgentEventKind.TEXT_DELTA
+        fake_agent.stream_loop.assert_called_once()
+        kwargs = fake_agent.stream_loop.call_args.kwargs
+        assert kwargs["max_turns"] == 5
+        assert callable(kwargs["on_confirm"])

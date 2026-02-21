@@ -15,23 +15,15 @@ import json
 import logging
 import sys
 
-from sdk.auth.models import AuthenticatedUser
-
 from demos.support.orchestrator import SupportPipeline
+from sdk.demo.framework import make_demo_user
 
 
 # ---------------------------------------------------------------------------
 # Mock user for demo
 # ---------------------------------------------------------------------------
 
-DEMO_USER = AuthenticatedUser(
-    user_id="demo-user-001",
-    email="demo@obscura.dev",
-    roles=("operator", "agent:copilot"),
-    org_id="org-demo",
-    token_type="user",
-    raw_token="demo-token",
-)
+DEMO_USER = make_demo_user("agent:copilot")
 
 
 # ---------------------------------------------------------------------------

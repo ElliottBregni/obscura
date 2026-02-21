@@ -83,7 +83,7 @@ class JWKSCache:
     async def refresh(self) -> None:
         """Fetch keys from the JWKS endpoint."""
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(self._jwks_uri)
                 resp.raise_for_status()
                 data = resp.json()

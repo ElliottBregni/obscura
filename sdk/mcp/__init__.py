@@ -54,6 +54,16 @@ from sdk.mcp.client import MCPClient, MCPSessionManager
 
 from sdk.mcp.server import ObscuraMCPServer, create_mcp_router
 
+from sdk.mcp.config_loader import DiscoveredMCPServer, build_runtime_server_configs, discover_mcp_servers
+from sdk.mcp.catalog import (
+    MCPCatalogEntry,
+    MCPCatalogProvider,
+    MCPRegistryAPICatalogProvider,
+    MCPServersOrgCatalogProvider,
+    catalog_entries_to_mcp_servers,
+    write_catalog_config,
+)
+
 from sdk.mcp.tools import (
     ObscuraMCPToolRegistry,
     create_array_property,
@@ -93,6 +103,16 @@ __all__ = [
     # Server
     "ObscuraMCPServer",
     "create_mcp_router",
+    # Config loader
+    "DiscoveredMCPServer",
+    "discover_mcp_servers",
+    "build_runtime_server_configs",
+    "MCPCatalogEntry",
+    "MCPCatalogProvider",
+    "MCPRegistryAPICatalogProvider",
+    "MCPServersOrgCatalogProvider",
+    "catalog_entries_to_mcp_servers",
+    "write_catalog_config",
     # Tools
     "ObscuraMCPToolRegistry",
     "create_array_property",

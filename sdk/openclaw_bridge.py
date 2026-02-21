@@ -99,12 +99,19 @@ class RunAgentRequest:
 
     prompt: str
     context: dict[str, Any] = field(default_factory=lambda: {})
+    timeout_seconds: float | None = None
+    cancellation_token: str = ""
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "prompt": self.prompt,
             "context": self.context,
         }
+        if self.timeout_seconds is not None:
+            payload["timeout_seconds"] = self.timeout_seconds
+        if self.cancellation_token:
+            payload["cancellation_token"] = self.cancellation_token
+        return payload
 
 
 @dataclass(frozen=True)

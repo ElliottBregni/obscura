@@ -1,5 +1,6 @@
 """Tests for sdk.routes.agents -- Agent CRUD, bulk ops, templates, tags, streaming."""
 
+import asyncio
 import pytest
 from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -58,6 +59,7 @@ def _make_mock_agent(
     mock.start = AsyncMock()
     mock.stop = AsyncMock()
     mock.run = AsyncMock(return_value="result text")
+    mock.list_registered_tools = MagicMock(return_value=[])
     return mock
 
 
@@ -103,6 +105,8 @@ class TestAgentSpawn:
         assert data["agent_id"] == "agent-1"
         assert data["name"] == "test-agent"
         assert data["mcp_enabled"] is False
+        assert runtime.spawn.call_args.kwargs["enable_system_tools"] is True
+        assert runtime.spawn.call_args.kwargs["a2a_remote_tools"] == {}
 
     @patch("sdk.routes.agents.get_runtime")
     def test_spawn_agent_with_model(
@@ -152,11 +156,63 @@ class TestAgentSpawn:
             json={
                 "name": "mcp-agent",
                 "model": "copilot",
-                "mcp": {"enabled": True, "servers": [{"transport": "stdio"}]},
+                "mcp": {
+                    "enabled": True,
+                    "servers": [{"transport": "stdio"}],
+                    "config_path": "config/mcp-config.json",
+                    "server_names": ["playwright"],
+                    "primary_server_name": "github",
+                    "auto_discover": True,
+                    "resolve_env": True,
+                },
             },
         )
         assert resp.status_code == 200
         assert resp.json()["mcp_enabled"] is True
+        mcp_cfg = runtime.spawn.call_args.kwargs["mcp"]
+        assert mcp_cfg.enabled is True
+        assert mcp_cfg.servers == [{"transport": "stdio"}]
+        assert mcp_cfg.config_path == "config/mcp-config.json"
+        assert mcp_cfg.server_names == ["playwright"]
+        assert mcp_cfg.primary_server_name == "github"
+        assert mcp_cfg.auto_discover is True
+        assert mcp_cfg.resolve_env is True
+        assert runtime.spawn.call_args.kwargs["enable_system_tools"] is True
+
+    @patch("sdk.routes.agents.get_runtime")
+    def test_spawn_agent_with_system_tools_disabled(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.post(
+            "/api/v1/agents",
+            json={"name": "no-system-tools", "enable_system_tools": False},
+        )
+        assert resp.status_code == 200
+        assert runtime.spawn.call_args.kwargs["enable_system_tools"] is False
+
+    @patch("sdk.routes.agents.get_runtime")
+    def test_spawn_agent_with_a2a_remote_tools(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        payload = {
+            "name": "remote-tools",
+            "a2a_remote_tools": {
+                "enabled": True,
+                "urls": ["https://agent-one.local", "https://agent-two.local"],
+                "auth_token": "demo",
+            },
+        }
+        resp = client.post("/api/v1/agents", json=payload)
+        assert resp.status_code == 200
+        assert runtime.spawn.call_args.kwargs["a2a_remote_tools"] == payload["a2a_remote_tools"]
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +256,43 @@ class TestAgentGet:
         mock_get_runtime.return_value = runtime
 
         resp = client.get("/api/v1/agents/nonexistent")
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"]
+
+
+class TestAgentListTools:
+    @patch("sdk.routes.agents.get_runtime")
+    def test_list_tools_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+        fake_tool = MagicMock()
+        fake_tool.name = "run_python3"
+        fake_tool.description = "Execute python code"
+        fake_tool.required_tier = "privileged"
+        fake_tool.parameters = {"type": "object"}
+        agent.list_registered_tools = MagicMock(return_value=[fake_tool])
+
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.get("/api/v1/agents/agent-1/tools")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_id"] == "agent-1"
+        assert len(data["tools"]) == 1
+        assert data["tools"][0]["name"] == "run_python3"
+        assert data["tools"][0]["required_tier"] == "privileged"
+
+    @patch("sdk.routes.agents.get_runtime")
+    def test_list_tools_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        runtime = AsyncMock()
+        runtime.get_agent = MagicMock(return_value=None)
+        mock_get_runtime.return_value = runtime
+
+        resp = client.get("/api/v1/agents/nonexistent/tools")
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"]
 
@@ -257,6 +350,42 @@ class TestAgentRun:
         resp = client.post("/api/v1/agents/agent-1/run", json={"prompt": "fail"})
         assert resp.status_code == 500
         assert "boom" in resp.json()["detail"]
+
+    @patch("sdk.routes.agents.get_runtime")
+    def test_run_agent_timeout(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+
+        async def _slow_run(*_args: object, **_kwargs: object) -> str:
+            await asyncio.sleep(0.05)
+            return "late"
+
+        agent.run = AsyncMock(side_effect=_slow_run)
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.post(
+            "/api/v1/agents/agent-1/run",
+            json={"prompt": "slow", "timeout_seconds": 0.01},
+        )
+        assert resp.status_code == 504
+        assert "timed out" in resp.json()["detail"]
+
+    @patch("sdk.routes.agents.get_runtime")
+    def test_run_agent_timeout_invalid(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.post(
+            "/api/v1/agents/agent-1/run",
+            json={"prompt": "x", "timeout_seconds": 0},
+        )
+        assert resp.status_code == 400
+        assert "timeout_seconds" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

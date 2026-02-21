@@ -8,7 +8,7 @@ model alias resolution and safety guards.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, cast
 
 from sdk.internal.auth import AuthConfig, resolve_auth
 from sdk.internal.tools import ToolRegistry
@@ -293,7 +293,8 @@ class ObscuraClient:
         """
         fork_fn = getattr(self._backend, "fork_session", None)
         if callable(fork_fn):
-            return await fork_fn(ref)
+            typed_fork = cast(Callable[[SessionRef], Awaitable[SessionRef]], fork_fn)
+            return await typed_fork(ref)
         raise RuntimeError(
             f"Backend {self._backend_type.value} does not support session forking."
         )
@@ -304,6 +305,10 @@ class ObscuraClient:
         """Register a tool with the active backend."""
         self._tool_registry.register(spec)
         self._backend.register_tool(spec)
+
+    def list_tools(self) -> list[ToolSpec]:
+        """Return all currently registered tool specs."""
+        return self._tool_registry.all()
 
     # -- Hooks ---------------------------------------------------------------
 

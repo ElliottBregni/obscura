@@ -33,13 +33,15 @@ import os
 import uuid
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, cast
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 from sdk.internal.types import AgentEvent, AgentEventKind
+from sdk.internal.types import ToolSpec
+from sdk.internal.paths import resolve_obscura_mcp_dir
 from sdk.auth.models import AuthenticatedUser
 from sdk.client import ObscuraClient
 from sdk.memory import MemoryStore
@@ -47,6 +49,19 @@ from sdk.memory import MemoryStore
 if TYPE_CHECKING:
     from sdk.backends.mcp_backend import MCPBackend
     from sdk.heartbeat.client import AgentHeartbeatClient
+    from sdk.agent.tool_providers import ToolProviderRegistry
+
+
+def _default_mcp_servers() -> list[dict[str, Any]]:
+    return []
+
+
+def _default_server_names() -> list[str]:
+    return []
+
+
+def _default_mcp_config_path() -> str:
+    return str(resolve_obscura_mcp_dir())
 
 
 class AgentStatus(Enum):
@@ -64,7 +79,12 @@ class MCPConfig(BaseModel):
     """Configuration for MCP (Model Context Protocol) integration."""
 
     enabled: bool = False
-    servers: list[dict[str, Any]] = []
+    servers: list[dict[str, Any]] = Field(default_factory=_default_mcp_servers)
+    config_path: str = Field(default_factory=_default_mcp_config_path)
+    server_names: list[str] = Field(default_factory=_default_server_names)
+    primary_server_name: str = "github"
+    auto_discover: bool = True
+    resolve_env: bool = True
     """List of MCP server configurations. Each server config should have:
     - transport: "stdio" or "sse"
     - command: str (for stdio)
@@ -87,6 +107,8 @@ class AgentConfig(BaseModel):
     parent_agent_id: str | None = None
     tags: list[str] = []
     mcp: MCPConfig = MCPConfig()
+    enable_system_tools: bool = True
+    a2a_remote_tools: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentState(BaseModel):
@@ -140,6 +162,7 @@ class Agent:
         self.iteration_count = 0
         self._client: ObscuraClient | None = None
         self._mcp_backend: MCPBackend | None = None
+        self._tool_provider_registry: ToolProviderRegistry | None = None
         self._message_queue: asyncio.Queue[AgentMessage] = asyncio.Queue()
         self._task: asyncio.Task[Any] | None = None
         self._heartbeat_client: AgentHeartbeatClient | None = None
@@ -222,8 +245,22 @@ class Agent:
         """Get the agent's memory store."""
         return MemoryStore.for_user(self.user)
 
+    def list_registered_tools(self) -> list[ToolSpec]:
+        """Return all tools currently registered on the underlying client."""
+        if self._client is None:
+            return []
+        return self._client.list_tools()
+
     async def start(self) -> None:
         """Initialize the agent and connect to backend."""
+        from sdk.agent.tool_providers import (
+            A2ARemoteToolProvider,
+            MCPToolProvider,
+            SystemToolProvider,
+            ToolProviderContext,
+            ToolProviderRegistry,
+        )
+
         self._client = ObscuraClient(
             self.config.model,
             system_prompt=self.config.system_prompt,
@@ -231,13 +268,39 @@ class Agent:
         )
         await self._client.start()
 
-        # Initialize MCP backend if configured
-        if self.config.mcp.enabled and self.config.mcp.servers:
+        provider_registry = ToolProviderRegistry()
+
+        server_configs: list[dict[str, Any]] = list(self.config.mcp.servers)
+        if (
+            self.config.mcp.enabled
+            and not server_configs
+            and self.config.mcp.auto_discover
+        ):
+            from sdk.mcp.config_loader import (
+                build_runtime_server_configs,
+                discover_mcp_servers,
+            )
+
+            discovered = discover_mcp_servers(
+                self.config.mcp.config_path,
+                resolve_env=self.config.mcp.resolve_env,
+            )
+            selected_names = (
+                self.config.mcp.server_names
+                if self.config.mcp.server_names
+                else None
+            )
+            server_configs = build_runtime_server_configs(
+                discovered,
+                selected_names=selected_names,
+                primary_server_name=self.config.mcp.primary_server_name,
+            )
+
+        if self.config.mcp.enabled and server_configs:
             from sdk.mcp.types import MCPConnectionConfig, MCPTransportType
-            from sdk.backends.mcp_backend import MCPBackend
 
             mcp_configs: list[MCPConnectionConfig] = []
-            for server_config in self.config.mcp.servers:
+            for server_config in server_configs:
                 transport = MCPTransportType(server_config.get("transport", "stdio"))
                 config = MCPConnectionConfig(
                     transport=transport,
@@ -248,12 +311,34 @@ class Agent:
                 )
                 mcp_configs.append(config)
 
-            self._mcp_backend = MCPBackend(mcp_configs)
-            await self._mcp_backend.start()
+            provider_registry.add(MCPToolProvider(mcp_configs))
 
-            # Register MCP tools with the client
-            for tool in self._mcp_backend.list_tools():
-                self._client.register_tool(tool)
+        if self.config.enable_system_tools:
+            provider_registry.add(SystemToolProvider())
+
+        a2a_remote_config = self.config.a2a_remote_tools
+        if bool(a2a_remote_config.get("enabled", False)):
+            raw_urls = a2a_remote_config.get("urls", [])
+            urls = (
+                [str(url) for url in cast(list[Any], raw_urls)]
+                if isinstance(raw_urls, list)
+                else []
+            )
+            if urls:
+                provider_registry.add(
+                    A2ARemoteToolProvider(
+                        urls=urls,
+                        auth_token=(
+                            str(a2a_remote_config["auth_token"])
+                            if "auth_token" in a2a_remote_config
+                            and a2a_remote_config["auth_token"] is not None
+                            else None
+                        ),
+                    )
+                )
+
+        await provider_registry.install_all(ToolProviderContext(agent=self))
+        self._tool_provider_registry = provider_registry
 
         # Initialize heartbeat client if enabled
         if self._heartbeat_enabled:
@@ -669,7 +754,14 @@ class Agent:
                 # Ignore cancel scope errors from underlying SDK
                 if "cancel scope" not in str(e):
                     raise
-        if self._mcp_backend:
+        if self._tool_provider_registry:
+            from sdk.agent.tool_providers import ToolProviderContext
+
+            await self._tool_provider_registry.uninstall_all(
+                ToolProviderContext(agent=self)
+            )
+            self._tool_provider_registry = None
+        elif self._mcp_backend:
             await self._mcp_backend.stop()
             self._mcp_backend = None
         if self._heartbeat_client:

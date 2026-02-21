@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 from sdk.auth.models import AuthenticatedUser
 from sdk.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from sdk.deps import audit, get_runtime
+from sdk.internal.paths import resolve_obscura_mcp_dir
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
@@ -57,8 +59,26 @@ async def agent_spawn(
     mcp_config: dict[str, Any] = body.get("mcp", {})
     mcp_enabled: bool = mcp_config.get("enabled", False)
     mcp_servers: list[dict[str, Any]] = mcp_config.get("servers", [])
+    mcp_config_path = str(
+        mcp_config.get("config_path", str(resolve_obscura_mcp_dir()))
+    )
+    raw_server_names = mcp_config.get("server_names", [])
+    mcp_server_names: list[str] = (
+        [str(name) for name in cast(list[Any], raw_server_names)]
+        if isinstance(raw_server_names, list)
+        else []
+    )
+    mcp_primary_server_name = str(mcp_config.get("primary_server_name", "github"))
+    mcp_auto_discover = bool(mcp_config.get("auto_discover", True))
+    mcp_resolve_env = bool(mcp_config.get("resolve_env", True))
 
     from sdk.agent.agents import MCPConfig
+    raw_a2a_remote_tools = body.get("a2a_remote_tools", {})
+    a2a_remote_tools: dict[str, Any] = (
+        cast(dict[str, Any], raw_a2a_remote_tools)
+        if isinstance(raw_a2a_remote_tools, dict)
+        else {}
+    )
 
     agent = runtime.spawn(
         name=body.get("name", "unnamed"),
@@ -66,7 +86,17 @@ async def agent_spawn(
         system_prompt=body.get("system_prompt", ""),
         memory_namespace=body.get("memory_namespace", "default"),
         max_iterations=body.get("max_iterations", 10),
-        mcp=MCPConfig(enabled=mcp_enabled, servers=mcp_servers),
+        enable_system_tools=bool(body.get("enable_system_tools", True)),
+        a2a_remote_tools=a2a_remote_tools,
+        mcp=MCPConfig(
+            enabled=mcp_enabled,
+            servers=mcp_servers,
+            config_path=mcp_config_path,
+            server_names=mcp_server_names,
+            primary_server_name=mcp_primary_server_name,
+            auto_discover=mcp_auto_discover,
+            resolve_env=mcp_resolve_env,
+        ),
     )
 
     await agent.start()
@@ -118,6 +148,35 @@ async def agent_get(
     )
 
 
+@router.get("/agents/{agent_id}/tools")
+async def agent_list_tools(
+    agent_id: str,
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+) -> JSONResponse:
+    """List currently registered tools for an agent."""
+    runtime = await get_runtime(user)
+    agent = runtime.get_agent(agent_id)
+
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    tools = agent.list_registered_tools()
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "required_tier": tool.required_tier,
+                    "parameters": tool.parameters,
+                }
+                for tool in tools
+            ],
+        }
+    )
+
+
 @router.post("/agents/{agent_id}/run")
 async def agent_run(
     agent_id: str,
@@ -133,9 +192,40 @@ async def agent_run(
 
     prompt: str = body.get("prompt", "")
     context: dict[str, Any] = body.get("context", {})
+    timeout_raw = body.get("timeout_seconds")
+    timeout_seconds: float | None = None
+    if timeout_raw is not None:
+        try:
+            timeout_seconds = float(timeout_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="timeout_seconds must be a positive number",
+            )
+        if timeout_seconds <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="timeout_seconds must be a positive number",
+            )
 
     try:
-        result = await agent.run(prompt, **context)
+        if timeout_seconds is None:
+            result = await agent.run(prompt, **context)
+        else:
+            run_task = asyncio.create_task(
+                agent.run(prompt, **context)
+            )
+            done, _pending = await asyncio.wait(
+                {run_task},
+                timeout=timeout_seconds,
+            )
+            if run_task not in done:
+                run_task.cancel()
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Agent run timed out after {timeout_seconds:.3f}s",
+                )
+            result = await run_task
         return JSONResponse(
             content={
                 "agent_id": agent_id,
@@ -143,6 +233,8 @@ async def agent_run(
                 "result": result,
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

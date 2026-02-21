@@ -55,6 +55,8 @@ class TestAgentConfig:
         assert config.system_prompt == ""
         assert config.memory_namespace == "default"
         assert config.max_iterations == 10
+        assert config.enable_system_tools is True
+        assert config.a2a_remote_tools == {}
 
     def test_custom_config(self) -> None:
         config = AgentConfig(
@@ -78,6 +80,11 @@ class TestAgentConfig:
         config = AgentConfig(name="test", model="claude")
         assert config.mcp.enabled is False
         assert config.mcp.servers == []
+        assert config.mcp.config_path.endswith(".obscura/mcp")
+        assert config.mcp.server_names == []
+        assert config.mcp.primary_server_name == "github"
+        assert config.mcp.auto_discover is True
+        assert config.mcp.resolve_env is True
 
 
 class TestMCPConfig:
@@ -88,6 +95,21 @@ class TestMCPConfig:
         )
         assert mcp.enabled is True
         assert len(mcp.servers) == 1
+
+    def test_mcp_config_discovery_fields(self) -> None:
+        mcp = MCPConfig(
+            enabled=True,
+            config_path="config/custom-mcp.json",
+            server_names=["playwright", "jira"],
+            primary_server_name="supabase",
+            auto_discover=True,
+            resolve_env=False,
+        )
+        assert mcp.config_path == "config/custom-mcp.json"
+        assert mcp.server_names == ["playwright", "jira"]
+        assert mcp.primary_server_name == "supabase"
+        assert mcp.auto_discover is True
+        assert mcp.resolve_env is False
 
 
 class TestAgentRuntime:
@@ -424,7 +446,65 @@ class TestAgentStart:
                 await agent.start()
 
                 mcp_instance.start.assert_awaited_once()
-                client_instance.register_tool.assert_called_once_with(mock_tool)
+                client_instance.register_tool.assert_any_call(mock_tool)
+                assert agent.mcp_backend is mcp_instance
+
+    @pytest.mark.asyncio
+    async def test_start_with_mcp_auto_discovery(self, runtime: AgentRuntime) -> None:
+        mcp_config = MCPConfig(
+            enabled=True,
+            servers=[],
+            config_path="config/mcp-config.json",
+            server_names=["playwright"],
+            primary_server_name="github",
+            auto_discover=True,
+            resolve_env=True,
+        )
+        with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
+            agent = runtime.spawn("mcp-auto", model="claude", mcp=mcp_config)
+        agent.heartbeat_enabled = False
+
+        mock_tool = MagicMock()
+        mock_tool.name = "auto_tool"
+
+        with patch("sdk.agent.agents.ObscuraClient") as MockClient:
+            client_instance = AsyncMock()
+            client_instance.register_tool = MagicMock()
+            MockClient.return_value = client_instance
+
+            with patch(
+                "sdk.mcp.config_loader.discover_mcp_servers"
+            ) as mock_discover, patch(
+                "sdk.mcp.config_loader.build_runtime_server_configs"
+            ) as mock_build, patch(
+                "sdk.backends.mcp_backend.MCPBackend"
+            ) as MockMCPBackend:
+                mock_discover.return_value = []
+                mock_build.return_value = [
+                    {
+                        "transport": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "@playwright/mcp@latest"],
+                        "env": {},
+                        "tools": [],
+                    }
+                ]
+                mcp_instance = AsyncMock()
+                mcp_instance.list_tools = MagicMock(return_value=[mock_tool])
+                MockMCPBackend.return_value = mcp_instance
+
+                await agent.start()
+
+                mock_discover.assert_called_once_with(
+                    "config/mcp-config.json",
+                    resolve_env=True,
+                )
+                mock_build.assert_called_once_with(
+                    [],
+                    selected_names=["playwright"],
+                    primary_server_name="github",
+                )
+                client_instance.register_tool.assert_any_call(mock_tool)
                 assert agent.mcp_backend is mcp_instance
 
     @pytest.mark.asyncio
