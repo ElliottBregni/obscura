@@ -4,6 +4,8 @@ sdk.schemas -- Pydantic request/response models for the Obscura API.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -18,6 +20,18 @@ class SendRequest(BaseModel):
     model_alias: str | None = Field(default=None, description="copilot_models alias")
     system_prompt: str = Field(default="", description="System prompt")
     session_id: str | None = Field(default=None, description="Resume session by ID")
+    mode: str = Field(
+        default="unified",
+        description="Execution mode: 'unified' or 'native'",
+    )
+    api_mode: str | None = Field(
+        default=None,
+        description="Backend API mode override (e.g. 'responses', 'chat_completions')",
+    )
+    native: dict[str, Any] | None = Field(
+        default=None,
+        description="Provider-native payload envelope",
+    )
 
 
 class SendResponse(BaseModel):
@@ -40,6 +54,18 @@ class StreamRequest(BaseModel):
     model_alias: str | None = Field(default=None, description="copilot_models alias")
     system_prompt: str = Field(default="", description="System prompt")
     session_id: str | None = Field(default=None, description="Resume session by ID")
+    mode: str = Field(
+        default="unified",
+        description="Execution mode: 'unified' or 'native'",
+    )
+    api_mode: str | None = Field(
+        default=None,
+        description="Backend API mode override (e.g. 'responses', 'chat_completions')",
+    )
+    native: dict[str, Any] | None = Field(
+        default=None,
+        description="Provider-native payload envelope",
+    )
 
 
 class SessionCreateRequest(BaseModel):

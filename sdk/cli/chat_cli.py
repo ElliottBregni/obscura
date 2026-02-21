@@ -1090,7 +1090,7 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> Non
 
     vendor_cmds: dict[str, str] = {
         "claude": "claude",
-        "openai": "openai",
+        "openai": "codex",
         "copilot": "copilot"
     }
 

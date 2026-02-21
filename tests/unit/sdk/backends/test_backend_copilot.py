@@ -1,9 +1,11 @@
 """Tests for sdk.backends.copilot — CopilotBackend."""
 
 import pytest
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
-from sdk.internal.types import Backend, HookPoint, ToolSpec
+from sdk.internal.types import Backend, ChunkKind, HookPoint, StreamChunk, ToolSpec
 from sdk.backends.copilot import (
     CopilotBackend,
     public_make_handler,
@@ -28,6 +30,12 @@ class TestCopilotBackendInit:
         b = CopilotBackend(_make_auth(), model="gpt-4o", system_prompt="Be helpful")
         assert b.model == "gpt-4o"
         assert b.system_prompt == "Be helpful"
+
+    def test_capabilities_include_native_features(self):
+        b = CopilotBackend(_make_auth())
+        caps = b.capabilities()
+        assert caps.supports_native_mode is True
+        assert "event_stream" in caps.native_features
 
 
 class TestCopilotBackendLifecycle:
@@ -82,6 +90,60 @@ class TestCopilotBackendSend:
         b = CopilotBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             await b.send("test")
+
+    @pytest.mark.asyncio
+    async def test_stream_event_lifecycle(self):
+        b = CopilotBackend(_make_auth())
+        b.set_client_for_testing(MagicMock())
+
+        handlers: list[Any] = []
+
+        class FakeSession:
+            def on(self, handler: Any) -> Any:
+                handlers.append(handler)
+                return lambda: None
+
+            async def send(self, _options: Any) -> None:
+                events = [
+                    SimpleNamespace(
+                        type="assistant.reasoning_delta",
+                        data=SimpleNamespace(delta_content="thinking"),
+                    ),
+                    SimpleNamespace(
+                        type="assistant.message_delta",
+                        data=SimpleNamespace(delta_content="hello"),
+                    ),
+                    SimpleNamespace(
+                        type="tool.execution_start",
+                        data=SimpleNamespace(tool_name="read_file"),
+                    ),
+                    SimpleNamespace(
+                        type="tool.execution_end",
+                        data=SimpleNamespace(tool_name="read_file"),
+                    ),
+                    SimpleNamespace(type="session.idle", data=SimpleNamespace()),
+                ]
+                for event in events:
+                    for h in list(handlers):
+                        h(event)
+
+        b.set_session_for_testing(FakeSession())
+
+        chunks: list[StreamChunk] = []
+        async for chunk in b.stream("hello"):
+            chunks.append(chunk)
+
+        kinds: list[ChunkKind] = [c.kind for c in chunks]
+        assert ChunkKind.MESSAGE_START in kinds
+        assert ChunkKind.THINKING_DELTA in kinds
+        assert ChunkKind.TEXT_DELTA in kinds
+        assert ChunkKind.TOOL_USE_START in kinds
+        assert ChunkKind.TOOL_USE_END in kinds
+        assert ChunkKind.DONE in kinds
+        text_chunks: list[StreamChunk] = [
+            c for c in chunks if c.kind == ChunkKind.TEXT_DELTA
+        ]
+        assert text_chunks[0].native_event is not None
 
 
 class TestCopilotBackendSessions:

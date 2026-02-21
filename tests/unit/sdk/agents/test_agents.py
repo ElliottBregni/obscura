@@ -309,6 +309,71 @@ class TestAgentRuntime:
         assert len(runtime.agents) == 0
 
 
+class TestBackendSpecificAgents:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model_name", "agent_name"),
+        [
+            ("claude", "claude-test-agent"),
+            ("openai", "codex-test-agent"),
+        ],
+    )
+    async def test_start_uses_expected_backend_model(
+        self,
+        runtime: AgentRuntime,
+        model_name: str,
+        agent_name: str,
+    ) -> None:
+        with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
+            agent = runtime.spawn(agent_name, model=model_name)
+        agent.heartbeat_enabled = False
+
+        with patch("sdk.agent.agents.ObscuraClient") as mock_client_ctor:
+            client_instance = AsyncMock()
+            mock_client_ctor.return_value = client_instance
+
+            await agent.start()
+
+            mock_client_ctor.assert_called_once_with(
+                model_name,
+                system_prompt="",
+                user=runtime.user,
+            )
+            assert agent.config.model == model_name
+            assert agent.status == AgentStatus.WAITING
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model_name", "agent_name", "response_text"),
+        [
+            ("claude", "claude-test-agent", "claude backend reply"),
+            ("openai", "codex-test-agent", "codex backend reply"),
+        ],
+    )
+    async def test_run_backend_specific_agent(
+        self,
+        runtime: AgentRuntime,
+        model_name: str,
+        agent_name: str,
+        response_text: str,
+    ) -> None:
+        with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
+            agent = runtime.spawn(agent_name, model=model_name)
+
+        mock_message = MagicMock()
+        mock_message.text = response_text
+
+        mock_client = AsyncMock()
+        mock_client.send = AsyncMock(return_value=mock_message)
+        agent.client = mock_client
+
+        result = await agent.run("backend smoke task")
+
+        assert agent.config.model == model_name
+        assert result == response_text
+        assert agent.status == AgentStatus.COMPLETED
+
+
 class TestAgentStart:
     @pytest.mark.asyncio
     async def test_start_initializes_client(self, runtime: AgentRuntime) -> None:

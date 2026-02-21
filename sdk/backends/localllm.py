@@ -137,6 +137,13 @@ class LocalLLMBackend:
             supports_tool_calls=True,
             supports_tool_choice=True,
             supports_usage=True,
+            supports_native_mode=True,
+            native_features=(
+                "chat_completions",
+                "models_list",
+                "health_check",
+                "native_client",
+            ),
         )
 
     def set_client_for_testing(self, client: Any) -> None:
@@ -284,12 +291,14 @@ class LocalLLMBackend:
                                 tool_name=tc.function.name,
                                 tool_use_id=tc.id or "",
                                 raw=chunk,
+                                native_event=chunk,
                             )
                         if tc.function and tc.function.arguments:
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_DELTA,
                                 tool_input_delta=tc.function.arguments,
                                 raw=chunk,
+                                native_event=chunk,
                             )
 
                 # Text content
@@ -299,6 +308,7 @@ class LocalLLMBackend:
                         kind=ChunkKind.TEXT_DELTA,
                         text=delta.content,
                         raw=chunk,
+                        native_event=chunk,
                     )
 
             # Close final tool if any

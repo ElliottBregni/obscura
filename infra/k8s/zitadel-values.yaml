@@ -27,8 +27,8 @@ zitadel:
     FirstInstance:
       Org:
         Human:
-          UserName: "admin@obscura.local"
-          Password: "ObscuraDev1!"
+          UserName: "admin"
+          Password: "password"
   secretConfig: {}
 
 cockroachdb:

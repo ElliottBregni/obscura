@@ -137,6 +137,13 @@ class CopilotBackend:
             supports_tool_calls=True,
             supports_reasoning=True,
             supports_remote_sessions=True,
+            supports_native_mode=True,
+            native_features=(
+                "event_stream",
+                "sdk_sessions",
+                "sdk_hooks",
+                "native_client",
+            ),
         )
 
     # -- Lifecycle -----------------------------------------------------------

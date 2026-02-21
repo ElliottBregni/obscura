@@ -7,7 +7,13 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
 
-from sdk.internal.types import Backend, SessionRef
+from sdk.internal.types import (
+    Backend,
+    ExecutionMode,
+    ProviderNativeRequest,
+    SessionRef,
+    UnifiedRequest,
+)
 from sdk.auth.models import AuthenticatedUser
 from sdk.auth.rbac import AGENT_READ_ROLES, require_any_role
 from sdk.deps import ClientFactory, audit
@@ -36,7 +42,40 @@ async def send(
             ref = SessionRef(session_id=body.session_id, backend=Backend(body.backend))
             await client.resume_session(ref)
 
-        msg = await client.send(body.prompt)
+        mode = (
+            ExecutionMode(body.mode)
+            if body.mode in ("unified", "native")
+            else ExecutionMode.UNIFIED
+        )
+        native_payload: ProviderNativeRequest | None = None
+        if body.native is not None:
+            native_payload = ProviderNativeRequest(
+                openai=body.native.get("openai")
+                if isinstance(body.native.get("openai"), dict)
+                else None,
+                claude=body.native.get("claude")
+                if isinstance(body.native.get("claude"), dict)
+                else None,
+                copilot=body.native.get("copilot")
+                if isinstance(body.native.get("copilot"), dict)
+                else None,
+                localllm=body.native.get("localllm")
+                if isinstance(body.native.get("localllm"), dict)
+                else None,
+            )
+        unified_req = UnifiedRequest(
+            prompt=body.prompt,
+            mode=mode,
+            native=native_payload,
+        )
+
+        msg = await client.send(
+            body.prompt,
+            mode=body.mode,
+            api_mode=body.api_mode,
+            native=body.native,
+            request=unified_req,
+        )
         audit(
             "agent.send",
             user,
@@ -88,7 +127,40 @@ async def stream(
                 )
                 await client.resume_session(ref)
 
-            async for chunk in client.stream(body.prompt):
+            mode = (
+                ExecutionMode(body.mode)
+                if body.mode in ("unified", "native")
+                else ExecutionMode.UNIFIED
+            )
+            native_payload: ProviderNativeRequest | None = None
+            if body.native is not None:
+                native_payload = ProviderNativeRequest(
+                    openai=body.native.get("openai")
+                    if isinstance(body.native.get("openai"), dict)
+                    else None,
+                    claude=body.native.get("claude")
+                    if isinstance(body.native.get("claude"), dict)
+                    else None,
+                    copilot=body.native.get("copilot")
+                    if isinstance(body.native.get("copilot"), dict)
+                    else None,
+                    localllm=body.native.get("localllm")
+                    if isinstance(body.native.get("localllm"), dict)
+                    else None,
+                )
+            unified_req = UnifiedRequest(
+                prompt=body.prompt,
+                mode=mode,
+                native=native_payload,
+            )
+
+            async for chunk in client.stream(
+                body.prompt,
+                mode=body.mode,
+                api_mode=body.api_mode,
+                native=body.native,
+                request=unified_req,
+            ):
                 yield {
                     "event": chunk.kind.value,
                     "data": chunk.text or chunk.tool_name or "",

@@ -12,7 +12,7 @@ StreamChunk types.
 from __future__ import annotations
 
 import inspect
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, Mapping, cast
 
 from sdk.internal.auth import AuthConfig
 from sdk.internal.sessions import SessionStore
@@ -33,6 +33,9 @@ from sdk.internal.types import (
     StreamMetadata,
     ToolChoice,
     ToolSpec,
+    ExecutionMode,
+    ProviderNativeRequest,
+    UnifiedRequest,
 )
 from sdk.backends.models import (
     ChatMessage,
@@ -143,6 +146,13 @@ class OpenAIBackend:
             supports_tool_calls=True,
             supports_tool_choice=True,
             supports_usage=True,
+            supports_native_mode=True,
+            native_features=(
+                "responses_api",
+                "chat_completions",
+                "models_list",
+                "native_client",
+            ),
         )
 
     def set_client_for_testing(self, client: Any) -> None:
@@ -174,6 +184,7 @@ class OpenAIBackend:
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_client()
+        prompt, structured, api_mode, native_openai = self._resolve_request(prompt, kwargs)
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("openai.send") as span:
             _set_span_attr(span, "backend", "openai")
@@ -183,19 +194,20 @@ class OpenAIBackend:
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
 
-            structured = kwargs.pop("messages", None)
-            messages = self.build_messages(
-                prompt, structured_messages=structured
-            )
-            create_kwargs = self.build_create_kwargs(kwargs)
+            if api_mode == "responses":
+                msg = await self._send_via_responses(prompt, kwargs, native_openai)
+            else:
+                messages = self.build_messages(
+                    prompt, structured_messages=structured
+                )
+                create_kwargs = self.build_create_kwargs(kwargs)
 
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                **create_kwargs,
-            )
-
-            msg = self.to_message(response)
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    **create_kwargs,
+                )
+                msg = self.to_message(response)
 
             # Persist conversation history (including tool calls)
             if self._active_session and self._active_session in self._conversations:
@@ -237,6 +249,7 @@ class OpenAIBackend:
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks."""
         self._ensure_client()
+        prompt, structured, api_mode, native_openai = self._resolve_request(prompt, kwargs)
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("openai.stream") as span:
             _set_span_attr(span, "backend", "openai")
@@ -246,7 +259,12 @@ class OpenAIBackend:
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
 
-            structured = kwargs.pop("messages", None)
+            if api_mode == "responses":
+                async for chunk in self._stream_via_responses(prompt, kwargs, native_openai):
+                    yield chunk
+                await self._run_hooks(HookContext(hook=HookPoint.STOP))
+                return
+
             messages = self.build_messages(
                 prompt, structured_messages=structured
             )
@@ -290,12 +308,14 @@ class OpenAIBackend:
                                 tool_name=tc.function.name,
                                 tool_use_id=tc.id or "",
                                 raw=chunk,
+                                native_event=chunk,
                             )
                         if tc.function and tc.function.arguments:
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_DELTA,
                                 tool_input_delta=tc.function.arguments,
                                 raw=chunk,
+                                native_event=chunk,
                             )
 
                 # Text content
@@ -305,6 +325,7 @@ class OpenAIBackend:
                         kind=ChunkKind.TEXT_DELTA,
                         text=delta.content,
                         raw=chunk,
+                        native_event=chunk,
                     )
 
             # Close final tool if any
@@ -428,6 +449,204 @@ class OpenAIBackend:
     def _ensure_client(self) -> None:
         if self._client is None:
             raise RuntimeError("OpenAIBackend not started. Call start() first.")
+
+    def _resolve_request(
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
+    ) -> tuple[str, list[Message] | None, str, Mapping[str, Any] | None]:
+        """Resolve unified/native mode inputs into an execution plan."""
+        structured = cast(list[Message] | None, kwargs.pop("messages", None))
+        mode_raw = kwargs.pop("mode", ExecutionMode.UNIFIED.value)
+        api_mode = kwargs.pop("api_mode", None)
+        native = kwargs.pop("native", None)
+        request_obj = kwargs.pop("request", None)
+
+        if isinstance(request_obj, UnifiedRequest):
+            if request_obj.prompt:
+                prompt = request_obj.prompt
+            if request_obj.messages is not None:
+                structured = request_obj.messages
+            mode_raw = request_obj.mode.value
+            if request_obj.native is not None:
+                native = request_obj.native
+
+        native_openai = self._extract_native_openai(native)
+        if api_mode is None and native_openai is not None:
+            raw_api_mode = native_openai.get("api_mode")
+            if isinstance(raw_api_mode, str):
+                api_mode = raw_api_mode
+
+        mode = (
+            mode_raw
+            if isinstance(mode_raw, str)
+            else ExecutionMode.UNIFIED.value
+        )
+        if api_mode is None and mode == ExecutionMode.NATIVE.value:
+            api_mode = "responses"
+
+        if api_mode not in ("chat_completions", "responses"):
+            api_mode = "chat_completions"
+
+        return prompt, structured, api_mode, native_openai
+
+    @staticmethod
+    def _extract_native_openai(native: Any) -> Mapping[str, Any] | None:
+        """Extract openai native payload from dicts or ProviderNativeRequest."""
+        if isinstance(native, ProviderNativeRequest):
+            return native.openai
+        if isinstance(native, Mapping):
+            if "openai" in native and isinstance(native["openai"], Mapping):
+                return cast(Mapping[str, Any], native["openai"])
+            return cast(Mapping[str, Any], native)
+        return None
+
+    async def _send_via_responses(
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
+        native_openai: Mapping[str, Any] | None,
+    ) -> Message:
+        """Execute a non-streaming request through Responses API."""
+        req = self._build_responses_kwargs(prompt, kwargs, native_openai)
+        response = await self._client.responses.create(**req)
+        text = self._extract_responses_text(response)
+        return Message(
+            role=Role.ASSISTANT,
+            content=[ContentBlock(kind="text", text=text)],
+            raw=response,
+            backend=Backend.OPENAI,
+        )
+
+    async def _stream_via_responses(
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
+        native_openai: Mapping[str, Any] | None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Execute a streaming request through Responses API."""
+        req = self._build_responses_kwargs(prompt, kwargs, native_openai)
+        response = await self._client.responses.create(stream=True, **req)
+
+        yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+        finish_reason = ""
+        async for event in response:
+            event_type = self._event_type(event)
+            delta = self._extract_response_delta(event)
+            if delta:
+                yield StreamChunk(
+                    kind=ChunkKind.TEXT_DELTA,
+                    text=delta,
+                    raw=event,
+                    native_event=event,
+                )
+            if event_type in ("response.completed", "response.failed"):
+                finish_reason = self._extract_finish_reason(event) or finish_reason
+
+        yield StreamChunk(
+            kind=ChunkKind.DONE,
+            metadata=StreamMetadata(
+                finish_reason=finish_reason,
+                model_id=self._model,
+            ),
+        )
+
+    def _build_responses_kwargs(
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
+        native_openai: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build argument payload for ``client.responses.create``."""
+        req: dict[str, Any] = dict(native_openai or {})
+        req.pop("api_mode", None)
+        req.pop("stream", None)
+        req.setdefault("model", self._model)
+        req.setdefault("input", prompt)
+        if self._system_prompt and "instructions" not in req:
+            req["instructions"] = self._system_prompt
+        if self._tools and "tools" not in req:
+            req["tools"] = [
+                ToolCallDefinition(
+                    t.name, t.description, t.parameters
+                ).to_openai_function()
+                for t in self._tools
+            ]
+        # Allow explicit low-level overrides from call kwargs.
+        if "response_create_kwargs" in kwargs:
+            extra = kwargs["response_create_kwargs"]
+            if isinstance(extra, Mapping):
+                extra_map = cast(Mapping[str, Any], extra)
+                req.update(dict(extra_map))
+        return req
+
+    @staticmethod
+    def _extract_responses_text(response: Any) -> str:
+        """Extract assistant text from a Responses API object."""
+        output_text = getattr(response, "output_text", None)
+        if isinstance(output_text, str):
+            return output_text
+
+        out = getattr(response, "output", None)
+        if isinstance(out, list):
+            parts: list[str] = []
+            out_list = cast(list[Any], out)
+            for item in out_list:
+                content = getattr(item, "content", None)
+                if isinstance(content, list):
+                    content_list = cast(list[Any], content)
+                    for c in content_list:
+                        txt = getattr(c, "text", None)
+                        if isinstance(txt, str):
+                            parts.append(txt)
+                        elif isinstance(c, Mapping):
+                            c_map = cast(Mapping[str, Any], c)
+                            mapped = c_map.get("text")
+                            if isinstance(mapped, str):
+                                parts.append(mapped)
+            if parts:
+                return "".join(parts)
+        return ""
+
+    @staticmethod
+    def _event_type(event: Any) -> str:
+        if hasattr(event, "type"):
+            t = getattr(event, "type")
+            if isinstance(t, str):
+                return t
+        if isinstance(event, Mapping):
+            event_map = cast(Mapping[str, Any], event)
+            t = event_map.get("type")
+            if isinstance(t, str):
+                return t
+        return ""
+
+    @staticmethod
+    def _extract_response_delta(event: Any) -> str:
+        """Extract text delta from a Responses stream event."""
+        for key in ("delta", "text"):
+            val = getattr(event, key, None)
+            if isinstance(val, str) and val:
+                return val
+        if isinstance(event, Mapping):
+            event_map = cast(Mapping[str, Any], event)
+            for key in ("delta", "text"):
+                val = event_map.get(key)
+                if isinstance(val, str) and val:
+                    return val
+        return ""
+
+    @staticmethod
+    def _extract_finish_reason(event: Any) -> str:
+        reason = getattr(event, "finish_reason", None)
+        if isinstance(reason, str):
+            return reason
+        if isinstance(event, Mapping):
+            event_map = cast(Mapping[str, Any], event)
+            mapped = event_map.get("finish_reason")
+            if isinstance(mapped, str):
+                return mapped
+        return ""
 
     def build_messages(
         self,

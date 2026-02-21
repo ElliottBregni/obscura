@@ -87,6 +87,11 @@ class TestBuildParser:
         args = parser.parse_args(["copilot", "--no-stream", "-p", "x"])
         assert args.stream is False
 
+    def test_mode_native(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["copilot", "--mode", "native", "-p", "x"])
+        assert args.mode == "native"
+
     def test_session(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["copilot", "--session", "abc123", "-p", "x"])
@@ -133,6 +138,13 @@ class TestBuildParser:
         args = parser.parse_args(["serve", "--workers", "4"])
         assert args.workers == 4
 
+    def test_passthrough_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["passthrough", "copilot", "--", "-p", "hello"])
+        assert args.command == "passthrough"
+        assert args.vendor == "copilot"
+        assert args.vendor_args == ["-p", "hello"]
+
 
 # ---------------------------------------------------------------------------
 # main() dispatch
@@ -154,6 +166,12 @@ class TestMain:
         mock_tui.return_value = 0
         assert main(["tui"]) == 0
         mock_tui.assert_called_once()
+
+    @patch("sdk.cli._run_passthrough")
+    def test_passthrough_command(self, mock_passthrough: MagicMock) -> None:
+        mock_passthrough.return_value = 0
+        assert main(["passthrough", "copilot"]) == 0
+        mock_passthrough.assert_called_once()
 
     @patch("sdk.cli.asyncio")
     def test_agent_command_copilot(self, mock_asyncio: MagicMock) -> None:

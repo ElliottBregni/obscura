@@ -209,3 +209,42 @@ class TestSendRoutes:
         )
         assert resp.status_code == 200
         assert resp.json()["text"] == "hello"
+        mock_client.send.assert_awaited_once()
+        args = mock_client.send.await_args.args
+        kwargs = mock_client.send.await_args.kwargs
+        assert args == ("hello",)
+        assert kwargs["mode"] == "unified"
+        assert kwargs["api_mode"] is None
+        assert kwargs["native"] is None
+        assert kwargs["request"].prompt == "hello"
+        assert kwargs["request"].mode.value == "unified"
+
+    def test_send_endpoint_native_payload(self, app: Any, client: TestClient) -> None:
+        mock_client: Any = AsyncMock()
+        mock_client.send.return_value = MagicMock(text="native-hello")
+        mock_client.stop = AsyncMock()
+        mock_client.capability_tier = "B"
+        mock_factory: Any = AsyncMock()
+        mock_factory.create.return_value = mock_client
+        app.state.client_factory = mock_factory
+
+        resp = client.post(
+            "/api/v1/send",
+            json={
+                "backend": "openai",
+                "prompt": "hello",
+                "mode": "native",
+                "api_mode": "responses",
+                "native": {"openai": {"api_mode": "responses"}},
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "native-hello"
+        mock_client.send.assert_awaited_once()
+        args = mock_client.send.await_args.args
+        kwargs = mock_client.send.await_args.kwargs
+        assert args == ("hello",)
+        assert kwargs["mode"] == "native"
+        assert kwargs["api_mode"] == "responses"
+        assert kwargs["native"] == {"openai": {"api_mode": "responses"}}
+        assert kwargs["request"].mode.value == "native"

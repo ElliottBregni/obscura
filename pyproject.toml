@@ -81,7 +81,7 @@ dev = [
 
 # Package discovery - explicitly define what to include
 [tool.setuptools]
-packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.cli", "sdk.heartbeat", "sdk.mcp", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets"]
+packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.cli", "sdk.heartbeat", "sdk.mcp", "sdk.parity", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets"]
 
 [tool.setuptools.package-data]
 sdk = ["py.typed"]

@@ -4,15 +4,20 @@ from __future__ import annotations
 
 from sdk.internal.types import (
     Backend,
+    BackendCapabilities,
     ChunkKind,
     ContentBlock,
+    ExecutionMode,
     HookContext,
     HookPoint,
     Message,
+    ProviderNativeRequest,
     Role,
     SessionRef,
     StreamChunk,
     ToolSpec,
+    ToolChoice,
+    UnifiedRequest,
 )
 
 
@@ -29,6 +34,59 @@ class TestBackend:
     def test_from_string(self) -> None:
         assert Backend("copilot") is Backend.COPILOT
         assert Backend("claude") is Backend.CLAUDE
+
+
+# ---------------------------------------------------------------------------
+# ExecutionMode
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionMode:
+    def test_values(self) -> None:
+        assert ExecutionMode.UNIFIED.value == "unified"
+        assert ExecutionMode.NATIVE.value == "native"
+
+    def test_from_string(self) -> None:
+        assert ExecutionMode("unified") is ExecutionMode.UNIFIED
+        assert ExecutionMode("native") is ExecutionMode.NATIVE
+
+
+# ---------------------------------------------------------------------------
+# ProviderNativeRequest / UnifiedRequest
+# ---------------------------------------------------------------------------
+
+
+class TestUnifiedRequest:
+    def test_provider_native_request_defaults(self) -> None:
+        req = ProviderNativeRequest()
+        assert req.openai is None
+        assert req.claude is None
+        assert req.copilot is None
+        assert req.localllm is None
+
+    def test_unified_request_defaults(self) -> None:
+        req = UnifiedRequest(prompt="hello")
+        assert req.mode is ExecutionMode.UNIFIED
+        assert req.prompt == "hello"
+        assert req.messages is None
+        assert req.tool_choice is None
+        assert req.native is None
+        assert req.metadata == {}
+
+    def test_unified_request_native_mode(self) -> None:
+        req = UnifiedRequest(
+            prompt="use provider-native payload",
+            mode=ExecutionMode.NATIVE,
+            tool_choice=ToolChoice.none(),
+            native=ProviderNativeRequest(
+                openai={"model": "gpt-4.1", "input": "hello"},
+            ),
+        )
+        assert req.mode is ExecutionMode.NATIVE
+        assert req.tool_choice is not None
+        assert req.tool_choice.mode == "none"
+        assert req.native is not None
+        assert req.native.openai is not None
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +170,15 @@ class TestStreamChunk:
         except AttributeError:
             pass
 
+    def test_native_event_passthrough(self) -> None:
+        raw_event = {"provider_event": "x"}
+        chunk = StreamChunk(
+            kind=ChunkKind.TEXT_DELTA,
+            text="hello",
+            native_event=raw_event,
+        )
+        assert chunk.native_event == raw_event
+
 
 # ---------------------------------------------------------------------------
 # ToolSpec
@@ -177,3 +244,19 @@ class TestHookContext:
         )
         assert ctx.tool_name == "read_file"
         assert ctx.tool_output == "file contents"
+
+
+# ---------------------------------------------------------------------------
+# BackendCapabilities
+# ---------------------------------------------------------------------------
+
+
+class TestBackendCapabilities:
+    def test_defaults(self) -> None:
+        caps = BackendCapabilities()
+        assert caps.supports_native_mode is True
+        assert caps.native_features == ()
+
+    def test_native_features(self) -> None:
+        caps = BackendCapabilities(native_features=("event_stream", "sdk_hooks"))
+        assert caps.native_features == ("event_stream", "sdk_hooks")

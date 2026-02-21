@@ -30,6 +30,14 @@ class TestLocalLLMInit:
         assert b.model == "llama-3"
         assert b.system_prompt == "Be concise"
 
+    def test_capabilities_include_native_features(self) -> None:
+        from sdk.backends.localllm import LocalLLMBackend
+
+        b = LocalLLMBackend(_make_auth())
+        caps = b.capabilities()
+        assert caps.supports_native_mode is True
+        assert "health_check" in caps.native_features
+
 
 class TestLocalLLMLifecycle:
     @pytest.mark.asyncio
@@ -132,6 +140,7 @@ class TestLocalLLMStream:
         text_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
         assert len(text_chunks) == 2
         assert text_chunks[0].text == "Hello"
+        assert text_chunks[0].native_event is chunk1
         done_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.DONE]
         assert len(done_chunks) == 1
 

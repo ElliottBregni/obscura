@@ -17,7 +17,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+from pathlib import Path
+import shlex
+import subprocess
 import sys
+import time
 from typing import Any
 
 from sdk.internal.types import Backend, ChunkKind, SessionRef
@@ -55,6 +60,12 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
         "--system-prompt",
         default="",
         help="System prompt for the conversation.",
+    )
+    parser.add_argument(
+        "--mode",
+        default="unified",
+        choices=["unified", "native"],
+        help="Execution mode: unified wrapper (default) or native SDK calls.",
     )
     parser.add_argument(
         "--stream",
@@ -117,6 +128,27 @@ def build_parser() -> argparse.ArgumentParser:
         "localllm", help="Use local LLM backend (LM Studio, Ollama, etc.)"
     )
     _add_agent_arguments(localllm_parser)
+
+    # -- passthrough subcommand ------------------------------------------
+    passthrough_parser = sub.add_parser(
+        "passthrough",
+        help="Run a vendor CLI directly (native passthrough mode).",
+    )
+    passthrough_parser.add_argument(
+        "vendor",
+        choices=["copilot", "claude", "codex", "openai", "localllm"],
+        help="Vendor CLI family to execute.",
+    )
+    passthrough_parser.add_argument(
+        "--capture",
+        action="store_true",
+        help="Capture transcript output to ~/.obscura/transcripts.",
+    )
+    passthrough_parser.add_argument(
+        "vendor_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments passed to the vendor CLI (prefix with --).",
+    )
 
     # -- serve subcommand ------------------------------------------------
     serve_parser = sub.add_parser("serve", help="Start the HTTP API server")
@@ -228,6 +260,10 @@ async def _run(args: argparse.Namespace) -> int:
                 )
                 await client.resume_session(ref)
 
+            if args.mode == "native":
+                await _run_native(client, backend, prompt, args.stream, log)
+                return 0
+
             # Send prompt
             if args.stream:
                 async for chunk in client.stream(prompt):
@@ -253,6 +289,152 @@ async def _run(args: argparse.Namespace) -> int:
         return 130
 
     return 0
+
+
+async def _run_native(
+    client: ObscuraClient,
+    backend: str,
+    prompt: str,
+    stream: bool,
+    log: Any,
+) -> None:
+    """Execute one request using raw provider SDK objects."""
+    handle = client.native
+    backend_impl = client.backend_impl
+
+    if backend in ("openai", "localllm"):
+        raw = handle.client
+        model = getattr(backend_impl, "model", None) or "default"
+        if stream:
+            response = await raw.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+            )
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if getattr(delta, "content", None):
+                    print(delta.content, end="", flush=True)
+            print()
+        else:
+            response = await raw.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.choices[0].message.content or ""
+            print(text)
+        return
+
+    if backend == "copilot":
+        session = handle.session
+        response = await session.send_and_wait({"prompt": prompt})
+        text = _extract_copilot_text(response)
+        print(text)
+        return
+
+    if backend == "claude":
+        raw = handle.client
+        await raw.query(prompt)
+        emitted = False
+        async for msg in raw.receive_response():
+            if type(msg).__name__ != "AssistantMessage":
+                continue
+            for block in getattr(msg, "content", []) or []:
+                if type(block).__name__ == "TextBlock":
+                    txt = getattr(block, "text", "")
+                    if txt:
+                        print(txt, end="", flush=True)
+                        emitted = True
+        if emitted:
+            print()
+        return
+
+    log.error("cli.native_unsupported", error=f"Unsupported backend: {backend}")
+    raise ValueError(f"Unsupported backend: {backend}")
+
+
+def _extract_copilot_text(response: Any) -> str:
+    """Extract text content from a Copilot SDK response object."""
+    if hasattr(response, "data") and hasattr(response.data, "content"):
+        return str(response.data.content or "")
+    if hasattr(response, "content"):
+        return str(response.content or "")
+    if isinstance(response, str):
+        return response
+    return str(response)
+
+
+def _resolve_passthrough_cmd(vendor: str) -> list[str]:
+    """Resolve the executable command for passthrough vendor selection."""
+    env_key = f"OBSCURA_PASSTHROUGH_{vendor.upper()}_CMD"
+    configured = os.environ.get(env_key, "").strip()
+    if configured:
+        return shlex.split(configured)
+
+    defaults: dict[str, list[str]] = {
+        "copilot": ["copilot"],
+        "claude": ["claude"],
+        "codex": ["codex"],
+        "openai": ["openai"],
+        "localllm": ["ollama"],
+    }
+    return defaults[vendor]
+
+
+def _run_passthrough(args: argparse.Namespace) -> int:
+    """Run a vendor CLI directly, optionally capturing output."""
+    vendor_args = list(args.vendor_args or [])
+    if vendor_args and vendor_args[0] == "--":
+        vendor_args = vendor_args[1:]
+
+    full_cmd = _resolve_passthrough_cmd(args.vendor) + vendor_args
+    if not full_cmd:
+        print("Error: no vendor command resolved", file=sys.stderr)
+        return 1
+
+    if args.capture:
+        return asyncio.run(_run_passthrough_captured(args.vendor, full_cmd))
+
+    proc = subprocess.run(full_cmd)
+    return int(proc.returncode)
+
+
+async def _run_passthrough_captured(vendor: str, full_cmd: list[str]) -> int:
+    """Run passthrough command and capture transcript to local file."""
+    proc = await asyncio.create_subprocess_exec(
+        *full_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    transcript: list[str] = []
+
+    async def _stream(src: Any, is_err: bool = False) -> None:
+        while True:
+            line = await src.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace")
+            transcript.append(text)
+            target = sys.stderr if is_err else sys.stdout
+            print(text, end="", file=target)
+
+    await asyncio.gather(
+        _stream(proc.stdout, is_err=False),
+        _stream(proc.stderr, is_err=True),
+    )
+    await proc.wait()
+
+    ts = int(time.time())
+    session_id = f"passthrough_{vendor}_{ts}"
+    transcript_dir = Path.home() / ".obscura" / "transcripts"
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    out_path = transcript_dir / f"{session_id}.txt"
+    out_path.write_text("".join(transcript)[:50000], encoding="utf-8")
+    print(f"\n[obscura-sdk] transcript saved: {out_path}", file=sys.stderr)
+    return int(proc.returncode) if proc.returncode is not None else 1
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +517,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "tui":
         return _run_tui(args)
+
+    if args.command == "passthrough":
+        return _run_passthrough(args)
 
     if args.command in _AGENT_COMMANDS:
         return asyncio.run(_run(args))

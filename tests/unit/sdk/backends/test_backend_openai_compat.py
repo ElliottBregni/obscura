@@ -39,6 +39,14 @@ class TestOpenAIInit:
         assert b.model == "gpt-4-turbo"
         assert b.system_prompt == "test"
 
+    def test_capabilities_include_responses(self) -> None:
+        from sdk.backends.openai_compat import OpenAIBackend
+
+        b = OpenAIBackend(_make_auth())
+        caps = b.capabilities()
+        assert caps.supports_native_mode is True
+        assert "responses_api" in caps.native_features
+
 
 class TestOpenAILifecycle:
     @pytest.mark.asyncio
@@ -101,6 +109,26 @@ class TestOpenAISend:
         with pytest.raises(RuntimeError):
             await b.send("test")
 
+    @pytest.mark.asyncio
+    async def test_send_native_responses_mode(self) -> None:
+        from sdk.backends.openai_compat import OpenAIBackend
+
+        b = OpenAIBackend(_make_auth())
+        mock_client: Any = AsyncMock()
+
+        response_obj = MagicMock()
+        response_obj.output_text = "Hello from Responses API"
+        mock_client.responses.create.return_value = response_obj
+        b.set_client_for_testing(mock_client)
+
+        msg = await b.send(
+            "Hello",
+            mode="native",
+            native={"openai": {"api_mode": "responses"}},
+        )
+        assert msg.content[0].text == "Hello from Responses API"
+        mock_client.responses.create.assert_awaited_once()
+
 
 class TestOpenAIStream:
     @pytest.mark.asyncio
@@ -128,6 +156,7 @@ class TestOpenAIStream:
         text_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
         assert len(text_chunks) == 1
         assert text_chunks[0].text == "Hi"
+        assert text_chunks[0].native_event is chunk1
 
     @pytest.mark.asyncio
     async def test_stream_tool_calls(self) -> None:
@@ -157,6 +186,42 @@ class TestOpenAIStream:
         tool_starts: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TOOL_USE_START]
         assert len(tool_starts) == 1
         assert tool_starts[0].tool_name == "my_tool"
+        assert tool_starts[0].native_event is chunk
+
+    @pytest.mark.asyncio
+    async def test_stream_native_responses_mode(self) -> None:
+        from sdk.backends.openai_compat import OpenAIBackend
+
+        b = OpenAIBackend(_make_auth())
+        mock_client: Any = AsyncMock()
+
+        event = MagicMock()
+        event.type = "response.output_text.delta"
+        event.delta = "Rsp"
+
+        complete_event = MagicMock()
+        complete_event.type = "response.completed"
+        complete_event.finish_reason = "stop"
+
+        async def response_stream() -> Any:
+            yield event
+            yield complete_event
+
+        mock_client.responses.create.return_value = response_stream()
+        b.set_client_for_testing(mock_client)
+
+        chunks: list[StreamChunk] = []
+        async for c in b.stream(
+            "Hello",
+            mode="native",
+            native={"openai": {"api_mode": "responses"}},
+        ):
+            chunks.append(c)
+
+        text_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
+        assert len(text_chunks) == 1
+        assert text_chunks[0].text == "Rsp"
+        assert text_chunks[0].native_event is event
 
 
 class TestOpenAISessions:

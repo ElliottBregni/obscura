@@ -40,7 +40,31 @@ class TestResolveGithubToken:
         with patch.dict(
             os.environ, {"GH_TOKEN": "env-token", "COPILOT_API_KEY": ""}, clear=False
         ):
-            assert resolve_github_token(None) == "env-token"
+            cli_result = MagicMock()
+            cli_result.returncode = 1
+            cli_result.stdout = ""
+            with patch("subprocess.run", return_value=cli_result):
+                assert resolve_github_token(None) == "env-token"
+
+    def test_oauth_first_over_env(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "env-token"}, clear=True):
+            cli_result = MagicMock()
+            cli_result.returncode = 0
+            cli_result.stdout = "oauth-token\n"
+            with patch("subprocess.run", return_value=cli_result):
+                assert resolve_github_token(None) == "oauth-token"
+
+    def test_env_first_over_oauth(self):
+        with patch.dict(
+            os.environ,
+            {"GH_TOKEN": "env-token", "OBSCURA_AUTH_MODE": "env_first"},
+            clear=True,
+        ):
+            cli_result = MagicMock()
+            cli_result.returncode = 0
+            cli_result.stdout = "oauth-token\n"
+            with patch("subprocess.run", return_value=cli_result):
+                assert resolve_github_token(None) == "env-token"
 
     def test_gh_cli_fallback(self):
         env = {
@@ -87,6 +111,22 @@ class TestResolveAnthropicKey:
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-key"}):
             assert resolve_anthropic_key(None) == "env-key"
 
+    def test_alt_env_var(self):
+        with patch.dict(os.environ, {"CLAUDE_API_KEY": "alt-env-key"}, clear=True):
+            assert resolve_anthropic_key(None) == "alt-env-key"
+
+    def test_cmd_fallback(self):
+        with patch.dict(
+            os.environ,
+            {"OBSCURA_CLAUDE_TOKEN_CMD": "echo cmd-key"},
+            clear=True,
+        ):
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "cmd-key\n"
+            with patch("subprocess.run", return_value=mock_result):
+                assert resolve_anthropic_key(None) == "cmd-key"
+
     def test_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="Claude auth"):
@@ -99,7 +139,69 @@ class TestResolveOpenAIKey:
 
     def test_env_var(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "env-oai"}):
-            assert resolve_openai_key(None) == "env-oai"
+            status = MagicMock()
+            status.returncode = 1
+            status.stdout = ""
+            status.stderr = ""
+            with patch("subprocess.run", return_value=status):
+                assert resolve_openai_key(None) == "env-oai"
+
+    def test_alt_env_var_codex(self):
+        with patch.dict(os.environ, {"CODEX_API_KEY": "codex-env-key"}, clear=True):
+            assert resolve_openai_key(None) == "codex-env-key"
+
+    def test_cmd_fallback(self):
+        with patch.dict(
+            os.environ,
+            {"OBSCURA_OPENAI_TOKEN_CMD": "echo openai-cmd-key"},
+            clear=True,
+        ):
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "openai-cmd-key\n"
+            with patch("subprocess.run", return_value=mock_result):
+                assert resolve_openai_key(None) == "openai-cmd-key"
+
+    def test_codex_oauth_fallback(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = ""
+            status.stderr = "Logged in using ChatGPT\n"
+            with patch("subprocess.run", return_value=status):
+                fake_payload = '{"tokens": {"access_token": "codex-oauth-token"}}'
+                with patch("pathlib.Path.read_text", return_value=fake_payload):
+                    assert resolve_openai_key(None) == "codex-oauth-token"
+
+    def test_codex_oauth_first_over_env(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "env-oai"}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = ""
+            status.stderr = "Logged in using ChatGPT\n"
+            with patch("subprocess.run", return_value=status):
+                fake_payload = '{"tokens": {"access_token": "codex-oauth-token"}}'
+                with patch("pathlib.Path.read_text", return_value=fake_payload):
+                    assert resolve_openai_key(None) == "codex-oauth-token"
+
+    def test_env_first_over_codex_oauth(self):
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "env-oai", "OBSCURA_AUTH_MODE": "env_first"},
+            clear=True,
+        ):
+            with patch("subprocess.run") as mock_run:
+                assert resolve_openai_key(None) == "env-oai"
+                mock_run.assert_not_called()
+
+    def test_codex_oauth_logged_out(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = "Not logged in\n"
+            with patch("subprocess.run", return_value=status):
+                with pytest.raises(ValueError, match="OpenAI auth"):
+                    resolve_openai_key(None)
 
     def test_missing(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -148,6 +250,55 @@ class TestResolveAuth:
         config = AuthConfig(anthropic_api_key="key")
         result = resolve_auth(Backend.CLAUDE, config)
         assert result.anthropic_api_key == "key"
+
+    def test_claude_oauth_fallback_when_not_explicit(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = '{"loggedIn": true}'
+            with patch("subprocess.run", return_value=status):
+                result = resolve_auth(Backend.CLAUDE)
+                assert result.anthropic_api_key is None
+
+    def test_claude_oauth_first_over_env(self):
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-key"}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = '{"loggedIn": true}'
+            with patch("subprocess.run", return_value=status):
+                result = resolve_auth(Backend.CLAUDE)
+                assert result.anthropic_api_key is None
+
+    def test_claude_env_first_over_oauth(self):
+        with patch.dict(
+            os.environ,
+            {"ANTHROPIC_API_KEY": "env-key", "OBSCURA_AUTH_MODE": "env_first"},
+            clear=True,
+        ):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = '{"loggedIn": true}'
+            with patch("subprocess.run", return_value=status):
+                result = resolve_auth(Backend.CLAUDE)
+                assert result.anthropic_api_key == "env-key"
+
+    def test_claude_env_first_oauth_late_fallback(self):
+        with patch.dict(os.environ, {"OBSCURA_AUTH_MODE": "env_first"}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = '{"loggedIn": true}'
+            with patch("subprocess.run", return_value=status):
+                result = resolve_auth(Backend.CLAUDE)
+                assert result.anthropic_api_key is None
+
+    def test_claude_oauth_fallback_not_logged_in(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = '{"loggedIn": false}'
+            with patch("subprocess.run", return_value=status):
+                with pytest.raises(ValueError, match="Claude auth"):
+                    resolve_auth(Backend.CLAUDE)
 
     def test_openai(self):
         config = AuthConfig(openai_api_key="key", openai_base_url="http://custom")

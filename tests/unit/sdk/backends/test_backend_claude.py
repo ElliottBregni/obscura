@@ -35,6 +35,14 @@ class TestClaudeBackendInit:
         assert b.permission_mode == "strict"
         assert b.cwd == "/tmp"
 
+    def test_capabilities_include_native_features(self):
+        from sdk.backends.claude import ClaudeBackend
+
+        b = ClaudeBackend(_make_auth())
+        caps = b.capabilities()
+        assert caps.supports_native_mode is True
+        assert "session_fork" in caps.native_features
+
 
 class TestClaudeLifecycle:
     @pytest.mark.asyncio
@@ -270,3 +278,23 @@ class TestClaudeInternals:
         msg = b.to_message([assistant_msg])
         assert msg.content[0].kind == "tool_use"
         assert msg.content[0].tool_name == "my_tool"
+
+    @pytest.mark.asyncio
+    async def test_fork_session(self):
+        from sdk.backends.claude import ClaudeBackend
+        from sdk.internal.types import SessionRef
+
+        b = ClaudeBackend(_make_auth())
+        old_client = AsyncMock()
+        b.set_client_for_testing(old_client)
+        ref = SessionRef(session_id="sess-123", backend=Backend.CLAUDE)
+
+        new_client = AsyncMock()
+        with (
+            patch("claude_agent_sdk.ClaudeSDKClient", return_value=new_client),
+            patch("claude_agent_sdk.ClaudeAgentOptions"),
+        ):
+            out = await b.fork_session(ref)
+            assert out is ref
+            old_client.disconnect.assert_awaited_once()
+            new_client.connect.assert_awaited_once()

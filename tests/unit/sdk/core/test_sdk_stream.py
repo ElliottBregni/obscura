@@ -62,6 +62,7 @@ class TestEventToIteratorBridge:
 
         assert chunks[0].kind == ChunkKind.TEXT_DELTA
         assert chunks[0].text == "hello"
+        assert chunks[0].native_event == "hello"
 
     @pytest.mark.asyncio
     async def test_concurrent_push_and_read(self) -> None:
@@ -150,6 +151,7 @@ class TestClaudeIteratorAdapter:
         assert len(chunks) == 1
         assert chunks[0].kind == ChunkKind.TEXT_DELTA
         assert chunks[0].text == "hello world"
+        assert chunks[0].native_event is not None
 
     @pytest.mark.asyncio
     async def test_assistant_thinking(self) -> None:

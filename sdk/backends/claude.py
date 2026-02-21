@@ -130,6 +130,14 @@ class ClaudeBackend:
             supports_tool_calls=True,
             supports_reasoning=True,
             supports_remote_sessions=True,
+            supports_native_mode=True,
+            native_features=(
+                "permission_modes",
+                "session_resume",
+                "session_fork",
+                "mcp_inprocess",
+                "native_client",
+            ),
         )
 
     # -- Lifecycle -----------------------------------------------------------

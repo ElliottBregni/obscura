@@ -64,7 +64,14 @@ class EventToIteratorBridge:
         elif isinstance(event, str):
             delta = event
         if delta:
-            self.push(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=delta, raw=event))
+            self.push(
+                StreamChunk(
+                    kind=ChunkKind.TEXT_DELTA,
+                    text=delta,
+                    raw=event,
+                    native_event=event,
+                )
+            )
 
     def on_thinking_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.reasoning_delta`` event."""
@@ -87,7 +94,14 @@ class EventToIteratorBridge:
             delta = event.data.delta
         elif isinstance(event, str):
             delta = event
-        self.push(StreamChunk(kind=ChunkKind.THINKING_DELTA, text=delta, raw=event))
+        self.push(
+            StreamChunk(
+                kind=ChunkKind.THINKING_DELTA,
+                text=delta,
+                raw=event,
+                native_event=event,
+            )
+        )
 
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
@@ -100,7 +114,14 @@ class EventToIteratorBridge:
             name = event.data.tool_name
         elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
             name = event.data.name
-        self.push(StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name=name, raw=event))
+        self.push(
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_START,
+                tool_name=name,
+                raw=event,
+                native_event=event,
+            )
+        )
 
     def on_tool_end(self, event: Any) -> None:
         """Map tool execution end."""
@@ -114,19 +135,38 @@ class EventToIteratorBridge:
         elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
             name = event.data.name
         self.push(
-            StreamChunk(kind=ChunkKind.TOOL_USE_END, tool_name=name, raw=event)
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_END,
+                tool_name=name,
+                raw=event,
+                native_event=event,
+            )
         )
 
     def finish(
         self, event: Any = None, *, metadata: StreamMetadata | None = None
     ) -> None:
         """Signal end of stream."""
-        self.push(StreamChunk(kind=ChunkKind.DONE, raw=event, metadata=metadata))
+        self.push(
+            StreamChunk(
+                kind=ChunkKind.DONE,
+                raw=event,
+                metadata=metadata,
+                native_event=event,
+            )
+        )
         self._queue.put_nowait(None)
 
     def error(self, err: Exception | Any) -> None:
         """Signal error and end stream."""
-        self.push(StreamChunk(kind=ChunkKind.ERROR, text=str(err), raw=err))
+        self.push(
+            StreamChunk(
+                kind=ChunkKind.ERROR,
+                text=str(err),
+                raw=err,
+                native_event=err,
+            )
+        )
         self._queue.put_nowait(None)
 
     # -- AsyncIterator interface --------------------------------------------
@@ -192,7 +232,14 @@ class ClaudeIteratorAdapter:
         # ResultMessage → done with metadata
         if type_name == "ResultMessage":
             meta = self._extract_result_metadata(item)
-            return [StreamChunk(kind=ChunkKind.DONE, raw=item, metadata=meta)]
+            return [
+                StreamChunk(
+                    kind=ChunkKind.DONE,
+                    raw=item,
+                    metadata=meta,
+                    native_event=item,
+                )
+            ]
 
         # StreamEvent → partial deltas
         if type_name == "StreamEvent":
@@ -211,7 +258,14 @@ class ClaudeIteratorAdapter:
             return []
 
         # Unknown → text fallback
-        return [StreamChunk(kind=ChunkKind.TEXT_DELTA, text=str(item), raw=item)]
+        return [
+            StreamChunk(
+                kind=ChunkKind.TEXT_DELTA,
+                text=str(item),
+                raw=item,
+                native_event=item,
+            )
+        ]
 
     def _adapt_stream_event(self, event: Any) -> list[StreamChunk]:
         """Adapt a Claude StreamEvent to StreamChunks."""
@@ -231,6 +285,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.TEXT_DELTA,
                         text=delta.get("text", ""),
                         raw=event,
+                        native_event=event,
                     )
                 ]
             if delta_type == "thinking_delta":
@@ -239,6 +294,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.THINKING_DELTA,
                         text=delta.get("thinking", ""),
                         raw=event,
+                        native_event=event,
                     )
                 ]
             if delta_type == "input_json_delta":
@@ -247,6 +303,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.TOOL_USE_DELTA,
                         tool_input_delta=delta.get("partial_json", ""),
                         raw=event,
+                        native_event=event,
                     )
                 ]
 
@@ -259,16 +316,27 @@ class ClaudeIteratorAdapter:
                         tool_name=block.get("name", ""),
                         tool_use_id=block.get("id", ""),
                         raw=event,
+                        native_event=event,
                     )
                 ]
 
         if ev_type == "content_block_stop":
             return [
-                StreamChunk(kind=ChunkKind.TOOL_USE_END, raw=event)
+                StreamChunk(
+                    kind=ChunkKind.TOOL_USE_END,
+                    raw=event,
+                    native_event=event,
+                )
             ]
 
         if ev_type == "message_start":
-            return [StreamChunk(kind=ChunkKind.MESSAGE_START, raw=event)]
+            return [
+                StreamChunk(
+                    kind=ChunkKind.MESSAGE_START,
+                    raw=event,
+                    native_event=event,
+                )
+            ]
 
         return []
 
@@ -287,6 +355,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.TEXT_DELTA,
                         text=block.text,
                         raw=block,
+                        native_event=block,
                     )
                 )
             elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
@@ -295,6 +364,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.THINKING_DELTA,
                         text=block.thinking,
                         raw=block,
+                        native_event=block,
                     )
                 )
             elif block_type == "ToolUseBlock":
@@ -303,6 +373,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.TOOL_USE_START,
                         tool_name=getattr(block, "name", ""),
                         raw=block,
+                        native_event=block,
                     )
                 )
             elif block_type == "ToolResultBlock":
@@ -314,6 +385,7 @@ class ClaudeIteratorAdapter:
                         kind=ChunkKind.TOOL_RESULT,
                         text=text,
                         raw=block,
+                        native_event=block,
                     )
                 )
 

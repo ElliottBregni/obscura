@@ -15,6 +15,7 @@ from typing import (
     Any,
     AsyncIterator,
     Callable,
+    Mapping,
     Protocol,
     runtime_checkable,
 )
@@ -35,6 +36,48 @@ class Backend(enum.Enum):
     CLAUDE = "claude"
     LOCALLLM = "localllm"
     OPENAI = "openai"
+
+
+# ---------------------------------------------------------------------------
+# Execution mode and provider-native requests
+# ---------------------------------------------------------------------------
+
+
+class ExecutionMode(enum.Enum):
+    """How a request should be executed.
+
+    ``UNIFIED`` uses Obscura's normalized contract and event model.
+    ``NATIVE`` preserves provider semantics and metadata as-is.
+    """
+
+    UNIFIED = "unified"
+    NATIVE = "native"
+
+
+@dataclass(frozen=True)
+class ProviderNativeRequest:
+    """Provider-specific request payloads for native mode.
+
+    Each payload is passed through to the corresponding backend adapter.
+    """
+
+    openai: Mapping[str, Any] | None = None
+    claude: Mapping[str, Any] | None = None
+    copilot: Mapping[str, Any] | None = None
+    localllm: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class UnifiedRequest:
+    """Versioned request envelope for future unified/native routing."""
+
+    prompt: str = ""
+    mode: ExecutionMode = ExecutionMode.UNIFIED
+    messages: list[Message] | None = None
+    tool_choice: ToolChoice | None = None
+    session: SessionRef | None = None
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    native: ProviderNativeRequest | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +175,7 @@ class StreamChunk:
     tool_use_id: str = ""
     raw: Any = None
     metadata: StreamMetadata | None = None
+    native_event: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +280,8 @@ class BackendCapabilities:
     supports_remote_sessions: bool = False
     supports_multimodal: bool = False
     supports_mcp: bool = False
+    supports_native_mode: bool = True
+    native_features: tuple[str, ...] = field(default_factory=tuple)
 
 
 # ---------------------------------------------------------------------------

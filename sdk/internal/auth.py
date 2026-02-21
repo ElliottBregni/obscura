@@ -8,7 +8,10 @@ CLI-based fallbacks (``gh auth token`` for Copilot).
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
+import json
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -53,35 +56,71 @@ _COPILOT_ENV_VARS = (
     "GITHUB_TOKEN",
     "COPILOT_GITHUB_TOKEN",
 )
-_CLAUDE_ENV_VARS = ("ANTHROPIC_API_KEY",)
-_OPENAI_KEY_ENV_VARS = ("OPENAI_API_KEY",)
+_CLAUDE_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_API_KEY",
+    "CLAUDE_CODE_API_KEY",
+)
+_OPENAI_KEY_ENV_VARS = ("OPENAI_API_KEY", "CODEX_API_KEY")
 _OPENAI_BASE_URL_ENV_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE")
 _LOCALLLM_BASE_URL_ENV_VARS = ("LOCALLLM_BASE_URL", "LM_STUDIO_URL", "OLLAMA_URL")
+_AUTH_MODE_ENV_VAR = "OBSCURA_AUTH_MODE"
+
+
+def _auth_mode() -> str:
+    """Get auth resolution mode: oauth_first (default) or env_first."""
+    raw = os.environ.get(_AUTH_MODE_ENV_VAR, "oauth_first").strip().lower()
+    normalized = raw.replace("-", "_")
+    if normalized == "env_first":
+        return "env_first"
+    return "oauth_first"
+
+
+def _is_env_first_mode() -> bool:
+    return _auth_mode() == "env_first"
 
 
 def _resolve_github_token(explicit: str | None) -> str:
-    """Resolve a GitHub token from explicit value, env vars, or gh CLI."""
+    """Resolve a GitHub token from explicit value, gh CLI, or env vars."""
     if explicit:
         return explicit
 
-    for var in _COPILOT_ENV_VARS:
-        token = os.environ.get(var)
-        if token:
-            return token
+    if _is_env_first_mode():
+        for var in _COPILOT_ENV_VARS:
+            token = os.environ.get(var)
+            if token:
+                return token
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    else:
+        # OAuth-first: gh auth token
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
-    # Fallback: gh auth token
-    try:
-        result = subprocess.run(
-            ["gh", "auth", "token"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        for var in _COPILOT_ENV_VARS:
+            token = os.environ.get(var)
+            if token:
+                return token
 
     raise ValueError(
         "Copilot auth requires one of: "
@@ -99,20 +138,145 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
         if key:
             return key
 
-    raise ValueError("Claude auth requires ANTHROPIC_API_KEY env var.")
+    token_cmd = os.environ.get("OBSCURA_CLAUDE_TOKEN_CMD", "").strip()
+    if token_cmd:
+        try:
+            result = subprocess.run(
+                shlex.split(token_cmd),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    raise ValueError(
+        "Claude auth requires one of: "
+        f"{', '.join(_CLAUDE_ENV_VARS)} env var, "
+        "or OBSCURA_CLAUDE_TOKEN_CMD."
+    )
+
+
+def _has_claude_cli_oauth() -> bool:
+    """Return True when Claude CLI reports an active OAuth login."""
+    try:
+        result = subprocess.run(
+            ["claude", "auth", "status", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+
+    return bool(payload.get("loggedIn"))
 
 
 def _resolve_openai_key(explicit: str | None) -> str:
-    """Resolve an OpenAI API key from explicit value or env var."""
+    """Resolve an OpenAI API key from explicit value, OAuth, env var, or cmd."""
     if explicit:
         return explicit
 
-    for var in _OPENAI_KEY_ENV_VARS:
-        key = os.environ.get(var)
-        if key:
-            return key
+    if _is_env_first_mode():
+        for var in _OPENAI_KEY_ENV_VARS:
+            key = os.environ.get(var)
+            if key:
+                return key
 
-    raise ValueError("OpenAI auth requires OPENAI_API_KEY env var.")
+        token_cmd = os.environ.get("OBSCURA_OPENAI_TOKEN_CMD", "").strip()
+        if token_cmd:
+            try:
+                result = subprocess.run(
+                    shlex.split(token_cmd),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+
+        oauth_token = _resolve_codex_oauth_token()
+        if oauth_token:
+            return oauth_token
+    else:
+        # OAuth-first: Codex login state
+        oauth_token = _resolve_codex_oauth_token()
+        if oauth_token:
+            return oauth_token
+
+        for var in _OPENAI_KEY_ENV_VARS:
+            key = os.environ.get(var)
+            if key:
+                return key
+
+        token_cmd = os.environ.get("OBSCURA_OPENAI_TOKEN_CMD", "").strip()
+        if token_cmd:
+            try:
+                result = subprocess.run(
+                    shlex.split(token_cmd),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+
+    raise ValueError(
+        "OpenAI auth requires one of: "
+        f"{', '.join(_OPENAI_KEY_ENV_VARS)} env var, "
+        "OBSCURA_OPENAI_TOKEN_CMD, or Codex OAuth login (`codex login`)."
+    )
+
+
+def _resolve_codex_oauth_token() -> str | None:
+    """Resolve an OpenAI-compatible bearer token from Codex OAuth state."""
+    try:
+        status = subprocess.run(
+            ["codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+    status_text = f"{status.stdout}\n{status.stderr}"
+    if status.returncode != 0 or "Logged in" not in status_text:
+        return None
+
+    auth_path = Path.home() / ".codex" / "auth.json"
+    try:
+        payload = json.loads(auth_path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+    tokens = payload.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+
+    access_token = tokens.get("access_token")
+    if isinstance(access_token, str) and access_token.strip():
+        return access_token.strip()
+    return None
 
 
 def _resolve_openai_base_url(explicit: str | None) -> str | None:
@@ -227,7 +391,9 @@ def resolve_auth(
 ) -> AuthConfig:
     """Resolve auth credentials for a backend.
 
-    Priority: explicit AuthConfig values > environment variables > CLI fallback.
+    Priority: explicit AuthConfig values first, then mode-based resolution:
+    - oauth_first (default): OAuth/CLI before env vars
+    - env_first: env vars before OAuth/CLI
     Raises ValueError with guidance when credentials cannot be found.
 
     Parameters
@@ -256,10 +422,17 @@ def resolve_auth(
         )
 
     if backend == Backend.CLAUDE:
+        # Mode-dependent: use Claude CLI OAuth before env/cmd in oauth_first.
+        if explicit is None and not _is_env_first_mode() and _has_claude_cli_oauth():
+            return AuthConfig(anthropic_api_key=None)
+
         try:
             key = _resolve_anthropic_key(config.anthropic_api_key)
             return AuthConfig(anthropic_api_key=key)
         except ValueError as exc:
+            # env_first still allows OAuth as late fallback.
+            if explicit is None and _is_env_first_mode() and _has_claude_cli_oauth():
+                return AuthConfig(anthropic_api_key=None)
             # When resolve_auth is invoked with an explicit AuthConfig
             # (e.g., HTTP route dispatch), treat missing creds as an
             # unsupported code path to satisfy routing tests.
