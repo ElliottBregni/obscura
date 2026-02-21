@@ -335,7 +335,7 @@ async def _get_test_token(base_url: str, machine_key: MachineKey) -> str:
     import time as _time
 
     now = int(_time.time())
-    claims = {
+    claims: dict[str, str | int] = {
         "iss": key_data.get("userId", ""),
         "sub": key_data.get("userId", ""),
         "aud": base_url,

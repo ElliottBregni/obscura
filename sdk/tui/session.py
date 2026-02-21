@@ -169,7 +169,7 @@ class TUISession:
 
     def save(self) -> None:
         """Save session to disk as JSON."""
-        data = {
+        data: dict[str, Any] = {
             "session_id": self.session_id,
             "backend": self.backend,
             "model": self.model,

@@ -286,7 +286,7 @@ class TestMCPClientHandleResponse:
         future = loop.create_future()
         client.pending_requests["42"] = future
 
-        response = {"id": 42, "result": {"data": "test"}}
+        response: dict[str, Any] = {"id": 42, "result": {"data": "test"}}
         client.handle_response(response)
 
         assert future.done()
@@ -366,7 +366,7 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        mock_result = {
+        mock_result: dict[str, Any] = {
             "content": [{"type": "text", "text": "file contents"}],
             "isError": False,
         }
@@ -384,7 +384,7 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        mock_result = {
+        mock_result: dict[str, Any] = {
             "content": [{"type": "text", "text": "fail"}],
             "isError": True,
         }

@@ -40,7 +40,7 @@ def generate_test_token():
 
     # Create JWT payload with all required roles
     now = datetime.now(UTC)
-    payload = {
+    payload: dict[str, object] = {
         "sub": "test-user-123",
         "email": "test@obscura.local",
         "iss": "http://localhost:8080",

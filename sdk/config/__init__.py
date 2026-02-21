@@ -45,6 +45,14 @@ class ObscuraConfig(BaseModel):
     capability_secret: str = ""  # HMAC signing key; empty = random per-process
     capability_ttl: int = 3600  # Token lifetime in seconds
 
+    # A2A (Agent-to-Agent protocol)
+    a2a_enabled: bool = False
+    a2a_redis_url: str = ""  # empty = use InMemoryTaskStore
+    a2a_task_ttl: int = 86400  # TTL for completed tasks in Redis (seconds)
+    a2a_grpc_port: int = 50051  # gRPC server port (0 = disabled)
+    a2a_agent_name: str = "Obscura Agent"
+    a2a_agent_description: str = ""
+
     @model_validator(mode="after")
     def _set_jwks_uri(self) -> Self:
         if not self.auth_jwks_uri:
@@ -76,4 +84,11 @@ class ObscuraConfig(BaseModel):
             # Capability system
             capability_secret=os.environ.get("OBSCURA_CAPABILITY_SECRET", ""),
             capability_ttl=int(os.environ.get("OBSCURA_CAPABILITY_TTL", "3600")),
+            # A2A
+            a2a_enabled=os.environ.get("OBSCURA_A2A_ENABLED", "false").lower() == "true",
+            a2a_redis_url=os.environ.get("OBSCURA_A2A_REDIS_URL", ""),
+            a2a_task_ttl=int(os.environ.get("OBSCURA_A2A_TASK_TTL", "86400")),
+            a2a_grpc_port=int(os.environ.get("OBSCURA_A2A_GRPC_PORT", "50051")),
+            a2a_agent_name=os.environ.get("OBSCURA_A2A_AGENT_NAME", "Obscura Agent"),
+            a2a_agent_description=os.environ.get("OBSCURA_A2A_AGENT_DESCRIPTION", ""),
         )

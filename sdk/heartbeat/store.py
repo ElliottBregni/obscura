@@ -11,7 +11,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, Optional, override
+from typing import Any, Mapping, Optional, override
 from types import MappingProxyType
 
 from sdk.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
@@ -266,7 +266,7 @@ class FileHeartbeatStore(HeartbeatStore):
     async def _persist_to_disk(self) -> None:
         """Persist current state to disk."""
         try:
-            data = {
+            data: dict[str, Any] = {
                 "records": [
                     {
                         "agent_id": r.agent_id,

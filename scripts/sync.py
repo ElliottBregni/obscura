@@ -1289,51 +1289,9 @@ class VaultWatcher:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="FV-Copilot vault sync tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python3 sync.py --mode symlink                    # Sync all agents, all repos
-  python3 sync.py --mode symlink --agent copilot    # Sync copilot only
-  python3 sync.py --mode symlink --repo FV-Platform-Main
-  python3 sync.py --clean                           # Remove all agent dirs
-  python3 sync.py --merge                           # Post-git-merge recovery
-  python3 sync.py --watch                           # Watch and auto-sync
-  python3 sync.py --dry-run --mode symlink          # Preview changes
-        """,
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["symlink"],
-        default="symlink",
-        help="Sync mode (default: symlink)",
-    )
-    parser.add_argument("--agent", help="Specific agent to sync")
-    parser.add_argument("--repo", help="Specific repo (name or path)")
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Preview without changes"
-    )
-    parser.add_argument(
-        "--clean", action="store_true", help="Remove all agent directories"
-    )
-    parser.add_argument(
-        "--merge",
-        action="store_true",
-        help="Merge real dirs into vault and re-sync (post-git-merge)",
-    )
-    parser.add_argument(
-        "--watch",
-        action="store_true",
-        help="Watch vault for changes and auto-sync (requires fswatch)",
-    )
-
-    args = parser.parse_args()
+def _run_vault(args: argparse.Namespace) -> None:
+    """Execute vault sync subcommand (config sync to repos)."""
     vs = VaultSync(dry_run=args.dry_run)
-
-    if args.dry_run:
-        print("DRY RUN - no changes will be made\n")
 
     if args.watch:
         VaultWatcher(vs.vault_path, vs, agent=args.agent, repo=args.repo).run()
@@ -1357,6 +1315,169 @@ Examples:
                 vs.merge_and_relink(target, vault_repo, repo_path, agent=args.agent)
     else:
         vs.sync_all(agent=args.agent, repo=args.repo)
+
+
+def _run_agents(args: argparse.Namespace) -> None:
+    """Execute agents subcommand (session discovery + sync)."""
+    from agent_sync import AgentSessionSync
+
+    sync = AgentSessionSync(dry_run=args.dry_run)
+
+    if args.clean:
+        sync.clean(agent=args.agent)
+    elif args.rebuild_index:
+        sync.rebuild_index(agent=args.agent)
+    else:
+        sync.sync_all(agent=args.agent, force=args.force)
+
+
+def _run_skills(args: argparse.Namespace) -> None:
+    """Execute skills subcommand (skills, commands, plugins, configs sync)."""
+    from skills_sync import SkillsSync
+
+    sync = SkillsSync(dry_run=args.dry_run)
+
+    if args.clean:
+        sync.clean(agent=args.agent)
+    elif args.rebuild_index:
+        sync.rebuild_index(agent=args.agent)
+    else:
+        sync.sync_all(agent=args.agent, force=args.force)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Obscura sync tool — vault config, agent sessions, and skills sync",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python3 sync.py vault                              # Sync vault config (default)
+  python3 sync.py vault --agent copilot              # Sync copilot config only
+  python3 sync.py vault --clean                      # Remove all agent dirs
+  python3 sync.py vault --watch                      # Watch and auto-sync
+  python3 sync.py agents                             # Sync all agent sessions
+  python3 sync.py agents --agent claude              # Sync claude sessions only
+  python3 sync.py agents --clean                     # Remove synced sessions
+  python3 sync.py agents --rebuild-index             # Regen INDEX.jsonl only
+  python3 sync.py skills                             # Sync all agent skills & tools
+  python3 sync.py skills --agent claude              # Sync claude skills only
+  python3 sync.py skills --clean                     # Remove synced skills
+  python3 sync.py skills --rebuild-index             # Regen skills INDEX.jsonl
+  python3 sync.py --dry-run vault                    # Preview vault sync
+  python3 sync.py --dry-run agents                   # Preview agent sync
+  python3 sync.py --dry-run skills                   # Preview skills sync
+        """,
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview without changes"
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    # -- vault subcommand (config sync) ------------------------------------
+    vault_parser = subparsers.add_parser(
+        "vault",
+        help="Sync vault config to repos (skills, instructions, docs)",
+    )
+    vault_parser.add_argument(
+        "--dry-run", action="store_true", help="Preview without changes",
+    )
+    vault_parser.add_argument(
+        "--mode",
+        choices=["symlink"],
+        default="symlink",
+        help="Sync mode (default: symlink)",
+    )
+    vault_parser.add_argument("--agent", help="Specific agent to sync")
+    vault_parser.add_argument("--repo", help="Specific repo (name or path)")
+    vault_parser.add_argument(
+        "--clean", action="store_true", help="Remove all agent directories"
+    )
+    vault_parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge real dirs into vault and re-sync (post-git-merge)",
+    )
+    vault_parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Watch vault for changes and auto-sync (requires fswatch)",
+    )
+
+    # -- agents subcommand (session sync) ----------------------------------
+    agents_parser = subparsers.add_parser(
+        "agents",
+        help="Discover, copy, and index agent sessions to ~/dev/.obscura/",
+    )
+    agents_parser.add_argument(
+        "--dry-run", action="store_true", help="Preview without changes",
+    )
+    agents_parser.add_argument(
+        "--agent",
+        choices=["claude", "copilot", "codex"],
+        help="Sync specific agent only",
+    )
+    agents_parser.add_argument(
+        "--clean", action="store_true", help="Remove synced session data"
+    )
+    agents_parser.add_argument(
+        "--force", action="store_true", help="Force re-copy all sessions"
+    )
+    agents_parser.add_argument(
+        "--rebuild-index",
+        action="store_true",
+        help="Regenerate INDEX.jsonl from synced copies",
+    )
+
+    # -- skills subcommand (skills, commands, plugins, configs) -------------
+    skills_parser = subparsers.add_parser(
+        "skills",
+        help="Discover, copy, and index agent skills, commands, plugins, configs",
+    )
+    skills_parser.add_argument(
+        "--dry-run", action="store_true", help="Preview without changes",
+    )
+    skills_parser.add_argument(
+        "--agent",
+        choices=["claude", "copilot", "codex"],
+        help="Sync specific agent only",
+    )
+    skills_parser.add_argument(
+        "--clean", action="store_true", help="Remove synced skill data"
+    )
+    skills_parser.add_argument(
+        "--force", action="store_true", help="Force re-copy all skills"
+    )
+    skills_parser.add_argument(
+        "--rebuild-index",
+        action="store_true",
+        help="Regenerate skills INDEX.jsonl from synced copies",
+    )
+
+    args = parser.parse_args()
+
+    # Merge --dry-run from parent or subcommand
+    if not args.dry_run and hasattr(args, "command") and args.command:
+        pass  # subcommand dry_run already in args via subparser
+
+    if args.dry_run:
+        print("DRY RUN - no changes will be made\n")
+
+    if args.command == "agents":
+        _run_agents(args)
+    elif args.command == "skills":
+        _run_skills(args)
+    elif args.command == "vault":
+        _run_vault(args)
+    else:
+        # Default: run vault sync for backwards compatibility
+        # Inject defaults for vault-specific args
+        args.agent = getattr(args, "agent", None)
+        args.repo = getattr(args, "repo", None)
+        args.clean = getattr(args, "clean", False)
+        args.merge = getattr(args, "merge", False)
+        args.watch = getattr(args, "watch", False)
+        _run_vault(args)
 
 
 if __name__ == "__main__":

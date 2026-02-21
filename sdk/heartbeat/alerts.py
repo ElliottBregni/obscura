@@ -110,7 +110,7 @@ class WebhookAlertChannel(AlertChannel):
     @override
     async def send(self, alert: Alert) -> bool:
         """Send alert via webhook POST request."""
-        payload = {
+        payload: dict[str, str | bool] = {
             "alert_id": alert.alert_id,
             "agent_id": alert.agent_id,
             "severity": alert.severity.value,
@@ -201,7 +201,7 @@ class SlackAlertChannel(AlertChannel):
             HealthStatus.CRITICAL: "danger",  # red
         }.get(alert.severity, "#808080")
 
-        attachment = {
+        attachment: dict[str, Any] = {
             "color": color,
             "title": f"Health Alert: {alert.agent_id}",
             "text": alert.message,

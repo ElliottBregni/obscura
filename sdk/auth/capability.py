@@ -188,7 +188,7 @@ def generate_capability_token(
     now = time.time()
     nonce = secrets.token_hex(16)
 
-    payload = {
+    payload: dict[str, str | float] = {
         "tier": tier.value,
         "user_id": user.user_id,
         "session_id": session_id,
@@ -219,7 +219,7 @@ def validate_capability_token(token: CapabilityToken) -> bool:
     if token.is_expired():
         return False
 
-    payload = {
+    payload: dict[str, str | float] = {
         "tier": token.tier.value,
         "user_id": token.user_id,
         "session_id": token.session_id,

@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package a2a;
+
+option python_generic_services = false;
+
+// ---------------------------------------------------------------------------
+// A2A gRPC Service Definition
+// ---------------------------------------------------------------------------
+
+service A2AService {
+    // Send a message and receive a task result (blocking).
+    rpc SendMessage (SendMessageRequest) returns (TaskResponse);
+
+    // Stream a message and receive events as they happen.
+    rpc StreamMessage (SendMessageRequest) returns (stream StreamEvent);
+
+    // Get a task by ID.
+    rpc GetTask (GetTaskRequest) returns (TaskResponse);
+
+    // List tasks with optional filtering.
+    rpc ListTasks (ListTasksRequest) returns (ListTasksResponse);
+
+    // Cancel a task.
+    rpc CancelTask (CancelTaskRequest) returns (TaskResponse);
+
+    // Subscribe to real-time task updates.
+    rpc SubscribeToTask (SubscribeRequest) returns (stream StreamEvent);
+
+    // Get the agent card.
+    rpc GetAgentCard (GetAgentCardRequest) returns (AgentCardResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Request / Response Messages
+// ---------------------------------------------------------------------------
+
+message TextPart {
+    string text = 1;
+    map<string, string> metadata = 2;
+}
+
+message FilePart {
+    string name = 1;
+    string mime_type = 2;
+    oneof content {
+        bytes data = 3;
+        string uri = 4;
+    }
+}
+
+message DataPart {
+    string json_data = 1;  // JSON-encoded structured data
+}
+
+message Part {
+    oneof part {
+        TextPart text_part = 1;
+        FilePart file_part = 2;
+        DataPart data_part = 3;
+    }
+}
+
+message A2AMessage {
+    string role = 1;        // "user" or "agent"
+    string message_id = 2;
+    repeated Part parts = 3;
+    string task_id = 4;
+    string context_id = 5;
+    string timestamp = 6;   // ISO 8601
+}
+
+message Artifact {
+    string artifact_id = 1;
+    string name = 2;
+    repeated Part parts = 3;
+}
+
+message TaskStatus {
+    string state = 1;    // TaskState value
+    string timestamp = 2;
+}
+
+message Task {
+    string id = 1;
+    string context_id = 2;
+    TaskStatus status = 3;
+    repeated Artifact artifacts = 4;
+    repeated A2AMessage history = 5;
+}
+
+message SendMessageRequest {
+    A2AMessage message = 1;
+    string context_id = 2;
+    string task_id = 3;
+    bool blocking = 4;
+}
+
+message GetTaskRequest {
+    string task_id = 1;
+}
+
+message ListTasksRequest {
+    string context_id = 1;
+    string state = 2;
+    string cursor = 3;
+    int32 limit = 4;
+}
+
+message CancelTaskRequest {
+    string task_id = 1;
+}
+
+message SubscribeRequest {
+    string task_id = 1;
+}
+
+message GetAgentCardRequest {
+    // Empty — no parameters needed
+}
+
+message TaskResponse {
+    Task task = 1;
+    Error error = 2;
+}
+
+message ListTasksResponse {
+    repeated Task tasks = 1;
+    string next_cursor = 2;
+    Error error = 3;
+}
+
+message StreamEvent {
+    string kind = 1;  // "status-update" or "artifact-update"
+    TaskStatus status = 2;
+    Artifact artifact = 3;
+    string task_id = 4;
+    string context_id = 5;
+    bool final = 6;
+    bool append = 7;
+    bool last_chunk = 8;
+}
+
+message AgentCardResponse {
+    string json_card = 1;  // JSON-serialized AgentCard
+}
+
+message Error {
+    int32 code = 1;
+    string message = 2;
+    string data = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Skill / Agent Card sub-messages (for future native proto representation)
+// ---------------------------------------------------------------------------
+
+message AgentSkill {
+    string id = 1;
+    string name = 2;
+    string description = 3;
+    repeated string tags = 4;
+}

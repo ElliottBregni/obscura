@@ -380,7 +380,7 @@ class ObscuraMCPServer:
 
         result: list[dict[str, Any]] = []
         for agent in agents:
-            agent_data = {
+            agent_data: dict[str, Any] = {
                 "id": agent.id,
                 "name": agent.config.name,
                 "status": agent.status.name,
@@ -991,7 +991,7 @@ class ObscuraMCPServer:
 
     async def handle_prompts_list(self) -> list[dict[str, Any]]:
         """Handle MCP prompts/list request."""
-        prompts = [
+        prompts: list[dict[str, Any]] = [
             {
                 "name": "agent_task",
                 "description": "Template for agent task execution",
@@ -1081,7 +1081,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
     router = APIRouter(prefix="/mcp", tags=["MCP"])
 
     @router.post("/rpc")
-    async def handle_rpc(request: Request):  # pyright: ignore[reportUnusedFunction]
+    async def handle_rpc(request: Request) -> dict[str, Any]:
         """Handle MCP JSON-RPC requests."""
         body = await request.json()
 
@@ -1090,6 +1090,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
         req_id = body.get("id")
 
         try:
+            result: Any
             if method == "initialize":
                 result = await server.handle_initialize(**params)
             elif method == "tools/list":
