@@ -320,7 +320,7 @@ class TestTUISessionMetadata:
 
     def test_complex_metadata_nesting(self) -> None:
         """Metadata supports arbitrarily nested dicts and lists."""
-        meta = {
+        meta: dict[str, Any] = {
             "tool_uses": [
                 {
                     "name": "read_file",

@@ -1,13 +1,18 @@
 """Tests for sdk.backends.claude — ClaudeBackend."""
 
+from typing import Any, AsyncIterator
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
-from sdk.internal.types import Backend, HookPoint
+from sdk.internal.types import Backend, ChunkKind, HookPoint, StreamChunk, ToolChoice, ToolSpec
 
 
 def _make_auth(api_key: str = "sk-ant-test") -> AuthConfig:
     return AuthConfig(anthropic_api_key=api_key)
+
+
+def _tool_handler(**_: Any) -> str:
+    return "ok"
 
 
 class TestClaudeBackendInit:
@@ -41,6 +46,7 @@ class TestClaudeBackendInit:
         b = ClaudeBackend(_make_auth())
         caps = b.capabilities()
         assert caps.supports_native_mode is True
+        assert caps.supports_tool_choice is True
         assert "session_fork" in caps.native_features
 
 
@@ -125,6 +131,101 @@ class TestClaudeSend:
         b = ClaudeBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             await b.send("test")
+
+    @pytest.mark.asyncio
+    async def test_send_tool_choice_function_maps_allowed_tools(self):
+        from sdk.backends.claude import ClaudeBackend
+
+        b = ClaudeBackend(_make_auth())
+        mock_client = AsyncMock()
+        b.set_client_for_testing(mock_client)
+        b.register_tool(
+            ToolSpec(
+                name="read_file",
+                description="read file",
+                parameters={"type": "object"},
+                handler=_tool_handler,
+            )
+        )
+
+        assistant_msg = MagicMock()
+        type(assistant_msg).__name__ = "AssistantMessage"
+        text_block = MagicMock()
+        type(text_block).__name__ = "TextBlock"
+        text_block.text = "ok"
+        assistant_msg.content = [text_block]
+        result_msg = MagicMock()
+        type(result_msg).__name__ = "ResultMessage"
+        result_msg.session_id = "sess-1"
+
+        call_count = 0
+
+        async def mock_receive():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return
+                yield
+            yield assistant_msg
+            yield result_msg
+
+        mock_client.receive_response = mock_receive
+        mock_client.query = AsyncMock()
+
+        await b.send("Hello", tool_choice=ToolChoice.required("read_file"))
+
+        mock_client.query.assert_awaited_once_with(
+            "Hello",
+            allowed_tools=["mcp__obscura_tools__read_file"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_tool_choice_kwargs_fallback_on_type_error(self):
+        from sdk.backends.claude import ClaudeBackend
+
+        b = ClaudeBackend(_make_auth())
+        mock_client = AsyncMock()
+        b.set_client_for_testing(mock_client)
+        b.register_tool(
+            ToolSpec(
+                name="read_file",
+                description="read file",
+                parameters={"type": "object"},
+                handler=_tool_handler,
+            )
+        )
+
+        assistant_msg = MagicMock()
+        type(assistant_msg).__name__ = "AssistantMessage"
+        text_block = MagicMock()
+        type(text_block).__name__ = "TextBlock"
+        text_block.text = "ok"
+        assistant_msg.content = [text_block]
+        result_msg = MagicMock()
+        type(result_msg).__name__ = "ResultMessage"
+        result_msg.session_id = "sess-1"
+
+        call_count = 0
+
+        async def mock_receive():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return
+                yield
+            yield assistant_msg
+            yield result_msg
+
+        mock_client.receive_response = mock_receive
+        mock_client.query = AsyncMock(side_effect=[TypeError("unsupported kw"), None])
+
+        await b.send("Hello", tool_choice=ToolChoice.none())
+
+        assert mock_client.query.await_count == 2
+        assert mock_client.query.await_args_list[0].kwargs == {
+            "disallowed_tools": ["mcp__obscura_tools__read_file"]
+        }
+        assert mock_client.query.await_args_list[1].args == ("Hello",)
 
 
 class TestClaudeSessions:
@@ -298,3 +399,42 @@ class TestClaudeInternals:
             assert out is ref
             old_client.disconnect.assert_awaited_once()
             new_client.connect.assert_awaited_once()
+
+
+class TestClaudeStream:
+    @pytest.mark.asyncio
+    async def test_stream_tool_choice_none_maps_disallowed_tools(self):
+        from sdk.backends.claude import ClaudeBackend
+
+        b = ClaudeBackend(_make_auth())
+        mock_client = AsyncMock()
+        b.set_client_for_testing(mock_client)
+        b.register_tool(
+            ToolSpec(
+                name="search",
+                description="search tool",
+                parameters={"type": "object"},
+                handler=_tool_handler,
+            )
+        )
+
+        async def mock_receive():
+            yield MagicMock()
+
+        async def _fake_adapter(_source: Any) -> AsyncIterator[StreamChunk]:
+            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+            yield StreamChunk(kind=ChunkKind.DONE)
+
+        mock_client.receive_response = mock_receive
+        mock_client.query = AsyncMock()
+
+        with patch("sdk.backends.claude.ClaudeIteratorAdapter", side_effect=_fake_adapter):
+            chunks: list[StreamChunk] = []
+            async for c in b.stream("ping", tool_choice=ToolChoice.none()):
+                chunks.append(c)
+
+        assert len(chunks) == 2
+        mock_client.query.assert_awaited_once_with(
+            "ping",
+            disallowed_tools=["mcp__obscura_tools__search"],
+        )

@@ -78,7 +78,7 @@ class AgentConfig(BaseModel):
     """Configuration for an agent instance."""
 
     name: str
-    model: str  # "copilot", "claude", "localllm", or "openai"
+    model: str  # "copilot", "claude", "localllm", "openai", or "moonshot"
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10

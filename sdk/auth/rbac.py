@@ -11,6 +11,7 @@ Roles
 - ``agent:claude``    -- may invoke the Claude backend
 - ``agent:localllm``  -- may invoke the LocalLLM backend
 - ``agent:openai``    -- may invoke the OpenAI backend
+- ``agent:moonshot``  -- may invoke the Moonshot/Kimi backend
 - ``agent:read``      -- read-only agent access (send / stream)
 - ``sync:write``      -- trigger vault sync
 - ``sessions:manage`` -- create / delete sessions
@@ -30,7 +31,13 @@ from sdk.auth.models import AuthenticatedUser
 # lists in sync when new backends are added.
 # ---------------------------------------------------------------------------
 
-AGENT_WRITE_ROLES = ("agent:copilot", "agent:claude", "agent:localllm", "agent:openai")
+AGENT_WRITE_ROLES = (
+    "agent:copilot",
+    "agent:claude",
+    "agent:localllm",
+    "agent:openai",
+    "agent:moonshot",
+)
 """Roles that may spawn, run, stop, or mutate agents."""
 
 AGENT_READ_ROLES = (*AGENT_WRITE_ROLES, "agent:read")

@@ -206,7 +206,7 @@ class TestMemoryImportExport:
 
     def test_import_memory(self, client: TestClient) -> None:
         """Can import memory data."""
-        import_data = {
+        import_data: dict[str, dict[str, object]] = {
             "import-test-ns": {
                 "key1": "imported-value-1",
                 "key2": {"nested": "imported"},

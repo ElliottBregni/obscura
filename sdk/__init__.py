@@ -35,6 +35,17 @@ from sdk.client import ObscuraClient
 from sdk.config import ObscuraConfig
 from sdk.context import ContextLoader
 from sdk.handlers import RequestHandler, SimpleHandler
+from sdk.openclaw_bridge import (
+    BackendRoutingPolicy,
+    MemoryWriteRequest,
+    OpenClawBridge,
+    OpenClawBridgeConfig,
+    RequestMetadata,
+    RunAgentRequest,
+    SemanticSearchRequest,
+    SpawnAgentRequest,
+    WorkflowRunRequest,
+)
 
 __all__ = [
     # Client
@@ -46,6 +57,16 @@ __all__ = [
     # Handlers
     "RequestHandler",
     "SimpleHandler",
+    # OpenClaw bridge
+    "OpenClawBridge",
+    "OpenClawBridgeConfig",
+    "BackendRoutingPolicy",
+    "RequestMetadata",
+    "SpawnAgentRequest",
+    "RunAgentRequest",
+    "MemoryWriteRequest",
+    "SemanticSearchRequest",
+    "WorkflowRunRequest",
     # Context
     "ContextLoader",
     # Config

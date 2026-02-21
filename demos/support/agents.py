@@ -14,11 +14,11 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING, override
 
 from sdk.agent.agent import BaseAgent
-from sdk.internal.types import AgentContext, AgentPhase, HookPoint
+from sdk.internal.types import AgentContext, HookPoint
 
 if TYPE_CHECKING:
     from sdk.client import ObscuraClient
@@ -247,7 +247,7 @@ class TriageAgent(BaseAgent):
             f"Look up the customer account and order status for customer ID: {customer_id}. "
             f"Use the query_customer and check_order_status tools."
         )
-        response = await self._client.send(enrich_prompt)
+        await self._client.send(enrich_prompt)
 
         # Parse enrichment from response (tools may have been called inline)
         # For deterministic demo: call tools directly as fallback

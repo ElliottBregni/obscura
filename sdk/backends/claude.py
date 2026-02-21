@@ -8,7 +8,7 @@ unified interface. Claude's async-iterator model maps naturally to our
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, cast
 
 from sdk.internal.auth import AuthConfig
 from sdk.internal.sessions import SessionStore
@@ -26,6 +26,7 @@ from sdk.internal.types import (
     Role,
     SessionRef,
     StreamChunk,
+    ToolChoice,
     ToolSpec,
 )
 
@@ -128,6 +129,7 @@ class ClaudeBackend:
         return BackendCapabilities(
             supports_streaming=True,
             supports_tool_calls=True,
+            supports_tool_choice=True,
             supports_reasoning=True,
             supports_remote_sessions=True,
             supports_native_mode=True,
@@ -170,7 +172,7 @@ class ClaudeBackend:
                 pass
 
             # Use query for a fresh exchange
-            await self._client.query(prompt)
+            await self._query(prompt, kwargs)
             messages: list[Any] = []
             async for msg in self._client.receive_response():
                 messages.append(msg)
@@ -187,7 +189,7 @@ class ClaudeBackend:
         with tracer.start_as_current_span("claude.stream") as span:
             _set_span_attr(span, "backend", "claude")
 
-            await self._client.query(prompt)
+            await self._query(prompt, kwargs)
             source = self._client.receive_response()
             adapter = ClaudeIteratorAdapter(source)
 
@@ -305,6 +307,51 @@ class ClaudeBackend:
     def _ensure_client(self) -> None:
         if self._client is None:
             raise RuntimeError("ClaudeBackend not started. Call start() first.")
+
+    async def _query(self, prompt: str, kwargs: dict[str, Any]) -> None:
+        """Issue a Claude query with optional per-request tool policy."""
+        query_kwargs = self._build_query_kwargs(kwargs)
+        if query_kwargs:
+            try:
+                await self._client.query(prompt, **query_kwargs)
+                return
+            except TypeError:
+                # Older SDKs may not accept query kwargs.
+                pass
+        await self._client.query(prompt)
+
+    def _build_query_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Convert unified kwargs into Claude query kwargs."""
+        tool_choice = kwargs.get("tool_choice")
+        return self._convert_tool_choice(tool_choice)
+
+    def _convert_tool_choice(self, choice: Any) -> dict[str, Any]:
+        """Map ToolChoice to Claude query kwargs."""
+        if choice is None:
+            return {}
+
+        tool_names = [f"mcp__obscura_tools__{t.name}" for t in self._tools]
+        if isinstance(choice, ToolChoice):
+            if choice.mode == "auto":
+                return {}
+            if choice.mode == "none":
+                return {"disallowed_tools": tool_names} if tool_names else {}
+            if choice.mode == "required":
+                return {"allowed_tools": tool_names} if tool_names else {}
+            if choice.mode == "function" and choice.function_name:
+                return {"allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"]}
+            return {}
+
+        if isinstance(choice, str):
+            if choice == "none":
+                return {"disallowed_tools": tool_names} if tool_names else {}
+            if choice == "required":
+                return {"allowed_tools": tool_names} if tool_names else {}
+            return {}
+
+        if isinstance(choice, dict):
+            return cast(dict[str, Any], choice)
+        return {}
 
     def _build_options(self, **overrides: Any) -> Any:
         """Build ClaudeAgentOptions for the SDK."""

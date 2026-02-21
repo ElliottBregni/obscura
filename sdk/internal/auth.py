@@ -12,7 +12,7 @@ import shlex
 import subprocess
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -41,6 +41,9 @@ class AuthConfig(BaseModel):
     # OpenAI-compatible (OpenAI, OpenRouter, Together, etc.)
     openai_api_key: str | None = None
     openai_base_url: str | None = None
+    # Moonshot/Kimi (OpenAI-compatible)
+    moonshot_api_key: str | None = None
+    moonshot_base_url: str | None = None
     # Local LLM (LM Studio, Ollama, etc.) — no key needed
     localllm_base_url: str | None = None
 
@@ -63,6 +66,8 @@ _CLAUDE_ENV_VARS = (
 )
 _OPENAI_KEY_ENV_VARS = ("OPENAI_API_KEY", "CODEX_API_KEY")
 _OPENAI_BASE_URL_ENV_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE")
+_MOONSHOT_KEY_ENV_VARS = ("MOONSHOT_API_KEY", "KIMI_API_KEY", "OPENAI_API_KEY")
+_MOONSHOT_BASE_URL_ENV_VARS = ("MOONSHOT_BASE_URL", "KIMI_BASE_URL")
 _LOCALLLM_BASE_URL_ENV_VARS = ("LOCALLLM_BASE_URL", "LM_STUDIO_URL", "OLLAMA_URL")
 _AUTH_MODE_ENV_VAR = "OBSCURA_AUTH_MODE"
 
@@ -269,11 +274,12 @@ def _resolve_codex_oauth_token() -> str | None:
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
 
-    tokens = payload.get("tokens")
+    tokens = cast(object, payload.get("tokens"))
     if not isinstance(tokens, dict):
         return None
 
-    access_token = tokens.get("access_token")
+    token_map = cast(dict[str, object], tokens)
+    access_token = token_map.get("access_token")
     if isinstance(access_token, str) and access_token.strip():
         return access_token.strip()
     return None
@@ -305,6 +311,31 @@ def _resolve_localllm_base_url(explicit: str | None) -> str:
     return "http://localhost:1234/v1"  # LM Studio default
 
 
+def _resolve_moonshot_key(explicit: str | None) -> str:
+    """Resolve a Moonshot/Kimi API key from explicit value or env vars."""
+    if explicit:
+        return explicit
+    for var in _MOONSHOT_KEY_ENV_VARS:
+        key = os.environ.get(var)
+        if key:
+            return key
+    raise ValueError(
+        "Moonshot auth requires one of: "
+        f"{', '.join(_MOONSHOT_KEY_ENV_VARS)} env var."
+    )
+
+
+def _resolve_moonshot_base_url(explicit: str | None) -> str:
+    """Resolve Moonshot base URL from explicit value/env/default."""
+    if explicit:
+        return explicit
+    for var in _MOONSHOT_BASE_URL_ENV_VARS:
+        url = os.environ.get(var)
+        if url:
+            return url
+    return "https://api.moonshot.ai/v1"
+
+
 # Public helpers for testing/observability
 def resolve_github_token(explicit: str | None) -> str:
     return _resolve_github_token(explicit)
@@ -324,6 +355,14 @@ def resolve_openai_base_url(explicit: str | None) -> str | None:
 
 def resolve_localllm_base_url(explicit: str | None) -> str:
     return _resolve_localllm_base_url(explicit)
+
+
+def resolve_moonshot_key(explicit: str | None) -> str:
+    return _resolve_moonshot_key(explicit)
+
+
+def resolve_moonshot_base_url(explicit: str | None) -> str:
+    return _resolve_moonshot_base_url(explicit)
 
 
 class TokenRefresher:
@@ -448,5 +487,15 @@ def resolve_auth(
     if backend == Backend.LOCALLLM:
         base_url = _resolve_localllm_base_url(config.localllm_base_url)
         return AuthConfig(localllm_base_url=base_url)
+
+    if backend == Backend.MOONSHOT:
+        key = _resolve_moonshot_key(config.moonshot_api_key or config.openai_api_key)
+        base_url = _resolve_moonshot_base_url(config.moonshot_base_url or config.openai_base_url)
+        return AuthConfig(
+            moonshot_api_key=key,
+            moonshot_base_url=base_url,
+            openai_api_key=key,
+            openai_base_url=base_url,
+        )
 
     raise ValueError(f"Unknown backend: {backend}")

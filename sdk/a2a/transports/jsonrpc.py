@@ -7,6 +7,7 @@ Mounts at ``/a2a/rpc`` and dispatches A2A methods:
 
 Mirrors the pattern in ``sdk/mcp/server.py:1083-1149``.
 """
+# pyright: reportUnusedFunction=false
 
 from __future__ import annotations
 

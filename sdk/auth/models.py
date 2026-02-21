@@ -23,6 +23,7 @@ VALID_ROLES: frozenset[str] = frozenset(
         "agent:claude",
         "agent:localllm",
         "agent:openai",
+        "agent:moonshot",
         "agent:read",
         "sync:write",
         "sessions:manage",

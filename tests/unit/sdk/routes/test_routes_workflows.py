@@ -208,3 +208,60 @@ class TestWorkflowExecutions:
     def test_get_execution_not_found(self, client: TestClient) -> None:
         resp = client.get("/api/v1/workflows/executions/nonexistent")
         assert resp.status_code == 404
+
+
+class TestWorkflowRunEndpoint:
+    @patch("sdk.routes.workflows.get_runtime")
+    def test_run_single_step_workflow(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
+        mock_agent: Any = MagicMock()
+        mock_agent.start = AsyncMock()
+        mock_agent.run = AsyncMock(return_value="single-step-result")
+        mock_agent.stop = AsyncMock()
+
+        mock_runtime: Any = AsyncMock()
+        mock_runtime.spawn = MagicMock(return_value=mock_agent)
+        mock_get_runtime.return_value = mock_runtime
+
+        resp = client.post(
+            "/api/v1/workflows/run",
+            json={
+                "name": "openclaw-workflow",
+                "task_type": "review",
+                "goal": "Review the patch",
+                "model": "claude",
+                "context": {"repo": "obscura-main"},
+                "store_result": False,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "completed"
+        assert body["model"] == "claude"
+        assert body["task_type"] == "review"
+        mock_runtime.spawn.assert_called_once()
+
+    @patch("sdk.routes.workflows.get_runtime")
+    def test_run_single_step_workflow_defaults_model(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
+        mock_agent: Any = MagicMock()
+        mock_agent.start = AsyncMock()
+        mock_agent.run = AsyncMock(return_value="ok")
+        mock_agent.stop = AsyncMock()
+
+        mock_runtime: Any = AsyncMock()
+        mock_runtime.spawn = MagicMock(return_value=mock_agent)
+        mock_get_runtime.return_value = mock_runtime
+
+        resp = client.post(
+            "/api/v1/workflows/run",
+            json={
+                "task_type": "analysis",
+                "goal": "Analyze logs",
+                "store_result": False,
+            },
+        )
+        assert resp.status_code == 200
+        assert mock_runtime.spawn.call_args.kwargs["model"] == "claude"

@@ -27,6 +27,21 @@ def to_markdown(report: ParityReport) -> str:
         ]
     )
 
+    if report.backend_conformance:
+        lines.extend(
+            [
+                "",
+                "## Method Conformance",
+                "",
+                "| Backend | Passed | Total | Percent |",
+                "|---|---:|---:|---:|",
+            ]
+        )
+        for conf in report.backend_conformance:
+            lines.append(
+                f"| {conf.backend.value} | {conf.passed} | {conf.total} | {conf.percent:.1f}% |"
+            )
+
     if report.residual_risks:
         lines.extend(["", "## Residual Risks"])
         for risk in report.residual_risks:

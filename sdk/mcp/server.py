@@ -16,6 +16,7 @@ Usage::
     # Or get the FastMCP app for mounting in FastAPI
     app = server.get_app()
 """
+# pyright: reportUnusedFunction=false
 
 from __future__ import annotations
 
@@ -226,7 +227,7 @@ class ObscuraMCPServer:
                 "properties": {
                     "backend": create_string_property(
                         "Backend to use",
-                        enum=["openai", "claude", "copilot", "localllm"],
+                        enum=["openai", "moonshot", "claude", "copilot", "localllm"],
                         default="openai",
                     ),
                     "name": create_string_property(
@@ -1150,7 +1151,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
             }
 
     @router.get("/sse")
-    async def handle_sse(request: Request):  # pyright: ignore[reportUnusedFunction]
+    async def handle_sse(request: Request):
         """Handle MCP SSE (Server-Sent Events) connections."""
 
         async def event_generator():

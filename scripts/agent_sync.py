@@ -239,15 +239,6 @@ def _safe_read_jsonl(path: Path, limit: int = 0) -> list[dict[str, Any]]:
     return entries
 
 
-def _collapse_home(path: Path) -> str:
-    """Collapse home directory to ~ for display."""
-    home = str(Path.home())
-    s = str(path)
-    if s.startswith(home):
-        return "~" + s[len(home):]
-    return s
-
-
 def _derive_topic(
     summary: str,
     turns: list[dict[str, str]],
@@ -742,8 +733,8 @@ class SemanticIndexBuilder:
                                 texts.append(str(block.get("text", "")))
                             elif block.get("type") == "tool_result":
                                 continue
-                        elif isinstance(block, str):
-                            texts.append(block)
+                        else:
+                            texts.append(str(block))
                     preview = _truncate(" ".join(texts))
                 else:
                     preview = ""

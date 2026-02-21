@@ -59,10 +59,12 @@ class A2AClient:
         *,
         auth_token: str | None = None,
         timeout: float = 120.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._auth_token = auth_token
         self._timeout = timeout
+        self._transport = transport
         self._http: httpx.AsyncClient | None = None
         self._agent_card: AgentCard | None = None
 
@@ -82,6 +84,7 @@ class A2AClient:
 
         self._http = httpx.AsyncClient(
             base_url=self._base_url,
+            transport=self._transport,
             headers=headers,
             timeout=self._timeout,
         )

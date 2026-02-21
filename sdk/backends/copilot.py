@@ -9,7 +9,7 @@ via ``EventToIteratorBridge``.
 from __future__ import annotations
 
 import inspect
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, cast
 
 from sdk.internal.auth import AuthConfig
 from sdk.internal.sessions import SessionStore
@@ -28,6 +28,7 @@ from sdk.internal.types import (
     Role,
     SessionRef,
     StreamChunk,
+    ToolChoice,
     ToolSpec,
 )
 
@@ -135,6 +136,7 @@ class CopilotBackend:
         return BackendCapabilities(
             supports_streaming=True,
             supports_tool_calls=True,
+            supports_tool_choice=True,
             supports_reasoning=True,
             supports_remote_sessions=True,
             supports_native_mode=True,
@@ -180,9 +182,7 @@ class CopilotBackend:
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("copilot.send") as span:
             _set_span_attr(span, "backend", "copilot")
-            msg_options: dict[str, Any] = {"prompt": prompt}
-            if kwargs.get("options"):
-                msg_options.update(kwargs["options"])
+            msg_options = self._build_message_options(prompt, kwargs)
             response = await self._session.send_and_wait(msg_options)
             return self._to_message(response)
 
@@ -257,9 +257,7 @@ class CopilotBackend:
 
             yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
-            msg_options: dict[str, Any] = {"prompt": prompt}
-            if kwargs.get("options"):
-                msg_options.update(kwargs["options"])
+            msg_options = self._build_message_options(prompt, kwargs)
             await self._session.send(msg_options)
 
             # Yield chunks from the bridge
@@ -312,6 +310,40 @@ class CopilotBackend:
         self._ensure_client()
         await self._client.delete_session(ref.session_id)
         self._session_store.remove(ref.session_id)
+
+    async def fork_session(self, ref: SessionRef) -> SessionRef:
+        """Fork a session.
+
+        Uses provider-native fork APIs when available. Falls back to
+        creating a new logical fork session and tracks parent metadata.
+        """
+        self._ensure_client()
+
+        # Prefer explicit SDK fork support if present.
+        fork_fn = getattr(self._client, "fork_session", None)
+        if callable(fork_fn):
+            fork_fn_typed = cast(Callable[[str], Any], fork_fn)
+            session = await fork_fn_typed(ref.session_id)
+            fork_ref = SessionRef(
+                session_id=session.session_id,
+                backend=Backend.COPILOT,
+                raw=session,
+            )
+            self._session_store.add(fork_ref)
+            self._session = session
+            return fork_ref
+
+        # Logical fork fallback: create a fresh session that records parent lineage.
+        config = self.build_session_config()
+        session = await self._client.create_session(config)
+        fork_ref = SessionRef(
+            session_id=session.session_id,
+            backend=Backend.COPILOT,
+            raw={"session": session, "forked_from": ref.session_id},
+        )
+        self._session_store.add(fork_ref)
+        self._session = session
+        return fork_ref
 
     # -- Tools ---------------------------------------------------------------
 
@@ -398,6 +430,33 @@ class CopilotBackend:
 
         config.update(overrides)
         return config
+
+    def _build_message_options(self, prompt: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Build per-message options including normalized tool choice."""
+        msg_options: dict[str, Any] = {"prompt": prompt}
+        options = kwargs.get("options")
+        if isinstance(options, dict):
+            msg_options.update(cast(dict[str, Any], options))
+
+        tool_choice = kwargs.get("tool_choice")
+        if isinstance(tool_choice, ToolChoice):
+            msg_options["tool_choice"] = self._convert_tool_choice(tool_choice)
+        elif tool_choice is not None:
+            msg_options["tool_choice"] = tool_choice
+        return msg_options
+
+    @staticmethod
+    def _convert_tool_choice(choice: ToolChoice) -> Any:
+        """Convert unified ToolChoice to a provider-neutral dict payload."""
+        if choice.mode == "auto":
+            return {"mode": "auto"}
+        if choice.mode == "none":
+            return {"mode": "none"}
+        if choice.mode == "required":
+            return {"mode": "required"}
+        if choice.mode == "function":
+            return {"mode": "function", "name": choice.function_name}
+        return {"mode": "auto"}
 
     def build_hooks_config(self) -> dict[str, Any] | None:
         """Translate registered hooks to Copilot SDK hook config."""

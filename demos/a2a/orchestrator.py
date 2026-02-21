@@ -38,8 +38,6 @@ from sdk.a2a.types import (
     StreamEvent,
     Task,
     TaskArtifactUpdateEvent,
-    TaskState,
-    TaskStatusUpdateEvent,
     TextPart,
 )
 from sdk.internal.tools import ToolRegistry
@@ -111,13 +109,8 @@ class A2APipeline:
         """Connect to all agents and discover their agent cards."""
         cards: dict[str, AgentCard] = {}
         for name, (url, transport) in self._transports.items():
-            client = A2AClient(url)
-            client._http = httpx.AsyncClient(
-                transport=transport,
-                base_url=url,
-                headers={"A2A-Version": "0.3"},
-                timeout=30.0,
-            )
+            client = A2AClient(url, timeout=30.0, transport=transport)
+            await client.connect()
             self._clients[name] = client
             card = await client.discover()
             cards[name] = card
@@ -168,7 +161,7 @@ class A2APipeline:
             logger.info(
                 "Triage complete: task=%s category=%s",
                 triage_task.id,
-                result.triage_json.get("category", "?"),
+                (result.triage_json or {}).get("category", "?"),
             )
 
             # Phase 2: Investigator — send triage JSON as input
@@ -186,7 +179,7 @@ class A2APipeline:
             logger.info(
                 "Investigation complete: task=%s root_cause=%s",
                 inv_task.id,
-                str(result.investigation_json.get("root_cause", "?"))[:60],
+                str((result.investigation_json or {}).get("root_cause", "?"))[:60],
             )
 
             # Phase 3: Resolution — send investigation JSON as input
@@ -221,7 +214,7 @@ class A2APipeline:
         Yields ``(agent_name, event)`` tuples as each agent processes.
         Uses ``message/stream`` (SSE) for real-time output.
         """
-        cards = await self.connect()
+        await self.connect()
 
         try:
             # Phase 1: Triage (streaming)

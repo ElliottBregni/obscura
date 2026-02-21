@@ -457,7 +457,7 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        mock_result = {
+        mock_result: dict[str, object] = {
             "contents": [
                 {
                     "uri": "file:///img.png",
@@ -512,7 +512,7 @@ class TestMCPClientProtocol:
         config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="echo")
         client = MCPClient(config)
 
-        mock_result = {
+        mock_result: dict[str, object] = {
             "prompts": [
                 {
                     "name": "code_review",
@@ -947,5 +947,4 @@ class TestSSETransport:
         # Queue should be empty
         result = await transport.receive()
         assert result is None
-
 

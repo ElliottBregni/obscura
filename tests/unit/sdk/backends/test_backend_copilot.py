@@ -5,7 +5,14 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from sdk.internal.auth import AuthConfig
-from sdk.internal.types import Backend, ChunkKind, HookPoint, StreamChunk, ToolSpec
+from sdk.internal.types import (
+    Backend,
+    ChunkKind,
+    HookPoint,
+    StreamChunk,
+    ToolChoice,
+    ToolSpec,
+)
 from sdk.backends.copilot import (
     CopilotBackend,
     public_make_handler,
@@ -92,6 +99,23 @@ class TestCopilotBackendSend:
             await b.send("test")
 
     @pytest.mark.asyncio
+    async def test_send_passes_structured_tool_choice(self):
+        b = CopilotBackend(_make_auth())
+        b.set_client_for_testing(MagicMock())
+        mock_response = MagicMock()
+        mock_response.data.content = "ok"
+        mock_session = AsyncMock()
+        mock_session.send_and_wait.return_value = mock_response
+        b.set_session_for_testing(mock_session)
+
+        await b.send("Hello", tool_choice=ToolChoice.required("read_file"))
+
+        call_args: Any = mock_session.send_and_wait.call_args
+        sent_opts = call_args.args[0]
+        assert sent_opts["prompt"] == "Hello"
+        assert sent_opts["tool_choice"] == {"mode": "function", "name": "read_file"}
+
+    @pytest.mark.asyncio
     async def test_stream_event_lifecycle(self):
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
@@ -145,6 +169,32 @@ class TestCopilotBackendSend:
         ]
         assert text_chunks[0].native_event is not None
 
+    @pytest.mark.asyncio
+    async def test_stream_passes_structured_tool_choice(self):
+        b = CopilotBackend(_make_auth())
+        b.set_client_for_testing(MagicMock())
+        handlers: list[Any] = []
+        captured_options: list[Any] = []
+
+        class FakeSession:
+            def on(self, handler: Any) -> Any:
+                handlers.append(handler)
+                return lambda: None
+
+            async def send(self, options: Any) -> None:
+                captured_options.append(options)
+                idle = SimpleNamespace(type="session.idle", data=SimpleNamespace())
+                for h in list(handlers):
+                    h(idle)
+
+        b.set_session_for_testing(FakeSession())
+
+        async for _ in b.stream("hello", tool_choice=ToolChoice.none()):
+            pass
+
+        assert captured_options[0]["prompt"] == "hello"
+        assert captured_options[0]["tool_choice"] == {"mode": "none"}
+
 
 class TestCopilotBackendSessions:
     @pytest.mark.asyncio
@@ -190,6 +240,37 @@ class TestCopilotBackendSessions:
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         await b.delete_session(ref)
         b.client.delete_session.assert_awaited_once_with("s1")
+
+    @pytest.mark.asyncio
+    async def test_fork_session_uses_sdk_when_available(self):
+        b = CopilotBackend(_make_auth())
+        b.set_client_for_testing(AsyncMock())
+        from sdk.internal.types import SessionRef
+
+        source = SessionRef(session_id="s1", backend=Backend.COPILOT)
+        forked = MagicMock()
+        forked.session_id = "s2"
+        b.client.fork_session = AsyncMock(return_value=forked)
+
+        ref = await b.fork_session(source)
+        assert ref.session_id == "s2"
+        b.client.fork_session.assert_awaited_once_with("s1")
+
+    @pytest.mark.asyncio
+    async def test_fork_session_falls_back_to_create(self):
+        b = CopilotBackend(_make_auth())
+        b.set_client_for_testing(AsyncMock())
+        from sdk.internal.types import SessionRef
+
+        source = SessionRef(session_id="s1", backend=Backend.COPILOT)
+        created = MagicMock()
+        created.session_id = "s-new"
+        b.client.create_session = AsyncMock(return_value=created)
+        b.client.fork_session = None
+
+        ref = await b.fork_session(source)
+        assert ref.session_id == "s-new"
+        b.client.create_session.assert_awaited()
 
 
 class TestCopilotBackendTools:

@@ -92,7 +92,7 @@ class TUISession:
     def save(self) -> None:
         """Write the session to disk as JSON."""
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
-        data = {
+        data: dict[str, Any] = {
             "session_id": self.session_id,
             "turns": [t.to_dict() for t in self.turns],
             "created_at": (self.turns[0].timestamp.isoformat() if self.turns else None),
@@ -341,7 +341,7 @@ class TestTUISessionLoad:
 
     def test_load_preserves_metadata(self, tmp_path: Path) -> None:
         """Loaded metadata is intact."""
-        meta = {"tool_uses": [{"name": "read_file"}], "timing_ms": 250}
+        meta: dict[str, Any] = {"tool_uses": [{"name": "read_file"}], "timing_ms": 250}
         session = TUISession(session_id="meta", base_dir=tmp_path)
         session.add_turn(_make_turn(metadata=meta))
         session.save()

@@ -1,7 +1,7 @@
 """
 sdk.client — ObscuraClient: unified entry point for all backends.
 
-Dispatches to the appropriate backend (Copilot, Claude, OpenAI, LocalLLM)
+Dispatches to the appropriate backend (Copilot, Claude, OpenAI, Moonshot, LocalLLM)
 based on the ``backend`` parameter. Integrates with ``copilot_models`` for
 model alias resolution and safety guards.
 """
@@ -44,6 +44,9 @@ class ObscuraClient:
                 print(chunk.text, end="", flush=True)
 
         async with ObscuraClient("openai", model="gpt-4o") as client:
+            response = await client.send("summarize this")
+
+        async with ObscuraClient("moonshot", model="kimi-2.5") as client:
             response = await client.send("summarize this")
 
         async with ObscuraClient("localllm") as client:
@@ -282,6 +285,19 @@ class ObscuraClient:
         """Delete a session."""
         await self._backend.delete_session(ref)
 
+    async def fork_session(self, ref: SessionRef) -> SessionRef:
+        """Fork an existing session.
+
+        Uses backend-native fork when implemented, otherwise performs a
+        logical fork fallback by creating/resuming sessions where possible.
+        """
+        fork_fn = getattr(self._backend, "fork_session", None)
+        if callable(fork_fn):
+            return await fork_fn(ref)
+        raise RuntimeError(
+            f"Backend {self._backend_type.value} does not support session forking."
+        )
+
     # -- Tools ---------------------------------------------------------------
 
     def register_tool(self, spec: ToolSpec) -> None:
@@ -435,6 +451,16 @@ class ObscuraClient:
             from sdk.backends.openai_compat import OpenAIBackend
 
             return OpenAIBackend(
+                auth=auth,
+                model=model,
+                system_prompt=system_prompt,
+                mcp_servers=mcp_servers,
+            )
+
+        if backend == Backend.MOONSHOT:
+            from sdk.backends.moonshot import MoonshotBackend
+
+            return MoonshotBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,

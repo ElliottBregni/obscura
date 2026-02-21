@@ -1,7 +1,7 @@
 {
   "include": ["."],
   "exclude": ["**/__pycache__", "**/node_modules", "**/.venv", "**/web-ui", "sdk/scripts"],
-  "typeCheckingMode": "warning",
+  "typeCheckingMode": "strict",
   "pythonVersion": "3.13",
   "reportMissingTypeStubs": true,
   "reportUnknownParameterType": true,

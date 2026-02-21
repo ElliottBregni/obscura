@@ -13,6 +13,7 @@ import pytest
 from sdk.backends.claude import ClaudeBackend
 from sdk.backends.copilot import CopilotBackend
 from sdk.backends.localllm import LocalLLMBackend
+from sdk.backends.moonshot import MoonshotBackend
 from sdk.backends.openai_compat import OpenAIBackend
 from sdk.internal.auth import AuthConfig
 from sdk.internal.types import HookPoint, NativeHandle, ToolSpec
@@ -21,6 +22,8 @@ from sdk.internal.types import HookPoint, NativeHandle, ToolSpec
 def _auth_for(name: str) -> AuthConfig:
     if name == "openai":
         return AuthConfig(openai_api_key="sk-test")
+    if name == "moonshot":
+        return AuthConfig(moonshot_api_key="sk-moonshot")
     if name == "localllm":
         return AuthConfig(localllm_base_url="http://localhost:1234/v1")
     if name == "claude":
@@ -32,6 +35,7 @@ def _auth_for(name: str) -> AuthConfig:
     ("name", "backend_cls"),
     [
         ("openai", OpenAIBackend),
+        ("moonshot", MoonshotBackend),
         ("localllm", LocalLLMBackend),
         ("claude", ClaudeBackend),
         ("copilot", CopilotBackend),
@@ -69,6 +73,7 @@ def test_backend_core_surface(name: str, backend_cls: Any) -> None:
     ("name", "backend_cls"),
     [
         ("openai", OpenAIBackend),
+        ("moonshot", MoonshotBackend),
         ("localllm", LocalLLMBackend),
         ("claude", ClaudeBackend),
         ("copilot", CopilotBackend),
@@ -87,7 +92,11 @@ def test_backend_registers_tools_and_hooks(name: str, backend_cls: Any) -> None:
         handler=_echo,
     )
     backend.register_tool(spec)
-    backend.register_hook(HookPoint.STOP, lambda _ctx: None)
+
+    def _on_stop(_ctx: Any) -> None:
+        return None
+
+    backend.register_hook(HookPoint.STOP, _on_stop)
 
     if hasattr(backend, "tools"):
         tools = getattr(backend, "tools")

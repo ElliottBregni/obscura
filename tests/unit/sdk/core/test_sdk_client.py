@@ -129,6 +129,15 @@ class TestBackendSelection:
         client = ObscuraClient("copilot", model="gpt-5-mini")
         assert client.backend_type is Backend.COPILOT
 
+    def test_moonshot_backend_created(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Backend.MOONSHOT should create a MoonshotBackend."""
+        monkeypatch.setenv("MOONSHOT_API_KEY", "moonshot-test-key")
+        client = ObscuraClient("moonshot", model="kimi-2.5")
+        from sdk.backends.moonshot import MoonshotBackend
+
+        assert isinstance(client.backend_impl, MoonshotBackend)
+        assert client.backend_type is Backend.MOONSHOT
+
     def test_invalid_backend(self) -> None:
         """Invalid backend string should raise ValueError."""
         with pytest.raises(ValueError):
@@ -159,8 +168,16 @@ class TestAuthResolution:
     def test_missing_claude_auth_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing Anthropic API key should raise ValueError."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        with pytest.raises(ValueError, match="Claude auth requires"):
-            ObscuraClient("claude")
+        with patch("sdk.internal.auth._has_claude_cli_oauth", return_value=False):
+            with pytest.raises(ValueError, match="Claude auth requires"):
+                ObscuraClient("claude")
+
+    def test_missing_moonshot_auth_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing Moonshot API key should raise ValueError."""
+        for var in ("MOONSHOT_API_KEY", "KIMI_API_KEY", "OPENAI_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        with pytest.raises(ValueError, match="Moonshot auth requires"):
+            ObscuraClient("moonshot")
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +258,7 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     mock_backend.resume_session = AsyncMock()
     mock_backend.list_sessions = AsyncMock()
     mock_backend.delete_session = AsyncMock()
+    mock_backend.fork_session = AsyncMock()
     mock_backend.register_tool = MagicMock()
     mock_backend.register_hook = MagicMock()
 
@@ -444,6 +462,27 @@ class TestSessionLifecycle:
         await client.delete_session(ref)
 
         mock_backend.delete_session.assert_awaited_once_with(ref)
+
+    async def test_fork_session(self) -> None:
+        """fork_session() should delegate when backend supports it."""
+        client, mock_backend = _make_client_with_mock_backend()
+        src = SessionRef(session_id="s1", backend=Backend.COPILOT)
+        dst = SessionRef(session_id="s2", backend=Backend.COPILOT)
+        mock_backend.fork_session.return_value = dst
+
+        out = await client.fork_session(src)
+
+        mock_backend.fork_session.assert_awaited_once_with(src)
+        assert out is dst
+
+    async def test_fork_session_unsupported(self) -> None:
+        """fork_session() should raise when backend has no fork method."""
+        client, _mock_backend = _make_client_with_mock_backend()
+        src = SessionRef(session_id="s1", backend=Backend.COPILOT)
+        client._backend = object()  # pyright: ignore[reportPrivateUsage]
+
+        with pytest.raises(RuntimeError, match="does not support session forking"):
+            await client.fork_session(src)
 
 
 # ---------------------------------------------------------------------------

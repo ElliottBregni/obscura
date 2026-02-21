@@ -12,6 +12,7 @@ StreamChunk types.
 from __future__ import annotations
 
 import inspect
+import json
 from typing import Any, AsyncIterator, Callable, Mapping, cast
 
 from sdk.internal.auth import AuthConfig
@@ -68,6 +69,7 @@ class OpenAIBackend:
         model: str | None = None,
         system_prompt: str = "",
         mcp_servers: list[dict[str, Any]] | None = None,
+        backend_type: Backend = Backend.OPENAI,
     ) -> None:
         self._api_key = auth.openai_api_key or ""
         self._base_url = auth.openai_base_url  # None = OpenAI default
@@ -76,6 +78,7 @@ class OpenAIBackend:
         self._mcp_servers: list[MCPServerConfig] = [
             MCPServerConfig.from_dict(s) for s in (mcp_servers or [])
         ]
+        self._backend_type = backend_type
 
         # SDK client (set on start())
         self._client: Any = None
@@ -209,13 +212,31 @@ class OpenAIBackend:
                 )
                 msg = self.to_message(response)
 
+            tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
+            for block in tool_blocks:
+                await self._run_hooks(
+                    HookContext(
+                        hook=HookPoint.PRE_TOOL_USE,
+                        tool_name=block.tool_name,
+                        tool_input=block.tool_input,
+                        message=msg,
+                    )
+                )
+                await self._run_hooks(
+                    HookContext(
+                        hook=HookPoint.POST_TOOL_USE,
+                        tool_name=block.tool_name,
+                        tool_input=block.tool_input,
+                        message=msg,
+                    )
+                )
+
             # Persist conversation history (including tool calls)
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
                     ChatMessage(role="user", content=prompt)
                 )
                 # Store tool_calls if present
-                tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
                 if tool_blocks:
                     import json as _json
 
@@ -282,6 +303,8 @@ class OpenAIBackend:
             accumulated_text = ""
             finish_reason = ""
             _active_tool_name = ""
+            _active_tool_id = ""
+            _active_tool_input = ""
             async for chunk in response:
                 if not chunk.choices:
                     continue
@@ -298,19 +321,37 @@ class OpenAIBackend:
                         if tc.function and tc.function.name:
                             # Close previous tool if any
                             if _active_tool_name:
+                                tool_input = _parse_tool_input(_active_tool_input)
                                 yield StreamChunk(
                                     kind=ChunkKind.TOOL_USE_END,
                                     tool_name=_active_tool_name,
                                 )
+                                await self._run_hooks(
+                                    HookContext(
+                                        hook=HookPoint.POST_TOOL_USE,
+                                        tool_name=_active_tool_name,
+                                        tool_input=tool_input,
+                                    )
+                                )
+                                _active_tool_input = ""
                             _active_tool_name = tc.function.name
+                            _active_tool_id = tc.id or ""
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_START,
                                 tool_name=tc.function.name,
-                                tool_use_id=tc.id or "",
+                                tool_use_id=_active_tool_id,
                                 raw=chunk,
                                 native_event=chunk,
                             )
+                            await self._run_hooks(
+                                HookContext(
+                                    hook=HookPoint.PRE_TOOL_USE,
+                                    tool_name=_active_tool_name,
+                                    tool_input={},
+                                )
+                            )
                         if tc.function and tc.function.arguments:
+                            _active_tool_input += tc.function.arguments
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_DELTA,
                                 tool_input_delta=tc.function.arguments,
@@ -330,9 +371,17 @@ class OpenAIBackend:
 
             # Close final tool if any
             if _active_tool_name:
+                tool_input = _parse_tool_input(_active_tool_input)
                 yield StreamChunk(
                     kind=ChunkKind.TOOL_USE_END,
                     tool_name=_active_tool_name,
+                )
+                await self._run_hooks(
+                    HookContext(
+                        hook=HookPoint.POST_TOOL_USE,
+                        tool_name=_active_tool_name,
+                        tool_input=tool_input,
+                    )
                 )
 
             # Persist conversation history
@@ -365,7 +414,7 @@ class OpenAIBackend:
         self._conversations[session_id] = []
         ref = SessionRef(
             session_id=session_id,
-            backend=Backend.OPENAI,
+            backend=self._backend_type,
         )
         self._session_store.add(ref)
         self._active_session = session_id
@@ -379,12 +428,32 @@ class OpenAIBackend:
 
     async def list_sessions(self) -> list[SessionRef]:
         """List tracked sessions."""
-        return self._session_store.list_all(Backend.OPENAI)
+        return self._session_store.list_all(self._backend_type)
 
     async def delete_session(self, ref: SessionRef) -> None:
         """Delete a session."""
         self._conversations.pop(ref.session_id, None)
         self._session_store.remove(ref.session_id)
+
+    async def fork_session(self, ref: SessionRef) -> SessionRef:
+        """Fork a session by cloning conversation history into a new session."""
+        import copy
+        import uuid
+
+        source = self._conversations.get(ref.session_id)
+        if source is None:
+            raise RuntimeError(f"Session {ref.session_id} not found")
+
+        session_id = str(uuid.uuid4())
+        self._conversations[session_id] = copy.deepcopy(source)
+        fork_ref = SessionRef(
+            session_id=session_id,
+            backend=self._backend_type,
+            raw={"forked_from": ref.session_id},
+        )
+        self._session_store.add(fork_ref)
+        self._active_session = session_id
+        return fork_ref
 
     # -- Tools ---------------------------------------------------------------
 
@@ -490,12 +559,16 @@ class OpenAIBackend:
 
         return prompt, structured, api_mode, native_openai
 
-    @staticmethod
-    def _extract_native_openai(native: Any) -> Mapping[str, Any] | None:
+    def _extract_native_openai(self, native: Any) -> Mapping[str, Any] | None:
         """Extract openai native payload from dicts or ProviderNativeRequest."""
         if isinstance(native, ProviderNativeRequest):
+            if self._backend_type == Backend.MOONSHOT and native.moonshot is not None:
+                return native.moonshot
             return native.openai
         if isinstance(native, Mapping):
+            if self._backend_type == Backend.MOONSHOT:
+                if "moonshot" in native and isinstance(native["moonshot"], Mapping):
+                    return cast(Mapping[str, Any], native["moonshot"])
             if "openai" in native and isinstance(native["openai"], Mapping):
                 return cast(Mapping[str, Any], native["openai"])
             return cast(Mapping[str, Any], native)
@@ -515,7 +588,7 @@ class OpenAIBackend:
             role=Role.ASSISTANT,
             content=[ContentBlock(kind="text", text=text)],
             raw=response,
-            backend=Backend.OPENAI,
+            backend=self._backend_type,
         )
 
     async def _stream_via_responses(
@@ -773,8 +846,6 @@ class OpenAIBackend:
 
         # Tool calls
         if msg.tool_calls:
-            import json
-
             for tc in msg.tool_calls:
                 try:
                     tool_input = json.loads(tc.function.arguments)
@@ -796,8 +867,21 @@ class OpenAIBackend:
             role=Role.ASSISTANT,
             content=blocks,
             raw=response,
-            backend=Backend.OPENAI,
+            backend=self._backend_type,
         )
+
+
+def _parse_tool_input(raw: str) -> dict[str, Any]:
+    """Parse accumulated tool input delta into a dict payload."""
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
+        return {"raw": raw}
+    except json.JSONDecodeError:
+        return {"raw": raw}
 
 
 # ---------------------------------------------------------------------------

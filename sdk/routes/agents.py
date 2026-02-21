@@ -45,7 +45,7 @@ async def agent_spawn(
 ) -> JSONResponse:
     """Spawn a new agent."""
     model: str = body.get("model", "copilot")
-    valid_models = ("copilot", "claude", "localllm", "openai")
+    valid_models = ("copilot", "claude", "localllm", "openai", "moonshot")
     if model not in valid_models:
         raise HTTPException(
             status_code=400,

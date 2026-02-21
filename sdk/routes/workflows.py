@@ -312,3 +312,86 @@ async def workflow_get_execution(
             status_code=404, detail=f"Execution {execution_id} not found"
         )
     return JSONResponse(content=execution.as_dict())
+
+
+@router.post("/workflows/run")
+async def workflow_run(
+    body: dict[str, Any],
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+) -> JSONResponse:
+    """Run a single-step workflow optimized for external orchestrators."""
+    runtime = await get_runtime(user)
+    model = str(body.get("model", "claude"))
+    name = str(body.get("name", "openclaw-workflow"))
+    system_prompt = str(body.get("system_prompt", ""))
+    memory_namespace = str(body.get("memory_namespace", "openclaw"))
+    store_result = bool(body.get("store_result", True))
+    memory_key = str(body.get("memory_key", "last_result"))
+
+    task_type = str(body.get("task_type", "task"))
+    goal = str(body.get("goal", ""))
+    context = dict(body.get("context", {}))
+    constraints = list(body.get("constraints", []))
+    expected_output = str(body.get("expected_output", ""))
+
+    prompt_lines = [
+        f"Task Type: {task_type}",
+        f"Goal: {goal}",
+    ]
+    if constraints:
+        prompt_lines.append("Constraints:")
+        prompt_lines.extend([f"- {str(c)}" for c in constraints])
+    if expected_output:
+        prompt_lines.append(f"Expected Output: {expected_output}")
+    prompt = "\n".join(prompt_lines)
+
+    agent = runtime.spawn(
+        name=name,
+        model=model,
+        system_prompt=system_prompt,
+        memory_namespace=memory_namespace,
+    )
+
+    await agent.start()
+    try:
+        result = await agent.run(prompt, **context)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await agent.stop()
+
+    if store_result:
+        from sdk.memory import MemoryStore
+
+        store = MemoryStore.for_user(user)
+        store.set(
+            memory_key,
+            {
+                "task_type": task_type,
+                "goal": goal,
+                "model": model,
+                "result": result,
+            },
+            namespace=memory_namespace,
+        )
+
+    audit(
+        "workflow.run",
+        user,
+        f"workflow:single:{name}",
+        "execute",
+        "success",
+        model=model,
+        task_type=task_type,
+    )
+
+    return JSONResponse(
+        content={
+            "status": "completed",
+            "name": name,
+            "model": model,
+            "task_type": task_type,
+            "memory_namespace": memory_namespace,
+            "result": result,
+        }
+    )

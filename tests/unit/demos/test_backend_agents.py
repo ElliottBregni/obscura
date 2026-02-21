@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, override
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -72,6 +72,7 @@ class _FakeRuntime:
 
 
 class _SlowStartRuntime(_FakeRuntime):
+    @override
     async def start(self) -> None:
         import asyncio
 

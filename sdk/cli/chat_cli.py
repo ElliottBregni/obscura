@@ -748,7 +748,7 @@ def _persist_transcript(
     "--backend",
     "-b",
     default="openai",
-    type=click.Choice(["openai", "claude", "copilot", "localllm"]),
+    type=click.Choice(["openai", "moonshot", "claude", "copilot", "localllm"]),
     help="Backend to use",
 )
 @click.option("--model", "-m", default=None, help="Model ID override")
@@ -801,6 +801,7 @@ def chat(
     \b
     Examples:
         obscura chat "explain this code" --backend openai
+        obscura chat "explain this code" --backend moonshot --model kimi-2.5
         obscura chat --backend claude --interactive
         obscura chat "hello" --backend localllm --no-stream
         obscura chat "test" --mode native --backend openai
@@ -984,7 +985,7 @@ def chat(
             console.print("[yellow]Provide a prompt or use --interactive mode.[/]")
             return
 
-        if backend in ("openai", "localllm"):
+        if backend in ("openai", "moonshot", "localllm"):
             # AsyncOpenAI-compatible client
             actual_model = model or "gpt-4o"
 
@@ -1084,7 +1085,6 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> Non
     Captured mode — pipes output for transcript storage:
         obscura passthrough --capture copilot -- -p "hello"
     """
-    import os
     import shutil
     import subprocess
 

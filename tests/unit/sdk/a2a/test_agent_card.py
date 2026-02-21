@@ -65,7 +65,10 @@ class TestAgentCardGenerator:
     def test_with_custom_auth_scheme(self) -> None:
         card = (
             AgentCardGenerator("Agent", "https://x.com")
-            .with_auth_scheme("apiKey", AuthScheme(type="apiKey", name="X-API-Key", in_="header"))
+            .with_auth_scheme(
+                "apiKey",
+                AuthScheme.model_validate({"type": "apiKey", "name": "X-API-Key", "in": "header"}),
+            )
             .build()
         )
         assert "apiKey" in card.securitySchemes

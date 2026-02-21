@@ -10,6 +10,7 @@ Mounts at ``/a2a/v1`` with conventional REST endpoints:
     GET    /a2a/v1/agent              — get agent card
     GET    /.well-known/agent.json    — well-known agent card (mounted separately)
 """
+# pyright: reportUnusedFunction=false
 
 from __future__ import annotations
 

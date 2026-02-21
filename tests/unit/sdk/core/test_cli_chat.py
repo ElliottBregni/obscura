@@ -473,7 +473,7 @@ class TestPassthrough:
         with patch("shutil.which", return_value="/usr/bin/claude"), patch(
             "subprocess.run", return_value=mock_result
         ) as mock_run:
-            result = runner.invoke(cli, ["passthrough", "claude", "--", "--help"])
+            runner.invoke(cli, ["passthrough", "claude", "--", "--help"])
 
         # subprocess.run was called with the right command
         mock_run.assert_called_once_with(["/usr/bin/claude", "--help"])

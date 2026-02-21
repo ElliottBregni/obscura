@@ -571,6 +571,28 @@ class TestLocalLLMSessions:
         await b.delete_session(fake)  # no error
 
     @pytest.mark.asyncio
+    async def test_fork_session_clones_history(self) -> None:
+        b = _backend()
+        client: Any = b.client
+        client.chat.completions.create.return_value = _mock_completion("reply")
+
+        src = await b.create_session()
+        await b.send("hello")
+
+        fork = await b.fork_session(src)
+        assert fork.backend == Backend.LOCALLLM
+        assert fork.session_id != src.session_id
+        assert b.active_session == fork.session_id
+        assert len(b.conversations[fork.session_id]) == len(b.conversations[src.session_id])
+
+    @pytest.mark.asyncio
+    async def test_fork_missing_session_raises(self) -> None:
+        b = _backend()
+        fake = SessionRef(session_id="ghost", backend=Backend.LOCALLLM)
+        with pytest.raises(RuntimeError, match="not found"):
+            await b.fork_session(fake)
+
+    @pytest.mark.asyncio
     async def test_conversation_persistence(self) -> None:
         """After send(), conversation history is appended for the active session."""
         b = _backend()
@@ -874,6 +896,73 @@ class TestLocalLLMHooks:
 
         assert len(fired) == 1
         assert fired[0].prompt == "hello"
+
+    @pytest.mark.asyncio
+    async def test_tool_hooks_fire_on_send(self) -> None:
+        b = _backend()
+        client: Any = b.client
+        func_mock: Any = MagicMock()
+        func_mock.name = "search"
+        func_mock.arguments = '{"q":"weather"}'
+        tc: Any = MagicMock(id="tc-search", function=func_mock)
+        client.chat.completions.create.return_value = _mock_completion(
+            content=None, tool_calls=[tc]
+        )
+
+        pre_hook: Any = MagicMock()
+        post_hook: Any = MagicMock()
+        b.register_hook(HookPoint.PRE_TOOL_USE, pre_hook)
+        b.register_hook(HookPoint.POST_TOOL_USE, post_hook)
+
+        await b.send("search weather")
+
+        pre_hook.assert_called_once()
+        post_hook.assert_called_once()
+        pre_ctx = pre_hook.call_args.args[0]
+        post_ctx = post_hook.call_args.args[0]
+        assert pre_ctx.tool_name == "search"
+        assert pre_ctx.tool_input == {"q": "weather"}
+        assert post_ctx.tool_name == "search"
+        assert post_ctx.tool_input == {"q": "weather"}
+
+    @pytest.mark.asyncio
+    async def test_tool_hooks_fire_on_stream(self) -> None:
+        b = _backend()
+        client: Any = b.client
+
+        tc1: Any = MagicMock()
+        tc1.id = "tc-stream"
+        tc1.function.name = "search"
+        tc1.function.arguments = '{"q":'
+        tc2: Any = MagicMock()
+        tc2.id = "tc-stream"
+        tc2.function.name = None
+        tc2.function.arguments = '"weather"}'
+
+        async def mock_response() -> AsyncIterator[Any]:
+            async for item in _aiter(
+                _mock_stream_chunk(tool_calls=[tc1]),
+                _mock_stream_chunk(tool_calls=[tc2]),
+            ):
+                yield item
+
+        client.chat.completions.create.return_value = mock_response()
+
+        pre_hook: Any = MagicMock()
+        post_hook: Any = MagicMock()
+        b.register_hook(HookPoint.PRE_TOOL_USE, pre_hook)
+        b.register_hook(HookPoint.POST_TOOL_USE, post_hook)
+
+        async for _ in b.stream("search weather"):
+            pass
+
+        pre_hook.assert_called_once()
+        post_hook.assert_called_once()
+        pre_ctx = pre_hook.call_args.args[0]
+        post_ctx = post_hook.call_args.args[0]
+        assert pre_ctx.tool_name == "search"
+        assert post_ctx.tool_name == "search"
+        assert post_ctx.tool_input == {"q": "weather"}
 
     @pytest.mark.asyncio
     async def test_run_hooks_with_no_callbacks(self) -> None:

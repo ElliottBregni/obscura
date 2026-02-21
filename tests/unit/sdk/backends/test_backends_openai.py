@@ -565,6 +565,29 @@ class TestOpenAISessions:
         await b.delete_session(fake_ref)  # should not raise
 
     @pytest.mark.asyncio
+    async def test_fork_session_clones_history(self) -> None:
+        b = _backend(model="gpt-4o-test")
+        b.set_client_for_testing(AsyncMock())
+        b.client.chat.completions.create.return_value = _make_response(content="Reply 1")
+
+        src = await b.create_session()
+        await b.send("Hello")
+
+        fork = await b.fork_session(src)
+        assert fork.backend == Backend.OPENAI
+        assert fork.session_id != src.session_id
+        assert fork.raw is not None
+        assert b.active_session == fork.session_id
+        assert len(b.conversations[fork.session_id]) == len(b.conversations[src.session_id])
+
+    @pytest.mark.asyncio
+    async def test_fork_missing_session_raises(self) -> None:
+        b = _backend()
+        fake_ref = SessionRef(session_id="ghost", backend=Backend.OPENAI)
+        with pytest.raises(RuntimeError, match="not found"):
+            await b.fork_session(fake_ref)
+
+    @pytest.mark.asyncio
     async def test_conversation_history_on_send(self) -> None:
         """After send(), conversation history is appended for the active session."""
         b = _backend(model="gpt-4o-test")
@@ -715,7 +738,7 @@ class TestOpenAITools:
     def test_build_create_kwargs_filters(self) -> None:
         """Only valid completion params are passed through."""
         b = _backend()
-        kwargs = {
+        kwargs: dict[str, object] = {
             "temperature": 0.7,
             "top_p": 0.9,
             "max_tokens": 100,
@@ -908,6 +931,70 @@ class TestOpenAIHooks:
 
         text_chunks = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
         assert len(text_chunks) == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_hooks_called_on_send(self) -> None:
+        b = _backend(model="gpt-4o-test")
+        b.set_client_for_testing(AsyncMock())
+        tc = _make_tool_call(name="read_file", arguments='{"path":"/tmp/a.txt"}')
+        b.client.chat.completions.create.return_value = _make_response(
+            content=None, tool_calls=[tc]
+        )
+
+        pre_hook: Any = MagicMock()
+        post_hook: Any = MagicMock()
+        b.register_hook(HookPoint.PRE_TOOL_USE, pre_hook)
+        b.register_hook(HookPoint.POST_TOOL_USE, post_hook)
+
+        await b.send("Open it")
+
+        pre_hook.assert_called_once()
+        post_hook.assert_called_once()
+        pre_ctx = pre_hook.call_args.args[0]
+        post_ctx = post_hook.call_args.args[0]
+        assert pre_ctx.hook == HookPoint.PRE_TOOL_USE
+        assert pre_ctx.tool_name == "read_file"
+        assert pre_ctx.tool_input == {"path": "/tmp/a.txt"}
+        assert post_ctx.hook == HookPoint.POST_TOOL_USE
+        assert post_ctx.tool_name == "read_file"
+        assert post_ctx.tool_input == {"path": "/tmp/a.txt"}
+
+    @pytest.mark.asyncio
+    async def test_tool_hooks_called_on_stream(self) -> None:
+        b = _backend(model="gpt-4o-test")
+        b.set_client_for_testing(AsyncMock())
+
+        tc1: Any = MagicMock()
+        tc1.id = "call_stream_1"
+        tc1.function.name = "calculate"
+        tc1.function.arguments = '{"x":'
+        tc2: Any = MagicMock()
+        tc2.id = "call_stream_1"
+        tc2.function.name = None
+        tc2.function.arguments = "1}"
+
+        b.client.chat.completions.create.return_value = _aiter(
+            _make_stream_chunk(content=None, tool_calls=[tc1]),
+            _make_stream_chunk(content=None, tool_calls=[tc2]),
+        )
+
+        pre_hook: Any = MagicMock()
+        post_hook: Any = MagicMock()
+        b.register_hook(HookPoint.PRE_TOOL_USE, pre_hook)
+        b.register_hook(HookPoint.POST_TOOL_USE, post_hook)
+
+        async for _ in b.stream("calc"):
+            pass
+
+        pre_hook.assert_called_once()
+        post_hook.assert_called_once()
+        pre_ctx = pre_hook.call_args.args[0]
+        post_ctx = post_hook.call_args.args[0]
+        assert pre_ctx.hook == HookPoint.PRE_TOOL_USE
+        assert pre_ctx.tool_name == "calculate"
+        assert post_ctx.hook == HookPoint.POST_TOOL_USE
+        assert post_ctx.tool_name == "calculate"
+        assert post_ctx.tool_input == {"x": 1}
 
 
 # ===================================================================

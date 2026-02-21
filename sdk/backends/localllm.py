@@ -11,7 +11,8 @@ Full proxy mode: ObscuraClient → openai SDK → local HTTP server → local mo
 from __future__ import annotations
 
 import inspect
-from typing import Any, AsyncIterator, Callable
+import json
+from typing import Any, AsyncIterator, Callable, cast
 
 from sdk.internal.auth import AuthConfig
 from sdk.internal.sessions import SessionStore
@@ -198,13 +199,30 @@ class LocalLLMBackend:
             )
 
             msg = self._to_message(response)
+            tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
+            for block in tool_blocks:
+                await self._run_hooks(
+                    HookContext(
+                        hook=HookPoint.PRE_TOOL_USE,
+                        tool_name=block.tool_name,
+                        tool_input=block.tool_input,
+                        message=msg,
+                    )
+                )
+                await self._run_hooks(
+                    HookContext(
+                        hook=HookPoint.POST_TOOL_USE,
+                        tool_name=block.tool_name,
+                        tool_input=block.tool_input,
+                        message=msg,
+                    )
+                )
 
             # Persist conversation history (including tool calls)
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
                     ChatMessage(role="user", content=prompt)
                 )
-                tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
                 if tool_blocks:
                     import json as _json
 
@@ -265,6 +283,7 @@ class LocalLLMBackend:
             accumulated_text = ""
             finish_reason = ""
             _active_tool_name = ""
+            _active_tool_input = ""
             async for chunk in response:
                 if not chunk.choices:
                     continue
@@ -281,10 +300,19 @@ class LocalLLMBackend:
                         if tc.function and tc.function.name:
                             # Close previous tool if any
                             if _active_tool_name:
+                                tool_input = _parse_tool_input(_active_tool_input)
                                 yield StreamChunk(
                                     kind=ChunkKind.TOOL_USE_END,
                                     tool_name=_active_tool_name,
                                 )
+                                await self._run_hooks(
+                                    HookContext(
+                                        hook=HookPoint.POST_TOOL_USE,
+                                        tool_name=_active_tool_name,
+                                        tool_input=tool_input,
+                                    )
+                                )
+                                _active_tool_input = ""
                             _active_tool_name = tc.function.name
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_START,
@@ -293,7 +321,15 @@ class LocalLLMBackend:
                                 raw=chunk,
                                 native_event=chunk,
                             )
+                            await self._run_hooks(
+                                HookContext(
+                                    hook=HookPoint.PRE_TOOL_USE,
+                                    tool_name=_active_tool_name,
+                                    tool_input={},
+                                )
+                            )
                         if tc.function and tc.function.arguments:
+                            _active_tool_input += tc.function.arguments
                             yield StreamChunk(
                                 kind=ChunkKind.TOOL_USE_DELTA,
                                 tool_input_delta=tc.function.arguments,
@@ -313,9 +349,17 @@ class LocalLLMBackend:
 
             # Close final tool if any
             if _active_tool_name:
+                tool_input = _parse_tool_input(_active_tool_input)
                 yield StreamChunk(
                     kind=ChunkKind.TOOL_USE_END,
                     tool_name=_active_tool_name,
+                )
+                await self._run_hooks(
+                    HookContext(
+                        hook=HookPoint.POST_TOOL_USE,
+                        tool_name=_active_tool_name,
+                        tool_input=tool_input,
+                    )
                 )
 
             # Persist conversation history
@@ -368,6 +412,26 @@ class LocalLLMBackend:
         """Delete a session."""
         self._conversations.pop(ref.session_id, None)
         self._session_store.remove(ref.session_id)
+
+    async def fork_session(self, ref: SessionRef) -> SessionRef:
+        """Fork a session by cloning conversation history into a new session."""
+        import copy
+        import uuid
+
+        source = self._conversations.get(ref.session_id)
+        if source is None:
+            raise RuntimeError(f"Session {ref.session_id} not found")
+
+        session_id = str(uuid.uuid4())
+        self._conversations[session_id] = copy.deepcopy(source)
+        fork_ref = SessionRef(
+            session_id=session_id,
+            backend=Backend.LOCALLLM,
+            raw={"forked_from": ref.session_id},
+        )
+        self._session_store.add(fork_ref)
+        self._active_session = session_id
+        return fork_ref
 
     # -- Tools ---------------------------------------------------------------
 
@@ -605,6 +669,19 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
 
         result.append(d)
     return result
+
+
+def _parse_tool_input(raw: str) -> dict[str, Any]:
+    """Parse accumulated tool input delta into a dict payload."""
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
+        return {"raw": raw}
+    except json.JSONDecodeError:
+        return {"raw": raw}
 
 
 # ---------------------------------------------------------------------------

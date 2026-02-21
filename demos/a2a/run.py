@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import sys
 
@@ -29,7 +28,7 @@ from demos.a2a.agents import (
 )
 from demos.a2a.orchestrator import A2APipeline, A2AResult
 from demos.support.run import SAMPLE_TICKETS
-from sdk.a2a.types import TaskArtifactUpdateEvent, TaskStatusUpdateEvent, TextPart
+from sdk.a2a.types import TaskStatusUpdateEvent, TextPart
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +82,7 @@ def _print_blocking_result(result: A2AResult) -> None:
 
     # Agent cards
     if result.agent_cards:
-        cards_info = []
+        cards_info: list[str] = []
         for name, card in result.agent_cards.items():
             skill_names = [s.name for s in card.skills]
             cards_info.append(f"  {name}: {card.name} (skills: {', '.join(skill_names)})")
@@ -145,7 +144,7 @@ async def run_streaming(ticket: str, verbose: bool = False) -> None:
             state = event.status.state.value
             final = " [FINAL]" if event.final else ""
             print(f"  [status] {state}{final}")
-        elif isinstance(event, TaskArtifactUpdateEvent):
+        else:
             for part in event.artifact.parts:
                 if isinstance(part, TextPart):
                     text = part.text

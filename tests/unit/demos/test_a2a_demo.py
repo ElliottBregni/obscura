@@ -435,7 +435,7 @@ class TestStreamingPipeline:
         async for _, event in pipeline.run_streaming(SAMPLE_TICKETS["billing"]):
             if isinstance(event, TaskStatusUpdateEvent):
                 status_events.append(event)
-            elif isinstance(event, TaskArtifactUpdateEvent):
+            else:
                 artifact_events.append(event)
 
         assert len(status_events) > 0

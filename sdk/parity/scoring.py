@@ -5,6 +5,7 @@ from __future__ import annotations
 from sdk.internal.types import Backend
 from sdk.parity.features import feature_map
 from sdk.parity.models import (
+    BackendConformance,
     BackendParityProfile,
     BackendParityScore,
     FeatureStatus,
@@ -40,6 +41,14 @@ def score_backend(profile: BackendParityProfile) -> BackendParityScore:
 
 def score_report(profiles: tuple[BackendParityProfile, ...]) -> ParityReport:
     """Compute aggregated parity score report."""
+    return score_report_with_conformance(profiles, ())
+
+
+def score_report_with_conformance(
+    profiles: tuple[BackendParityProfile, ...],
+    conformance: tuple[BackendConformance, ...],
+) -> ParityReport:
+    """Compute parity score report with optional method-level conformance."""
     scores = tuple(score_backend(p) for p in profiles)
     overall_score = sum(s.score for s in scores)
     overall_max = sum(s.max_score for s in scores)
@@ -55,10 +64,17 @@ def score_report(profiles: tuple[BackendParityProfile, ...]) -> ParityReport:
             f"{partial_or_worse} feature declarations are partial or unsupported across backends."
         )
 
+    for item in conformance:
+        if item.percent < 100.0:
+            risks.append(
+                f"{item.backend.value} method conformance is {item.percent:.1f}% ({item.passed}/{item.total})."
+            )
+
     return ParityReport(
         backend_scores=scores,
         overall_score=overall_score,
         overall_max=overall_max,
+        backend_conformance=conformance,
         residual_risks=tuple(risks),
     )
 

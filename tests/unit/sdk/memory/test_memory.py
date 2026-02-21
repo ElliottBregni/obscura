@@ -141,7 +141,7 @@ class TestMemoryStore:
 
     def test_complex_values(self, test_user: AuthenticatedUser, temp_db: Path) -> None:
         store = MemoryStore(test_user, db_path=temp_db)
-        complex_value = {
+        complex_value: dict[str, object] = {
             "list": [1, 2, 3],
             "nested": {"a": "b"},
             "bool": True,
@@ -181,5 +181,4 @@ class TestMemoryStore:
 
         assert store1.get("shared_key", namespace="test") == "user1_value"
         assert store2.get("shared_key", namespace="test") == "user2_value"
-
 

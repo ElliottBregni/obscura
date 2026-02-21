@@ -6,6 +6,7 @@ Usage::
     obscura-sdk copilot -p "explain this code"
     obscura-sdk claude -p "summarize this file" --model claude-sonnet-4-5-20250929
     obscura-sdk openai -p "summarize this" --model gpt-4o
+    obscura-sdk moonshot -p "summarize this" --model kimi-2.5
     obscura-sdk localllm -p "hello from localhost"
     cat file.py | obscura-sdk copilot --model-alias copilot_batch_diagrammer --automation-safe
     obscura-sdk claude --session abc123 -p "continue"
@@ -107,7 +108,7 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="obscura-sdk",
-        description="Unified CLI for Copilot, Claude, OpenAI, and LocalLLM backends.",
+        description="Unified CLI for Copilot, Claude, OpenAI, Moonshot, and LocalLLM backends.",
     )
 
     sub = p.add_subparsers(dest="command", help="Available commands")
@@ -124,6 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_agent_arguments(openai_parser)
 
+    moonshot_parser = sub.add_parser("moonshot", help="Use Moonshot/Kimi backend")
+    _add_agent_arguments(moonshot_parser)
+
     localllm_parser = sub.add_parser(
         "localllm", help="Use local LLM backend (LM Studio, Ollama, etc.)"
     )
@@ -136,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     passthrough_parser.add_argument(
         "vendor",
-        choices=["copilot", "claude", "codex", "openai", "localllm"],
+        choices=["copilot", "claude", "codex", "openai", "moonshot", "localllm"],
         help="Vendor CLI family to execute.",
     )
     passthrough_parser.add_argument(
@@ -180,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     tui_parser.add_argument(
         "--backend",
         default="copilot",
-        choices=["copilot", "claude", "openai", "localllm"],
+        choices=["copilot", "claude", "openai", "moonshot", "localllm"],
         help="Backend to use (default: copilot).",
     )
     tui_parser.add_argument(
@@ -212,11 +216,11 @@ def build_parser() -> argparse.ArgumentParser:
 # Async runner (agent commands)
 # ---------------------------------------------------------------------------
 
-_AGENT_COMMANDS: frozenset[str] = frozenset({"copilot", "claude", "openai", "localllm"})
+_AGENT_COMMANDS: frozenset[str] = frozenset({"copilot", "claude", "openai", "moonshot", "localllm"})
 
 
 async def _run(args: argparse.Namespace) -> int:
-    backend: str = args.command  # "copilot", "claude", "openai", or "localllm"
+    backend: str = args.command  # "copilot", "claude", "openai", "moonshot", or "localllm"
 
     # Initialize telemetry if available (CLI mode — text logging, no auth user)
     _init_cli_telemetry()
@@ -302,7 +306,7 @@ async def _run_native(
     handle = client.native
     backend_impl = client.backend_impl
 
-    if backend in ("openai", "localllm"):
+    if backend in ("openai", "moonshot", "localllm"):
         raw = handle.client
         model = getattr(backend_impl, "model", None) or "default"
         if stream:
@@ -378,6 +382,7 @@ def _resolve_passthrough_cmd(vendor: str) -> list[str]:
         "claude": ["claude"],
         "codex": ["codex"],
         "openai": ["openai"],
+        "moonshot": ["moonshot", "kimi"],
         "localllm": ["ollama"],
     }
     return defaults[vendor]

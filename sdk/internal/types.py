@@ -36,6 +36,7 @@ class Backend(enum.Enum):
     CLAUDE = "claude"
     LOCALLLM = "localllm"
     OPENAI = "openai"
+    MOONSHOT = "moonshot"
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ class ProviderNativeRequest:
     """
 
     openai: Mapping[str, Any] | None = None
+    moonshot: Mapping[str, Any] | None = None
     claude: Mapping[str, Any] | None = None
     copilot: Mapping[str, Any] | None = None
     localllm: Mapping[str, Any] | None = None
