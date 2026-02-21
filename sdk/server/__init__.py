@@ -61,6 +61,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.warning("Could not pre-fetch JWKS; will retry on first request")
 
+    # Initialize A2A server
+    if config.a2a_enabled and hasattr(app.state, "a2a_server"):
+        try:
+            await app.state.a2a_server.startup()
+            logger.info("A2A server started")
+        except Exception:
+            logger.warning("Could not start A2A server; continuing without A2A")
+
     # Initialize heartbeat monitor
     try:
         from sdk.heartbeat import get_default_monitor
@@ -76,6 +84,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state._heartbeat_monitor = None
 
     yield
+
+    # Cleanup A2A server
+    if hasattr(app.state, "a2a_server"):
+        try:
+            await app.state.a2a_server.shutdown()
+            logger.info("A2A server stopped")
+        except Exception:
+            pass
 
     # Cleanup heartbeat monitor
     if app.state._heartbeat_monitor:
@@ -169,6 +185,44 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         logger.info("MCP router added")
     except Exception as e:
         logger.warning(f"Could not initialize MCP router: {e}")
+
+    # -- A2A routes --------------------------------------------------------
+
+    if config.a2a_enabled:
+        try:
+            from sdk.a2a.server import ObscuraA2AServer
+            from sdk.a2a.transports import (
+                create_jsonrpc_router,
+                create_rest_router,
+                create_sse_router,
+                create_wellknown_router,
+            )
+
+            # Choose store backend
+            if config.a2a_redis_url:
+                from sdk.a2a.store import RedisTaskStore
+                a2a_store = RedisTaskStore(config.a2a_redis_url, task_ttl=config.a2a_task_ttl)
+            else:
+                from sdk.a2a.store import InMemoryTaskStore
+                a2a_store = InMemoryTaskStore()
+
+            a2a_server = ObscuraA2AServer(
+                store=a2a_store,
+                name=config.a2a_agent_name,
+                url=f"http://{config.host}:{config.port}",
+                description=config.a2a_agent_description,
+            )
+            app.state.a2a_server = a2a_server
+
+            # Mount transport routers
+            svc = a2a_server.service
+            app.include_router(create_jsonrpc_router(svc))
+            app.include_router(create_rest_router(svc))
+            app.include_router(create_sse_router(svc))
+            app.include_router(create_wellknown_router(svc))
+            logger.info("A2A routers added (JSON-RPC, REST, SSE, well-known)")
+        except Exception as e:
+            logger.warning(f"Could not initialize A2A: {e}")
 
     # -- API routes --------------------------------------------------------
 

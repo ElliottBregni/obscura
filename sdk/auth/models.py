@@ -26,6 +26,8 @@ VALID_ROLES: frozenset[str] = frozenset(
         "agent:read",
         "sync:write",
         "sessions:manage",
+        "a2a:invoke",
+        "a2a:manage",
     }
 )
 

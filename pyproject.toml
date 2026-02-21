@@ -51,6 +51,13 @@ tui = [
     "textual>=0.45.0",
     "rich>=14.0.0",
 ]
+a2a = [
+    "redis[hiredis]>=5.0.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "grpcio-reflection>=1.60.0",
+    "protobuf>=4.25.0",
+]
 
 [project.scripts]
 obscura = "obscura_cli:main"

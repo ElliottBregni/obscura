@@ -20,6 +20,7 @@ services:
     container_name: obscura-sdk
     ports:
       - "8080:8080"
+      - "50051:50051"  # A2A gRPC
     environment:
       # Auth (Zitadel)
       OBSCURA_AUTH_ENABLED: "true"
@@ -34,6 +35,10 @@ services:
       OBSCURA_LOG_FORMAT: "json"
       # Backend
       OBSCURA_DEFAULT_BACKEND: "copilot"
+      # A2A
+      OBSCURA_A2A_ENABLED: "true"
+      OBSCURA_A2A_REDIS_URL: "redis://redis:6379"
+      OBSCURA_A2A_GRPC_PORT: "50051"
       # API keys from .env
       GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
@@ -42,6 +47,27 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis — A2A task persistence and pub/sub
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - obscura-net
     restart: unless-stopped
@@ -170,6 +196,7 @@ volumes:
   cockroach-data:
   prometheus-data:
   grafana-data:
+  redis-data:
 
 # =============================================================================
 # Networks
