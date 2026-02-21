@@ -161,8 +161,8 @@ class Task(BaseModel):
     id: str
     contextId: str
     status: TaskStatus
-    artifacts: list[Artifact] = Field(default_factory=list)
-    history: list[A2AMessage] = Field(default_factory=list)
+    artifacts: list[Artifact] = Field(default_factory=lambda: list[Artifact]())
+    history: list[A2AMessage] = Field(default_factory=lambda: list[A2AMessage]())
     kind: Literal["task"] = "task"
     metadata: dict[str, Any] | None = None
 
@@ -240,12 +240,12 @@ class AgentCard(BaseModel):
     url: str
     version: str = "1.0"
     protocolVersion: str = "0.3"
-    skills: list[AgentSkill] = Field(default_factory=list)
+    skills: list[AgentSkill] = Field(default_factory=lambda: list[AgentSkill]())
     defaultInputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     defaultOutputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
-    securitySchemes: dict[str, AuthScheme] = Field(default_factory=dict)
-    security: list[dict[str, list[str]]] = Field(default_factory=list)
+    securitySchemes: dict[str, AuthScheme] = Field(default_factory=lambda: dict[str, AuthScheme]())
+    security: list[dict[str, list[str]]] = Field(default_factory=lambda: list[dict[str, list[str]]]())
     provider: dict[str, str] | None = None
     extensions: list[dict[str, Any]] | None = None
 

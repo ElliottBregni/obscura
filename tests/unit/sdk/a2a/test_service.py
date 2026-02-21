@@ -1,9 +1,10 @@
 """Tests for sdk.a2a.service — A2AService core business logic."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -12,6 +13,7 @@ from sdk.a2a.service import A2AService
 from sdk.a2a.store import InMemoryTaskStore
 from sdk.a2a.types import (
     A2AMessage,
+    StreamEvent,
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatusUpdateEvent,
@@ -24,7 +26,10 @@ from sdk.a2a.types import (
 # ---------------------------------------------------------------------------
 
 
-def _msg(text: str = "hello", role: str = "user", msg_id: str = "m1") -> A2AMessage:
+from typing import Literal
+
+
+def _msg(text: str = "hello", role: Literal["user", "agent"] = "user", msg_id: str = "m1") -> A2AMessage:
     return A2AMessage(role=role, messageId=msg_id, parts=[TextPart(text=text)])
 
 
@@ -114,7 +119,7 @@ class TestMessageStream:
     @pytest.mark.asyncio
     async def test_yields_events(self) -> None:
         svc = _service()
-        events = []
+        events: list[StreamEvent] = []
         async for event in svc.message_stream(_msg("Stream this")):
             events.append(event)
 
@@ -128,7 +133,7 @@ class TestMessageStream:
     @pytest.mark.asyncio
     async def test_starts_with_working(self) -> None:
         svc = _service()
-        events = []
+        events: list[StreamEvent] = []
         async for event in svc.message_stream(_msg("Stream")):
             events.append(event)
         first = events[0]
@@ -138,7 +143,7 @@ class TestMessageStream:
     @pytest.mark.asyncio
     async def test_has_artifact_events(self) -> None:
         svc = _service()
-        events = []
+        events: list[StreamEvent] = []
         async for event in svc.message_stream(_msg("Content please")):
             events.append(event)
         artifact_events = [e for e in events if isinstance(e, TaskArtifactUpdateEvent)]
@@ -177,7 +182,7 @@ class TestTasksList:
         svc = _service()
         await svc.message_send(_msg("Task 1"))
         await svc.message_send(_msg("Task 2", msg_id="m2"))
-        tasks, cursor = await svc.tasks_list()
+        tasks, _cursor = await svc.tasks_list()
         assert len(tasks) == 2
 
     @pytest.mark.asyncio

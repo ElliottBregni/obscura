@@ -26,6 +26,7 @@ import logging
 from typing import Any
 
 from sdk.a2a.client import A2AClient
+from sdk.a2a.types import DataPart, TextPart
 from sdk.internal.tools import ToolRegistry
 from sdk.internal.types import ToolSpec
 
@@ -80,12 +81,12 @@ def register_remote_agent_as_tool(
             )
 
             # Extract result from artifacts
-            results = []
+            results: list[str] = []
             for artifact in task.artifacts:
                 for part in artifact.parts:
-                    if hasattr(part, "text"):
+                    if isinstance(part, TextPart):
                         results.append(part.text)
-                    elif hasattr(part, "data"):
+                    elif isinstance(part, DataPart):
                         results.append(json.dumps(part.data))
 
             if results:

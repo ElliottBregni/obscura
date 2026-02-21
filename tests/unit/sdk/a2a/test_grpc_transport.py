@@ -7,6 +7,7 @@ by calling the JSON-in/JSON-out methods.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -158,13 +159,13 @@ class TestStreamMessage:
                 "parts": [{"kind": "text", "text": "Stream me"}],
             },
         })
-        events = []
+        events: list[dict[str, Any]] = []
         async for event_json in servicer.StreamMessage(request):
             events.append(json.loads(event_json))
 
         assert len(events) > 0
         # Last event should be COMPLETED
-        last = events[-1]
+        last: dict[str, Any] = events[-1]
         assert last["kind"] == "status-update"
         assert last["status"]["state"] == "completed"
         assert last["final"] is True

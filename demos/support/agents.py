@@ -15,7 +15,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, override
 
 from sdk.agent.agent import BaseAgent
 from sdk.internal.types import AgentContext, AgentPhase, HookPoint
@@ -157,7 +157,7 @@ class TriageAgent(BaseAgent):
     @staticmethod
     def _hook_post_analyze(ctx: AgentContext) -> None:
         """Log urgency detection metrics after analysis."""
-        analysis = ctx.analysis or {}
+        analysis: dict[str, Any] = ctx.analysis or {}
         logger.info(
             "triage.post_analyze: customer_id=%s urgency=%s",
             analysis.get("customer_id", "unknown"),
@@ -167,14 +167,15 @@ class TriageAgent(BaseAgent):
     @staticmethod
     def _hook_pre_execute(ctx: AgentContext) -> None:
         """Validate we have a customer ID before running enrichment tools."""
-        plan = ctx.plan or {}
-        customer_id = plan.get("customer_id", "")
+        plan: dict[str, Any] = ctx.plan or {}
+        customer_id: str = plan.get("customer_id", "")
         if not customer_id:
             logger.warning("triage.pre_execute: No customer_id — skipping enrichment")
             ctx.metadata["skip_enrichment"] = True
 
     # -- APER phases --------------------------------------------------------
 
+    @override
     async def analyze(self, ctx: AgentContext) -> None:
         """Parse ticket text, extract customer ID, detect urgency signals."""
         ticket_text: str = ctx.input_data or ""
@@ -195,12 +196,13 @@ class TriageAgent(BaseAgent):
             "urgency_detected": urgency_detected,
         }
 
+    @override
     async def plan(self, ctx: AgentContext) -> None:
         """Classify into category and severity."""
-        analysis = ctx.analysis or {}
-        ticket_lower = analysis.get("ticket_text", "").lower()
-        urgency = analysis.get("urgency_detected", False)
-        customer_id = analysis.get("customer_id", "")
+        analysis: dict[str, Any] = ctx.analysis or {}
+        ticket_lower: str = analysis.get("ticket_text", "").lower()
+        urgency: bool = analysis.get("urgency_detected", False)
+        customer_id: str = analysis.get("customer_id", "")
 
         # Category classification by keyword matching
         scores: dict[str, int] = {cat: 0 for cat in CATEGORY_KEYWORDS}
@@ -227,13 +229,14 @@ class TriageAgent(BaseAgent):
             "urgency_detected": urgency,
         }
 
+    @override
     async def execute(self, ctx: AgentContext) -> None:
         """Enrich with customer and order data via registered tools."""
-        plan = ctx.plan or {}
-        customer_id = plan.get("customer_id", "")
+        plan: dict[str, Any] = ctx.plan or {}
+        customer_id: str = plan.get("customer_id", "")
 
-        customer_info = None
-        order_info = None
+        customer_info: dict[str, Any] | None = None
+        order_info: dict[str, Any] | None = None
 
         if ctx.metadata.get("skip_enrichment") or not customer_id:
             ctx.results = [{"customer_info": None, "order_info": None}]
@@ -253,19 +256,22 @@ class TriageAgent(BaseAgent):
         customer_raw = query_customer(customer_id)
         order_raw = check_order_status(customer_id)
 
-        customer_info = json.loads(customer_raw)
-        order_info = json.loads(order_raw)
+        customer_info_loaded: dict[str, Any] = json.loads(customer_raw)
+        customer_info = customer_info_loaded
+        order_info_loaded: dict[str, Any] = json.loads(order_raw)
+        order_info = order_info_loaded
 
         ctx.results = [{"customer_info": customer_info, "order_info": order_info}]
 
+    @override
     async def respond(self, ctx: AgentContext) -> None:
         """Produce structured TriageResult with routing decision."""
-        plan = ctx.plan or {}
-        analysis = ctx.analysis or {}
-        enrichment = ctx.results[0] if ctx.results else {}
+        plan: dict[str, Any] = ctx.plan or {}
+        analysis: dict[str, Any] = ctx.analysis or {}
+        enrichment: dict[str, Any] = ctx.results[0] if ctx.results else {}
 
-        severity = plan.get("severity", "P4")
-        customer_info = enrichment.get("customer_info")
+        severity: str = plan.get("severity", "P4")
+        customer_info: dict[str, Any] | None = enrichment.get("customer_info")
 
         # Routing decision
         if severity == "P1":
@@ -275,14 +281,20 @@ class TriageAgent(BaseAgent):
         else:
             routing = "investigate"
 
+        customer_id: str = plan.get("customer_id", "")
+        category: str = plan.get("category", "general")
+        urgency_detected: bool = plan.get("urgency_detected", False)
+        order_info: dict[str, Any] | None = enrichment.get("order_info")
+        original_ticket: str = analysis.get("ticket_text", "")
+
         ctx.response = TriageResult(
-            customer_id=plan.get("customer_id", ""),
-            category=plan.get("category", "general"),
+            customer_id=customer_id,
+            category=category,
             severity=severity,
-            urgency_detected=plan.get("urgency_detected", False),
+            urgency_detected=urgency_detected,
             customer_info=customer_info,
-            order_info=enrichment.get("order_info"),
-            original_ticket=analysis.get("ticket_text", ""),
+            order_info=order_info,
+            original_ticket=original_ticket,
             routing=routing,
         )
 
@@ -318,9 +330,10 @@ class InvestigatorAgent(BaseAgent):
     @staticmethod
     def _hook_post_execute(ctx: AgentContext) -> None:
         """Log investigation findings count."""
-        results = ctx.results or []
-        similar = results[0].get("similar_tickets", []) if results else []
-        kb = results[0].get("kb_articles", []) if results else []
+        results: list[Any] = ctx.results or []
+        first: dict[str, Any] = results[0] if results else {}
+        similar: list[dict[str, Any]] = first.get("similar_tickets", []) if results else []
+        kb: list[dict[str, Any]] = first.get("kb_articles", []) if results else []
         logger.info(
             "investigator.post_execute: found %d similar tickets, %d KB articles",
             len(similar),
@@ -329,6 +342,7 @@ class InvestigatorAgent(BaseAgent):
 
     # -- APER phases --------------------------------------------------------
 
+    @override
     async def analyze(self, ctx: AgentContext) -> None:
         """Receive triage output and determine investigation strategy."""
         triage: TriageResult = ctx.input_data
@@ -360,10 +374,11 @@ class InvestigatorAgent(BaseAgent):
 
         return queries
 
+    @override
     async def plan(self, ctx: AgentContext) -> None:
         """Build ordered list of diagnostic steps."""
-        analysis = ctx.analysis or {}
-        category = analysis.get("category", "general")
+        analysis: dict[str, Any] = ctx.analysis or {}
+        category: str = analysis.get("category", "general")
 
         steps = [
             f"Search past tickets for similar issues in category '{category}'",
@@ -375,10 +390,11 @@ class InvestigatorAgent(BaseAgent):
 
         ctx.plan = {"steps": steps, "queries": analysis.get("search_queries", [])}
 
+    @override
     async def execute(self, ctx: AgentContext) -> None:
         """Run search tools to gather diagnostic evidence."""
-        analysis = ctx.analysis or {}
-        plan = ctx.plan or {}
+        analysis: dict[str, Any] = ctx.analysis or {}
+        plan: dict[str, Any] = ctx.plan or {}
         triage: TriageResult = analysis["triage"]
         queries: list[str] = plan.get("queries", [])
 
@@ -392,19 +408,19 @@ class InvestigatorAgent(BaseAgent):
                 customer_id=triage.customer_id,
                 category=triage.category,
             )
-            parsed = json.loads(raw)
+            parsed: dict[str, Any] = json.loads(raw)
             for match in parsed["matches"]:
                 if match not in all_similar:
                     all_similar.append(match)
 
         # Search knowledge base
         kb_raw = search_knowledge_base(query=triage.category)
-        kb_parsed = json.loads(kb_raw)
+        kb_parsed: dict[str, Any] = json.loads(kb_raw)
 
         # Also search with the original ticket text keywords
         ticket_words = re.findall(r"\b\w{4,}\b", triage.original_ticket.lower())
         if ticket_words:
-            kb_extra = json.loads(search_knowledge_base(query=" ".join(ticket_words[:3])))
+            kb_extra: dict[str, Any] = json.loads(search_knowledge_base(query=" ".join(ticket_words[:3])))
             for article in kb_extra["articles"]:
                 if article not in kb_parsed["articles"]:
                     kb_parsed["articles"].append(article)
@@ -442,19 +458,26 @@ class InvestigatorAgent(BaseAgent):
             "should_escalate": should_escalate,
         }]
 
+    @override
     async def respond(self, ctx: AgentContext) -> None:
         """Compile investigation findings."""
-        analysis = ctx.analysis or {}
+        analysis: dict[str, Any] = ctx.analysis or {}
         triage: TriageResult = analysis["triage"]
-        findings = ctx.results[0] if ctx.results else {}
+        findings: dict[str, Any] = ctx.results[0] if ctx.results else {}
+
+        similar_tickets: list[dict[str, Any]] = findings.get("similar_tickets", [])
+        kb_articles: list[dict[str, Any]] = findings.get("kb_articles", [])
+        root_cause: str = findings.get("root_cause", "Unknown")
+        recommended_action: str = findings.get("recommended_action", "")
+        should_escalate: bool = findings.get("should_escalate", False)
 
         ctx.response = InvestigationResult(
             triage=triage,
-            similar_tickets=findings.get("similar_tickets", []),
-            kb_articles=findings.get("kb_articles", []),
-            root_cause=findings.get("root_cause", "Unknown"),
-            recommended_action=findings.get("recommended_action", ""),
-            should_escalate=findings.get("should_escalate", False),
+            similar_tickets=similar_tickets,
+            kb_articles=kb_articles,
+            root_cause=root_cause,
+            recommended_action=recommended_action,
+            should_escalate=should_escalate,
             escalation_reason=(
                 f"P1 severity: {triage.severity}" if triage.severity == "P1" else None
             ),
@@ -499,7 +522,7 @@ class ResolutionAgent(BaseAgent):
     @staticmethod
     def _hook_pre_respond(ctx: AgentContext) -> None:
         """Validate tone and compliance before sending response."""
-        response_draft = ctx.metadata.get("response_draft", "")
+        response_draft: str = ctx.metadata.get("response_draft", "")
         if not response_draft:
             return
 
@@ -535,6 +558,7 @@ class ResolutionAgent(BaseAgent):
 
     # -- APER phases --------------------------------------------------------
 
+    @override
     async def analyze(self, ctx: AgentContext) -> None:
         """Receive investigation findings and determine resolution type."""
         investigation: InvestigationResult = ctx.input_data
@@ -553,10 +577,11 @@ class ResolutionAgent(BaseAgent):
             "resolution_type": resolution_type,
         }
 
+    @override
     async def plan(self, ctx: AgentContext) -> None:
         """Choose response template and tone."""
-        analysis = ctx.analysis or {}
-        resolution_type = analysis.get("resolution_type", "info")
+        analysis: dict[str, Any] = ctx.analysis or {}
+        resolution_type: str = analysis.get("resolution_type", "info")
         investigation: InvestigationResult = analysis["investigation"]
         triage = investigation.triage
 
@@ -599,9 +624,10 @@ class ResolutionAgent(BaseAgent):
             "investigation": investigation,
         }
 
+    @override
     async def execute(self, ctx: AgentContext) -> None:
         """Draft response using template + investigation data."""
-        plan = ctx.plan or {}
+        plan: dict[str, Any] = ctx.plan or {}
         investigation: InvestigationResult = plan["investigation"]
         template: str = plan["template"]
 
@@ -615,7 +641,7 @@ class ResolutionAgent(BaseAgent):
             details_parts.append(f"\nRecommended steps:\n{investigation.recommended_action}")
 
         if investigation.kb_articles:
-            article = investigation.kb_articles[0]
+            article: dict[str, Any] = investigation.kb_articles[0]
             details_parts.append(
                 f"\nFor more information, see our guide: {article['title']}"
             )
@@ -627,12 +653,14 @@ class ResolutionAgent(BaseAgent):
         ctx.metadata["response_draft"] = draft
 
         # Build internal notes
-        internal = [
+        ticket_ids: list[Any] = [t['ticket_id'] for t in investigation.similar_tickets]
+        article_ids: list[Any] = [a['id'] for a in investigation.kb_articles]
+        internal: list[str] = [
             f"Category: {investigation.triage.category}",
             f"Severity: {investigation.triage.severity}",
             f"Root cause: {investigation.root_cause}",
-            f"Similar tickets: {[t['ticket_id'] for t in investigation.similar_tickets]}",
-            f"KB articles used: {[a['id'] for a in investigation.kb_articles]}",
+            f"Similar tickets: {ticket_ids}",
+            f"KB articles used: {article_ids}",
         ]
 
         if investigation.should_escalate:
@@ -643,18 +671,23 @@ class ResolutionAgent(BaseAgent):
             "internal_notes": "\n".join(internal),
         }]
 
+    @override
     async def respond(self, ctx: AgentContext) -> None:
         """Produce final ResolutionResult."""
-        analysis = ctx.analysis or {}
-        result_data = ctx.results[0] if ctx.results else {}
+        analysis: dict[str, Any] = ctx.analysis or {}
+        result_data: dict[str, Any] = ctx.results[0] if ctx.results else {}
         investigation: InvestigationResult = analysis["investigation"]
 
         elapsed_ms = (time.monotonic() - self._start_time) * 1000 if self._start_time else 0
 
+        response_type: str = analysis.get("resolution_type", "info")
+        customer_message: str = result_data.get("draft", "")
+        internal_notes: str = result_data.get("internal_notes", "")
+
         ctx.response = ResolutionResult(
             investigation=investigation,
-            response_type=analysis.get("resolution_type", "info"),
-            customer_message=result_data.get("draft", ""),
-            internal_notes=result_data.get("internal_notes", ""),
+            response_type=response_type,
+            customer_message=customer_message,
+            internal_notes=internal_notes,
             resolution_time_ms=elapsed_ms,
         )

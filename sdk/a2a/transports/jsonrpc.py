@@ -10,12 +10,10 @@ Mirrors the pattern in ``sdk/mcp/server.py:1083-1149``.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
 from sdk.a2a.service import A2AService
 from sdk.a2a.types import (
@@ -43,16 +41,13 @@ def create_jsonrpc_router(service: A2AService) -> APIRouter:
     router = APIRouter(prefix="/a2a", tags=["A2A JSON-RPC"])
 
     @router.post("/rpc")
-    async def handle_rpc(request: Request) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def handle_rpc(request: Request) -> dict[str, Any]:
         """Handle A2A JSON-RPC 2.0 requests."""
         body = await request.json()
 
         method = body.get("method", "")
         params = body.get("params", {})
         req_id = body.get("id")
-
-        # Validate protocol version header (optional but recommended)
-        version = request.headers.get("A2A-Version", A2A_PROTOCOL_VERSION)
 
         try:
             result = await _dispatch(service, method, params)

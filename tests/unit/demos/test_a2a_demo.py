@@ -12,21 +12,23 @@ Tests the full A2A demo surface:
 All tests use ``ASGITransport`` — no network, no Redis, fully deterministic.
 """
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import json
 
 import pytest
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport
 
 from sdk.a2a.client import A2AClient
 from sdk.a2a.tool_adapter import register_remote_agent_as_tool
 from sdk.a2a.types import (
-    AgentCard,
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatusUpdateEvent,
+    TextPart,
 )
 from sdk.internal.tools import ToolRegistry
 
@@ -35,7 +37,7 @@ from demos.a2a.agents import (
     create_resolution_app,
     create_triage_app,
 )
-from demos.a2a.orchestrator import A2APipeline, A2AResult
+from demos.a2a.orchestrator import A2APipeline
 from demos.support.run import SAMPLE_TICKETS
 
 
@@ -428,8 +430,8 @@ class TestStreamingPipeline:
     async def test_streaming_has_status_and_artifacts(
         self, pipeline: A2APipeline,
     ) -> None:
-        status_events = []
-        artifact_events = []
+        status_events: list[TaskStatusUpdateEvent] = []
+        artifact_events: list[TaskArtifactUpdateEvent] = []
         async for _, event in pipeline.run_streaming(SAMPLE_TICKETS["billing"]):
             if isinstance(event, TaskStatusUpdateEvent):
                 status_events.append(event)
@@ -546,7 +548,7 @@ def _artifact_text(task: object) -> str:
     """Extract all text from a task's artifacts."""
     parts: list[str] = []
     for artifact in task.artifacts:  # type: ignore[attr-defined]
-        for part in artifact.parts:
-            if hasattr(part, "text"):
+        for part in artifact.parts:  # type: ignore[union-attr]
+            if isinstance(part, TextPart):
                 parts.append(part.text)
     return "".join(parts)

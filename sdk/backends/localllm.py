@@ -201,7 +201,7 @@ class LocalLLMBackend:
                 if tool_blocks:
                     import json as _json
 
-                    tc_list = [
+                    tc_list: list[dict[str, Any]] = [
                         {
                             "id": b.tool_use_id,
                             "type": "function",

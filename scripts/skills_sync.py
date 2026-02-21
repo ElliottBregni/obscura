@@ -61,7 +61,7 @@ class DiscoveredItem:
     source_path: Path
     files: list[tuple[Path, Path]]  # (source_abs, dest_relative)
     mtime: float = 0.0
-    frontmatter: dict[str, str] = field(default_factory=dict)
+    frontmatter: dict[str, str] = field(default_factory=lambda: dict[str, str]())
 
 
 @dataclass
@@ -308,12 +308,13 @@ class SkillDiscovery:
                 pjson = _safe_read_json(pjson_path)
                 fm: dict[str, str] = {}
                 if pjson:
-                    fm["name"] = pjson.get("name", plugin_dir.name)
-                    fm["description"] = pjson.get("description", "")
-                    fm["version"] = pjson.get("version", "")
-                    author = pjson.get("author", {})
-                    if isinstance(author, dict):
-                        fm["author"] = author.get("name", "")
+                    fm["name"] = str(pjson.get("name", plugin_dir.name))
+                    fm["description"] = str(pjson.get("description", ""))
+                    fm["version"] = str(pjson.get("version", ""))
+                    author_val: Any = pjson.get("author", {})
+                    if isinstance(author_val, dict):
+                        author_dict: dict[str, Any] = author_val  # type: ignore[assignment]
+                        fm["author"] = str(author_dict.get("name", ""))
                 else:
                     fm["name"] = plugin_dir.name
                 items.append(DiscoveredItem(
@@ -915,7 +916,7 @@ class SkillCleaner:
                     shutil.rmtree(agent_dir)
 
         if agent is None and INDEX_FILE.is_file():
-            print(f"  Removing INDEX.jsonl")
+            print("  Removing INDEX.jsonl")
             if not self.dry_run:
                 INDEX_FILE.unlink()
 
@@ -992,7 +993,7 @@ class SkillsSync:
             )
 
         # Build index
-        print(f"\nBuilding skills index...")
+        print("\nBuilding skills index...")
         entries = self._indexer.build()
         if not self.dry_run:
             self._indexer.write_index(entries)

@@ -65,7 +65,7 @@ __all__ = [
 ]
 
 # Lazy imports to avoid pulling in everything on simple type imports
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     if name == "A2AService":
         from sdk.a2a.service import A2AService
         return A2AService

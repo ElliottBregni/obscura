@@ -1,6 +1,10 @@
 """Tests for sdk.a2a.tool_adapter — registering remote agents as tools."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
+
+from collections.abc import AsyncGenerator
 
 import pytest
 from fastapi import FastAPI
@@ -37,7 +41,7 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-async def remote_client(app: FastAPI) -> A2AClient:
+async def remote_client(app: FastAPI) -> AsyncGenerator[A2AClient, None]:
     import httpx
 
     transport = ASGITransport(app=app)
@@ -49,7 +53,7 @@ async def remote_client(app: FastAPI) -> A2AClient:
         timeout=30.0,
     )
     await client.discover()
-    yield client  # type: ignore[misc]
+    yield client
     await client.disconnect()
 
 

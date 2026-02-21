@@ -17,7 +17,8 @@ import logging
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from typing import Any, Protocol, runtime_checkable
 
 from sdk.a2a.types import (
     A2AMessage,
@@ -73,7 +74,7 @@ class TaskStore(Protocol):
 
     async def cancel_task(self, task_id: str) -> Task: ...
 
-    async def subscribe(
+    def subscribe(
         self, task_id: str
     ) -> AsyncIterator[StreamEvent]: ...
 
@@ -260,13 +261,13 @@ class RedisTaskStore:
     async def connect(self) -> None:
         """Connect to Redis."""
         try:
-            import redis.asyncio as aioredis
+            import redis.asyncio as aioredis  # type: ignore[import-untyped]
 
-            self._redis = aioredis.from_url(
+            self._redis: Any = aioredis.from_url(  # pyright: ignore[reportUnknownMemberType]
                 self._redis_url,
                 decode_responses=True,
             )
-            await self._redis.ping()
+            await self._redis.ping()  # pyright: ignore[reportUnknownMemberType]
             logger.info("Connected to Redis at %s", self._redis_url)
         except ImportError:
             raise ImportError(
@@ -345,16 +346,18 @@ class RedisTaskStore:
             except Exception:
                 start_idx = 0
 
+        task_ids: list[str]
         if context_id:
             # Get task IDs from context sorted set (reverse chronological)
-            task_ids = await self._redis.zrevrange(
+            raw_ids: list[Any] = await self._redis.zrevrange(
                 self._context_key(context_id), 0, -1
             )
+            task_ids = [str(x) for x in raw_ids]
         else:
             # Scan for all task keys
             task_ids = []
             async for key in self._redis.scan_iter(match="a2a:task:*"):
-                task_ids.append(key.replace("a2a:task:", ""))
+                task_ids.append(str(key).replace("a2a:task:", ""))
 
         # Load tasks
         tasks: list[Task] = []

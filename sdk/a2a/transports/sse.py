@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from sdk.a2a.service import A2AService
@@ -24,7 +24,6 @@ from sdk.a2a.types import (
     A2AError,
     A2AMessage,
     TaskArtifactUpdateEvent,
-    TaskStatusUpdateEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
     router = APIRouter(prefix="/a2a/v1", tags=["A2A SSE"])
 
     @router.post("/tasks/streaming")
-    async def stream_task(body: StreamRequest):  # pyright: ignore[reportUnusedFunction]
+    async def stream_task(body: StreamRequest):  # type: ignore[no-untyped-def]
         """Stream a new task's execution as SSE events."""
         from sse_starlette.sse import EventSourceResponse
 
@@ -82,7 +81,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
         return EventSourceResponse(event_generator())
 
     @router.post("/tasks/{task_id}:subscribe")
-    async def subscribe_task(task_id: str):  # pyright: ignore[reportUnusedFunction]
+    async def subscribe_task(task_id: str):  # type: ignore[no-untyped-def]
         """Subscribe to real-time updates for an existing task."""
         from sse_starlette.sse import EventSourceResponse
 

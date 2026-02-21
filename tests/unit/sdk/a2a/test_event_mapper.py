@@ -1,9 +1,12 @@
 """Tests for sdk.a2a.event_mapper — AgentEvent → A2A event mapping."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 from sdk.a2a.event_mapper import EventMapper
 from sdk.a2a.types import (
+    StreamEvent,
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatusUpdateEvent,
@@ -112,6 +115,7 @@ class TestTurnComplete:
         m.map(_event(AgentEventKind.TURN_COMPLETE))
         # Next text delta should start a new artifact
         r = m.map(_event(AgentEventKind.TEXT_DELTA, text="new"))
+        assert isinstance(r[0], TaskArtifactUpdateEvent)
         assert r[0].artifact.artifactId != ""
 
 
@@ -164,7 +168,7 @@ class TestFullSequence:
     def test_typical_stream(self) -> None:
         """TURN_START → TEXT_DELTA*3 → TURN_COMPLETE → AGENT_DONE."""
         m = _mapper()
-        all_events = []
+        all_events: list[StreamEvent] = []
 
         all_events.extend(m.map(_event(AgentEventKind.TURN_START)))
         all_events.extend(m.map(_event(AgentEventKind.TEXT_DELTA, text="Hi ")))
@@ -188,7 +192,7 @@ class TestFullSequence:
     def test_confirmation_flow(self) -> None:
         """TURN_START → TOOL_CALL → CONFIRMATION_REQUEST (paused)."""
         m = _mapper()
-        all_events = []
+        all_events: list[StreamEvent] = []
 
         all_events.extend(m.map(_event(AgentEventKind.TURN_START)))
         all_events.extend(m.map(_event(AgentEventKind.TOOL_CALL, tool_name="deploy")))

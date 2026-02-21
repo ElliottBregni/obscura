@@ -17,14 +17,13 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from sdk.a2a.service import A2AService
 from sdk.a2a.types import (
     A2AError,
     A2AMessage,
     TaskState,
-    TextPart,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +59,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
     router = APIRouter(prefix="/a2a/v1", tags=["A2A REST"])
 
     @router.post("/tasks")
-    async def create_task(body: SendMessageRequest) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def create_task(body: SendMessageRequest) -> dict[str, Any]:
         """Create a new task via message/send."""
         try:
             message = A2AMessage.model_validate(body.message)
@@ -75,7 +74,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
             raise HTTPException(status_code=_error_status(e.code), detail=e.message)
 
     @router.get("/tasks/{task_id}")
-    async def get_task(task_id: str) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def get_task(task_id: str) -> dict[str, Any]:
         """Get a task by ID."""
         task = await service.tasks_get(task_id)
         if task is None:
@@ -83,7 +82,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
         return task.model_dump(mode="json")
 
     @router.get("/tasks")
-    async def list_tasks(  # pyright: ignore[reportUnusedFunction]
+    async def list_tasks(
         contextId: str | None = Query(default=None),
         state: str | None = Query(default=None),
         cursor: str | None = Query(default=None),
@@ -105,7 +104,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
         return result
 
     @router.post("/tasks/{task_id}:cancel")
-    async def cancel_task(task_id: str) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def cancel_task(task_id: str) -> dict[str, Any]:
         """Cancel a task."""
         try:
             task = await service.tasks_cancel(task_id)
@@ -114,7 +113,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
             raise HTTPException(status_code=_error_status(e.code), detail=e.message)
 
     @router.get("/agent")
-    async def get_agent_card() -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def get_agent_card() -> dict[str, Any]:
         """Get the agent card."""
         card = service.get_agent_card()
         return card.model_dump(mode="json")
@@ -127,7 +126,7 @@ def create_wellknown_router(service: A2AService) -> APIRouter:
     router = APIRouter(tags=["A2A Discovery"])
 
     @router.get("/.well-known/agent.json")
-    async def wellknown_agent_card() -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def wellknown_agent_card() -> dict[str, Any]:
         """A2A agent discovery endpoint."""
         return service.get_agent_card().model_dump(mode="json")
 

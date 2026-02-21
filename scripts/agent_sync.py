@@ -42,7 +42,7 @@ class AgentSource:
 
     name: str
     source_dir: Path
-    exclude_dirs: set[str] = field(default_factory=set)
+    exclude_dirs: set[str] = field(default_factory=lambda: set[str]())
 
 
 AGENT_SOURCES: dict[str, AgentSource] = {
@@ -78,7 +78,7 @@ class DiscoveredSession:
     source_path: Path
     files: list[tuple[Path, Path]]  # (source_abs, dest_relative)
     mtime: float = 0.0
-    meta: dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
 
 
 @dataclass
@@ -99,10 +99,10 @@ class SessionEntry:
     turns: list[dict[str, str]]
     # Enriched context fields
     slug: str = ""
-    cwds: list[str] = field(default_factory=list)
+    cwds: list[str] = field(default_factory=lambda: list[str]())
     git_branch: str = ""
     git_repo: str = ""
-    tools_used: list[str] = field(default_factory=list)
+    tools_used: list[str] = field(default_factory=lambda: list[str]())
     agent_version: str = ""
     source: str = ""  # cli, vscode, etc.
     topic: str = ""  # Compact topic/subject label
@@ -730,15 +730,16 @@ class SemanticIndexBuilder:
                 agent_version = event["version"]
 
             if event_type == "user" and role == "user":
-                content = msg.get("content", "")
+                content: Any = msg.get("content", "")
                 if isinstance(content, str):
                     preview = _truncate(content)
                 elif isinstance(content, list):
-                    texts = []
-                    for block in content:
+                    texts: list[str] = []
+                    content_list: list[dict[str, Any] | str] = content  # type: ignore[assignment]
+                    for block in content_list:
                         if isinstance(block, dict):
                             if block.get("type") == "text":
-                                texts.append(block.get("text", ""))
+                                texts.append(str(block.get("text", "")))
                             elif block.get("type") == "tool_result":
                                 continue
                         elif isinstance(block, str):
@@ -756,19 +757,20 @@ class SemanticIndexBuilder:
                 if not model:
                     model = msg.get("model", "")
 
-                content = msg.get("content", [])
-                texts = []
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict):
-                            if block.get("type") == "text":
-                                texts.append(block.get("text", ""))
-                            elif block.get("type") == "tool_use":
-                                tools_used.add(block.get("name", ""))
-                elif isinstance(content, str):
-                    texts.append(content)
+                asst_content: Any = msg.get("content", [])
+                texts_a: list[str] = []
+                if isinstance(asst_content, list):
+                    asst_list: list[dict[str, Any] | str] = asst_content  # type: ignore[assignment]
+                    for ablock in asst_list:
+                        if isinstance(ablock, dict):
+                            if ablock.get("type") == "text":
+                                texts_a.append(str(ablock.get("text", "")))
+                            elif ablock.get("type") == "tool_use":
+                                tools_used.add(str(ablock.get("name", "")))
+                elif isinstance(asst_content, str):
+                    texts_a.append(asst_content)
 
-                text = " ".join(texts).strip()
+                text = " ".join(texts_a).strip()
                 if text:
                     preview = _truncate(text)
                     turns.append({"ts": ts, "role": "assistant", "preview": preview})
@@ -973,9 +975,9 @@ class SemanticIndexBuilder:
                     model = m  # Use actual model, overrides model_provider
 
             elif event_type == "response_item":
-                role = payload.get("role", "")
-                content_blocks = payload.get("content", [])
-                item_type = payload.get("type", "")
+                role = str(payload.get("role", ""))
+                content_blocks: list[dict[str, Any]] = payload.get("content", [])
+                item_type = str(payload.get("type", ""))
 
                 # Skip developer/system messages entirely
                 if role == "developer":
@@ -1003,15 +1005,15 @@ class SemanticIndexBuilder:
                     continue
 
                 if role == "user":
-                    texts = []
-                    for block in content_blocks:
-                        if isinstance(block, dict) and block.get("type") == "input_text":
-                            text_val = block.get("text", "")
+                    u_texts: list[str] = []
+                    for cb in content_blocks:
+                        if cb.get("type") == "input_text":
+                            text_val = str(cb.get("text", ""))
                             # Skip system context blocks (instructions, env, permissions)
                             if text_val.startswith(("<", "# AGENTS.md")):
                                 continue
-                            texts.append(text_val)
-                    text = " ".join(texts).strip()
+                            u_texts.append(text_val)
+                    text = " ".join(u_texts).strip()
                     if text:
                         turns.append({
                             "ts": ts,
@@ -1022,13 +1024,12 @@ class SemanticIndexBuilder:
                             timestamps.append(ts)
 
                 elif role == "assistant":
-                    texts = []
-                    for block in content_blocks:
-                        if isinstance(block, dict):
-                            t = block.get("type", "")
-                            if t in ("output_text", "input_text", "text"):
-                                texts.append(block.get("text", ""))
-                    text = " ".join(texts).strip()
+                    a_texts: list[str] = []
+                    for cb in content_blocks:
+                        t = str(cb.get("type", ""))
+                        if t in ("output_text", "input_text", "text"):
+                            a_texts.append(str(cb.get("text", "")))
+                    text = " ".join(a_texts).strip()
                     if text:
                         turns.append({
                             "ts": ts,
@@ -1075,7 +1076,7 @@ class SemanticIndexBuilder:
             ended=ended,
             summary=summary,
             message_count=len([t for t in turns if t["role"] == "user"]),
-            source_path=f"~/.codex/sessions/",
+            source_path="~/.codex/sessions/",
             synced_path=f"codex/{sid}/",
             files=files,
             turns=turns,
@@ -1114,7 +1115,7 @@ class SessionCleaner:
 
         # Remove INDEX.jsonl only when cleaning all agents
         if agent is None and INDEX_FILE.is_file():
-            print(f"  Removing INDEX.jsonl")
+            print("  Removing INDEX.jsonl")
             if not self.dry_run:
                 INDEX_FILE.unlink()
 
@@ -1192,7 +1193,7 @@ class AgentSessionSync:
             )
 
         # Build semantic index from all synced copies
-        print(f"\nBuilding semantic index...")
+        print("\nBuilding semantic index...")
         entries = self._indexer.build()
         if not self.dry_run:
             self._indexer.write_index(entries)

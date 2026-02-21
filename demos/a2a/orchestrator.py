@@ -40,6 +40,7 @@ from sdk.a2a.types import (
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatusUpdateEvent,
+    TextPart,
 )
 from sdk.internal.tools import ToolRegistry
 
@@ -62,9 +63,9 @@ class A2AResult:
     triage_json: dict[str, Any] | None = None
     investigation_json: dict[str, Any] | None = None
     resolution_json: dict[str, Any] | None = None
-    agent_cards: dict[str, AgentCard] = field(default_factory=dict)
+    agent_cards: dict[str, AgentCard] = field(default_factory=lambda: dict[str, AgentCard]())
     total_time_ms: float = 0.0
-    phases: list[str] = field(default_factory=list)
+    phases: list[str] = field(default_factory=lambda: list[str]())
     mode: str = "blocking"
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
@@ -230,7 +231,7 @@ class A2APipeline:
                 yield ("triage", event)
                 if isinstance(event, TaskArtifactUpdateEvent):
                     for part in event.artifact.parts:
-                        if hasattr(part, "text"):
+                        if isinstance(part, TextPart):
                             triage_text += part.text
 
             # Phase 2: Investigator (streaming)
@@ -241,7 +242,7 @@ class A2APipeline:
                 yield ("investigator", event)
                 if isinstance(event, TaskArtifactUpdateEvent):
                     for part in event.artifact.parts:
-                        if hasattr(part, "text"):
+                        if isinstance(part, TextPart):
                             inv_text += part.text
 
             # Phase 3: Resolution (streaming)
@@ -326,6 +327,6 @@ def _extract_artifact_text(task: Task) -> str:
     parts: list[str] = []
     for artifact in task.artifacts:
         for part in artifact.parts:
-            if hasattr(part, "text"):
+            if isinstance(part, TextPart):
                 parts.append(part.text)
     return "".join(parts) if parts else ""

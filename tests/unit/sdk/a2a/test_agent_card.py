@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sdk.a2a.agent_card import AgentCardGenerator
 from sdk.a2a.types import AgentCard, AgentSkill, AuthScheme
 
@@ -33,7 +35,7 @@ class TestAgentCardGenerator:
         assert card.skills[1].tags == ["billing"]
 
     def test_with_skills_from_tools(self) -> None:
-        tools = [
+        tools: list[dict[str, Any]] = [
             {"name": "search", "description": "Search documents"},
             {"name": "deploy", "description": "Deploy to staging", "tags": ["infra"]},
         ]
@@ -63,7 +65,7 @@ class TestAgentCardGenerator:
     def test_with_custom_auth_scheme(self) -> None:
         card = (
             AgentCardGenerator("Agent", "https://x.com")
-            .with_auth_scheme("apiKey", AuthScheme(type="apiKey", name="X-API-Key", **{"in": "header"}))
+            .with_auth_scheme("apiKey", AuthScheme(type="apiKey", name="X-API-Key", in_="header"))
             .build()
         )
         assert "apiKey" in card.securitySchemes

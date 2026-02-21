@@ -1,9 +1,10 @@
 """Tests for demos.support — Customer support multi-agent pipeline."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import json
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -438,8 +439,8 @@ class TestResolutionAgent:
 
     @pytest.mark.asyncio
     async def test_compliance_hook_flags_pii(self) -> None:
-        investigation = _sample_investigation_result()
-        agent = ResolutionAgent(_mock_client())
+        _sample_investigation_result()
+        ResolutionAgent(_mock_client())
         ctx = AgentContext(phase=AgentPhase.RESPOND)
         ctx.metadata = {"response_draft": "Your card 4111-1111-1111-1111 was refunded"}
         ResolutionAgent._hook_pre_respond(ctx)
@@ -448,8 +449,8 @@ class TestResolutionAgent:
 
     @pytest.mark.asyncio
     async def test_compliance_hook_flags_internal_jargon(self) -> None:
-        investigation = _sample_investigation_result()
-        agent = ResolutionAgent(_mock_client())
+        _sample_investigation_result()
+        ResolutionAgent(_mock_client())
         ctx = AgentContext(phase=AgentPhase.RESPOND)
         ctx.metadata = {"response_draft": "We updated your capability token to Tier B"}
         ResolutionAgent._hook_pre_respond(ctx)

@@ -47,7 +47,7 @@ class ObscuraA2AServer:
         url: str = "http://localhost:8080",
         description: str = "",
     ) -> None:
-        self._store = store or InMemoryTaskStore()
+        self._store: TaskStore = store or InMemoryTaskStore()
         self._agent_card = agent_card or AgentCardGenerator(
             name=name,
             url=url,

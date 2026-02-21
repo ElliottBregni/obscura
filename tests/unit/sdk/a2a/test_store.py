@@ -26,7 +26,10 @@ from sdk.a2a.types import (
 # ---------------------------------------------------------------------------
 
 
-def _msg(text: str = "hello", role: str = "user", msg_id: str = "m1") -> A2AMessage:
+from typing import Literal
+
+
+def _msg(text: str = "hello", role: Literal["user", "agent"] = "user", msg_id: str = "m1") -> A2AMessage:
     return A2AMessage(role=role, messageId=msg_id, parts=[TextPart(text=text)])
 
 
@@ -392,6 +395,7 @@ class TestPubSub:
         assert len(events_received) == 2
         assert isinstance(events_received[0], TaskStatusUpdateEvent)
         assert events_received[0].status.state == TaskState.WORKING
+        assert isinstance(events_received[1], TaskStatusUpdateEvent)
         assert events_received[1].final
 
     @pytest.mark.asyncio

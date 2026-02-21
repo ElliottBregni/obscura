@@ -4,11 +4,13 @@ Tests use a real FastAPI test server running the A2A transports,
 giving us true end-to-end client↔server testing without mocks.
 """
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport
 
 from sdk.a2a.agent_card import AgentCardGenerator
 from sdk.a2a.client import A2AClient, A2ASessionManager

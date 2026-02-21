@@ -22,16 +22,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from sdk.a2a.service import A2AService
 from sdk.a2a.types import (
     A2AError,
     A2AMessage,
-    TaskArtifactUpdateEvent,
     TaskState,
-    TaskStatusUpdateEvent,
-    TextPart,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,46 +147,52 @@ async def start_grpc_server(
     server = grpc.aio.server()
 
     # Register a generic service using add_generic_rpc_handlers
-    method_handlers = {
+    def _deserialize(b: bytes) -> str:
+        return b.decode("utf-8")
+
+    def _serialize(s: str) -> bytes:
+        return s.encode("utf-8")
+
+    method_handlers: dict[str, Any] = {
         "/a2a.A2AService/SendMessage": grpc.unary_unary_rpc_method_handler(
             _wrap_unary(servicer.SendMessage),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
         "/a2a.A2AService/GetTask": grpc.unary_unary_rpc_method_handler(
             _wrap_unary(servicer.GetTask),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
         "/a2a.A2AService/ListTasks": grpc.unary_unary_rpc_method_handler(
             _wrap_unary(servicer.ListTasks),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
         "/a2a.A2AService/CancelTask": grpc.unary_unary_rpc_method_handler(
             _wrap_unary(servicer.CancelTask),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
         "/a2a.A2AService/GetAgentCard": grpc.unary_unary_rpc_method_handler(
             _wrap_unary(servicer.GetAgentCard),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
         "/a2a.A2AService/StreamMessage": grpc.unary_stream_rpc_method_handler(
             _wrap_stream(servicer.StreamMessage),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
         "/a2a.A2AService/SubscribeToTask": grpc.unary_stream_rpc_method_handler(
             _wrap_stream(servicer.SubscribeToTask),
-            request_deserializer=lambda b: b.decode("utf-8"),
-            response_serializer=lambda s: s.encode("utf-8"),
+            request_deserializer=_deserialize,
+            response_serializer=_serialize,
         ),
     }
 
-    handler = grpc.method_service_handler(None, method_handlers)
-    server.add_generic_rpc_handlers([handler])
+    handler: Any = grpc.method_service_handler(None, method_handlers)  # type: ignore[attr-defined]
+    server.add_generic_rpc_handlers([handler])  # pyright: ignore[reportUnknownArgumentType]
 
     server.add_insecure_port(f"[::]:{port}")
     await server.start()
@@ -197,9 +201,11 @@ async def start_grpc_server(
     return server
 
 
-def _wrap_unary(fn):
+def _wrap_unary(
+    fn: Callable[[str], Awaitable[str]],
+) -> Callable[..., Awaitable[str]]:
     """Wrap an async servicer method for grpc.aio unary handler."""
-    async def handler(request, context):
+    async def handler(request: str, context: Any) -> str:
         try:
             return await fn(request)
         except A2AError as e:
@@ -215,9 +221,11 @@ def _wrap_unary(fn):
     return handler
 
 
-def _wrap_stream(fn):
+def _wrap_stream(
+    fn: Callable[[str], AsyncIterator[str]],
+) -> Callable[..., AsyncIterator[str]]:
     """Wrap an async generator servicer method for grpc.aio stream handler."""
-    async def handler(request, context):
+    async def handler(request: str, context: Any) -> AsyncIterator[str]:
         try:
             async for item in fn(request):
                 yield item

@@ -42,7 +42,7 @@ class EventMapper:
         self._artifact_id: str | None = None
         self._chunk_count = 0
 
-    def _status_event(
+    def status_event(
         self, state: TaskState, *, final: bool = False, message: str | None = None,
     ) -> TaskStatusUpdateEvent:
         status = TaskStatus(
@@ -85,7 +85,7 @@ class EventMapper:
         kind = event.kind
 
         if kind == AgentEventKind.TURN_START:
-            return [self._status_event(TaskState.WORKING)]
+            return [self.status_event(TaskState.WORKING)]
 
         if kind == AgentEventKind.TEXT_DELTA:
             if event.text:
@@ -98,7 +98,7 @@ class EventMapper:
 
         if kind == AgentEventKind.TOOL_CALL:
             # Inform client that a tool is being invoked.
-            return [self._status_event(TaskState.WORKING)]
+            return [self.status_event(TaskState.WORKING)]
 
         if kind == AgentEventKind.TOOL_RESULT:
             # Tool results are internal; the agent will incorporate them
@@ -106,7 +106,7 @@ class EventMapper:
             return []
 
         if kind == AgentEventKind.CONFIRMATION_REQUEST:
-            return [self._status_event(TaskState.INPUT_REQUIRED)]
+            return [self.status_event(TaskState.INPUT_REQUIRED)]
 
         if kind == AgentEventKind.TURN_COMPLETE:
             # Close the current artifact if one was being streamed.
@@ -126,7 +126,7 @@ class EventMapper:
                     self._artifact_event("", append=True, last_chunk=True)
                 )
                 self._artifact_id = None
-            events.append(self._status_event(TaskState.COMPLETED, final=True))
+            events.append(self.status_event(TaskState.COMPLETED, final=True))
             return events
 
         if kind == AgentEventKind.ERROR:
@@ -136,7 +136,7 @@ class EventMapper:
                     self._artifact_event("", append=True, last_chunk=True)
                 )
                 self._artifact_id = None
-            events.append(self._status_event(TaskState.FAILED, final=True))
+            events.append(self.status_event(TaskState.FAILED, final=True))
             return events
 
         # Unknown event kind — ignore gracefully.

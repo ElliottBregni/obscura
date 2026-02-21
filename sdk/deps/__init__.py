@@ -108,7 +108,7 @@ def audit(
         pass
 
     # Store in memory for the /audit/logs endpoint
-    log_entry = {
+    log_entry: dict[str, str | dict[str, str] | None] = {
         "timestamp": datetime.now(UTC).isoformat(),
         "event_type": event_type,
         "user_id": user.user_id,

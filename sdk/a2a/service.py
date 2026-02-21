@@ -15,9 +15,8 @@ import logging
 import uuid
 from typing import Any, AsyncIterator, Callable, Awaitable
 
-from sdk.a2a.agent_card import AgentCardGenerator
 from sdk.a2a.event_mapper import EventMapper
-from sdk.a2a.store import InMemoryTaskStore, TaskStore
+from sdk.a2a.store import TaskStore
 from sdk.a2a.types import (
     A2AMessage,
     AgentCard,
@@ -25,7 +24,6 @@ from sdk.a2a.types import (
     StreamEvent,
     Task,
     TaskState,
-    TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
 )
@@ -156,7 +154,7 @@ class A2AService:
 
         # Transition to WORKING
         await self._store.transition(task.id, TaskState.WORKING)
-        yield mapper._status_event(TaskState.WORKING)
+        yield mapper.status_event(TaskState.WORKING)
 
         # Run agent and stream events
         try:
@@ -175,7 +173,7 @@ class A2AService:
         except Exception as e:
             logger.error("Agent execution failed for task %s: %s", task.id, e)
             await self._store.transition(task.id, TaskState.FAILED)
-            yield mapper._status_event(TaskState.FAILED, final=True)
+            yield mapper.status_event(TaskState.FAILED, final=True)
 
     # ------------------------------------------------------------------
     # tasks/get
@@ -407,22 +405,22 @@ class A2AService:
     @staticmethod
     def _extract_text(message: A2AMessage) -> str:
         """Extract plain text from a message's parts."""
-        parts = []
+        texts: list[str] = []
         for part in message.parts:
-            if hasattr(part, "text"):
-                parts.append(part.text)
-        return " ".join(parts).strip() or "[empty message]"
+            if isinstance(part, TextPart):
+                texts.append(part.text)
+        return " ".join(texts).strip() or "[empty message]"
 
     @staticmethod
     def _extract_text_from_history(task: Task) -> str:
         """Extract the most recent user message text from task history."""
         for msg in reversed(task.history):
             if msg.role == "user":
-                parts = []
+                texts: list[str] = []
                 for part in msg.parts:
-                    if hasattr(part, "text"):
-                        parts.append(part.text)
-                text = " ".join(parts).strip()
+                    if isinstance(part, TextPart):
+                        texts.append(part.text)
+                text = " ".join(texts).strip()
                 if text:
                     return text
         return "[empty]"

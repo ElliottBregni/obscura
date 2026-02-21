@@ -22,8 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-import uuid
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, override
 
 from fastapi import FastAPI
 
@@ -34,12 +33,8 @@ from sdk.a2a.transports.jsonrpc import create_jsonrpc_router
 from sdk.a2a.transports.rest import create_rest_router, create_wellknown_router
 from sdk.a2a.transports.sse import create_sse_router
 from sdk.a2a.types import (
-    A2AMessage,
     AgentSkill,
-    Artifact,
     Task,
-    TaskState,
-    TextPart,
 )
 from sdk.internal.types import AgentEvent, AgentEventKind
 
@@ -86,11 +81,13 @@ class DomainA2AService(A2AService):
         super().__init__(*args, **kwargs)
         self._domain_fn = domain_fn
 
+    @override
     async def _execute_agent(self, task: Task, prompt: str) -> str:
         if self._domain_fn:
             return self._domain_fn(prompt)
         return f"[No domain function] Received: {prompt}"
 
+    @override
     async def _execute_agent_stream(
         self, task: Task, prompt: str,
     ) -> AsyncIterator[AgentEvent]:
@@ -151,17 +148,19 @@ def _triage_fn(prompt: str) -> str:
         severity = "P4"
 
     # Customer enrichment
-    customer_info = None
-    order_info = None
+    customer_info: dict[str, Any] | None = None
+    order_info: dict[str, Any] | None = None
     if customer_id:
         try:
-            customer_info = json.loads(query_customer(customer_id))
-            if "error" in customer_info:
+            customer_info_raw: dict[str, Any] = json.loads(query_customer(customer_id))
+            if "error" in customer_info_raw:
                 customer_info = None
+            else:
+                customer_info = customer_info_raw
         except Exception:
             pass
         try:
-            order_data = json.loads(check_order_status(customer_id))
+            order_data: dict[str, Any] = json.loads(check_order_status(customer_id))
             if "error" not in order_data:
                 order_info = order_data
         except Exception:
@@ -197,15 +196,15 @@ def _investigator_fn(prompt: str) -> str:
     """Deterministic investigation: search tickets + KB, find root cause."""
     # Parse triage JSON from the prompt
     try:
-        triage_data = json.loads(prompt)
+        triage_data: dict[str, Any] = json.loads(prompt)
     except json.JSONDecodeError:
         # Fallback: treat as raw text
         triage_data = {"category": "general", "customer_id": "", "original_ticket": prompt}
 
-    category = triage_data.get("category", "general")
-    customer_id = triage_data.get("customer_id", "")
-    severity = triage_data.get("severity", "P4")
-    original_ticket = triage_data.get("original_ticket", prompt)
+    category: str = triage_data.get("category", "general")
+    customer_id: str = triage_data.get("customer_id", "")
+    severity: str = triage_data.get("severity", "P4")
+    original_ticket: str = triage_data.get("original_ticket", prompt)
 
     # Search past tickets
     all_similar: list[dict[str, Any]] = []
@@ -213,19 +212,19 @@ def _investigator_fn(prompt: str) -> str:
         if not query:
             continue
         raw = search_tickets(query=query, customer_id=customer_id, category=category)
-        parsed = json.loads(raw)
+        parsed: dict[str, Any] = json.loads(raw)
         for match in parsed["matches"]:
             if match not in all_similar:
                 all_similar.append(match)
 
     # Search knowledge base
     kb_raw = search_knowledge_base(query=category)
-    kb_parsed = json.loads(kb_raw)
+    kb_parsed: dict[str, Any] = json.loads(kb_raw)
 
     # Also search with ticket keywords
     ticket_words = re.findall(r"\b\w{4,}\b", original_ticket.lower())
     if ticket_words:
-        kb_extra = json.loads(search_knowledge_base(query=" ".join(ticket_words[:3])))
+        kb_extra: dict[str, Any] = json.loads(search_knowledge_base(query=" ".join(ticket_words[:3])))
         for article in kb_extra["articles"]:
             if article not in kb_parsed["articles"]:
                 kb_parsed["articles"].append(article)
@@ -253,10 +252,16 @@ def _investigator_fn(prompt: str) -> str:
         should_escalate = True
 
     result = InvestigationResult(
-        triage=TriageResult(**{k: triage_data.get(k) for k in [
-            "customer_id", "category", "severity", "urgency_detected",
-            "customer_info", "order_info", "original_ticket", "routing",
-        ]}),
+        triage=TriageResult(
+            customer_id=triage_data.get("customer_id", ""),
+            category=triage_data.get("category", "general"),
+            severity=triage_data.get("severity", "P4"),
+            urgency_detected=bool(triage_data.get("urgency_detected", False)),
+            customer_info=triage_data.get("customer_info"),
+            order_info=triage_data.get("order_info"),
+            original_ticket=triage_data.get("original_ticket", ""),
+            routing=triage_data.get("routing", "investigate"),
+        ),
         similar_tickets=all_similar,
         kb_articles=kb_parsed["articles"],
         root_cause=root_cause,
@@ -275,21 +280,21 @@ def _investigator_fn(prompt: str) -> str:
 def _resolution_fn(prompt: str) -> str:
     """Deterministic resolution: draft customer response from investigation."""
     try:
-        inv_data = json.loads(prompt)
+        inv_data: dict[str, Any] = json.loads(prompt)
     except json.JSONDecodeError:
         inv_data = {}
 
-    triage_data = inv_data.get("triage", {})
-    customer_info = triage_data.get("customer_info")
-    customer_name = (
+    triage_data: dict[str, Any] = inv_data.get("triage", {})
+    customer_info: dict[str, Any] | None = triage_data.get("customer_info")
+    customer_name: str = (
         customer_info.get("name", "Customer") if customer_info else "Customer"
     )
-    category = triage_data.get("category", "general")
-    root_cause = inv_data.get("root_cause", "Under investigation")
-    recommended_action = inv_data.get("recommended_action", "")
-    kb_articles = inv_data.get("kb_articles", [])
-    should_escalate = inv_data.get("should_escalate", False)
-    similar_tickets = inv_data.get("similar_tickets", [])
+    category: str = triage_data.get("category", "general")
+    root_cause: str = inv_data.get("root_cause", "Under investigation")
+    recommended_action: str = inv_data.get("recommended_action", "")
+    kb_articles: list[dict[str, Any]] = inv_data.get("kb_articles", [])
+    should_escalate: bool = inv_data.get("should_escalate", False)
+    similar_tickets: list[dict[str, Any]] = inv_data.get("similar_tickets", [])
 
     # Determine response type
     if should_escalate:
@@ -347,25 +352,33 @@ def _resolution_fn(prompt: str) -> str:
         ),
     }
 
-    customer_message = templates.get(response_type, templates["info"])
+    customer_message: str = templates.get(response_type, templates["info"])
 
     # Internal notes
-    internal = [
+    severity_str: str = triage_data.get("severity", "unknown")
+    escalation_reason_str: str = inv_data.get("escalation_reason", "N/A")
+    internal: list[str] = [
         f"Category: {category}",
-        f"Severity: {triage_data.get('severity', 'unknown')}",
+        f"Severity: {severity_str}",
         f"Root cause: {root_cause}",
         f"Similar tickets: {[t.get('ticket_id', '?') for t in similar_tickets]}",
         f"KB articles used: {[a.get('id', '?') for a in kb_articles]}",
     ]
     if should_escalate:
-        internal.append(f"ESCALATED: {inv_data.get('escalation_reason', 'N/A')}")
+        internal.append(f"ESCALATED: {escalation_reason_str}")
 
     result = ResolutionResult(
         investigation=InvestigationResult(
-            triage=TriageResult(**{k: triage_data.get(k) for k in [
-                "customer_id", "category", "severity", "urgency_detected",
-                "customer_info", "order_info", "original_ticket", "routing",
-            ]}),
+            triage=TriageResult(
+                customer_id=triage_data.get("customer_id", ""),
+                category=triage_data.get("category", "general"),
+                severity=triage_data.get("severity", "P4"),
+                urgency_detected=bool(triage_data.get("urgency_detected", False)),
+                customer_info=triage_data.get("customer_info"),
+                order_info=triage_data.get("order_info"),
+                original_ticket=triage_data.get("original_ticket", ""),
+                routing=triage_data.get("routing", "investigate"),
+            ),
             similar_tickets=similar_tickets,
             kb_articles=kb_articles,
             root_cause=root_cause,

@@ -8,6 +8,8 @@ and validate the EventSourceResponse wiring.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -35,10 +37,10 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncClient:
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c  # type: ignore[misc]
+        yield c
 
 
 # ---------------------------------------------------------------------------

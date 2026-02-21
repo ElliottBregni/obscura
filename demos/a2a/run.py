@@ -27,9 +27,9 @@ from demos.a2a.agents import (
     create_resolution_app,
     create_triage_app,
 )
-from demos.a2a.orchestrator import A2APipeline
+from demos.a2a.orchestrator import A2APipeline, A2AResult
 from demos.support.run import SAMPLE_TICKETS
-from sdk.a2a.types import TaskArtifactUpdateEvent, TaskStatusUpdateEvent
+from sdk.a2a.types import TaskArtifactUpdateEvent, TaskStatusUpdateEvent, TextPart
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ def _section(title: str, content: str) -> None:
     print(content)
 
 
-def _print_blocking_result(result: Any) -> None:
+def _print_blocking_result(result: A2AResult) -> None:
     """Print a blocking pipeline result."""
     # Triage
     if result.triage_json:
@@ -147,7 +147,7 @@ async def run_streaming(ticket: str, verbose: bool = False) -> None:
             print(f"  [status] {state}{final}")
         elif isinstance(event, TaskArtifactUpdateEvent):
             for part in event.artifact.parts:
-                if hasattr(part, "text"):
+                if isinstance(part, TextPart):
                     text = part.text
                     if len(text) > 100:
                         text = text[:100] + "..."

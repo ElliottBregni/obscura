@@ -123,7 +123,7 @@ class A2AClient:
     async def _rpc(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a JSON-RPC 2.0 request and return the result."""
         http = self._ensure_connected()
-        payload = {
+        payload: dict[str, Any] = {
             "jsonrpc": "2.0",
             "id": str(uuid.uuid4().hex[:8]),
             "method": method,
