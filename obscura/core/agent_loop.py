@@ -322,11 +322,44 @@ class AgentLoop:
 
     @staticmethod
     async def _call_handler(spec: ToolSpec, inputs: dict[str, Any]) -> Any:
-        """Call a tool handler (sync or async)."""
+        """Call a tool handler (sync or async).
+
+        Automatically filters out kwargs the handler doesn't declare — e.g. a
+        ``prompt`` param that Claude passes to ``web_fetch`` but other backends
+        don't.  This gives cross-agent parity without requiring every tool to
+        enumerate every LLM-convention parameter.
+        """
         handler = spec.handler
-        if inspect.iscoroutinefunction(handler):
-            return await handler(**inputs)
-        return handler(**inputs)
+        try:
+            if inspect.iscoroutinefunction(handler):
+                return await handler(**inputs)
+            return handler(**inputs)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            # If the handler uses **kwargs it accepts everything — a TypeError
+            # here is a genuine bug, not a cross-agent compat issue.
+            sig = inspect.signature(handler)
+            if any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            ):
+                raise
+            accepted = {
+                n
+                for n, p in sig.parameters.items()
+                if p.kind
+                not in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                )
+            }
+            filtered = {k: v for k, v in inputs.items() if k in accepted}
+            dropped = sorted(set(inputs) - accepted)
+            logger.debug("Tool %s: dropping undeclared kwargs %s", spec.name, dropped)
+            if inspect.iscoroutinefunction(handler):
+                return await handler(**filtered)
+            return handler(**filtered)
 
     # ------------------------------------------------------------------
     # Helpers

@@ -83,6 +83,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         app.state._heartbeat_monitor = None
 
+    # Load persisted agent templates into memory
+    try:
+        from obscura.routes.template_store import load_persisted_templates, put
+
+        persisted = load_persisted_templates()
+        for tid, tdata in persisted.items():
+            put(tid, tdata)
+        if persisted:
+            logger.info("Loaded %d persisted agent templates", len(persisted))
+    except Exception:
+        logger.warning(
+            "Could not load persisted agent templates; starting with empty store"
+        )
+
     yield
 
     # Cleanup A2A server

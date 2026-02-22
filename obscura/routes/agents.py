@@ -9,6 +9,7 @@ from typing import Any, AsyncGenerator, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from obscura.approvals import (
@@ -23,35 +24,74 @@ from obscura.core.paths import resolve_obscura_mcp_dir
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
-# In-memory template store
-agent_templates: dict[str, dict[str, Any]] = {}
+# Template store (in-memory + optional SQLite)
+from obscura.routes import template_store
+from obscura.schemas.templates import (
+    SpawnFromTemplateRequest,
+    TemplateCreateRequest,
+    TemplateUpdateRequest,
+)
+from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
+
+# Backwards-compatible alias: workflows.py imports this dict directly
+agent_templates = template_store.get_all()
 
 
 def get_agent_templates() -> dict[str, dict[str, Any]]:
     """Read-only access to agent templates (for admin stats/tests)."""
-    return agent_templates
+    return template_store.get_all()
 
 
 def clear_agent_templates() -> None:
     """Clear agent templates (testing helper)."""
-    agent_templates.clear()
+    template_store.clear()
 
 
 def get_agent_templates_view() -> dict[str, dict[str, Any]]:
     """Return a shallow copy for safe read access."""
-    return dict(agent_templates)
+    return dict(template_store.get_all())
 
 
-# -- CRUD -----------------------------------------------------------------
-
-
-@router.post("/agents")
-async def agent_spawn(
+def _resolve_spawn_field(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
-) -> JSONResponse:
-    """Spawn a new agent."""
-    model: str = body.get("model", "copilot")
+    builder: dict[str, Any],
+    key: str,
+    default: Any,
+) -> Any:
+    if key in body:
+        return body.get(key)
+    return builder.get(key, default)
+
+
+def _dump_explicit_top_level(model: BaseModel) -> dict[str, Any]:
+    """Dump only explicitly provided top-level fields (except builder)."""
+    payload = model.model_dump(exclude_none=True)
+    explicit = set(model.model_fields_set)
+    for key in list(payload.keys()):
+        if key == "builder":
+            continue
+        if key not in explicit:
+            payload.pop(key, None)
+    return payload
+
+
+def _string_key_dict(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    typed = cast(dict[Any, Any], value)
+    return {str(k): v for k, v in typed.items()}
+
+
+def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    from obscura.agent.agents import MCPConfig
+
+    raw_builder = body.get("builder", {})
+    builder: dict[str, Any] = (
+        cast(dict[str, Any], raw_builder) if isinstance(raw_builder, dict) else {}
+    )
+
+    model_raw = _resolve_spawn_field(body, builder, "model", "copilot")
+    model = str(model_raw)
     valid_models = ("copilot", "claude", "localllm", "openai", "moonshot")
     if model not in valid_models:
         raise HTTPException(
@@ -59,49 +99,109 @@ async def agent_spawn(
             detail=f"Invalid model '{model}'. Must be one of: {valid_models}",
         )
 
-    runtime = await get_runtime(user)
-
-    mcp_config: dict[str, Any] = body.get("mcp", {})
-    mcp_enabled: bool = mcp_config.get("enabled", False)
-    mcp_servers: list[dict[str, Any]] = mcp_config.get("servers", [])
-    mcp_config_path = str(mcp_config.get("config_path", str(resolve_obscura_mcp_dir())))
-    raw_server_names = mcp_config.get("server_names", [])
-    mcp_server_names: list[str] = (
-        [str(name) for name in cast(list[Any], raw_server_names)]
-        if isinstance(raw_server_names, list)
-        else []
+    system_prompt_base = str(_resolve_spawn_field(body, builder, "system_prompt", ""))
+    skills_raw = builder.get("skills", [])
+    skills: list[dict[str, Any]] = (
+        cast(list[dict[str, Any]], skills_raw) if isinstance(skills_raw, list) else []
     )
-    mcp_primary_server_name = str(mcp_config.get("primary_server_name", "github"))
-    mcp_auto_discover = bool(mcp_config.get("auto_discover", True))
-    mcp_resolve_env = bool(mcp_config.get("resolve_env", True))
+    system_prompt = _compose_system_prompt(
+        {
+            "system_prompt": system_prompt_base,
+            "skills": skills,
+        }
+    )
 
-    from obscura.agent.agents import MCPConfig
-
-    raw_a2a_remote_tools = body.get("a2a_remote_tools", {})
+    raw_a2a_remote_tools = _resolve_spawn_field(
+        body,
+        builder,
+        "a2a_remote_tools",
+        {},
+    )
     a2a_remote_tools: dict[str, Any] = (
         cast(dict[str, Any], raw_a2a_remote_tools)
         if isinstance(raw_a2a_remote_tools, dict)
         else {}
     )
 
-    agent = runtime.spawn(
-        name=body.get("name", "unnamed"),
-        model=model,
-        system_prompt=body.get("system_prompt", ""),
-        memory_namespace=body.get("memory_namespace", "default"),
-        max_iterations=body.get("max_iterations", 10),
-        enable_system_tools=bool(body.get("enable_system_tools", True)),
-        a2a_remote_tools=a2a_remote_tools,
-        mcp=MCPConfig(
-            enabled=mcp_enabled,
+    mcp_config_payload = body.get("mcp")
+    if not isinstance(mcp_config_payload, dict):
+        mcp_config_payload = builder.get("mcp")
+    mcp_config: MCPConfig
+    mcp_payload_map = _string_key_dict(mcp_config_payload)
+    if mcp_payload_map is not None:
+        mcp_servers_raw = mcp_payload_map.get("servers", [])
+        mcp_servers: list[dict[str, Any]] = (
+            cast(list[dict[str, Any]], mcp_servers_raw)
+            if isinstance(mcp_servers_raw, list)
+            else []
+        )
+        raw_server_names = mcp_payload_map.get("server_names", [])
+        mcp_server_names: list[str] = (
+            [str(name) for name in cast(list[Any], raw_server_names)]
+            if isinstance(raw_server_names, list)
+            else []
+        )
+        mcp_config = MCPConfig(
+            enabled=bool(mcp_payload_map.get("enabled", False)),
             servers=mcp_servers,
-            config_path=mcp_config_path,
+            config_path=str(
+                mcp_payload_map.get("config_path", str(resolve_obscura_mcp_dir()))
+            ),
             server_names=mcp_server_names,
-            primary_server_name=mcp_primary_server_name,
-            auto_discover=mcp_auto_discover,
-            resolve_env=mcp_resolve_env,
-        ),
+            primary_server_name=str(
+                mcp_payload_map.get("primary_server_name", "github")
+            ),
+            auto_discover=bool(mcp_payload_map.get("auto_discover", True)),
+            resolve_env=bool(mcp_payload_map.get("resolve_env", True)),
+        )
+    else:
+        mcp_config = _build_mcp_config(builder)
+
+    tags_value = _resolve_spawn_field(body, builder, "tags", [])
+    tags: list[str] = (
+        [str(tag) for tag in cast(list[Any], tags_value)]
+        if isinstance(tags_value, list)
+        else []
     )
+
+    spawn_kwargs: dict[str, Any] = {
+        "name": str(_resolve_spawn_field(body, builder, "name", "unnamed")),
+        "model": model,
+        "system_prompt": system_prompt,
+        "memory_namespace": str(
+            _resolve_spawn_field(body, builder, "memory_namespace", "default")
+        ),
+        "max_iterations": int(_resolve_spawn_field(body, builder, "max_iterations", 10)),
+        "timeout_seconds": float(
+            _resolve_spawn_field(body, builder, "timeout_seconds", 300.0)
+        ),
+        "enable_system_tools": bool(
+            _resolve_spawn_field(body, builder, "enable_system_tools", True)
+        ),
+        "a2a_remote_tools": a2a_remote_tools,
+        "mcp": mcp_config,
+        "tags": tags,
+    }
+    parent_agent_id = _resolve_spawn_field(body, builder, "parent_agent_id", None)
+    if parent_agent_id is not None:
+        spawn_kwargs["parent_agent_id"] = str(parent_agent_id)
+    return spawn_kwargs, mcp_config.enabled
+
+
+# -- CRUD -----------------------------------------------------------------
+
+
+@router.post("/agents")
+async def agent_spawn(
+    body: AgentSpawnRequest,
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+) -> JSONResponse:
+    """Spawn a new agent."""
+    runtime = await get_runtime(user)
+    spawn_kwargs, mcp_enabled = _normalize_spawn_request(
+        _dump_explicit_top_level(body)
+    )
+    agent = runtime.spawn(**spawn_kwargs)
 
     await agent.start()
 
@@ -398,12 +498,14 @@ async def agent_list(
 
 @router.post("/agents/bulk")
 async def agents_bulk_spawn(
-    body: dict[str, Any],
+    body: AgentBulkSpawnRequest,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Spawn multiple agents in one request."""
     runtime = await get_runtime(user)
-    agents_config: list[dict[str, Any]] = body.get("agents", [])
+    agents_config: list[dict[str, Any]] = [
+        _dump_explicit_top_level(item) for item in body.agents
+    ]
 
     if not agents_config:
         raise HTTPException(status_code=400, detail="No agents provided")
@@ -417,14 +519,14 @@ async def agents_bulk_spawn(
 
     for idx, cfg in enumerate(agents_config):
         try:
-            agent = runtime.spawn(
-                name=cfg.get("name", f"bulk-agent-{idx}"),
-                model=cfg.get("model", "claude"),
-                system_prompt=cfg.get("system_prompt", ""),
-                memory_namespace=cfg.get("memory_namespace", "default"),
-                max_iterations=cfg.get("max_iterations", 10),
-                tags=cfg.get("tags", []),
+            spawn_kwargs, _mcp_enabled = _normalize_spawn_request(cfg)
+            builder_payload = cfg.get("builder", {})
+            builder_name_missing = not (
+                isinstance(builder_payload, dict) and "name" in builder_payload
             )
+            if "name" not in cfg and builder_name_missing:
+                spawn_kwargs["name"] = f"bulk-agent-{idx}"
+            agent = runtime.spawn(**spawn_kwargs)
             await agent.start()
             created.append(
                 {
@@ -538,25 +640,26 @@ async def agents_bulk_tag(
 
 @router.post("/agent-templates")
 async def template_create(
-    body: dict[str, Any],
+    body: TemplateCreateRequest,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
-    """Create an agent template."""
+    """Create an agent template with full APER profile support."""
     template_id = str(uuid.uuid4())
+    now = datetime.now(UTC).isoformat()
+
     template: dict[str, Any] = {
         "template_id": template_id,
-        "name": body.get("name", "unnamed-template"),
-        "model": body.get("model", "claude"),
-        "system_prompt": body.get("system_prompt", ""),
-        "timeout_seconds": body.get("timeout_seconds", 300),
-        "max_iterations": body.get("max_iterations", 10),
-        "memory_namespace": body.get("memory_namespace", "default"),
-        "tags": body.get("tags", []),
+        **body.model_dump(exclude={"persist"}),
+        "persist": body.persist,
         "created_by": user.user_id,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": now,
+        "updated_at": now,
     }
 
-    agent_templates[template_id] = template
+    template_store.put(template_id, template)
+
+    if body.persist:
+        template_store.persist_template(template_id, template)
 
     audit(
         "template.create",
@@ -564,7 +667,7 @@ async def template_create(
         f"template:{template_id}",
         "create",
         "success",
-        name=template["name"],
+        name=body.name,
     )
 
     return JSONResponse(content=template)
@@ -575,7 +678,7 @@ async def template_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agent templates."""
-    templates: list[dict[str, Any]] = list(agent_templates.values())
+    templates: list[dict[str, Any]] = list(template_store.get_all().values())
     return JSONResponse(
         content={
             "templates": templates,
@@ -590,10 +693,45 @@ async def template_get(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific agent template."""
-    template = agent_templates.get(template_id)
+    template = template_store.get(template_id)
     if template is None:
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
     return JSONResponse(content=template)
+
+
+@router.put("/agent-templates/{template_id}")
+async def template_update(
+    template_id: str,
+    body: TemplateUpdateRequest,
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+) -> JSONResponse:
+    """Partial-update an agent template (only non-null fields are merged)."""
+    existing = template_store.get(template_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+
+    updates = body.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        if key == "aper_profile" and isinstance(value, dict):
+            existing[key] = value
+        elif key == "skills" and isinstance(value, list):
+            existing[key] = cast(list[Any], value)
+        elif key == "mcp_servers" and isinstance(value, list):
+            existing[key] = cast(list[Any], value)
+        elif key == "a2a_remote_tools" and isinstance(value, dict):
+            existing[key] = value
+        else:
+            existing[key] = value
+    existing["updated_at"] = datetime.now(UTC).isoformat()
+
+    template_store.put(template_id, existing)
+
+    if existing.get("persist", False):
+        template_store.persist_template(template_id, existing)
+
+    audit("template.update", user, f"template:{template_id}", "update", "success")
+
+    return JSONResponse(content=existing)
 
 
 @router.delete("/agent-templates/{template_id}")
@@ -602,42 +740,151 @@ async def template_delete(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete an agent template."""
-    if template_id not in agent_templates:
+    existing = template_store.get(template_id)
+    if existing is None:
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
 
-    del agent_templates[template_id]
+    was_persisted = existing.get("persist", False)
+    template_store.delete(template_id)
+
+    if was_persisted:
+        template_store.delete_persisted(template_id)
 
     audit("template.delete", user, f"template:{template_id}", "delete", "success")
 
     return JSONResponse(content={"template_id": template_id, "deleted": True})
 
 
+def _compose_system_prompt(template: dict[str, Any]) -> str:
+    """Build system prompt with skills injected (mirrors AgentBuilder pattern)."""
+    base: str = template.get("system_prompt", "")
+    skills: list[dict[str, Any]] = template.get("skills", [])
+    if not skills:
+        return base
+    parts: list[str] = [base, "", "## Loaded Skills"]
+    for skill in skills:
+        parts.append(f"### {skill['name']} (source: {skill.get('source', 'inline')})")
+        parts.append(str(skill.get("content", "")).strip())
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
+def _build_mcp_config(template: dict[str, Any]) -> Any:
+    """Build MCPConfig from template fields."""
+    from obscura.agent.agents import MCPConfig
+
+    mcp_servers_raw: list[dict[str, Any]] = template.get("mcp_servers", [])
+    explicit_servers: list[dict[str, Any]] = []
+    for spec in mcp_servers_raw:
+        transport = spec.get("transport", "stdio")
+        if transport == "stdio":
+            explicit_servers.append({
+                "transport": "stdio",
+                "command": spec.get("command", ""),
+                "args": spec.get("args", []),
+                "env": spec.get("env", {}),
+            })
+        else:
+            explicit_servers.append({
+                "transport": "sse",
+                "url": spec.get("url", ""),
+                "env": spec.get("env", {}),
+            })
+
+    mcp_enabled = template.get("mcp_auto_discover", False) or bool(explicit_servers)
+    return MCPConfig(
+        enabled=mcp_enabled,
+        servers=explicit_servers,
+        config_path=template.get("mcp_config_path", "config/mcp-config.json"),
+        server_names=template.get("mcp_server_names", []),
+        primary_server_name=template.get("mcp_primary_server_name", "github"),
+        auto_discover=template.get("mcp_auto_discover", False),
+        resolve_env=template.get("mcp_resolve_env", True),
+    )
+
+
 @router.post("/agents/from-template")
 async def agent_spawn_from_template(
-    body: dict[str, Any],
+    body: SpawnFromTemplateRequest,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
-    """Spawn an agent from a template."""
+    """Spawn an agent from a template with full APER / MCP / A2A support."""
     runtime = await get_runtime(user)
-    template_id: str | None = body.get("template_id")
 
-    if not template_id:
-        raise HTTPException(status_code=400, detail="template_id is required")
-
-    template = agent_templates.get(template_id)
+    template = template_store.get(body.template_id)
     if template is None:
-        raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Template {body.template_id} not found"
+        )
+
+    system_prompt = _compose_system_prompt(template)
+    mcp_config = _build_mcp_config(template)
+
+    # Build a2a_remote_tools dict
+    a2a_spec = template.get("a2a_remote_tools")
+    a2a_remote_tools: dict[str, Any] = {}
+    if a2a_spec is not None:
+        a2a_remote_tools = {
+            "enabled": a2a_spec.get("enabled", False),
+            "urls": a2a_spec.get("urls", []),
+        }
+        if a2a_spec.get("auth_token") is not None:
+            a2a_remote_tools["auth_token"] = a2a_spec["auth_token"]
+
+    agent_name = body.name or f"{template['name']}-instance"
 
     agent = runtime.spawn(
-        name=body.get("name", f"{template['name']}-instance"),
+        name=agent_name,
         model=template.get("model", "claude"),
-        system_prompt=template.get("system_prompt", ""),
+        system_prompt=system_prompt,
         memory_namespace=template.get("memory_namespace", "default"),
         max_iterations=template.get("max_iterations", 10),
+        timeout_seconds=template.get("timeout_seconds", 300.0),
+        enable_system_tools=template.get("enable_system_tools", True),
         tags=template.get("tags", []),
+        mcp=mcp_config,
+        a2a_remote_tools=a2a_remote_tools,
+        parent_agent_id=template.get("parent_agent_id"),
     )
 
     await agent.start()
+
+    # If APER mode and profile present, run the APER loop immediately
+    aper_profile_data = template.get("aper_profile")
+    aper_result: str | None = None
+    if body.mode == "aper" and aper_profile_data is not None and body.prompt:
+        from obscura.agent.aper import APERProfile, ServerAPERAgent
+
+        profile = APERProfile(
+            analyze_template=aper_profile_data.get(
+                "analyze_template",
+                "Analyze the user goal and extract constraints.",
+            ),
+            plan_template=aper_profile_data.get(
+                "plan_template",
+                "Create a step-by-step plan to solve the goal.",
+            ),
+            execute_template=aper_profile_data.get(
+                "execute_template",
+                (
+                    "Goal:\n{goal}\n\nAnalysis:\n{analysis}\n\nPlan:\n{plan}\n\n"
+                    "Execute using tools where useful and return concise output."
+                ),
+            ),
+            respond_template=aper_profile_data.get(
+                "respond_template",
+                "Return a final concise answer based on execution output.",
+            ),
+            max_turns=aper_profile_data.get("max_turns", 8),
+        )
+        if agent.client is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Agent client was not initialized before APER execution",
+            )
+        aper_agent = ServerAPERAgent(agent.client, profile=profile, name=agent_name)
+        result = await aper_agent.run(body.prompt)
+        aper_result = str(result)
 
     audit(
         "agent.spawn",
@@ -646,18 +893,23 @@ async def agent_spawn_from_template(
         "create",
         "success",
         name=agent.config.name,
-        template_id=template_id,
+        template_id=body.template_id,
+        mode=body.mode,
     )
 
-    return JSONResponse(
-        content={
-            "agent_id": agent.id,
-            "name": agent.config.name,
-            "status": agent.status.name,
-            "template_id": template_id,
-            "created_at": agent.created_at.isoformat(),
-        }
-    )
+    response: dict[str, Any] = {
+        "agent_id": agent.id,
+        "name": agent.config.name,
+        "status": agent.status.name,
+        "template_id": body.template_id,
+        "mode": body.mode,
+        "aper_enabled": aper_profile_data is not None,
+        "created_at": agent.created_at.isoformat(),
+    }
+    if aper_result is not None:
+        response["aper_result"] = aper_result
+
+    return JSONResponse(content=response)
 
 
 # -- tags ------------------------------------------------------------------

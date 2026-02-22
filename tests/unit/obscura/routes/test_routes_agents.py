@@ -219,6 +219,87 @@ class TestAgentSpawn:
             == payload["a2a_remote_tools"]
         )
 
+    @patch("obscura.routes.agents.get_runtime")
+    def test_spawn_agent_with_builder_payload(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent(model="claude")
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        payload = {
+            "builder": {
+                "name": "builder-agent",
+                "model": "claude",
+                "system_prompt": "You are a planner.",
+                "skills": [{"name": "planning", "content": "Always plan first."}],
+                "memory_namespace": "builder:claude:planner",
+                "max_iterations": 22,
+                "timeout_seconds": 91.5,
+                "enable_system_tools": False,
+                "tags": ["builder", "aper"],
+                "parent_agent_id": "agent-root",
+                "mcp_auto_discover": True,
+                "mcp_config_path": "config/mcp-config.json",
+                "mcp_server_names": ["github", "filesystem"],
+                "mcp_primary_server_name": "github",
+                "mcp_resolve_env": True,
+                "a2a_remote_tools": {
+                    "enabled": True,
+                    "urls": ["https://a2a.example.local"],
+                    "auth_token": "token-1",
+                },
+            }
+        }
+        resp = client.post("/api/v1/agents", json=payload)
+        assert resp.status_code == 200
+        kwargs = runtime.spawn.call_args.kwargs
+        assert kwargs["name"] == "builder-agent"
+        assert kwargs["model"] == "claude"
+        assert kwargs["memory_namespace"] == "builder:claude:planner"
+        assert kwargs["max_iterations"] == 22
+        assert kwargs["timeout_seconds"] == 91.5
+        assert kwargs["enable_system_tools"] is False
+        assert kwargs["tags"] == ["builder", "aper"]
+        assert kwargs["parent_agent_id"] == "agent-root"
+        assert "## Loaded Skills" in kwargs["system_prompt"]
+        assert "Always plan first." in kwargs["system_prompt"]
+        assert kwargs["a2a_remote_tools"]["enabled"] is True
+        assert kwargs["mcp"].enabled is True
+        assert kwargs["mcp"].auto_discover is True
+        assert kwargs["mcp"].server_names == ["github", "filesystem"]
+
+    @patch("obscura.routes.agents.get_runtime")
+    def test_spawn_agent_top_level_overrides_builder(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent(model="openai")
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.post(
+            "/api/v1/agents",
+            json={
+                "name": "top-agent",
+                "model": "openai",
+                "system_prompt": "Top level prompt.",
+                "enable_system_tools": True,
+                "builder": {
+                    "name": "builder-agent",
+                    "model": "claude",
+                    "system_prompt": "Builder prompt",
+                    "enable_system_tools": False,
+                    "skills": [{"name": "s1", "content": "S1"}],
+                },
+            },
+        )
+        assert resp.status_code == 200
+        kwargs = runtime.spawn.call_args.kwargs
+        assert kwargs["name"] == "top-agent"
+        assert kwargs["model"] == "openai"
+        assert kwargs["enable_system_tools"] is True
+        assert kwargs["system_prompt"].startswith("Top level prompt.")
+
 
 # ---------------------------------------------------------------------------
 # Agent get (GET /agents/{agent_id})
@@ -934,8 +1015,7 @@ class TestSpawnFromTemplate:
         mock_get_runtime.return_value = runtime
 
         resp = client.post("/api/v1/agents/from-template", json={})
-        assert resp.status_code == 400
-        assert "template_id is required" in resp.json()["detail"]
+        assert resp.status_code == 422  # Pydantic validation: template_id required
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_from_template_not_found(

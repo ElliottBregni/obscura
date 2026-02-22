@@ -102,3 +102,23 @@ class HealthResponse(BaseModel):
     """Response body for GET /health and /ready."""
 
     status: str
+
+
+# Re-export template schemas for convenience
+from obscura.schemas.templates import (  # noqa: E402, F401
+    A2ARemoteToolsSpecSchema,
+    APERProfileSchema,
+    MCPServerSpecSchema,
+    SkillSpecSchema,
+    SpawnFromTemplateRequest,
+    TemplateCreateRequest,
+    TemplateListResponse,
+    TemplateResponse,
+    TemplateUpdateRequest,
+)
+from obscura.schemas.agents import (  # noqa: E402, F401
+    AgentBulkSpawnRequest,
+    AgentBuilderSpawnSchema,
+    AgentSpawnRequest,
+    MCPRuntimeSchema,
+)

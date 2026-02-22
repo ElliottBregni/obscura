@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from obscura.cli.chat_cli import (
+from obscura.cli import (
     _load_memory_context,
     _parse_tool_policy,
     _persist_transcript,
@@ -383,8 +383,8 @@ class TestChatMemory:
 
         with (
             _patch_client(mock_client),
-            patch("obscura.cli.chat_cli._load_memory_context") as mock_load,
-            patch("obscura.cli.chat_cli._persist_transcript") as mock_persist,
+            patch("obscura.cli._load_memory_context") as mock_load,
+            patch("obscura.cli._persist_transcript") as mock_persist,
         ):
             result = runner.invoke(
                 cli,
@@ -401,7 +401,7 @@ class TestChatMemory:
 
         with (
             _patch_client(mock_client),
-            patch("obscura.cli.chat_cli._persist_transcript") as mock_persist,
+            patch("obscura.cli._persist_transcript") as mock_persist,
         ):
             result = runner.invoke(
                 cli,

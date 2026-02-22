@@ -1,8 +1,9 @@
-"""S&P 500 research agent demo using the APER loop with Playwright MCP browser tools.
+"""S&P 500 research agent demo using the APER loop with all tools + MCP.
 
 Demonstrates:
   - Custom APER (Analyze → Plan → Execute → Respond) agent lifecycle
-  - Playwright MCP integration for live web browsing
+  - Full system tool suite: web search/fetch, Python execution, shell, file I/O, etc.
+  - Dynamic MCP server discovery — all configured MCP servers injected as tools
   - Lifecycle hooks for observability at each phase boundary
   - Tool-calling loop inside the Execute phase
 
@@ -20,7 +21,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast, override
@@ -30,6 +31,11 @@ try:
     from obscura.agent.agent import BaseAgent
     from obscura.auth.models import AuthenticatedUser
     from obscura.core.types import AgentContext, HookPoint
+    from obscura.integrations.mcp.config_loader import (
+        build_runtime_server_configs,
+        discover_mcp_servers,
+    )
+    from obscura.tools.system import get_system_tool_specs
 except ModuleNotFoundError:
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
@@ -38,6 +44,11 @@ except ModuleNotFoundError:
     from obscura.agent.agent import BaseAgent
     from obscura.auth.models import AuthenticatedUser
     from obscura.core.types import AgentContext, HookPoint
+    from obscura.integrations.mcp.config_loader import (
+        build_runtime_server_configs,
+        discover_mcp_servers,
+    )
+    from obscura.tools.system import get_system_tool_specs
 
 
 BackendName = Literal["copilot", "claude", "openai", "moonshot", "localllm"]
@@ -45,17 +56,29 @@ BackendName = Literal["copilot", "claude", "openai", "moonshot", "localllm"]
 RESEARCH_SYSTEM_PROMPT = """\
 You are a financial research analyst specializing in the S&P 500 and US equity markets.
 
-Capabilities:
-- Browse the web using Playwright MCP tools to gather live market data
-- Navigate financial news sites, market data pages, and search engines
-- Extract structured data from web pages (prices, percentages, rankings)
+You have a FULL toolbelt — use whatever tool is best for the job:
+
+System tools:
+- web_search — search the web for live data (DuckDuckGo)
+- web_fetch — fetch and read any URL
+- run_python3 — execute Python code for data processing/analysis
+- run_shell — run shell commands
+- read_text_file / write_text_file — persist intermediate results
+- All other system tools (file I/O, process mgmt, networking, etc.)
+
+MCP tools (dynamically loaded from configured servers):
+- GitHub, Slack, Linear, Asana, and other connected services
+- Use list_system_tools to see all available tools at runtime
+- MCP tools appear alongside system tools — call them by name
 
 Guidelines:
 - Always cite the source URL when reporting data
 - Present numerical data in clean, structured format
 - Distinguish between real-time, delayed, and historical data
 - Note the timestamp of any data you retrieve
-- If a page fails to load, try an alternative source
+- If a tool or source fails, try an alternative approach
+- Use Python for any data transformation, sorting, or calculation
+- Leverage MCP integrations when they provide better data access
 """
 
 ANALYZE_TEMPLATE = """\
@@ -98,11 +121,12 @@ Analysis:
 Plan:
 {plan}
 
-Now execute the plan using available Playwright MCP browser tools:
-- Use browser_navigate to visit pages
-- Use browser_snapshot to read page content
-- Use browser_click to interact with elements
-- Use browser_type to fill search boxes
+Now execute the plan using ALL available tools:
+- web_search to find relevant pages
+- web_fetch to retrieve specific URLs and read their content
+- run_python3 to process, sort, or calculate data
+- MCP tools (GitHub, etc.) if they provide relevant data
+- Any other system tool that helps
 
 Follow your plan step by step. Gather all relevant data points.
 When done, compile your raw findings with source URLs.
@@ -126,10 +150,6 @@ Synthesize a clean, well-structured research brief:
 """
 
 
-def _empty_str_map() -> dict[str, str]:
-    return {}
-
-
 @dataclass(frozen=True)
 class ResearchConfig:
     """Configuration for the S&P 500 research demo."""
@@ -139,9 +159,6 @@ class ResearchConfig:
     )
     model: BackendName = "claude"
     max_turns: int = 10
-    mcp_command: str = "npx"
-    mcp_args: tuple[str, ...] = ("-y", "@playwright/mcp@latest")
-    mcp_env: dict[str, str] = field(default_factory=_empty_str_map)
     verbose: bool = True
 
 
@@ -204,7 +221,7 @@ class SP500ResearchAgent(BaseAgent):
 
     @override
     async def execute(self, ctx: AgentContext) -> None:
-        """Phase 3: Execute the plan using Playwright MCP browser tools."""
+        """Phase 3: Execute the plan using web_search and web_fetch tools."""
         _phase_banner("execute", f"Browsing web (max {self._max_turns} tool turns)")
 
         analysis_text = json.dumps(ctx.analysis, indent=2, default=str)
@@ -239,6 +256,18 @@ class SP500ResearchAgent(BaseAgent):
             print(result, flush=True)
 
 
+def _discover_mcp_server_configs() -> list[dict[str, Any]]:
+    """Auto-discover all MCP servers from ~/.obscura/mcp/ and return runtime configs."""
+    try:
+        discovered = discover_mcp_servers()
+        if not discovered:
+            return []
+        return build_runtime_server_configs(discovered)
+    except Exception as exc:
+        print(f"  MCP discovery failed ({exc}), continuing without MCP", flush=True)
+        return []
+
+
 def _make_user(backend: BackendName) -> AuthenticatedUser:
     return AuthenticatedUser(
         user_id=f"research-{backend}-user",
@@ -252,18 +281,15 @@ def _make_user(backend: BackendName) -> AuthenticatedUser:
 
 async def run_research(config: ResearchConfig) -> str:
     """Run the full APER research loop and return the final brief."""
-    mcp_server: dict[str, Any] = {
-        "transport": "stdio",
-        "command": config.mcp_command,
-        "args": list(config.mcp_args),
-        "env": config.mcp_env,
-    }
+    # Discover MCP servers before startup banner
+    mcp_configs = _discover_mcp_server_configs()
 
     print(f"\n{'#' * 60}", flush=True)
     print("  S&P 500 Research Agent — APER Demo", flush=True)
     print(f"  Topic: {config.topic}", flush=True)
     print(f"  Backend: {config.model}", flush=True)
     print(f"  Max tool turns: {config.max_turns}", flush=True)
+    print(f"  MCP servers: {len(mcp_configs)}", flush=True)
     print(f"  Started: {_timestamp()}", flush=True)
     print(f"{'#' * 60}", flush=True)
 
@@ -272,7 +298,8 @@ async def run_research(config: ResearchConfig) -> str:
     async with ObscuraClient(
         config.model,
         system_prompt=RESEARCH_SYSTEM_PROMPT,
-        mcp_servers=[mcp_server],
+        tools=get_system_tool_specs(),
+        mcp_servers=mcp_configs or None,
         user=user,
     ) as client:
         agent = SP500ResearchAgent(
@@ -327,7 +354,7 @@ async def run_research(config: ResearchConfig) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="S&P 500 research agent demo with APER loop and Playwright MCP"
+        description="S&P 500 research agent demo with APER loop and built-in web tools"
     )
     parser.add_argument(
         "--topic",
@@ -339,29 +366,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         choices=("copilot", "claude", "openai", "moonshot", "localllm"),
         default="claude",
-        help="Backend model (claude recommended for MCP tool use).",
+        help="Backend model.",
     )
     parser.add_argument(
         "--max-turns",
         type=int,
         default=10,
         help="Maximum tool-calling turns in the Execute phase.",
-    )
-    parser.add_argument(
-        "--mcp-command",
-        default="npx",
-        help="Command for Playwright MCP stdio server.",
-    )
-    parser.add_argument(
-        "--mcp-args",
-        nargs="*",
-        default=["-y", "@playwright/mcp@latest"],
-        help="Args for --mcp-command.",
-    )
-    parser.add_argument(
-        "--mcp-env",
-        default="{}",
-        help='JSON env vars for MCP server, e.g. \'{"DISPLAY":":0"}\'.',
     )
     parser.add_argument(
         "--quiet",
@@ -374,16 +385,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
-    try:
-        mcp_env_raw: Any = json.loads(str(args.mcp_env))
-        if not isinstance(mcp_env_raw, dict):
-            raise ValueError("--mcp-env must be a JSON object")
-        mcp_env_dict = cast(dict[str, Any], mcp_env_raw)
-        env_map: dict[str, str] = {str(k): str(v) for k, v in mcp_env_dict.items()}
-    except (json.JSONDecodeError, ValueError) as exc:
-        print(f"Invalid --mcp-env: {exc}", file=sys.stderr)
-        raise SystemExit(2) from None
-
     model_name = str(args.model)
     if model_name not in ("copilot", "claude", "openai", "moonshot", "localllm"):
         print(f"Unknown model: {model_name}", file=sys.stderr)
@@ -394,9 +395,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         topic=str(args.topic),
         model=backend,
         max_turns=int(args.max_turns),
-        mcp_command=str(args.mcp_command),
-        mcp_args=tuple(str(a) for a in args.mcp_args),
-        mcp_env=env_map,
         verbose=not bool(args.quiet),
     )
 

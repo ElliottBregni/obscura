@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -16,6 +18,22 @@ from urllib import request as url_request
 
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
+
+def _strip_html(raw: str) -> str:
+    """Strip HTML tags and decode entities, returning plain text."""
+    # Drop script/style blocks entirely
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    # Replace block-level tags with newlines for readability
+    text = re.sub(r"</(p|div|li|tr|h[1-6]|br)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Strip remaining tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Decode HTML entities (&amp; &lt; etc.)
+    text = _html.unescape(text)
+    # Collapse whitespace while preserving paragraph breaks
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
 
 _DEFAULT_DENIED_COMMANDS: tuple[str, ...] = (
     "rm",
@@ -286,34 +304,47 @@ async def run_command(
     {
         "type": "object",
         "properties": {
-            "script": {"type": "string"},
+            "script": {"type": "string", "description": "Shell script to execute."},
+            "command": {"type": "string", "description": "Alias for script (LLM compat)."},
             "cwd": {"type": "string"},
             "timeout_seconds": {"type": "number"},
         },
-        "required": ["script"],
     },
     required_tier="privileged",
 )
 async def run_shell(
-    script: str,
+    script: str = "",
+    command: str = "",
     cwd: str = "",
     timeout_seconds: float = 60.0,
 ) -> str:
+    actual_script = script or command
+    if not actual_script:
+        return json.dumps({"ok": False, "error": "no_script_provided"})
     return await run_command(
         "/bin/zsh",
-        args=["-lc", script],
+        args=["-lc", actual_script],
         cwd=cwd,
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=float(timeout_seconds),
     )
 
 
 @tool(
     "web_fetch",
-    "Fetch a URL and return status, headers, and body text.",
+    (
+        "Fetch a URL and return the page content as plain text. "
+        "Provide a `prompt` describing what to extract (e.g. 'list the top 5 stock gainers') "
+        "and the response will include that context alongside the body so you can extract it. "
+        "HTML is automatically stripped to clean readable text."
+    ),
     {
         "type": "object",
         "properties": {
             "url": {"type": "string"},
+            "prompt": {
+                "type": "string",
+                "description": "What to extract or summarize from the page.",
+            },
             "method": {"type": "string"},
             "headers": {"type": "object", "additionalProperties": {"type": "string"}},
             "body": {"type": "string"},
@@ -326,12 +357,15 @@ async def run_shell(
 )
 async def web_fetch(
     url: str,
+    prompt: str = "",
     method: str = "GET",
     headers: dict[str, str] | None = None,
     body: str = "",
     timeout_seconds: float = 20.0,
     max_bytes: int = 200_000,
 ) -> str:
+    timeout_seconds = float(timeout_seconds)
+    max_bytes = int(max_bytes)
     request_headers = headers or {}
     payload = body.encode("utf-8") if body else None
     req = url_request.Request(
@@ -347,18 +381,22 @@ async def web_fetch(
             data = raw[:max_bytes]
             text = data.decode("utf-8", errors="replace")
             response_headers = {k: v for k, v in response.headers.items()}
-            return json.dumps(
-                {
-                    "ok": True,
-                    "url": url,
-                    "final_url": response.geturl(),
-                    "status": getattr(response, "status", 200),
-                    "headers": response_headers,
-                    "body": text,
-                    "truncated": truncated,
-                    "bytes_read": len(data),
-                }
-            )
+            content_type = response_headers.get("Content-Type", "").lower()
+            is_html = "html" in content_type or text.lstrip().startswith("<")
+            body_text = _strip_html(text) if is_html else text
+            result: dict[str, object] = {
+                "ok": True,
+                "url": url,
+                "final_url": response.geturl(),
+                "status": getattr(response, "status", 200),
+                "content_type": content_type,
+                "body": body_text,
+                "truncated": truncated,
+                "bytes_read": len(data),
+            }
+            if prompt:
+                result["prompt"] = prompt
+            return json.dumps(result)
     except url_error.HTTPError as exc:
         raw_error = exc.read(max_bytes)
         return json.dumps(
@@ -375,6 +413,28 @@ async def web_fetch(
 
 
 @tool(
+    "run_python",
+    "Execute Python code and return stdout/stderr/exit_code. Alias for run_python3.",
+    {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string"},
+            "cwd": {"type": "string"},
+            "timeout_seconds": {"type": "number"},
+        },
+        "required": ["code"],
+    },
+    required_tier="privileged",
+)
+async def run_python(
+    code: str,
+    cwd: str = "",
+    timeout_seconds: float = 30.0,
+) -> str:
+    return await run_python3(code, cwd=cwd, timeout_seconds=timeout_seconds)
+
+
+@tool(
     "web_search",
     "Search the web for a query and return concise result items.",
     {
@@ -388,7 +448,7 @@ async def web_fetch(
     required_tier="privileged",
 )
 async def web_search(query: str, max_results: int = 5) -> str:
-    limit = max(1, min(max_results, 20))
+    limit = max(1, min(int(max_results), 20))
     encoded = url_parse.quote_plus(query)
     endpoint = (
         "https://api.duckduckgo.com/"
@@ -1070,6 +1130,7 @@ def get_system_tool_specs() -> list[ToolSpec]:
     """Return default system tool specs for agent runtime."""
     return [
         cast(ToolSpec, getattr(cast(Any, run_python3), "spec")),
+        cast(ToolSpec, getattr(cast(Any, run_python), "spec")),
         cast(ToolSpec, getattr(cast(Any, run_npx), "spec")),
         cast(ToolSpec, getattr(cast(Any, run_command), "spec")),
         cast(ToolSpec, getattr(cast(Any, run_shell), "spec")),

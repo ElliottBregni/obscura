@@ -60,7 +60,7 @@ a2a = [
 ]
 
 [project.scripts]
-obscura = "obscura.cli.chat_cli:main"
+obscura = "obscura.cli:main"
 
 [dependency-groups]
 dev = [

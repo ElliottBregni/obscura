@@ -27,19 +27,36 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
         self._alias_targets: dict[str, str] = {
+            # shell
             "bash": "run_shell",
             "shell": "run_shell",
             "terminal": "run_shell",
             "runbash": "run_shell",
             "run_bash": "run_shell",
+            # python — multiple naming conventions used by different LLMs
+            "python": "run_python3",
+            "run_python": "run_python3",
+            "execute_python": "run_python3",
+            "execute_code": "run_python3",
+            "run_code": "run_python3",
+            "code": "run_python3",
+            # web search
             "websearch": "web_search",
             "web_search": "web_search",
             "searchweb": "web_search",
+            "search": "web_search",
+            # web fetch
             "webfetch": "web_fetch",
             "web_fetch": "web_fetch",
             "fetchurl": "web_fetch",
+            "fetch": "web_fetch",
+            "get_url": "web_fetch",
+            "browse": "web_fetch",
+            "open_url": "web_fetch",
+            # task delegation
             "task": "task",
             "delegatetask": "task",
+            # browser tools
             "browsernavigate": "browser_navigate",
             "browsersnapshot": "browser_snapshot",
             "browserclick": "browser_click",
@@ -48,6 +65,16 @@ class ToolRegistry:
 
     def register(self, spec: ToolSpec) -> None:
         self._tools[spec.name] = spec
+
+    def register_alias(self, alias: str, canonical: str) -> None:
+        """Map *alias* to an already-registered *canonical* tool name.
+
+        Useful for runtime registration of backend-specific naming conventions::
+
+            registry.register_alias("execute_python", "run_python3")
+            registry.register_alias("google", "web_search")
+        """
+        self._alias_targets[_normalize_tool_name(alias)] = canonical
 
     def get(self, name: str) -> ToolSpec | None:
         direct = self._tools.get(name)

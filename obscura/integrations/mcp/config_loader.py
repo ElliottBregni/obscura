@@ -147,10 +147,13 @@ def discover_mcp_servers(
         name = str(raw_name)
         entry = cast(dict[str, Any], raw_entry)
 
-        raw_transport = str(entry.get("transport", "stdio")).lower()
+        # Support both "transport" (Obscura native) and "type" (Claude synced format)
+        raw_transport = str(
+            entry.get("transport", entry.get("type", "stdio"))
+        ).lower()
         if raw_transport == "stdio":
             transport = MCPTransportType.STDIO
-        elif raw_transport == "sse":
+        elif raw_transport in ("sse", "http"):
             transport = MCPTransportType.SSE
         else:
             raise ValueError(
@@ -233,3 +236,46 @@ def build_runtime_server_configs(
         runtime_servers.append(payload)
 
     return runtime_servers
+
+
+# ---------------------------------------------------------------------------
+# Keyword-based MCP server auto-selection
+# ---------------------------------------------------------------------------
+
+_SERVER_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "github": ("github", "git", "repo", "pull request", "commit", "issue", "repository"),
+    "gitlab": ("gitlab", "merge request", "pipeline"),
+    "slack": ("slack", "message", "channel"),
+    "linear": ("linear", "sprint", "roadmap"),
+    "asana": ("asana",),
+    "jira": ("jira", "ticket", "epic"),
+    "stripe": ("stripe", "payment", "invoice", "subscription", "billing"),
+    "supabase": ("supabase", "database", "postgres"),
+    "firebase": ("firebase", "firestore"),
+    "playwright": ("playwright", "scrape", "screenshot"),
+    "postman": ("postman",),
+    "context7": ("context7", "documentation"),
+    "greptile": ("greptile",),
+    "serena": ("serena",),
+}
+
+
+def select_servers_for_task(
+    discovered: Sequence[DiscoveredMCPServer],
+    task_text: str,
+) -> list[str] | None:
+    """Return server names whose keywords appear in *task_text*.
+
+    Falls back to the server's own name when no keywords are registered.
+    Returns ``None`` when nothing matches (caller should treat as "use all").
+    """
+    text_lower = task_text.lower()
+    matched = [
+        server.name
+        for server in discovered
+        if any(
+            kw.lower() in text_lower
+            for kw in _SERVER_KEYWORDS.get(server.name, (server.name,))
+        )
+    ]
+    return matched or None
