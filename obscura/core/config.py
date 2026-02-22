@@ -33,7 +33,7 @@ class ObscuraConfig(BaseModel):
 
     # Telemetry (OpenTelemetry)
     otel_enabled: bool = True
-    otel_endpoint: str = "http://otel-collector:4317"
+    otel_endpoint: str = "http://127.0.0.1:4317"
     otel_service_name: str = "obscura-sdk"
     log_level: str = "INFO"
     log_format: str = "json"  # "json" | "text"
@@ -74,7 +74,7 @@ class ObscuraConfig(BaseModel):
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
             otel_endpoint=os.environ.get(
-                "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
+                "OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317"
             ),
             otel_service_name=os.environ.get("OTEL_SERVICE_NAME", "obscura-sdk"),
             log_level=os.environ.get("OBSCURA_LOG_LEVEL", "INFO"),

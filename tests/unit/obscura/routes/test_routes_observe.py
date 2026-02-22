@@ -124,8 +124,7 @@ def test_observe_stream_once_emits_snapshot_event(client: TestClient) -> None:
 
     with client.stream("GET", "/api/v1/observe/stream?once=true") as resp:
         body = "".join(
-            chunk.decode("utf-8", errors="replace")
-            for chunk in resp.iter_raw()
+            chunk.decode("utf-8", errors="replace") for chunk in resp.iter_raw()
         )
 
     assert resp.status_code == 200

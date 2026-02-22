@@ -65,4 +65,3 @@ async def tool_approvals_resolve(
     if approval is None:
         raise HTTPException(status_code=404, detail=f"Approval {approval_id} not found")
     return JSONResponse(content=approval.to_dict())
-

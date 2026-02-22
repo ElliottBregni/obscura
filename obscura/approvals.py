@@ -76,7 +76,9 @@ async def list_tool_approval_requests(
     status: ApprovalStatus | Literal["all"] = "all",
 ) -> list[ToolApprovalRequest]:
     async with _approvals_lock:
-        values = [entry for entry in _approvals_by_id.values() if entry.user_id == user_id]
+        values = [
+            entry for entry in _approvals_by_id.values() if entry.user_id == user_id
+        ]
     if status == "all":
         return sorted(values, key=lambda entry: entry.created_at)
     filtered = [entry for entry in values if entry.status == status]

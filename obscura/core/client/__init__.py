@@ -185,22 +185,23 @@ class ObscuraClient:
         prompt = self._filter_prompt(prompt)
 
         tracer = _get_client_tracer()
-        with tracer.start_as_current_span("obscura.core.client.stream") as span:
-            _set_span_attr(span, "obscura.backend", self._backend_type.value)
-            _set_span_attr(span, "obscura.method", "stream")
-            start = _time.monotonic()
-            status = "success"
-            try:
-                async for chunk in self._backend.stream(prompt, **kwargs):
-                    _record_stream_chunk(self._backend_type.value, chunk.kind.value)
-                    yield chunk
-            except Exception:
-                status = "error"
-                raise
-            finally:
-                duration = _time.monotonic() - start
-                _record_request_metric(self._backend_type.value, "stream", status)
-                _record_request_duration(self._backend_type.value, "stream", duration)
+        span = tracer.start_span("obscura.core.client.stream")
+        _set_span_attr(span, "obscura.backend", self._backend_type.value)
+        _set_span_attr(span, "obscura.method", "stream")
+        start = _time.monotonic()
+        status = "success"
+        try:
+            async for chunk in self._backend.stream(prompt, **kwargs):
+                _record_stream_chunk(self._backend_type.value, chunk.kind.value)
+                yield chunk
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = _time.monotonic() - start
+            _record_request_metric(self._backend_type.value, "stream", status)
+            _record_request_duration(self._backend_type.value, "stream", duration)
+            span.end()
 
     # -- Agent loop ----------------------------------------------------------
 

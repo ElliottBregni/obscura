@@ -43,8 +43,7 @@ from obscura.vector_memory.vector_memory import VectorMemoryStore  # noqa: E402
 
 # Agent sessions are always user-global (not per-project), so use $HOME
 _OBSCURA_HOME = Path(
-    os.environ.get("OBSCURA_HOME", "").strip()
-    or str(Path.home() / ".obscura")
+    os.environ.get("OBSCURA_HOME", "").strip() or str(Path.home() / ".obscura")
 )
 SESSIONS_DIR = _OBSCURA_HOME / "agents" / "sessions"
 INDEX_FILE = SESSIONS_DIR / "INDEX.jsonl"
@@ -1399,9 +1398,7 @@ class AgentSessionSync:
         """Ingest session entries into MemoryStore + VectorMemoryStore."""
         print("\nIngesting into .obscura memory...")
         ingested, skipped = self._ingestor.ingest(entries, force=force)
-        print(
-            f"  Memory: {ingested} sessions ingested, {skipped} already present"
-        )
+        print(f"  Memory: {ingested} sessions ingested, {skipped} already present")
 
     def ingest_only(self, agent: str | None = None) -> None:
         """Ingest sessions from existing INDEX.jsonl without re-syncing."""

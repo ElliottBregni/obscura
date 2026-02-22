@@ -183,6 +183,9 @@ class NoOpSpan:
     def is_recording(self) -> bool:
         return False
 
+    def end(self) -> None:
+        return None
+
     def __enter__(self) -> "NoOpSpan":
         return self
 

@@ -11,6 +11,7 @@ import sys
 from obscura.cli import build_parser, main
 from obscura.cli import _StderrLogger as _StderrLogger  # pyright: ignore[reportPrivateUsage]
 from obscura.cli import _run as _run  # pyright: ignore[reportPrivateUsage]
+from obscura.cli import _summarize_tool_input as _summarize_tool_input  # pyright: ignore[reportPrivateUsage]
 
 _AGENT_COMMANDS: frozenset[str] = frozenset({"copilot", "claude", "openai", "localllm"})
 # ---------------------------------------------------------------------------
@@ -575,6 +576,52 @@ class TestAsyncRun:
     @patch("obscura.cli._get_cli_logger")
     @patch("obscura.cli._init_cli_telemetry")
     @patch("obscura.cli.ObscuraClient")
+    async def test_run_stream_tool_use_summary_on_end(
+        self, MockClient: MagicMock, mock_telemetry: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Tool call summary should be logged after TOOL_USE_END."""
+        from obscura.core.types import ChunkKind, StreamChunk
+
+        mock_log: Any = MagicMock()
+        mock_logger.return_value = mock_log
+
+        chunks = [
+            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="Read"),
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_DELTA,
+                tool_input_delta='{"file_path":"MEMORY.md","start_line":1}',
+            ),
+            StreamChunk(kind=ChunkKind.TOOL_USE_END, tool_name="Read"),
+        ]
+
+        mock_client_instance: Any = AsyncMock()
+
+        async def fake_stream(prompt: str) -> Any:
+            _ = prompt
+            for chunk in chunks:
+                yield chunk
+
+        mock_client_instance.stream = fake_stream
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = mock_client_instance
+
+        parser = build_parser()
+        args = parser.parse_args(["copilot", "-p", "use tool"])
+        result = await _run(args)
+        assert result == 0
+        mock_log.info.assert_any_call("cli.tool_use", tool_name="Read")
+        mock_log.info.assert_any_call(
+            "cli.tool_use_summary",
+            tool_name="Read",
+            tool_input_summary="args keys: file_path, start_line",
+            msg="Tool call: Read (args keys: file_path, start_line)",
+        )
+
+    @pytest.mark.asyncio
+    @patch("obscura.cli._get_cli_logger")
+    @patch("obscura.cli._init_cli_telemetry")
+    @patch("obscura.cli.ObscuraClient")
     async def test_run_stream_error_chunk(
         self, MockClient: MagicMock, mock_telemetry: MagicMock, mock_logger: MagicMock
     ) -> None:
@@ -667,6 +714,16 @@ class TestStderrLogger:
         log = _StderrLogger()
         log.warning("test.event")
         assert "test.event" in capsys.readouterr().err
+
+
+class TestToolInputSummary:
+    def test_summarize_object_keys(self) -> None:
+        out = _summarize_tool_input('{"script":"ls","cwd":"/tmp"}')
+        assert out == "args keys: script, cwd"
+
+    def test_summarize_non_json(self) -> None:
+        out = _summarize_tool_input("raw input value")
+        assert out == "args: raw input value"
 
 
 # ---------------------------------------------------------------------------

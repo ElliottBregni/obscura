@@ -253,9 +253,9 @@ class CopilotBackend:
 
         # Send the message (non-blocking)
         tracer = _get_backend_tracer()
-        with tracer.start_as_current_span("copilot.stream") as span:
-            _set_span_attr(span, "backend", "copilot")
-
+        span = tracer.start_span("copilot.stream")
+        _set_span_attr(span, "backend", "copilot")
+        try:
             yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
             msg_options = self._build_message_options(prompt, kwargs)
@@ -270,6 +270,8 @@ class CopilotBackend:
                 for unsub in unsub_fns:
                     if callable(unsub):
                         unsub()
+        finally:
+            span.end()
 
     # -- Sessions ------------------------------------------------------------
 

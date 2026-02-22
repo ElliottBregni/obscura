@@ -15,19 +15,33 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Add project root to path so we can import obscura modules
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from obscura.auth.models import AuthenticatedUser  # noqa: E402
+from obscura.memory import MemoryStore  # noqa: E402
+from obscura.vector_memory.vector_memory import VectorMemoryStore  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-SKILLS_DIR = Path.home() / "dev" / ".obscura" / "agents" / "skills"
+_OBSCURA_HOME = Path(
+    os.environ.get("OBSCURA_HOME", "").strip() or str(Path.home() / ".obscura")
+)
+SKILLS_DIR = _OBSCURA_HOME / "agents" / "skills"
 INDEX_FILE = SKILLS_DIR / "INDEX.jsonl"
+MCP_DIR = _OBSCURA_HOME / "mcp"
 VAULT_DIR = Path.home() / "dev" / "vault"
 
 
@@ -926,6 +940,179 @@ class VaultFeeder:
 
 
 # ---------------------------------------------------------------------------
+# Local user factory
+# ---------------------------------------------------------------------------
+
+
+def _local_user() -> AuthenticatedUser:
+    """Create an AuthenticatedUser from the machine hostname."""
+    hostname = socket.gethostname()
+    return AuthenticatedUser(
+        user_id=f"local-{hostname}",
+        email=f"{hostname}@local",
+        roles=("admin",),
+        org_id="local",
+        token_type="local",
+        raw_token="",
+    )
+
+
+# ---------------------------------------------------------------------------
+# SkillMemoryIngestor — ingest skills into MemoryStore + VectorMemoryStore
+# ---------------------------------------------------------------------------
+
+
+class SkillMemoryIngestor:
+    """Ingest SkillEntry objects into .obscura memory stores."""
+
+    def __init__(self, dry_run: bool = False) -> None:
+        self.dry_run = dry_run
+        self._user = _local_user()
+        self._memory: MemoryStore | None = None
+        self._vector: VectorMemoryStore | None = None
+
+    @property
+    def memory(self) -> MemoryStore:
+        if self._memory is None:
+            self._memory = MemoryStore(self._user)
+        return self._memory
+
+    @property
+    def vector(self) -> VectorMemoryStore:
+        if self._vector is None:
+            self._vector = VectorMemoryStore(self._user)
+        return self._vector
+
+    def ingest(self, entries: list[SkillEntry], force: bool = False) -> tuple[int, int]:
+        """Ingest skill entries into memory stores. Returns (ingested, skipped)."""
+        ingested = 0
+        skipped = 0
+
+        for entry in entries:
+            if not force and self.memory.get(entry.id, namespace="skills") is not None:
+                skipped += 1
+                continue
+
+            if not self.dry_run:
+                self.memory.set(key=entry.id, value=entry.to_dict(), namespace="skills")
+
+                text = (
+                    f"{entry.name}: {entry.description}"
+                    if entry.description
+                    else entry.name
+                )
+                self.vector.set(
+                    key=f"{entry.id}:content",
+                    text=text,
+                    metadata={
+                        "skill_id": entry.id,
+                        "agent": entry.agent,
+                        "type": entry.type,
+                        "name": entry.name,
+                    },
+                    namespace="skills",
+                    memory_type="skill",
+                )
+            ingested += 1
+
+        if not self.dry_run:
+            if self._memory:
+                self._memory.close()
+            if self._vector:
+                self._vector.close()
+
+        return ingested, skipped
+
+
+# ---------------------------------------------------------------------------
+# MCPDiscovery — find and merge MCP configs from agent dirs
+# ---------------------------------------------------------------------------
+
+
+class MCPDiscovery:
+    """Discover MCP server configs from Claude plugins, Codex, and Copilot."""
+
+    @staticmethod
+    def _extract_servers(
+        data: dict[str, Any], source: str
+    ) -> dict[str, dict[str, Any]]:
+        """Extract MCP server entries from a config dict.
+
+        Handles two formats:
+        - Standard:  { "mcpServers": { "name": { ...config } } }
+        - Per-plugin: { "pluginName": { ...config } }  (Claude marketplace)
+        """
+        servers: dict[str, dict[str, Any]] = {}
+        if "mcpServers" in data:
+            for name, config in data["mcpServers"].items():
+                if isinstance(config, dict):
+                    config["_source"] = source
+                    servers[name] = config
+        else:
+            # Treat each top-level key as a server name
+            for name, config in data.items():
+                if isinstance(config, dict):
+                    config["_source"] = source
+                    servers[name] = config
+        return servers
+
+    def discover(self) -> dict[str, dict[str, Any]]:
+        """Return merged mcpServers dict with source annotations."""
+        servers: dict[str, dict[str, Any]] = {}
+
+        # Claude external plugins
+        claude_ext = (
+            Path.home()
+            / ".claude"
+            / "plugins"
+            / "marketplaces"
+            / "claude-plugins-official"
+            / "external_plugins"
+        )
+        if claude_ext.is_dir():
+            for plugin_dir in sorted(claude_ext.iterdir()):
+                if not plugin_dir.is_dir():
+                    continue
+                mcp_file = plugin_dir / ".mcp.json"
+                if mcp_file.is_file():
+                    data = _safe_read_json(mcp_file)
+                    servers.update(
+                        self._extract_servers(data, f"claude:plugin:{plugin_dir.name}")
+                    )
+
+        # Codex mcp.json
+        codex_mcp = Path.home() / ".codex" / "mcp.json"
+        if codex_mcp.is_file():
+            data = _safe_read_json(codex_mcp)
+            servers.update(self._extract_servers(data, "codex"))
+
+        # Copilot mcp.json
+        copilot_mcp = Path.home() / ".copilot" / "mcp.json"
+        if copilot_mcp.is_file():
+            data = _safe_read_json(copilot_mcp)
+            servers.update(self._extract_servers(data, "copilot"))
+
+        # LM Studio mcp.json
+        lmstudio_mcp = Path.home() / ".lmstudio" / "mcp.json"
+        if lmstudio_mcp.is_file():
+            data = _safe_read_json(lmstudio_mcp)
+            servers.update(self._extract_servers(data, "lmstudio"))
+
+        return servers
+
+    def write_synced(
+        self, servers: dict[str, dict[str, Any]], dry_run: bool = False
+    ) -> None:
+        """Write merged MCP config to ~/.obscura/mcp/synced.json."""
+        if not servers:
+            return
+        if not dry_run:
+            MCP_DIR.mkdir(parents=True, exist_ok=True)
+            synced_path = MCP_DIR / "synced.json"
+            synced_path.write_text(json.dumps({"mcpServers": servers}, indent=2) + "\n")
+
+
+# ---------------------------------------------------------------------------
 # SkillCleaner — remove synced data
 # ---------------------------------------------------------------------------
 
@@ -977,11 +1164,15 @@ class SkillsSync:
         self._indexer = SkillIndexBuilder(skills_dir)
         self._feeder = VaultFeeder(vault_dir, dry_run=dry_run)
         self._cleaner = SkillCleaner(skills_dir, dry_run=dry_run)
+        self._ingestor = SkillMemoryIngestor(dry_run=dry_run)
+        self._mcp_discovery = MCPDiscovery()
 
     def sync_all(
         self,
         agent: str | None = None,
         force: bool = False,
+        skip_memory: bool = False,
+        skip_mcp: bool = False,
     ) -> None:
         agents = [agent] if agent else list(SKILL_SOURCES.keys())
         total_copied = 0
@@ -1040,6 +1231,28 @@ class SkillsSync:
             vc, vs = self._feeder.feed(portable)
             print(f"  Vault: {vc} files copied, {vs} unchanged")
 
+        # Ingest into .obscura memory stores
+        if not skip_memory:
+            print("\nIngesting into .obscura memory...")
+            ingested, mem_skipped = self._ingestor.ingest(entries, force=force)
+            print(
+                f"  Memory: {ingested} skills ingested, {mem_skipped} already present"
+            )
+
+        # Discover and sync MCP configs
+        if not skip_mcp:
+            print("\nDiscovering MCP configs...")
+            mcp_servers = self._mcp_discovery.discover()
+            if mcp_servers:
+                print(
+                    f"  Found {len(mcp_servers)} MCP servers: {', '.join(sorted(mcp_servers))}"
+                )
+                self._mcp_discovery.write_synced(mcp_servers, dry_run=self.dry_run)
+                if not self.dry_run:
+                    print(f"  Written to {MCP_DIR / 'synced.json'}")
+            else:
+                print("  No MCP configs found")
+
         print(
             f"\nSync complete. {total_copied} files copied, {total_skipped} unchanged."
         )
@@ -1069,12 +1282,14 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 skills_sync.py                          # Sync all agents
+  python3 skills_sync.py                          # Sync all + ingest + MCP
   python3 skills_sync.py --agent claude           # Sync claude only
   python3 skills_sync.py --dry-run                # Preview changes
   python3 skills_sync.py --clean                  # Remove synced data
   python3 skills_sync.py --force                  # Force re-copy all
   python3 skills_sync.py --rebuild-index          # Regen INDEX.jsonl only
+  python3 skills_sync.py --skip-memory            # Skip memory ingestion
+  python3 skills_sync.py --skip-mcp               # Skip MCP config sync
         """,
     )
     parser.add_argument(
@@ -1102,6 +1317,16 @@ Examples:
         action="store_true",
         help="Regenerate INDEX.jsonl from synced copies",
     )
+    parser.add_argument(
+        "--skip-memory",
+        action="store_true",
+        help="Skip memory ingestion after sync",
+    )
+    parser.add_argument(
+        "--skip-mcp",
+        action="store_true",
+        help="Skip MCP config discovery and sync",
+    )
 
     args = parser.parse_args()
     sync = SkillsSync(dry_run=args.dry_run)
@@ -1114,7 +1339,12 @@ Examples:
     elif args.rebuild_index:
         sync.rebuild_index(agent=args.agent)
     else:
-        sync.sync_all(agent=args.agent, force=args.force)
+        sync.sync_all(
+            agent=args.agent,
+            force=args.force,
+            skip_memory=args.skip_memory,
+            skip_mcp=args.skip_mcp,
+        )
 
 
 if __name__ == "__main__":

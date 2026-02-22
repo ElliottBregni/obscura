@@ -186,9 +186,9 @@ class ClaudeBackend:
         """Send a prompt and yield streaming chunks."""
         self._ensure_client()
         tracer = _get_backend_tracer()
-        with tracer.start_as_current_span("claude.stream") as span:
-            _set_span_attr(span, "backend", "claude")
-
+        span = tracer.start_span("claude.stream")
+        _set_span_attr(span, "backend", "claude")
+        try:
             await self._query(prompt, kwargs)
             source = self._client.receive_response()
             adapter = ClaudeIteratorAdapter(source)
@@ -199,6 +199,8 @@ class ClaudeBackend:
                     if hasattr(chunk.raw, "session_id"):
                         self._last_session_id = chunk.raw.session_id
                 yield chunk
+        finally:
+            span.end()
 
     # -- Sessions ------------------------------------------------------------
 
@@ -374,11 +376,23 @@ class ClaudeBackend:
         if self._tools:
             opts["mcp_servers"] = self._build_mcp_tools()
         if self._mcp_servers:
-            # Merge external MCP servers
+            # Merge external MCP servers, translating Obscura format to
+            # Claude SDK format (McpStdioServerConfig / McpSSEServerConfig).
             existing: dict[str, Any] = opts.get("mcp_servers", {})
             for server in self._mcp_servers:
                 name: str = server.get("name", f"mcp_{len(existing)}")
-                existing[name] = server
+                transport = server.get("transport", "stdio")
+                if transport == "stdio":
+                    entry: dict[str, Any] = {"command": server["command"]}
+                    if server.get("args"):
+                        entry["args"] = server["args"]
+                    if server.get("env"):
+                        entry["env"] = server["env"]
+                else:
+                    entry = {"type": transport, "url": server["url"]}
+                    if server.get("env"):
+                        entry["env"] = server["env"]
+                existing[name] = entry
             opts["mcp_servers"] = existing
 
         # Hooks

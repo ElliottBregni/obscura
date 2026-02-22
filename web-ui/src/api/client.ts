@@ -245,6 +245,39 @@ export function useImportMemory() {
   });
 }
 
+// ========== VECTOR MEMORY API ==========
+
+export interface VectorMemoryResult {
+  namespace: string;
+  key: string;
+  text: string;
+  score: number;
+  final_score: number;
+  memory_type: string;
+  metadata: Record<string, any>;
+}
+
+interface VectorSearchResponse {
+  query: string;
+  results: VectorMemoryResult[];
+  count: number;
+}
+
+export function useVectorMemorySearch(
+  query: string,
+  options?: { namespace?: string; top_k?: number }
+) {
+  return useQuery({
+    queryKey: ['vector-memory', 'search', query, options],
+    queryFn: () => {
+      const params = new URLSearchParams({ q: query, top_k: String(options?.top_k ?? 20) });
+      if (options?.namespace) params.set('namespace', options.namespace);
+      return fetchApi<VectorSearchResponse>(`/api/v1/vector-memory/search?${params}`);
+    },
+    enabled: query.length > 1,
+  });
+}
+
 // ========== WORKFLOWS API ==========
 
 export interface WorkflowStep {

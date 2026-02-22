@@ -191,7 +191,9 @@ async def observe_stream(
                 "count": len(states),
                 "states": [state.to_dict() for state in states],
                 "stale_agent_ids": stale_agent_ids,
-                "pending_tool_approvals": [entry.to_dict() for entry in pending_approvals],
+                "pending_tool_approvals": [
+                    entry.to_dict() for entry in pending_approvals
+                ],
             }
             yield {
                 "event": "snapshot",

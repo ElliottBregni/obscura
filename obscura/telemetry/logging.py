@@ -51,7 +51,7 @@ def configure_logging(config: ObscuraConfig) -> None:
     processors: list[Callable[..., Any]] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
-        structlog.stdlib.add_logger_name,
+        _safe_add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
         _add_otel_context,
         structlog.processors.StackInfoRenderer(),
@@ -108,6 +108,19 @@ def _add_otel_context(
     except (ImportError, AttributeError):
         pass
 
+    return event_dict
+
+
+def _safe_add_logger_name(
+    logger: Any,
+    method_name: str,
+    event_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """Add logger name if available (PrintLogger has no `name`)."""
+    _ = method_name
+    name = getattr(logger, "name", None)
+    if isinstance(name, str) and name:
+        event_dict["logger"] = name
     return event_dict
 
 

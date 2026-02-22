@@ -20,6 +20,7 @@ import argparse
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 import os
 from pathlib import Path
 import shlex
@@ -274,6 +275,32 @@ _AGENT_COMMANDS: frozenset[str] = frozenset(
 )
 
 
+def _summarize_tool_input(raw_json: str) -> str:
+    """Return a concise one-line summary of tool input."""
+    text = raw_json.strip()
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            parsed_dict = cast(dict[Any, Any], parsed)
+            keys = [str(key) for key in parsed_dict.keys()]
+            preview = ", ".join(keys[:4])
+            if len(keys) > 4:
+                preview = f"{preview}, ..."
+            return f"args keys: {preview}" if preview else "args: {}"
+        if isinstance(parsed, list):
+            parsed_list = cast(list[Any], parsed)
+            return f"args list(len={len(parsed_list)})"
+        scalar = str(parsed)
+    except Exception:
+        scalar = text
+    scalar = scalar.replace("\n", " ").strip()
+    if len(scalar) > 120:
+        scalar = f"{scalar[:117]}..."
+    return f"args: {scalar}"
+
+
 async def _run(args: argparse.Namespace) -> int:
     backend: str = (
         args.command
@@ -327,6 +354,30 @@ async def _run(args: argparse.Namespace) -> int:
 
             # Send prompt
             if args.stream:
+                active_tool_name = ""
+                active_tool_input_parts: list[str] = []
+
+                def _flush_tool_summary() -> None:
+                    nonlocal active_tool_name, active_tool_input_parts
+                    if not active_tool_name:
+                        return
+                    summary = _summarize_tool_input("".join(active_tool_input_parts))
+                    if summary:
+                        log.info(
+                            "cli.tool_use_summary",
+                            tool_name=active_tool_name,
+                            tool_input_summary=summary,
+                            msg=f"Tool call: {active_tool_name} ({summary})",
+                        )
+                    else:
+                        log.info(
+                            "cli.tool_use_summary",
+                            tool_name=active_tool_name,
+                            msg=f"Tool call: {active_tool_name}",
+                        )
+                    active_tool_name = ""
+                    active_tool_input_parts = []
+
                 async for chunk in client.stream(prompt):
                     if chunk.kind == ChunkKind.TEXT_DELTA:
                         print(chunk.text, end="", flush=True)
@@ -334,9 +385,19 @@ async def _run(args: argparse.Namespace) -> int:
                         # Dim gray for thinking
                         print(f"\033[90m{chunk.text}\033[0m", end="", flush=True)
                     elif chunk.kind == ChunkKind.TOOL_USE_START:
+                        _flush_tool_summary()
+                        active_tool_name = chunk.tool_name
+                        active_tool_input_parts = []
                         log.info("cli.tool_use", tool_name=chunk.tool_name)
+                    elif chunk.kind == ChunkKind.TOOL_USE_DELTA:
+                        if chunk.tool_input_delta:
+                            active_tool_input_parts.append(chunk.tool_input_delta)
+                    elif chunk.kind == ChunkKind.TOOL_USE_END:
+                        _flush_tool_summary()
                     elif chunk.kind == ChunkKind.ERROR:
+                        _flush_tool_summary()
                         log.error("cli.stream_error", error=chunk.text)
+                _flush_tool_summary()
                 print()  # trailing newline
             else:
                 response = await client.send(prompt)

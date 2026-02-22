@@ -274,10 +274,11 @@ class OpenAIBackend:
             prompt, kwargs
         )
         tracer = _get_backend_tracer()
-        with tracer.start_as_current_span("openai.stream") as span:
-            _set_span_attr(span, "backend", "openai")
-            _set_span_attr(span, "model", self._model)
-
+        span = tracer.start_span("openai.stream")
+        _set_span_attr(span, "backend", "openai")
+        _set_span_attr(span, "model", self._model)
+        finish_reason = ""
+        try:
             await self._run_hooks(
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
             )
@@ -303,7 +304,6 @@ class OpenAIBackend:
             yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
             accumulated_text = ""
-            finish_reason = ""
             _active_tool_name = ""
             _active_tool_id = ""
             _active_tool_input = ""
@@ -396,6 +396,8 @@ class OpenAIBackend:
                 )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
+        finally:
+            span.end()
 
             yield StreamChunk(
                 kind=ChunkKind.DONE,
