@@ -1,14 +1,16 @@
-# 🧪 Obscura
+# Obscura
 
-> Multi-agent context management system with TUI and API
+> Multi-agent context management system with API, CLI, and TUI
 
-## Quick Start (5 minutes)
+Obscura is a unified agent runtime that supports multiple LLM providers (Claude, Copilot, OpenAI, Moonshot, LocalLLM) with shared memory, tool execution, and multi-agent orchestration.
 
-### 1. Install
+## Quick Start
+
+### Install
 
 ```bash
 git clone <repo-url>
-cd obscura
+cd obscura-main
 
 # Install with all dependencies
 pip install -e ".[dev,server,telemetry,tui]"
@@ -17,129 +19,193 @@ pip install -e ".[dev,server,telemetry,tui]"
 uv pip install -e ".[dev,server,telemetry,tui]"
 ```
 
-### 2. Start Server
+### Start the Server
 
 ```bash
-# Start with auth disabled (for development)
+# Development mode (auth + telemetry disabled)
 export OBSCURA_AUTH_ENABLED=false
 export OTEL_ENABLED=false
 obscura serve --port 8080
-
-# Or using uvicorn directly
-uv run python -m uvicorn sdk.server:create_app --factory --port 8080
 ```
 
-### 3. Test It Works
+### Verify
 
 ```bash
 # Health check
 curl http://localhost:8080/health
 
-# Create an agent
+# Spawn an agent
 curl -X POST http://localhost:8080/api/v1/agents \
   -H "Content-Type: application/json" \
   -d '{"name": "my-agent", "model": "claude"}'
 
-# Store memory
+# Store a memory
 curl -X POST http://localhost:8080/api/v1/memory/session/context \
   -H "Content-Type: application/json" \
-  -d '{"value": {"key": "value"}}'
+  -d '{"value": {"repo": "obscura", "task": "getting started"}}'
 ```
 
-### 4. Launch TUI
+### CLI
 
 ```bash
-obscura tui
-```
-
-## API Reference
-
-### Health
-- `GET /health` - Server health check
-
-### Agents
-- `POST /api/v1/agents` - Create agent
-- `GET /api/v1/agents` - List agents
-- `GET /api/v1/agents/{id}` - Get agent status
-- `DELETE /api/v1/agents/{id}` - Stop agent
-- `POST /api/v1/agents/{id}/run` - Run task
-
-### Memory
-- `POST /api/v1/memory/{ns}/{key}` - Store value
-- `GET /api/v1/memory/{ns}/{key}` - Get value
-- `DELETE /api/v1/memory/{ns}/{key}` - Delete value
-- `GET /api/v1/memory` - List keys
-
-## Configuration
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OBSCURA_AUTH_ENABLED` | `true` | Enable JWT auth |
-| `OBSCURA_PORT` | `8080` | Server port |
-| `OTEL_ENABLED` | `true` | Enable telemetry |
-
-## Development
-
-### Running & Using
-
-**Install (dev):**
-```bash
-pip install -e "[dev,server,telemetry,tui]"
-# or
-uv pip install -e "[dev,server,telemetry,tui]"
-```
-
-**Run server (dev, auth off, telemetry off):**
-```bash
-export OBSCURA_AUTH_ENABLED=false
-export OTEL_ENABLED=false
-obscura serve --port 8080
-# or
-uv run python -m uvicorn sdk.server:create_app --factory --port 8080
-```
-
-**Use the CLI:**
-```bash
-# Quick ask
+# Direct backend chat
 obscura claude -p "Explain Python async"
-# Spawn/list agents
+obscura copilot -p "Write a test for auth.py"
+
+# Agent management
 obscura agent spawn --name reviewer --model claude
 obscura agent list
-# Memory ops
-obscura memory set mykey "value"
+obscura agent run <agent-id> --prompt "Review this module"
+
+# Memory
+obscura memory set mykey '{"project": "obscura"}'
 obscura memory get mykey
+obscura memory search "project"
+
+# Vector memory (semantic)
+obscura vector remember "Auth uses JWT with RS256 via Zitadel"
+obscura vector recall "how does authentication work?"
 ```
 
-**Python SDK:**
+### Python SDK
+
 ```python
-from sdk import ObscuraClient
+from obscura.core import ObscuraClient
 
 async with ObscuraClient("claude") as client:
     resp = await client.send("Hello!")
     print(resp.text)
 ```
 
-**TUI:**
+### TUI
+
 ```bash
 obscura tui
 ```
 
-**Tests:**
-- Unit: `pytest tests/unit -v`
-- E2E: `pytest tests/e2e -v` (starts temp server; ensure ports free)
-- All (if needed): `pytest tests -v`
+## Architecture
 
-**Config & logs:**
-- MCP config: `config/mcp-config.json` (template in same folder)
-- Audit log: `logs/audit.jsonl`
+Obscura operates in two modes:
 
-**Troubleshooting**
+- **Unified Mode** -- Normalized interface for multi-agent orchestration, tools, sessions, streaming, and memory. Cross-provider portable.
+- **Native Mode** -- Direct SDK access (`backend.native`) with zero abstraction. Provider-specific features, no portability guarantees.
 
+### Layers
+
+```
+Layer 0: Provider SDKs (Claude, OpenAI, Copilot, local servers)
+Layer 1: Backend Adapters (implement BackendProtocol, normalize streaming)
+Layer 2: Agent Runtime (tool execution, memory, hooks, telemetry)
+Layer 3: Server / CLI / TUI (FastAPI, Click, Textual)
+```
+
+### Package Structure
+
+```
+obscura/
+  core/           # Stable API: types, client, config, auth, stream, sessions, tools
+  providers/      # Backend adapters: claude, copilot, openai, localllm, moonshot
+  auth/           # Zitadel JWT, RBAC, middleware
+  memory/         # Per-user SQLite memory (MemoryStore, GlobalMemoryStore)
+  tools/
+    system/       # Shell, Python execution (sandboxed)
+    policy/       # ToolPolicy engine (allow/deny lists, base_dir)
+    providers/    # Tool provider protocol (System, MCP, A2A)
+  integrations/
+    mcp/          # Model Context Protocol client + server
+    a2a/          # Agent-to-Agent protocol (JSON-RPC, REST, SSE, gRPC)
+  agent/          # BaseAgent (APER lifecycle), AgentRuntime
+  server/         # FastAPI app factory, middleware, lifespan
+  routes/         # API endpoints (agents, memory, sessions, health, etc.)
+  cli/            # Click CLI + unified chat CLI
+  tui/            # Terminal UI (Textual)
+  telemetry/      # OpenTelemetry traces, metrics, structured logging
+  vector_memory/  # Semantic search with embeddings
+  heartbeat/      # Health monitoring
+```
+
+### Stability Tiers
+
+| Tier | Modules | Policy |
+|------|---------|--------|
+| **Stable** | `core`, `providers`, `auth`, `memory` | Breaking changes require RFC + migration guide |
+| **Beta** | `tools`, `integrations.mcp`, `agent`, `server`, `cli`, `tui`, `telemetry` | Breaking changes require changelog |
+| **Experimental** | `integrations.a2a`, `openclaw_bridge`, `parity`, `skills` | Breaking changes allowed |
+
+### Backend Parity
+
+| Feature | Copilot | Claude | OpenAI | LocalLLM | Moonshot |
+|---------|---------|--------|--------|----------|---------|
+| send/stream | Y | Y | Y | Y | Y |
+| Tool use | Y | Y | Y | Partial | N |
+| Sessions | Y | Y | Y | N | N |
+| Thinking/CoT | N | Y | Y | N | N |
+| Agent loop | Y | Y | Y | Y | Y |
+| Native SDK | Y | Y | Y | N | N |
+
+## API Reference
+
+### Agents
+- `POST /api/v1/agents` -- Spawn agent
+- `GET /api/v1/agents` -- List agents (filter: `?status=RUNNING`)
+- `GET /api/v1/agents/{id}` -- Get status
+- `POST /api/v1/agents/{id}/run` -- Run task
+- `GET /api/v1/agents/{id}/stream` -- SSE streaming
+- `DELETE /api/v1/agents/{id}` -- Stop agent
+
+### Memory
+- `POST /api/v1/memory/{ns}/{key}` -- Store value (TTL: `?ttl=300`)
+- `GET /api/v1/memory/{ns}/{key}` -- Get value
+- `DELETE /api/v1/memory/{ns}/{key}` -- Delete value
+- `GET /api/v1/memory` -- List keys (filter: `?namespace=session`)
+- `GET /api/v1/memory/search?q=<query>` -- Text search
+- `GET /api/v1/memory/stats` -- Usage statistics
+- `POST /api/v1/memory/transaction` -- Atomic multi-op
+- `GET /api/v1/memory/export` -- Export as JSON
+- `POST /api/v1/memory/import` -- Import from JSON
+
+### Sessions
+- `POST /api/v1/sessions` -- Create session
+- `GET /api/v1/sessions` -- List sessions
+- `GET /api/v1/sessions/{id}` -- Get session
+- `DELETE /api/v1/sessions/{id}` -- Delete session
+
+### Health
+- `GET /health` -- Server health check
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OBSCURA_AUTH_ENABLED` | `true` | Enable JWT authentication |
+| `OBSCURA_AUTH_ISSUER` | -- | Zitadel OIDC issuer URL |
+| `OBSCURA_AUTH_AUDIENCE` | -- | JWT audience |
+| `OBSCURA_PORT` | `8080` | Server port |
+| `OTEL_ENABLED` | `true` | Enable OpenTelemetry |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | -- | OTLP collector endpoint |
+| `OBSCURA_CORS_ORIGINS` | `localhost` | Allowed CORS origins |
+| `OBSCURA_A2A_ENABLED` | `false` | Enable Agent-to-Agent protocol |
+| `OBSCURA_A2A_REDIS_URL` | -- | Redis URL for A2A pub/sub |
+| `OBSCURA_MEMORY_DIR` | `~/.obscura/memory` | Memory storage path |
+| `OBSCURA_LOG_LEVEL` | `INFO` | Logging level |
+| `OBSCURA_LOG_FORMAT` | `json` | Log format (`json` or `text`) |
+
+### Auth Credentials (per backend)
+
+| Backend | Environment Variables |
+|---------|----------------------|
+| Copilot | `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` |
+| Claude | `ANTHROPIC_API_KEY` or `claude auth status` |
+| OpenAI | `OPENAI_API_KEY` |
+| Moonshot | `MOONSHOT_API_KEY` or `OPENAI_API_KEY` |
+| LocalLLM | `OBSCURA_LOCALLLM_BASE_URL` (default: `http://localhost:1234/v1`) |
+
+## Development
+
+### Tests
 
 ```bash
-# Unit tests
+# Unit tests (fast, no server needed)
 pytest tests/ -v -m "not e2e"
 
 # E2E tests (starts temp server)
@@ -147,51 +213,65 @@ pytest tests/ -v -m "not e2e"
 
 # All tests
 pytest tests/ -v
+
+# With coverage
+pytest tests/ --cov=obscura --cov-report=term-missing --cov-fail-under=85
 ```
 
-### Project Structure (updated)
+### Quality Checks
 
+```bash
+# Type checking (strict)
+pyright
+
+# Linting + formatting
+ruff check .
+ruff format --check .
 ```
-obscura/
-├── sdk/                  # Core SDK (agents, backends, telemetry, tui, mcp, etc.)
-│   ├── agent/            # Agent runtime, loop, base agent
-│   ├── backends/         # Copilot, Claude, OpenAI-compatible, LocalLLM
-│   ├── internal/         # Auth, tools, types, stream, sessions (internal APIs)
-│   ├── telemetry/        # traces, metrics, audit hooks
-│   ├── vector_memory/    # memory store, filters, router, rerank
-│   └── ...               # cli, client, config, routes, tui, mcp, etc.
-├── config/               # Runtime configs (e.g., mcp-config.json, templates)
-├── logs/                 # Runtime logs (e.g., audit.jsonl)
-├── scripts/              # Helper scripts (sync, crawlers, etc.)
-├── tests/
-│   ├── unit/             # Unit tests grouped by sdk sub-areas + scripts
-│   └── e2e/              # End-to-end tests
-├── docs/                 # Documentation
-├── examples/             # Usage examples
-└── web-ui/               # Frontend (excluded from pyright)
+
+### Docker
+
+```bash
+# Build
+docker build -t obscura .
+
+# Full stack (app + Redis + Zitadel + OTEL + Jaeger + Prometheus + Grafana)
+docker compose up
 ```
+
+### PR Requirements
+
+1. `pyright` -- 0 errors
+2. `ruff check .` -- clean
+3. `pytest tests/unit/` -- all pass
+4. Module-specific tests for changed modules (see `ownership.md`)
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/02-25-25-arch.md) | Design principles, layers, modes |
+| [Memory](docs/MEMORY.md) | Memory system: namespaces, TTL, multi-tenancy |
+| [Agents](docs/AGENTS.md) | Agent runtime: lifecycle, coordination, streaming |
+| [Auth Guide](docs/AUTH_GUIDE.md) | Zitadel setup, RBAC, JWT |
+| [MCP](docs/MCP-README.md) | Model Context Protocol integration |
+| [Vector Memory](docs/VECTOR_MEMORY.md) | Semantic search with embeddings |
+| [Testing](docs/TESTING.md) | Test suite organization and strategy |
 
 ## Troubleshooting
 
-### Import errors
 ```bash
-# Reinstall in editable mode
+# Import errors
 pip install -e .
-```
 
-### Server won't start
-```bash
-# Check port 8080 isn't in use
+# Port in use
 lsof -ti:8080 | xargs kill
 
-# Start with debug logging
+# Debug logging
 export OBSCURA_LOG_LEVEL=DEBUG
 obscura serve
-```
 
-### Auth issues
-```bash
-# Disable auth for development
+# Auth issues (dev)
 export OBSCURA_AUTH_ENABLED=false
 ```
 

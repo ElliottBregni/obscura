@@ -3,6 +3,7 @@
 import asyncio
 import pytest
 from collections.abc import Generator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
 from fastapi import FastAPI
@@ -262,6 +263,37 @@ class TestAgentGet:
         resp = client.get("/api/v1/agents/nonexistent")
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"]
+
+
+class TestAgentRunLoop:
+    @patch("obscura.routes.agents.get_runtime")
+    def test_run_loop_with_tool_approval_sets_on_confirm(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+        captured_on_confirm: object | None = None
+
+        async def _fake_run_loop(prompt: str, **kwargs: Any) -> str:
+            nonlocal captured_on_confirm
+            _ = prompt
+            captured_on_confirm = kwargs.get("on_confirm")
+            return "loop-result"
+
+        agent.run_loop = _fake_run_loop
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.post(
+            "/api/v1/agents/agent-1/run",
+            json={
+                "prompt": "hi",
+                "mode": "loop",
+                "require_tool_approval": True,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["result"] == "loop-result"
+        assert callable(captured_on_confirm)
 
 
 class TestAgentListTools:

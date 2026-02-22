@@ -8,6 +8,7 @@ import { WorkflowsList } from './features/workflows/WorkflowsList';
 import { SkillsList } from './features/skills/SkillsList';
 import { HealthDashboard } from './features/health/HealthDashboard';
 import { AdminSettings } from './features/admin/AdminSettings';
+import { AgentChat } from './features/agents/AgentChat';
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
         <Route index element={<Dashboard />} />
         <Route path="agents" element={<AgentsList />} />
         <Route path="agents/spawn" element={<SpawnWizard />} />
+        <Route path="agents/:agentId/chat" element={<AgentChat />} />
         <Route path="memory" element={<MemoryBrowser />} />
         <Route path="workflows" element={<WorkflowsList />} />
         <Route path="skills" element={<SkillsList />} />

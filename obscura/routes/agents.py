@@ -11,8 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from obscura.approvals import (
+    create_tool_approval_request,
+    wait_for_tool_approval,
+)
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
+from obscura.core.types import ToolCallInfo
 from obscura.deps import audit, get_runtime
 from obscura.core.paths import resolve_obscura_mcp_dir
 
@@ -218,6 +223,26 @@ async def agent_run(
 
     prompt: str = body.get("prompt", "")
     context: dict[str, Any] = body.get("context", {})
+    mode = str(body.get("mode", "run")).strip().lower()
+    if mode not in {"run", "loop"}:
+        raise HTTPException(
+            status_code=400,
+            detail="mode must be either 'run' or 'loop'",
+        )
+    require_tool_approval = bool(body.get("require_tool_approval", False))
+    approval_timeout_raw = body.get("approval_timeout_seconds", 300.0)
+    try:
+        approval_timeout_seconds = float(approval_timeout_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="approval_timeout_seconds must be a positive number",
+        )
+    if approval_timeout_seconds <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="approval_timeout_seconds must be a positive number",
+        )
     timeout_raw = body.get("timeout_seconds")
     timeout_seconds: float | None = None
     if timeout_raw is not None:
@@ -234,11 +259,43 @@ async def agent_run(
                 detail="timeout_seconds must be a positive number",
             )
 
+    async def _on_confirm_tool_call(tool_call: ToolCallInfo) -> bool:
+        approval = await create_tool_approval_request(
+            user_id=user.user_id,
+            agent_id=agent_id,
+            tool_use_id=tool_call.tool_use_id,
+            tool_name=tool_call.name,
+            tool_input=tool_call.input,
+        )
+        return await wait_for_tool_approval(
+            approval.approval_id,
+            user_id=user.user_id,
+            timeout_seconds=approval_timeout_seconds,
+        )
+
     try:
         if timeout_seconds is None:
-            result = await agent.run(prompt, **context)
+            if mode == "run":
+                result = await agent.run(prompt, **context)
+            else:
+                on_confirm = _on_confirm_tool_call if require_tool_approval else None
+                result = await agent.run_loop(
+                    prompt,
+                    on_confirm=on_confirm,
+                    **context,
+                )
         else:
-            run_task = asyncio.create_task(agent.run(prompt, **context))
+            if mode == "run":
+                run_task = asyncio.create_task(agent.run(prompt, **context))
+            else:
+                on_confirm = _on_confirm_tool_call if require_tool_approval else None
+                run_task = asyncio.create_task(
+                    agent.run_loop(
+                        prompt,
+                        on_confirm=on_confirm,
+                        **context,
+                    )
+                )
             done, _pending = await asyncio.wait(
                 {run_task},
                 timeout=timeout_seconds,

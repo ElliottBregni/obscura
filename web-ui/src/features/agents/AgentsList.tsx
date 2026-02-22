@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/Table';
-import { Bot, Plus, Pause, Play, Search, RefreshCw, Trash2, Loader2 } from 'lucide-react';
+import { Bot, Plus, Pause, Play, Search, RefreshCw, Trash2, Loader2, MessageCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatDate } from '@/lib/utils';
 
@@ -41,6 +41,11 @@ function AgentActions({ agent }: { agent: Agent }) {
 
   return (
     <div className="flex items-center gap-1">
+      <Link to={`/agents/${agent.id}/chat`}>
+        <Button variant="ghost" size="icon">
+          <MessageCircle className="w-4 h-4" />
+        </Button>
+      </Link>
       {agent.status === 'running' ? (
         <Button
           variant="ghost"

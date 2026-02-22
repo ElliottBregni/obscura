@@ -10,9 +10,11 @@ from obscura.routes.health import router as health_router
 from obscura.routes.heartbeat import router as heartbeat_router
 from obscura.routes.heartbeat import ws_router as heartbeat_ws_router
 from obscura.routes.memory import router as memory_router
+from obscura.routes.observe import router as observe_router
 from obscura.routes.send import router as send_router
 from obscura.routes.sessions import router as sessions_router
 from obscura.routes.sync import router as sync_router
+from obscura.routes.tool_approvals import router as tool_approvals_router
 from obscura.routes.vector_memory import router as vector_memory_router
 from obscura.routes.websockets import router as websockets_router
 from obscura.routes.webhooks import router as webhooks_router
@@ -23,7 +25,9 @@ all_routers = [
     send_router,
     sessions_router,
     sync_router,
+    tool_approvals_router,
     memory_router,
+    observe_router,
     vector_memory_router,
     agents_router,
     agent_groups_router,

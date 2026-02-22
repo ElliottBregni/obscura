@@ -28,3 +28,8 @@ def resolve_obscura_mcp_dir(cwd: Path | None = None) -> Path:
 def resolve_obscura_skills_dir(cwd: Path | None = None) -> Path:
     """Resolve directory containing markdown skill documents."""
     return resolve_obscura_home(cwd) / "skills"
+
+
+def resolve_agents_sessions_dir(cwd: Path | None = None) -> Path:
+    """Resolve directory for synced agent sessions."""
+    return resolve_obscura_home(cwd) / "agents" / "sessions"

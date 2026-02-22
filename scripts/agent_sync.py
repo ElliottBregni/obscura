@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sys
 import time
 from dataclasses import dataclass, field
@@ -26,12 +27,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# Add project root to path so we can import obscura modules
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from obscura.auth.models import AuthenticatedUser  # noqa: E402
+from obscura.memory import MemoryStore  # noqa: E402
+from obscura.vector_memory.vector_memory import VectorMemoryStore  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-SESSIONS_DIR = Path.home() / "dev" / ".obscura" / "agents" / "sessions"
+# Agent sessions are always user-global (not per-project), so use $HOME
+_OBSCURA_HOME = Path(
+    os.environ.get("OBSCURA_HOME", "").strip()
+    or str(Path.home() / ".obscura")
+)
+SESSIONS_DIR = _OBSCURA_HOME / "agents" / "sessions"
 INDEX_FILE = SESSIONS_DIR / "INDEX.jsonl"
 TURN_PREVIEW_LENGTH = 120
 
@@ -1123,6 +1138,136 @@ class SemanticIndexBuilder:
 
 
 # ---------------------------------------------------------------------------
+# Local user factory
+# ---------------------------------------------------------------------------
+
+
+def _local_user() -> AuthenticatedUser:
+    """Create an AuthenticatedUser from the machine hostname."""
+    hostname = socket.gethostname()
+    return AuthenticatedUser(
+        user_id=f"local-{hostname}",
+        email=f"{hostname}@local",
+        roles=("admin",),
+        org_id="local",
+        token_type="local",
+        raw_token="",
+    )
+
+
+# ---------------------------------------------------------------------------
+# SessionMemoryIngestor — ingest sessions into MemoryStore + VectorMemoryStore
+# ---------------------------------------------------------------------------
+
+
+class SessionMemoryIngestor:
+    """Ingest SessionEntry objects into .obscura memory stores."""
+
+    def __init__(self, dry_run: bool = False) -> None:
+        self.dry_run = dry_run
+        self._user = _local_user()
+        self._memory: MemoryStore | None = None
+        self._vector: VectorMemoryStore | None = None
+
+    @property
+    def memory(self) -> MemoryStore:
+        if self._memory is None:
+            self._memory = MemoryStore(self._user)
+        return self._memory
+
+    @property
+    def vector(self) -> VectorMemoryStore:
+        if self._vector is None:
+            self._vector = VectorMemoryStore(self._user)
+        return self._vector
+
+    def ingest(
+        self, entries: list[SessionEntry], force: bool = False
+    ) -> tuple[int, int]:
+        """Ingest session entries into memory stores.
+
+        Returns (ingested, skipped).
+        """
+        ingested = 0
+        skipped = 0
+
+        for entry in entries:
+            if not force and self._already_ingested(entry.id):
+                skipped += 1
+                continue
+
+            if not self.dry_run:
+                self._ingest_kv(entry)
+                self._ingest_vector(entry)
+            ingested += 1
+
+        if not self.dry_run and (self._memory or self._vector):
+            if self._memory:
+                self._memory.close()
+            if self._vector:
+                self._vector.close()
+
+        return ingested, skipped
+
+    def _already_ingested(self, session_id: str) -> bool:
+        """Check if a session is already in the key-value store."""
+        return self.memory.get(session_id, namespace="sessions") is not None
+
+    def _ingest_kv(self, entry: SessionEntry) -> None:
+        """Write session metadata to MemoryStore."""
+        self.memory.set(
+            key=entry.id,
+            value=entry.to_dict(),
+            namespace="sessions",
+        )
+
+    def _ingest_vector(self, entry: SessionEntry) -> None:
+        """Write session content to VectorMemoryStore for semantic search."""
+        # Summary embedding
+        summary_text = entry.topic or entry.summary
+        if summary_text:
+            metadata: dict[str, Any] = {
+                "session_id": entry.id,
+                "agent": entry.agent,
+                "project": entry.project,
+                "model": entry.model,
+                "started": entry.started,
+                "ended": entry.ended,
+            }
+            if entry.tools_used:
+                metadata["tools_used"] = entry.tools_used
+            if entry.git_branch:
+                metadata["git_branch"] = entry.git_branch
+            if entry.git_repo:
+                metadata["git_repo"] = entry.git_repo
+
+            self.vector.set(
+                key=f"{entry.id}:summary",
+                text=summary_text,
+                metadata=metadata,
+                namespace="sessions",
+                memory_type="summary",
+            )
+
+        # Turn previews embedding
+        if entry.turns:
+            conversation = "\n".join(
+                f"{t['role']}: {t['preview']}" for t in entry.turns
+            )
+            self.vector.set(
+                key=f"{entry.id}:turns",
+                text=conversation,
+                metadata={
+                    "session_id": entry.id,
+                    "agent": entry.agent,
+                    "message_count": entry.message_count,
+                },
+                namespace="sessions",
+                memory_type="episode",
+            )
+
+
+# ---------------------------------------------------------------------------
 # SessionCleaner — remove synced data
 # ---------------------------------------------------------------------------
 
@@ -1171,11 +1316,13 @@ class AgentSessionSync:
         self._copier = SessionCopier(sessions_dir, dry_run=dry_run)
         self._indexer = SemanticIndexBuilder(sessions_dir)
         self._cleaner = SessionCleaner(sessions_dir, dry_run=dry_run)
+        self._ingestor = SessionMemoryIngestor(dry_run=dry_run)
 
     def sync_all(
         self,
         agent: str | None = None,
         force: bool = False,
+        skip_memory: bool = False,
     ) -> None:
         """Discover, copy, and index all sessions."""
         agents = [agent] if agent else list(AGENT_SOURCES.keys())
@@ -1238,9 +1385,67 @@ class AgentSessionSync:
             f"{sum(1 for e in entries if e.agent == 'codex')} codex)"
         )
 
+        # Ingest into .obscura memory stores
+        if not skip_memory:
+            self._ingest_to_memory(entries, force=force)
+
         print(
             f"\nSync complete. {total_copied} files copied, {total_skipped} unchanged."
         )
+
+    def _ingest_to_memory(
+        self, entries: list[SessionEntry], force: bool = False
+    ) -> None:
+        """Ingest session entries into MemoryStore + VectorMemoryStore."""
+        print("\nIngesting into .obscura memory...")
+        ingested, skipped = self._ingestor.ingest(entries, force=force)
+        print(
+            f"  Memory: {ingested} sessions ingested, {skipped} already present"
+        )
+
+    def ingest_only(self, agent: str | None = None) -> None:
+        """Ingest sessions from existing INDEX.jsonl without re-syncing."""
+        if not INDEX_FILE.is_file():
+            print("No INDEX.jsonl found. Run sync first.", file=sys.stderr)
+            return
+
+        print("Loading sessions from INDEX.jsonl...")
+        raw_entries = _safe_read_jsonl(INDEX_FILE)
+
+        # Filter by agent if specified
+        if agent:
+            raw_entries = [e for e in raw_entries if e.get("agent") == agent]
+
+        # Convert dicts back to SessionEntry objects
+        entries: list[SessionEntry] = []
+        for raw in raw_entries:
+            entries.append(
+                SessionEntry(
+                    id=raw.get("id", ""),
+                    agent=raw.get("agent", ""),
+                    project=raw.get("project", ""),
+                    model=raw.get("model", ""),
+                    started=raw.get("started", ""),
+                    ended=raw.get("ended", ""),
+                    summary=raw.get("summary", ""),
+                    message_count=raw.get("message_count", 0),
+                    source_path=raw.get("source_path", ""),
+                    synced_path=raw.get("synced_path", ""),
+                    files=raw.get("files", []),
+                    turns=raw.get("turns", []),
+                    slug=raw.get("slug", ""),
+                    cwds=raw.get("cwds", []),
+                    git_branch=raw.get("git_branch", ""),
+                    git_repo=raw.get("git_repo", ""),
+                    tools_used=raw.get("tools_used", []),
+                    agent_version=raw.get("agent_version", ""),
+                    source=raw.get("source", ""),
+                    topic=raw.get("topic", ""),
+                )
+            )
+
+        print(f"  Loaded {len(entries)} sessions")
+        self._ingest_to_memory(entries, force=True)
 
     def rebuild_index(self, agent: str | None = None) -> None:
         """Regenerate INDEX.jsonl from synced copies only."""
@@ -1269,12 +1474,14 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 agent_sync.py                          # Sync all agents
+  python3 agent_sync.py                          # Sync all agents + ingest
   python3 agent_sync.py --agent copilot          # Sync copilot only
   python3 agent_sync.py --dry-run                # Preview changes
   python3 agent_sync.py --clean                  # Remove synced data
   python3 agent_sync.py --force                  # Force re-copy all
   python3 agent_sync.py --rebuild-index          # Regen INDEX.jsonl only
+  python3 agent_sync.py --skip-memory            # Sync without memory ingest
+  python3 agent_sync.py --ingest-only            # Ingest from existing INDEX
         """,
     )
     parser.add_argument(
@@ -1302,6 +1509,16 @@ Examples:
         action="store_true",
         help="Regenerate INDEX.jsonl from synced copies",
     )
+    parser.add_argument(
+        "--skip-memory",
+        action="store_true",
+        help="Skip memory ingestion after sync",
+    )
+    parser.add_argument(
+        "--ingest-only",
+        action="store_true",
+        help="Ingest from existing INDEX.jsonl without re-syncing",
+    )
 
     args = parser.parse_args()
     sync = AgentSessionSync(dry_run=args.dry_run)
@@ -1313,8 +1530,14 @@ Examples:
         sync.clean(agent=args.agent)
     elif args.rebuild_index:
         sync.rebuild_index(agent=args.agent)
+    elif args.ingest_only:
+        sync.ingest_only(agent=args.agent)
     else:
-        sync.sync_all(agent=args.agent, force=args.force)
+        sync.sync_all(
+            agent=args.agent,
+            force=args.force,
+            skip_memory=args.skip_memory,
+        )
 
 
 if __name__ == "__main__":
