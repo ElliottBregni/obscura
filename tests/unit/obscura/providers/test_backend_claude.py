@@ -408,6 +408,132 @@ class TestClaudeInternals:
             new_client.connect.assert_awaited_once()
 
 
+class TestClaudeBuildOptions:
+    """Tests for _build_options() MCP server config translation."""
+
+    def test_stdio_server_translated(self):
+        from obscura.providers.claude import ClaudeBackend
+
+        b = ClaudeBackend(
+            _make_auth(),
+            mcp_servers=[
+                {
+                    "transport": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@playwright/mcp@latest"],
+                    "env": {"DEBUG": "1"},
+                    "name": "playwright",
+                },
+            ],
+        )
+
+        with patch("claude_agent_sdk.ClaudeAgentOptions", side_effect=lambda **kw: kw):
+            opts = b._build_options()
+
+        server = opts["mcp_servers"]["playwright"]
+        assert server == {
+            "command": "npx",
+            "args": ["-y", "@playwright/mcp@latest"],
+            "env": {"DEBUG": "1"},
+        }
+        assert "transport" not in server
+
+    def test_sse_server_translated(self):
+        from obscura.providers.claude import ClaudeBackend
+
+        b = ClaudeBackend(
+            _make_auth(),
+            mcp_servers=[
+                {
+                    "transport": "sse",
+                    "url": "http://localhost:3000",
+                    "env": {"TOKEN": "abc"},
+                    "name": "remote",
+                },
+            ],
+        )
+
+        with patch("claude_agent_sdk.ClaudeAgentOptions", side_effect=lambda **kw: kw):
+            opts = b._build_options()
+
+        server = opts["mcp_servers"]["remote"]
+        assert server == {
+            "type": "sse",
+            "url": "http://localhost:3000",
+            "env": {"TOKEN": "abc"},
+        }
+        assert "transport" not in server
+
+    def test_auto_naming(self):
+        from obscura.providers.claude import ClaudeBackend
+
+        b = ClaudeBackend(
+            _make_auth(),
+            mcp_servers=[
+                {"transport": "stdio", "command": "echo"},
+                {"transport": "stdio", "command": "cat"},
+            ],
+        )
+
+        with patch("claude_agent_sdk.ClaudeAgentOptions", side_effect=lambda **kw: kw):
+            opts = b._build_options()
+
+        servers = opts["mcp_servers"]
+        assert "mcp_0" in servers
+        assert "mcp_1" in servers
+        assert servers["mcp_0"]["command"] == "echo"
+        assert servers["mcp_1"]["command"] == "cat"
+
+    def test_optional_fields_omitted(self):
+        from obscura.providers.claude import ClaudeBackend
+
+        b = ClaudeBackend(
+            _make_auth(),
+            mcp_servers=[
+                {"transport": "stdio", "command": "echo", "name": "bare"},
+            ],
+        )
+
+        with patch("claude_agent_sdk.ClaudeAgentOptions", side_effect=lambda **kw: kw):
+            opts = b._build_options()
+
+        server = opts["mcp_servers"]["bare"]
+        assert server == {"command": "echo"}
+        assert "args" not in server
+        assert "env" not in server
+
+    def test_no_mcp_servers(self):
+        from obscura.providers.claude import ClaudeBackend
+
+        b = ClaudeBackend(_make_auth())
+
+        with patch("claude_agent_sdk.ClaudeAgentOptions", side_effect=lambda **kw: kw):
+            opts = b._build_options()
+
+        assert "mcp_servers" not in opts
+
+    def test_explicit_name_used(self):
+        from obscura.providers.claude import ClaudeBackend
+
+        b = ClaudeBackend(
+            _make_auth(),
+            mcp_servers=[
+                {
+                    "name": "my-browser",
+                    "transport": "stdio",
+                    "command": "npx",
+                    "args": ["--help"],
+                },
+            ],
+        )
+
+        with patch("claude_agent_sdk.ClaudeAgentOptions", side_effect=lambda **kw: kw):
+            opts = b._build_options()
+
+        assert "my-browser" in opts["mcp_servers"]
+        assert "mcp_0" not in opts["mcp_servers"]
+
+
 class TestClaudeStream:
     @pytest.mark.asyncio
     async def test_stream_tool_choice_none_maps_disallowed_tools(self):

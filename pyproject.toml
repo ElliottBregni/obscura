@@ -61,7 +61,6 @@ a2a = [
 
 [project.scripts]
 obscura = "obscura.cli.chat_cli:main"
-obscura-sdk = "obscura.cli:main"
 
 [dependency-groups]
 dev = [

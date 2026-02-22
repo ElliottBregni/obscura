@@ -8,7 +8,10 @@ model alias resolution and safety guards.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, AsyncIterator, Awaitable, Callable, cast
+
+_logger = logging.getLogger(__name__)
 
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.tools import ToolRegistry
@@ -113,13 +116,29 @@ class ObscuraClient:
             except Exception:
                 pass  # Degrade gracefully if capability module not available
 
-        # Create backend
+        # Inject ~/.claude context (CLAUDE.md + instructions + skills) for ALL backends
+        try:
+            from obscura.core.context import ContextLoader
+            loader = ContextLoader(Backend.CLAUDE)
+            claude_ctx = loader.load_system_prompt()
+            if claude_ctx:
+                system_prompt = f"{claude_ctx}\n\n{system_prompt}" if system_prompt else claude_ctx
+        except Exception:
+            pass
+
+        # Store MCP server configs for lazy initialization in start().
+        # MCP tools are connected via Obscura's own MCPBackend so they
+        # appear in the ToolRegistry and work with AgentLoop.
+        self._mcp_server_configs = mcp_servers or []
+        self._mcp_backend: Any = None  # MCPBackend, set in start()
+
+        # Create backend (mcp_servers NOT forwarded — Obscura handles them)
         self._backend = self._create_backend(
             backend=backend,
             auth=resolved_auth,
             model=resolved_model,
             system_prompt=system_prompt,
-            mcp_servers=mcp_servers,
+            mcp_servers=None,
             permission_mode=permission_mode,
             cwd=cwd,
             streaming=streaming,
@@ -137,11 +156,50 @@ class ObscuraClient:
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
-        """Initialize the backend connection."""
+        """Initialize the backend connection and MCP servers."""
         await self._backend.start()
+
+        # Connect to MCP servers and register their tools
+        if self._mcp_server_configs:
+            from obscura.integrations.mcp.types import (
+                MCPConnectionConfig,
+                MCPTransportType,
+            )
+            from obscura.providers.mcp_backend import MCPBackend
+
+            configs: list[MCPConnectionConfig] = []
+            for server in self._mcp_server_configs:
+                transport = MCPTransportType(server.get("transport", "stdio"))
+                configs.append(
+                    MCPConnectionConfig(
+                        transport=transport,
+                        command=server.get("command"),
+                        args=server.get("args", []),
+                        url=server.get("url"),
+                        env=server.get("env", {}),
+                    )
+                )
+
+            self._mcp_backend = MCPBackend(configs)
+            await self._mcp_backend.start()
+
+            mcp_tools = self._mcp_backend.list_tools()
+            for spec in mcp_tools:
+                self._tool_registry.register(spec)
+                self._backend.register_tool(spec)
+
+            if not mcp_tools:
+                _logger.warning(
+                    "MCP servers were configured but no tools were registered. "
+                    "Check server connectivity. Connection errors: %s",
+                    self._mcp_backend.connection_errors,
+                )
 
     async def stop(self) -> None:
         """Gracefully shut down."""
+        if self._mcp_backend is not None:
+            await self._mcp_backend.stop()
+            self._mcp_backend = None
         await self._backend.stop()
 
     async def __aenter__(self) -> ObscuraClient:
@@ -157,8 +215,8 @@ class ObscuraClient:
         """Send prompt, wait for full response."""
         import time as _time
 
-        # Apply prompt injection filter
-        prompt = self._filter_prompt(prompt)
+        # Apply prompt injection filter and memory enrichment
+        prompt = self._enrich_prompt(self._filter_prompt(prompt))
 
         tracer = _get_client_tracer()
         with tracer.start_as_current_span("obscura.core.client.send") as span:
@@ -181,8 +239,8 @@ class ObscuraClient:
         """Send prompt, yield streaming chunks."""
         import time as _time
 
-        # Apply prompt injection filter
-        prompt = self._filter_prompt(prompt)
+        # Apply prompt injection filter and memory enrichment
+        prompt = self._enrich_prompt(self._filter_prompt(prompt))
 
         tracer = _get_client_tracer()
         span = tracer.start_span("obscura.core.client.stream")
@@ -363,6 +421,25 @@ class ObscuraClient:
                 ...
         """
         return self._backend.capabilities()
+
+    def _enrich_prompt(self, prompt: str) -> str:
+        """Prepend relevant memory context to prompt (best-effort)."""
+        if self._user is None:
+            return prompt
+        try:
+            from obscura.memory import MemoryStore
+            from obscura.auth.models import AuthenticatedUser as _AuthUser
+
+            if isinstance(self._user, _AuthUser):
+                mem = MemoryStore.for_user(self._user)
+                hits = mem.search(prompt)
+                if hits:
+                    lines = [f"- {key}: {str(val)[:200]}" for key, val in hits[:3]]
+                    ctx = "\n".join(lines)
+                    return f"[Relevant context from memory]\n{ctx}\n\n{prompt}"
+        except Exception:
+            pass
+        return prompt
 
     def _filter_prompt(self, prompt: str) -> str:
         """Apply prompt injection filter based on capability tier.

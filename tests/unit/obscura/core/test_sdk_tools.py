@@ -177,3 +177,32 @@ class TestToolRegistry:
 
         reg.register(getattr(t, "spec"))
         assert len(reg) == 1
+
+    def test_alias_lookup_resolves_native_names(self) -> None:
+        reg = ToolRegistry()
+
+        @tool("run_shell", "Run shell")
+        def run_shell_tool(script: str) -> str:
+            return script
+
+        @tool("web_search", "Web search")
+        def web_search_tool(query: str) -> str:
+            return query
+
+        @tool("task", "Task")
+        def task_tool(prompt: str) -> str:
+            return prompt
+
+        @tool("browser_navigate", "Browser navigate")
+        def browser_navigate_tool(url: str) -> str:
+            return url
+
+        reg.register(getattr(run_shell_tool, "spec"))
+        reg.register(getattr(web_search_tool, "spec"))
+        reg.register(getattr(task_tool, "spec"))
+        reg.register(getattr(browser_navigate_tool, "spec"))
+
+        assert reg.get("Bash") is reg.get("run_shell")
+        assert reg.get("WebSearch") is reg.get("web_search")
+        assert reg.get("Task") is reg.get("task")
+        assert reg.get("BrowserNavigate") is reg.get("browser_navigate")

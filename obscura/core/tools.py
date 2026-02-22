@@ -26,12 +26,37 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        self._alias_targets: dict[str, str] = {
+            "bash": "run_shell",
+            "shell": "run_shell",
+            "terminal": "run_shell",
+            "runbash": "run_shell",
+            "run_bash": "run_shell",
+            "websearch": "web_search",
+            "web_search": "web_search",
+            "searchweb": "web_search",
+            "webfetch": "web_fetch",
+            "web_fetch": "web_fetch",
+            "fetchurl": "web_fetch",
+            "task": "task",
+            "delegatetask": "task",
+            "browsernavigate": "browser_navigate",
+            "browsersnapshot": "browser_snapshot",
+            "browserclick": "browser_click",
+            "browserfill": "browser_fill",
+        }
 
     def register(self, spec: ToolSpec) -> None:
         self._tools[spec.name] = spec
 
     def get(self, name: str) -> ToolSpec | None:
-        return self._tools.get(name)
+        direct = self._tools.get(name)
+        if direct is not None:
+            return direct
+        canonical = self._alias_targets.get(_normalize_tool_name(name))
+        if canonical is None:
+            return None
+        return self._tools.get(canonical)
 
     def all(self) -> list[ToolSpec]:
         return list(self._tools.values())
@@ -99,6 +124,14 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
         "properties": properties,
         "required": required,
     }
+
+
+def _normalize_tool_name(name: str) -> str:
+    chars: list[str] = []
+    for char in name.strip().lower():
+        if char.isalnum() or char == "_":
+            chars.append(char)
+    return "".join(chars)
 
 
 # ---------------------------------------------------------------------------

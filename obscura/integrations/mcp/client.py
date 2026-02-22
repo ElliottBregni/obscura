@@ -23,6 +23,7 @@ Usage::
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import types
 from typing import Any, override
@@ -417,7 +418,7 @@ class StdioTransport(MCPTransport):
                 message="Command required for stdio transport",
             )
 
-        env = {**self.config.env}
+        env = {**os.environ, **self.config.env}
 
         self._process = await asyncio.create_subprocess_exec(
             self.config.command,

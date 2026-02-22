@@ -21,7 +21,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time as _time_mod
 from collections.abc import Generator
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import click
@@ -653,18 +656,23 @@ def _parse_tool_policy(raw: str) -> Any:
     return ToolChoice.auto()
 
 
-def _render_event(event: Any) -> None:
+def _render_event(
+    event: Any,
+    *,
+    show_aux: bool = True,
+    show_thinking: bool = True,
+) -> None:
     """Render an AgentEvent to the Rich console."""
     from obscura.core.types import AgentEventKind
 
     if event.kind == AgentEventKind.TEXT_DELTA:
         console.print(event.text, end="")
-    elif event.kind == AgentEventKind.THINKING_DELTA:
+    elif event.kind == AgentEventKind.THINKING_DELTA and show_thinking:
         console.print(f"[dim italic]{event.text}[/]", end="")
-    elif event.kind == AgentEventKind.TOOL_CALL:
-        console.print(f"\n[dim][tool] {event.tool_name}[/]", end="")
-    elif event.kind == AgentEventKind.TOOL_RESULT:
-        console.print(f"\n[dim][result] {event.tool_result[:80]}[/]", end="")
+    elif event.kind == AgentEventKind.TOOL_CALL and show_aux:
+        console.print(f"[dim][tool] {event.tool_name}[/]")
+    elif event.kind == AgentEventKind.TOOL_RESULT and show_aux:
+        console.print(f"[dim][result] {event.tool_result[:80]}[/]")
 
 
 def _load_memory_context(user: Any, prompt: str) -> str:
@@ -750,8 +758,11 @@ def _persist_transcript(
     help="Backend to use",
 )
 @click.option("--model", "-m", default=None, help="Model ID override")
+@click.option("--model-alias", default=None, help="Model alias (e.g. copilot_automation_safe)")
+@click.option("--automation-safe", is_flag=True, help="Require automation-safe model (copilot only)")
 @click.option("--system-prompt", "-s", default="", help="System instructions")
 @click.option("--session", default=None, help="Session ID to resume")
+@click.option("--list-sessions", is_flag=True, help="List available sessions and exit")
 @click.option(
     "--no-stream", is_flag=True, help="Disable streaming (wait for full response)"
 )
@@ -781,12 +792,22 @@ def _persist_transcript(
     default=True,
     help="Enable/disable memory injection and persistence",
 )
+@click.option(
+    "--permission-mode",
+    default="default",
+    type=click.Choice(["default", "acceptEdits", "plan", "bypassPermissions"]),
+    help="Claude permission mode (claude only)",
+)
+@click.option("--cwd", default=None, help="Working directory (claude only)")
 def chat(
     prompt: str | None,
     backend: str,
     model: str | None,
+    model_alias: str | None,
+    automation_safe: bool,
     system_prompt: str,
     session: str | None,
+    list_sessions: bool,
     no_stream: bool,
     json_out: bool,
     interactive: bool,
@@ -795,6 +816,8 @@ def chat(
     tools: str,
     tool_policy: str,
     memory_enabled: bool,
+    permission_mode: str,
+    cwd: str | None,
 ) -> None:
     """Chat directly with a backend (no server required).
 
@@ -807,6 +830,8 @@ def chat(
         obscura chat "test" --mode native --backend openai
         obscura chat "test" --tools off --no-stream
         obscura chat "test" --tool-policy required:search
+        obscura chat --backend copilot --list-sessions
+        obscura chat "test" --backend copilot --model-alias copilot_automation_safe
     """
     import asyncio
 
@@ -829,7 +854,7 @@ def chat(
         # --- Step 4: Memory context injection ---
         effective_system = system_prompt
         cli_user: Any = None
-        if memory_enabled:
+        if memory_enabled and bool(prompt and prompt.strip()):
             try:
                 cli_user = _resolve_cli_user()
                 ctx = _load_memory_context(cli_user, prompt or "")
@@ -846,8 +871,28 @@ def chat(
         async with ObscuraClient(
             backend,
             model=model,
+            model_alias=model_alias,
+            automation_safe=automation_safe,
             system_prompt=effective_system,
+            permission_mode=permission_mode,
+            cwd=cwd,
         ) as client:
+            # --- List sessions mode ---
+            if list_sessions:
+                sessions = await client.list_sessions()
+                if not sessions:
+                    console.print("[yellow]No sessions found.[/]")
+                else:
+                    for s in sessions:
+                        console.print(f"  {s.session_id}  ({s.backend.value})")
+                return
+
+            if tools == "on":
+                from obscura.tools.system import get_system_tool_specs
+
+                for tool_spec in get_system_tool_specs():
+                    client.register_tool(tool_spec)
+
             # --- Step 3: Resolve/create session ---
             session_ref: SessionRef | None = None
             if session:
@@ -907,7 +952,7 @@ def chat(
                     async for event in client.run_loop(
                         user_input, max_turns=max_turns, **loop_kwargs
                     ):
-                        _render_event(event)
+                        _render_event(event, show_aux=False, show_thinking=False)
                         if event.kind == AgentEventKind.TEXT_DELTA:
                             turn_text += event.text
                     console.print()
@@ -1200,6 +1245,345 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> Non
         sys.exit(result.returncode)
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/]")
+
+
+# ---------------------------------------------------------------------------
+# Telemetry helpers (no-op when dependencies are unavailable)
+# ---------------------------------------------------------------------------
+
+
+def _init_cli_telemetry() -> None:
+    """Initialize telemetry for CLI mode with text logging."""
+    try:
+        from obscura.core.config import ObscuraConfig
+        from obscura.telemetry import init_telemetry
+
+        config = ObscuraConfig.from_env()
+        config.log_format = "text"
+        init_telemetry(config)
+    except Exception:
+        pass
+
+
+class _StderrLogger:
+    """Minimal fallback logger that writes to stderr."""
+
+    def info(self, event: str, **kw: Any) -> None:
+        msg = kw.get("msg", event)
+        print(msg, file=sys.stderr)
+
+    def error(self, event: str, **kw: Any) -> None:
+        msg = kw.get("error", kw.get("msg", event))
+        print(f"Error: {msg}", file=sys.stderr)
+
+    def warning(self, event: str, **kw: Any) -> None:
+        msg = kw.get("msg", event)
+        print(f"Warning: {msg}", file=sys.stderr)
+
+
+def _get_cli_logger(name: str) -> Any:
+    """Return a structlog logger, or a stderr fallback."""
+    try:
+        from obscura.telemetry.logging import get_logger
+
+        return get_logger(name)
+    except Exception:
+        return _StderrLogger()
+
+
+def _summarize_tool_input(raw_json: str) -> str:
+    """Return a concise one-line summary of tool input."""
+    text = raw_json.strip()
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            parsed_dict = cast(dict[Any, Any], parsed)
+            keys = [str(key) for key in parsed_dict.keys()]
+            preview = ", ".join(keys[:4])
+            if len(keys) > 4:
+                preview = f"{preview}, ..."
+            return f"args keys: {preview}" if preview else "args: {}"
+        if isinstance(parsed, list):
+            parsed_list = cast(list[Any], parsed)
+            return f"args list(len={len(parsed_list)})"
+        scalar = str(parsed)
+    except Exception:
+        scalar = text
+    scalar = scalar.replace("\n", " ").strip()
+    if len(scalar) > 120:
+        scalar = f"{scalar[:117]}..."
+    return f"args: {scalar}"
+
+
+# ---------------------------------------------------------------------------
+# Observe command — agent state monitoring
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ObservedAgentState:
+    """Compact runtime state object used by the observe command."""
+
+    agent_id: str
+    name: str
+    status: str
+    updated_at: datetime
+    iteration_count: int
+    error_message: str | None
+
+    def signature(self) -> tuple[str, str, int, str | None]:
+        return (
+            self.status,
+            self.updated_at.isoformat(),
+            self.iteration_count,
+            self.error_message,
+        )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> ObservedAgentState | None:
+        agent_id = payload.get("agent_id")
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            return None
+        name = payload.get("name")
+        status = payload.get("status")
+        updated_raw = payload.get("updated_at")
+        if not isinstance(name, str) or not isinstance(status, str):
+            return None
+        if not isinstance(updated_raw, str):
+            return None
+        updated_at = _parse_iso_datetime(updated_raw)
+        if updated_at is None:
+            return None
+        iteration_raw = payload.get("iteration_count", 0)
+        iteration_count = int(iteration_raw) if isinstance(iteration_raw, int) else 0
+        error_message = payload.get("error_message")
+        if error_message is not None and not isinstance(error_message, str):
+            error_message = str(error_message)
+        return cls(
+            agent_id=agent_id,
+            name=name,
+            status=status,
+            updated_at=updated_at,
+            iteration_count=iteration_count,
+            error_message=error_message,
+        )
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def collect_observed_agent_states(
+    store: Any,
+    *,
+    namespace: str,
+) -> list[ObservedAgentState]:
+    states: list[ObservedAgentState] = []
+    for key in store.list_keys(namespace=namespace):
+        if not key.key.startswith("agent_state_"):
+            continue
+        payload = store.get(key.key, namespace=namespace)
+        if not isinstance(payload, dict):
+            continue
+        payload_dict = cast(dict[Any, Any], payload)
+        typed_payload: dict[str, Any] = {}
+        for raw_key, raw_value in payload_dict.items():
+            key_name = raw_key if isinstance(raw_key, str) else str(raw_key)
+            typed_payload[key_name] = raw_value
+        state = ObservedAgentState.from_payload(typed_payload)
+        if state is None:
+            continue
+        states.append(state)
+    return sorted(states, key=lambda entry: (entry.updated_at, entry.agent_id))
+
+
+def find_stale_agent_ids(
+    states: list[ObservedAgentState],
+    *,
+    now: datetime,
+    stale_seconds: float,
+) -> list[str]:
+    stale: list[str] = []
+    for state in states:
+        if state.status not in {"RUNNING", "WAITING"}:
+            continue
+        age = (now - state.updated_at).total_seconds()
+        if age >= stale_seconds:
+            stale.append(state.agent_id)
+    return stale
+
+
+def _render_state_line(state: ObservedAgentState) -> str:
+    updated = state.updated_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+    base = (
+        f"{state.agent_id} name={state.name} status={state.status} "
+        f"iter={state.iteration_count} updated={updated}"
+    )
+    if state.error_message:
+        return f"{base} error={state.error_message}"
+    return base
+
+
+def run_observe(
+    user_id: str,
+    email: str = "observe@obscura.local",
+    org_id: str = "org-observe",
+    namespace: str = "agent:runtime",
+    interval_seconds: float = 1.0,
+    stale_seconds: float = 20.0,
+    duration_seconds: float = 0.0,
+    once: bool = False,
+) -> int:
+    """Core observe logic, callable from both click and argparse interfaces."""
+    import time
+
+    from obscura.auth.models import AuthenticatedUser
+    from obscura.memory import MemoryStore
+
+    interval = max(0.1, interval_seconds)
+    stale_threshold = max(1.0, stale_seconds)
+    max_duration = max(0.0, duration_seconds)
+
+    user = AuthenticatedUser(
+        user_id=user_id,
+        email=email,
+        roles=("operator",),
+        org_id=org_id,
+        token_type="user",
+        raw_token="observe-token",
+    )
+    store = MemoryStore.for_user(user)
+    stats = store.get_stats()
+    db_path = str(stats.get("db_path", "unknown"))
+    print(
+        f"[observe] user={user.user_id} namespace={namespace} db={db_path} "
+        f"interval={interval:.1f}s stale={stale_threshold:.1f}s",
+        flush=True,
+    )
+
+    previous_by_id: dict[str, tuple[str, str, int, str | None]] = {}
+    stale_alerts: set[tuple[str, str]] = set()
+    started = time.monotonic()
+
+    try:
+        while True:
+            now = datetime.now(UTC)
+            states = collect_observed_agent_states(store, namespace=namespace)
+            current_ids = {state.agent_id for state in states}
+
+            for state in states:
+                signature = state.signature()
+                if previous_by_id.get(state.agent_id) != signature:
+                    print(_render_state_line(state), flush=True)
+
+            stale_ids = set(
+                find_stale_agent_ids(
+                    states, now=now, stale_seconds=stale_threshold
+                )
+            )
+            for state in states:
+                if state.agent_id not in stale_ids:
+                    continue
+                signature_key = (state.agent_id, state.updated_at.isoformat())
+                if signature_key in stale_alerts:
+                    continue
+                age = (now - state.updated_at).total_seconds()
+                print(
+                    f"WARNING: stalled agent {state.agent_id} "
+                    f"(status={state.status}, age={age:.1f}s)",
+                    flush=True,
+                )
+                stale_alerts.add(signature_key)
+
+            removed_ids = set(previous_by_id) - current_ids
+            for agent_id in sorted(removed_ids):
+                print(
+                    f"{agent_id} removed from namespace={namespace}", flush=True
+                )
+
+            previous_by_id = {
+                state.agent_id: state.signature() for state in states
+            }
+
+            if once:
+                break
+            if max_duration > 0 and (time.monotonic() - started) >= max_duration:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return 130
+
+    return 0
+
+
+@cli.command("observe")
+@click.option("--user-id", required=True, help="User ID to observe")
+@click.option(
+    "--email",
+    default="observe@obscura.local",
+    help="Email for observer identity",
+)
+@click.option("--org-id", default="org-observe", help="Org ID for observer identity")
+@click.option(
+    "--namespace",
+    default="agent:runtime",
+    help="Memory namespace containing agent state records",
+)
+@click.option(
+    "--interval-seconds",
+    default=1.0,
+    type=float,
+    help="Polling interval in seconds",
+)
+@click.option(
+    "--stale-seconds",
+    default=20.0,
+    type=float,
+    help="Stalled warning threshold in seconds",
+)
+@click.option(
+    "--duration-seconds",
+    default=0.0,
+    type=float,
+    help="Max observe duration (0 = run until interrupted)",
+)
+@click.option("--once", is_flag=True, help="Print one snapshot and exit")
+def observe_cmd(
+    user_id: str,
+    email: str,
+    org_id: str,
+    namespace: str,
+    interval_seconds: float,
+    stale_seconds: float,
+    duration_seconds: float,
+    once: bool,
+) -> None:
+    """Tail agent runtime state and highlight stalled agents."""
+    code = run_observe(
+        user_id=user_id,
+        email=email,
+        org_id=org_id,
+        namespace=namespace,
+        interval_seconds=interval_seconds,
+        stale_seconds=stale_seconds,
+        duration_seconds=duration_seconds,
+        once=once,
+    )
+    if code:
+        sys.exit(code)
 
 
 # Main entry point

@@ -272,6 +272,8 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     client._tool_registry = ToolRegistry()  # pyright: ignore[reportPrivateUsage]
     client._user = None  # pyright: ignore[reportPrivateUsage]
     client._capability_token = None  # pyright: ignore[reportPrivateUsage]
+    client._mcp_server_configs = []  # pyright: ignore[reportPrivateUsage]
+    client._mcp_backend = None  # pyright: ignore[reportPrivateUsage]
     return client, mock_backend
 
 

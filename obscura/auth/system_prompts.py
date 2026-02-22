@@ -83,7 +83,7 @@ def get_tier_system_prompt(
         The full system prompt string.
     """
     # TODO: use TIER_A_SYSTEM_PREFIX for PUBLIC once tier differentiation is enabled
-    prefix = TIER_B_SYSTEM_PREFIX
+    prefix = TIER_A_SYSTEM_PREFIX
 
     parts = [prefix.rstrip()]
     if additional:

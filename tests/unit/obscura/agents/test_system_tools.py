@@ -32,6 +32,9 @@ from obscura.tools.system import (
     run_shell,
     security_lookup,
     signal_process,
+    task,
+    web_fetch,
+    web_search,
     which_command,
     write_text_file,
 )
@@ -62,6 +65,9 @@ class TestSystemToolSpecs:
         assert "security_lookup" in names
         assert "manage_crontab" in names
         assert "list_unix_capabilities" in names
+        assert "web_fetch" in names
+        assert "web_search" in names
+        assert "task" in names
 
 
 class TestRunPython3:
@@ -192,6 +198,60 @@ class TestRunShell:
         payload = json.loads(await run_shell("echo shell-ok"))
         assert payload["ok"] is True
         assert "shell-ok" in payload["stdout"]
+
+
+class TestWebCompatibilityTools:
+    @pytest.mark.asyncio
+    async def test_web_fetch_success(self) -> None:
+        class _Resp:
+            status = 200
+            headers = {"content-type": "text/plain"}
+
+            def read(self, _max_bytes: int) -> bytes:
+                return b"hello"
+
+            def geturl(self) -> str:
+                return "https://example.com"
+
+            def __enter__(self) -> _Resp:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+        with patch("obscura.tools.system.url_request.urlopen", return_value=_Resp()):
+            payload = json.loads(await web_fetch("https://example.com"))
+        assert payload["ok"] is True
+        assert payload["status"] == 200
+        assert payload["body"] == "hello"
+
+    @pytest.mark.asyncio
+    async def test_web_search_parses_results(self) -> None:
+        search_payload = {
+            "ok": True,
+            "body": json.dumps(
+                {
+                    "Heading": "Python",
+                    "AbstractText": "Python language",
+                    "AbstractURL": "https://python.org",
+                    "RelatedTopics": [{"Text": "Docs - Official docs", "FirstURL": "https://docs.python.org"}],
+                }
+            ),
+        }
+        with patch(
+            "obscura.tools.system.web_fetch",
+            AsyncMock(return_value=json.dumps(search_payload)),
+        ):
+            payload = json.loads(await web_search("python", max_results=3))
+        assert payload["ok"] is True
+        assert payload["count"] >= 1
+        assert payload["results"][0]["title"]
+
+    @pytest.mark.asyncio
+    async def test_task_tool_returns_configured_error(self) -> None:
+        payload = json.loads(await task("do work"))
+        assert payload["ok"] is False
+        assert payload["error"] == "task_delegation_not_configured"
 
 
 class TestFilesystemTools:

@@ -771,11 +771,50 @@ class TestStdioTransport:
             "asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
-        ):
+        ) as mock_exec:
             await transport.connect()
 
         assert transport.process is mock_proc
         assert transport.read_task is not None
+
+        # Verify env inherits os.environ and includes config overrides
+        passed_env = mock_exec.call_args.kwargs.get("env")
+        assert passed_env is not None
+        assert passed_env["MY_VAR"] == "val"
+        assert "PATH" in passed_env  # inherited from os.environ
+
+        # Cleanup
+        transport.read_task.cancel()
+        try:
+            await transport.read_task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_connect_default_env_inherits_os_environ(self):
+        """When config.env is empty, subprocess still inherits os.environ."""
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.STDIO,
+            command="echo",
+            args=[],
+        )
+        transport = StdioTransport(config)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.stdout.readline = AsyncMock(return_value=b"")
+        mock_proc.stdin = MagicMock()
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            await transport.connect()
+
+        passed_env = mock_exec.call_args.kwargs.get("env")
+        assert passed_env is not None
+        assert "PATH" in passed_env
 
         # Cleanup
         transport.read_task.cancel()

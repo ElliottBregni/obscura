@@ -10,6 +10,9 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib import error as url_error
+from urllib import parse as url_parse
+from urllib import request as url_request
 
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
@@ -23,6 +26,13 @@ _DEFAULT_DENIED_COMMANDS: tuple[str, ...] = (
     "mkfs",
     "dd",
 )
+
+
+def _string_key_dict(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    mapping = cast(dict[Any, Any], value)
+    return {str(key): item for key, item in mapping.items()}
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -294,6 +304,178 @@ async def run_shell(
         args=["-lc", script],
         cwd=cwd,
         timeout_seconds=timeout_seconds,
+    )
+
+
+@tool(
+    "web_fetch",
+    "Fetch a URL and return status, headers, and body text.",
+    {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+            "method": {"type": "string"},
+            "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+            "body": {"type": "string"},
+            "timeout_seconds": {"type": "number"},
+            "max_bytes": {"type": "integer"},
+        },
+        "required": ["url"],
+    },
+    required_tier="privileged",
+)
+async def web_fetch(
+    url: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str = "",
+    timeout_seconds: float = 20.0,
+    max_bytes: int = 200_000,
+) -> str:
+    request_headers = headers or {}
+    payload = body.encode("utf-8") if body else None
+    req = url_request.Request(
+        url=url,
+        method=method.upper(),
+        headers=request_headers,
+        data=payload,
+    )
+    try:
+        with url_request.urlopen(req, timeout=timeout_seconds) as response:
+            raw = response.read(max_bytes + 1)
+            truncated = len(raw) > max_bytes
+            data = raw[:max_bytes]
+            text = data.decode("utf-8", errors="replace")
+            response_headers = {k: v for k, v in response.headers.items()}
+            return json.dumps(
+                {
+                    "ok": True,
+                    "url": url,
+                    "final_url": response.geturl(),
+                    "status": getattr(response, "status", 200),
+                    "headers": response_headers,
+                    "body": text,
+                    "truncated": truncated,
+                    "bytes_read": len(data),
+                }
+            )
+    except url_error.HTTPError as exc:
+        raw_error = exc.read(max_bytes)
+        return json.dumps(
+            {
+                "ok": False,
+                "url": url,
+                "status": exc.code,
+                "error": "http_error",
+                "body": raw_error.decode("utf-8", errors="replace"),
+            }
+        )
+    except Exception as exc:
+        return _json_error("web_fetch_failed", url=url, detail=str(exc))
+
+
+@tool(
+    "web_search",
+    "Search the web for a query and return concise result items.",
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "max_results": {"type": "integer"},
+        },
+        "required": ["query"],
+    },
+    required_tier="privileged",
+)
+async def web_search(query: str, max_results: int = 5) -> str:
+    limit = max(1, min(max_results, 20))
+    encoded = url_parse.quote_plus(query)
+    endpoint = (
+        "https://api.duckduckgo.com/"
+        f"?q={encoded}&format=json&no_redirect=1&no_html=1&skip_disambig=1"
+    )
+    payload = json.loads(await web_fetch(endpoint, timeout_seconds=20.0))
+    if not payload.get("ok", False):
+        return json.dumps(payload)
+
+    try:
+        parsed_raw = json.loads(str(payload.get("body", "{}")))
+    except Exception:
+        return _json_error("search_parse_failed")
+    parsed = _string_key_dict(parsed_raw)
+    if parsed is None:
+        return _json_error("search_parse_failed")
+
+    items: list[dict[str, str]] = []
+    heading = str(parsed.get("Heading", "")).strip()
+    abstract = str(parsed.get("AbstractText", "")).strip()
+    abstract_url = str(parsed.get("AbstractURL", "")).strip()
+    if abstract:
+        items.append({"title": heading or query, "url": abstract_url, "snippet": abstract})
+
+    related_raw = parsed.get("RelatedTopics", [])
+    related = cast(list[Any], related_raw) if isinstance(related_raw, list) else []
+    for entry in related:
+        entry_map = _string_key_dict(entry)
+        if entry_map is None:
+            continue
+        topics_raw = entry_map.get("Topics")
+        topics = cast(list[Any], topics_raw) if isinstance(topics_raw, list) else None
+        if topics is not None:
+            for nested in topics:
+                if len(items) >= limit:
+                    break
+                nested_map = _string_key_dict(nested)
+                if nested_map is None:
+                    continue
+                text = str(nested_map.get("Text", "")).strip()
+                first_url = str(nested_map.get("FirstURL", "")).strip()
+                if text:
+                    items.append(
+                        {
+                            "title": text.split(" - ", 1)[0],
+                            "url": first_url,
+                            "snippet": text,
+                        }
+                    )
+            continue
+
+        text = str(entry_map.get("Text", "")).strip()
+        first_url = str(entry_map.get("FirstURL", "")).strip()
+        if text:
+            items.append(
+                {
+                    "title": text.split(" - ", 1)[0],
+                    "url": first_url,
+                    "snippet": text,
+                }
+            )
+
+    return json.dumps({"ok": True, "query": query, "count": len(items[:limit]), "results": items[:limit]})
+
+
+@tool(
+    "task",
+    "Compatibility tool for agent task delegation. Returns a structured status.",
+    {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string"},
+            "target": {"type": "string"},
+        },
+        "required": ["prompt"],
+    },
+    required_tier="privileged",
+)
+async def task(prompt: str, target: str = "") -> str:
+    return json.dumps(
+        {
+            "ok": False,
+            "error": "task_delegation_not_configured",
+            "prompt": prompt,
+            "target": target,
+            "message": "Configure A2A remote tools to enable real delegation.",
+        }
     )
 
 
@@ -891,6 +1073,9 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast(ToolSpec, getattr(cast(Any, run_npx), "spec")),
         cast(ToolSpec, getattr(cast(Any, run_command), "spec")),
         cast(ToolSpec, getattr(cast(Any, run_shell), "spec")),
+        cast(ToolSpec, getattr(cast(Any, web_fetch), "spec")),
+        cast(ToolSpec, getattr(cast(Any, web_search), "spec")),
+        cast(ToolSpec, getattr(cast(Any, task), "spec")),
         cast(ToolSpec, getattr(cast(Any, which_command), "spec")),
         cast(ToolSpec, getattr(cast(Any, discover_all_commands), "spec")),
         cast(ToolSpec, getattr(cast(Any, list_directory), "spec")),

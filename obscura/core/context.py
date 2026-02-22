@@ -86,9 +86,19 @@ class ContextLoader:
                     parts.append(text)
         return "\n\n".join(parts)
 
+    def load_claude_md(self) -> str:
+        """Load CLAUDE.md from the agent root dir (e.g. ~/.claude/CLAUDE.md)."""
+        f = self.agent_dir / "CLAUDE.md"
+        if f.is_file():
+            return f.read_text(encoding="utf-8").strip()
+        return ""
+
     def load_system_prompt(self, additional: str = "") -> str:
-        """Build a system prompt from instructions + skills + optional extra."""
+        """Build a system prompt from CLAUDE.md + instructions + skills + optional extra."""
         parts: list[str] = []
+        claude_md = self.load_claude_md()
+        if claude_md:
+            parts.append(claude_md)
         instructions = self.load_instructions()
         if instructions:
             parts.append(instructions)

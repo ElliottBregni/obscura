@@ -251,6 +251,16 @@ class TestChatUnifiedSingleShot:
         tc = call_kwargs.get("tool_choice")
         assert tc is not None
         assert tc.mode == "none"
+        mock_client.register_tool.assert_not_called()
+
+    def test_chat_tools_on_registers_system_tools(self, runner: CliRunner) -> None:
+        mock_client = _make_mock_client()
+
+        with _patch_client(mock_client):
+            result = runner.invoke(cli, ["chat", "test", "-b", "openai"])
+
+        assert result.exit_code == 0
+        assert mock_client.register_tool.call_count > 0
 
     def test_chat_tool_policy_required(self, runner: CliRunner) -> None:
         """--tool-policy required:search should pass ToolChoice.required."""

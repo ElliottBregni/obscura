@@ -73,6 +73,7 @@ class MCPBackend:
             hp: [] for hp in HookPoint
         }
         self._initialized = False
+        self._connection_errors: dict[str, Exception] = {}
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -96,6 +97,11 @@ class MCPBackend:
     def session_manager(self) -> MCPSessionManager:
         return self._session_manager
 
+    @property
+    def connection_errors(self) -> dict[str, Exception]:
+        """Errors from MCP server connection attempts (server_name → exception)."""
+        return dict(self._connection_errors)
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
@@ -111,6 +117,14 @@ class MCPBackend:
                 logger.info(f"Connected to MCP server: {session_name}")
             except Exception as e:
                 logger.error(f"Failed to connect to MCP server {session_name}: {e}")
+                self._connection_errors[session_name] = e
+
+        if self.mcp_servers and len(self._connection_errors) == len(self.mcp_servers):
+            logger.warning(
+                "All MCP servers failed to connect. The agent will have no MCP tools. "
+                "Errors: %s",
+                {k: str(v) for k, v in self._connection_errors.items()},
+            )
 
         # Aggregate tools from all servers
         await self._refresh_tools()
