@@ -23,7 +23,8 @@ interface MCPPrompt {
 interface JSONRPCResponse<T> {
   jsonrpc: '2.0';
   id: number;
-  result: T;
+  result?: T;
+  error?: { code: number; message: string };
 }
 
 function rpcBody(method: string) {
@@ -46,8 +47,9 @@ export function useMCPTools() {
         '/mcp/rpc',
         rpcBody('tools/list')
       );
-      return res.result.tools;
+      return res.result?.tools ?? [];
     },
+    retry: false,
   });
 }
 
@@ -58,8 +60,9 @@ export function useMCPResources() {
       const res = await fetchApi<
         JSONRPCResponse<{ resources: MCPResource[] }>
       >('/mcp/rpc', rpcBody('resources/list'));
-      return res.result.resources;
+      return res.result?.resources ?? [];
     },
+    retry: false,
   });
 }
 
@@ -71,7 +74,8 @@ export function useMCPPrompts() {
         '/mcp/rpc',
         rpcBody('prompts/list')
       );
-      return res.result.prompts;
+      return res.result?.prompts ?? [];
     },
+    retry: false,
   });
 }

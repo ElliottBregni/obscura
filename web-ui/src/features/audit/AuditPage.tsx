@@ -75,7 +75,7 @@ export default function AuditPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">{summary.total_events}</p>
+              <p className="text-2xl font-bold">{summary.total_logs}</p>
             </CardContent>
           </Card>
           <Card>
@@ -86,7 +86,7 @@ export default function AuditPage() {
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold text-emerald-500">
-                {summary.by_outcome?.success ?? 0}
+                {summary.outcomes?.success ?? 0}
               </p>
             </CardContent>
           </Card>
@@ -98,19 +98,19 @@ export default function AuditPage() {
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold text-red-500">
-                {summary.by_outcome?.failure ?? 0}
+                {summary.outcomes?.denied ?? 0}
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium text-muted-foreground">
-                Unique Users
+                Last 24h
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold">
-                {summary.by_user ? Object.keys(summary.by_user).length : 0}
+                {summary.last_24h}
               </p>
             </CardContent>
           </Card>
@@ -177,29 +177,29 @@ export default function AuditPage() {
                 <TableRow>
                   <TableHead>Timestamp</TableHead>
                   <TableHead>User</TableHead>
+                  <TableHead>Event</TableHead>
+                  <TableHead>Resource</TableHead>
                   <TableHead>Action</TableHead>
-                  <TableHead>Resource Type</TableHead>
-                  <TableHead>Resource ID</TableHead>
                   <TableHead>Outcome</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {logs.map((entry) => (
-                  <TableRow key={entry.id}>
+                {logs.map((entry, i) => (
+                  <TableRow key={`${entry.timestamp}-${i}`}>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                       {formatDate(entry.timestamp)}
                     </TableCell>
                     <TableCell className="text-sm">{entry.user_id}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-xs">
-                        {entry.action}
+                        {entry.event_type}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {entry.resource_type}
-                    </TableCell>
                     <TableCell className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">
-                      {entry.resource_id}
+                      {entry.resource}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {entry.action}
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={entry.outcome} />

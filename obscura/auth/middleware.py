@@ -223,6 +223,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if not request.url.path.startswith("/api/"):
             return await call_next(request)
 
+        # If an API key is present, let the RBAC dependency handle it
+        if request.headers.get("X-API-Key"):
+            return await call_next(request)
+
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             _emit_auth_audit(

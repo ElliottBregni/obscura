@@ -88,13 +88,11 @@ export interface WorkflowStep {
 }
 
 export interface Workflow {
-  id: string;
   workflow_id: string;
   name: string;
   description: string;
-  status: 'active' | 'paused' | 'archived';
   steps: WorkflowStep[];
-  step_count: number;
+  created_by?: string;
   created_at?: string;
 }
 
@@ -169,10 +167,10 @@ export interface HealthSummary {
 // ========== Metrics ==========
 
 export interface SystemMetrics {
-  agents: { total: number; running: number; idle: number; error: number };
-  memory: { namespaces: number; total_keys: number };
-  templates: { total: number };
-  workflows: { total: number; active: number };
+  agents: { total: number; by_status: Record<string, number>; by_model: Record<string, number> };
+  memory: { total_keys: number; expired_keys: number; namespaces: Record<string, number>; db_path: string };
+  templates: { total_templates: number };
+  workflows: { total_workflows: number; total_executions: number };
   webhooks: { total: number; active: number };
   timestamp: string;
 }
@@ -204,21 +202,21 @@ export interface ToolApproval {
 // ========== Audit ==========
 
 export interface AuditLogEntry {
-  id: string;
   timestamp: string;
+  event_type: string;
   user_id: string;
+  user_email?: string;
+  resource: string;
   action: string;
-  resource_type: string;
-  resource_id: string;
-  outcome: 'success' | 'failure';
+  outcome: string;
   details?: Record<string, unknown>;
 }
 
 export interface AuditSummary {
-  total_events: number;
-  by_action: Record<string, number>;
-  by_outcome: Record<string, number>;
-  by_user: Record<string, number>;
+  total_logs: number;
+  actions: Record<string, number>;
+  outcomes: Record<string, number>;
+  last_24h: number;
 }
 
 // ========== Sessions ==========
@@ -226,7 +224,7 @@ export interface AuditSummary {
 export interface Session {
   session_id: string;
   backend: string;
-  created_at: string;
+  created_at?: string;
 }
 
 // ========== Capabilities ==========
@@ -238,10 +236,17 @@ export interface CapabilityTier {
 
 // ========== Rate Limits ==========
 
-export interface RateLimit {
-  api_key: string;
+export interface RateLimitConfig {
   requests_per_minute: number;
-  requests_per_hour: number;
+  concurrent_agents: number;
+  memory_quota_mb: number;
+  set_by?: string;
+  set_at?: string;
+}
+
+export interface RateLimitsResponse {
+  default: RateLimitConfig;
+  custom: Record<string, RateLimitConfig>;
 }
 
 // ========== A2A ==========

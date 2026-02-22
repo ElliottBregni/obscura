@@ -480,12 +480,12 @@ function VectorSearchTab() {
               </div>
               <div className="w-48">
                 <Label>Namespace (optional)</Label>
-                <Select value={namespace} onValueChange={setNamespace}>
+                <Select value={namespace || '__all__'} onValueChange={(v) => setNamespace(v === '__all__' ? '' : v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="All namespaces" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All namespaces</SelectItem>
+                    <SelectItem value="__all__">All namespaces</SelectItem>
                     {namespacesQuery.data?.map((ns) => (
                       <SelectItem key={ns} value={ns}>
                         {ns}

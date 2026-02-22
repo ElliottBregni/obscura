@@ -141,9 +141,8 @@ export default function WorkflowDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <StatusBadge status={wf.status} />
           <Badge variant="outline">
-            {wf.step_count} step{wf.step_count !== 1 ? 's' : ''}
+            {wf.steps.length} step{wf.steps.length !== 1 ? 's' : ''}
           </Badge>
           <Button onClick={() => setExecuteOpen(true)}>
             <Play className="mr-1.5 h-4 w-4" />

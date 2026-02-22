@@ -11,25 +11,35 @@ export function useCapabilityTier() {
 
 export function useGenerateToken() {
   return useMutation({
-    mutationFn: (req: { scope?: string; ttl?: number }) =>
-      fetchApi<{ token: string; expires_at: string }>(
-        '/api/v1/capabilities/token',
-        {
-          method: 'POST',
-          body: JSON.stringify(req),
-        }
-      ),
+    mutationFn: (req: { session_id: string }) =>
+      fetchApi<{
+        tier: string;
+        session_id: string;
+        expires_at: number;
+        token: Record<string, unknown>;
+      }>('/api/v1/capabilities/token', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }),
   });
 }
 
 export function useValidateToken() {
   return useMutation({
-    mutationFn: (token: string) =>
-      fetchApi<{ valid: boolean; tier?: string; roles?: string[] }>(
+    mutationFn: (token: {
+      tier: string;
+      user_id: string;
+      session_id: string;
+      issued_at: number;
+      expires_at: number;
+      nonce: string;
+      signature: string;
+    }) =>
+      fetchApi<{ valid: boolean; tier: string; expired: boolean }>(
         '/api/v1/capabilities/validate',
         {
           method: 'POST',
-          body: JSON.stringify({ token }),
+          body: JSON.stringify(token),
         }
       ),
   });

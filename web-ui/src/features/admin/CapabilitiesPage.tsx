@@ -8,13 +8,6 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/Select';
-import {
   Card,
   CardHeader,
   CardTitle,
@@ -31,24 +24,26 @@ export default function CapabilitiesPage() {
   const validateToken = useValidateToken();
 
   // Generate form state
-  const [scope, setScope] = useState<string>('PUBLIC');
-  const [ttl, setTtl] = useState('');
+  const [sessionId, setSessionId] = useState('');
 
   // Validate form state
   const [tokenInput, setTokenInput] = useState('');
 
   const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
-    generateToken.mutate({
-      scope,
-      ...(ttl ? { ttl: Number(ttl) } : {}),
-    });
+    if (!sessionId.trim()) return;
+    generateToken.mutate({ session_id: sessionId.trim() });
   };
 
   const handleValidate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!tokenInput.trim()) return;
-    validateToken.mutate(tokenInput.trim());
+    try {
+      const parsed = JSON.parse(tokenInput.trim());
+      validateToken.mutate(parsed);
+    } catch {
+      // If it's not JSON, show error
+    }
   };
 
   if (isLoading) {
@@ -103,33 +98,18 @@ export default function CapabilitiesPage() {
         <CardHeader>
           <CardTitle className="text-lg">Token Generator</CardTitle>
           <CardDescription>
-            Generate a scoped access token for API consumers.
+            Generate a capability token for a session.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <form onSubmit={handleGenerate} className="flex flex-wrap items-end gap-4">
-            <div className="space-y-1.5">
-              <Label>Tier</Label>
-              <Select value={scope} onValueChange={setScope}>
-                <SelectTrigger className="w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PUBLIC">PUBLIC</SelectItem>
-                  <SelectItem value="PRIVILEGED">PRIVILEGED</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cap-ttl">TTL (seconds)</Label>
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="cap-session">Session ID</Label>
               <Input
-                id="cap-ttl"
-                type="number"
-                min={0}
-                placeholder="3600"
-                value={ttl}
-                onChange={(e) => setTtl(e.target.value)}
-                className="w-36"
+                id="cap-session"
+                placeholder="Enter session ID..."
+                value={sessionId}
+                onChange={(e) => setSessionId(e.target.value)}
               />
             </div>
             <Button type="submit" disabled={generateToken.isPending}>
@@ -146,12 +126,17 @@ export default function CapabilitiesPage() {
           {generateToken.data && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
+                Tier: <span className="font-mono text-foreground">{generateToken.data.tier}</span>
+                {' | '}
                 Expires at:{' '}
                 <span className="font-mono text-foreground">
-                  {generateToken.data.expires_at}
+                  {new Date(generateToken.data.expires_at * 1000).toLocaleString()}
                 </span>
               </p>
-              <CodeBlock code={generateToken.data.token} language="token" />
+              <CodeBlock
+                code={JSON.stringify(generateToken.data.token, null, 2)}
+                language="json"
+              />
             </div>
           )}
         </CardContent>
@@ -162,18 +147,19 @@ export default function CapabilitiesPage() {
         <CardHeader>
           <CardTitle className="text-lg">Token Validator</CardTitle>
           <CardDescription>
-            Paste a token to verify its validity and inspect its claims.
+            Paste a token object (JSON) to verify its validity.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form onSubmit={handleValidate} className="flex items-end gap-4">
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="cap-validate">Token</Label>
-              <Input
+          <form onSubmit={handleValidate} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="cap-validate">Token (JSON)</Label>
+              <textarea
                 id="cap-validate"
-                placeholder="Paste token here..."
+                placeholder='{"tier":"PUBLIC","user_id":"...","session_id":"...","issued_at":0,"expires_at":0,"nonce":"...","signature":"..."}'
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
+                className="h-32 w-full rounded-md border border-input bg-background p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <Button type="submit" disabled={validateToken.isPending}>
@@ -197,24 +183,15 @@ export default function CapabilitiesPage() {
                 >
                   {validateToken.data.valid ? 'Valid' : 'Invalid'}
                 </Badge>
-                {validateToken.data.tier && (
-                  <span className="text-sm">
-                    Tier:{' '}
-                    <span className="font-semibold">
-                      {validateToken.data.tier}
-                    </span>
+                <span className="text-sm">
+                  Tier:{' '}
+                  <span className="font-semibold">
+                    {validateToken.data.tier}
                   </span>
+                </span>
+                {validateToken.data.expired && (
+                  <Badge variant="destructive">Expired</Badge>
                 )}
-                {validateToken.data.roles &&
-                  validateToken.data.roles.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {validateToken.data.roles.map((role) => (
-                        <Badge key={role} variant="secondary">
-                          {role}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
               </CardContent>
             </Card>
           )}

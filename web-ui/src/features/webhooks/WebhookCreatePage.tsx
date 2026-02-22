@@ -47,7 +47,7 @@ export default function WebhookCreatePage() {
         return;
       }
       createWebhook.mutate(
-        { url: url.trim(), events, active },
+        { url: url.trim(), events },
         {
           onSuccess: () => {
             toast.success('Webhook created');

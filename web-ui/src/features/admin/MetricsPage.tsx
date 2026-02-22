@@ -30,6 +30,11 @@ export default function MetricsPage() {
 
   if (!metrics) return null;
 
+  const namespaceCount = Object.keys(metrics.memory.namespaces).length;
+  const runningAgents = metrics.agents.by_status?.running ?? 0;
+  const idleAgents = metrics.agents.by_status?.idle ?? 0;
+  const errorAgents = metrics.agents.by_status?.error ?? 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -44,13 +49,9 @@ export default function MetricsPage() {
         <h2 className="text-lg font-semibold">Agents</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard label="Total" value={metrics.agents.total} icon={Bot} />
-          <MetricCard
-            label="Running"
-            value={metrics.agents.running}
-            icon={Bot}
-          />
-          <MetricCard label="Idle" value={metrics.agents.idle} icon={Bot} />
-          <MetricCard label="Error" value={metrics.agents.error} icon={Bot} />
+          <MetricCard label="Running" value={runningAgents} icon={Bot} />
+          <MetricCard label="Idle" value={idleAgents} icon={Bot} />
+          <MetricCard label="Error" value={errorAgents} icon={Bot} />
         </div>
       </section>
 
@@ -60,7 +61,7 @@ export default function MetricsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Namespaces"
-            value={metrics.memory.namespaces}
+            value={namespaceCount}
             icon={Database}
           />
           <MetricCard
@@ -77,7 +78,7 @@ export default function MetricsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Total"
-            value={metrics.templates.total}
+            value={metrics.templates.total_templates}
             icon={LayoutTemplate}
           />
         </div>
@@ -89,12 +90,12 @@ export default function MetricsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Total"
-            value={metrics.workflows.total}
+            value={metrics.workflows.total_workflows}
             icon={Workflow}
           />
           <MetricCard
-            label="Active"
-            value={metrics.workflows.active}
+            label="Executions"
+            value={metrics.workflows.total_executions}
             icon={Workflow}
           />
         </div>

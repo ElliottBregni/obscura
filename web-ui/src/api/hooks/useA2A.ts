@@ -5,7 +5,8 @@ import type { A2AAgentCard, A2ATask } from '@/api/types';
 interface JSONRPCResponse<T> {
   jsonrpc: '2.0';
   id: number;
-  result: T;
+  result?: T;
+  error?: { code: number; message: string };
 }
 
 function a2aRpc(method: string, params?: Record<string, unknown>) {
@@ -24,6 +25,7 @@ export function useA2AAgentCard() {
   return useQuery({
     queryKey: ['a2a', 'agent-card'],
     queryFn: () => fetchApi<A2AAgentCard>('/.well-known/agent.json'),
+    retry: false,
   });
 }
 
@@ -35,8 +37,9 @@ export function useA2ATasks() {
         '/a2a/jsonrpc',
         a2aRpc('tasks/list')
       );
-      return res.result.tasks;
+      return res.result?.tasks ?? [];
     },
+    retry: false,
   });
 }
 
@@ -50,7 +53,7 @@ export function useA2ACreateTask() {
       fetchApi<JSONRPCResponse<A2ATask>>(
         '/a2a/jsonrpc',
         a2aRpc('tasks/send', params)
-      ).then((res) => res.result),
+      ).then((res) => res.result!),
   });
 }
 
@@ -60,6 +63,6 @@ export function useA2ACancelTask() {
       fetchApi<JSONRPCResponse<{ task_id: string; status: string }>>(
         '/a2a/jsonrpc',
         a2aRpc('tasks/cancel', { task_id: taskId })
-      ).then((res) => res.result),
+      ).then((res) => res.result!),
   });
 }

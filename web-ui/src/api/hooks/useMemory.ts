@@ -5,17 +5,24 @@ import type { MemoryEntry, NamespaceStatsResponse } from '@/api/types';
 export function useMemoryNamespaces() {
   return useQuery({
     queryKey: ['memory', 'namespaces'],
-    queryFn: () => fetchApi<string[]>('/api/v1/memory/namespaces'),
+    queryFn: async () => {
+      const data = await fetchApi<{ namespaces: string[]; count: number }>(
+        '/api/v1/memory/namespaces'
+      );
+      return data.namespaces;
+    },
   });
 }
 
 export function useMemoryKeys(namespace: string | undefined) {
   return useQuery({
     queryKey: ['memory', 'keys', namespace],
-    queryFn: () =>
-      fetchApi<MemoryEntry[]>(
+    queryFn: async () => {
+      const data = await fetchApi<{ keys: { namespace: string; key: string }[]; count: number }>(
         `/api/v1/memory?namespace=${encodeURIComponent(namespace!)}`
-      ),
+      );
+      return data.keys;
+    },
     enabled: !!namespace,
   });
 }
@@ -115,7 +122,7 @@ export function useCreateNamespace() {
     mutationFn: (namespace: string) =>
       fetchApi<void>('/api/v1/memory/namespaces', {
         method: 'POST',
-        body: JSON.stringify({ namespace }),
+        body: JSON.stringify({ name: namespace }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['memory', 'namespaces'] });

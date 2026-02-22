@@ -20,15 +20,15 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
-      '/mcp': {
+      '/mcp/': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      '/a2a': {
+      '/a2a/': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      '/.well-known': {
+      '/.well-known/agent.json': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

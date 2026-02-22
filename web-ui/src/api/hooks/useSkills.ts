@@ -5,7 +5,12 @@ import type { Skill } from '@/api/types';
 export function useSkills() {
   return useQuery({
     queryKey: ['skills'],
-    queryFn: () => fetchApi<Skill[]>('/api/v1/skills'),
+    queryFn: async () => {
+      const data = await fetchApi<{ skills: Skill[]; count: number }>(
+        '/api/v1/skills'
+      );
+      return data.skills;
+    },
   });
 }
 

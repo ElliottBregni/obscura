@@ -102,6 +102,7 @@ class HealthResponse(BaseModel):
     """Response body for GET /health and /ready."""
 
     status: str
+    auth_enabled: bool | None = None
 
 
 # Re-export template schemas for convenience

@@ -6,12 +6,25 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(date: string | Date): string {
-  return format(new Date(date), 'MMM d, yyyy HH:mm');
+function toDate(date: string | number | Date): Date {
+  if (date instanceof Date) return date;
+  // Handle Unix timestamps (seconds since epoch)
+  const num = typeof date === 'number' ? date : Number(date);
+  if (!isNaN(num) && num > 1e9 && num < 1e12) return new Date(num * 1000);
+  if (!isNaN(num) && num >= 1e12) return new Date(num);
+  return new Date(date);
 }
 
-export function formatRelative(date: string | Date): string {
-  return formatDistanceToNow(new Date(date), { addSuffix: true });
+export function formatDate(date: string | number | Date): string {
+  const d = toDate(date);
+  if (isNaN(d.getTime())) return String(date);
+  return format(d, 'MMM d, yyyy HH:mm');
+}
+
+export function formatRelative(date: string | number | Date): string {
+  const d = toDate(date);
+  if (isNaN(d.getTime())) return String(date);
+  return formatDistanceToNow(d, { addSuffix: true });
 }
 
 export function formatBytes(bytes: number): string {

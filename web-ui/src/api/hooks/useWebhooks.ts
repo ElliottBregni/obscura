@@ -5,7 +5,12 @@ import type { Webhook } from '@/api/types';
 export function useWebhooks() {
   return useQuery({
     queryKey: ['webhooks'],
-    queryFn: () => fetchApi<Webhook[]>('/api/v1/webhooks'),
+    queryFn: async () => {
+      const data = await fetchApi<{ webhooks: Webhook[]; count: number }>(
+        '/api/v1/webhooks'
+      );
+      return data.webhooks;
+    },
   });
 }
 
@@ -20,7 +25,7 @@ export function useWebhook(id: string | undefined) {
 export function useCreateWebhook() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (webhook: Omit<Webhook, 'webhook_id' | 'created_at'>) =>
+    mutationFn: (webhook: { url: string; events: string[] }) =>
       fetchApi<Webhook>('/api/v1/webhooks', {
         method: 'POST',
         body: JSON.stringify(webhook),

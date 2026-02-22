@@ -16,7 +16,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     async function checkHealth() {
       try {
-        const resp = await fetch(`${API_URL}/api/v1/health`);
+        const resp = await fetch(`${API_URL}/health`);
         if (resp.ok) {
           const data = await resp.json();
           setAuthEnabled(data.auth_enabled ?? false);

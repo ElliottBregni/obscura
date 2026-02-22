@@ -30,26 +30,33 @@ export default function RateLimitsPage() {
 
   const [apiKey, setApiKey] = useState('');
   const [rpm, setRpm] = useState('');
-  const [rph, setRph] = useState('');
+  const [concurrentAgents, setConcurrentAgents] = useState('');
+  const [memoryQuota, setMemoryQuota] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!apiKey || !rpm || !rph) return;
+    if (!apiKey) return;
     setLimit.mutate(
       {
         api_key: apiKey,
-        requests_per_minute: Number(rpm),
-        requests_per_hour: Number(rph),
+        ...(rpm ? { requests_per_minute: Number(rpm) } : {}),
+        ...(concurrentAgents ? { concurrent_agents: Number(concurrentAgents) } : {}),
+        ...(memoryQuota ? { memory_quota_mb: Number(memoryQuota) } : {}),
       },
       {
         onSuccess: () => {
           setApiKey('');
           setRpm('');
-          setRph('');
+          setConcurrentAgents('');
+          setMemoryQuota('');
         },
       }
     );
   };
+
+  const customEntries = limits
+    ? Object.entries(limits.custom).map(([key, cfg]) => ({ api_key: key, ...cfg }))
+    : [];
 
   return (
     <div className="space-y-6">
@@ -60,9 +67,34 @@ export default function RateLimitsPage() {
         </p>
       </div>
 
+      {/* Default limits */}
+      {limits && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Default Limits</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-8 text-sm">
+              <div>
+                <span className="text-muted-foreground">Requests / min:</span>{' '}
+                <span className="font-semibold">{limits.default.requests_per_minute}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Concurrent agents:</span>{' '}
+                <span className="font-semibold">{limits.default.concurrent_agents}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Memory quota:</span>{' '}
+                <span className="font-semibold">{limits.default.memory_quota_mb} MB</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Set Rate Limit</CardTitle>
+          <CardTitle className="text-lg">Set Custom Limit</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-4">
@@ -77,27 +109,39 @@ export default function RateLimitsPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rl-rpm">Requests / min</Label>
+              <Label htmlFor="rl-rpm">Req / min</Label>
               <Input
                 id="rl-rpm"
                 type="number"
                 min={0}
-                placeholder="60"
+                placeholder="100"
                 value={rpm}
                 onChange={(e) => setRpm(e.target.value)}
-                className="w-36"
+                className="w-32"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rl-rph">Requests / hr</Label>
+              <Label htmlFor="rl-agents">Concurrent agents</Label>
               <Input
-                id="rl-rph"
+                id="rl-agents"
                 type="number"
                 min={0}
-                placeholder="1000"
-                value={rph}
-                onChange={(e) => setRph(e.target.value)}
-                className="w-36"
+                placeholder="10"
+                value={concurrentAgents}
+                onChange={(e) => setConcurrentAgents(e.target.value)}
+                className="w-32"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rl-memory">Memory (MB)</Label>
+              <Input
+                id="rl-memory"
+                type="number"
+                min={0}
+                placeholder="1024"
+                value={memoryQuota}
+                onChange={(e) => setMemoryQuota(e.target.value)}
+                className="w-32"
               />
             </div>
             <Button type="submit" disabled={setLimit.isPending}>
@@ -126,43 +170,50 @@ export default function RateLimitsPage() {
 
       {limits && (
         <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Custom Limits</CardTitle>
+          </CardHeader>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>API Key</TableHead>
                 <TableHead className="text-right">Req / min</TableHead>
-                <TableHead className="text-right">Req / hr</TableHead>
+                <TableHead className="text-right">Concurrent</TableHead>
+                <TableHead className="text-right">Memory (MB)</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {limits.length === 0 && (
+              {customEntries.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={4}
+                    colSpan={5}
                     className="text-center text-muted-foreground"
                   >
-                    No rate limits configured.
+                    No custom rate limits configured.
                   </TableCell>
                 </TableRow>
               )}
-              {limits.map((limit) => (
-                <TableRow key={limit.api_key}>
+              {customEntries.map((entry) => (
+                <TableRow key={entry.api_key}>
                   <TableCell className="font-mono text-xs">
-                    {limit.api_key}
+                    {entry.api_key}
                   </TableCell>
                   <TableCell className="text-right">
-                    {limit.requests_per_minute}
+                    {entry.requests_per_minute}
                   </TableCell>
                   <TableCell className="text-right">
-                    {limit.requests_per_hour}
+                    {entry.concurrent_agents}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {entry.memory_quota_mb}
                   </TableCell>
                   <TableCell>
                     <Button
                       variant="destructive"
                       size="sm"
                       disabled={deleteLimit.isPending}
-                      onClick={() => deleteLimit.mutate(limit.api_key)}
+                      onClick={() => deleteLimit.mutate(entry.api_key)}
                     >
                       Delete
                     </Button>

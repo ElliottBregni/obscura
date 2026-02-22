@@ -18,6 +18,7 @@ from obscura.routes.tool_approvals import router as tool_approvals_router
 from obscura.routes.vector_memory import router as vector_memory_router
 from obscura.routes.websockets import router as websockets_router
 from obscura.routes.webhooks import router as webhooks_router
+from obscura.routes.skills import router as skills_router
 from obscura.routes.workflows import router as workflows_router
 
 all_routers = [
@@ -38,4 +39,5 @@ all_routers = [
     heartbeat_router,
     heartbeat_ws_router,
     capabilities_router,
+    skills_router,
 ]

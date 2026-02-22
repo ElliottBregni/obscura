@@ -35,7 +35,13 @@ export function useAgent(id: string | undefined) {
 export function useAgentTools(id: string | undefined) {
   return useQuery({
     queryKey: ['agents', id, 'tools'],
-    queryFn: () => fetchApi<string[]>(`/api/v1/agents/${id}/tools`),
+    queryFn: async () => {
+      const data = await fetchApi<{
+        agent_id: string;
+        tools: { name: string; description: string; required_tier?: string; parameters?: unknown }[];
+      }>(`/api/v1/agents/${id}/tools`);
+      return data.tools.map((t) => t.name);
+    },
     enabled: !!id,
   });
 }
@@ -43,7 +49,16 @@ export function useAgentTools(id: string | undefined) {
 export function useAgentPeers(id: string | undefined) {
   return useQuery({
     queryKey: ['agents', id, 'peers'],
-    queryFn: () => fetchApi<string[]>(`/api/v1/agents/${id}/peers`),
+    queryFn: async () => {
+      const data = await fetchApi<{
+        agent_id: string;
+        local: Record<string, unknown>[];
+        remote: Record<string, unknown>[];
+      }>(`/api/v1/agents/${id}/peers`);
+      return [...data.local, ...data.remote].map(
+        (p) => (p.name as string) ?? (p.agent_id as string) ?? String(p)
+      );
+    },
     enabled: !!id,
   });
 }
@@ -51,7 +66,12 @@ export function useAgentPeers(id: string | undefined) {
 export function useAgentTags(id: string | undefined) {
   return useQuery({
     queryKey: ['agents', id, 'tags'],
-    queryFn: () => fetchApi<string[]>(`/api/v1/agents/${id}/tags`),
+    queryFn: async () => {
+      const data = await fetchApi<{ agent_id: string; tags: string[] }>(
+        `/api/v1/agents/${id}/tags`
+      );
+      return data.tags;
+    },
     enabled: !!id,
   });
 }
@@ -59,10 +79,14 @@ export function useAgentTags(id: string | undefined) {
 export function useAgentMessages(id: string | undefined) {
   return useQuery({
     queryKey: ['agents', id, 'messages'],
-    queryFn: () =>
-      fetchApi<{ role: string; content: string }[]>(
-        `/api/v1/agents/${id}/messages`
-      ),
+    queryFn: async () => {
+      const data = await fetchApi<{
+        agent_id: string;
+        messages: { role: string; content: string }[];
+        count: number;
+      }>(`/api/v1/agents/${id}/messages`);
+      return data.messages;
+    },
     enabled: !!id,
   });
 }
@@ -223,7 +247,12 @@ export function useSpawnFromTemplate() {
 export function useAgentTemplates() {
   return useQuery({
     queryKey: ['agent-templates'],
-    queryFn: () => fetchApi<AgentTemplate[]>('/api/v1/agent-templates'),
+    queryFn: async () => {
+      const data = await fetchApi<{ templates: AgentTemplate[]; count: number }>(
+        '/api/v1/agent-templates'
+      );
+      return data.templates;
+    },
   });
 }
 
@@ -283,7 +312,12 @@ export function useDeleteTemplate() {
 export function useAgentGroups() {
   return useQuery({
     queryKey: ['agent-groups'],
-    queryFn: () => fetchApi<AgentGroup[]>('/api/v1/agent-groups'),
+    queryFn: async () => {
+      const data = await fetchApi<{ groups: AgentGroup[]; count: number }>(
+        '/api/v1/agent-groups'
+      );
+      return data.groups;
+    },
   });
 }
 
@@ -301,7 +335,7 @@ export function useCreateAgentGroup() {
     mutationFn: (group: { name: string; agent_ids: string[] }) =>
       fetchApi<AgentGroup>('/api/v1/agent-groups', {
         method: 'POST',
-        body: JSON.stringify(group),
+        body: JSON.stringify({ name: group.name, agents: group.agent_ids }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-groups'] });

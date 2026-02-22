@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { MonitorSmartphone, Plus, Trash2 } from 'lucide-react';
+import { MonitorSmartphone, Plus, Trash2, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import {
   useSessions,
   useCreateSession,
@@ -36,7 +36,69 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/Dialog';
-import { formatDate } from '@/lib/utils';
+import type { Session } from '@/api/types';
+
+// Backend session_id may contain a Python repr string like
+// "SessionMetadata(sessionId='uuid', startTime='...', ...)" — extract fields.
+function cleanSessionId(raw: string): string {
+  const match = raw.match(/sessionId='([^']+)'/);
+  return match ? match[1] : raw;
+}
+
+function extractReprField(raw: string, field: string): string | null {
+  const re = new RegExp(`${field}='([^']*)'`);
+  const match = raw.match(re);
+  return match ? match[1] : null;
+}
+
+function SessionDetailPanel({ session }: { session: Session }) {
+  const [copied, setCopied] = useState(false);
+  const rawId = session.session_id;
+  const displayId = cleanSessionId(rawId);
+  const isRepr = rawId !== displayId;
+
+  const startTime = isRepr ? extractReprField(rawId, 'startTime') : null;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(displayId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/30 p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Session ID</p>
+          <div className="mt-0.5 flex items-center gap-2">
+            <code className="text-sm font-mono">{displayId}</code>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}>
+              {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            </Button>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Backend</p>
+          <p className="mt-0.5 text-sm">{session.backend}</p>
+        </div>
+        {startTime && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Start Time</p>
+            <p className="mt-0.5 text-sm">{startTime}</p>
+          </div>
+        )}
+      </div>
+      {isRepr && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Raw Metadata</p>
+          <pre className="mt-1 overflow-auto rounded-md bg-background p-2 text-xs text-muted-foreground">
+            {rawId}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SessionsPage() {
   const sessionsQuery = useSessions();
@@ -45,6 +107,7 @@ export default function SessionsPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedBackend, setSelectedBackend] = useState<string>(BACKENDS[0].value);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleCreate = useCallback(() => {
     createSession.mutate(
@@ -60,14 +123,18 @@ export default function SessionsPage() {
   }, [createSession, selectedBackend]);
 
   const handleDelete = useCallback(
-    (sessionId: string) => {
-      if (!confirm(`Delete session ${sessionId}?`)) return;
+    (sessionId: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!confirm(`Delete session ${cleanSessionId(sessionId)}?`)) return;
       deleteSession.mutate(sessionId, {
-        onSuccess: () => toast.success('Session deleted'),
+        onSuccess: () => {
+          toast.success('Session deleted');
+          if (expandedId === sessionId) setExpandedId(null);
+        },
         onError: (err) => toast.error(`Delete failed: ${String(err)}`),
       });
     },
-    [deleteSession],
+    [deleteSession, expandedId],
   );
 
   if (sessionsQuery.isLoading) {
@@ -126,38 +193,60 @@ export default function SessionsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>Session ID</TableHead>
                 <TableHead>Backend</TableHead>
-                <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sessions.map((session) => (
-                <TableRow key={session.session_id}>
-                  <TableCell className="font-mono text-sm">
-                    {session.session_id}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {backendLabel(session.backend)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(session.created_at)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => handleDelete(session.session_id)}
+              {sessions.map((session) => {
+                const isExpanded = expandedId === session.session_id;
+                return (
+                  <>
+                    <TableRow
+                      key={session.session_id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() =>
+                        setExpandedId(isExpanded ? null : session.session_id)
+                      }
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+                      <TableCell className="w-8 pr-0">
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {cleanSessionId(session.session_id)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">
+                          {backendLabel(session.backend)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={(e) => handleDelete(session.session_id, e)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && (
+                      <TableRow key={`${session.session_id}-detail`}>
+                        <TableCell colSpan={4} className="p-3">
+                          <SessionDetailPanel session={session} />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
+                );
+              })}
             </TableBody>
           </Table>
         </Card>

@@ -5,7 +5,12 @@ import type { Workflow, WorkflowExecution } from '@/api/types';
 export function useWorkflows() {
   return useQuery({
     queryKey: ['workflows'],
-    queryFn: () => fetchApi<Workflow[]>('/api/v1/workflows'),
+    queryFn: async () => {
+      const data = await fetchApi<{ workflows: Workflow[]; count: number }>(
+        '/api/v1/workflows'
+      );
+      return data.workflows;
+    },
   });
 }
 
@@ -20,9 +25,7 @@ export function useWorkflow(id: string | undefined) {
 export function useCreateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (
-      workflow: Omit<Workflow, 'id' | 'workflow_id' | 'status' | 'step_count' | 'created_at'>
-    ) =>
+    mutationFn: (workflow: { name: string; description: string; steps: Workflow['steps'] }) =>
       fetchApi<Workflow>('/api/v1/workflows', {
         method: 'POST',
         body: JSON.stringify(workflow),
@@ -69,10 +72,14 @@ export function useExecuteWorkflow() {
 export function useWorkflowExecutions(workflowId: string | undefined) {
   return useQuery({
     queryKey: ['workflows', workflowId, 'executions'],
-    queryFn: () =>
-      fetchApi<WorkflowExecution[]>(
-        `/api/v1/workflows/${workflowId}/executions`
-      ),
+    queryFn: async () => {
+      const data = await fetchApi<{
+        workflow_id: string;
+        executions: WorkflowExecution[];
+        count: number;
+      }>(`/api/v1/workflows/${workflowId}/executions`);
+      return data.executions;
+    },
     enabled: !!workflowId,
   });
 }
@@ -82,7 +89,7 @@ export function useWorkflowExecution(executionId: string | undefined) {
     queryKey: ['workflow-executions', executionId],
     queryFn: () =>
       fetchApi<WorkflowExecution>(
-        `/api/v1/workflow-executions/${executionId}`
+        `/api/v1/workflows/executions/${executionId}`
       ),
     enabled: !!executionId,
   });

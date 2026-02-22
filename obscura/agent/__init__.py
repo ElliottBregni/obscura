@@ -18,6 +18,7 @@ from obscura.agent.interaction import (
 )
 from obscura.agent.loop_agent import LoopAgent
 from obscura.agent.daemon_agent import DaemonAgent
+from obscura.agent.aper_loop_agent import APERLoopAgent
 from obscura.agent.peers import (
     AgentRef,
     PeerCatalog,
@@ -43,6 +44,7 @@ __all__ = [
     # Long-running agents
     "LoopAgent",
     "DaemonAgent",
+    "APERLoopAgent",
     "InteractionBus",
     "AttentionPriority",
     "AttentionRequest",

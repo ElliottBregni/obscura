@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/auth/useAuth';
 import { canAccessSection } from '@/auth/permissions';
 import { useUIStore } from '@/stores/uiStore';
+import { useSystemStore } from '@/stores/systemStore';
 
 interface NavItem {
   label: string;
@@ -47,6 +48,7 @@ const NAV_ITEMS: (NavItem | 'separator')[] = [
 
 export function Sidebar() {
   const { roles } = useAuth();
+  const authEnabled = useSystemStore((s) => s.authEnabled);
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
 
@@ -77,7 +79,7 @@ export function Sidebar() {
             return <div key={`sep-${i}`} className="my-2 h-px bg-border" />;
           }
 
-          if (!canAccessSection(item.section, roles)) return null;
+          if (!canAccessSection(item.section, roles, authEnabled)) return null;
 
           return (
             <NavLink

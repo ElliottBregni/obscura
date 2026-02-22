@@ -45,7 +45,8 @@ export const SECTION_ROLES: Record<string, readonly Role[]> = {
   a2a: ['a2a:invoke', 'a2a:manage'],
 };
 
-export function canAccessSection(section: string, userRoles: string[]): boolean {
+export function canAccessSection(section: string, userRoles: string[], authEnabled = true): boolean {
+  if (!authEnabled) return true;
   if (userRoles.includes('admin')) return true;
   const required = SECTION_ROLES[section];
   if (!required || required.length === 0) return true;

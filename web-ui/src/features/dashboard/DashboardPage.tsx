@@ -60,7 +60,7 @@ export default function DashboardPage() {
           <>
             <MetricCard
               label="Running Agents"
-              value={metrics?.agents.running ?? 0}
+              value={metrics?.agents.by_status?.running ?? 0}
               icon={Bot}
               trendValue={`${metrics?.agents.total ?? 0} total`}
               trend="neutral"
@@ -69,14 +69,14 @@ export default function DashboardPage() {
               label="Memory Keys"
               value={metrics?.memory.total_keys ?? 0}
               icon={Database}
-              trendValue={`${metrics?.memory.namespaces ?? 0} namespaces`}
+              trendValue={`${Object.keys(metrics?.memory.namespaces ?? {}).length} namespaces`}
               trend="neutral"
             />
             <MetricCard
               label="Active Workflows"
-              value={metrics?.workflows.active ?? 0}
+              value={metrics?.workflows.total_executions ?? 0}
               icon={GitBranch}
-              trendValue={`${metrics?.workflows.total ?? 0} total`}
+              trendValue={`${metrics?.workflows.total_workflows ?? 0} total`}
               trend="neutral"
             />
             <MetricCard
@@ -152,18 +152,18 @@ export default function DashboardPage() {
               </div>
             ) : auditData?.logs && auditData.logs.length > 0 ? (
               <div className="space-y-1">
-                {auditData.logs.map((entry) => (
+                {auditData.logs.map((entry, i) => (
                   <div
-                    key={entry.id}
+                    key={`${entry.timestamp}-${i}`}
                     className="flex items-center justify-between rounded-md px-3 py-2 text-sm hover:bg-muted/50"
                   >
                     <div className="flex items-center gap-3">
                       <Activity className="h-3.5 w-3.5 text-muted-foreground" />
                       <div>
-                        <span className="font-medium">{entry.action}</span>
+                        <span className="font-medium">{entry.event_type}</span>
                         <span className="mx-1.5 text-muted-foreground">on</span>
                         <span className="text-muted-foreground">
-                          {entry.resource_type}/{entry.resource_id}
+                          {entry.resource}
                         </span>
                       </div>
                     </div>

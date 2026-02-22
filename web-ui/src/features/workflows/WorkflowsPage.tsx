@@ -14,7 +14,6 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Label } from '@/components/ui/Label';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import {
   Dialog,
   DialogContent,
@@ -135,9 +134,8 @@ export default function WorkflowsPage() {
                     >
                       {wf.name}
                     </Link>
-                    <StatusBadge status={wf.status} />
                     <Badge variant="outline" className="text-xs">
-                      {wf.step_count} step{wf.step_count !== 1 ? 's' : ''}
+                      {wf.steps.length} step{wf.steps.length !== 1 ? 's' : ''}
                     </Badge>
                   </div>
                   {wf.description && (

@@ -278,6 +278,8 @@ class AgentSupervisor:
                 await self._run_loop_agent(client, agent_def)
             elif agent_def.type == "daemon":
                 await self._run_daemon_agent(client, agent_def)
+            elif agent_def.type == "aper":
+                await self._run_aper_agent(client, agent_def)
             else:
                 logger.warning(
                     "Unknown agent type '%s' for '%s' — skipping",
@@ -343,6 +345,21 @@ class AgentSupervisor:
             triggers=triggers,
             interaction_bus=self._bus,
             max_turns_per_trigger=agent_def.max_turns,
+        )
+        await agent.run_forever()
+
+    async def _run_aper_agent(
+        self,
+        client: Any,
+        agent_def: AgentDefinition,
+    ) -> None:
+        from obscura.agent.aper_loop_agent import APERLoopAgent
+
+        agent = APERLoopAgent(
+            client,
+            name=agent_def.name,
+            interaction_bus=self._bus,
+            max_turns_per_input=agent_def.max_turns,
         )
         await agent.run_forever()
 

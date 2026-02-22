@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any, AsyncGenerator, cast
@@ -1025,9 +1026,12 @@ async def agent_stream(
     async def _event_generator() -> AsyncGenerator[dict[str, str], None]:
         try:
             async for chunk in agent.stream(prompt, **context):
-                yield {"event": "chunk", "data": chunk}
+                yield {
+                    "event": "text_delta",
+                    "data": json.dumps({"text": chunk}),
+                }
             yield {"event": "done", "data": ""}
         except Exception as e:
-            yield {"event": "error", "data": str(e)}
+            yield {"event": "error", "data": json.dumps({"text": str(e)})}
 
     return EventSourceResponse(_event_generator())

@@ -6,8 +6,14 @@ export function useToolApprovals(status?: ToolApproval['status']) {
   const params = status ? `?status=${encodeURIComponent(status)}` : '';
   return useQuery({
     queryKey: ['tool-approvals', status],
-    queryFn: () =>
-      fetchApi<ToolApproval[]>(`/api/v1/tool-approvals${params}`),
+    queryFn: async () => {
+      const data = await fetchApi<{
+        approvals: ToolApproval[];
+        count: number;
+        status: string;
+      }>(`/api/v1/tool-approvals${params}`);
+      return data.approvals;
+    },
   });
 }
 
