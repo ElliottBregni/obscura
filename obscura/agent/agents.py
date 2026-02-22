@@ -54,6 +54,7 @@ from obscura.agent.peers import (
 from obscura.memory import MemoryStore
 
 if TYPE_CHECKING:
+    from obscura.agent.interaction import InteractionBus
     from obscura.providers.mcp_backend import MCPBackend
     from obscura.heartbeat.client import AgentHeartbeatClient
     from obscura.tools.providers import ToolProviderRegistry
@@ -941,7 +942,10 @@ class AgentRuntime:
         self,
         user: AuthenticatedUser | None = None,
         lifecycle_hook: RuntimeLifecycleHook | None = None,
+        interaction_bus: InteractionBus | None = None,
     ):
+        from obscura.agent.interaction import InteractionBus as _IB
+
         self.user = user
         self.runtime_id = f"runtime-{uuid.uuid4().hex[:8]}"
         self._agents: dict[str, Agent] = {}
@@ -950,8 +954,14 @@ class AgentRuntime:
         self._bus_task: asyncio.Task[None] | None = None
         self._peer_registry = PeerRegistry(self)
         self._lifecycle_hook = lifecycle_hook
+        self._interaction_bus: InteractionBus = interaction_bus or _IB()
 
     # Public observability helpers
+    @property
+    def interaction_bus(self) -> InteractionBus:
+        """The shared interaction bus for agent↔user communication."""
+        return self._interaction_bus
+
     @property
     def agents(self) -> dict[str, Agent]:
         """Read-only view of managed agents."""

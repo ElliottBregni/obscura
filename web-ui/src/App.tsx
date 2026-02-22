@@ -1,32 +1,33 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { Layout } from './components/layout/Layout';
-import { Dashboard } from './features/dashboard/Dashboard';
-import { AgentsList } from './features/agents/AgentsList';
-import { SpawnWizard } from './features/agents/SpawnWizard';
-import { MemoryBrowser } from './features/memory/MemoryBrowser';
-import { WorkflowsList } from './features/workflows/WorkflowsList';
-import { SkillsList } from './features/skills/SkillsList';
-import { HealthDashboard } from './features/health/HealthDashboard';
-import { AdminSettings } from './features/admin/AdminSettings';
-import { AgentChat } from './features/agents/AgentChat';
+import { RouterProvider } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { Toaster } from 'sonner';
+import { AuthProvider } from '@/auth/AuthProvider';
+import { router } from '@/routes';
 
-function App() {
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 5000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Dashboard />} />
-        <Route path="agents" element={<AgentsList />} />
-        <Route path="agents/spawn" element={<SpawnWizard />} />
-        <Route path="agents/:agentId/chat" element={<AgentChat />} />
-        <Route path="memory" element={<MemoryBrowser />} />
-        <Route path="workflows" element={<WorkflowsList />} />
-        <Route path="skills" element={<SkillsList />} />
-        <Route path="health" element={<HealthDashboard />} />
-        <Route path="settings" element={<AdminSettings />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <RouterProvider router={router} />
+        <Toaster
+          position="bottom-right"
+          theme="dark"
+          richColors
+          closeButton
+        />
+      </AuthProvider>
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
   );
 }
-
-export default App;

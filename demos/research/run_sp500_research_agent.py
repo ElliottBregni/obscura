@@ -19,6 +19,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import shutil
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -29,26 +31,32 @@ from typing import Any, Literal, cast, override
 try:
     from obscura import ObscuraClient
     from obscura.agent.agent import BaseAgent
+    from obscura.agent.agents import AgentRuntime, AgentStatus, MCPConfig
     from obscura.auth.models import AuthenticatedUser
     from obscura.core.types import AgentContext, HookPoint
     from obscura.integrations.mcp.config_loader import (
         build_runtime_server_configs,
         discover_mcp_servers,
+        select_servers_for_task,
     )
-    from obscura.tools.system import get_system_tool_specs
+    from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+    from obscura.providers.mcp_backend import MCPBackend
 except ModuleNotFoundError:
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from obscura import ObscuraClient
     from obscura.agent.agent import BaseAgent
+    from obscura.agent.agents import AgentRuntime, AgentStatus, MCPConfig
     from obscura.auth.models import AuthenticatedUser
     from obscura.core.types import AgentContext, HookPoint
     from obscura.integrations.mcp.config_loader import (
         build_runtime_server_configs,
         discover_mcp_servers,
+        select_servers_for_task,
     )
-    from obscura.tools.system import get_system_tool_specs
+    from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+    from obscura.providers.mcp_backend import MCPBackend
 
 
 BackendName = Literal["copilot", "claude", "openai", "moonshot", "localllm"]
@@ -160,6 +168,7 @@ class ResearchConfig:
     model: BackendName = "claude"
     max_turns: int = 10
     verbose: bool = True
+    mcp_start_timeout_seconds: float = 60.0
 
 
 def _timestamp() -> str:
@@ -194,13 +203,21 @@ class SP500ResearchAgent(BaseAgent):
         self._max_turns = max_turns
         self._verbose = verbose
 
+    async def _run_phase_prompt(self, prompt: str, *, max_turns: int) -> str:
+        """Run phase prompt with loop-first behavior and send() fallback."""
+        text = await self._client.run_loop_to_completion(prompt, max_turns=max_turns)
+        if text.strip():
+            return text
+        message = await self._client.send(prompt)
+        return message.text
+
     @override
     async def analyze(self, ctx: AgentContext) -> None:
         """Phase 1: Analyze the research topic and identify data needs."""
         _phase_banner("analyze", "Identifying data requirements")
 
         prompt = ANALYZE_TEMPLATE.format(topic=self._topic)
-        result = await self._client.run_loop_to_completion(prompt, max_turns=2)
+        result = await self._run_phase_prompt(prompt, max_turns=2)
 
         ctx.analysis = {"topic": self._topic, "breakdown": result}
         if self._verbose:
@@ -213,7 +230,7 @@ class SP500ResearchAgent(BaseAgent):
 
         analysis_text = str(ctx.analysis.get("breakdown", "")) if ctx.analysis else ""
         prompt = PLAN_TEMPLATE.format(topic=self._topic, analysis=analysis_text)
-        result = await self._client.run_loop_to_completion(prompt, max_turns=2)
+        result = await self._run_phase_prompt(prompt, max_turns=2)
 
         ctx.plan = {"steps": result}
         if self._verbose:
@@ -232,9 +249,7 @@ class SP500ResearchAgent(BaseAgent):
             analysis=analysis_text,
             plan=plan_text,
         )
-        result = await self._client.run_loop_to_completion(
-            prompt, max_turns=self._max_turns
-        )
+        result = await self._run_phase_prompt(prompt, max_turns=self._max_turns)
 
         ctx.results.append(result)
         if self._verbose:
@@ -249,23 +264,31 @@ class SP500ResearchAgent(BaseAgent):
 
         findings = str(ctx.results[-1]) if ctx.results else "(no findings)"
         prompt = RESPOND_TEMPLATE.format(topic=self._topic, findings=findings)
-        result = await self._client.run_loop_to_completion(prompt, max_turns=2)
+        result = await self._run_phase_prompt(prompt, max_turns=2)
 
         ctx.response = result
         if self._verbose:
             print(result, flush=True)
 
 
-def _discover_mcp_server_configs() -> list[dict[str, Any]]:
-    """Auto-discover all MCP servers from ~/.obscura/mcp/ and return runtime configs."""
+def _discover_mcp_server_configs(
+    task_text: str = "",
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Auto-discover MCP servers and select those relevant to *task_text*.
+
+    Returns ``(runtime_configs, matched_server_names)``.
+    """
     try:
         discovered = discover_mcp_servers()
         if not discovered:
-            return []
-        return build_runtime_server_configs(discovered)
+            return [], []
+        selected = select_servers_for_task(discovered, task_text) if task_text else None
+        configs = build_runtime_server_configs(discovered, selected_names=selected)
+        names = selected if selected else [s.name for s in discovered]
+        return configs, names
     except Exception as exc:
         print(f"  MCP discovery failed ({exc}), continuing without MCP", flush=True)
-        return []
+        return [], []
 
 
 def _make_user(backend: BackendName) -> AuthenticatedUser:
@@ -279,35 +302,165 @@ def _make_user(backend: BackendName) -> AuthenticatedUser:
     )
 
 
+def _write_runtime_state(
+    runtime_agent: Any,
+    *,
+    status: AgentStatus,
+    error_message: str | None = None,
+) -> None:
+    """Persist status so observe reflects custom APER execution."""
+    now = datetime.now().isoformat()
+    runtime_agent.status = status
+    runtime_agent.memory.set(
+        f"agent_state_{runtime_agent.id}",
+        {
+            "agent_id": runtime_agent.id,
+            "name": runtime_agent.config.name,
+            "status": status.name,
+            "created_at": runtime_agent.created_at.isoformat(),
+            "updated_at": now,
+            "iteration_count": runtime_agent.iteration_count,
+            "error_message": error_message,
+        },
+        namespace="agent:runtime",
+    )
+
+
+def _runtime_mcp_config_to_connection(config: dict[str, Any]) -> MCPConnectionConfig:
+    transport = MCPTransportType(str(config.get("transport", "stdio")))
+    return MCPConnectionConfig(
+        transport=transport,
+        command=(
+            str(config.get("command"))
+            if config.get("command") is not None
+            else None
+        ),
+        args=cast(list[str], config.get("args", []))
+        if isinstance(config.get("args", []), list)
+        else [],
+        url=str(config.get("url")) if config.get("url") is not None else None,
+        env=cast(dict[str, str], config.get("env", {}))
+        if isinstance(config.get("env", {}), dict)
+        else {},
+    )
+
+
+async def _filter_mcp_server_configs(
+    configs: list[dict[str, Any]],
+    *,
+    timeout_seconds: float,
+) -> list[dict[str, Any]]:
+    """Probe MCP servers; keep only ones that start within timeout."""
+    if not configs:
+        return []
+    timeout = max(1.0, float(timeout_seconds))
+
+    def _is_stdio_command_available(command: str) -> bool:
+        if not command:
+            return False
+        if "/" in command:
+            cmd_path = Path(command)
+            return cmd_path.is_file() and os.access(cmd_path, os.X_OK)
+        return shutil.which(command) is not None
+
+    async def _probe(idx_and_cfg: tuple[int, dict[str, Any]]) -> tuple[int, dict[str, Any] | None]:
+        idx, runtime_config = idx_and_cfg
+        if str(runtime_config.get("transport", "stdio")) == "stdio":
+            command = str(runtime_config.get("command", ""))
+            if not _is_stdio_command_available(command):
+                print(
+                    f"  [{_timestamp()}] Skipping MCP server #{idx} due to missing command "
+                    f"('{command}') in PATH",
+                    flush=True,
+                )
+                return idx, None
+        connection = _runtime_mcp_config_to_connection(runtime_config)
+        backend = MCPBackend([connection])
+        backend._connect_timeout_seconds = timeout  # pyright: ignore[reportPrivateUsage]
+        try:
+            await asyncio.wait_for(backend.start(), timeout=timeout)
+            if backend.connection_errors or not backend.list_servers():
+                raise TimeoutError("MCP server did not connect successfully")
+            return idx, runtime_config
+        except Exception as exc:
+            print(
+                f"  [{_timestamp()}] Skipping MCP server #{idx} due to startup timeout/failure "
+                f"({type(exc).__name__}: {exc})",
+                flush=True,
+            )
+            return idx, None
+        finally:
+            try:
+                await asyncio.wait_for(backend.stop(), timeout=3.0)
+            except Exception:
+                pass
+
+    results = await asyncio.gather(
+        *[_probe((idx, cfg)) for idx, cfg in enumerate(configs)]
+    )
+    ordered = sorted(results, key=lambda item: item[0])
+    return [cfg for _idx, cfg in ordered if cfg is not None]
+
+
 async def run_research(config: ResearchConfig) -> str:
     """Run the full APER research loop and return the final brief."""
-    # Discover MCP servers before startup banner
-    mcp_configs = _discover_mcp_server_configs()
+    # Discover MCP servers, auto-selecting by topic keywords
+    mcp_configs, mcp_names = _discover_mcp_server_configs(config.topic)
 
     print(f"\n{'#' * 60}", flush=True)
     print("  S&P 500 Research Agent — APER Demo", flush=True)
     print(f"  Topic: {config.topic}", flush=True)
     print(f"  Backend: {config.model}", flush=True)
     print(f"  Max tool turns: {config.max_turns}", flush=True)
-    print(f"  MCP servers: {len(mcp_configs)}", flush=True)
+    if mcp_names:
+        print(f"  MCP servers: {', '.join(mcp_names)}", flush=True)
+    else:
+        print("  MCP servers: (none matched)", flush=True)
     print(f"  Started: {_timestamp()}", flush=True)
     print(f"{'#' * 60}", flush=True)
 
+    usable_mcp_configs = await _filter_mcp_server_configs(
+        mcp_configs,
+        timeout_seconds=config.mcp_start_timeout_seconds,
+    )
+    os.environ["OBSCURA_MCP_CONNECT_TIMEOUT_SECONDS"] = str(
+        max(1.0, float(config.mcp_start_timeout_seconds))
+    )
     user = _make_user(config.model)
-
-    async with ObscuraClient(
-        config.model,
-        system_prompt=RESEARCH_SYSTEM_PROMPT,
-        tools=get_system_tool_specs(),
-        mcp_servers=mcp_configs or None,
-        user=user,
-    ) as client:
+    runtime = AgentRuntime(user=user)
+    await runtime.start()
+    try:
+        if mcp_configs and not usable_mcp_configs:
+            print(
+                f"  [{_timestamp()}] Continuing without MCP servers for this run.",
+                flush=True,
+            )
+        runtime_agent = runtime.spawn(
+            name="sp500-research-runtime",
+            model=config.model,
+            system_prompt=RESEARCH_SYSTEM_PROMPT,
+            memory_namespace=f"research:{config.model}:sp500",
+            enable_system_tools=True,
+            mcp=MCPConfig(
+                enabled=bool(usable_mcp_configs),
+                servers=usable_mcp_configs,
+                auto_discover=True,
+            ),
+        )
+        runtime_agent.heartbeat_enabled = False
+        await asyncio.wait_for(
+            runtime_agent.start(),
+            timeout=max(1.0, float(config.mcp_start_timeout_seconds)),
+        )
+        if runtime_agent.client is None:
+            raise RuntimeError("Runtime agent client was not initialized")
         agent = SP500ResearchAgent(
-            client,
+            runtime_agent.client,
             topic=config.topic,
             max_turns=config.max_turns,
             verbose=config.verbose,
         )
+        _write_runtime_state(runtime_agent, status=AgentStatus.RUNNING)
 
         # Register APER lifecycle hooks for observability
         agent.on(
@@ -343,13 +496,25 @@ async def run_research(config: ResearchConfig) -> str:
             lambda ctx: print(f"  [{_timestamp()}] hook: POST_RESPOND", flush=True),
         )
 
-        result = await agent.run(config.topic)
+        try:
+            result = await agent.run(config.topic)
+        except Exception as exc:
+            _write_runtime_state(
+                runtime_agent,
+                status=AgentStatus.FAILED,
+                error_message=str(exc),
+            )
+            raise
+        runtime_agent.iteration_count += 1
+        _write_runtime_state(runtime_agent, status=AgentStatus.COMPLETED)
 
         print(f"\n{'#' * 60}", flush=True)
         print(f"  APER loop complete — {_timestamp()}", flush=True)
         print(f"{'#' * 60}\n", flush=True)
 
         return str(result)
+    finally:
+        await runtime.stop()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -365,7 +530,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         choices=("copilot", "claude", "openai", "moonshot", "localllm"),
-        default="claude",
+        default="copilot",
         help="Backend model.",
     )
     parser.add_argument(
@@ -378,6 +543,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet",
         action="store_true",
         help="Suppress per-phase output (only print final brief).",
+    )
+    parser.add_argument(
+        "--mcp-start-timeout-seconds",
+        type=float,
+        default=60.0,
+        help="Max seconds to wait for MCP startup before falling back to no-MCP.",
     )
     return parser
 
@@ -396,6 +567,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         model=backend,
         max_turns=int(args.max_turns),
         verbose=not bool(args.quiet),
+        mcp_start_timeout_seconds=float(args.mcp_start_timeout_seconds),
     )
 
     try:

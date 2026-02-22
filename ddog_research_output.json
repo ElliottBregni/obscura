@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-02-22T14:27:47.659199",
+  "symbol": "DDOG",
+  "current_price": 115.66,
+  "quote_data": {
+    "currency": "USD",
+    "symbol": "DDOG",
+    "regularMarketPrice": 115.66,
+    "fiftyTwoWeekHigh": 201.69,
+    "fiftyTwoWeekLow": 81.63,
+    "regularMarketDayHigh": 123.06,
+    "regularMarketDayLow": 114.78,
+    "regularMarketVolume": 4549091,
+    "previousClose": 120.600006,
+    "longName": "Datadog, Inc.",
+    "exchangeName": "NasdaqGS"
+  },
+  "technical_levels": {
+    "support": [
+      81.63,
+      110.0,
+      109.877
+    ],
+    "resistance": [
+      121.443,
+      130.0,
+      201.69
+    ]
+  },
+  "strategies": {
+    "bull_call_spread": {
+      "buy": 120,
+      "sell": 125
+    },
+    "bear_put_spread": {
+      "buy": 115,
+      "sell": 105
+    },
+    "iron_condor": {
+      "call_spread": {
+        "sell": 125,
+        "buy": 135
+      },
+      "put_spread": {
+        "sell": 105,
+        "buy": 100
+      }
+    },
+    "cash_secured_put": {
+      "strike": 110
+    },
+    "covered_call": {
+      "strike": 125
+    }
+  }
+}

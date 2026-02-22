@@ -260,6 +260,60 @@ class SlackAlertChannel(AlertChannel):
             return False
 
 
+class NativeNotificationChannel(AlertChannel):
+    """Alert channel that fires macOS native notifications.
+
+    Maps :class:`HealthStatus` severity to :class:`AttentionPriority`
+    so that critical alerts become modal popups and warnings become
+    banner notifications.
+    """
+
+    name = "native"
+
+    def __init__(self) -> None:
+        from obscura.notifications.native import NativeNotifier
+
+        self._notifier = NativeNotifier()
+
+    @override
+    async def send(self, alert: Alert) -> bool:
+        """Send a native macOS notification for the alert."""
+        from obscura.agent.interaction import AttentionPriority
+
+        priority_map: dict[HealthStatus, AttentionPriority] = {
+            HealthStatus.CRITICAL: AttentionPriority.CRITICAL,
+            HealthStatus.WARNING: AttentionPriority.HIGH,
+            HealthStatus.HEALTHY: AttentionPriority.NORMAL,
+        }
+        priority = priority_map.get(alert.severity, AttentionPriority.NORMAL)
+
+        try:
+            await self._notifier.attention(
+                title=f"Agent Alert: {alert.agent_id}",
+                message=alert.message,
+                priority=priority,
+            )
+            return True
+        except Exception as e:
+            logger.warning("Native notification failed: %s", e)
+            return False
+
+    @override
+    async def test(self) -> bool:
+        """Test the native notification channel."""
+        from obscura.agent.interaction import AttentionPriority
+
+        try:
+            await self._notifier.notify(
+                title="Obscura Heartbeat",
+                message="Alert channel test notification",
+                priority=AttentionPriority.NORMAL,
+            )
+            return True
+        except Exception:
+            return False
+
+
 class AlertManager:
     """
     Manages health alerts and routing to channels.

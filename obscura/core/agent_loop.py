@@ -32,8 +32,9 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 import uuid
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, cast
 
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -45,7 +46,12 @@ from obscura.core.types import (
     Message,
     Role,
     StreamChunk,
+    ToolCallContext,
+    ToolCallEnvelope,
     ToolCallInfo,
+    ToolErrorType,
+    ToolExecutionError,
+    ToolResultEnvelope,
     ToolSpec,
 )
 
@@ -122,6 +128,7 @@ class AgentLoop:
             turn_text = ""
             _current_tool_name = ""
             _current_tool_input_json = ""
+            _current_tool_raw: Any = None
 
             try:
                 if self._backend is None:
@@ -143,11 +150,12 @@ class AgentLoop:
                             tc = self._parse_tool_call(
                                 _current_tool_name,
                                 _current_tool_input_json,
-                                chunk.raw,
+                                _current_tool_raw,
                             )
                             tool_calls.append(tc)
                         _current_tool_name = chunk.tool_name
                         _current_tool_input_json = ""
+                        _current_tool_raw = chunk.raw
 
                     if chunk.kind == ChunkKind.TOOL_USE_DELTA:
                         _current_tool_input_json += chunk.tool_input_delta
@@ -158,18 +166,19 @@ class AgentLoop:
                             tc = self._parse_tool_call(
                                 _current_tool_name,
                                 _current_tool_input_json,
-                                chunk.raw,
+                                _current_tool_raw,
                             )
                             tool_calls.append(tc)
                             _current_tool_name = ""
                             _current_tool_input_json = ""
+                            _current_tool_raw = None
 
                 # Flush last tool call (fallback if no TOOL_USE_END received)
                 if _current_tool_name:
                     tc = self._parse_tool_call(
                         _current_tool_name,
                         _current_tool_input_json,
-                        None,
+                        _current_tool_raw,
                     )
                     tool_calls.append(tc)
 
@@ -200,14 +209,15 @@ class AgentLoop:
             tool_results = await self._execute_tools(tool_calls, turn)
 
             # Yield tool events
-            for tc, result_text, is_err in tool_results:
+            for result in tool_results:
                 yield AgentEvent(
                     kind=AgentEventKind.TOOL_RESULT,
-                    tool_name=tc.name,
-                    tool_use_id=tc.tool_use_id,
-                    tool_result=result_text,
-                    is_error=is_err,
+                    tool_name=result.tool,
+                    tool_use_id=result.tool_use_id,
+                    tool_result=self._render_tool_result_text(result),
+                    is_error=result.status == "error",
                     turn=turn,
+                    raw=result,
                 )
 
             # Build structured messages for backends that support it,
@@ -217,7 +227,7 @@ class AgentLoop:
                 tool_results,
                 turn_text,
             )
-            current_prompt = self._format_tool_results(tool_results)
+            current_prompt = self._format_tool_results_envelopes(tool_results)
 
             # Pass structured messages via kwargs so backends can
             # persist full tool call/result history.  Merge rather
@@ -251,27 +261,61 @@ class AgentLoop:
         self,
         tool_calls: list[ToolCallInfo],
         turn: int,
-    ) -> list[tuple[ToolCallInfo, str, bool]]:
-        """Execute tool calls and return (call, result_text, is_error) tuples."""
-        results: list[tuple[ToolCallInfo, str, bool]] = []
+    ) -> list[ToolResultEnvelope]:
+        """Execute tool calls and return canonical result envelopes."""
+        del turn
+        results: list[ToolResultEnvelope] = []
 
         for tc in tool_calls:
+            call = ToolCallEnvelope(
+                call_id=tc.tool_use_id,
+                agent_id="agent_loop",
+                tool=tc.name,
+                args=tc.input,
+                context=ToolCallContext(trace_id=uuid.uuid4().hex, policy="default"),
+            )
+            started = time.monotonic()
+
             # Confirmation gate
             if self._on_confirm is not None:
                 approved = self._on_confirm(tc)
                 if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
                     approved = await approved
                 if not approved:
-                    results.append((tc, "Tool call denied by user.", True))
+                    err = ToolExecutionError(
+                        type=ToolErrorType.UNAUTHORIZED,
+                        message="Tool call denied by user.",
+                        safe_to_retry=False,
+                    )
+                    results.append(
+                        ToolResultEnvelope(
+                            call_id=call.call_id,
+                            tool=call.tool,
+                            status="error",
+                            error=err,
+                            latency_ms=int((time.monotonic() - started) * 1000),
+                            tool_use_id=tc.tool_use_id,
+                            raw=tc.raw,
+                        )
+                    )
                     continue
 
             spec = self._tools.get(tc.name)
             if spec is None:
+                err = ToolExecutionError(
+                    type=ToolErrorType.NOT_FOUND,
+                    message=f"Unknown tool: {tc.name}. Available: {', '.join(self._tools.names())}",
+                    safe_to_retry=False,
+                )
                 results.append(
-                    (
-                        tc,
-                        f"Unknown tool: {tc.name}. Available: {', '.join(self._tools.names())}",
-                        True,
+                    ToolResultEnvelope(
+                        call_id=call.call_id,
+                        tool=call.tool,
+                        status="error",
+                        error=err,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        tool_use_id=tc.tool_use_id,
+                        raw=tc.raw,
                     )
                 )
                 continue
@@ -283,8 +327,21 @@ class AgentLoop:
 
                     if not validate_capability_token(self._capability_token):
                         _audit_tool_denied(tc.name, "invalid_or_expired_token")
+                        err = ToolExecutionError(
+                            type=ToolErrorType.UNAUTHORIZED,
+                            message="Capability token invalid or expired.",
+                            safe_to_retry=False,
+                        )
                         results.append(
-                            (tc, "Capability token invalid or expired.", True)
+                            ToolResultEnvelope(
+                                call_id=call.call_id,
+                                tool=call.tool,
+                                status="error",
+                                error=err,
+                                latency_ms=int((time.monotonic() - started) * 1000),
+                                tool_use_id=tc.tool_use_id,
+                                raw=tc.raw,
+                            )
                         )
                         continue
 
@@ -308,15 +365,31 @@ class AgentLoop:
 
             try:
                 result = await self._call_handler(spec, tc.input)
-                result_text = (
-                    result
-                    if isinstance(result, str)
-                    else json.dumps(result, default=str)
+                results.append(
+                    ToolResultEnvelope(
+                        call_id=call.call_id,
+                        tool=call.tool,
+                        status="ok",
+                        result=result,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        tool_use_id=tc.tool_use_id,
+                        raw=tc.raw,
+                    )
                 )
-                results.append((tc, result_text, False))
             except Exception as exc:
                 logger.warning("Tool %s failed: %s", tc.name, exc)
-                results.append((tc, f"Tool error: {exc}", True))
+                err = self._normalize_tool_error(exc)
+                results.append(
+                    ToolResultEnvelope(
+                        call_id=call.call_id,
+                        tool=call.tool,
+                        status="error",
+                        error=err,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        tool_use_id=tc.tool_use_id,
+                        raw=tc.raw,
+                    )
+                )
 
         return results
 
@@ -366,6 +439,80 @@ class AgentLoop:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _normalize_tool_error(exc: Exception) -> ToolExecutionError:
+        msg = str(exc)
+        lower = msg.lower()
+
+        if isinstance(exc, (TypeError, ValueError)):
+            if (
+                "required positional argument" in lower
+                or "missing" in lower
+                or "unexpected keyword argument" in lower
+            ):
+                return ToolExecutionError(
+                    type=ToolErrorType.INVALID_ARGS,
+                    message=msg,
+                    safe_to_retry=False,
+                )
+        if isinstance(exc, PermissionError):
+            return ToolExecutionError(
+                type=ToolErrorType.UNAUTHORIZED,
+                message=msg,
+                safe_to_retry=False,
+            )
+        if isinstance(exc, FileNotFoundError):
+            return ToolExecutionError(
+                type=ToolErrorType.NOT_FOUND,
+                message=msg,
+                safe_to_retry=False,
+            )
+        if isinstance(exc, FileExistsError):
+            return ToolExecutionError(
+                type=ToolErrorType.CONFLICT,
+                message=msg,
+                safe_to_retry=False,
+            )
+        if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+            return ToolExecutionError(
+                type=ToolErrorType.TIMEOUT,
+                message=msg,
+                safe_to_retry=True,
+            )
+        if isinstance(exc, ConnectionError):
+            return ToolExecutionError(
+                type=ToolErrorType.DEPENDENCY_ERROR,
+                message=msg,
+                safe_to_retry=True,
+            )
+        if "rate limit" in lower or "429" in lower:
+            return ToolExecutionError(
+                type=ToolErrorType.RATE_LIMITED,
+                message=msg,
+                safe_to_retry=True,
+            )
+        return ToolExecutionError(
+            type=ToolErrorType.UNKNOWN,
+            message=msg,
+            safe_to_retry=False,
+        )
+
+    @staticmethod
+    def _render_tool_result_text(result: ToolResultEnvelope) -> str:
+        if result.status == "ok":
+            if isinstance(result.result, str):
+                return result.result
+            return json.dumps(result.result, default=str)
+        if result.error is None:
+            return "Tool error"
+        payload = {
+            "type": result.error.type.value,
+            "message": result.error.message,
+            "retry_after_ms": result.error.retry_after_ms,
+            "safe_to_retry": result.error.safe_to_retry,
+        }
+        return json.dumps(payload, default=str)
+
+    @staticmethod
     def _map_chunk(chunk: StreamChunk, turn: int) -> AgentEvent | None:
         """Map a StreamChunk to an AgentEvent, or None to skip."""
         if chunk.kind == ChunkKind.TEXT_DELTA:
@@ -405,12 +552,29 @@ class AgentLoop:
         raw: Any,
     ) -> ToolCallInfo:
         """Parse accumulated tool call data into a ToolCallInfo."""
+        raw_input = AgentLoop._extract_tool_input_from_raw(raw)
         parsed_input: dict[str, Any] = {}
+        delta_valid = False
+
         if input_json.strip():
             try:
-                parsed_input = json.loads(input_json)
+                decoded = json.loads(input_json)
+                if isinstance(decoded, dict):
+                    parsed_input = cast(dict[str, Any], decoded)
+                    delta_valid = True
+                else:
+                    parsed_input = {"_raw_input": input_json}
             except json.JSONDecodeError:
                 parsed_input = {"_raw_input": input_json}
+
+        if delta_valid:
+            # Streamed JSON deltas are authoritative when present.
+            parsed_input = {**raw_input, **parsed_input}
+        elif not parsed_input:
+            parsed_input = raw_input
+        elif raw_input and parsed_input.keys() == {"_raw_input"}:
+            # If delta payload is invalid, prefer provider-native structured args.
+            parsed_input = raw_input
 
         return ToolCallInfo(
             tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
@@ -420,9 +584,75 @@ class AgentLoop:
         )
 
     @staticmethod
+    def _extract_tool_input_from_raw(raw: Any) -> dict[str, Any]:
+        """Best-effort extraction of tool args from provider-native raw events."""
+
+        def _field(obj: Any, key: str) -> Any:
+            if obj is None:
+                return None
+            if isinstance(obj, dict):
+                return cast(dict[str, Any], obj).get(key)
+            return getattr(obj, key, None)
+
+        def _coerce_to_dict(value: Any) -> dict[str, Any]:
+            if value is None:
+                return {}
+            if isinstance(value, dict):
+                return cast(dict[str, Any], value)
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return {}
+                try:
+                    decoded = json.loads(text)
+                except json.JSONDecodeError:
+                    return {"_raw_input": value}
+                if isinstance(decoded, dict):
+                    return cast(dict[str, Any], decoded)
+                return {"_raw_input": value}
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                dumped = model_dump()
+                if isinstance(dumped, dict):
+                    return cast(dict[str, Any], dumped)
+                return {}
+            to_dict = getattr(value, "to_dict", None)
+            if callable(to_dict):
+                dumped = to_dict()
+                if isinstance(dumped, dict):
+                    return cast(dict[str, Any], dumped)
+                return {}
+            as_dict = getattr(value, "__dict__", None)
+            if isinstance(as_dict, dict):
+                object_dict = cast(dict[str, Any], as_dict)
+                return {k: v for k, v in object_dict.items() if not k.startswith("_")}
+            return {}
+
+        data = _field(raw, "data")
+        if data is None:
+            data = raw
+
+        direct_keys = ("tool_input", "input", "arguments", "parameters")
+        for key in direct_keys:
+            payload = _field(data, key)
+            parsed = _coerce_to_dict(payload)
+            if parsed:
+                return parsed
+
+        nested_tool = _field(data, "tool_call")
+        if nested_tool is not None:
+            for key in direct_keys:
+                payload = _field(nested_tool, key)
+                parsed = _coerce_to_dict(payload)
+                if parsed:
+                    return parsed
+
+        return {}
+
+    @staticmethod
     def _build_structured_tool_messages(
         tool_calls: list[ToolCallInfo],
-        tool_results: list[tuple[ToolCallInfo, str, bool]],
+        tool_results: list[ToolResultEnvelope],
         turn_text: str,
     ) -> list[Message]:
         """Build structured Message objects for tool call/result turns.
@@ -457,13 +687,17 @@ class AgentLoop:
 
         # 2) Tool result message
         result_blocks: list[ContentBlock] = []
-        for tc, result_text, is_err in tool_results:
+        result_by_id = {r.tool_use_id: r for r in tool_results}
+        for tc in tool_calls:
+            result = result_by_id.get(tc.tool_use_id)
+            if result is None:
+                continue
             result_blocks.append(
                 ContentBlock(
                     kind="tool_result",
-                    text=result_text,
+                    text=AgentLoop._render_tool_result_text(result),
                     tool_use_id=tc.tool_use_id,
-                    is_error=is_err,
+                    is_error=result.status == "error",
                 )
             )
 
@@ -479,11 +713,38 @@ class AgentLoop:
         results: list[tuple[ToolCallInfo, str, bool]],
     ) -> str:
         """Format tool results as a prompt for the next model turn."""
-        parts: list[str] = []
+        envelopes: list[ToolResultEnvelope] = []
         for tc, result_text, is_error in results:
-            status = "ERROR" if is_error else "OK"
+            envelopes.append(
+                ToolResultEnvelope(
+                    call_id=tc.tool_use_id,
+                    tool=tc.name,
+                    status="error" if is_error else "ok",
+                    result=None if is_error else result_text,
+                    error=(
+                        ToolExecutionError(
+                            type=ToolErrorType.UNKNOWN,
+                            message=result_text,
+                            safe_to_retry=False,
+                        )
+                        if is_error
+                        else None
+                    ),
+                    tool_use_id=tc.tool_use_id,
+                    raw=tc.raw,
+                )
+            )
+        return AgentLoop._format_tool_results_envelopes(envelopes)
+
+    @staticmethod
+    def _format_tool_results_envelopes(results: list[ToolResultEnvelope]) -> str:
+        """Format canonical tool result envelopes as prompt text."""
+        parts: list[str] = []
+        for result in results:
+            status = "ERROR" if result.status == "error" else "OK"
+            result_text = AgentLoop._render_tool_result_text(result)
             parts.append(
-                f"[Tool Result: {tc.name} (id={tc.tool_use_id}) status={status}]\n"
+                f"[Tool Result: {result.tool} (id={result.tool_use_id}) status={status}]\n"
                 f"{result_text}\n"
                 f"[/Tool Result]"
             )

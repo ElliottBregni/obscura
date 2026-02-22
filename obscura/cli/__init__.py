@@ -383,6 +383,250 @@ def agent_quick(ctx: click.Context, name: str, model: str, prompt: str) -> None:
         client.stop_agent(agent_id)
 
 
+# -- Long-running agent commands -------------------------------------------
+
+
+@agent.command("loop")
+@click.option("--name", "-n", default="loop-agent", help="Agent name")
+@click.option("--model", "-m", default="copilot", help="Model backend")
+@click.option("--system-prompt", "-s", default="", help="System instructions")
+@click.option("--max-turns", default=25, help="Max turns per input")
+def agent_loop(name: str, model: str, system_prompt: str, max_turns: int) -> None:
+    """Start a long-running loop agent (interactive prompt loop)."""
+    import asyncio
+
+    async def _run() -> None:
+        from obscura.agent.interaction import InteractionBus
+        from obscura.agent.loop_agent import LoopAgent
+        from obscura.core.client import ObscuraClient
+        from obscura.notifications.native import NativeNotifier
+
+        bus = InteractionBus()
+
+        # Wire native notifications
+        notifier = NativeNotifier()
+
+        async def _on_attention(req: Any) -> None:
+            await notifier.attention(
+                title=req.agent_name,
+                message=req.message,
+                priority=req.priority,
+                actions=list(req.actions),
+            )
+
+        bus.on_attention(_on_attention)
+
+        async with ObscuraClient(
+            model, system_prompt=system_prompt
+        ) as client:
+            agent = LoopAgent(
+                client,
+                name=name,
+                interaction_bus=bus,
+                max_turns_per_input=max_turns,
+            )
+
+            # Start the loop in the background
+            loop_task = asyncio.create_task(agent.run_forever())
+
+            console.print(
+                f"[bold green]Loop agent '{name}' started[/] (model={model})"
+            )
+            console.print("[dim]Type messages below. 'exit' or Ctrl-C to stop.[/]\n")
+
+            try:
+                while not agent.stopped:
+                    try:
+                        user_input: str = await asyncio.get_event_loop().run_in_executor(
+                            None, lambda: click.prompt("You", type=str)
+                        )
+                    except (EOFError, click.Abort):
+                        break
+                    if user_input.strip().lower() in ("exit", "quit"):
+                        break
+                    await agent.send(user_input)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                await agent.stop()
+                loop_task.cancel()
+                try:
+                    await loop_task
+                except asyncio.CancelledError:
+                    pass
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
+
+
+@agent.command("daemon")
+@click.option("--name", "-n", default="daemon", help="Agent name")
+@click.option("--model", "-m", default="copilot", help="Model backend")
+@click.option("--system-prompt", "-s", default="", help="System instructions")
+@click.option(
+    "--trigger",
+    "-t",
+    multiple=True,
+    help=(
+        'Trigger spec: "schedule:CRON:PROMPT" e.g. '
+        '"schedule:*/5 * * * *:check system health"'
+    ),
+)
+def agent_daemon(
+    name: str, model: str, system_prompt: str, trigger: tuple[str, ...]
+) -> None:
+    """Start a daemon agent that reacts to triggers."""
+    import asyncio
+
+    async def _run() -> None:
+        from obscura.agent.daemon_agent import DaemonAgent, ScheduleTrigger, Trigger
+        from obscura.agent.interaction import AttentionPriority, InteractionBus
+        from obscura.core.client import ObscuraClient
+        from obscura.notifications.native import NativeNotifier
+
+        bus = InteractionBus()
+        notifier = NativeNotifier()
+
+        async def _on_attention(req: Any) -> None:
+            await notifier.attention(
+                title=req.agent_name,
+                message=req.message,
+                priority=req.priority,
+                actions=list(req.actions),
+            )
+
+        bus.on_attention(_on_attention)
+
+        # Parse trigger specs
+        triggers: list[Trigger] = []
+        for spec in trigger:
+            parts = spec.split(":", 2)
+            if len(parts) >= 3 and parts[0] == "schedule":
+                triggers.append(
+                    ScheduleTrigger(
+                        cron=parts[1],
+                        prompt=parts[2],
+                        description=parts[2][:50],
+                        notify_user=True,
+                        priority=AttentionPriority.NORMAL,
+                    )
+                )
+            else:
+                console.print(f"[yellow]Unknown trigger spec: {spec}[/]")
+
+        async with ObscuraClient(
+            model, system_prompt=system_prompt
+        ) as client:
+            daemon = DaemonAgent(
+                client,
+                name=name,
+                triggers=triggers,
+                interaction_bus=bus,
+            )
+
+            console.print(
+                f"[bold green]Daemon agent '{name}' started[/] "
+                f"(model={model}, triggers={len(triggers)})"
+            )
+            console.print("[dim]Press Ctrl-C to stop.[/]\n")
+
+            try:
+                await daemon.run_forever()
+            except KeyboardInterrupt:
+                await daemon.stop()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
+
+
+@agent.command("send")
+@click.argument("agent_id")
+@click.option("--message", "-m", required=True, help="Message to send")
+@click.pass_context
+def agent_send(ctx: click.Context, agent_id: str, message: str) -> None:
+    """Send a message to a running agent via WebSocket."""
+    import asyncio
+
+    async def _send() -> None:
+        import websockets
+
+        client: ObscuraCLI = _get_client(ctx)
+        ws_url = client.base_url.replace("http://", "ws://").replace(
+            "https://", "wss://"
+        )
+        url = f"{ws_url}/ws/agents/{agent_id}"
+
+        async with websockets.connect(
+            url,
+            additional_headers={"Authorization": f"Bearer {client.token}"},
+        ) as ws:
+            await ws.send(json.dumps({"type": "run", "prompt": message}))
+            console.print(f"[bold green]Sent to {agent_id}[/]: {message}")
+
+            # Read response chunks
+            while True:
+                raw = await ws.recv()
+                data: dict[str, Any] = json.loads(str(raw))
+                if data.get("type") == "chunk":
+                    console.print(str(data.get("text", "")), end="")
+                elif data.get("type") == "done":
+                    console.print()
+                    break
+                elif data.get("type") == "error":
+                    console.print(f"\n[red]Error: {data.get('message')}[/]")
+                    break
+                elif data.get("type") == "attention_request":
+                    console.print(
+                        f"\n[bold yellow]Attention:[/] {data.get('message')}"
+                    )
+                    console.print(
+                        f"  Actions: {', '.join(data.get('actions', []))}"
+                    )
+
+    try:
+        asyncio.run(_send())
+    except ImportError:
+        console.print(
+            "[red]websockets not installed. Run: pip install websockets[/]"
+        )
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+
+
+@agent.command("supervisor")
+@click.option(
+    "--config",
+    "-c",
+    default="~/.obscura/agents.yaml",
+    help="Path to agents YAML config",
+)
+def agent_supervisor(config: str) -> None:
+    """Start the agent supervisor (keeps configured agents alive)."""
+    import asyncio
+    from pathlib import Path
+
+    async def _run() -> None:
+        from obscura.agent.supervisor import AgentSupervisor
+
+        cli_user = _resolve_cli_user()
+        sup = AgentSupervisor(
+            config_path=Path(config),
+            user=cli_user,
+        )
+        console.print(f"[bold green]Supervisor starting[/] (config={config})")
+        console.print("[dim]Press Ctrl-C to stop.[/]\n")
+        await sup.run_forever()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Supervisor stopped.[/]")
+
+
 # Memory commands
 @cli.group()
 def memory() -> None:

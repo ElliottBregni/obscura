@@ -6,6 +6,7 @@ hooks, sessions, send/stream, and server management.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -467,6 +468,24 @@ class TestMCPBackendLifecycle:
         # Should not raise; logs the error and continues.
         await backend.start()
         assert backend.initialized is True
+
+    @pytest.mark.asyncio
+    async def test_start_with_server_timeout_records_error(self) -> None:
+        config = MCPConnectionConfig(transport=MCPTransportType.STDIO, command="sleep")
+        backend = MCPBackend(mcp_servers=[config], name="test-mcp")
+        backend._connect_timeout_seconds = 0.01  # pyright: ignore[reportPrivateUsage]
+        mock_mgr: Any = MagicMock()
+
+        async def _slow_add(*_args: Any, **_kwargs: Any) -> None:
+            await asyncio.sleep(1)
+
+        mock_mgr.add_session = AsyncMock(side_effect=_slow_add)
+        mock_mgr.aggregate_tools = AsyncMock(return_value=[])
+        backend._session_manager = mock_mgr  # pyright: ignore[reportPrivateUsage]
+
+        await backend.start()
+        assert backend.initialized is True
+        assert "mcp_server_0" in backend.connection_errors
 
     @pytest.mark.asyncio
     async def test_stop_calls_close_all(self) -> None:

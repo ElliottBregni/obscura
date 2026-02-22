@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export interface ToolCallInfo {
+export interface ToolCall {
   id: string;
   name: string;
   input: string;
@@ -11,103 +11,84 @@ export interface ToolCallInfo {
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
-  thinking: string;
-  toolCalls: ToolCallInfo[];
-  isStreaming: boolean;
+  text: string;
+  thinking?: string;
+  toolCalls: ToolCall[];
   timestamp: number;
 }
 
 interface ChatState {
   messages: ChatMessage[];
   isStreaming: boolean;
-  currentMessageId: string | null;
   error: string | null;
+  currentToolCallId: string | null;
 
   addUserMessage: (text: string) => void;
   startAssistantMessage: () => string;
-  appendText: (id: string, delta: string) => void;
-  appendThinking: (id: string, delta: string) => void;
+  appendText: (msgId: string, text: string) => void;
+  appendThinking: (msgId: string, text: string) => void;
   startToolCall: (msgId: string, toolName: string, toolId: string) => void;
   appendToolInput: (msgId: string, delta: string) => void;
   completeToolCall: (msgId: string, result: string) => void;
-  failToolCall: (msgId: string, error: string) => void;
-  finishStream: (id: string) => void;
-  setError: (err: string) => void;
+  finishStream: (msgId: string) => void;
+  setError: (error: string) => void;
   clearMessages: () => void;
 }
 
-let _nextId = 0;
-function genId(): string {
-  return `msg-${Date.now()}-${++_nextId}`;
-}
+let msgCounter = 0;
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>()((set) => ({
   messages: [],
   isStreaming: false,
-  currentMessageId: null,
   error: null,
+  currentToolCallId: null,
 
-  addUserMessage: (text: string) => {
-    const id = genId();
-    set((state) => ({
+  addUserMessage: (text) =>
+    set((s) => ({
       messages: [
-        ...state.messages,
+        ...s.messages,
         {
-          id,
+          id: `user-${++msgCounter}`,
           role: 'user',
-          content: text,
-          thinking: '',
+          text,
           toolCalls: [],
-          isStreaming: false,
           timestamp: Date.now(),
         },
       ],
       error: null,
-    }));
-  },
+    })),
 
   startAssistantMessage: () => {
-    const id = genId();
-    set((state) => ({
+    const id = `asst-${++msgCounter}`;
+    set((s) => ({
       messages: [
-        ...state.messages,
-        {
-          id,
-          role: 'assistant',
-          content: '',
-          thinking: '',
-          toolCalls: [],
-          isStreaming: true,
-          timestamp: Date.now(),
-        },
+        ...s.messages,
+        { id, role: 'assistant', text: '', toolCalls: [], timestamp: Date.now() },
       ],
       isStreaming: true,
-      currentMessageId: id,
       error: null,
     }));
     return id;
   },
 
-  appendText: (id: string, delta: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === id ? { ...m, content: m.content + delta } : m
+  appendText: (msgId, text) =>
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === msgId ? { ...m, text: m.text + text } : m
       ),
-    }));
-  },
+    })),
 
-  appendThinking: (id: string, delta: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === id ? { ...m, thinking: m.thinking + delta } : m
+  appendThinking: (msgId, text) =>
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === msgId ? { ...m, thinking: (m.thinking || '') + text } : m
       ),
-    }));
-  },
+    })),
 
-  startToolCall: (msgId: string, toolName: string, toolId: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) =>
+  startToolCall: (msgId, toolName, toolId) =>
+    set((s) => ({
+      currentToolCallId: toolId,
+      messages: s.messages.map((m) =>
         m.id === msgId
           ? {
               ...m,
@@ -118,67 +99,47 @@ export const useChatStore = create<ChatState>((set) => ({
             }
           : m
       ),
-    }));
-  },
+    })),
 
-  appendToolInput: (msgId: string, delta: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) => {
-        if (m.id !== msgId || m.toolCalls.length === 0) return m;
-        const tools = [...m.toolCalls];
-        const last = { ...tools[tools.length - 1], input: tools[tools.length - 1].input + delta };
-        tools[tools.length - 1] = last;
-        return { ...m, toolCalls: tools };
-      }),
-    }));
-  },
-
-  completeToolCall: (msgId: string, result: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) => {
-        if (m.id !== msgId || m.toolCalls.length === 0) return m;
-        const tools = [...m.toolCalls];
-        const last = { ...tools[tools.length - 1], status: 'complete' as const, result };
-        tools[tools.length - 1] = last;
-        return { ...m, toolCalls: tools };
-      }),
-    }));
-  },
-
-  failToolCall: (msgId: string, error: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) => {
-        if (m.id !== msgId || m.toolCalls.length === 0) return m;
-        const tools = [...m.toolCalls];
-        const last = { ...tools[tools.length - 1], status: 'error' as const, result: error };
-        tools[tools.length - 1] = last;
-        return { ...m, toolCalls: tools };
-      }),
-    }));
-  },
-
-  finishStream: (id: string) => {
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === id ? { ...m, isStreaming: false } : m
+  appendToolInput: (msgId, delta) =>
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === msgId
+          ? {
+              ...m,
+              toolCalls: m.toolCalls.map((tc, i) =>
+                i === m.toolCalls.length - 1
+                  ? { ...tc, input: tc.input + delta }
+                  : tc
+              ),
+            }
+          : m
       ),
-      isStreaming: false,
-      currentMessageId: null,
-    }));
-  },
+    })),
 
-  setError: (err: string) => {
-    set((state) => ({
-      error: err,
-      isStreaming: false,
-      messages: state.messages.map((m) =>
-        m.isStreaming ? { ...m, isStreaming: false } : m
+  completeToolCall: (msgId, result) =>
+    set((s) => ({
+      currentToolCallId: null,
+      messages: s.messages.map((m) =>
+        m.id === msgId
+          ? {
+              ...m,
+              toolCalls: m.toolCalls.map((tc, i) =>
+                i === m.toolCalls.length - 1
+                  ? { ...tc, result, status: 'complete' as const }
+                  : tc
+              ),
+            }
+          : m
       ),
-      currentMessageId: null,
-    }));
-  },
+    })),
 
-  clearMessages: () => {
-    set({ messages: [], isStreaming: false, currentMessageId: null, error: null });
-  },
+  finishStream: (_msgId) =>
+    set({ isStreaming: false }),
+
+  setError: (error) =>
+    set({ error, isStreaming: false }),
+
+  clearMessages: () =>
+    set({ messages: [], isStreaming: false, error: null, currentToolCallId: null }),
 }));

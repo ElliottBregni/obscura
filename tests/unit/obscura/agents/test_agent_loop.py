@@ -21,6 +21,7 @@ from obscura.core.types import (
     StreamChunk,
     SessionRef,
     ToolCallInfo,
+    ToolErrorType,
     ToolSpec,
     HookPoint,
 )
@@ -242,6 +243,40 @@ class TestAgentLoopToolExecution:
         # Should have 2 turns
         turn_starts = [e for e in events if e.kind == AgentEventKind.TURN_START]
         assert len(turn_starts) == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_call_uses_raw_arguments_when_no_delta(self) -> None:
+        """Tool args should be parsed from raw START event when no delta is emitted."""
+
+        def web_fetch(url: str) -> str:
+            return f"fetched:{url}"
+
+        spec = ToolSpec(
+            name="web_fetch",
+            description="Fetch URL",
+            parameters={"type": "object"},
+            handler=web_fetch,
+        )
+
+        raw_start = {"data": {"tool_name": "web_fetch", "input": {"url": "https://example.com"}}}
+        turn1 = [
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_START,
+                tool_name="web_fetch",
+                raw=raw_start,
+            ),
+            StreamChunk(kind=ChunkKind.DONE),
+        ]
+        turn2 = _make_text_chunks("done")
+
+        backend = MockBackend([turn1, turn2])
+        loop = AgentLoop(backend, _make_registry(spec))
+
+        events: list[AgentEvent] = [e async for e in loop.run("fetch")]
+        results = [e for e in events if e.kind == AgentEventKind.TOOL_RESULT]
+        assert len(results) == 1
+        assert results[0].is_error is False
+        assert "https://example.com" in results[0].tool_result
 
     @pytest.mark.asyncio
     async def test_multiple_tool_calls_in_one_turn(self) -> None:
@@ -631,6 +666,21 @@ class TestToolCallParsing:
         tc = AgentLoop.parse_tool_call("no_args", "", None)
         assert tc.input == {}
 
+    def test_parse_empty_delta_uses_raw_input(self) -> None:
+        raw = {"data": {"input": {"path": "/tmp/a.txt"}}}
+        tc = AgentLoop.parse_tool_call("read_file", "", raw)
+        assert tc.input == {"path": "/tmp/a.txt"}
+
+    def test_parse_empty_delta_uses_raw_arguments_json(self) -> None:
+        raw = {"data": {"arguments": '{"query":"obscura"}'}}
+        tc = AgentLoop.parse_tool_call("web_search", "", raw)
+        assert tc.input == {"query": "obscura"}
+
+    def test_parse_delta_overrides_raw_fields(self) -> None:
+        raw = {"data": {"input": {"query": "old", "limit": 5}}}
+        tc = AgentLoop.parse_tool_call("web_search", '{"query":"new"}', raw)
+        assert tc.input == {"query": "new", "limit": 5}
+
     def test_format_tool_results(self) -> None:
         tc = ToolCallInfo(tool_use_id="tool_abc", name="read", input={})
         formatted = AgentLoop.format_tool_results([(tc, "file content", False)])
@@ -644,3 +694,26 @@ class TestToolCallParsing:
         formatted = AgentLoop.format_tool_results([(tc, "permission denied", True)])
         assert "ERROR" in formatted
         assert "permission denied" in formatted
+
+
+class TestToolErrorNormalization:
+    def test_missing_argument_maps_to_invalid_args(self) -> None:
+        err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]
+            TypeError("run_python3() missing 1 required positional argument: 'code'")
+        )
+        assert err.type == ToolErrorType.INVALID_ARGS
+        assert err.safe_to_retry is False
+
+    def test_timeout_maps_to_timeout_retryable(self) -> None:
+        err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]
+            TimeoutError("tool timed out")
+        )
+        assert err.type == ToolErrorType.TIMEOUT
+        assert err.safe_to_retry is True
+
+    def test_permission_maps_to_unauthorized(self) -> None:
+        err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]
+            PermissionError("permission denied")
+        )
+        assert err.type == ToolErrorType.UNAUTHORIZED
+        assert err.safe_to_retry is False

@@ -49,7 +49,6 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 
-  /* Scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -69,7 +68,6 @@
 }
 
 @layer components {
-  /* Status indicators */
   .status-dot {
     @apply w-2 h-2 rounded-full;
   }

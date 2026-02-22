@@ -1,20 +1,16 @@
 import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+import { useAuthStore } from '@/stores/authStore';
+import { API_URL } from '@/lib/constants';
 
 interface StreamOptions {
   backend: string;
   model?: string;
   systemPrompt?: string;
   sessionId?: string;
+  agentId?: string;
 }
 
-/**
- * Parse an SSE text stream into individual events.
- * Each SSE message has the form:
- *   event: <type>\ndata: <json>\n\n
- */
 function parseSSELine(
   buffer: string,
   onEvent: (event: string, data: string) => void
@@ -27,7 +23,6 @@ function parseSSELine(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Check if this is the last line and might be incomplete
     if (i === lines.length - 1 && line !== '') {
       remaining = line;
       break;
@@ -56,7 +51,6 @@ export function useAgentStream(options: StreamOptions) {
       const state = store.getState();
       if (state.isStreaming) return;
 
-      // Add user message
       state.addUserMessage(prompt);
       const msgId = state.startAssistantMessage();
 
@@ -64,9 +58,18 @@ export function useAgentStream(options: StreamOptions) {
       abortRef.current = controller;
 
       try {
-        const response = await fetch(`${API_URL}/api/v1/stream`, {
+        const { token, apiKey } = useAuthStore.getState();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        else if (apiKey) headers['X-API-Key'] = apiKey;
+
+        const endpoint = options.agentId
+          ? `${API_URL}/api/v1/agents/${options.agentId}/stream`
+          : `${API_URL}/api/v1/stream`;
+
+        const response = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             backend: options.backend,
             prompt,
@@ -92,16 +95,12 @@ export function useAgentStream(options: StreamOptions) {
         const decoder = new TextDecoder();
         let buffer = '';
 
-        // Track current tool call context
-        let currentToolId = '';
-
         const handleEvent = (event: string, data: string) => {
           const s = store.getState();
           let payload: Record<string, string> = {};
           try {
             payload = data ? JSON.parse(data) : {};
           } catch {
-            // Legacy: plain text data
             payload = { text: data };
           }
 
@@ -113,18 +112,19 @@ export function useAgentStream(options: StreamOptions) {
               if (payload.text) s.appendThinking(msgId, payload.text);
               break;
             case 'tool_use_start':
-              currentToolId = payload.tool_use_id || `tool-${Date.now()}`;
-              s.startToolCall(msgId, payload.tool_name || 'unknown', currentToolId);
+              s.startToolCall(
+                msgId,
+                payload.tool_name || 'unknown',
+                payload.tool_use_id || `tool-${Date.now()}`
+              );
               break;
             case 'tool_use_delta':
               if (payload.tool_input_delta) s.appendToolInput(msgId, payload.tool_input_delta);
               break;
             case 'tool_use_end':
-              // Tool execution complete (input fully received)
               break;
             case 'tool_result':
               s.completeToolCall(msgId, payload.text || '');
-              currentToolId = '';
               break;
             case 'done':
               s.finishStream(msgId);
@@ -138,12 +138,10 @@ export function useAgentStream(options: StreamOptions) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
           buffer = parseSSELine(buffer, handleEvent);
         }
 
-        // Ensure stream is marked as finished
         const finalState = store.getState();
         if (finalState.isStreaming) {
           finalState.finishStream(msgId);
@@ -158,7 +156,7 @@ export function useAgentStream(options: StreamOptions) {
         abortRef.current = null;
       }
     },
-    [options.backend, options.model, options.systemPrompt, options.sessionId, store]
+    [options.backend, options.model, options.systemPrompt, options.sessionId, options.agentId, store]
   );
 
   const cancelStream = useCallback(() => {

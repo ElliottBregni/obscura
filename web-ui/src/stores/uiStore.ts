@@ -1,15 +1,25 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 interface UIState {
-  sidebarOpen: boolean;
-  theme: 'dark' | 'light';
+  sidebarCollapsed: boolean;
+  commandPaletteOpen: boolean;
+
   toggleSidebar: () => void;
-  setTheme: (theme: 'dark' | 'light') => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
 }
 
-export const useUIStore = create<UIState>((set) => ({
-  sidebarOpen: true,
-  theme: 'dark',
-  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  setTheme: (theme) => set({ theme }),
-}));
+export const useUIStore = create<UIState>()(
+  persist(
+    (set) => ({
+      sidebarCollapsed: false,
+      commandPaletteOpen: false,
+
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+    }),
+    { name: 'obscura-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed }) }
+  )
+);

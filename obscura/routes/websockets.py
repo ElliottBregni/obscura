@@ -48,7 +48,21 @@ async def agent_websocket(
     websocket: WebSocket,
     agent_id: str,
 ) -> None:
-    """WebSocket for real-time agent communication."""
+    """WebSocket for real-time agent communication.
+
+    Inbound message types:
+        run              — start streaming a prompt
+        status           — request current agent state
+        stop             — stop the agent
+        attention_response — route a user response to an attention request
+
+    Outbound message types:
+        chunk            — text delta from agent
+        done             — streaming complete
+        error            — error occurred
+        status           — agent state update
+        attention_request — agent needs user input (from InteractionBus)
+    """
     user = await authenticate_websocket(websocket)
     if user is None:
         await websocket.close(code=4001, reason="Unauthorized")
@@ -67,48 +81,81 @@ async def agent_websocket(
             await websocket.close()
             return
 
-        while True:
-            message: dict[str, Any] = await websocket.receive_json()
+        # Subscribe to attention requests for this agent
+        from obscura.agent.interaction import AttentionRequest
 
-            if message.get("type") == "run":
-                prompt: str = message.get("prompt", "")
-                context: dict[str, Any] = message.get("context", {})
-                try:
-                    async for chunk in agent.stream(prompt, **context):
+        async def _on_attention(request: AttentionRequest) -> None:
+            if request.agent_id != agent_id:
+                return
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "attention_request",
+                        "request_id": request.request_id,
+                        "agent_name": request.agent_name,
+                        "message": request.message,
+                        "priority": request.priority.value,
+                        "actions": list(request.actions),
+                    }
+                )
+            except Exception:
+                pass
+
+        bus = runtime.interaction_bus
+        bus.on_attention(_on_attention)
+
+        try:
+            while True:
+                message: dict[str, Any] = await websocket.receive_json()
+
+                if message.get("type") == "run":
+                    prompt: str = message.get("prompt", "")
+                    context: dict[str, Any] = message.get("context", {})
+                    try:
+                        async for chunk in agent.stream(prompt, **context):
+                            await websocket.send_json(
+                                {
+                                    "type": "chunk",
+                                    "text": chunk,
+                                }
+                            )
+                        await websocket.send_json({"type": "done"})
+                    except Exception as e:
                         await websocket.send_json(
                             {
-                                "type": "chunk",
-                                "text": chunk,
+                                "type": "error",
+                                "message": str(e),
                             }
                         )
-                    await websocket.send_json({"type": "done"})
-                except Exception as e:
+
+                elif message.get("type") == "status":
+                    state = agent.get_state()
                     await websocket.send_json(
                         {
-                            "type": "error",
-                            "message": str(e),
+                            "type": "status",
+                            "status": state.status.name,
+                            "iteration_count": state.iteration_count,
                         }
                     )
 
-            elif message.get("type") == "status":
-                state = agent.get_state()
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "status": state.status.name,
-                        "iteration_count": state.iteration_count,
-                    }
-                )
+                elif message.get("type") == "attention_response":
+                    request_id = message.get("request_id", "")
+                    action = message.get("action", "ok")
+                    text = message.get("text", "")
+                    await bus.respond(request_id, action, text)
 
-            elif message.get("type") == "stop":
-                await agent.stop()
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "status": "STOPPED",
-                    }
-                )
-                break
+                elif message.get("type") == "stop":
+                    await agent.stop()
+                    await websocket.send_json(
+                        {
+                            "type": "status",
+                            "status": "STOPPED",
+                        }
+                    )
+                    break
+
+        finally:
+            bus.remove_attention_handler(_on_attention)
 
     except WebSocketDisconnect:
         pass

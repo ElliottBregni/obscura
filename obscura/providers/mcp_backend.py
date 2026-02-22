@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 if TYPE_CHECKING:
@@ -74,6 +75,9 @@ class MCPBackend:
         }
         self._initialized = False
         self._connection_errors: dict[str, Exception] = {}
+        self._connect_timeout_seconds = max(
+            1.0, float(os.environ.get("OBSCURA_MCP_CONNECT_TIMEOUT_SECONDS", "90"))
+        )
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -113,8 +117,18 @@ class MCPBackend:
         for i, config in enumerate(self.mcp_servers):
             session_name = f"mcp_server_{i}"
             try:
-                await self._session_manager.add_session(session_name, config)
+                await asyncio.wait_for(
+                    self._session_manager.add_session(session_name, config),
+                    timeout=self._connect_timeout_seconds,
+                )
                 logger.info(f"Connected to MCP server: {session_name}")
+            except asyncio.TimeoutError as e:
+                logger.error(
+                    "Timed out connecting to MCP server %s after %.1fs",
+                    session_name,
+                    self._connect_timeout_seconds,
+                )
+                self._connection_errors[session_name] = e
             except Exception as e:
                 logger.error(f"Failed to connect to MCP server {session_name}: {e}")
                 self._connection_errors[session_name] = e

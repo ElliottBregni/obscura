@@ -784,9 +784,11 @@ class TestStdioTransport:
         assert "PATH" in passed_env  # inherited from os.environ
 
         # Cleanup
-        transport.read_task.cancel()
+        assert transport.read_task is not None
+        task = transport.read_task
+        task.cancel()
         try:
-            await transport.read_task
+            await task
         except asyncio.CancelledError:
             pass
 
@@ -817,9 +819,11 @@ class TestStdioTransport:
         assert "PATH" in passed_env
 
         # Cleanup
-        transport.read_task.cancel()
+        assert transport.read_task is not None
+        task = transport.read_task
+        task.cancel()
         try:
-            await transport.read_task
+            await task
         except asyncio.CancelledError:
             pass
 

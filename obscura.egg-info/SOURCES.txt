@@ -13,6 +13,7 @@ obscura.egg-info/top_level.txt
 obscura/agent/__init__.py
 obscura/agent/agent.py
 obscura/agent/agents.py
+obscura/agent/aper.py
 obscura/agent/peers.py
 obscura/auth/__init__.py
 obscura/auth/capability.py
@@ -23,7 +24,6 @@ obscura/auth/rbac.py
 obscura/auth/system_prompts.py
 obscura/auth/zitadel.py
 obscura/cli/__init__.py
-obscura/cli/chat_cli.py
 obscura/core/__init__.py
 obscura/core/agent_loop.py
 obscura/core/auth.py
@@ -100,12 +100,15 @@ obscura/routes/observe.py
 obscura/routes/send.py
 obscura/routes/sessions.py
 obscura/routes/sync.py
+obscura/routes/template_store.py
 obscura/routes/tool_approvals.py
 obscura/routes/vector_memory.py
 obscura/routes/webhooks.py
 obscura/routes/websockets.py
 obscura/routes/workflows.py
 obscura/schemas/__init__.py
+obscura/schemas/agents.py
+obscura/schemas/templates.py
 obscura/server/__init__.py
 obscura/skills/base.py
 obscura/skills/docs_loader.py

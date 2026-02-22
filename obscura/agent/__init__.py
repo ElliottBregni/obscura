@@ -10,6 +10,14 @@ from obscura.agent.agents import (
     RuntimeLifecycleEvent,
     RuntimeLifecycleHook,
 )
+from obscura.agent.interaction import (
+    AttentionPriority,
+    AttentionRequest,
+    InteractionBus,
+    UserResponse,
+)
+from obscura.agent.loop_agent import LoopAgent
+from obscura.agent.daemon_agent import DaemonAgent
 from obscura.agent.peers import (
     AgentRef,
     PeerCatalog,
@@ -32,4 +40,11 @@ __all__ = [
     "PeerCatalog",
     "PeerRegistry",
     "PeerInvocationEnvelope",
+    # Long-running agents
+    "LoopAgent",
+    "DaemonAgent",
+    "InteractionBus",
+    "AttentionPriority",
+    "AttentionRequest",
+    "UserResponse",
 ]

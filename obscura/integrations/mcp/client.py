@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 import types
 from typing import Any, override
 
@@ -193,11 +194,20 @@ class MCPClient:
         try:
             await self._transport.send(request)
 
-            # Wait for response with timeout
-            response: dict[str, Any] = await asyncio.wait_for(
-                future,
-                timeout=self.config.timeout,
-            )
+            timeout = max(0.1, float(self.config.timeout))
+            started = time.monotonic()
+            while not future.done():
+                elapsed = time.monotonic() - started
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                inbound = await asyncio.wait_for(
+                    self._transport.receive(),
+                    timeout=min(1.0, remaining),
+                )
+                if isinstance(inbound, dict) and "id" in inbound:
+                    self._handle_response(inbound)
+            response: dict[str, Any] = future.result()
 
             if "error" in response:
                 error: dict[str, Any] = response["error"]

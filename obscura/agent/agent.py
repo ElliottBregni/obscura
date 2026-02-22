@@ -27,9 +27,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
+from obscura.agent.interaction import AttentionPriority
 from obscura.core.types import AgentContext, AgentPhase, HookPoint
 
 if TYPE_CHECKING:
+    from obscura.agent.interaction import InteractionBus, UserResponse
     from obscura.core.client import ObscuraClient
     from obscura.core.context import ContextLoader
 
@@ -57,17 +59,65 @@ class BaseAgent:
         client: ObscuraClient,
         *,
         name: str = "agent",
+        agent_id: str = "",
         context_loader: ContextLoader | None = None,
+        interaction_bus: InteractionBus | None = None,
     ) -> None:
         self._client = client
         self._name = name
+        self._agent_id = agent_id or f"agent-{name}"
         self._context_loader = context_loader
+        self._interaction_bus = interaction_bus
         self._hooks: dict[HookPoint, list[HookCallback]] = {hp: [] for hp in HookPoint}
 
     @property
     def name(self) -> str:
         """Read-only agent name for telemetry and observability."""
         return self._name
+
+    @property
+    def agent_id(self) -> str:
+        """Unique agent identifier."""
+        return self._agent_id
+
+    @property
+    def interaction_bus(self) -> InteractionBus | None:
+        """The interaction bus, if wired."""
+        return self._interaction_bus
+
+    # -- Interaction helpers -------------------------------------------------
+
+    async def request_attention(
+        self,
+        message: str,
+        *,
+        priority: AttentionPriority = AttentionPriority.NORMAL,
+        actions: tuple[str, ...] | list[str] | None = None,
+        context: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> UserResponse | None:
+        """Ask for user attention via the InteractionBus.
+
+        Returns ``None`` if no bus is wired or if the request fails.
+        Subclasses can call this at any point during their lifecycle.
+        """
+        if self._interaction_bus is None:
+            return None
+        try:
+            return await self._interaction_bus.request_attention(
+                agent_id=self._agent_id,
+                agent_name=self._name,
+                message=message,
+                priority=priority,
+                actions=actions,
+                context=context,
+                timeout=timeout,
+            )
+        except Exception:
+            import logging as _logging
+
+            _logging.getLogger(__name__).exception("attention request failed")
+            return None
 
     # -- Hook registration ---------------------------------------------------
 

@@ -201,8 +201,16 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., Any]
+    output_schema: dict[str, Any] = field(default_factory=lambda: {})
     _pydantic_model: type | None = None
     required_tier: str = "public"
+    side_effects: str = "none"
+    auth_scope: tuple[str, ...] = field(default_factory=lambda: ())
+    rate_limit_per_minute: int = 0
+    cost_hint: float = 0.0
+    timeout_seconds: float = 60.0
+    retries: int = 0
+    examples: tuple[dict[str, Any], ...] = field(default_factory=lambda: ())
 
 
 # Hook config type for Copilot backend
@@ -425,6 +433,64 @@ class ToolCallInfo:
     tool_use_id: str
     name: str
     input: dict[str, Any] = field(default_factory=lambda: {})
+    raw: Any = None
+
+
+class ToolErrorType(enum.Enum):
+    """Normalized error types for tool execution."""
+
+    INVALID_ARGS = "INVALID_ARGS"
+    UNAUTHORIZED = "UNAUTHORIZED"
+    NOT_FOUND = "NOT_FOUND"
+    RATE_LIMITED = "RATE_LIMITED"
+    TIMEOUT = "TIMEOUT"
+    DEPENDENCY_ERROR = "DEPENDENCY_ERROR"
+    CONFLICT = "CONFLICT"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class ToolCallContext:
+    """Execution context attached to each tool call."""
+
+    trace_id: str = ""
+    user_id: str = ""
+    policy: str = ""
+
+
+@dataclass(frozen=True)
+class ToolCallEnvelope:
+    """Canonical tool call envelope used by execution adapters."""
+
+    call_id: str
+    agent_id: str
+    tool: str
+    args: dict[str, Any] = field(default_factory=lambda: {})
+    context: ToolCallContext = field(default_factory=ToolCallContext)
+
+
+@dataclass(frozen=True)
+class ToolExecutionError:
+    """Normalized tool error payload."""
+
+    type: ToolErrorType
+    message: str
+    retry_after_ms: int | None = None
+    safe_to_retry: bool = False
+
+
+@dataclass(frozen=True)
+class ToolResultEnvelope:
+    """Canonical tool result envelope."""
+
+    call_id: str
+    tool: str
+    status: str
+    result: Any = None
+    error: ToolExecutionError | None = None
+    latency_ms: int = 0
+    cost: float = 0.0
+    tool_use_id: str = ""
     raw: Any = None
 
 

@@ -1,87 +1,86 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { useAgentStore } from '@/stores/agentStore';
-import { useSystemStore } from '@/stores/systemStore';
+import { useEffect, useRef, useCallback } from 'react';
+import { WS_URL } from '@/lib/constants';
+import { useAuthStore } from '@/stores/authStore';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/monitor';
-const RECONNECT_DELAY = 3000;
-const MAX_RECONNECT_DELAY = 30000;
+interface UseWebSocketOptions {
+  path: string;
+  onMessage?: (data: unknown) => void;
+  onOpen?: () => void;
+  onClose?: () => void;
+  enabled?: boolean;
+  reconnectInterval?: number;
+  maxReconnectAttempts?: number;
+}
 
-export function useWebSocket() {
+export function useWebSocket({
+  path,
+  onMessage,
+  onOpen,
+  onClose,
+  enabled = true,
+  reconnectInterval = 3000,
+  maxReconnectAttempts = 10,
+}: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectDelay = useRef(RECONNECT_DELAY);
-  const [connected, setConnected] = useState(false);
-  const { setAgents, updateAgentStatus, addAgent, removeAgent } = useAgentStore();
-  const { setConnected: setSystemConnected } = useSystemStore();
+  const attemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (!enabled) return;
 
-    try {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
+    const { token, apiKey } = useAuthStore.getState();
+    let url = `${WS_URL}${path}`;
 
-      ws.onopen = () => {
-        setConnected(true);
-        setSystemConnected(true);
-        reconnectDelay.current = RECONNECT_DELAY;
-      };
+    const params = new URLSearchParams();
+    if (token) params.set('token', token);
+    else if (apiKey) params.set('api_key', apiKey);
+    if (params.toString()) url += `?${params}`;
 
-      ws.onclose = () => {
-        setConnected(false);
-        setSystemConnected(false);
-        // Auto-reconnect with exponential backoff
-        reconnectTimeout.current = setTimeout(() => {
-          reconnectDelay.current = Math.min(
-            reconnectDelay.current * 1.5,
-            MAX_RECONNECT_DELAY
-          );
-          connect();
-        }, reconnectDelay.current);
-      };
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
+    ws.onopen = () => {
+      attemptsRef.current = 0;
+      onOpen?.();
+    };
 
-          switch (data.type) {
-            case 'init':
-              if (data.agents) setAgents(data.agents);
-              break;
-            case 'agent.update':
-            case 'agent_status':
-              updateAgentStatus(data.agent_id, data.status);
-              break;
-            case 'agent.add':
-            case 'agent_spawned':
-              addAgent(data.agent);
-              break;
-            case 'agent.remove':
-            case 'agent_stopped':
-              removeAgent(data.agent_id);
-              break;
-          }
-        } catch {
-          // silently ignore parse errors
-        }
-      };
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onMessage?.(data);
+      } catch {
+        onMessage?.(event.data);
+      }
+    };
 
-      ws.onerror = () => {
-        // onclose will handle reconnection
-      };
-    } catch {
-      // Connection failed, will retry via onclose
-    }
-  }, [setAgents, updateAgentStatus, addAgent, removeAgent, setSystemConnected]);
+    ws.onclose = () => {
+      onClose?.();
+      if (enabled && attemptsRef.current < maxReconnectAttempts) {
+        const delay = reconnectInterval * Math.pow(1.5, attemptsRef.current);
+        attemptsRef.current++;
+        reconnectTimerRef.current = setTimeout(connect, delay);
+      }
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+  }, [path, enabled, onMessage, onOpen, onClose, reconnectInterval, maxReconnectAttempts]);
 
   useEffect(() => {
     connect();
 
     return () => {
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      clearTimeout(reconnectTimerRef.current);
       wsRef.current?.close();
     };
   }, [connect]);
 
-  return { connected, ws: wsRef.current };
+  const send = useCallback((data: unknown) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(data));
+    }
+  }, []);
+
+  return { send };
 }
