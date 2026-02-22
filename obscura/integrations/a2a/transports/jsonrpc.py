@@ -82,7 +82,9 @@ def create_jsonrpc_router(service: A2AService) -> APIRouter:
 
 
 async def _dispatch(
-    service: A2AService, method: str, params: dict[str, Any],
+    service: A2AService,
+    method: str,
+    params: dict[str, Any],
 ) -> Any:
     """Dispatch a JSON-RPC method to the service layer."""
     if method == A2AMethod.MESSAGE_SEND.value:
@@ -100,6 +102,7 @@ async def _dispatch(
         task = await service.tasks_get(task_id)
         if task is None:
             from obscura.integrations.a2a.types import TaskNotFoundError
+
             raise TaskNotFoundError(task_id)
         return task.model_dump(mode="json")
 
@@ -128,10 +131,14 @@ async def _dispatch(
 
     # message/stream is handled via SSE, not JSON-RPC response
     if method == A2AMethod.MESSAGE_STREAM.value:
-        raise A2AError(-32600, "Use SSE endpoint for streaming: POST /a2a/v1/tasks/streaming")
+        raise A2AError(
+            -32600, "Use SSE endpoint for streaming: POST /a2a/v1/tasks/streaming"
+        )
 
     if method == A2AMethod.TASKS_SUBSCRIBE.value:
-        raise A2AError(-32600, "Use SSE endpoint for subscribe: POST /a2a/v1/tasks/{id}:subscribe")
+        raise A2AError(
+            -32600, "Use SSE endpoint for subscribe: POST /a2a/v1/tasks/{id}:subscribe"
+        )
 
     raise A2AError(-32601, f"Method not found: {method}")
 

@@ -20,7 +20,9 @@ class TestDiscoverMCPServers:
         discovered = discover_mcp_servers(tmp_path / "missing.json")
         assert discovered == []
 
-    def test_resolves_env_placeholders(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_resolves_env_placeholders(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_path = tmp_path / "mcp-config.json"
         config_path.write_text(
             json.dumps(
@@ -119,7 +121,9 @@ class TestDiscoverMCPServers:
         names = {server.name for server in discovered}
         assert {"github", "supabase"} == names
 
-    def test_loads_toml_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_loads_toml_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_path = tmp_path / "mcp-config.toml"
         config_path.write_text(
             "\n".join(
@@ -160,7 +164,11 @@ class TestDiscoverMCPServers:
                         "filesystem": {
                             "transport": "stdio",
                             "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+                            "args": [
+                                "-y",
+                                "@modelcontextprotocol/server-filesystem",
+                                ".",
+                            ],
                         }
                     }
                 }

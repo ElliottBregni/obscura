@@ -349,7 +349,10 @@ class OpenClawBridge:
                     }
                 except httpx.HTTPStatusError as exc:
                     status = exc.response.status_code
-                    if self._is_retryable_status(status) and attempt < self._config.workflow_max_retries:
+                    if (
+                        self._is_retryable_status(status)
+                        and attempt < self._config.workflow_max_retries
+                    ):
                         current_attempt.retry_reason = f"http_{status}"
                         await self._sleep_backoff(attempt)
                         continue
@@ -405,7 +408,7 @@ class OpenClawBridge:
         return headers
 
     async def _sleep_backoff(self, attempt: int) -> None:
-        delay = self._config.workflow_retry_backoff_seconds * (2 ** attempt)
+        delay = self._config.workflow_retry_backoff_seconds * (2**attempt)
         if delay > 0:
             await asyncio.sleep(delay)
 

@@ -739,11 +739,13 @@ class ObscuraMCPServer:
         if isinstance(raw, list):
             entries = cast(list[dict[str, Any]], raw)
 
-        entries.append({
-            "role": role,
-            "content": content,
-            "index": len(entries),
-        })
+        entries.append(
+            {
+                "role": role,
+                "content": content,
+                "index": len(entries),
+            }
+        )
 
         memory.set(transcript_key, entries, namespace="transcript")
 

@@ -104,7 +104,9 @@ class A2AClient:
 
     def _ensure_connected(self) -> httpx.AsyncClient:
         if self._http is None:
-            raise RuntimeError("Client not connected. Call connect() or use async context manager.")
+            raise RuntimeError(
+                "Client not connected. Call connect() or use async context manager."
+            )
         return self._http
 
     # ------------------------------------------------------------------
@@ -123,7 +125,9 @@ class A2AClient:
     # JSON-RPC helpers
     # ------------------------------------------------------------------
 
-    async def _rpc(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _rpc(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Send a JSON-RPC 2.0 request and return the result."""
         http = self._ensure_connected()
         payload: dict[str, Any] = {
@@ -139,6 +143,7 @@ class A2AClient:
         if "error" in body:
             error = body["error"]
             from obscura.integrations.a2a.types import A2AError
+
             raise A2AError(error["code"], error["message"], error.get("data"))
 
         return body.get("result", {})

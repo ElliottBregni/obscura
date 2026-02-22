@@ -12,7 +12,10 @@ from httpx import ASGITransport, AsyncClient
 from obscura.integrations.a2a.agent_card import AgentCardGenerator
 from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore
-from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.rest import (
+    create_rest_router,
+    create_wellknown_router,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +42,9 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
         yield c
 
 
-def _task_body(text: str = "Hello", msg_id: str = "m1", blocking: bool = True) -> dict[str, Any]:
+def _task_body(
+    text: str = "Hello", msg_id: str = "m1", blocking: bool = True
+) -> dict[str, Any]:
     return {
         "message": {
             "role": "user",

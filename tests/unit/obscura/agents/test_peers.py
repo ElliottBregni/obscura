@@ -83,13 +83,17 @@ class TestPeerRegistry:
 
 class TestPeerInvoke:
     @pytest.mark.asyncio
-    async def test_invoke_peer_requires_feature_flag(self, runtime: AgentRuntime) -> None:
+    async def test_invoke_peer_requires_feature_flag(
+        self, runtime: AgentRuntime
+    ) -> None:
         target = _spawn(runtime, "target")
         with pytest.raises(RuntimeError, match="OBSCURA_PEER_CALLS_ENABLED"):
             await runtime.invoke_peer(target.id, "hello")
 
     @pytest.mark.asyncio
-    async def test_invoke_peer_blocking_with_envelope(self, runtime: AgentRuntime) -> None:
+    async def test_invoke_peer_blocking_with_envelope(
+        self, runtime: AgentRuntime
+    ) -> None:
         source = _spawn(runtime, "source")
         target = _spawn(runtime, "target")
         target.run = AsyncMock(return_value="peer-ok")

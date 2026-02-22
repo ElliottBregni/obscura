@@ -339,7 +339,9 @@ class ClaudeBackend:
             if choice.mode == "required":
                 return {"allowed_tools": tool_names} if tool_names else {}
             if choice.mode == "function" and choice.function_name:
-                return {"allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"]}
+                return {
+                    "allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"]
+                }
             return {}
 
         if isinstance(choice, str):

@@ -62,7 +62,9 @@ class TestWorkflowExecution:
         assert "step1" in data["step_results"]
 
     @patch("obscura.routes.workflows.get_runtime")
-    def test_execute_workflow_not_found(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_execute_workflow_not_found(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_get_runtime.return_value = mock_runtime
         resp = client.post(
@@ -74,7 +76,9 @@ class TestWorkflowExecution:
         assert resp.status_code == 404
 
     @patch("obscura.routes.workflows.get_runtime")
-    def test_execute_workflow_with_inputs(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_execute_workflow_with_inputs(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_agent: Any = MagicMock()
         mock_agent.start = AsyncMock()
         mock_agent.run = AsyncMock(return_value="processed data")
@@ -105,7 +109,9 @@ class TestWorkflowExecution:
         assert resp.json()["status"] == "completed"
 
     @patch("obscura.routes.workflows.get_runtime")
-    def test_execute_workflow_step_fails(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_execute_workflow_step_fails(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_agent: Any = MagicMock()
         mock_agent.start = AsyncMock()
         mock_agent.run = AsyncMock(side_effect=RuntimeError("step failed"))
@@ -129,7 +135,9 @@ class TestWorkflowExecution:
         assert resp.json()["status"] == "failed"
 
     @patch("obscura.routes.workflows.get_runtime")
-    def test_execute_multi_step_workflow(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_execute_multi_step_workflow(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         call_count = 0
 
         async def run_step(prompt: Any, **ctx: Any) -> str:

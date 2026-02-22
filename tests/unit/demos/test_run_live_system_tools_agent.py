@@ -31,7 +31,9 @@ async def test_run_live_system_tools_demo_collects_events() -> None:
     agent.stream_loop = MagicMock(return_value=_fake_events())
 
     @asynccontextmanager
-    async def _fake_session(*args: object, **kwargs: object) -> AsyncIterator[MagicMock]:
+    async def _fake_session(
+        *args: object, **kwargs: object
+    ) -> AsyncIterator[MagicMock]:
         _ = args
         _ = kwargs
         yield agent
@@ -52,7 +54,9 @@ async def test_run_live_system_tools_demo_collects_events() -> None:
 
 def test_parser_accepts_backend_and_prompt() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--backend", "claude", "--prompt", "hi", "--max-turns", "3"])
+    args = parser.parse_args(
+        ["--backend", "claude", "--prompt", "hi", "--max-turns", "3"]
+    )
     assert args.backend == "claude"
     assert args.prompt == "hi"
     assert args.max_turns == 3

@@ -39,14 +39,16 @@ def servicer() -> A2AServicer:
 class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_blocking(self, servicer: A2AServicer) -> None:
-        request = json.dumps({
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Hello gRPC"}],
-            },
-            "blocking": True,
-        })
+        request = json.dumps(
+            {
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Hello gRPC"}],
+                },
+                "blocking": True,
+            }
+        )
         result_json = await servicer.SendMessage(request)
         result = json.loads(result_json)
         assert result["status"]["state"] == "completed"
@@ -54,14 +56,16 @@ class TestSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_with_context(self, servicer: A2AServicer) -> None:
-        request = json.dumps({
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Test"}],
-            },
-            "contextId": "ctx-grpc",
-        })
+        request = json.dumps(
+            {
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Test"}],
+                },
+                "contextId": "ctx-grpc",
+            }
+        )
         result = json.loads(await servicer.SendMessage(request))
         assert result["contextId"] == "ctx-grpc"
 
@@ -75,13 +79,17 @@ class TestGetTask:
     @pytest.mark.asyncio
     async def test_get_existing(self, servicer: A2AServicer) -> None:
         # Create first
-        create_json = await servicer.SendMessage(json.dumps({
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Create"}],
-            },
-        }))
+        create_json = await servicer.SendMessage(
+            json.dumps(
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "Create"}],
+                    },
+                }
+            )
+        )
         task_id = json.loads(create_json)["id"]
 
         # Get
@@ -107,13 +115,17 @@ class TestListTasks:
 
     @pytest.mark.asyncio
     async def test_list_after_create(self, servicer: A2AServicer) -> None:
-        await servicer.SendMessage(json.dumps({
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "A"}],
-            },
-        }))
+        await servicer.SendMessage(
+            json.dumps(
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "A"}],
+                    },
+                }
+            )
+        )
         result = json.loads(await servicer.ListTasks(json.dumps({})))
         assert len(result["tasks"]) == 1
 
@@ -126,19 +138,25 @@ class TestListTasks:
 class TestCancelTask:
     @pytest.mark.asyncio
     async def test_cancel(self, servicer: A2AServicer) -> None:
-        create_json = await servicer.SendMessage(json.dumps({
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "X"}],
-            },
-            "blocking": False,
-        }))
+        create_json = await servicer.SendMessage(
+            json.dumps(
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "X"}],
+                    },
+                    "blocking": False,
+                }
+            )
+        )
         task_id = json.loads(create_json)["id"]
         # Task may already be completed, but CancelTask should either
         # succeed or raise TaskNotCancelableError
         try:
-            result = json.loads(await servicer.CancelTask(json.dumps({"taskId": task_id})))
+            result = json.loads(
+                await servicer.CancelTask(json.dumps({"taskId": task_id}))
+            )
             assert result["status"]["state"] == "canceled"
         except Exception:
             pass  # Already completed — expected
@@ -152,13 +170,15 @@ class TestCancelTask:
 class TestStreamMessage:
     @pytest.mark.asyncio
     async def test_stream_yields_events(self, servicer: A2AServicer) -> None:
-        request = json.dumps({
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Stream me"}],
-            },
-        })
+        request = json.dumps(
+            {
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Stream me"}],
+                },
+            }
+        )
         events: list[dict[str, Any]] = []
         async for event_json in servicer.StreamMessage(request):
             events.append(json.loads(event_json))

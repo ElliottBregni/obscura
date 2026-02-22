@@ -54,7 +54,11 @@ from obscura.integrations.mcp.client import MCPClient, MCPSessionManager
 
 from obscura.integrations.mcp.server import ObscuraMCPServer, create_mcp_router
 
-from obscura.integrations.mcp.config_loader import DiscoveredMCPServer, build_runtime_server_configs, discover_mcp_servers
+from obscura.integrations.mcp.config_loader import (
+    DiscoveredMCPServer,
+    build_runtime_server_configs,
+    discover_mcp_servers,
+)
 from obscura.integrations.mcp.catalog import (
     MCPCatalogEntry,
     MCPCatalogProvider,

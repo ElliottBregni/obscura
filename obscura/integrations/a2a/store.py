@@ -74,13 +74,9 @@ class TaskStore(Protocol):
 
     async def cancel_task(self, task_id: str) -> Task: ...
 
-    def subscribe(
-        self, task_id: str
-    ) -> AsyncIterator[StreamEvent]: ...
+    def subscribe(self, task_id: str) -> AsyncIterator[StreamEvent]: ...
 
-    async def publish_update(
-        self, task_id: str, event: StreamEvent
-    ) -> None: ...
+    async def publish_update(self, task_id: str, event: StreamEvent) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +94,11 @@ class InMemoryTaskStore:
     def __init__(self) -> None:
         self._tasks: dict[str, Task] = {}
         self._context_tasks: dict[str, list[str]] = defaultdict(list)
-        self._subscribers: dict[str, list[asyncio.Queue[StreamEvent]]] = defaultdict(list)
+        self._subscribers: dict[str, list[asyncio.Queue[StreamEvent]]] = defaultdict(
+            list
+        )
 
-    async def create_task(
-        self, context_id: str, initial_message: A2AMessage
-    ) -> Task:
+    async def create_task(self, context_id: str, initial_message: A2AMessage) -> Task:
         task_id = f"task-{uuid.uuid4().hex[:12]}"
         now = datetime.now(UTC)
 
@@ -306,9 +302,7 @@ class RedisTaskStore:
             return None
         return Task.model_validate_json(data)
 
-    async def create_task(
-        self, context_id: str, initial_message: A2AMessage
-    ) -> Task:
+    async def create_task(self, context_id: str, initial_message: A2AMessage) -> Task:
         task_id = f"task-{uuid.uuid4().hex[:12]}"
         now = datetime.now(UTC)
 

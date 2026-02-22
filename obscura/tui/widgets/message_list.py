@@ -135,14 +135,14 @@ class MessageList(VerticalScroll):
         if offset_y >= max_y - 2:
             self.auto_scroll_enabled = True
 
+    def request_scroll_to_bottom(self) -> None:
+        """Explicitly scroll to bottom (e.g., new message posted)."""
+        self.auto_scroll_enabled = True
+        self.scroll_end(animate=False)
+
 
 def _get_y(offset: object) -> int:
     """Extract y attribute from Textual offset objects safely."""
     if offset is None:
         return 0
     return cast(int, getattr(offset, "y", 0))
-
-    def request_scroll_to_bottom(self) -> None:
-        """Explicitly scroll to bottom (e.g., new message posted)."""
-        self.auto_scroll_enabled = True
-        self.scroll_end(animate=False)

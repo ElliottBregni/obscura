@@ -1380,7 +1380,9 @@ Examples:
         help="Sync vault config to repos (skills, instructions, docs)",
     )
     vault_parser.add_argument(
-        "--dry-run", action="store_true", help="Preview without changes",
+        "--dry-run",
+        action="store_true",
+        help="Preview without changes",
     )
     vault_parser.add_argument(
         "--mode",
@@ -1410,7 +1412,9 @@ Examples:
         help="Discover, copy, and index agent sessions to ~/dev/.obscura/",
     )
     agents_parser.add_argument(
-        "--dry-run", action="store_true", help="Preview without changes",
+        "--dry-run",
+        action="store_true",
+        help="Preview without changes",
     )
     agents_parser.add_argument(
         "--agent",
@@ -1435,7 +1439,9 @@ Examples:
         help="Discover, copy, and index agent skills, commands, plugins, configs",
     )
     skills_parser.add_argument(
-        "--dry-run", action="store_true", help="Preview without changes",
+        "--dry-run",
+        action="store_true",
+        help="Preview without changes",
     )
     skills_parser.add_argument(
         "--agent",

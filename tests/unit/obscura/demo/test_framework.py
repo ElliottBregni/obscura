@@ -50,7 +50,9 @@ class _FakeAgent:
         _ = max_turns
         # emulate missing args call being denied
         if on_confirm is not None:
-            approved = on_confirm(ToolCallInfo(tool_use_id="1", name="run_shell", input={}))
+            approved = on_confirm(
+                ToolCallInfo(tool_use_id="1", name="run_shell", input={})
+            )
             if approved is False:
                 return f"loop-denied:{self.model}:{prompt}"
         return f"loop:{self.model}:{prompt}"

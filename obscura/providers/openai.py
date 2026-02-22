@@ -187,7 +187,9 @@ class OpenAIBackend:
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_client()
-        prompt, structured, api_mode, native_openai = self._resolve_request(prompt, kwargs)
+        prompt, structured, api_mode, native_openai = self._resolve_request(
+            prompt, kwargs
+        )
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("openai.send") as span:
             _set_span_attr(span, "backend", "openai")
@@ -200,9 +202,7 @@ class OpenAIBackend:
             if api_mode == "responses":
                 msg = await self._send_via_responses(prompt, kwargs, native_openai)
             else:
-                messages = self.build_messages(
-                    prompt, structured_messages=structured
-                )
+                messages = self.build_messages(prompt, structured_messages=structured)
                 create_kwargs = self.build_create_kwargs(kwargs)
 
                 response = await self._client.chat.completions.create(
@@ -270,7 +270,9 @@ class OpenAIBackend:
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks."""
         self._ensure_client()
-        prompt, structured, api_mode, native_openai = self._resolve_request(prompt, kwargs)
+        prompt, structured, api_mode, native_openai = self._resolve_request(
+            prompt, kwargs
+        )
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("openai.stream") as span:
             _set_span_attr(span, "backend", "openai")
@@ -281,14 +283,14 @@ class OpenAIBackend:
             )
 
             if api_mode == "responses":
-                async for chunk in self._stream_via_responses(prompt, kwargs, native_openai):
+                async for chunk in self._stream_via_responses(
+                    prompt, kwargs, native_openai
+                ):
                     yield chunk
                 await self._run_hooks(HookContext(hook=HookPoint.STOP))
                 return
 
-            messages = self.build_messages(
-                prompt, structured_messages=structured
-            )
+            messages = self.build_messages(prompt, structured_messages=structured)
             create_kwargs = self.build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
@@ -546,11 +548,7 @@ class OpenAIBackend:
             if isinstance(raw_api_mode, str):
                 api_mode = raw_api_mode
 
-        mode = (
-            mode_raw
-            if isinstance(mode_raw, str)
-            else ExecutionMode.UNIFIED.value
-        )
+        mode = mode_raw if isinstance(mode_raw, str) else ExecutionMode.UNIFIED.value
         if api_mode is None and mode == ExecutionMode.NATIVE.value:
             api_mode = "responses"
 
@@ -799,11 +797,13 @@ class OpenAIBackend:
                 # OpenAI uses "tool" role for tool results
                 for block in msg.content:
                     if block.kind == "tool_result":
-                        result.append({
-                            "role": "tool",
-                            "content": block.text,
-                            "tool_call_id": block.tool_use_id,
-                        })
+                        result.append(
+                            {
+                                "role": "tool",
+                                "content": block.text,
+                                "tool_call_id": block.tool_use_id,
+                            }
+                        )
                 continue
 
             # Build content — simple text or list of blocks

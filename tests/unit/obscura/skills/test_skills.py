@@ -62,7 +62,13 @@ class EchoSkill(Skill):
             description="Count characters",
             parameters=[
                 CapabilityParameter("text", "string", "Text to count"),
-                CapabilityParameter("uppercase", "boolean", "Uppercase output", required=False, default=False),
+                CapabilityParameter(
+                    "uppercase",
+                    "boolean",
+                    "Uppercase output",
+                    required=False,
+                    default=False,
+                ),
             ],
             returns=CapabilityReturn("number", "Character count"),
         ),
@@ -416,7 +422,7 @@ class TestSkillLoader:
     def test_load_from_file(self, tmp_path: Path) -> None:
         skill_file = tmp_path / "my_skill.py"
         skill_file.write_text(
-            '''\
+            """\
 from obscura.skills.base import (
     Skill, SkillCapability, CapabilityParameter, CapabilityReturn,
     SkillHealth, SkillMetadata,
@@ -448,7 +454,7 @@ class TestLoadedSkill(Skill):
 
     async def shutdown(self) -> None:
         pass
-'''
+"""
         )
 
         loader = SkillLoader()
@@ -473,7 +479,7 @@ class TestLoadedSkill(Skill):
         (tmp_path / "_private.py").write_text("# ignored")
         skill_file = tmp_path / "greet.py"
         skill_file.write_text(
-            '''\
+            """\
 from obscura.skills.base import (
     Skill, SkillCapability, CapabilityParameter, CapabilityReturn,
     SkillHealth, SkillMetadata,
@@ -505,7 +511,7 @@ class GreetSkill(Skill):
 
     async def shutdown(self) -> None:
         pass
-'''
+"""
         )
 
         loader = SkillLoader()

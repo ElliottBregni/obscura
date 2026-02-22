@@ -140,16 +140,12 @@ class TestChatHelpers:
         assert "hmm" in out
 
     def test_render_event_tool_call(self, capsys: pytest.CaptureFixture[str]) -> None:
-        ev = AgentEvent(
-            kind=AgentEventKind.TOOL_CALL, tool_name="search", turn=1
-        )
+        ev = AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="search", turn=1)
         _render_event(ev)
         out = capsys.readouterr().out
         assert "search" in out
 
-    def test_render_event_tool_result(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_render_event_tool_result(self, capsys: pytest.CaptureFixture[str]) -> None:
         ev = AgentEvent(
             kind=AgentEventKind.TOOL_RESULT,
             tool_result="found 3 results",
@@ -240,9 +236,7 @@ class TestChatUnifiedSingleShot:
 
         async def _capture_run_loop(*_args: Any, **kwargs: Any) -> Any:
             call_kwargs.update(kwargs)
-            yield AgentEvent(
-                kind=AgentEventKind.TEXT_DELTA, text="ok", turn=1
-            )
+            yield AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="ok", turn=1)
             yield AgentEvent(kind=AgentEventKind.AGENT_DONE, text="ok", turn=1)
 
         mock_client = _make_mock_client()
@@ -264,9 +258,7 @@ class TestChatUnifiedSingleShot:
 
         async def _capture_run_loop(*_args: Any, **kwargs: Any) -> Any:
             call_kwargs.update(kwargs)
-            yield AgentEvent(
-                kind=AgentEventKind.TEXT_DELTA, text="ok", turn=1
-            )
+            yield AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="ok", turn=1)
             yield AgentEvent(kind=AgentEventKind.AGENT_DONE, text="ok", turn=1)
 
         mock_client = _make_mock_client()
@@ -348,7 +340,10 @@ class TestChatNativeMode:
 
         assert result.exit_code == 0
         # Should show fallback message about raw SDK
-        assert "native" in result.output.lower() or "claude native response" in result.output
+        assert (
+            "native" in result.output.lower()
+            or "claude native response" in result.output
+        )
 
     def test_chat_native_no_client(self, runner: CliRunner) -> None:
         """Native mode with no native client shows error."""
@@ -376,11 +371,11 @@ class TestChatMemory:
         """--no-memory should skip memory operations."""
         mock_client = _make_mock_client()
 
-        with _patch_client(mock_client), patch(
-            "obscura.cli.chat_cli._load_memory_context"
-        ) as mock_load, patch(
-            "obscura.cli.chat_cli._persist_transcript"
-        ) as mock_persist:
+        with (
+            _patch_client(mock_client),
+            patch("obscura.cli.chat_cli._load_memory_context") as mock_load,
+            patch("obscura.cli.chat_cli._persist_transcript") as mock_persist,
+        ):
             result = runner.invoke(
                 cli,
                 ["chat", "hello", "-b", "openai", "--no-memory"],
@@ -394,9 +389,10 @@ class TestChatMemory:
         """Memory is enabled by default — _persist_transcript is called."""
         mock_client = _make_mock_client()
 
-        with _patch_client(mock_client), patch(
-            "obscura.cli.chat_cli._persist_transcript"
-        ) as mock_persist:
+        with (
+            _patch_client(mock_client),
+            patch("obscura.cli.chat_cli._persist_transcript") as mock_persist,
+        ):
             result = runner.invoke(
                 cli,
                 ["chat", "hello", "-b", "openai", "--no-stream"],
@@ -441,9 +437,7 @@ class TestChatSession:
         mock_client = _make_mock_client()
 
         with _patch_client(mock_client):
-            result = runner.invoke(
-                cli, ["chat", "hello", "-b", "openai"]
-            )
+            result = runner.invoke(cli, ["chat", "hello", "-b", "openai"])
 
         assert result.exit_code == 0
         mock_client.create_session.assert_awaited_once()
@@ -470,9 +464,10 @@ class TestPassthrough:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
-            "subprocess.run", return_value=mock_result
-        ) as mock_run:
+        with (
+            patch("shutil.which", return_value="/usr/bin/claude"),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
             runner.invoke(cli, ["passthrough", "claude", "--", "--help"])
 
         # subprocess.run was called with the right command
@@ -505,8 +500,9 @@ class TestPassthrough:
         mock_proc.stdout = mock_stdout
         mock_proc.stderr = mock_stderr
 
-        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
-            "asyncio.create_subprocess_exec", return_value=mock_proc
+        with (
+            patch("shutil.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
         ):
             result = runner.invoke(
                 cli, ["passthrough", "--capture", "claude", "--", "--help"]
@@ -542,8 +538,9 @@ class TestPassthrough:
         mock_proc.stdout = mock_stdout
         mock_proc.stderr = mock_stderr
 
-        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
-            "asyncio.create_subprocess_exec", return_value=mock_proc
+        with (
+            patch("shutil.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
         ):
             result = runner.invoke(cli, ["passthrough", "--capture", "claude"])
 
@@ -581,8 +578,9 @@ class TestPassthrough:
         mock_proc.stdout = mock_stdout
         mock_proc.stderr = mock_stderr
 
-        with patch("shutil.which", return_value="/usr/bin/openai"), patch(
-            "asyncio.create_subprocess_exec", return_value=mock_proc
+        with (
+            patch("shutil.which", return_value="/usr/bin/openai"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
         ):
             result = runner.invoke(cli, ["passthrough", "--capture", "openai"])
 

@@ -26,7 +26,9 @@ class TestOpenClawBridgeDemo:
         assert result["status"]["status"] == "RUNNING"
         assert isinstance(result["run"]["result"], str)
         assert result["workflow"]["status"] == "completed"
-        telemetry = cast(list[dict[str, Any]], result["workflow"]["telemetry"]["attempts"])
+        telemetry = cast(
+            list[dict[str, Any]], result["workflow"]["telemetry"]["attempts"]
+        )
         assert isinstance(telemetry, list)
         assert len(telemetry) >= 1
         assert result["memory_value"] == "Review this patch."

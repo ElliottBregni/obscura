@@ -100,9 +100,7 @@ class RuntimeLifecycleEvent:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
-RuntimeLifecycleHook = Callable[
-    [RuntimeLifecycleEvent], None | Awaitable[None]
-]
+RuntimeLifecycleHook = Callable[[RuntimeLifecycleEvent], None | Awaitable[None]]
 
 
 class MCPConfig(BaseModel):
@@ -331,9 +329,7 @@ class Agent:
                 resolve_env=self.config.mcp.resolve_env,
             )
             selected_names = (
-                self.config.mcp.server_names
-                if self.config.mcp.server_names
-                else None
+                self.config.mcp.server_names if self.config.mcp.server_names else None
             )
             server_configs = build_runtime_server_configs(
                 discovered,
@@ -342,7 +338,10 @@ class Agent:
             )
 
         if self.config.mcp.enabled and server_configs:
-            from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+            from obscura.integrations.mcp.types import (
+                MCPConnectionConfig,
+                MCPTransportType,
+            )
 
             mcp_configs: list[MCPConnectionConfig] = []
             for server_config in server_configs:
@@ -1269,7 +1268,11 @@ class AgentRuntime:
             target_agent_id=agent.id,
             mode=mode,
         )
-        timeout = timeout_seconds if timeout_seconds is not None else agent.config.timeout_seconds
+        timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else agent.config.timeout_seconds
+        )
         if use_loop:
             call = agent.run_loop(prompt, max_turns=max_turns, **merged_context)
         else:
@@ -1303,8 +1306,13 @@ class AgentRuntime:
             target_agent_id=agent.id,
             mode=mode,
         )
-        timeout = timeout_seconds if timeout_seconds is not None else agent.config.timeout_seconds
+        timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else agent.config.timeout_seconds
+        )
         if not use_loop:
+
             async def _direct_stream() -> AsyncIterator[str]:
                 async for chunk in agent.stream(prompt, **merged_context):
                     yield chunk

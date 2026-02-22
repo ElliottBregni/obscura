@@ -18,16 +18,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime
 import os
 from pathlib import Path
 import shlex
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
+from obscura.auth.models import AuthenticatedUser
 from obscura.core.types import Backend, ChunkKind, SessionRef
 from obscura.core.client import ObscuraClient
+from obscura.memory import MemoryStore
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +213,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="Initial mode (default: ask).",
     )
 
+    # -- observe subcommand ----------------------------------------------
+    observe_parser = sub.add_parser(
+        "observe",
+        help="Tail agent runtime state from memory and highlight stalled agents.",
+    )
+    observe_parser.add_argument(
+        "--user-id",
+        required=True,
+        help="User ID whose memory database should be observed.",
+    )
+    observe_parser.add_argument(
+        "--email",
+        default="observe@obscura.local",
+        help="Email used to construct the observer user identity.",
+    )
+    observe_parser.add_argument(
+        "--org-id",
+        default="org-observe",
+        help="Org ID used to construct the observer user identity.",
+    )
+    observe_parser.add_argument(
+        "--namespace",
+        default="agent:runtime",
+        help="Memory namespace containing agent state records.",
+    )
+    observe_parser.add_argument(
+        "--interval-seconds",
+        type=float,
+        default=1.0,
+        help="Polling interval in seconds (default: 1.0).",
+    )
+    observe_parser.add_argument(
+        "--stale-seconds",
+        type=float,
+        default=20.0,
+        help="Emit stalled warning when RUNNING/WAITING state is older than this threshold.",
+    )
+    observe_parser.add_argument(
+        "--duration-seconds",
+        type=float,
+        default=0.0,
+        help="Optional max observe duration. 0 means run until interrupted.",
+    )
+    observe_parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Print one snapshot and exit.",
+    )
+
     return p
 
 
@@ -216,11 +269,15 @@ def build_parser() -> argparse.ArgumentParser:
 # Async runner (agent commands)
 # ---------------------------------------------------------------------------
 
-_AGENT_COMMANDS: frozenset[str] = frozenset({"copilot", "claude", "openai", "moonshot", "localllm"})
+_AGENT_COMMANDS: frozenset[str] = frozenset(
+    {"copilot", "claude", "openai", "moonshot", "localllm"}
+)
 
 
 async def _run(args: argparse.Namespace) -> int:
-    backend: str = args.command  # "copilot", "claude", "openai", "moonshot", or "localllm"
+    backend: str = (
+        args.command
+    )  # "copilot", "claude", "openai", "moonshot", or "localllm"
 
     # Initialize telemetry if available (CLI mode — text logging, no auth user)
     _init_cli_telemetry()
@@ -504,6 +561,200 @@ def _run_tui(args: argparse.Namespace) -> int:
     return 0
 
 
+@dataclass(frozen=True)
+class ObservedAgentState:
+    """Compact runtime state object used by the observe command."""
+
+    agent_id: str
+    name: str
+    status: str
+    updated_at: datetime
+    iteration_count: int
+    error_message: str | None
+
+    def signature(self) -> tuple[str, str, int, str | None]:
+        return (
+            self.status,
+            self.updated_at.isoformat(),
+            self.iteration_count,
+            self.error_message,
+        )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> ObservedAgentState | None:
+        agent_id = payload.get("agent_id")
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            return None
+        name = payload.get("name")
+        status = payload.get("status")
+        updated_raw = payload.get("updated_at")
+        if not isinstance(name, str) or not isinstance(status, str):
+            return None
+        if not isinstance(updated_raw, str):
+            return None
+        updated_at = _parse_iso_datetime(updated_raw)
+        if updated_at is None:
+            return None
+        iteration_raw = payload.get("iteration_count", 0)
+        iteration_count = int(iteration_raw) if isinstance(iteration_raw, int) else 0
+        error_message = payload.get("error_message")
+        if error_message is not None and not isinstance(error_message, str):
+            error_message = str(error_message)
+        return cls(
+            agent_id=agent_id,
+            name=name,
+            status=status,
+            updated_at=updated_at,
+            iteration_count=iteration_count,
+            error_message=error_message,
+        )
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _build_observe_user(args: argparse.Namespace) -> AuthenticatedUser:
+    return AuthenticatedUser(
+        user_id=str(args.user_id),
+        email=str(args.email),
+        roles=("operator",),
+        org_id=str(args.org_id),
+        token_type="user",
+        raw_token="observe-token",
+    )
+
+
+def collect_observed_agent_states(
+    store: MemoryStore,
+    *,
+    namespace: str,
+) -> list[ObservedAgentState]:
+    states: list[ObservedAgentState] = []
+    for key in store.list_keys(namespace=namespace):
+        if not key.key.startswith("agent_state_"):
+            continue
+        payload = store.get(key.key, namespace=namespace)
+        if not isinstance(payload, dict):
+            continue
+        payload_dict = cast(dict[Any, Any], payload)
+        typed_payload: dict[str, Any] = {}
+        for raw_key, raw_value in payload_dict.items():
+            key_name = raw_key if isinstance(raw_key, str) else str(raw_key)
+            typed_payload[key_name] = raw_value
+        state = ObservedAgentState.from_payload(typed_payload)
+        if state is None:
+            continue
+        states.append(state)
+    return sorted(states, key=lambda entry: (entry.updated_at, entry.agent_id))
+
+
+def find_stale_agent_ids(
+    states: list[ObservedAgentState],
+    *,
+    now: datetime,
+    stale_seconds: float,
+) -> list[str]:
+    stale: list[str] = []
+    for state in states:
+        if state.status not in {"RUNNING", "WAITING"}:
+            continue
+        age = (now - state.updated_at).total_seconds()
+        if age >= stale_seconds:
+            stale.append(state.agent_id)
+    return stale
+
+
+def _render_state_line(state: ObservedAgentState) -> str:
+    updated = state.updated_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+    base = (
+        f"{state.agent_id} name={state.name} status={state.status} "
+        f"iter={state.iteration_count} updated={updated}"
+    )
+    if state.error_message:
+        return f"{base} error={state.error_message}"
+    return base
+
+
+def run_observe(args: argparse.Namespace) -> int:
+    interval = max(0.1, float(args.interval_seconds))
+    stale_seconds = max(1.0, float(args.stale_seconds))
+    duration_seconds = max(0.0, float(args.duration_seconds))
+    namespace = str(args.namespace)
+
+    user = _build_observe_user(args)
+    store = MemoryStore.for_user(user)
+    stats = store.get_stats()
+    db_path = str(stats.get("db_path", "unknown"))
+    print(
+        f"[observe] user={user.user_id} namespace={namespace} db={db_path} "
+        f"interval={interval:.1f}s stale={stale_seconds:.1f}s",
+        flush=True,
+    )
+
+    previous_by_id: dict[str, tuple[str, str, int, str | None]] = {}
+    stale_alerts: set[tuple[str, str]] = set()
+    started = time.monotonic()
+
+    try:
+        while True:
+            now = datetime.now(UTC)
+            states = collect_observed_agent_states(store, namespace=namespace)
+            current_ids = {state.agent_id for state in states}
+
+            for state in states:
+                signature = state.signature()
+                if previous_by_id.get(state.agent_id) != signature:
+                    print(_render_state_line(state), flush=True)
+
+            stale_ids = set(
+                find_stale_agent_ids(states, now=now, stale_seconds=stale_seconds)
+            )
+            for state in states:
+                if state.agent_id not in stale_ids:
+                    continue
+                signature_key = (state.agent_id, state.updated_at.isoformat())
+                if signature_key in stale_alerts:
+                    continue
+                age = (now - state.updated_at).total_seconds()
+                print(
+                    f"WARNING: stalled agent {state.agent_id} "
+                    f"(status={state.status}, age={age:.1f}s)",
+                    flush=True,
+                )
+                stale_alerts.add(signature_key)
+
+            removed_ids = set(previous_by_id) - current_ids
+            for agent_id in sorted(removed_ids):
+                print(f"{agent_id} removed from namespace={namespace}", flush=True)
+
+            previous_by_id = {state.agent_id: state.signature() for state in states}
+
+            if bool(args.once):
+                break
+            if (
+                duration_seconds > 0
+                and (time.monotonic() - started) >= duration_seconds
+            ):
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return 130
+
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -525,6 +776,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "passthrough":
         return _run_passthrough(args)
+
+    if args.command == "observe":
+        return run_observe(args)
 
     if args.command in _AGENT_COMMANDS:
         return asyncio.run(_run(args))

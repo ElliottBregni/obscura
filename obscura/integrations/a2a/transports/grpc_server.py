@@ -73,6 +73,7 @@ class A2AServicer:
         task = await self._service.tasks_get(task_id)
         if task is None:
             from obscura.integrations.a2a.types import TaskNotFoundError
+
             raise TaskNotFoundError(task_id)
         return task.model_dump_json()
 
@@ -205,19 +206,23 @@ def _wrap_unary(
     fn: Callable[[str], Awaitable[str]],
 ) -> Callable[..., Awaitable[str]]:
     """Wrap an async servicer method for grpc.aio unary handler."""
+
     async def handler(request: str, context: Any) -> str:
         try:
             return await fn(request)
         except A2AError as e:
             import grpc
+
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(json.dumps({"code": e.code, "message": e.message}))
             return ""
         except Exception as e:
             import grpc
+
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
             return ""
+
     return handler
 
 
@@ -225,16 +230,20 @@ def _wrap_stream(
     fn: Callable[[str], AsyncIterator[str]],
 ) -> Callable[..., AsyncIterator[str]]:
     """Wrap an async generator servicer method for grpc.aio stream handler."""
+
     async def handler(request: str, context: Any) -> AsyncIterator[str]:
         try:
             async for item in fn(request):
                 yield item
         except A2AError as e:
             import grpc
+
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(json.dumps({"code": e.code, "message": e.message}))
         except Exception as e:
             import grpc
+
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
+
     return handler

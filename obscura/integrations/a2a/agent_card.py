@@ -63,7 +63,8 @@ class AgentCardGenerator:
         return self
 
     def with_skills_from_tools(
-        self, tools: list[dict[str, Any]],
+        self,
+        tools: list[dict[str, Any]],
     ) -> AgentCardGenerator:
         """Generate skills from a list of tool-spec-like dicts.
 
@@ -99,13 +100,16 @@ class AgentCardGenerator:
     def with_bearer_auth(self) -> AgentCardGenerator:
         """Add HTTP Bearer authentication scheme."""
         self._security_schemes["bearer"] = AuthScheme(
-            type="http", scheme="bearer",
+            type="http",
+            scheme="bearer",
         )
         self._security = [{"bearer": []}]
         return self
 
     def with_auth_scheme(
-        self, name: str, scheme: AuthScheme,
+        self,
+        name: str,
+        scheme: AuthScheme,
     ) -> AgentCardGenerator:
         """Add a custom authentication scheme."""
         self._security_schemes[name] = scheme
@@ -114,7 +118,9 @@ class AgentCardGenerator:
         return self
 
     def with_provider(
-        self, name: str, url: str = "",
+        self,
+        name: str,
+        url: str = "",
     ) -> AgentCardGenerator:
         """Set the agent provider information."""
         self._provider = {"name": name}

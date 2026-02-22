@@ -39,7 +39,9 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
         yield c
 
 
-def _rpc(method: str, params: dict[str, Any] | None = None, req_id: int = 1) -> dict[str, Any]:
+def _rpc(
+    method: str, params: dict[str, Any] | None = None, req_id: int = 1
+) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
         "id": req_id,
@@ -56,13 +58,19 @@ def _rpc(method: str, params: dict[str, Any] | None = None, req_id: int = 1) -> 
 class TestMessageSend:
     @pytest.mark.asyncio
     async def test_send_creates_task(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/rpc", json=_rpc("message/send", {
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Hello A2A"}],
-            },
-        }))
+        resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "message/send",
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "Hello A2A"}],
+                    },
+                },
+            ),
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["jsonrpc"] == "2.0"
@@ -72,14 +80,20 @@ class TestMessageSend:
 
     @pytest.mark.asyncio
     async def test_send_with_context(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/rpc", json=_rpc("message/send", {
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Test"}],
-            },
-            "contextId": "ctx-custom",
-        }))
+        resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "message/send",
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "Test"}],
+                    },
+                    "contextId": "ctx-custom",
+                },
+            ),
+        )
         result = resp.json()["result"]
         assert result["contextId"] == "ctx-custom"
 
@@ -88,26 +102,44 @@ class TestTasksGet:
     @pytest.mark.asyncio
     async def test_get_existing(self, client: AsyncClient) -> None:
         # Create a task first
-        create_resp = await client.post("/a2a/rpc", json=_rpc("message/send", {
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Test"}],
-            },
-        }))
+        create_resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "message/send",
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "Test"}],
+                    },
+                },
+            ),
+        )
         task_id = create_resp.json()["result"]["id"]
 
         # Get the task
-        resp = await client.post("/a2a/rpc", json=_rpc("tasks/get", {
-            "taskId": task_id,
-        }))
+        resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "tasks/get",
+                {
+                    "taskId": task_id,
+                },
+            ),
+        )
         assert resp.json()["result"]["id"] == task_id
 
     @pytest.mark.asyncio
     async def test_get_not_found(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/rpc", json=_rpc("tasks/get", {
-            "taskId": "nonexistent",
-        }))
+        resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "tasks/get",
+                {
+                    "taskId": "nonexistent",
+                },
+            ),
+        )
         body = resp.json()
         assert "error" in body
         assert body["error"]["code"] == -32001
@@ -123,18 +155,33 @@ class TestTasksList:
     @pytest.mark.asyncio
     async def test_list_with_tasks(self, client: AsyncClient) -> None:
         # Create tasks
-        await client.post("/a2a/rpc", json=_rpc("message/send", {
-            "message": {
-                "role": "user", "messageId": "m1",
-                "parts": [{"kind": "text", "text": "A"}],
-            },
-        }))
-        await client.post("/a2a/rpc", json=_rpc("message/send", {
-            "message": {
-                "role": "user", "messageId": "m2",
-                "parts": [{"kind": "text", "text": "B"}],
-            },
-        }, req_id=2))
+        await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "message/send",
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "A"}],
+                    },
+                },
+            ),
+        )
+        await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "message/send",
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m2",
+                        "parts": [{"kind": "text", "text": "B"}],
+                    },
+                },
+                req_id=2,
+            ),
+        )
 
         resp = await client.post("/a2a/rpc", json=_rpc("tasks/list"))
         assert len(resp.json()["result"]["tasks"]) == 2
@@ -144,19 +191,32 @@ class TestTasksCancel:
     @pytest.mark.asyncio
     async def test_cancel(self, client: AsyncClient) -> None:
         # Create non-blocking task
-        create_resp = await client.post("/a2a/rpc", json=_rpc("message/send", {
-            "message": {
-                "role": "user", "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Test"}],
-            },
-            "configuration": {"blocking": False},
-        }))
+        create_resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "message/send",
+                {
+                    "message": {
+                        "role": "user",
+                        "messageId": "m1",
+                        "parts": [{"kind": "text", "text": "Test"}],
+                    },
+                    "configuration": {"blocking": False},
+                },
+            ),
+        )
         task_id = create_resp.json()["result"]["id"]
 
         # Cancel it (may already be completed if fast enough)
-        resp = await client.post("/a2a/rpc", json=_rpc("tasks/cancel", {
-            "taskId": task_id,
-        }))
+        resp = await client.post(
+            "/a2a/rpc",
+            json=_rpc(
+                "tasks/cancel",
+                {
+                    "taskId": task_id,
+                },
+            ),
+        )
         body = resp.json()
         # Either canceled successfully or already terminal
         assert "result" in body or "error" in body
@@ -165,9 +225,9 @@ class TestTasksCancel:
 class TestAgentCard:
     @pytest.mark.asyncio
     async def test_get_card(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/rpc", json=_rpc(
-            "agent/authenticatedExtendedCard"
-        ))
+        resp = await client.post(
+            "/a2a/rpc", json=_rpc("agent/authenticatedExtendedCard")
+        )
         result = resp.json()["result"]
         assert result["name"] == "TestAgent"
         assert result["protocolVersion"] == "0.3"

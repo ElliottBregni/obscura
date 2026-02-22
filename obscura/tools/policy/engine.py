@@ -10,14 +10,16 @@ from typing import Any
 from obscura.tools.policy.models import PolicyResult, ToolPolicy
 
 # Tools that operate on file-system paths.
-_FS_TOOLS: frozenset[str] = frozenset({
-    "read_file",
-    "write_file",
-    "list_directory",
-    "search_files",
-    "create_directory",
-    "delete_file",
-})
+_FS_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "list_directory",
+        "search_files",
+        "create_directory",
+        "delete_file",
+    }
+)
 
 
 def evaluate_policy(

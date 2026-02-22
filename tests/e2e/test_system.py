@@ -90,5 +90,3 @@ class TestDomain2SystemSync:
         sync_instance.sync_system()
 
         assert settings.exists(), "~/.claude/settings.local.json should be preserved"
-
-

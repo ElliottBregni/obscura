@@ -168,9 +168,7 @@ async def test_openclaw_bridge_sets_request_and_idempotency_headers() -> None:
 
     async def handler(request: httpx.Request) -> httpx.Response:
         seen_headers["x-request-id"] = request.headers.get("x-request-id", "")
-        seen_headers["x-idempotency-key"] = request.headers.get(
-            "x-idempotency-key", ""
-        )
+        seen_headers["x-idempotency-key"] = request.headers.get("x-idempotency-key", "")
         return httpx.Response(200, json={"status": "ok"})
 
     transport = httpx.MockTransport(handler)
@@ -202,7 +200,9 @@ async def test_openclaw_bridge_run_agent_sends_timeout_and_cancellation() -> Non
                 json.loads(request.content.decode("utf-8")),
             )
             seen_payload.update(payload)
-            return httpx.Response(200, json={"agent_id": "a1", "status": "RUNNING", "result": "ok"})
+            return httpx.Response(
+                200, json={"agent_id": "a1", "status": "RUNNING", "result": "ok"}
+            )
         return httpx.Response(404, json={"detail": "not found"})
 
     transport = httpx.MockTransport(handler)

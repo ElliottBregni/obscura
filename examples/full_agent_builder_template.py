@@ -141,7 +141,9 @@ def make_user_for_backend(backend: BackendName) -> AuthenticatedUser:
 class BuilderAPERAgent(BaseAgent):
     """Custom APER agent that runs inside the builder path."""
 
-    def __init__(self, client: ObscuraClient, profile: APERProfile, *, name: str) -> None:
+    def __init__(
+        self, client: ObscuraClient, profile: APERProfile, *, name: str
+    ) -> None:
         super().__init__(client, name=name)
         self._profile = profile
 
@@ -180,8 +182,7 @@ class BuilderAPERAgent(BaseAgent):
     async def respond(self, ctx: AgentContext) -> None:
         execute_result = str(ctx.results[-1]) if ctx.results else ""
         ctx.response = (
-            f"{self._profile.respond_template}\n\n"
-            f"Execution Output:\n{execute_result}"
+            f"{self._profile.respond_template}\n\nExecution Output:\n{execute_result}"
         )
 
 
@@ -463,14 +464,31 @@ class AgentBuilder:
                     profile=self.aper_profile,
                     name=self.name,
                 )
-                agent.on(HookPoint.PRE_ANALYZE, lambda _: self._aper_phase_log("pre_analyze"))
-                agent.on(HookPoint.POST_ANALYZE, lambda _: self._aper_phase_log("post_analyze"))
+                agent.on(
+                    HookPoint.PRE_ANALYZE, lambda _: self._aper_phase_log("pre_analyze")
+                )
+                agent.on(
+                    HookPoint.POST_ANALYZE,
+                    lambda _: self._aper_phase_log("post_analyze"),
+                )
                 agent.on(HookPoint.PRE_PLAN, lambda _: self._aper_phase_log("pre_plan"))
-                agent.on(HookPoint.POST_PLAN, lambda _: self._aper_phase_log("post_plan"))
-                agent.on(HookPoint.PRE_EXECUTE, lambda _: self._aper_phase_log("pre_execute"))
-                agent.on(HookPoint.POST_EXECUTE, lambda _: self._aper_phase_log("post_execute"))
-                agent.on(HookPoint.PRE_RESPOND, lambda _: self._aper_phase_log("pre_respond"))
-                agent.on(HookPoint.POST_RESPOND, lambda _: self._aper_phase_log("post_respond"))
+                agent.on(
+                    HookPoint.POST_PLAN, lambda _: self._aper_phase_log("post_plan")
+                )
+                agent.on(
+                    HookPoint.PRE_EXECUTE, lambda _: self._aper_phase_log("pre_execute")
+                )
+                agent.on(
+                    HookPoint.POST_EXECUTE,
+                    lambda _: self._aper_phase_log("post_execute"),
+                )
+                agent.on(
+                    HookPoint.PRE_RESPOND, lambda _: self._aper_phase_log("pre_respond")
+                )
+                agent.on(
+                    HookPoint.POST_RESPOND,
+                    lambda _: self._aper_phase_log("post_respond"),
+                )
                 result = await agent.run(prompt)
                 if self.lifecycle_logs_enabled:
                     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -550,14 +568,36 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("run", "stream", "loop", "stream_loop", "aper"),
         default="loop",
     )
-    parser.add_argument("--skill-file", action="append", default=[], help="Path to skill markdown/text file.")
-    parser.add_argument("--skills-dir", default="", help="Directory containing skill files (*.md).")
-    parser.add_argument("--mcp-stdio", action="append", default=[], help="MCP stdio server as name:command:arg1,arg2")
-    parser.add_argument("--mcp-sse", action="append", default=[], help="MCP sse server as name:url")
-    parser.add_argument("--mcp-discover", action="store_true", help="Enable MCP config auto-discovery.")
+    parser.add_argument(
+        "--skill-file",
+        action="append",
+        default=[],
+        help="Path to skill markdown/text file.",
+    )
+    parser.add_argument(
+        "--skills-dir", default="", help="Directory containing skill files (*.md)."
+    )
+    parser.add_argument(
+        "--mcp-stdio",
+        action="append",
+        default=[],
+        help="MCP stdio server as name:command:arg1,arg2",
+    )
+    parser.add_argument(
+        "--mcp-sse", action="append", default=[], help="MCP sse server as name:url"
+    )
+    parser.add_argument(
+        "--mcp-discover", action="store_true", help="Enable MCP config auto-discovery."
+    )
     parser.add_argument("--mcp-config", default="config/mcp-config.json")
-    parser.add_argument("--mcp-server-names", default="", help="Comma list for discovered MCP server names.")
-    parser.add_argument("--a2a-urls", default="", help="Comma-separated A2A remote tool URLs.")
+    parser.add_argument(
+        "--mcp-server-names",
+        default="",
+        help="Comma list for discovered MCP server names.",
+    )
+    parser.add_argument(
+        "--a2a-urls", default="", help="Comma-separated A2A remote tool URLs."
+    )
     parser.add_argument("--a2a-auth-token", default="")
     parser.add_argument("--enable-system-tools", action="store_true")
     parser.add_argument("--disable-system-tools", action="store_true")
@@ -605,16 +645,21 @@ def main() -> None:
     elif args.enable_system_tools:
         enable_system_tools = True
 
-    builder = AgentBuilder().with_identity(
-        name=str(args.name),
-        backend=backend_name,
-        memory_namespace=f"builder:{backend_name}:{args.name}",
-    ).with_runtime_options(
-        max_iterations=int(args.max_iterations),
-        timeout_seconds=float(args.timeout_seconds),
-        enable_system_tools=enable_system_tools,
-        tags=[tag.strip() for tag in str(args.tags).split(",") if tag.strip()],
-    ).with_lifecycle_logs(not bool(args.disable_lifecycle_logs))
+    builder = (
+        AgentBuilder()
+        .with_identity(
+            name=str(args.name),
+            backend=backend_name,
+            memory_namespace=f"builder:{backend_name}:{args.name}",
+        )
+        .with_runtime_options(
+            max_iterations=int(args.max_iterations),
+            timeout_seconds=float(args.timeout_seconds),
+            enable_system_tools=enable_system_tools,
+            tags=[tag.strip() for tag in str(args.tags).split(",") if tag.strip()],
+        )
+        .with_lifecycle_logs(not bool(args.disable_lifecycle_logs))
+    )
 
     aper_execute_template = str(args.aper_execute_template).strip()
     if aper_execute_template:
@@ -641,14 +686,20 @@ def main() -> None:
         builder.with_mcp_sse_server(name=name, url=url)
 
     if args.mcp_discover:
-        names = [entry.strip() for entry in str(args.mcp_server_names).split(",") if entry.strip()]
+        names = [
+            entry.strip()
+            for entry in str(args.mcp_server_names).split(",")
+            if entry.strip()
+        ]
         builder.with_mcp_discovery(
             config_path=str(args.mcp_config),
             server_names=names,
         )
 
     if str(args.a2a_urls).strip():
-        urls = [entry.strip() for entry in str(args.a2a_urls).split(",") if entry.strip()]
+        urls = [
+            entry.strip() for entry in str(args.a2a_urls).split(",") if entry.strip()
+        ]
         token = str(args.a2a_auth_token).strip()
         builder.with_a2a_remote_tools(urls=urls, auth_token=(token or None))
 

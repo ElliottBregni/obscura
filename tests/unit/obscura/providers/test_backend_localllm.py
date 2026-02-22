@@ -137,7 +137,9 @@ class TestLocalLLMStream:
         async for c in b.stream("Hi"):
             chunks.append(c)
 
-        text_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
+        text_chunks: list[StreamChunk] = [
+            c for c in chunks if c.kind == ChunkKind.TEXT_DELTA
+        ]
         assert len(text_chunks) == 2
         assert text_chunks[0].text == "Hello"
         assert text_chunks[0].native_event is chunk1

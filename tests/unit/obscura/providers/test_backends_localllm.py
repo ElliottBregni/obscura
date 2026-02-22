@@ -76,9 +76,7 @@ def _mock_completion(
     return resp
 
 
-def _mock_stream_chunk(
-    content: str | None = None, tool_calls: Any = None
-) -> MagicMock:
+def _mock_stream_chunk(content: str | None = None, tool_calls: Any = None) -> MagicMock:
     """Build a single mock streaming chunk."""
     delta: Any = MagicMock()
     delta.content = content
@@ -287,7 +285,9 @@ class TestLocalLLMSend:
         await b.send("Hi")
 
         call_kwargs: Any = client.chat.completions.create.call_args
-        messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get("messages")
+        messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get(
+            "messages"
+        )
         assert messages[0] == {"role": "system", "content": "Be concise"}
 
     @pytest.mark.asyncio
@@ -299,7 +299,9 @@ class TestLocalLLMSend:
         await b.send("Hi")
 
         call_kwargs: Any = client.chat.completions.create.call_args
-        messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get("messages")
+        messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get(
+            "messages"
+        )
         # No system message — first message should be the user prompt
         assert messages[0] == {"role": "user", "content": "Hi"}
 
@@ -583,7 +585,9 @@ class TestLocalLLMSessions:
         assert fork.backend == Backend.LOCALLLM
         assert fork.session_id != src.session_id
         assert b.active_session == fork.session_id
-        assert len(b.conversations[fork.session_id]) == len(b.conversations[src.session_id])
+        assert len(b.conversations[fork.session_id]) == len(
+            b.conversations[src.session_id]
+        )
 
     @pytest.mark.asyncio
     async def test_fork_missing_session_raises(self) -> None:
@@ -626,7 +630,9 @@ class TestLocalLLMSessions:
         await b.send("second message")
 
         call_kwargs: Any = client.chat.completions.create.call_args
-        messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get("messages")
+        messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get(
+            "messages"
+        )
         # Should contain: history (user+assistant from first turn) + current user prompt
         user_messages: list[Any] = [m for m in messages if m["role"] == "user"]
         assert len(user_messages) == 2

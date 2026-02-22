@@ -116,9 +116,7 @@ async def test_a2a_aper_workflow_executes_all_system_tools() -> None:
     expected = {spec.name for spec in get_system_tool_specs()}
     cached_response: str | None = None
 
-    async def _patched_execute(
-        self: WorkflowA2AService, task: Any, prompt: str
-    ) -> str:
+    async def _patched_execute(self: WorkflowA2AService, task: Any, prompt: str) -> str:
         _ = self
         _ = task
         nonlocal cached_response

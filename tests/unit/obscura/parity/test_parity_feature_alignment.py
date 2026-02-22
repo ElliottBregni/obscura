@@ -14,12 +14,16 @@ def test_profiles_align_with_backends() -> None:
     profiles = profile_map()
 
     openai_caps = OpenAIBackend(AuthConfig(openai_api_key="sk-test")).capabilities()
-    claude_caps = ClaudeBackend(AuthConfig(anthropic_api_key="sk-ant-test")).capabilities()
+    claude_caps = ClaudeBackend(
+        AuthConfig(anthropic_api_key="sk-ant-test")
+    ).capabilities()
     copilot_caps = CopilotBackend(AuthConfig(github_token="gh-test")).capabilities()
     local_caps = LocalLLMBackend(
         AuthConfig(localllm_base_url="http://localhost:1234/v1")
     ).capabilities()
-    moonshot_caps = MoonshotBackend(AuthConfig(moonshot_api_key="msk-test")).capabilities()
+    moonshot_caps = MoonshotBackend(
+        AuthConfig(moonshot_api_key="msk-test")
+    ).capabilities()
 
     assert Backend.OPENAI in profiles
     assert Backend.MOONSHOT in profiles

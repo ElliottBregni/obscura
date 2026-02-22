@@ -163,9 +163,7 @@ def _parse_simple_toml(path: Path) -> dict[str, Any]:
                     result[key] = []
                 else:
                     items = [
-                        i.strip().strip('"')
-                        for i in inner.split(",")
-                        if i.strip()
+                        i.strip().strip('"') for i in inner.split(",") if i.strip()
                     ]
                     result[key] = items
             # Number
@@ -198,7 +196,7 @@ def _collapse_home(p: Path) -> str:
     home = str(Path.home())
     s = str(p)
     if s.startswith(home):
-        return "~" + s[len(home):]
+        return "~" + s[len(home) :]
     return s
 
 
@@ -263,15 +261,17 @@ class SkillDiscovery:
                 if not files:
                     continue
                 fm = _parse_frontmatter(skill_dir / "SKILL.md")
-                items.append(DiscoveredItem(
-                    agent="claude",
-                    item_type="skill",
-                    name=skill_dir.name,
-                    source_path=skill_dir,
-                    files=files,
-                    mtime=_max_mtime(files),
-                    frontmatter=fm,
-                ))
+                items.append(
+                    DiscoveredItem(
+                        agent="claude",
+                        item_type="skill",
+                        name=skill_dir.name,
+                        source_path=skill_dir,
+                        files=files,
+                        mtime=_max_mtime(files),
+                        frontmatter=fm,
+                    )
+                )
 
         # Commands: commands/*.md
         commands_dir = base / "commands"
@@ -282,18 +282,22 @@ class SkillDiscovery:
                 fm = _parse_frontmatter(cmd_file)
                 name = cmd_file.stem
                 files = [(cmd_file, Path(cmd_file.name))]
-                items.append(DiscoveredItem(
-                    agent="claude",
-                    item_type="command",
-                    name=name,
-                    source_path=cmd_file,
-                    files=files,
-                    mtime=_max_mtime(files),
-                    frontmatter=fm,
-                ))
+                items.append(
+                    DiscoveredItem(
+                        agent="claude",
+                        item_type="command",
+                        name=name,
+                        source_path=cmd_file,
+                        files=files,
+                        mtime=_max_mtime(files),
+                        frontmatter=fm,
+                    )
+                )
 
         # Plugins: plugins/marketplaces/claude-plugins-official/plugins/*/
-        plugins_base = base / "plugins" / "marketplaces" / "claude-plugins-official" / "plugins"
+        plugins_base = (
+            base / "plugins" / "marketplaces" / "claude-plugins-official" / "plugins"
+        )
         if plugins_base.is_dir():
             for plugin_dir in sorted(plugins_base.iterdir()):
                 if not plugin_dir.is_dir() or plugin_dir.name.startswith("."):
@@ -317,15 +321,17 @@ class SkillDiscovery:
                         fm["author"] = str(author_dict.get("name", ""))
                 else:
                     fm["name"] = plugin_dir.name
-                items.append(DiscoveredItem(
-                    agent="claude",
-                    item_type="plugin",
-                    name=plugin_dir.name,
-                    source_path=plugin_dir,
-                    files=files,
-                    mtime=_max_mtime(files),
-                    frontmatter=fm,
-                ))
+                items.append(
+                    DiscoveredItem(
+                        agent="claude",
+                        item_type="plugin",
+                        name=plugin_dir.name,
+                        source_path=plugin_dir,
+                        files=files,
+                        mtime=_max_mtime(files),
+                        frontmatter=fm,
+                    )
+                )
 
         # Config files
         for config_name in ("settings.json", "settings.local.json"):
@@ -335,14 +341,16 @@ class SkillDiscovery:
                     mtime = config_path.stat().st_mtime
                 except OSError:
                     mtime = 0.0
-                items.append(DiscoveredItem(
-                    agent="claude",
-                    item_type="config",
-                    name=config_name,
-                    source_path=config_path,
-                    files=[(config_path, Path(config_name))],
-                    mtime=mtime,
-                ))
+                items.append(
+                    DiscoveredItem(
+                        agent="claude",
+                        item_type="config",
+                        name=config_name,
+                        source_path=config_path,
+                        files=[(config_path, Path(config_name))],
+                        mtime=mtime,
+                    )
+                )
 
         return items
 
@@ -358,14 +366,16 @@ class SkillDiscovery:
                 mtime = config_path.stat().st_mtime
             except OSError:
                 mtime = 0.0
-            items.append(DiscoveredItem(
-                agent="copilot",
-                item_type="config",
-                name="config.json",
-                source_path=config_path,
-                files=[(config_path, Path("config.json"))],
-                mtime=mtime,
-            ))
+            items.append(
+                DiscoveredItem(
+                    agent="copilot",
+                    item_type="config",
+                    name="config.json",
+                    source_path=config_path,
+                    files=[(config_path, Path("config.json"))],
+                    mtime=mtime,
+                )
+            )
 
         return items
 
@@ -392,29 +402,33 @@ class SkillDiscovery:
                             continue
                         fm = _parse_frontmatter(sys_skill / "SKILL.md")
                         fm["system"] = "true"
-                        items.append(DiscoveredItem(
-                            agent="codex",
-                            item_type="skill",
-                            name=f".system/{sys_skill.name}",
-                            source_path=sys_skill,
-                            files=files,
-                            mtime=_max_mtime(files),
-                            frontmatter=fm,
-                        ))
+                        items.append(
+                            DiscoveredItem(
+                                agent="codex",
+                                item_type="skill",
+                                name=f".system/{sys_skill.name}",
+                                source_path=sys_skill,
+                                files=files,
+                                mtime=_max_mtime(files),
+                                frontmatter=fm,
+                            )
+                        )
                 else:
                     files = _collect_dir_files(skill_dir)
                     if not files:
                         continue
                     fm = _parse_frontmatter(skill_dir / "SKILL.md")
-                    items.append(DiscoveredItem(
-                        agent="codex",
-                        item_type="skill",
-                        name=skill_dir.name,
-                        source_path=skill_dir,
-                        files=files,
-                        mtime=_max_mtime(files),
-                        frontmatter=fm,
-                    ))
+                    items.append(
+                        DiscoveredItem(
+                            agent="codex",
+                            item_type="skill",
+                            name=skill_dir.name,
+                            source_path=skill_dir,
+                            files=files,
+                            mtime=_max_mtime(files),
+                            frontmatter=fm,
+                        )
+                    )
 
         # Automations: automations/*/automation.toml
         automations_dir = base / "automations"
@@ -436,15 +450,17 @@ class SkillDiscovery:
                     prompt = str(toml_data["prompt"])
                     fm["prompt"] = prompt[:120] + "..." if len(prompt) > 120 else prompt
                 files = _collect_dir_files(auto_dir)
-                items.append(DiscoveredItem(
-                    agent="codex",
-                    item_type="automation",
-                    name=auto_dir.name,
-                    source_path=auto_dir,
-                    files=files,
-                    mtime=_max_mtime(files),
-                    frontmatter=fm,
-                ))
+                items.append(
+                    DiscoveredItem(
+                        agent="codex",
+                        item_type="automation",
+                        name=auto_dir.name,
+                        source_path=auto_dir,
+                        files=files,
+                        mtime=_max_mtime(files),
+                        frontmatter=fm,
+                    )
+                )
 
         # Config: config.toml
         config_path = base / "config.toml"
@@ -453,28 +469,32 @@ class SkillDiscovery:
                 mtime = config_path.stat().st_mtime
             except OSError:
                 mtime = 0.0
-            items.append(DiscoveredItem(
-                agent="codex",
-                item_type="config",
-                name="config.toml",
-                source_path=config_path,
-                files=[(config_path, Path("config.toml"))],
-                mtime=mtime,
-            ))
+            items.append(
+                DiscoveredItem(
+                    agent="codex",
+                    item_type="config",
+                    name="config.toml",
+                    source_path=config_path,
+                    files=[(config_path, Path("config.toml"))],
+                    mtime=mtime,
+                )
+            )
 
         # Rules: rules/
         rules_dir = base / "rules"
         if rules_dir.is_dir():
             files = _collect_dir_files(rules_dir)
             if files:
-                items.append(DiscoveredItem(
-                    agent="codex",
-                    item_type="rule",
-                    name="rules",
-                    source_path=rules_dir,
-                    files=files,
-                    mtime=_max_mtime(files),
-                ))
+                items.append(
+                    DiscoveredItem(
+                        agent="codex",
+                        item_type="rule",
+                        name="rules",
+                        source_path=rules_dir,
+                        files=files,
+                        mtime=_max_mtime(files),
+                    )
+                )
 
         return items
 
@@ -614,14 +634,18 @@ class SkillIndexBuilder:
                             for sys_dir in sorted(item_dir.iterdir()):
                                 if sys_dir.is_dir():
                                     entry = self._parse_dir_item(
-                                        agent, item_type, sys_dir,
+                                        agent,
+                                        item_type,
+                                        sys_dir,
                                         name_prefix=".system/",
                                     )
                                     if entry:
                                         entries.append(entry)
                         else:
                             entry = self._parse_dir_item(
-                                agent, item_type, item_dir,
+                                agent,
+                                item_type,
+                                item_dir,
                             )
                             if entry:
                                 entries.append(entry)
@@ -675,7 +699,8 @@ class SkillIndexBuilder:
             description = pjson.get("description", "") or fm.get("description", "")
             if pjson:
                 metadata["plugin_json"] = {
-                    k: v for k, v in pjson.items()
+                    k: v
+                    for k, v in pjson.items()
                     if k in ("name", "description", "version", "author")
                 }
             # Discover contained items
@@ -683,11 +708,13 @@ class SkillIndexBuilder:
             cmds_dir = item_dir / "commands"
             metadata["contained_agents"] = (
                 [f.stem for f in sorted(agents_dir.iterdir()) if f.suffix == ".md"]
-                if agents_dir.is_dir() else []
+                if agents_dir.is_dir()
+                else []
             )
             metadata["contained_commands"] = (
                 [f.stem for f in sorted(cmds_dir.iterdir()) if f.suffix == ".md"]
-                if cmds_dir.is_dir() else []
+                if cmds_dir.is_dir()
+                else []
             )
             metadata["has_skill"] = (item_dir / "SKILL.md").is_file()
 
@@ -699,18 +726,24 @@ class SkillIndexBuilder:
                 metadata["schedule"] = str(toml_data["rrule"])
             if toml_data.get("prompt"):
                 prompt = str(toml_data["prompt"])
-                metadata["prompt"] = prompt[:120] + "..." if len(prompt) > 120 else prompt
+                metadata["prompt"] = (
+                    prompt[:120] + "..." if len(prompt) > 120 else prompt
+                )
 
         else:
             description = ""
 
         synced_rel = f"{agent}/{item_type}s/{name}/"
         source_path = _collapse_home(
-            SKILL_SOURCES[agent].source_dir / (
-                "skills" if item_type == "skill"
-                else "automations" if item_type == "automation"
+            SKILL_SOURCES[agent].source_dir
+            / (
+                "skills"
+                if item_type == "skill"
+                else "automations"
+                if item_type == "automation"
                 else "plugins/marketplaces/claude-plugins-official/plugins"
-            ) / name
+            )
+            / name
         )
 
         return SkillEntry(
@@ -781,9 +814,7 @@ class SkillIndexBuilder:
             type="config",
             name=name,
             description=f"{agent} configuration",
-            source_path=_collapse_home(
-                SKILL_SOURCES[agent].source_dir / name
-            ),
+            source_path=_collapse_home(SKILL_SOURCES[agent].source_dir / name),
             synced_path=f"{agent}/config/{name}",
             files=[name],
             metadata=metadata,
@@ -804,7 +835,8 @@ class SkillIndexBuilder:
             if f.is_file():
                 try:
                     rule_count += sum(
-                        1 for line in f.read_text(errors="replace").splitlines()
+                        1
+                        for line in f.read_text(errors="replace").splitlines()
                         if line.strip() and not line.startswith("#")
                     )
                 except OSError:
@@ -910,7 +942,9 @@ class SkillCleaner:
         for a in agents:
             agent_dir = self.skills_dir / a
             if agent_dir.is_dir():
-                count = sum(1 for d in agent_dir.iterdir() if not d.name.startswith("."))
+                count = sum(
+                    1 for d in agent_dir.iterdir() if not d.name.startswith(".")
+                )
                 print(f"  [{a}] Removing {count} synced items")
                 if not self.dry_run:
                     shutil.rmtree(agent_dir)
@@ -1000,16 +1034,15 @@ class SkillsSync:
         print(f"  INDEX.jsonl: {len(entries)} items indexed")
 
         # Feed vault
-        portable = [
-            i for i in all_items
-            if i.item_type in ("skill", "command")
-        ]
+        portable = [i for i in all_items if i.item_type in ("skill", "command")]
         if portable:
             print(f"\nFeeding vault ({len(portable)} portable items)...")
             vc, vs = self._feeder.feed(portable)
             print(f"  Vault: {vc} files copied, {vs} unchanged")
 
-        print(f"\nSync complete. {total_copied} files copied, {total_skipped} unchanged.")
+        print(
+            f"\nSync complete. {total_copied} files copied, {total_skipped} unchanged."
+        )
 
     def rebuild_index(self, agent: str | None = None) -> None:
         agents_filter = [agent] if agent else None

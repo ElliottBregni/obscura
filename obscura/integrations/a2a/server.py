@@ -48,11 +48,17 @@ class ObscuraA2AServer:
         description: str = "",
     ) -> None:
         self._store: TaskStore = store or InMemoryTaskStore()
-        self._agent_card = agent_card or AgentCardGenerator(
-            name=name,
-            url=url,
-            description=description,
-        ).with_bearer_auth().with_provider("Obscura", "https://obscura.dev").build()
+        self._agent_card = (
+            agent_card
+            or AgentCardGenerator(
+                name=name,
+                url=url,
+                description=description,
+            )
+            .with_bearer_auth()
+            .with_provider("Obscura", "https://obscura.dev")
+            .build()
+        )
 
         self._service = A2AService(
             store=self._store,

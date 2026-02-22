@@ -34,7 +34,11 @@ SCENARIOS: tuple[tuple[ScenarioSpec, ScenarioExpectation], ...] = (
         ),
         ScenarioExpectation(
             should_pass=True,
-            expected_events=("assistant.message_delta", "tool.execution_start", "session.idle"),
+            expected_events=(
+                "assistant.message_delta",
+                "tool.execution_start",
+                "session.idle",
+            ),
         ),
     ),
     (

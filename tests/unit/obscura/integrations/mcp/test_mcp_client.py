@@ -18,7 +18,12 @@ from obscura.integrations.mcp.types import (
     MCPToolResult,
     MCPTransportType,
 )
-from obscura.integrations.mcp.client import MCPClient, MCPSessionManager, StdioTransport, SSETransport
+from obscura.integrations.mcp.client import (
+    MCPClient,
+    MCPSessionManager,
+    StdioTransport,
+    SSETransport,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +94,10 @@ class TestMCPClientConnect:
         mock_transport.connect = AsyncMock()
         mock_transport.send = AsyncMock()
 
-        with patch("obscura.integrations.mcp.client.StdioTransport", return_value=mock_transport):
+        with patch(
+            "obscura.integrations.mcp.client.StdioTransport",
+            return_value=mock_transport,
+        ):
             # Mock _request to return init response, and _notification to do nothing
             with patch.object(
                 client,
@@ -113,7 +121,9 @@ class TestMCPClientConnect:
         mock_transport.connect = AsyncMock()
         mock_transport.send = AsyncMock()
 
-        with patch("obscura.integrations.mcp.client.SSETransport", return_value=mock_transport):
+        with patch(
+            "obscura.integrations.mcp.client.SSETransport", return_value=mock_transport
+        ):
             with patch.object(
                 client,
                 "_request",
@@ -947,4 +957,3 @@ class TestSSETransport:
         # Queue should be empty
         result = await transport.receive()
         assert result is None
-

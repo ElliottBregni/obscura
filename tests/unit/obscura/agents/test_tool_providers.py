@@ -113,9 +113,12 @@ class TestA2ARemoteToolProvider:
             handler=lambda: "ok",
         )
 
-        with patch("obscura.tools.providers.A2AClient") as MockA2AClient, patch(
-            "obscura.tools.providers.register_remote_agent_as_tool",
-            return_value=spec,
+        with (
+            patch("obscura.tools.providers.A2AClient") as MockA2AClient,
+            patch(
+                "obscura.tools.providers.register_remote_agent_as_tool",
+                return_value=spec,
+            ),
         ):
             remote_client = AsyncMock()
             MockA2AClient.return_value = remote_client

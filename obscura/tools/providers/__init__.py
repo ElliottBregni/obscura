@@ -33,11 +33,9 @@ class ToolProviderContext:
 
 
 class ToolProvider(Protocol):
-    async def install(self, context: ToolProviderContext) -> None:
-        ...
+    async def install(self, context: ToolProviderContext) -> None: ...
 
-    async def uninstall(self, context: ToolProviderContext) -> None:
-        ...
+    async def uninstall(self, context: ToolProviderContext) -> None: ...
 
 
 class SystemToolProvider:

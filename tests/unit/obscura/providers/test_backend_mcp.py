@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from obscura.core.types import HookContext, HookPoint, ToolSpec
 from obscura.providers.mcp_backend import MCPBackend
-from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType, MCPError
+from obscura.integrations.mcp.types import (
+    MCPConnectionConfig,
+    MCPTransportType,
+    MCPError,
+)
 
 
 class TestMCPBackendInit:

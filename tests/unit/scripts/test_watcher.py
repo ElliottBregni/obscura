@@ -65,5 +65,3 @@ class TestVaultWatcher:
         )
         watcher.release_lock()
         assert not mock_lock_file.exists(), "Lock file should be removed"
-
-

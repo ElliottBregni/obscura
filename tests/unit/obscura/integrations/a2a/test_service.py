@@ -30,7 +30,9 @@ from obscura.integrations.a2a.types import (
 from typing import Literal
 
 
-def _msg(text: str = "hello", role: Literal["user", "agent"] = "user", msg_id: str = "m1") -> A2AMessage:
+def _msg(
+    text: str = "hello", role: Literal["user", "agent"] = "user", msg_id: str = "m1"
+) -> A2AMessage:
     return A2AMessage(role=role, messageId=msg_id, parts=[TextPart(text=text)])
 
 

@@ -25,7 +25,9 @@ def client(app: Any) -> TestClient:
 
 class TestWebhookTest:
     @patch("httpx.AsyncClient")
-    def test_webhook_test_success(self, mock_async_cls: Any, client: TestClient) -> None:
+    def test_webhook_test_success(
+        self, mock_async_cls: Any, client: TestClient
+    ) -> None:
         # Create a webhook first
         create = client.post(
             "/api/v1/webhooks",
@@ -55,7 +57,9 @@ class TestWebhookTest:
         assert resp.status_code == 404
 
     @patch("httpx.AsyncClient")
-    def test_webhook_test_network_error(self, mock_async_cls: Any, client: TestClient) -> None:
+    def test_webhook_test_network_error(
+        self, mock_async_cls: Any, client: TestClient
+    ) -> None:
         create = client.post(
             "/api/v1/webhooks",
             json={
@@ -82,7 +86,11 @@ class TestTriggerWebhooks:
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
     async def test_trigger_webhooks(self, mock_async_cls: Any) -> None:
-        from obscura.routes.webhooks import get_webhooks_store, trigger_webhooks, WebhookConfig
+        from obscura.routes.webhooks import (
+            get_webhooks_store,
+            trigger_webhooks,
+            WebhookConfig,
+        )
 
         store = get_webhooks_store()
         # Clear all webhooks to avoid interference from other tests
@@ -110,7 +118,11 @@ class TestTriggerWebhooks:
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
     async def test_trigger_skips_inactive(self, mock_async_cls: Any) -> None:
-        from obscura.routes.webhooks import get_webhooks_store, trigger_webhooks, WebhookConfig
+        from obscura.routes.webhooks import (
+            get_webhooks_store,
+            trigger_webhooks,
+            WebhookConfig,
+        )
 
         store = get_webhooks_store()
         store.clear()
@@ -137,7 +149,11 @@ class TestTriggerWebhooks:
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
     async def test_trigger_skips_wrong_event(self, mock_async_cls: Any) -> None:
-        from obscura.routes.webhooks import get_webhooks_store, trigger_webhooks, WebhookConfig
+        from obscura.routes.webhooks import (
+            get_webhooks_store,
+            trigger_webhooks,
+            WebhookConfig,
+        )
 
         store = get_webhooks_store()
         store.clear()

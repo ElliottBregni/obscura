@@ -172,7 +172,9 @@ class TestAuthResolution:
             with pytest.raises(ValueError, match="Claude auth requires"):
                 ObscuraClient("claude")
 
-    def test_missing_moonshot_auth_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_moonshot_auth_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Missing Moonshot API key should raise ValueError."""
         for var in ("MOONSHOT_API_KEY", "KIMI_API_KEY", "OPENAI_API_KEY"):
             monkeypatch.delenv(var, raising=False)
@@ -235,6 +237,7 @@ class TestHookRegistration:
 
         def callback(ctx: Any) -> None:
             pass
+
         client.on(HookPoint.PRE_TOOL_USE, callback)
 
         backend = client.backend_impl
@@ -537,6 +540,7 @@ class TestRunLoop:
     def test_run_loop_with_on_confirm(self) -> None:
         """run_loop() should pass on_confirm callback to AgentLoop."""
         client, mock_backend = _make_client_with_mock_backend()
+
         def confirm_fn(info: Any) -> bool:
             return True
 

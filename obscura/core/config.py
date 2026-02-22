@@ -85,7 +85,8 @@ class ObscuraConfig(BaseModel):
             capability_secret=os.environ.get("OBSCURA_CAPABILITY_SECRET", ""),
             capability_ttl=int(os.environ.get("OBSCURA_CAPABILITY_TTL", "3600")),
             # A2A
-            a2a_enabled=os.environ.get("OBSCURA_A2A_ENABLED", "false").lower() == "true",
+            a2a_enabled=os.environ.get("OBSCURA_A2A_ENABLED", "false").lower()
+            == "true",
             a2a_redis_url=os.environ.get("OBSCURA_A2A_REDIS_URL", ""),
             a2a_task_ttl=int(os.environ.get("OBSCURA_A2A_TASK_TTL", "86400")),
             a2a_grpc_port=int(os.environ.get("OBSCURA_A2A_GRPC_PORT", "50051")),

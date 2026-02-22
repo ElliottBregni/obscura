@@ -29,7 +29,8 @@ from obscura.core.tools import ToolRegistry
 def app() -> FastAPI:
     store = InMemoryTaskStore()
     card = AgentCardGenerator(
-        "Remote Support Agent", "https://support.example.com",
+        "Remote Support Agent",
+        "https://support.example.com",
         description="Handles customer support tickets",
     ).build()
     service = A2AService(store=store, agent_card=card)
@@ -127,12 +128,8 @@ class TestRegistryIntegration:
     @pytest.mark.asyncio
     async def test_multiple_agents(self, remote_client: A2AClient) -> None:
         registry = ToolRegistry()
-        register_remote_agent_as_tool(
-            registry, remote_client, tool_name="agent_a"
-        )
-        register_remote_agent_as_tool(
-            registry, remote_client, tool_name="agent_b"
-        )
+        register_remote_agent_as_tool(registry, remote_client, tool_name="agent_a")
+        register_remote_agent_as_tool(registry, remote_client, tool_name="agent_b")
         assert len(registry) == 2
         assert registry.get("agent_a") is not None
         assert registry.get("agent_b") is not None

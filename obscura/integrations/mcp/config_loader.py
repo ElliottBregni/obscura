@@ -123,9 +123,7 @@ def _resolve_command_binary(command: str) -> str:
     if command == "npx":
         nvm_root = Path.home() / ".nvm" / "versions" / "node"
         if nvm_root.is_dir():
-            candidates = sorted(
-                p for p in nvm_root.glob("*/bin/npx") if p.is_file()
-            )
+            candidates = sorted(p for p in nvm_root.glob("*/bin/npx") if p.is_file())
             if candidates:
                 return str(candidates[-1])
 
@@ -155,7 +153,9 @@ def discover_mcp_servers(
         elif raw_transport == "sse":
             transport = MCPTransportType.SSE
         else:
-            raise ValueError(f"Unsupported MCP transport '{raw_transport}' for '{name}'")
+            raise ValueError(
+                f"Unsupported MCP transport '{raw_transport}' for '{name}'"
+            )
 
         args = _tuple_of_str(entry.get("args", []))
         tools = _tuple_of_str(entry.get("tools", []))
@@ -164,7 +164,9 @@ def discover_mcp_servers(
         resolved_env: dict[str, str] = {}
         missing_env: list[str] = []
         for key, raw_value in env_map.items():
-            value, missing_key = _resolve_env_value(str(raw_value), resolve_env=resolve_env)
+            value, missing_key = _resolve_env_value(
+                str(raw_value), resolve_env=resolve_env
+            )
             resolved_env[key] = value
             if missing_key is not None:
                 missing_env.append(missing_key)
@@ -191,7 +193,9 @@ def build_runtime_server_configs(
     primary_server_name: str = "github",
 ) -> list[dict[str, Any]]:
     """Convert discovered MCP servers into agent runtime server dicts."""
-    selected: set[str] | None = set(selected_names) if selected_names is not None else None
+    selected: set[str] | None = (
+        set(selected_names) if selected_names is not None else None
+    )
     available_names = {server.name for server in discovered}
     if selected is not None:
         missing = sorted(selected.difference(available_names))
@@ -201,7 +205,9 @@ def build_runtime_server_configs(
 
     ordered_servers: list[DiscoveredMCPServer]
     if selected_names is not None:
-        by_name: dict[str, DiscoveredMCPServer] = {server.name: server for server in discovered}
+        by_name: dict[str, DiscoveredMCPServer] = {
+            server.name: server for server in discovered
+        }
         ordered_servers = [by_name[name] for name in selected_names]
     else:
         ordered_servers = sorted(

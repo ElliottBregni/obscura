@@ -60,7 +60,9 @@ async def run_obscura_instance(
         model=config.model,
         system_prompt=config.system_prompt,
     ) as client:
-        message = await asyncio.wait_for(client.send(prompt), timeout=config.timeout_seconds)
+        message = await asyncio.wait_for(
+            client.send(prompt), timeout=config.timeout_seconds
+        )
     return message.text
 
 
@@ -90,7 +92,9 @@ async def run_managed_agent(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Obscura clean agent/instance template")
+    parser = argparse.ArgumentParser(
+        description="Obscura clean agent/instance template"
+    )
     parser.add_argument(
         "--mode",
         choices=("instance", "agent"),

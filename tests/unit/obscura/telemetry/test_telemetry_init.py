@@ -41,7 +41,9 @@ class TestSetupLogging:
         from obscura.telemetry import setup_logging
 
         config = ObscuraConfig(otel_enabled=False)
-        with patch("obscura.telemetry.logging.configure_logging", side_effect=ImportError):
+        with patch(
+            "obscura.telemetry.logging.configure_logging", side_effect=ImportError
+        ):
             # Should not raise
             setup_logging(config)
 

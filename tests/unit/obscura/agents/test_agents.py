@@ -516,13 +516,15 @@ class TestAgentStart:
             client_instance.register_tool = MagicMock()
             MockClient.return_value = client_instance
 
-            with patch(
-                "obscura.integrations.mcp.config_loader.discover_mcp_servers"
-            ) as mock_discover, patch(
-                "obscura.integrations.mcp.config_loader.build_runtime_server_configs"
-            ) as mock_build, patch(
-                "obscura.providers.mcp_backend.MCPBackend"
-            ) as MockMCPBackend:
+            with (
+                patch(
+                    "obscura.integrations.mcp.config_loader.discover_mcp_servers"
+                ) as mock_discover,
+                patch(
+                    "obscura.integrations.mcp.config_loader.build_runtime_server_configs"
+                ) as mock_build,
+                patch("obscura.providers.mcp_backend.MCPBackend") as MockMCPBackend,
+            ):
                 mock_discover.return_value = []
                 mock_build.return_value = [
                     {

@@ -664,9 +664,7 @@ def _render_event(event: Any) -> None:
     elif event.kind == AgentEventKind.TOOL_CALL:
         console.print(f"\n[dim][tool] {event.tool_name}[/]", end="")
     elif event.kind == AgentEventKind.TOOL_RESULT:
-        console.print(
-            f"\n[dim][result] {event.tool_result[:80]}[/]", end=""
-        )
+        console.print(f"\n[dim][result] {event.tool_result[:80]}[/]", end="")
 
 
 def _load_memory_context(user: Any, prompt: str) -> str:
@@ -754,7 +752,9 @@ def _persist_transcript(
 @click.option("--model", "-m", default=None, help="Model ID override")
 @click.option("--system-prompt", "-s", default="", help="System instructions")
 @click.option("--session", default=None, help="Session ID to resume")
-@click.option("--no-stream", is_flag=True, help="Disable streaming (wait for full response)")
+@click.option(
+    "--no-stream", is_flag=True, help="Disable streaming (wait for full response)"
+)
 @click.option("--json-output", "json_out", is_flag=True, help="Output as JSON")
 @click.option("--interactive", "-i", is_flag=True, help="Interactive multi-turn mode")
 @click.option("--max-turns", default=10, help="Max agent loop turns")
@@ -851,9 +851,7 @@ def chat(
             # --- Step 3: Resolve/create session ---
             session_ref: SessionRef | None = None
             if session:
-                ref = SessionRef(
-                    session_id=session, backend=BackendEnum(backend)
-                )
+                ref = SessionRef(session_id=session, backend=BackendEnum(backend))
                 await client.resume_session(ref)
                 session_ref = ref
             else:
@@ -877,8 +875,14 @@ def chat(
             # --- Step 6: Route unified vs native ---
             if mode == "native":
                 await _run_native(
-                    client, backend, model, prompt, no_stream, json_out,
-                    interactive, transcript,
+                    client,
+                    backend,
+                    model,
+                    prompt,
+                    no_stream,
+                    json_out,
+                    interactive,
+                    transcript,
                 )
             elif interactive:
                 # --- Unified interactive mode ---
@@ -931,9 +935,7 @@ def chat(
                     console.print()
                     transcript.append({"role": "assistant", "content": turn_text})
             else:
-                console.print(
-                    "[yellow]Provide a prompt or use --interactive mode.[/]"
-                )
+                console.print("[yellow]Provide a prompt or use --interactive mode.[/]")
                 return
 
             # --- Steps 8-9: Persist transcript + update memory ---
@@ -1091,15 +1093,14 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> Non
     vendor_cmds: dict[str, str] = {
         "claude": "claude",
         "openai": "codex",
-        "copilot": "copilot"
+        "copilot": "copilot",
     }
 
     cmd_name = vendor_cmds[vendor]
     cmd_path: str | None = shutil.which(cmd_name)
     if cmd_path is None:
         console.print(
-            f"[bold red]Error:[/] '{cmd_name}' CLI not found on PATH. "
-            f"Install it first."
+            f"[bold red]Error:[/] '{cmd_name}' CLI not found on PATH. Install it first."
         )
         sys.exit(1)
 
@@ -1113,9 +1114,7 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> Non
         async def _run_captured() -> None:
             import time
 
-            console.print(
-                f"[dim]Running (captured): {' '.join(full_cmd)}[/]\n"
-            )
+            console.print(f"[dim]Running (captured): {' '.join(full_cmd)}[/]\n")
 
             proc = await asyncio.create_subprocess_exec(
                 *full_cmd,
@@ -1184,9 +1183,7 @@ def passthrough(vendor: str, vendor_args: tuple[str, ...], capture: bool) -> Non
                         },
                         namespace="passthrough",
                     )
-                    console.print(
-                        f"[dim]Transcript stored in memory ({session_id})[/]"
-                    )
+                    console.print(f"[dim]Transcript stored in memory ({session_id})[/]")
                 except Exception:
                     pass
 

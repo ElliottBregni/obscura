@@ -908,5 +908,3 @@ class TestCreateMCPRouter:
         data = resp.json()
         assert "error" in data
         assert data["error"]["code"] == MCPErrorCode.INTERNAL_ERROR.value
-
-

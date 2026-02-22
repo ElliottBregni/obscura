@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from obscura.parity.models import BackendConformance, ContractCheckResult, MethodContract
+from obscura.parity.models import (
+    BackendConformance,
+    ContractCheckResult,
+    MethodContract,
+)
 
 
 def evaluate_backend_conformance(

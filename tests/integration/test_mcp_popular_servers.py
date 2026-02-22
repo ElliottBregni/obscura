@@ -10,7 +10,10 @@ from typing import Any
 import pytest
 
 from demos.mcp.run_generic_mcp_agent import add_server
-from obscura.integrations.mcp.config_loader import build_runtime_server_configs, discover_mcp_servers
+from obscura.integrations.mcp.config_loader import (
+    build_runtime_server_configs,
+    discover_mcp_servers,
+)
 
 
 @dataclass(frozen=True)
@@ -24,26 +27,90 @@ class PopularServerCase:
 
 
 POPULAR_SERVER_CASES: tuple[PopularServerCase, ...] = (
-    PopularServerCase("github", "stdio", "npx", ("-y", "@modelcontextprotocol/server-github"), "", "GITHUB_PERSONAL_ACCESS_TOKEN"),
+    PopularServerCase(
+        "github",
+        "stdio",
+        "npx",
+        ("-y", "@modelcontextprotocol/server-github"),
+        "",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+    ),
     PopularServerCase("jira", "stdio", "npx", ("-y", "jira-mcp"), "", "JIRA_API_TOKEN"),
-    PopularServerCase("auth0", "stdio", "npx", ("-y", "@auth0/auth0-mcp-server", "run"), "", None),
-    PopularServerCase("postman", "stdio", "npx", ("-y", "@postman/postman-mcp-server"), "", "POSTMAN_API_KEY"),
-    PopularServerCase("playwright", "stdio", "npx", ("-y", "@playwright/mcp@latest"), "", None),
-    PopularServerCase("filesystem", "stdio", "npx", ("-y", "@modelcontextprotocol/server-filesystem", "/tmp"), "", None),
-    PopularServerCase("slack", "stdio", "npx", ("-y", "@modelcontextprotocol/server-slack"), "", "SLACK_BOT_TOKEN"),
-    PopularServerCase("notion", "stdio", "npx", ("-y", "@notionhq/notion-mcp-server"), "", "NOTION_API_KEY"),
-    PopularServerCase("linear", "stdio", "npx", ("-y", "linear-mcp"), "", "LINEAR_API_KEY"),
-    PopularServerCase("stripe", "stdio", "npx", ("-y", "stripe-mcp"), "", "STRIPE_API_KEY"),
-    PopularServerCase("sentry", "stdio", "npx", ("-y", "sentry-mcp"), "", "SENTRY_AUTH_TOKEN"),
-    PopularServerCase("gitlab", "stdio", "npx", ("-y", "gitlab-mcp"), "", "GITLAB_TOKEN"),
-    PopularServerCase("confluence", "stdio", "npx", ("-y", "confluence-mcp"), "", "CONFLUENCE_API_TOKEN"),
-    PopularServerCase("atlassian", "stdio", "npx", ("-y", "atlassian-mcp"), "", "ATLASSIAN_API_TOKEN"),
-    PopularServerCase("jenkins", "stdio", "npx", ("-y", "jenkins-mcp"), "", "JENKINS_TOKEN"),
+    PopularServerCase(
+        "auth0", "stdio", "npx", ("-y", "@auth0/auth0-mcp-server", "run"), "", None
+    ),
+    PopularServerCase(
+        "postman",
+        "stdio",
+        "npx",
+        ("-y", "@postman/postman-mcp-server"),
+        "",
+        "POSTMAN_API_KEY",
+    ),
+    PopularServerCase(
+        "playwright", "stdio", "npx", ("-y", "@playwright/mcp@latest"), "", None
+    ),
+    PopularServerCase(
+        "filesystem",
+        "stdio",
+        "npx",
+        ("-y", "@modelcontextprotocol/server-filesystem", "/tmp"),
+        "",
+        None,
+    ),
+    PopularServerCase(
+        "slack",
+        "stdio",
+        "npx",
+        ("-y", "@modelcontextprotocol/server-slack"),
+        "",
+        "SLACK_BOT_TOKEN",
+    ),
+    PopularServerCase(
+        "notion",
+        "stdio",
+        "npx",
+        ("-y", "@notionhq/notion-mcp-server"),
+        "",
+        "NOTION_API_KEY",
+    ),
+    PopularServerCase(
+        "linear", "stdio", "npx", ("-y", "linear-mcp"), "", "LINEAR_API_KEY"
+    ),
+    PopularServerCase(
+        "stripe", "stdio", "npx", ("-y", "stripe-mcp"), "", "STRIPE_API_KEY"
+    ),
+    PopularServerCase(
+        "sentry", "stdio", "npx", ("-y", "sentry-mcp"), "", "SENTRY_AUTH_TOKEN"
+    ),
+    PopularServerCase(
+        "gitlab", "stdio", "npx", ("-y", "gitlab-mcp"), "", "GITLAB_TOKEN"
+    ),
+    PopularServerCase(
+        "confluence",
+        "stdio",
+        "npx",
+        ("-y", "confluence-mcp"),
+        "",
+        "CONFLUENCE_API_TOKEN",
+    ),
+    PopularServerCase(
+        "atlassian", "stdio", "npx", ("-y", "atlassian-mcp"), "", "ATLASSIAN_API_TOKEN"
+    ),
+    PopularServerCase(
+        "jenkins", "stdio", "npx", ("-y", "jenkins-mcp"), "", "JENKINS_TOKEN"
+    ),
     PopularServerCase("docker", "stdio", "npx", ("-y", "docker-mcp"), "", None),
     PopularServerCase("kubernetes", "stdio", "npx", ("-y", "kubernetes-mcp"), "", None),
-    PopularServerCase("aws", "stdio", "npx", ("-y", "aws-mcp"), "", "AWS_ACCESS_KEY_ID"),
-    PopularServerCase("gcp", "stdio", "npx", ("-y", "gcp-mcp"), "", "GOOGLE_APPLICATION_CREDENTIALS"),
-    PopularServerCase("azure", "stdio", "npx", ("-y", "azure-mcp"), "", "AZURE_OPENAI_API_KEY"),
+    PopularServerCase(
+        "aws", "stdio", "npx", ("-y", "aws-mcp"), "", "AWS_ACCESS_KEY_ID"
+    ),
+    PopularServerCase(
+        "gcp", "stdio", "npx", ("-y", "gcp-mcp"), "", "GOOGLE_APPLICATION_CREDENTIALS"
+    ),
+    PopularServerCase(
+        "azure", "stdio", "npx", ("-y", "azure-mcp"), "", "AZURE_OPENAI_API_KEY"
+    ),
 )
 
 
@@ -288,7 +355,9 @@ def _write_popular_config(path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_popular_server_discovery_and_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_popular_server_discovery_and_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_path = tmp_path / "mcp-config.json"
     _write_popular_config(config_path)
 
@@ -380,7 +449,9 @@ def test_demo_add_server_round_trips_with_core_loader(tmp_path: Path) -> None:
     POPULAR_SERVER_CASES,
     ids=[case.name for case in POPULAR_SERVER_CASES],
 )
-def test_popular_single_server_round_trip(case: PopularServerCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_popular_single_server_round_trip(
+    case: PopularServerCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_path = tmp_path / f"{case.name}-mcp-config.json"
     _write_single_server_config(config_path, case)
 
@@ -439,7 +510,9 @@ def test_top_100_github_mcp_catalog_round_trip(
     assert server.transport.value == "stdio"
     assert server.command == "npx"
 
-    runtime_servers = build_runtime_server_configs(discovered, selected_names=[case.name])
+    runtime_servers = build_runtime_server_configs(
+        discovered, selected_names=[case.name]
+    )
     assert len(runtime_servers) == 1
     runtime_server = runtime_servers[0]
     assert runtime_server["transport"] == "stdio"

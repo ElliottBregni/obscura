@@ -4,7 +4,14 @@ from typing import Any, AsyncIterator
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from obscura.core.auth import AuthConfig
-from obscura.core.types import Backend, ChunkKind, HookPoint, StreamChunk, ToolChoice, ToolSpec
+from obscura.core.types import (
+    Backend,
+    ChunkKind,
+    HookPoint,
+    StreamChunk,
+    ToolChoice,
+    ToolSpec,
+)
 
 
 def _make_auth(api_key: str = "sk-ant-test") -> AuthConfig:
@@ -428,7 +435,9 @@ class TestClaudeStream:
         mock_client.receive_response = mock_receive
         mock_client.query = AsyncMock()
 
-        with patch("obscura.providers.claude.ClaudeIteratorAdapter", side_effect=_fake_adapter):
+        with patch(
+            "obscura.providers.claude.ClaudeIteratorAdapter", side_effect=_fake_adapter
+        ):
             chunks: list[StreamChunk] = []
             async for c in b.stream("ping", tool_choice=ToolChoice.none()):
                 chunks.append(c)

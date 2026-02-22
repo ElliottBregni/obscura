@@ -185,9 +185,7 @@ def required_args_tool_guard(agent: Agent) -> ToolConfirmGuard:
     required_by_tool: dict[str, list[str]] = {}
     for spec in agent.list_registered_tools():
         required_raw = spec.parameters.get("required", [])
-        required_fields = [
-            str(name) for name in required_raw if isinstance(name, str)
-        ]
+        required_fields = [str(name) for name in required_raw if isinstance(name, str)]
         required_by_tool[spec.name] = required_fields
 
     def _confirm(call: ToolCallInfo) -> bool:

@@ -59,9 +59,7 @@ async def agent_spawn(
     mcp_config: dict[str, Any] = body.get("mcp", {})
     mcp_enabled: bool = mcp_config.get("enabled", False)
     mcp_servers: list[dict[str, Any]] = mcp_config.get("servers", [])
-    mcp_config_path = str(
-        mcp_config.get("config_path", str(resolve_obscura_mcp_dir()))
-    )
+    mcp_config_path = str(mcp_config.get("config_path", str(resolve_obscura_mcp_dir())))
     raw_server_names = mcp_config.get("server_names", [])
     mcp_server_names: list[str] = (
         [str(name) for name in cast(list[Any], raw_server_names)]
@@ -73,6 +71,7 @@ async def agent_spawn(
     mcp_resolve_env = bool(mcp_config.get("resolve_env", True))
 
     from obscura.agent.agents import MCPConfig
+
     raw_a2a_remote_tools = body.get("a2a_remote_tools", {})
     a2a_remote_tools: dict[str, Any] = (
         cast(dict[str, Any], raw_a2a_remote_tools)
@@ -239,9 +238,7 @@ async def agent_run(
         if timeout_seconds is None:
             result = await agent.run(prompt, **context)
         else:
-            run_task = asyncio.create_task(
-                agent.run(prompt, **context)
-            )
+            run_task = asyncio.create_task(agent.run(prompt, **context))
             done, _pending = await asyncio.wait(
                 {run_task},
                 timeout=timeout_seconds,

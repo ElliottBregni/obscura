@@ -75,7 +75,9 @@ class SupportResult:
         return {
             "ticket": self.ticket,
             "triage": self.triage.to_dict(),
-            "investigation": self.investigation.to_dict() if self.investigation else None,
+            "investigation": self.investigation.to_dict()
+            if self.investigation
+            else None,
             "resolution": self.resolution.to_dict() if self.resolution else None,
             "escalated": self.escalated,
             "total_time_ms": self.total_time_ms,
@@ -101,6 +103,7 @@ class HookTracker:
             entry = f"{agent_name}.{hook_name}"
             self.fired.append(entry)
             logger.debug("hook fired: %s", entry)
+
         return _cb
 
 

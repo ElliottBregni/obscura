@@ -36,36 +36,46 @@ class TaskState(str, enum.Enum):
 
 # Valid state transitions enforced by the task store.
 VALID_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
-    TaskState.PENDING: frozenset({TaskState.WORKING, TaskState.REJECTED, TaskState.CANCELED}),
-    TaskState.WORKING: frozenset({
-        TaskState.INPUT_REQUIRED,
-        TaskState.AUTH_REQUIRED,
-        TaskState.COMPLETED,
-        TaskState.FAILED,
-        TaskState.CANCELED,
-    }),
-    TaskState.INPUT_REQUIRED: frozenset({
-        TaskState.WORKING,
-        TaskState.CANCELED,
-        TaskState.FAILED,
-    }),
-    TaskState.AUTH_REQUIRED: frozenset({
-        TaskState.WORKING,
-        TaskState.CANCELED,
-        TaskState.FAILED,
-    }),
+    TaskState.PENDING: frozenset(
+        {TaskState.WORKING, TaskState.REJECTED, TaskState.CANCELED}
+    ),
+    TaskState.WORKING: frozenset(
+        {
+            TaskState.INPUT_REQUIRED,
+            TaskState.AUTH_REQUIRED,
+            TaskState.COMPLETED,
+            TaskState.FAILED,
+            TaskState.CANCELED,
+        }
+    ),
+    TaskState.INPUT_REQUIRED: frozenset(
+        {
+            TaskState.WORKING,
+            TaskState.CANCELED,
+            TaskState.FAILED,
+        }
+    ),
+    TaskState.AUTH_REQUIRED: frozenset(
+        {
+            TaskState.WORKING,
+            TaskState.CANCELED,
+            TaskState.FAILED,
+        }
+    ),
     TaskState.COMPLETED: frozenset(),
     TaskState.FAILED: frozenset(),
     TaskState.CANCELED: frozenset(),
     TaskState.REJECTED: frozenset(),
 }
 
-TERMINAL_STATES: frozenset[TaskState] = frozenset({
-    TaskState.COMPLETED,
-    TaskState.FAILED,
-    TaskState.CANCELED,
-    TaskState.REJECTED,
-})
+TERMINAL_STATES: frozenset[TaskState] = frozenset(
+    {
+        TaskState.COMPLETED,
+        TaskState.FAILED,
+        TaskState.CANCELED,
+        TaskState.REJECTED,
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +254,12 @@ class AgentCard(BaseModel):
     defaultInputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     defaultOutputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
-    securitySchemes: dict[str, AuthScheme] = Field(default_factory=lambda: dict[str, AuthScheme]())
-    security: list[dict[str, list[str]]] = Field(default_factory=lambda: list[dict[str, list[str]]]())
+    securitySchemes: dict[str, AuthScheme] = Field(
+        default_factory=lambda: dict[str, AuthScheme]()
+    )
+    security: list[dict[str, list[str]]] = Field(
+        default_factory=lambda: list[dict[str, list[str]]]()
+    )
     provider: dict[str, str] | None = None
     extensions: list[dict[str, Any]] | None = None
 

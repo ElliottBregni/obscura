@@ -15,7 +15,10 @@ from typing import override
 
 import pytest
 
-from obscura.integrations.mcp.catalog import MCPServersOrgCatalogProvider, write_catalog_config
+from obscura.integrations.mcp.catalog import (
+    MCPServersOrgCatalogProvider,
+    write_catalog_config,
+)
 from obscura.integrations.mcp.catalog import MCPRegistryAPICatalogProvider
 from obscura.integrations.mcp.config_loader import discover_mcp_servers
 
@@ -67,7 +70,9 @@ def _run_catalog_server(pages: dict[str, str]) -> Iterator[_CatalogServer]:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         host, port = probe.getsockname()
-    httpd = http.server.ThreadingHTTPServer((str(host), int(port)), _CatalogRequestHandler)
+    httpd = http.server.ThreadingHTTPServer(
+        (str(host), int(port)), _CatalogRequestHandler
+    )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -120,7 +125,9 @@ def test_registry_api_provider_fetches_paginated_top_500(tmp_path: Path) -> None
         page_slugs = slugs[start:end]
         next_cursor = f"c{page_index + 1}" if page_index < 3 else None
         body = {
-            "servers": [{"name": slug, "displayName": slug.upper()} for slug in page_slugs],
+            "servers": [
+                {"name": slug, "displayName": slug.upper()} for slug in page_slugs
+            ],
             "nextCursor": next_cursor,
         }
         path = "/v0.1/servers" if page_index == 0 else f"/v0.1/servers?cursor={cursor}"
@@ -168,7 +175,9 @@ def test_top_500_catalog_includes_supabase_from_source(tmp_path: Path) -> None:
 @pytest.mark.integration
 def test_live_mcpservers_org_top_500_optional() -> None:
     if not bool(int(os.environ.get("OBSCURA_RUN_LIVE_MCP_CATALOG", "0"))):
-        pytest.skip("Set OBSCURA_RUN_LIVE_MCP_CATALOG=1 to run live mcpservers.org fetch")
+        pytest.skip(
+            "Set OBSCURA_RUN_LIVE_MCP_CATALOG=1 to run live mcpservers.org fetch"
+        )
 
     provider = MCPServersOrgCatalogProvider(base_url="https://mcpservers.org")
     entries = provider.fetch_top(limit=500)

@@ -320,8 +320,7 @@ def _resolve_moonshot_key(explicit: str | None) -> str:
         if key:
             return key
     raise ValueError(
-        "Moonshot auth requires one of: "
-        f"{', '.join(_MOONSHOT_KEY_ENV_VARS)} env var."
+        f"Moonshot auth requires one of: {', '.join(_MOONSHOT_KEY_ENV_VARS)} env var."
     )
 
 
@@ -490,7 +489,9 @@ def resolve_auth(
 
     if backend == Backend.MOONSHOT:
         key = _resolve_moonshot_key(config.moonshot_api_key or config.openai_api_key)
-        base_url = _resolve_moonshot_base_url(config.moonshot_base_url or config.openai_base_url)
+        base_url = _resolve_moonshot_base_url(
+            config.moonshot_base_url or config.openai_base_url
+        )
         return AuthConfig(
             moonshot_api_key=key,
             moonshot_base_url=base_url,

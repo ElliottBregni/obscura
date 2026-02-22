@@ -158,7 +158,8 @@ class TestAgentCardDiscovery:
 
     @pytest.mark.asyncio
     async def test_cards_have_streaming_capability(
-        self, triage_client: A2AClient,
+        self,
+        triage_client: A2AClient,
     ) -> None:
         card = await triage_client.discover()
         assert card.capabilities.streaming is True
@@ -233,16 +234,18 @@ class TestInvestigatorAgent:
     @pytest.mark.asyncio
     async def test_billing_investigation(self, investigator_client: A2AClient) -> None:
         # Simulate triage output as input
-        triage_input = json.dumps({
-            "customer_id": "cust_001",
-            "category": "billing",
-            "severity": "P2",
-            "urgency_detected": False,
-            "customer_info": {"name": "Acme Corp", "plan": "enterprise"},
-            "order_info": None,
-            "original_ticket": "I was charged twice (cust_001)",
-            "routing": "investigate",
-        })
+        triage_input = json.dumps(
+            {
+                "customer_id": "cust_001",
+                "category": "billing",
+                "severity": "P2",
+                "urgency_detected": False,
+                "customer_info": {"name": "Acme Corp", "plan": "enterprise"},
+                "order_info": None,
+                "original_ticket": "I was charged twice (cust_001)",
+                "routing": "investigate",
+            }
+        )
         task = await investigator_client.send_message(triage_input)
         assert task.status.state == TaskState.COMPLETED
 
@@ -255,18 +258,21 @@ class TestInvestigatorAgent:
 
     @pytest.mark.asyncio
     async def test_investigation_finds_kb(
-        self, investigator_client: A2AClient,
+        self,
+        investigator_client: A2AClient,
     ) -> None:
-        triage_input = json.dumps({
-            "customer_id": "cust_002",
-            "category": "account",
-            "severity": "P2",
-            "urgency_detected": False,
-            "customer_info": None,
-            "order_info": None,
-            "original_ticket": "Can't login after password reset (cust_002)",
-            "routing": "investigate",
-        })
+        triage_input = json.dumps(
+            {
+                "customer_id": "cust_002",
+                "category": "account",
+                "severity": "P2",
+                "urgency_detected": False,
+                "customer_info": None,
+                "order_info": None,
+                "original_ticket": "Can't login after password reset (cust_002)",
+                "routing": "investigate",
+            }
+        )
         task = await investigator_client.send_message(triage_input)
         data = json.loads(_artifact_text(task))
         assert len(data["kb_articles"]) > 0
@@ -282,24 +288,30 @@ class TestResolutionAgent:
 
     @pytest.mark.asyncio
     async def test_apology_response(self, resolution_client: A2AClient) -> None:
-        inv_input = json.dumps({
-            "triage": {
-                "customer_id": "cust_001",
-                "category": "billing",
-                "severity": "P2",
-                "urgency_detected": False,
-                "customer_info": {"name": "Acme Corp", "plan": "enterprise"},
-                "order_info": None,
-                "original_ticket": "Double charge",
-                "routing": "investigate",
-            },
-            "similar_tickets": [{"ticket_id": "TKT-1001", "resolution": "Refund issued"}],
-            "kb_articles": [{"id": "kb_001", "title": "Handling Duplicate Charges"}],
-            "root_cause": "Duplicate charge from payment gateway retry",
-            "recommended_action": "Issue refund",
-            "should_escalate": False,
-            "escalation_reason": None,
-        })
+        inv_input = json.dumps(
+            {
+                "triage": {
+                    "customer_id": "cust_001",
+                    "category": "billing",
+                    "severity": "P2",
+                    "urgency_detected": False,
+                    "customer_info": {"name": "Acme Corp", "plan": "enterprise"},
+                    "order_info": None,
+                    "original_ticket": "Double charge",
+                    "routing": "investigate",
+                },
+                "similar_tickets": [
+                    {"ticket_id": "TKT-1001", "resolution": "Refund issued"}
+                ],
+                "kb_articles": [
+                    {"id": "kb_001", "title": "Handling Duplicate Charges"}
+                ],
+                "root_cause": "Duplicate charge from payment gateway retry",
+                "recommended_action": "Issue refund",
+                "should_escalate": False,
+                "escalation_reason": None,
+            }
+        )
         task = await resolution_client.send_message(inv_input)
         assert task.status.state == TaskState.COMPLETED
 
@@ -310,26 +322,29 @@ class TestResolutionAgent:
 
     @pytest.mark.asyncio
     async def test_escalation_response(
-        self, resolution_client: A2AClient,
+        self,
+        resolution_client: A2AClient,
     ) -> None:
-        inv_input = json.dumps({
-            "triage": {
-                "customer_id": "cust_003",
-                "category": "technical",
-                "severity": "P1",
-                "urgency_detected": True,
-                "customer_info": {"name": "DataFlow Inc"},
-                "order_info": None,
-                "original_ticket": "Production down!",
-                "routing": "escalate",
-            },
-            "similar_tickets": [],
-            "kb_articles": [],
-            "root_cause": "Critical outage",
-            "recommended_action": "Immediate investigation required",
-            "should_escalate": True,
-            "escalation_reason": "P1 severity",
-        })
+        inv_input = json.dumps(
+            {
+                "triage": {
+                    "customer_id": "cust_003",
+                    "category": "technical",
+                    "severity": "P1",
+                    "urgency_detected": True,
+                    "customer_info": {"name": "DataFlow Inc"},
+                    "order_info": None,
+                    "original_ticket": "Production down!",
+                    "routing": "escalate",
+                },
+                "similar_tickets": [],
+                "kb_articles": [],
+                "root_cause": "Critical outage",
+                "recommended_action": "Immediate investigation required",
+                "should_escalate": True,
+                "escalation_reason": "P1 severity",
+            }
+        )
         task = await resolution_client.send_message(inv_input)
         data = json.loads(_artifact_text(task))
         assert data["response_type"] == "escalation"
@@ -384,7 +399,8 @@ class TestFullPipeline:
 
     @pytest.mark.asyncio
     async def test_pipeline_discovers_all_cards(
-        self, pipeline: A2APipeline,
+        self,
+        pipeline: A2APipeline,
     ) -> None:
         result = await pipeline.run(SAMPLE_TICKETS["general"])
         assert "triage" in result.agent_cards
@@ -428,7 +444,8 @@ class TestStreamingPipeline:
 
     @pytest.mark.asyncio
     async def test_streaming_has_status_and_artifacts(
-        self, pipeline: A2APipeline,
+        self,
+        pipeline: A2APipeline,
     ) -> None:
         status_events: list[TaskStatusUpdateEvent] = []
         artifact_events: list[TaskArtifactUpdateEvent] = []
@@ -443,7 +460,8 @@ class TestStreamingPipeline:
 
     @pytest.mark.asyncio
     async def test_streaming_ends_with_completed(
-        self, pipeline: A2APipeline,
+        self,
+        pipeline: A2APipeline,
     ) -> None:
         last_status: TaskStatusUpdateEvent | None = None
         async for _, event in pipeline.run_streaming(SAMPLE_TICKETS["billing"]):
@@ -477,7 +495,8 @@ class TestToolAdapterPipeline:
 
     @pytest.mark.asyncio
     async def test_tool_registration(
-        self, triage_app: FastAPI,
+        self,
+        triage_app: FastAPI,
     ) -> None:
         """Test that an agent can be registered as a tool."""
         import httpx as _httpx
@@ -495,7 +514,9 @@ class TestToolAdapterPipeline:
             await client.discover()
             registry = ToolRegistry()
             spec = register_remote_agent_as_tool(
-                registry, client, tool_name="triage_agent",
+                registry,
+                client,
+                tool_name="triage_agent",
             )
             assert spec.name == "triage_agent"
             assert registry.get("triage_agent") is not None

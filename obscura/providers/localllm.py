@@ -187,9 +187,7 @@ class LocalLLMBackend:
             )
 
             structured = kwargs.pop("messages", None)
-            messages = self._build_messages(
-                prompt, structured_messages=structured
-            )
+            messages = self._build_messages(prompt, structured_messages=structured)
             create_kwargs = self._build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
@@ -266,9 +264,7 @@ class LocalLLMBackend:
             )
 
             structured = kwargs.pop("messages", None)
-            messages = self._build_messages(
-                prompt, structured_messages=structured
-            )
+            messages = self._build_messages(prompt, structured_messages=structured)
             create_kwargs = self._build_create_kwargs(kwargs)
 
             response = await self._client.chat.completions.create(
@@ -514,9 +510,7 @@ class LocalLLMBackend:
 
         # Structured multi-turn messages (from caller)
         if structured_messages:
-            messages.extend(
-                _convert_messages_to_openai(structured_messages)
-            )
+            messages.extend(_convert_messages_to_openai(structured_messages))
 
         # Append conversation history if in a session
         if self._active_session and self._active_session in self._conversations:
@@ -639,11 +633,13 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
         if role == "tool_result":
             for block in msg.content:
                 if block.kind == "tool_result":
-                    result.append({
-                        "role": "tool",
-                        "content": block.text,
-                        "tool_call_id": block.tool_use_id,
-                    })
+                    result.append(
+                        {
+                            "role": "tool",
+                            "content": block.text,
+                            "tool_call_id": block.tool_use_id,
+                        }
+                    )
             continue
 
         text_parts = [b.text for b in msg.content if b.kind == "text"]

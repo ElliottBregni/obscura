@@ -26,9 +26,7 @@ def test_loads_mcp_from_workspace_obscura_directory(
                         "transport": "stdio",
                         "command": "npx",
                         "args": ["-y", "@supabase/mcp-server"],
-                        "env": {
-                            "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
-                        },
+                        "env": {"SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"},
                     }
                 }
             }
@@ -52,7 +50,9 @@ def test_loads_skill_documents_from_workspace_obscura_directory(
     workspace = tmp_path / "workspace"
     skills_dir = workspace / ".obscura" / "skills"
     (skills_dir / "roles" / "reviewer").mkdir(parents=True)
-    (skills_dir / "python.md").write_text("# Python\nUse strict typing.", encoding="utf-8")
+    (skills_dir / "python.md").write_text(
+        "# Python\nUse strict typing.", encoding="utf-8"
+    )
     (skills_dir / "roles" / "reviewer" / "style.md").write_text(
         "# Reviewer Style\nFocus on regressions.",
         encoding="utf-8",

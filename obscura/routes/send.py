@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Request
@@ -161,9 +162,26 @@ async def stream(
                 native=body.native,
                 request=unified_req,
             ):
+                payload: dict[str, str] = {}
+                if chunk.text:
+                    payload["text"] = chunk.text
+                if chunk.tool_name:
+                    payload["tool_name"] = chunk.tool_name
+                if chunk.tool_input_delta:
+                    payload["tool_input_delta"] = chunk.tool_input_delta
+                if chunk.tool_use_id:
+                    payload["tool_use_id"] = chunk.tool_use_id
+                if chunk.metadata:
+                    payload["metadata"] = json.dumps(
+                        {
+                            "finish_reason": chunk.metadata.finish_reason,
+                            "model_id": chunk.metadata.model_id,
+                            "usage": chunk.metadata.usage,
+                        }
+                    )
                 yield {
                     "event": chunk.kind.value,
-                    "data": chunk.text or chunk.tool_name or "",
+                    "data": json.dumps(payload),
                 }
         finally:
             await client.stop()

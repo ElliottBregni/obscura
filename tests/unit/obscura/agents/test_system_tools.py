@@ -154,13 +154,16 @@ class TestRunCommand:
         proc = AsyncMock()
         proc.communicate = AsyncMock(return_value=(b"", b""))
         proc.returncode = 0
-        with patch.dict(
-            os.environ,
-            {"OBSCURA_SYSTEM_TOOLS_DENIED_COMMANDS": ""},
-            clear=False,
-        ), patch(
-            "obscura.tools.system.asyncio.create_subprocess_exec",
-            return_value=proc,
+        with (
+            patch.dict(
+                os.environ,
+                {"OBSCURA_SYSTEM_TOOLS_DENIED_COMMANDS": ""},
+                clear=False,
+            ),
+            patch(
+                "obscura.tools.system.asyncio.create_subprocess_exec",
+                return_value=proc,
+            ),
         ):
             payload = json.loads(await run_command("rm", args=["--version"]))
         assert payload["ok"] is True
@@ -203,7 +206,9 @@ class TestFilesystemTools:
             )
             assert write_payload["ok"] is True
 
-            append_payload = json.loads(await append_text_file(str(file_path), "line2\n"))
+            append_payload = json.loads(
+                await append_text_file(str(file_path), "line2\n")
+            )
             assert append_payload["ok"] is True
 
             read_payload = json.loads(await read_text_file(str(file_path)))
@@ -213,7 +218,9 @@ class TestFilesystemTools:
 
             list_payload = json.loads(await list_directory(str(base / "a")))
             assert list_payload["ok"] is True
-            assert any(entry["name"] == "notes.txt" for entry in list_payload["entries"])
+            assert any(
+                entry["name"] == "notes.txt" for entry in list_payload["entries"]
+            )
 
     @pytest.mark.asyncio
     async def test_make_and_remove_directory(self) -> None:
@@ -240,7 +247,9 @@ class TestFilesystemTools:
                 {"OBSCURA_SYSTEM_TOOLS_BASE_DIR": allowed},
                 clear=False,
             ):
-                payload = json.loads(await write_text_file(str(blocked_file), "blocked"))
+                payload = json.loads(
+                    await write_text_file(str(blocked_file), "blocked")
+                )
             assert payload["ok"] is False
             assert payload["error"] == "path_not_allowed"
 
@@ -272,7 +281,9 @@ class TestDiscoveryTools:
             {"OBSCURA_TEST_A": "1", "OTHER": "x"},
             clear=False,
         ):
-            payload = json.loads(await get_environment(prefix="OBSCURA_TEST_", include_values=True))
+            payload = json.loads(
+                await get_environment(prefix="OBSCURA_TEST_", include_values=True)
+            )
         assert payload["ok"] is True
         assert payload["count"] >= 1
         assert "OBSCURA_TEST_A" in payload["variables"]
@@ -339,7 +350,9 @@ class TestOpsAndSecurityTools:
 
     @pytest.mark.asyncio
     async def test_manage_crontab_add_requires_fields(self) -> None:
-        with patch("obscura.tools.system.shutil.which", return_value="/usr/bin/crontab"):
+        with patch(
+            "obscura.tools.system.shutil.which", return_value="/usr/bin/crontab"
+        ):
             payload = json.loads(await manage_crontab("add", schedule="", command=""))
         assert payload["ok"] is False
         assert payload["error"] == "schedule_and_command_required"

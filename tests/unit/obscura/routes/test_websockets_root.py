@@ -128,5 +128,3 @@ class TestNotifyMemoryChange:
         finally:
             ws_mod.clear_memory_watch_clients()
             ws_mod.memory_watch_clients().update(original)
-
-

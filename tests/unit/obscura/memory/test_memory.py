@@ -181,4 +181,3 @@ class TestMemoryStore:
 
         assert store1.get("shared_key", namespace="test") == "user1_value"
         assert store2.get("shared_key", namespace="test") == "user2_value"
-

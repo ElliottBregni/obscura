@@ -201,9 +201,13 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             # Choose store backend
             if config.a2a_redis_url:
                 from obscura.integrations.a2a.store import RedisTaskStore
-                a2a_store = RedisTaskStore(config.a2a_redis_url, task_ttl=config.a2a_task_ttl)
+
+                a2a_store = RedisTaskStore(
+                    config.a2a_redis_url, task_ttl=config.a2a_task_ttl
+                )
             else:
                 from obscura.integrations.a2a.store import InMemoryTaskStore
+
                 a2a_store = InMemoryTaskStore()
 
             a2a_server = ObscuraA2AServer(

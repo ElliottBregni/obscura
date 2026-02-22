@@ -14,7 +14,10 @@ from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
-from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.rest import (
+    create_rest_router,
+    create_wellknown_router,
+)
 from obscura.integrations.a2a.transports.sse import create_sse_router
 from obscura.integrations.a2a.types import Task
 from obscura.agent.agents import AgentRuntime, MCPConfig
@@ -34,16 +37,86 @@ class AgentBlueprint:
 
 
 BLUEPRINTS: tuple[AgentBlueprint, ...] = (
-    AgentBlueprint("triage", "Triage Agent", "Classify ticket", ("classify", "priority_scoring"), ("filesystem", "playwright"), ("streaming", "extended-card")),
-    AgentBlueprint("auth", "Auth Agent", "Check auth context", ("token_audit", "oauth_trace"), ("filesystem",), ("streaming",)),
-    AgentBlueprint("repo", "Repo Agent", "Inspect code ownership", ("code_search", "blame_analysis"), ("filesystem", "fetch"), ("streaming",)),
-    AgentBlueprint("incident", "Incident Agent", "Evaluate incidents", ("incident_lookup", "impact_assessment"), ("fetch", "playwright"), ("streaming",)),
-    AgentBlueprint("data", "Data Agent", "Validate data contracts", ("schema_check", "payload_diff"), ("filesystem", "fetch"), ("streaming",)),
-    AgentBlueprint("security", "Security Agent", "Run security review", ("threat_model", "policy_check"), ("filesystem", "fetch"), ("streaming",)),
-    AgentBlueprint("planner", "Planner Agent", "Plan remediation", ("task_planning", "dependency_mapping"), ("filesystem",), ("streaming",)),
-    AgentBlueprint("implementer", "Implementer Agent", "Draft implementation", ("patch_strategy", "test_plan"), ("filesystem",), ("streaming", "extended-card")),
-    AgentBlueprint("qa", "QA Agent", "Generate validation", ("test_generation", "risk_matrix"), ("filesystem", "playwright"), ("streaming",)),
-    AgentBlueprint("responder", "Responder Agent", "Compose final response", ("response_drafting", "handoff_notes"), ("filesystem", "fetch"), ("streaming", "push-notifications")),
+    AgentBlueprint(
+        "triage",
+        "Triage Agent",
+        "Classify ticket",
+        ("classify", "priority_scoring"),
+        ("filesystem", "playwright"),
+        ("streaming", "extended-card"),
+    ),
+    AgentBlueprint(
+        "auth",
+        "Auth Agent",
+        "Check auth context",
+        ("token_audit", "oauth_trace"),
+        ("filesystem",),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "repo",
+        "Repo Agent",
+        "Inspect code ownership",
+        ("code_search", "blame_analysis"),
+        ("filesystem", "fetch"),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "incident",
+        "Incident Agent",
+        "Evaluate incidents",
+        ("incident_lookup", "impact_assessment"),
+        ("fetch", "playwright"),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "data",
+        "Data Agent",
+        "Validate data contracts",
+        ("schema_check", "payload_diff"),
+        ("filesystem", "fetch"),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "security",
+        "Security Agent",
+        "Run security review",
+        ("threat_model", "policy_check"),
+        ("filesystem", "fetch"),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "planner",
+        "Planner Agent",
+        "Plan remediation",
+        ("task_planning", "dependency_mapping"),
+        ("filesystem",),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "implementer",
+        "Implementer Agent",
+        "Draft implementation",
+        ("patch_strategy", "test_plan"),
+        ("filesystem",),
+        ("streaming", "extended-card"),
+    ),
+    AgentBlueprint(
+        "qa",
+        "QA Agent",
+        "Generate validation",
+        ("test_generation", "risk_matrix"),
+        ("filesystem", "playwright"),
+        ("streaming",),
+    ),
+    AgentBlueprint(
+        "responder",
+        "Responder Agent",
+        "Compose final response",
+        ("response_drafting", "handoff_notes"),
+        ("filesystem", "fetch"),
+        ("streaming", "push-notifications"),
+    ),
 )
 
 
@@ -183,8 +256,12 @@ async def run_workflow(ticket: str, model: str) -> list[tuple[str, str]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run 10-agent A2A APER workflow demo")
-    parser.add_argument("--ticket", "-t", required=True, help="Initial workflow request.")
-    parser.add_argument("--model", default="copilot", help="Backend model for all 10 agents.")
+    parser.add_argument(
+        "--ticket", "-t", required=True, help="Initial workflow request."
+    )
+    parser.add_argument(
+        "--model", default="copilot", help="Backend model for all 10 agents."
+    )
     return parser
 
 

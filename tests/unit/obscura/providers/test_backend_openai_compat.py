@@ -153,7 +153,9 @@ class TestOpenAIStream:
         async for c in b.stream("Hello"):
             chunks.append(c)
 
-        text_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
+        text_chunks: list[StreamChunk] = [
+            c for c in chunks if c.kind == ChunkKind.TEXT_DELTA
+        ]
         assert len(text_chunks) == 1
         assert text_chunks[0].text == "Hi"
         assert text_chunks[0].native_event is chunk1
@@ -183,7 +185,9 @@ class TestOpenAIStream:
         async for c in b.stream("call tool"):
             chunks.append(c)
 
-        tool_starts: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TOOL_USE_START]
+        tool_starts: list[StreamChunk] = [
+            c for c in chunks if c.kind == ChunkKind.TOOL_USE_START
+        ]
         assert len(tool_starts) == 1
         assert tool_starts[0].tool_name == "my_tool"
         assert tool_starts[0].native_event is chunk
@@ -218,7 +222,9 @@ class TestOpenAIStream:
         ):
             chunks.append(c)
 
-        text_chunks: list[StreamChunk] = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
+        text_chunks: list[StreamChunk] = [
+            c for c in chunks if c.kind == ChunkKind.TEXT_DELTA
+        ]
         assert len(text_chunks) == 1
         assert text_chunks[0].text == "Rsp"
         assert text_chunks[0].native_event is event

@@ -124,7 +124,10 @@ async def metrics_get(
     memory_stats = store.get_stats()
 
     from obscura.routes.agents import get_agent_templates
-    from obscura.routes.workflows import get_workflows_store, get_workflow_executions_store
+    from obscura.routes.workflows import (
+        get_workflows_store,
+        get_workflow_executions_store,
+    )
     from obscura.routes.webhooks import get_webhooks_store
 
     return JSONResponse(

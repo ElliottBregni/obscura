@@ -105,9 +105,7 @@ def _resolve_command(command: str) -> str:
     if command == "npx":
         nvm_root = Path.home() / ".nvm" / "versions" / "node"
         if nvm_root.is_dir():
-            candidates = sorted(
-                p for p in nvm_root.glob("*/bin/npx") if p.is_file()
-            )
+            candidates = sorted(p for p in nvm_root.glob("*/bin/npx") if p.is_file())
             if candidates:
                 return str(candidates[-1])
     return command
@@ -142,7 +140,9 @@ async def run_python3(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout_seconds
+        )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -185,7 +185,9 @@ async def run_npx(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout_seconds
+        )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -249,7 +251,9 @@ async def run_command(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout_seconds
+        )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -663,7 +667,9 @@ async def list_processes() -> str:
     required_tier="privileged",
 )
 async def signal_process(pid: int, signal: str = "TERM") -> str:
-    return await run_command("kill", args=[f"-{signal}", str(pid)], timeout_seconds=10.0)
+    return await run_command(
+        "kill", args=[f"-{signal}", str(pid)], timeout_seconds=10.0
+    )
 
 
 @tool(
@@ -725,7 +731,13 @@ async def security_lookup(
         if platform.system() == "Darwin":
             return await run_command(
                 "log",
-                args=["show", "--last", "1d", "--predicate", "eventMessage CONTAINS[c] \"failed\""],
+                args=[
+                    "show",
+                    "--last",
+                    "1d",
+                    "--predicate",
+                    'eventMessage CONTAINS[c] "failed"',
+                ],
                 timeout_seconds=20.0,
             )
         return _json_error("failed_logins_unsupported")
@@ -791,7 +803,9 @@ async def manage_crontab(
     if action == "add":
         if not schedule.strip() or not command.strip():
             return _json_error("schedule_and_command_required")
-        list_payload = json.loads(await run_command("crontab", args=["-l"], timeout_seconds=20.0))
+        list_payload = json.loads(
+            await run_command("crontab", args=["-l"], timeout_seconds=20.0)
+        )
         existing = ""
         if list_payload.get("ok"):
             existing = str(list_payload.get("stdout", ""))
@@ -804,7 +818,9 @@ async def manage_crontab(
         )
 
     # remove
-    list_payload = json.loads(await run_command("crontab", args=["-l"], timeout_seconds=20.0))
+    list_payload = json.loads(
+        await run_command("crontab", args=["-l"], timeout_seconds=20.0)
+    )
     existing_lines: list[str] = []
     if list_payload.get("ok"):
         existing_lines = str(list_payload.get("stdout", "")).splitlines()

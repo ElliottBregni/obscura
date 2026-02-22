@@ -73,50 +73,73 @@ async def run_pipeline(ticket: str, verbose: bool = False) -> None:
         raise
 
     # -- Triage results ----------------------------------------------------
-    _print_section("TRIAGE", "\n".join([
-        f"  Category:  {result.triage.category}",
-        f"  Severity:  {result.triage.severity}",
-        f"  Urgency:   {result.triage.urgency_detected}",
-        f"  Customer:  {result.triage.customer_id}",
-        f"  Routing:   {result.triage.routing}",
-        f"  Plan:      {result.triage.customer_info.get('plan', 'unknown') if result.triage.customer_info else 'N/A'}",
-    ]))
+    _print_section(
+        "TRIAGE",
+        "\n".join(
+            [
+                f"  Category:  {result.triage.category}",
+                f"  Severity:  {result.triage.severity}",
+                f"  Urgency:   {result.triage.urgency_detected}",
+                f"  Customer:  {result.triage.customer_id}",
+                f"  Routing:   {result.triage.routing}",
+                f"  Plan:      {result.triage.customer_info.get('plan', 'unknown') if result.triage.customer_info else 'N/A'}",
+            ]
+        ),
+    )
 
     # -- Investigation results ---------------------------------------------
     if result.investigation:
-        _print_section("INVESTIGATION", "\n".join([
-            f"  Root cause:     {result.investigation.root_cause}",
-            f"  Similar tix:    {len(result.investigation.similar_tickets)}",
-            f"  KB articles:    {len(result.investigation.kb_articles)}",
-            f"  Should escalate: {result.investigation.should_escalate}",
-            f"  Action:         {result.investigation.recommended_action[:80]}...",
-        ]))
+        _print_section(
+            "INVESTIGATION",
+            "\n".join(
+                [
+                    f"  Root cause:     {result.investigation.root_cause}",
+                    f"  Similar tix:    {len(result.investigation.similar_tickets)}",
+                    f"  KB articles:    {len(result.investigation.kb_articles)}",
+                    f"  Should escalate: {result.investigation.should_escalate}",
+                    f"  Action:         {result.investigation.recommended_action[:80]}...",
+                ]
+            ),
+        )
     elif result.escalated:
-        _print_section("INVESTIGATION", "  Skipped — ticket escalated directly from triage")
+        _print_section(
+            "INVESTIGATION", "  Skipped — ticket escalated directly from triage"
+        )
 
     # -- Resolution results ------------------------------------------------
     if result.resolution:
-        _print_section("RESOLUTION", "\n".join([
-            f"  Type: {result.resolution.response_type}",
-            f"  Time: {result.resolution.resolution_time_ms:.1f}ms",
-            "",
-            "  Customer Message:",
-            "  " + result.resolution.customer_message.replace("\n", "\n  "),
-        ]))
+        _print_section(
+            "RESOLUTION",
+            "\n".join(
+                [
+                    f"  Type: {result.resolution.response_type}",
+                    f"  Time: {result.resolution.resolution_time_ms:.1f}ms",
+                    "",
+                    "  Customer Message:",
+                    "  " + result.resolution.customer_message.replace("\n", "\n  "),
+                ]
+            ),
+        )
 
     # -- Audit trail -------------------------------------------------------
-    _print_section("AUDIT TRAIL", "\n".join([
-        f"  Phases completed:  {result.phases_completed}",
-        f"  Hooks fired:       {len(result.hooks_fired)}",
-        f"  Total time:        {result.total_time_ms:.1f}ms",
-        f"  Escalated:         {result.escalated}",
-        f"  Timestamp:         {result.timestamp}",
-    ]))
+    _print_section(
+        "AUDIT TRAIL",
+        "\n".join(
+            [
+                f"  Phases completed:  {result.phases_completed}",
+                f"  Hooks fired:       {len(result.hooks_fired)}",
+                f"  Total time:        {result.total_time_ms:.1f}ms",
+                f"  Escalated:         {result.escalated}",
+                f"  Timestamp:         {result.timestamp}",
+            ]
+        ),
+    )
 
     if verbose:
-        _print_section("HOOKS (detail)", "\n".join(
-            f"    {i+1}. {h}" for i, h in enumerate(result.hooks_fired)
-        ))
+        _print_section(
+            "HOOKS (detail)",
+            "\n".join(f"    {i + 1}. {h}" for i, h in enumerate(result.hooks_fired)),
+        )
 
     print(f"\n{'#' * 70}\n")
 
@@ -126,16 +149,19 @@ def main() -> None:
         description="Run the Obscura customer support demo pipeline",
     )
     parser.add_argument(
-        "--ticket", "-t",
+        "--ticket",
+        "-t",
         help="Ticket text (reads from stdin if not provided)",
     )
     parser.add_argument(
-        "--sample", "-s",
+        "--sample",
+        "-s",
         choices=list(SAMPLE_TICKETS.keys()),
         help="Use a pre-built sample ticket",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable verbose logging (DEBUG level)",
     )
@@ -158,6 +184,7 @@ def main() -> None:
         parser.error("Provide --ticket, --sample, or pipe text via stdin")
 
     if args.json:
+
         async def _json_run() -> None:
             logging.basicConfig(level=logging.WARNING)
             pipeline = SupportPipeline(user=DEMO_USER)

@@ -69,7 +69,9 @@ def discover_servers(path: Path) -> list[DiscoveredMCPServer]:
         )
         url = str(entry.get("url", ""))
         env_map_raw = entry.get("env", {})
-        env_map = cast(dict[str, Any], env_map_raw) if isinstance(env_map_raw, dict) else {}
+        env_map = (
+            cast(dict[str, Any], env_map_raw) if isinstance(env_map_raw, dict) else {}
+        )
         resolved_env: dict[str, str] = {}
         missing: list[str] = []
         for k, v in env_map.items():
@@ -239,10 +241,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             return
         for server in servers:
             missing = ", ".join(server.missing_env) if server.missing_env else "none"
-            print(
-                f"{server.name}: transport={server.transport} "
-                f"missing_env={missing}"
-            )
+            print(f"{server.name}: transport={server.transport} missing_env={missing}")
         return
 
     if args.command == "add":

@@ -213,7 +213,9 @@ class AgentLoop:
             # Build structured messages for backends that support it,
             # with plain-text fallback as the prompt.
             structured = self._build_structured_tool_messages(
-                tool_calls, tool_results, turn_text,
+                tool_calls,
+                tool_results,
+                turn_text,
             )
             current_prompt = self._format_tool_results(tool_results)
 
@@ -404,12 +406,14 @@ class AgentLoop:
         if turn_text:
             assistant_blocks.append(ContentBlock(kind="text", text=turn_text))
         for tc in tool_calls:
-            assistant_blocks.append(ContentBlock(
-                kind="tool_use",
-                tool_name=tc.name,
-                tool_input=tc.input,
-                tool_use_id=tc.tool_use_id,
-            ))
+            assistant_blocks.append(
+                ContentBlock(
+                    kind="tool_use",
+                    tool_name=tc.name,
+                    tool_input=tc.input,
+                    tool_use_id=tc.tool_use_id,
+                )
+            )
         if not assistant_blocks:
             assistant_blocks.append(ContentBlock(kind="text", text=""))
 
@@ -421,12 +425,14 @@ class AgentLoop:
         # 2) Tool result message
         result_blocks: list[ContentBlock] = []
         for tc, result_text, is_err in tool_results:
-            result_blocks.append(ContentBlock(
-                kind="tool_result",
-                text=result_text,
-                tool_use_id=tc.tool_use_id,
-                is_error=is_err,
-            ))
+            result_blocks.append(
+                ContentBlock(
+                    kind="tool_result",
+                    text=result_text,
+                    tool_use_id=tc.tool_use_id,
+                    is_error=is_err,
+                )
+            )
 
         result_msg = Message(
             role=Role.TOOL_RESULT,

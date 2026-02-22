@@ -51,26 +51,32 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 class TestStreamTask:
     @pytest.mark.asyncio
     async def test_streaming_returns_200(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/v1/tasks/streaming", json={
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Stream me"}],
+        resp = await client.post(
+            "/a2a/v1/tasks/streaming",
+            json={
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Stream me"}],
+                },
             },
-        })
+        )
         assert resp.status_code == 200
         # SSE content type
         assert "text/event-stream" in resp.headers.get("content-type", "")
 
     @pytest.mark.asyncio
     async def test_streaming_contains_events(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/v1/tasks/streaming", json={
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Hello"}],
+        resp = await client.post(
+            "/a2a/v1/tasks/streaming",
+            json={
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Hello"}],
+                },
             },
-        })
+        )
         body = resp.text
         # Should contain SSE event fields
         assert "event:" in body
@@ -78,26 +84,32 @@ class TestStreamTask:
 
     @pytest.mark.asyncio
     async def test_streaming_has_status_update(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/v1/tasks/streaming", json={
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Process"}],
+        resp = await client.post(
+            "/a2a/v1/tasks/streaming",
+            json={
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Process"}],
+                },
             },
-        })
+        )
         body = resp.text
         assert "status-update" in body
 
     @pytest.mark.asyncio
     async def test_with_context_id(self, client: AsyncClient) -> None:
-        resp = await client.post("/a2a/v1/tasks/streaming", json={
-            "message": {
-                "role": "user",
-                "messageId": "m1",
-                "parts": [{"kind": "text", "text": "Test"}],
+        resp = await client.post(
+            "/a2a/v1/tasks/streaming",
+            json={
+                "message": {
+                    "role": "user",
+                    "messageId": "m1",
+                    "parts": [{"kind": "text", "text": "Test"}],
+                },
+                "contextId": "ctx-stream",
             },
-            "contextId": "ctx-stream",
-        })
+        )
         assert resp.status_code == 200
         assert "ctx-stream" in resp.text
 

@@ -432,7 +432,9 @@ class CopilotBackend:
         config.update(overrides)
         return config
 
-    def _build_message_options(self, prompt: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _build_message_options(
+        self, prompt: str, kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
         """Build per-message options including normalized tool choice."""
         msg_options: dict[str, Any] = {"prompt": prompt}
         options = kwargs.get("options")

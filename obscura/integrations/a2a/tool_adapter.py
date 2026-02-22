@@ -66,7 +66,9 @@ def register_remote_agent_as_tool(
     """
     card = client.agent_card
     name = tool_name or (card.name if card else client.base_url.split("//")[-1])
-    desc = description or (card.description if card else f"Remote A2A agent at {client.base_url}")
+    desc = description or (
+        card.description if card else f"Remote A2A agent at {client.base_url}"
+    )
 
     # Clean name for tool registration (no spaces, lowercase)
     safe_name = name.lower().replace(" ", "_").replace("-", "_")

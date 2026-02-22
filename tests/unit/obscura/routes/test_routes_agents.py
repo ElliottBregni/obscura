@@ -213,7 +213,10 @@ class TestAgentSpawn:
         }
         resp = client.post("/api/v1/agents", json=payload)
         assert resp.status_code == 200
-        assert runtime.spawn.call_args.kwargs["a2a_remote_tools"] == payload["a2a_remote_tools"]
+        assert (
+            runtime.spawn.call_args.kwargs["a2a_remote_tools"]
+            == payload["a2a_remote_tools"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +324,9 @@ class TestAgentListPeers:
         runtime = _make_mock_runtime([agent])
         mock_get_runtime.return_value = runtime
 
-        resp = client.get("/api/v1/agents/agent-1/peers?include_self=false&discover_remote=false")
+        resp = client.get(
+            "/api/v1/agents/agent-1/peers?include_self=false&discover_remote=false"
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["agent_id"] == "agent-1"

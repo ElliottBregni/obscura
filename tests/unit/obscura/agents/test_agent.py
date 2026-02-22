@@ -114,10 +114,14 @@ class TestHooks:
         await agent.run()
 
         assert fired == [
-            "pre_analyze", "post_analyze",
-            "pre_plan", "post_plan",
-            "pre_execute", "post_execute",
-            "pre_respond", "post_respond",
+            "pre_analyze",
+            "post_analyze",
+            "pre_plan",
+            "post_plan",
+            "pre_execute",
+            "post_execute",
+            "pre_respond",
+            "post_respond",
         ]
 
     @pytest.mark.asyncio
@@ -153,10 +157,18 @@ class TestHooks:
         agent = StubAgent(client)
         phases: list[tuple[str, AgentPhase]] = []
 
-        agent.on(HookPoint.POST_ANALYZE, lambda ctx: phases.append(("post_analyze", ctx.phase)))
+        agent.on(
+            HookPoint.POST_ANALYZE,
+            lambda ctx: phases.append(("post_analyze", ctx.phase)),
+        )
         agent.on(HookPoint.PRE_PLAN, lambda ctx: phases.append(("pre_plan", ctx.phase)))
-        agent.on(HookPoint.PRE_EXECUTE, lambda ctx: phases.append(("pre_execute", ctx.phase)))
-        agent.on(HookPoint.POST_EXECUTE, lambda ctx: phases.append(("post_execute", ctx.phase)))
+        agent.on(
+            HookPoint.PRE_EXECUTE, lambda ctx: phases.append(("pre_execute", ctx.phase))
+        )
+        agent.on(
+            HookPoint.POST_EXECUTE,
+            lambda ctx: phases.append(("post_execute", ctx.phase)),
+        )
 
         await agent.run()
 
@@ -167,7 +179,6 @@ class TestHooks:
             ("pre_execute", AgentPhase.EXECUTE),
             ("post_execute", AgentPhase.EXECUTE),
         ]
-
 
     @pytest.mark.asyncio
     async def test_post_analyze_sees_analysis(self) -> None:

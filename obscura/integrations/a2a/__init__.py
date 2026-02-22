@@ -36,7 +36,11 @@ if TYPE_CHECKING:
     from obscura.integrations.a2a.event_mapper import EventMapper
     from obscura.integrations.a2a.server import ObscuraA2AServer
     from obscura.integrations.a2a.service import A2AService
-    from obscura.integrations.a2a.store import InMemoryTaskStore, RedisTaskStore, TaskStore
+    from obscura.integrations.a2a.store import (
+        InMemoryTaskStore,
+        RedisTaskStore,
+        TaskStore,
+    )
 
 __all__ = [
     # Types
@@ -74,24 +78,31 @@ __all__ = [
     "EventMapper",
 ]
 
+
 # Lazy imports to avoid pulling in everything on simple type imports
 def __getattr__(name: str) -> object:
     if name == "A2AService":
         from obscura.integrations.a2a.service import A2AService
+
         return A2AService
     if name in ("InMemoryTaskStore", "RedisTaskStore", "TaskStore"):
         from obscura.integrations.a2a import store
+
         return getattr(store, name)
     if name in ("A2AClient", "A2ASessionManager"):
         from obscura.integrations.a2a import client
+
         return getattr(client, name)
     if name == "ObscuraA2AServer":
         from obscura.integrations.a2a.server import ObscuraA2AServer
+
         return ObscuraA2AServer
     if name == "AgentCardGenerator":
         from obscura.integrations.a2a.agent_card import AgentCardGenerator
+
         return AgentCardGenerator
     if name == "EventMapper":
         from obscura.integrations.a2a.event_mapper import EventMapper
+
         return EventMapper
     raise AttributeError(f"module 'obscura.a2a' has no attribute {name!r}")

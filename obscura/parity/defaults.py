@@ -22,4 +22,6 @@ def default_backend_conformance() -> tuple[BackendConformance, ...]:
         CopilotBackend(AuthConfig(github_token="gh-test")),
         LocalLLMBackend(AuthConfig(localllm_base_url="http://localhost:1234/v1")),
     )
-    return tuple(evaluate_backend_conformance(backend, CONTRACTS) for backend in backends)
+    return tuple(
+        evaluate_backend_conformance(backend, CONTRACTS) for backend in backends
+    )

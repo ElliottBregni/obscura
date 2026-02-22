@@ -142,10 +142,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         raise SystemExit(2) from None
     except Exception as exc:
-        if (
-            not args.no_cli_fallback
-            and "billing_not_active" in str(exc)
-        ):
+        if not args.no_cli_fallback and "billing_not_active" in str(exc):
             try:
                 result = run_codex_cli_oauth(
                     args.prompt,

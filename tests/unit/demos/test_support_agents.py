@@ -9,7 +9,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from obscura.core.types import AgentContext, AgentPhase, HookPoint, ContentBlock, Message, Role
+from obscura.core.types import (
+    AgentContext,
+    AgentPhase,
+    HookPoint,
+    ContentBlock,
+    Message,
+    Role,
+)
 
 from demos.support.agents import (
     InvestigationResult,
@@ -73,16 +80,20 @@ def _sample_investigation_result(
     triage = _sample_triage_result()
     return InvestigationResult(
         triage=triage,
-        similar_tickets=[{
-            "ticket_id": "TKT-1001",
-            "subject": "Double charge on February invoice",
-            "resolution": "Refund issued for duplicate charge.",
-        }],
-        kb_articles=[{
-            "id": "kb_001",
-            "title": "Handling Duplicate Charges",
-            "content": "When a customer reports a duplicate charge...",
-        }],
+        similar_tickets=[
+            {
+                "ticket_id": "TKT-1001",
+                "subject": "Double charge on February invoice",
+                "resolution": "Refund issued for duplicate charge.",
+            }
+        ],
+        kb_articles=[
+            {
+                "id": "kb_001",
+                "title": "Handling Duplicate Charges",
+                "content": "When a customer reports a duplicate charge...",
+            }
+        ],
         root_cause="Similar to TKT-1001: Refund issued for duplicate charge.",
         recommended_action="Apply same resolution as TKT-1001.",
         should_escalate=should_escalate,
@@ -151,7 +162,9 @@ class TestTools:
         assert result["suggested_team"] == "engineering"
 
     def test_send_response(self) -> None:
-        raw = send_response("cust_001", "Re: Your ticket", "We fixed it.", "internal note")
+        raw = send_response(
+            "cust_001", "Re: Your ticket", "We fixed it.", "internal note"
+        )
         result = json.loads(raw)
         assert result["customer_id"] == "cust_001"
         assert result["status"] == "delivered"
@@ -161,8 +174,12 @@ class TestTools:
         assert len(specs) == 6
         names = {s.name for s in specs}
         assert names == {
-            "search_tickets", "query_customer", "check_order_status",
-            "search_knowledge_base", "escalate_to_human", "send_response",
+            "search_tickets",
+            "query_customer",
+            "check_order_status",
+            "search_knowledge_base",
+            "escalate_to_human",
+            "send_response",
         }
 
     def test_send_response_requires_privileged_tier(self) -> None:
@@ -185,14 +202,18 @@ class TestTriageAgent:
     @pytest.mark.asyncio
     async def test_analyze_extracts_customer_id(self) -> None:
         agent = TriageAgent(_mock_client())
-        ctx = AgentContext(phase=AgentPhase.ANALYZE, input_data="Problem with cust_001 billing")
+        ctx = AgentContext(
+            phase=AgentPhase.ANALYZE, input_data="Problem with cust_001 billing"
+        )
         await agent.analyze(ctx)
         assert ctx.analysis["customer_id"] == "cust_001"
 
     @pytest.mark.asyncio
     async def test_analyze_detects_urgency(self) -> None:
         agent = TriageAgent(_mock_client())
-        ctx = AgentContext(phase=AgentPhase.ANALYZE, input_data="URGENT: production is down!")
+        ctx = AgentContext(
+            phase=AgentPhase.ANALYZE, input_data="URGENT: production is down!"
+        )
         await agent.analyze(ctx)
         assert ctx.analysis["urgency_detected"] is True
 
@@ -265,8 +286,10 @@ class TestTriageAgent:
         ctx = AgentContext(phase=AgentPhase.RESPOND)
         ctx.analysis = {"ticket_text": "outage"}
         ctx.plan = {
-            "customer_id": "cust_001", "category": "technical",
-            "severity": "P1", "urgency_detected": True,
+            "customer_id": "cust_001",
+            "category": "technical",
+            "severity": "P1",
+            "urgency_detected": True,
         }
         ctx.results = [{"customer_info": {"status": "active"}, "order_info": None}]
         await agent.respond(ctx)
@@ -279,8 +302,10 @@ class TestTriageAgent:
         ctx = AgentContext(phase=AgentPhase.RESPOND)
         ctx.analysis = {"ticket_text": "question"}
         ctx.plan = {
-            "customer_id": "cust_004", "category": "general",
-            "severity": "P4", "urgency_detected": False,
+            "customer_id": "cust_004",
+            "category": "general",
+            "severity": "P4",
+            "urgency_detected": False,
         }
         ctx.results = [{"customer_info": {"status": "churned"}, "order_info": None}]
         await agent.respond(ctx)
@@ -459,7 +484,9 @@ class TestResolutionAgent:
     @pytest.mark.asyncio
     async def test_compliance_hook_passes_clean_response(self) -> None:
         ctx = AgentContext(phase=AgentPhase.RESPOND)
-        ctx.metadata = {"response_draft": "We've issued a refund. It should appear in 3-5 days."}
+        ctx.metadata = {
+            "response_draft": "We've issued a refund. It should appear in 3-5 days."
+        }
         ResolutionAgent._hook_pre_respond(ctx)
         assert "compliance_violations" not in ctx.metadata
 
@@ -483,10 +510,14 @@ class TestHookOrder:
         # Verify APER hook order
         aper_hooks = [h for h in fired if h.startswith("pre_") or h.startswith("post_")]
         expected_order = [
-            "pre_analyze", "post_analyze",
-            "pre_plan", "post_plan",
-            "pre_execute", "post_execute",
-            "pre_respond", "post_respond",
+            "pre_analyze",
+            "post_analyze",
+            "pre_plan",
+            "post_plan",
+            "pre_execute",
+            "post_execute",
+            "pre_respond",
+            "post_respond",
         ]
         assert aper_hooks == expected_order
 

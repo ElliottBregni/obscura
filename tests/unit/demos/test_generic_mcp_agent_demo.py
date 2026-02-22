@@ -67,7 +67,9 @@ class _SlowRuntime(_FakeRuntime):
 
 
 class TestGenericMCPDiscovery:
-    def test_add_and_discover_servers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_add_and_discover_servers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         cfg_path = tmp_path / "mcp-config.json"
         add_server(
             path=cfg_path,

@@ -49,52 +49,74 @@ def _print_blocking_result(result: A2AResult) -> None:
     # Triage
     if result.triage_json:
         t = result.triage_json
-        _section("TRIAGE (A2A)", "\n".join([
-            f"  Task ID:    {result.triage_task.id if result.triage_task else 'N/A'}",
-            f"  Category:   {t.get('category', '?')}",
-            f"  Severity:   {t.get('severity', '?')}",
-            f"  Urgency:    {t.get('urgency_detected', '?')}",
-            f"  Customer:   {t.get('customer_id', '?')}",
-            f"  Routing:    {t.get('routing', '?')}",
-        ]))
+        _section(
+            "TRIAGE (A2A)",
+            "\n".join(
+                [
+                    f"  Task ID:    {result.triage_task.id if result.triage_task else 'N/A'}",
+                    f"  Category:   {t.get('category', '?')}",
+                    f"  Severity:   {t.get('severity', '?')}",
+                    f"  Urgency:    {t.get('urgency_detected', '?')}",
+                    f"  Customer:   {t.get('customer_id', '?')}",
+                    f"  Routing:    {t.get('routing', '?')}",
+                ]
+            ),
+        )
 
     # Investigation
     if result.investigation_json:
         inv = result.investigation_json
-        _section("INVESTIGATION (A2A)", "\n".join([
-            f"  Task ID:      {result.investigator_task.id if result.investigator_task else 'N/A'}",
-            f"  Root cause:   {str(inv.get('root_cause', '?'))[:80]}",
-            f"  Similar tix:  {len(inv.get('similar_tickets', []))}",
-            f"  KB articles:  {len(inv.get('kb_articles', []))}",
-            f"  Escalate:     {inv.get('should_escalate', '?')}",
-        ]))
+        _section(
+            "INVESTIGATION (A2A)",
+            "\n".join(
+                [
+                    f"  Task ID:      {result.investigator_task.id if result.investigator_task else 'N/A'}",
+                    f"  Root cause:   {str(inv.get('root_cause', '?'))[:80]}",
+                    f"  Similar tix:  {len(inv.get('similar_tickets', []))}",
+                    f"  KB articles:  {len(inv.get('kb_articles', []))}",
+                    f"  Escalate:     {inv.get('should_escalate', '?')}",
+                ]
+            ),
+        )
 
     # Resolution
     if result.resolution_json:
         res = result.resolution_json
-        _section("RESOLUTION (A2A)", "\n".join([
-            f"  Task ID:  {result.resolution_task.id if result.resolution_task else 'N/A'}",
-            f"  Type:     {res.get('response_type', '?')}",
-            "",
-            "  Customer Message:",
-            "  " + res.get("customer_message", "N/A").replace("\n", "\n  "),
-        ]))
+        _section(
+            "RESOLUTION (A2A)",
+            "\n".join(
+                [
+                    f"  Task ID:  {result.resolution_task.id if result.resolution_task else 'N/A'}",
+                    f"  Type:     {res.get('response_type', '?')}",
+                    "",
+                    "  Customer Message:",
+                    "  " + res.get("customer_message", "N/A").replace("\n", "\n  "),
+                ]
+            ),
+        )
 
     # Agent cards
     if result.agent_cards:
         cards_info: list[str] = []
         for name, card in result.agent_cards.items():
             skill_names = [s.name for s in card.skills]
-            cards_info.append(f"  {name}: {card.name} (skills: {', '.join(skill_names)})")
+            cards_info.append(
+                f"  {name}: {card.name} (skills: {', '.join(skill_names)})"
+            )
         _section("AGENT CARDS DISCOVERED", "\n".join(cards_info))
 
     # Audit
-    _section("PROTOCOL AUDIT", "\n".join([
-        f"  Mode:              {result.mode}",
-        f"  Phases completed:  {result.phases}",
-        f"  Total time:        {result.total_time_ms:.1f}ms",
-        f"  Timestamp:         {result.timestamp}",
-    ]))
+    _section(
+        "PROTOCOL AUDIT",
+        "\n".join(
+            [
+                f"  Mode:              {result.mode}",
+                f"  Phases completed:  {result.phases}",
+                f"  Total time:        {result.total_time_ms:.1f}ms",
+                f"  Timestamp:         {result.timestamp}",
+            ]
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -182,22 +204,26 @@ def main() -> None:
         description="Run the A2A multi-agent customer support demo",
     )
     parser.add_argument(
-        "--ticket", "-t",
+        "--ticket",
+        "-t",
         help="Ticket text (reads from stdin if not provided)",
     )
     parser.add_argument(
-        "--sample", "-s",
+        "--sample",
+        "-s",
         choices=list(SAMPLE_TICKETS.keys()),
         help="Use a pre-built sample ticket",
     )
     parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["blocking", "streaming", "tool-adapter"],
         default="blocking",
         help="Execution mode (default: blocking)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable verbose logging",
     )

@@ -60,7 +60,9 @@ def _make_response(content: str | None = "Hello", tool_calls: Any = None) -> Any
     return resp
 
 
-def _make_stream_chunk(content: str | None = None, tool_calls: Any = None, choices: bool = True) -> Any:
+def _make_stream_chunk(
+    content: str | None = None, tool_calls: Any = None, choices: bool = True
+) -> Any:
     """Build a MagicMock streaming chunk."""
     chunk: Any = MagicMock()
     if not choices:
@@ -75,7 +77,9 @@ def _make_stream_chunk(content: str | None = None, tool_calls: Any = None, choic
     return chunk
 
 
-def _make_tool_call(name: str = "my_tool", arguments: str = '{"x": 1}', tc_id: str = "call_abc123") -> Any:
+def _make_tool_call(
+    name: str = "my_tool", arguments: str = '{"x": 1}', tc_id: str = "call_abc123"
+) -> Any:
     """Build a MagicMock tool call object."""
     tc: Any = MagicMock()
     tc.id = tc_id
@@ -568,7 +572,9 @@ class TestOpenAISessions:
     async def test_fork_session_clones_history(self) -> None:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
-        b.client.chat.completions.create.return_value = _make_response(content="Reply 1")
+        b.client.chat.completions.create.return_value = _make_response(
+            content="Reply 1"
+        )
 
         src = await b.create_session()
         await b.send("Hello")
@@ -578,7 +584,9 @@ class TestOpenAISessions:
         assert fork.session_id != src.session_id
         assert fork.raw is not None
         assert b.active_session == fork.session_id
-        assert len(b.conversations[fork.session_id]) == len(b.conversations[src.session_id])
+        assert len(b.conversations[fork.session_id]) == len(
+            b.conversations[src.session_id]
+        )
 
     @pytest.mark.asyncio
     async def test_fork_missing_session_raises(self) -> None:

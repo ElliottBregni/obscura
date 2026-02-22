@@ -80,7 +80,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if not args.sdk_first:
         try:
-            result = run_copilot_cli_oauth(args.prompt, timeout_seconds=args.run_timeout)
+            result = run_copilot_cli_oauth(
+                args.prompt, timeout_seconds=args.run_timeout
+            )
             print(result)
             return
         except Exception:

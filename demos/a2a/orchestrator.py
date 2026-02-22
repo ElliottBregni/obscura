@@ -61,7 +61,9 @@ class A2AResult:
     triage_json: dict[str, Any] | None = None
     investigation_json: dict[str, Any] | None = None
     resolution_json: dict[str, Any] | None = None
-    agent_cards: dict[str, AgentCard] = field(default_factory=lambda: dict[str, AgentCard]())
+    agent_cards: dict[str, AgentCard] = field(
+        default_factory=lambda: dict[str, AgentCard]()
+    )
     total_time_ms: float = 0.0
     phases: list[str] = field(default_factory=lambda: list[str]())
     mode: str = "blocking"
@@ -114,7 +116,9 @@ class A2APipeline:
             self._clients[name] = client
             card = await client.discover()
             cards[name] = card
-            logger.info("Discovered %s: %s (%d skills)", name, card.name, len(card.skills))
+            logger.info(
+                "Discovered %s: %s (%d skills)", name, card.name, len(card.skills)
+            )
         return cards
 
     async def disconnect(self) -> None:
@@ -207,7 +211,8 @@ class A2APipeline:
     # ------------------------------------------------------------------
 
     async def run_streaming(
-        self, ticket: str,
+        self,
+        ticket: str,
     ) -> AsyncIterator[tuple[str, StreamEvent]]:
         """Run the pipeline in streaming mode.
 

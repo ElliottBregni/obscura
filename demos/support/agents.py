@@ -29,28 +29,79 @@ logger = logging.getLogger(__name__)
 # Shared data structures
 # ---------------------------------------------------------------------------
 
-URGENCY_SIGNALS = frozenset({
-    "urgent", "asap", "immediately", "critical", "outage", "down",
-    "emergency", "production", "p1", "broken", "blocked", "cannot access",
-    "double charge", "charged twice", "unauthorized", "security breach",
-})
+URGENCY_SIGNALS = frozenset(
+    {
+        "urgent",
+        "asap",
+        "immediately",
+        "critical",
+        "outage",
+        "down",
+        "emergency",
+        "production",
+        "p1",
+        "broken",
+        "blocked",
+        "cannot access",
+        "double charge",
+        "charged twice",
+        "unauthorized",
+        "security breach",
+    }
+)
 
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "billing": [
-        "charge", "invoice", "payment", "refund", "subscription", "bill",
-        "price", "cost", "credit", "discount", "upgrade", "downgrade",
+        "charge",
+        "invoice",
+        "payment",
+        "refund",
+        "subscription",
+        "bill",
+        "price",
+        "cost",
+        "credit",
+        "discount",
+        "upgrade",
+        "downgrade",
     ],
     "technical": [
-        "api", "error", "bug", "crash", "timeout", "webhook", "rate limit",
-        "integration", "endpoint", "ssl", "certificate", "deployment",
+        "api",
+        "error",
+        "bug",
+        "crash",
+        "timeout",
+        "webhook",
+        "rate limit",
+        "integration",
+        "endpoint",
+        "ssl",
+        "certificate",
+        "deployment",
     ],
     "account": [
-        "login", "password", "access", "permission", "sso", "user",
-        "role", "invite", "dashboard", "session", "authentication",
+        "login",
+        "password",
+        "access",
+        "permission",
+        "sso",
+        "user",
+        "role",
+        "invite",
+        "dashboard",
+        "session",
+        "authentication",
     ],
     "general": [
-        "question", "documentation", "feature", "request", "compliance",
-        "soc2", "gdpr", "contract", "sla",
+        "question",
+        "documentation",
+        "feature",
+        "request",
+        "compliance",
+        "soc2",
+        "gdpr",
+        "contract",
+        "sla",
     ],
 }
 
@@ -210,11 +261,15 @@ class TriageAgent(BaseAgent):
             for kw in keywords:
                 if kw in ticket_lower:
                     scores[cat] += 1
-        category = max(scores, key=lambda c: scores[c]) if any(scores.values()) else "general"
+        category = (
+            max(scores, key=lambda c: scores[c]) if any(scores.values()) else "general"
+        )
 
         # Severity assignment
         if urgency:
-            severity = "P1" if "outage" in ticket_lower or "down" in ticket_lower else "P2"
+            severity = (
+                "P1" if "outage" in ticket_lower or "down" in ticket_lower else "P2"
+            )
         elif category == "billing":
             severity = "P2"
         elif category == "technical":
@@ -332,7 +387,9 @@ class InvestigatorAgent(BaseAgent):
         """Log investigation findings count."""
         results: list[Any] = ctx.results or []
         first: dict[str, Any] = results[0] if results else {}
-        similar: list[dict[str, Any]] = first.get("similar_tickets", []) if results else []
+        similar: list[dict[str, Any]] = (
+            first.get("similar_tickets", []) if results else []
+        )
         kb: list[dict[str, Any]] = first.get("kb_articles", []) if results else []
         logger.info(
             "investigator.post_execute: found %d similar tickets, %d KB articles",
@@ -420,7 +477,9 @@ class InvestigatorAgent(BaseAgent):
         # Also search with the original ticket text keywords
         ticket_words = re.findall(r"\b\w{4,}\b", triage.original_ticket.lower())
         if ticket_words:
-            kb_extra: dict[str, Any] = json.loads(search_knowledge_base(query=" ".join(ticket_words[:3])))
+            kb_extra: dict[str, Any] = json.loads(
+                search_knowledge_base(query=" ".join(ticket_words[:3]))
+            )
             for article in kb_extra["articles"]:
                 if article not in kb_parsed["articles"]:
                     kb_parsed["articles"].append(article)
@@ -450,13 +509,15 @@ class InvestigatorAgent(BaseAgent):
         if triage.severity == "P1":
             should_escalate = True
 
-        ctx.results = [{
-            "similar_tickets": all_similar,
-            "kb_articles": kb_parsed["articles"],
-            "root_cause": root_cause,
-            "recommended_action": recommended_action,
-            "should_escalate": should_escalate,
-        }]
+        ctx.results = [
+            {
+                "similar_tickets": all_similar,
+                "kb_articles": kb_parsed["articles"],
+                "root_cause": root_cause,
+                "recommended_action": recommended_action,
+                "should_escalate": should_escalate,
+            }
+        ]
 
     @override
     async def respond(self, ctx: AgentContext) -> None:
@@ -638,7 +699,9 @@ class ResolutionAgent(BaseAgent):
             details_parts.append(f"Root cause: {investigation.root_cause}")
 
         if investigation.recommended_action:
-            details_parts.append(f"\nRecommended steps:\n{investigation.recommended_action}")
+            details_parts.append(
+                f"\nRecommended steps:\n{investigation.recommended_action}"
+            )
 
         if investigation.kb_articles:
             article: dict[str, Any] = investigation.kb_articles[0]
@@ -646,15 +709,17 @@ class ResolutionAgent(BaseAgent):
                 f"\nFor more information, see our guide: {article['title']}"
             )
 
-        details = "\n".join(details_parts) if details_parts else "We're looking into this."
+        details = (
+            "\n".join(details_parts) if details_parts else "We're looking into this."
+        )
         draft = template.format(details=details)
 
         # Store draft for compliance hook
         ctx.metadata["response_draft"] = draft
 
         # Build internal notes
-        ticket_ids: list[Any] = [t['ticket_id'] for t in investigation.similar_tickets]
-        article_ids: list[Any] = [a['id'] for a in investigation.kb_articles]
+        ticket_ids: list[Any] = [t["ticket_id"] for t in investigation.similar_tickets]
+        article_ids: list[Any] = [a["id"] for a in investigation.kb_articles]
         internal: list[str] = [
             f"Category: {investigation.triage.category}",
             f"Severity: {investigation.triage.severity}",
@@ -666,10 +731,12 @@ class ResolutionAgent(BaseAgent):
         if investigation.should_escalate:
             internal.append(f"ESCALATED: {investigation.escalation_reason}")
 
-        ctx.results = [{
-            "draft": draft,
-            "internal_notes": "\n".join(internal),
-        }]
+        ctx.results = [
+            {
+                "draft": draft,
+                "internal_notes": "\n".join(internal),
+            }
+        ]
 
     @override
     async def respond(self, ctx: AgentContext) -> None:
@@ -678,7 +745,9 @@ class ResolutionAgent(BaseAgent):
         result_data: dict[str, Any] = ctx.results[0] if ctx.results else {}
         investigation: InvestigationResult = analysis["investigation"]
 
-        elapsed_ms = (time.monotonic() - self._start_time) * 1000 if self._start_time else 0
+        elapsed_ms = (
+            (time.monotonic() - self._start_time) * 1000 if self._start_time else 0
+        )
 
         response_type: str = analysis.get("resolution_type", "info")
         customer_message: str = result_data.get("draft", "")

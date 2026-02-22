@@ -71,7 +71,9 @@ class TestAgentGroupCRUD:
 
 class TestAgentGroupBroadcast:
     @patch("obscura.routes.agent_groups.get_runtime")
-    def test_broadcast_to_group(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_broadcast_to_group(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_agent: Any = MagicMock()
         mock_agent.run = AsyncMock()
         mock_runtime: Any = AsyncMock()
@@ -99,7 +101,9 @@ class TestAgentGroupBroadcast:
         assert len(data["queued"]) == 1
 
     @patch("obscura.routes.agent_groups.get_runtime")
-    def test_broadcast_group_not_found(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_broadcast_group_not_found(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_get_runtime.return_value = mock_runtime
         resp = client.post(
@@ -111,7 +115,9 @@ class TestAgentGroupBroadcast:
         assert resp.status_code == 404
 
     @patch("obscura.routes.agent_groups.get_runtime")
-    def test_broadcast_agent_not_found(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_broadcast_agent_not_found(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_runtime.get_agent = MagicMock(return_value=None)
         mock_get_runtime.return_value = mock_runtime
@@ -154,7 +160,9 @@ class TestAgentMessaging:
         assert resp.json()["sent"] is True
 
     @patch("obscura.routes.agent_groups.get_runtime")
-    def test_send_message_source_not_found(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_send_message_source_not_found(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_runtime.get_agent = MagicMock(return_value=None)
         mock_get_runtime.return_value = mock_runtime
@@ -179,7 +187,9 @@ class TestAgentMessaging:
         assert resp.json()["agent_id"] == "a1"
 
     @patch("obscura.routes.agent_groups.get_runtime")
-    def test_get_messages_not_found(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_get_messages_not_found(
+        self, mock_get_runtime: Any, client: TestClient
+    ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_runtime.get_agent = MagicMock(return_value=None)
         mock_get_runtime.return_value = mock_runtime

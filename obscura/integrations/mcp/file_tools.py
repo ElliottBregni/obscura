@@ -56,13 +56,9 @@ def _resolve_safe(
     resolved = Path(path_str).expanduser().resolve()
 
     # Check allowed roots
-    in_allowed = any(
-        str(resolved).startswith(str(Path(r).resolve())) for r in roots
-    )
+    in_allowed = any(str(resolved).startswith(str(Path(r).resolve())) for r in roots)
     if not in_allowed:
-        raise ValueError(
-            f"Path {path_str!r} is outside allowed directories"
-        )
+        raise ValueError(f"Path {path_str!r} is outside allowed directories")
 
     # Check blocked patterns
     if _is_blocked(resolved):
@@ -167,9 +163,7 @@ def search_files(
 
     # Validate search root
     roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
-    in_allowed = any(
-        str(search_root).startswith(str(Path(r).resolve())) for r in roots
-    )
+    in_allowed = any(str(search_root).startswith(str(Path(r).resolve())) for r in roots)
     if not in_allowed:
         return {"error": f"Search root {root!r} is outside allowed directories"}
 
@@ -207,10 +201,12 @@ def search_files(
                     break
 
         if matches:
-            results.append({
-                "path": str(p),
-                "matches": matches,
-            })
+            results.append(
+                {
+                    "path": str(p),
+                    "matches": matches,
+                }
+            )
 
     return {
         "results": results,

@@ -221,9 +221,7 @@ class A2AService:
     # tasks/subscribe
     # ------------------------------------------------------------------
 
-    async def tasks_subscribe(
-        self, task_id: str
-    ) -> AsyncIterator[StreamEvent]:
+    async def tasks_subscribe(self, task_id: str) -> AsyncIterator[StreamEvent]:
         """Subscribe to real-time updates for a task."""
         async for event in self._store.subscribe(task_id):
             yield event
@@ -232,7 +230,9 @@ class A2AService:
     # Confirmation bridge: on_confirm → INPUT_REQUIRED
     # ------------------------------------------------------------------
 
-    def _make_on_confirm(self, task_id: str) -> Callable[[ToolCallInfo], Awaitable[bool]]:
+    def _make_on_confirm(
+        self, task_id: str
+    ) -> Callable[[ToolCallInfo], Awaitable[bool]]:
         """Create an on_confirm callback that bridges to A2A INPUT_REQUIRED.
 
         When the agent loop wants to confirm a tool call, this:
@@ -250,9 +250,15 @@ class A2AService:
             confirm_msg = A2AMessage(
                 role="agent",
                 messageId=f"confirm-{uuid.uuid4().hex[:8]}",
-                parts=[TextPart(text=f"Approve tool call: {tool_call.name}({tool_call.input})")],
+                parts=[
+                    TextPart(
+                        text=f"Approve tool call: {tool_call.name}({tool_call.input})"
+                    )
+                ],
             )
-            await self._store.transition(task_id, TaskState.INPUT_REQUIRED, message=confirm_msg)
+            await self._store.transition(
+                task_id, TaskState.INPUT_REQUIRED, message=confirm_msg
+            )
 
             # Publish update for streaming subscribers
             task = await self._store.get_task(task_id)
@@ -376,7 +382,9 @@ class A2AService:
             await agent.stop()
 
     async def _execute_agent_stream(
-        self, task: Task, prompt: str,
+        self,
+        task: Task,
+        prompt: str,
     ) -> AsyncIterator[AgentEvent]:
         """Execute the agent and yield AgentEvent objects."""
         if not self._get_runtime:

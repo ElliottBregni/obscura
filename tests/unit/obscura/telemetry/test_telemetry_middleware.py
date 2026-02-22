@@ -50,7 +50,9 @@ class TestTelemetryMiddleware:
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
-    @patch("obscura.telemetry.middleware._get_traceparent", return_value="00-abc-def-01")
+    @patch(
+        "obscura.telemetry.middleware._get_traceparent", return_value="00-abc-def-01"
+    )
     def test_traceparent_header(self, mock_tp: MagicMock) -> None:  # noqa: ARG002
         client = TestClient(_make_app())
         resp = client.get("/test")
@@ -167,7 +169,9 @@ class TestEnrichRequestSpan:
             "sys.modules",
             {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
         ):
-            with patch("obscura.telemetry.context.enrich_span_with_user") as mock_enrich:
+            with patch(
+                "obscura.telemetry.context.enrich_span_with_user"
+            ) as mock_enrich:
                 enrich_request_span(mock_request, "req-1")
                 mock_enrich.assert_called_once_with(mock_span, mock_user)
 

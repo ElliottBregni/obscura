@@ -20,7 +20,11 @@ from obscura.core.types import (
     ToolSpec,
 )
 from obscura.providers.mcp_backend import MCPBackend, MCPBackendMixin
-from obscura.integrations.mcp.types import MCPConnectionConfig, MCPError, MCPTransportType
+from obscura.integrations.mcp.types import (
+    MCPConnectionConfig,
+    MCPError,
+    MCPTransportType,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +338,9 @@ class TestMCPBackendHooks:
         assert called_with[0].hook == HookPoint.PRE_TOOL_USE
 
     @pytest.mark.asyncio
-    async def test_hook_error_logged_not_raised(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_hook_error_logged_not_raised(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
 
         def exploding_hook(ctx: Any) -> None:
@@ -356,7 +362,9 @@ class TestMCPBackendHooks:
         )
 
     @pytest.mark.asyncio
-    async def test_async_hook_error_logged_not_raised(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_async_hook_error_logged_not_raised(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
 
         async def async_exploding_hook(ctx: Any) -> None:
@@ -443,9 +451,7 @@ class TestMCPBackendLifecycle:
         backend._session_manager = mock_mgr  # pyright: ignore[reportPrivateUsage]
 
         await backend.start()
-        mock_mgr.add_session.assert_called_once_with(
-            "mcp_server_0", config
-        )
+        mock_mgr.add_session.assert_called_once_with("mcp_server_0", config)
 
     @pytest.mark.asyncio
     async def test_start_with_server_failure_still_initializes(self) -> None:
@@ -454,9 +460,7 @@ class TestMCPBackendLifecycle:
         )
         backend = MCPBackend(mcp_servers=[config], name="test-mcp")
         mock_mgr: Any = MagicMock()
-        mock_mgr.add_session = AsyncMock(
-            side_effect=Exception("connection failed")
-        )
+        mock_mgr.add_session = AsyncMock(side_effect=Exception("connection failed"))
         mock_mgr.aggregate_tools = AsyncMock(return_value=[])
         backend._session_manager = mock_mgr  # pyright: ignore[reportPrivateUsage]
 
@@ -656,7 +660,8 @@ class TestMCPBackendExecuteMCPTool:
         backend._session_manager = mock_mgr  # pyright: ignore[reportPrivateUsage]
 
         with patch(
-            "obscura.providers.mcp_backend.mcp_result_to_obscura", return_value="converted"
+            "obscura.providers.mcp_backend.mcp_result_to_obscura",
+            return_value="converted",
         ):
             result = await backend._execute_mcp_tool("srv", "tool_name", {"a": 1})  # pyright: ignore[reportPrivateUsage]
 

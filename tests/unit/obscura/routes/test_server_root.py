@@ -96,7 +96,9 @@ class TestSendEndpoint:
         app = _make_app()
         client = TestClient(app)
 
-        with patch("obscura.auth.rbac.require_any_role", return_value=lambda: _TEST_USER):
+        with patch(
+            "obscura.auth.rbac.require_any_role", return_value=lambda: _TEST_USER
+        ):
             # Override the dependency
             from obscura.auth.rbac import require_any_role
 
@@ -371,7 +373,9 @@ class TestLifespan:
         config = ObscuraConfig(auth_enabled=False, otel_enabled=True)
         app = create_app(config)
 
-        with patch("obscura.telemetry.init_telemetry", side_effect=Exception("otel boom")):
+        with patch(
+            "obscura.telemetry.init_telemetry", side_effect=Exception("otel boom")
+        ):
             # Should not raise
             async with lifespan(app):
                 pass

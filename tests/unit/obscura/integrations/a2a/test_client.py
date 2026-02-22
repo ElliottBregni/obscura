@@ -17,7 +17,10 @@ from obscura.integrations.a2a.client import A2AClient, A2ASessionManager
 from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
-from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.rest import (
+    create_rest_router,
+    create_wellknown_router,
+)
 from obscura.integrations.a2a.transports.sse import create_sse_router
 from obscura.integrations.a2a.types import A2AError, TaskState
 
@@ -30,7 +33,8 @@ from obscura.integrations.a2a.types import A2AError, TaskState
 def _make_app() -> FastAPI:
     store = InMemoryTaskStore()
     card = AgentCardGenerator(
-        "ClientTestAgent", "https://test.local",
+        "ClientTestAgent",
+        "https://test.local",
         description="Test agent for client tests",
     ).build()
     service = A2AService(store=store, agent_card=card)
@@ -55,6 +59,7 @@ async def client(app: FastAPI):
     c = A2AClient("http://test")
     # Inject httpx client with ASGI transport
     import httpx
+
     c._http = httpx.AsyncClient(
         transport=transport,
         base_url="http://test",
@@ -99,7 +104,11 @@ class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_non_blocking(self, client: A2AClient) -> None:
         task = await client.send_message("Quick task", blocking=False)
-        assert task.status.state in (TaskState.PENDING, TaskState.WORKING, TaskState.COMPLETED)
+        assert task.status.state in (
+            TaskState.PENDING,
+            TaskState.WORKING,
+            TaskState.COMPLETED,
+        )
 
 
 # ---------------------------------------------------------------------------

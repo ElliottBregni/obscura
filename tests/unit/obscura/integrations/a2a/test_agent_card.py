@@ -39,7 +39,11 @@ class TestAgentCardGenerator:
             {"name": "search", "description": "Search documents"},
             {"name": "deploy", "description": "Deploy to staging", "tags": ["infra"]},
         ]
-        card = AgentCardGenerator("Agent", "https://x.com").with_skills_from_tools(tools).build()
+        card = (
+            AgentCardGenerator("Agent", "https://x.com")
+            .with_skills_from_tools(tools)
+            .build()
+        )
         assert len(card.skills) == 2
         assert card.skills[0].id == "search"
         assert card.skills[0].name == "search"
@@ -48,7 +52,9 @@ class TestAgentCardGenerator:
     def test_with_capabilities(self) -> None:
         card = (
             AgentCardGenerator("Agent", "https://x.com")
-            .with_capabilities(streaming=False, push_notifications=True, extended_card=True)
+            .with_capabilities(
+                streaming=False, push_notifications=True, extended_card=True
+            )
             .build()
         )
         assert card.capabilities.streaming is False
@@ -67,7 +73,9 @@ class TestAgentCardGenerator:
             AgentCardGenerator("Agent", "https://x.com")
             .with_auth_scheme(
                 "apiKey",
-                AuthScheme.model_validate({"type": "apiKey", "name": "X-API-Key", "in": "header"}),
+                AuthScheme.model_validate(
+                    {"type": "apiKey", "name": "X-API-Key", "in": "header"}
+                ),
             )
             .build()
         )
@@ -85,7 +93,9 @@ class TestAgentCardGenerator:
         assert card.provider["url"] == "https://obscura.dev"
 
     def test_provider_name_only(self) -> None:
-        card = AgentCardGenerator("Agent", "https://x.com").with_provider("Acme").build()
+        card = (
+            AgentCardGenerator("Agent", "https://x.com").with_provider("Acme").build()
+        )
         assert card.provider == {"name": "Acme"}
 
     def test_chaining(self) -> None:

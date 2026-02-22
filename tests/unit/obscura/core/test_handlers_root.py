@@ -88,5 +88,3 @@ class TestSimpleHandler:
         await handler.handle(42)
 
         client.send.assert_called_once_with("42")
-
-

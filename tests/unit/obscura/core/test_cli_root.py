@@ -566,5 +566,3 @@ class TestCLIOptions:
                 assert call_args[0][1] == "custom-token"
             elif call_args and call_args[1]:
                 assert call_args[1].get("token") == "custom-token"
-
-

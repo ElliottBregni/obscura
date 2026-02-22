@@ -30,7 +30,10 @@ from obscura.integrations.a2a.agent_card import AgentCardGenerator
 from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
-from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.rest import (
+    create_rest_router,
+    create_wellknown_router,
+)
 from obscura.integrations.a2a.transports.sse import create_sse_router
 from obscura.integrations.a2a.types import (
     AgentSkill,
@@ -89,7 +92,9 @@ class DomainA2AService(A2AService):
 
     @override
     async def _execute_agent_stream(
-        self, task: Task, prompt: str,
+        self,
+        task: Task,
+        prompt: str,
     ) -> AsyncIterator[AgentEvent]:
         """Stream agent execution as AgentEvent objects."""
         yield AgentEvent(kind=AgentEventKind.TURN_START)
@@ -135,7 +140,9 @@ def _triage_fn(prompt: str) -> str:
         for kw in keywords:
             if kw in ticket_lower:
                 scores[cat] += 1
-    category = max(scores, key=lambda c: scores[c]) if any(scores.values()) else "general"
+    category = (
+        max(scores, key=lambda c: scores[c]) if any(scores.values()) else "general"
+    )
 
     # Severity
     if urgency_detected:
@@ -199,7 +206,11 @@ def _investigator_fn(prompt: str) -> str:
         triage_data: dict[str, Any] = json.loads(prompt)
     except json.JSONDecodeError:
         # Fallback: treat as raw text
-        triage_data = {"category": "general", "customer_id": "", "original_ticket": prompt}
+        triage_data = {
+            "category": "general",
+            "customer_id": "",
+            "original_ticket": prompt,
+        }
 
     category: str = triage_data.get("category", "general")
     customer_id: str = triage_data.get("customer_id", "")
@@ -224,7 +235,9 @@ def _investigator_fn(prompt: str) -> str:
     # Also search with ticket keywords
     ticket_words = re.findall(r"\b\w{4,}\b", original_ticket.lower())
     if ticket_words:
-        kb_extra: dict[str, Any] = json.loads(search_knowledge_base(query=" ".join(ticket_words[:3])))
+        kb_extra: dict[str, Any] = json.loads(
+            search_knowledge_base(query=" ".join(ticket_words[:3]))
+        )
         for article in kb_extra["articles"]:
             if article not in kb_parsed["articles"]:
                 kb_parsed["articles"].append(article)
@@ -446,9 +459,21 @@ def create_triage_app(url: str = "http://triage.local") -> FastAPI:
             "with customer/order data."
         ),
         skills=[
-            AgentSkill(id="classify", name="classify", description="Classify ticket category and severity"),
-            AgentSkill(id="extract_customer", name="extract_customer", description="Extract customer ID from ticket"),
-            AgentSkill(id="detect_urgency", name="detect_urgency", description="Detect urgency signals in ticket text"),
+            AgentSkill(
+                id="classify",
+                name="classify",
+                description="Classify ticket category and severity",
+            ),
+            AgentSkill(
+                id="extract_customer",
+                name="extract_customer",
+                description="Extract customer ID from ticket",
+            ),
+            AgentSkill(
+                id="detect_urgency",
+                name="detect_urgency",
+                description="Detect urgency signals in ticket text",
+            ),
         ],
         domain_fn=_triage_fn,
     )
@@ -467,9 +492,21 @@ def create_investigator_app(url: str = "http://investigator.local") -> FastAPI:
             "Identifies root causes and recommends resolution actions."
         ),
         skills=[
-            AgentSkill(id="search_similar", name="search_similar", description="Search past tickets for similar issues"),
-            AgentSkill(id="search_kb", name="search_kb", description="Search knowledge base articles"),
-            AgentSkill(id="root_cause", name="root_cause", description="Determine root cause from evidence"),
+            AgentSkill(
+                id="search_similar",
+                name="search_similar",
+                description="Search past tickets for similar issues",
+            ),
+            AgentSkill(
+                id="search_kb",
+                name="search_kb",
+                description="Search knowledge base articles",
+            ),
+            AgentSkill(
+                id="root_cause",
+                name="root_cause",
+                description="Determine root cause from evidence",
+            ),
         ],
         domain_fn=_investigator_fn,
     )
@@ -488,8 +525,16 @@ def create_resolution_app(url: str = "http://resolution.local") -> FastAPI:
             "Chooses appropriate tone (apology, fix, escalation, info)."
         ),
         skills=[
-            AgentSkill(id="draft_response", name="draft_response", description="Draft customer-facing response message"),
-            AgentSkill(id="send_response", name="send_response", description="Send the final response to the customer"),
+            AgentSkill(
+                id="draft_response",
+                name="draft_response",
+                description="Draft customer-facing response message",
+            ),
+            AgentSkill(
+                id="send_response",
+                name="send_response",
+                description="Send the final response to the customer",
+            ),
         ],
         domain_fn=_resolution_fn,
     )

@@ -252,7 +252,9 @@ async def run_inproc_demo(
             metadata=metadata,
         )
         # Use concrete request object for strict typing on retrieval path.
-        memory_value = await bridge.get_memory(namespace, "last_goal", metadata=metadata)
+        memory_value = await bridge.get_memory(
+            namespace, "last_goal", metadata=metadata
+        )
 
     return {
         "mode": "inproc",

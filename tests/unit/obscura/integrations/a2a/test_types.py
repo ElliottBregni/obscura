@@ -36,8 +36,14 @@ class TestTaskState:
     def test_all_states_exist(self) -> None:
         states = {s.value for s in TaskState}
         assert states == {
-            "pending", "working", "input-required", "auth-required",
-            "completed", "failed", "canceled", "rejected",
+            "pending",
+            "working",
+            "input-required",
+            "auth-required",
+            "completed",
+            "failed",
+            "canceled",
+            "rejected",
         }
 
     def test_terminal_states(self) -> None:
@@ -75,7 +81,11 @@ class TestParts:
 
     def test_file_part_with_uri(self) -> None:
         part = FilePart(
-            file=FileContent(name="report.pdf", mimeType="application/pdf", uri="https://example.com/report.pdf")
+            file=FileContent(
+                name="report.pdf",
+                mimeType="application/pdf",
+                uri="https://example.com/report.pdf",
+            )
         )
         d = part.model_dump()
         assert d["kind"] == "file"
@@ -166,9 +176,7 @@ class TestTask:
             id="task-002",
             contextId="ctx-001",
             status=TaskStatus(state=TaskState.COMPLETED),
-            artifacts=[
-                Artifact(artifactId="art-1", parts=[TextPart(text="result")])
-            ],
+            artifacts=[Artifact(artifactId="art-1", parts=[TextPart(text="result")])],
         )
         assert len(task.artifacts) == 1
 
@@ -233,8 +241,12 @@ class TestAgentCard:
             description="Handles customer support tickets",
             url="https://support.example.com/a2a",
             skills=[
-                AgentSkill(id="triage", name="Ticket Triage", description="Classify tickets"),
-                AgentSkill(id="resolve", name="Issue Resolution", tags=["billing", "tech"]),
+                AgentSkill(
+                    id="triage", name="Ticket Triage", description="Classify tickets"
+                ),
+                AgentSkill(
+                    id="resolve", name="Issue Resolution", tags=["billing", "tech"]
+                ),
             ],
             capabilities=AgentCapabilities(streaming=True, pushNotifications=True),
             securitySchemes={

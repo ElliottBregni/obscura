@@ -199,7 +199,9 @@ class TestBackendBridgeConnect:
         bridge = BackendBridge(backend="copilot", model="gpt-5-mini")
         mock_client = _make_mock_client()
 
-        with patch("obscura.core.client.ObscuraClient", return_value=mock_client) as mock_cls:
+        with patch(
+            "obscura.core.client.ObscuraClient", return_value=mock_client
+        ) as mock_cls:
             await bridge.connect()
 
         mock_cls.assert_called_once_with("copilot", model="gpt-5-mini", cwd=None)
@@ -210,7 +212,9 @@ class TestBackendBridgeConnect:
         bridge = BackendBridge(backend="claude", cwd="/my/project")
         mock_client = _make_mock_client()
 
-        with patch("obscura.core.client.ObscuraClient", return_value=mock_client) as mock_cls:
+        with patch(
+            "obscura.core.client.ObscuraClient", return_value=mock_client
+        ) as mock_cls:
             await bridge.connect()
 
         mock_cls.assert_called_once_with("claude", model=None, cwd="/my/project")

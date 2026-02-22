@@ -7,7 +7,9 @@ from obscura.auth.models import AuthenticatedUser
 from obscura.core.config import ObscuraConfig
 
 
-def _make_user(user_id: str = "test-user", email: str = "test@example.com") -> AuthenticatedUser:
+def _make_user(
+    user_id: str = "test-user", email: str = "test@example.com"
+) -> AuthenticatedUser:
     return AuthenticatedUser(
         user_id=user_id,
         email=email,
@@ -174,5 +176,3 @@ class TestAuthenticateWebsocket:
 
         user = await authenticate_websocket(mock_ws)
         assert user is not None
-
-

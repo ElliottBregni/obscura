@@ -185,6 +185,7 @@ class MCPRegistryAPICatalogProvider:
                 break
         return entries
 
+
 def catalog_entries_to_mcp_servers(
     entries: list[MCPCatalogEntry],
 ) -> dict[str, dict[str, object]]:

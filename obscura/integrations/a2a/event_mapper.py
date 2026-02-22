@@ -43,7 +43,11 @@ class EventMapper:
         self._chunk_count = 0
 
     def status_event(
-        self, state: TaskState, *, final: bool = False, message: str | None = None,
+        self,
+        state: TaskState,
+        *,
+        final: bool = False,
+        message: str | None = None,
     ) -> TaskStatusUpdateEvent:
         status = TaskStatus(
             state=state,
@@ -57,7 +61,11 @@ class EventMapper:
         )
 
     def _artifact_event(
-        self, text: str, *, append: bool = True, last_chunk: bool = False,
+        self,
+        text: str,
+        *,
+        append: bool = True,
+        last_chunk: bool = False,
     ) -> TaskArtifactUpdateEvent:
         if self._artifact_id is None:
             self._artifact_id = f"art-{uuid.uuid4().hex[:8]}"
@@ -112,9 +120,7 @@ class EventMapper:
             # Close the current artifact if one was being streamed.
             events: list[StreamEvent] = []
             if self._artifact_id is not None:
-                events.append(
-                    self._artifact_event("", append=True, last_chunk=True)
-                )
+                events.append(self._artifact_event("", append=True, last_chunk=True))
                 self._artifact_id = None
             return events
 
@@ -122,9 +128,7 @@ class EventMapper:
             events = []
             # Close any open artifact.
             if self._artifact_id is not None:
-                events.append(
-                    self._artifact_event("", append=True, last_chunk=True)
-                )
+                events.append(self._artifact_event("", append=True, last_chunk=True))
                 self._artifact_id = None
             events.append(self.status_event(TaskState.COMPLETED, final=True))
             return events
@@ -132,9 +136,7 @@ class EventMapper:
         if kind == AgentEventKind.ERROR:
             events = []
             if self._artifact_id is not None:
-                events.append(
-                    self._artifact_event("", append=True, last_chunk=True)
-                )
+                events.append(self._artifact_event("", append=True, last_chunk=True))
                 self._artifact_id = None
             events.append(self.status_event(TaskState.FAILED, final=True))
             return events

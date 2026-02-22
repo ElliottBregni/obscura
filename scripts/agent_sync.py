@@ -59,7 +59,15 @@ AGENT_SOURCES: dict[str, AgentSource] = {
     "codex": AgentSource(
         name="codex",
         source_dir=Path.home() / ".codex",
-        exclude_dirs={"log", "sqlite", "tmp", "vendor_imports", "shell_snapshots", "rules", "skills"},
+        exclude_dirs={
+            "log",
+            "sqlite",
+            "tmp",
+            "vendor_imports",
+            "shell_snapshots",
+            "rules",
+            "skills",
+        },
     ),
 }
 
@@ -271,7 +279,9 @@ def _derive_topic(
     if text.startswith(("http://", "https://")):
         # Use path segments as topic
         parts = text.split("/")
-        meaningful = [p for p in parts[3:] if p and p not in ("tree", "dev", "main", "master")]
+        meaningful = [
+            p for p in parts[3:] if p and p not in ("tree", "dev", "main", "master")
+        ]
         if meaningful:
             text = " ".join(meaningful[-2:])
         elif len(parts) > 2:
@@ -281,12 +291,22 @@ def _derive_topic(
 
     # Strip common conversational prefixes
     for prefix in (
-        "I want you to ", "I want to ", "I need you to ", "I need to ",
-        "Can you ", "Could you ", "Will you ", "Would you ",
-        "Help me ", "Please ", "Generate ", "Create ", "Write ",
+        "I want you to ",
+        "I want to ",
+        "I need you to ",
+        "I need to ",
+        "Can you ",
+        "Could you ",
+        "Will you ",
+        "Would you ",
+        "Help me ",
+        "Please ",
+        "Generate ",
+        "Create ",
+        "Write ",
     ):
         if text.lower().startswith(prefix.lower()):
-            text = text[len(prefix):]
+            text = text[len(prefix) :]
             # Capitalize first char
             if text:
                 text = text[0].upper() + text[1:]
@@ -417,14 +437,16 @@ class SessionDiscovery:
             if not files:
                 continue
 
-            sessions.append(DiscoveredSession(
-                agent="claude",
-                session_id=sid,
-                source_path=base,
-                files=files,
-                mtime=max_mtime,
-                meta=meta,
-            ))
+            sessions.append(
+                DiscoveredSession(
+                    agent="claude",
+                    session_id=sid,
+                    source_path=base,
+                    files=files,
+                    mtime=max_mtime,
+                    meta=meta,
+                )
+            )
 
         return sessions
 
@@ -476,13 +498,15 @@ class SessionDiscovery:
             if not files:
                 continue
 
-            sessions.append(DiscoveredSession(
-                agent="copilot",
-                session_id=sid,
-                source_path=session_dir,
-                files=files,
-                mtime=max_mtime,
-            ))
+            sessions.append(
+                DiscoveredSession(
+                    agent="copilot",
+                    session_id=sid,
+                    source_path=session_dir,
+                    files=files,
+                    mtime=max_mtime,
+                )
+            )
 
         return sessions
 
@@ -539,14 +563,16 @@ class SessionDiscovery:
                 "title": thread_titles.get(sid, ""),
             }
 
-            sessions.append(DiscoveredSession(
-                agent="codex",
-                session_id=sid,
-                source_path=rollout_file.parent,
-                files=files,
-                mtime=mtime,
-                meta=meta,
-            ))
+            sessions.append(
+                DiscoveredSession(
+                    agent="codex",
+                    session_id=sid,
+                    source_path=rollout_file.parent,
+                    files=files,
+                    mtime=mtime,
+                    meta=meta,
+                )
+            )
 
         return sessions
 
@@ -663,7 +689,10 @@ class SemanticIndexBuilder:
                     if entry:
                         entries.append(entry)
                 except Exception as e:
-                    print(f"  Warning: failed to parse {session_dir.name}: {e}", file=sys.stderr)
+                    print(
+                        f"  Warning: failed to parse {session_dir.name}: {e}",
+                        file=sys.stderr,
+                    )
 
         # Sort by start time descending (most recent first)
         entries.sort(key=lambda e: e.started or "", reverse=True)
@@ -859,16 +888,18 @@ class SemanticIndexBuilder:
                 # Model change info events
                 msg = data.get("message", "")
                 if msg.startswith("Model changed to: "):
-                    model = msg[len("Model changed to: "):]
+                    model = msg[len("Model changed to: ") :]
 
             elif event_type == "user.message":
                 content = data.get("content", "")
                 if content:
-                    turns.append({
-                        "ts": ts,
-                        "role": "user",
-                        "preview": _truncate(content),
-                    })
+                    turns.append(
+                        {
+                            "ts": ts,
+                            "role": "user",
+                            "preview": _truncate(content),
+                        }
+                    )
                     user_count += 1
                     if not summary:
                         summary = _truncate(content, 200)
@@ -876,11 +907,13 @@ class SemanticIndexBuilder:
             elif event_type == "assistant.message":
                 content = data.get("content", "")
                 if content:
-                    turns.append({
-                        "ts": ts,
-                        "role": "assistant",
-                        "preview": _truncate(content),
-                    })
+                    turns.append(
+                        {
+                            "ts": ts,
+                            "role": "assistant",
+                            "preview": _truncate(content),
+                        }
+                    )
 
             elif event_type == "tool.execution_start":
                 tool_name = data.get("toolName", "")
@@ -983,8 +1016,12 @@ class SemanticIndexBuilder:
                         timestamps.append(ts)
                     continue
 
-                if item_type in ("function_call_output", "custom_tool_call_output",
-                                 "reasoning", "ghost_snapshot"):
+                if item_type in (
+                    "function_call_output",
+                    "custom_tool_call_output",
+                    "reasoning",
+                    "ghost_snapshot",
+                ):
                     if ts:
                         timestamps.append(ts)
                     continue
@@ -1006,11 +1043,13 @@ class SemanticIndexBuilder:
                             u_texts.append(text_val)
                     text = " ".join(u_texts).strip()
                     if text:
-                        turns.append({
-                            "ts": ts,
-                            "role": "user",
-                            "preview": _truncate(text),
-                        })
+                        turns.append(
+                            {
+                                "ts": ts,
+                                "role": "user",
+                                "preview": _truncate(text),
+                            }
+                        )
                         if ts:
                             timestamps.append(ts)
 
@@ -1022,11 +1061,13 @@ class SemanticIndexBuilder:
                             a_texts.append(str(cb.get("text", "")))
                     text = " ".join(a_texts).strip()
                     if text:
-                        turns.append({
-                            "ts": ts,
-                            "role": "assistant",
-                            "preview": _truncate(text),
-                        })
+                        turns.append(
+                            {
+                                "ts": ts,
+                                "role": "assistant",
+                                "preview": _truncate(text),
+                            }
+                        )
                         if ts:
                             timestamps.append(ts)
 
@@ -1161,7 +1202,9 @@ class AgentSessionSync:
                 sessions = [s for s in all_sessions if s.mtime > last_sync]
                 skipped_unchanged = len(all_sessions) - len(sessions)
                 if skipped_unchanged > 0:
-                    print(f"  [{agent_name}] Skipping {skipped_unchanged} unchanged sessions (last sync: {_unix_to_iso(last_sync)[:19]})")
+                    print(
+                        f"  [{agent_name}] Skipping {skipped_unchanged} unchanged sessions (last sync: {_unix_to_iso(last_sync)[:19]})"
+                    )
             else:
                 sessions = all_sessions
 
@@ -1195,7 +1238,9 @@ class AgentSessionSync:
             f"{sum(1 for e in entries if e.agent == 'codex')} codex)"
         )
 
-        print(f"\nSync complete. {total_copied} files copied, {total_skipped} unchanged.")
+        print(
+            f"\nSync complete. {total_copied} files copied, {total_skipped} unchanged."
+        )
 
     def rebuild_index(self, agent: str | None = None) -> None:
         """Regenerate INDEX.jsonl from synced copies only."""

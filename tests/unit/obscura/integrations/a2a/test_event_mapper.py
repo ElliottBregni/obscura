@@ -179,7 +179,9 @@ class TestFullSequence:
 
         # WORKING, 3x artifact, close-artifact, COMPLETED
         status_events = [e for e in all_events if isinstance(e, TaskStatusUpdateEvent)]
-        artifact_events = [e for e in all_events if isinstance(e, TaskArtifactUpdateEvent)]
+        artifact_events = [
+            e for e in all_events if isinstance(e, TaskArtifactUpdateEvent)
+        ]
 
         assert len(status_events) == 2  # WORKING + COMPLETED
         assert status_events[0].status.state == TaskState.WORKING
@@ -198,8 +200,14 @@ class TestFullSequence:
         all_events.extend(m.map(_event(AgentEventKind.TOOL_CALL, tool_name="deploy")))
         all_events.extend(m.map(_event(AgentEventKind.CONFIRMATION_REQUEST)))
 
-        states = [e.status.state for e in all_events if isinstance(e, TaskStatusUpdateEvent)]
-        assert states == [TaskState.WORKING, TaskState.WORKING, TaskState.INPUT_REQUIRED]
+        states = [
+            e.status.state for e in all_events if isinstance(e, TaskStatusUpdateEvent)
+        ]
+        assert states == [
+            TaskState.WORKING,
+            TaskState.WORKING,
+            TaskState.INPUT_REQUIRED,
+        ]
 
 
 class TestReset:

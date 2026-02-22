@@ -31,7 +31,9 @@ class MoonshotBackend(OpenAIBackend):
         mcp_servers: list[dict[str, Any]] | None = None,
     ) -> None:
         key = auth.moonshot_api_key or auth.openai_api_key
-        base_url = auth.moonshot_base_url or auth.openai_base_url or self.DEFAULT_BASE_URL
+        base_url = (
+            auth.moonshot_base_url or auth.openai_base_url or self.DEFAULT_BASE_URL
+        )
         compat_auth = AuthConfig(openai_api_key=key, openai_base_url=base_url)
         super().__init__(
             compat_auth,
