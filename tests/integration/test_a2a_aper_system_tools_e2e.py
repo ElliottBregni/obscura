@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from demos.a2a.run_aper_10_agents import WorkflowA2AService, run_workflow
-from sdk.agent.agent import BaseAgent
-from sdk.agent.system_tools import (
+from obscura.agent.agent import BaseAgent
+from obscura.tools.system import (
     append_text_file,
     discover_all_commands,
     get_environment,
@@ -37,7 +37,7 @@ from sdk.agent.system_tools import (
     which_command,
     write_text_file,
 )
-from sdk.internal.types import AgentContext
+from obscura.core.types import AgentContext
 
 
 class _SystemToolsAPERAgent(BaseAgent):

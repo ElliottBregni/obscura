@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from sdk.agent.agents import AgentRuntime, MCPConfig
-from sdk.demo.framework import DemoAgentConfig, run_demo_prompt
+from obscura.agent.agents import AgentRuntime, MCPConfig
+from obscura.demo.framework import DemoAgentConfig, run_demo_prompt
 
 
 @dataclass(frozen=True)

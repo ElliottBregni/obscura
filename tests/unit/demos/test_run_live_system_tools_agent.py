@@ -12,7 +12,7 @@ from demos.backend_agents.run_live_system_tools_agent import (
     build_parser,
     run_live_system_tools_demo,
 )
-from sdk.internal.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent, AgentEventKind
 
 
 async def _fake_events() -> AsyncIterator[AgentEvent]:

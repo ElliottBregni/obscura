@@ -19,8 +19,8 @@ from unittest.mock import patch
 import httpx
 from httpx import ASGITransport
 
-from sdk.config import ObscuraConfig
-from sdk.openclaw_bridge import (
+from obscura.core.config import ObscuraConfig
+from obscura.openclaw_bridge import (
     MemoryWriteRequest,
     OpenClawBridge,
     OpenClawBridgeConfig,
@@ -188,7 +188,7 @@ async def run_inproc_demo(
     run_timeout: float,
     namespace: str,
 ) -> dict[str, Any]:
-    from sdk.server import create_app
+    from obscura.server import create_app
 
     app = create_app(ObscuraConfig(auth_enabled=False, otel_enabled=False))
     transport = ASGITransport(app=app)
@@ -208,8 +208,8 @@ async def run_inproc_demo(
             idempotency_key="openclaw-e2e-demo-idem",
         )
         with (
-            patch("sdk.routes.agents.get_runtime", return_value=runtime),
-            patch("sdk.routes.workflows.get_runtime", return_value=runtime),
+            patch("obscura.routes.agents.get_runtime", return_value=runtime),
+            patch("obscura.routes.workflows.get_runtime", return_value=runtime),
         ):
             spawned = await bridge.spawn_agent(
                 SpawnAgentRequest(

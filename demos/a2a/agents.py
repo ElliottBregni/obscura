@@ -26,17 +26,17 @@ from typing import Any, AsyncIterator, override
 
 from fastapi import FastAPI
 
-from sdk.a2a.agent_card import AgentCardGenerator
-from sdk.a2a.service import A2AService
-from sdk.a2a.store import InMemoryTaskStore
-from sdk.a2a.transports.jsonrpc import create_jsonrpc_router
-from sdk.a2a.transports.rest import create_rest_router, create_wellknown_router
-from sdk.a2a.transports.sse import create_sse_router
-from sdk.a2a.types import (
+from obscura.integrations.a2a.agent_card import AgentCardGenerator
+from obscura.integrations.a2a.service import A2AService
+from obscura.integrations.a2a.store import InMemoryTaskStore
+from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
+from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.sse import create_sse_router
+from obscura.integrations.a2a.types import (
     AgentSkill,
     Task,
 )
-from sdk.internal.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent, AgentEventKind
 
 logger = logging.getLogger(__name__)
 

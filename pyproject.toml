@@ -60,8 +60,8 @@ a2a = [
 ]
 
 [project.scripts]
-obscura = "sdk.cli.chat_cli:main"
-obscura-sdk = "sdk.cli:main"
+obscura = "obscura.cli.chat_cli:main"
+obscura-sdk = "obscura.cli:main"
 
 [dependency-groups]
 dev = [
@@ -81,14 +81,43 @@ dev = [
 
 # Package discovery - explicitly define what to include
 [tool.setuptools]
-packages = ["sdk", "sdk.auth", "sdk.backends", "sdk.cli", "sdk.demo", "sdk.heartbeat", "sdk.mcp", "sdk.parity", "sdk.routes", "sdk.skills", "sdk.tui", "sdk.tui.widgets"]
+packages = [
+    "obscura",
+    "obscura.core",
+    "obscura.core.client",
+    "obscura.providers",
+    "obscura.tools",
+    "obscura.tools.system",
+    "obscura.tools.policy",
+    "obscura.tools.providers",
+    "obscura.integrations",
+    "obscura.integrations.mcp",
+    "obscura.integrations.a2a",
+    "obscura.integrations.a2a.transports",
+    "obscura.auth",
+    "obscura.agent",
+    "obscura.memory",
+    "obscura.vector_memory",
+    "obscura.telemetry",
+    "obscura.server",
+    "obscura.routes",
+    "obscura.deps",
+    "obscura.cli",
+    "obscura.tui",
+    "obscura.tui.widgets",
+    "obscura.parity",
+    "obscura.heartbeat",
+    "obscura.skills",
+    "obscura.demo",
+    "obscura.schemas",
+]
 
 [tool.setuptools.package-data]
-sdk = ["py.typed"]
+obscura = ["py.typed"]
 
 # Exclude non-package directories
 [tool.setuptools.exclude-package-data]
-sdk = ["tests/*", "helm/*", "infra/*", "docs/*", "web-ui/*", "examples/*", "scripts/*"]
+obscura = ["tests/*", "helm/*", "infra/*", "docs/*", "web-ui/*", "examples/*", "scripts/*"]
 
 # End-to-end test configuration
 [tool.pytest.ini_options]
@@ -102,8 +131,8 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["sdk"]
-omit = ["sdk/tui/*", "tests/*"]
+source = ["obscura"]
+omit = ["obscura/tui/*", "tests/*"]
 
 [tool.coverage.report]
 fail_under = 85
@@ -121,22 +150,23 @@ ignore = ["E501"]
 "infra/zitadel/setup.py" = ["E402"]
 "scripts/sync.py" = ["F541"]
 "scripts/test_server.py" = ["F541"]
-"sdk/agent/agent.py" = ["E402"]
-"sdk/agent/agents.py" = ["E402"]
-"sdk/backends/claude.py" = ["E402"]
-"sdk/backends/copilot.py" = ["E402"]
-"sdk/backends/localllm.py" = ["E402"]
-"sdk/backends/openai_compat.py" = ["E402"]
-"sdk/client/__init__.py" = ["E402"]
-"sdk/deps/__init__.py" = ["E402"]
-"sdk/internal/__init__.py" = ["F403"]
-"sdk/mcp/server.py" = ["F811"]
-"sdk/routes/admin.py" = ["E741"]
-"sdk/tui/app.py" = ["F811"]
+"obscura/agent/agent.py" = ["E402"]
+"obscura/agent/agents.py" = ["E402"]
+"obscura/providers/claude.py" = ["E402"]
+"obscura/providers/copilot.py" = ["E402"]
+"obscura/providers/localllm.py" = ["E402"]
+"obscura/providers/openai.py" = ["E402"]
+"obscura/core/client/__init__.py" = ["E402"]
+"obscura/deps/__init__.py" = ["E402"]
+"obscura/integrations/mcp/server.py" = ["F811"]
+"obscura/routes/admin.py" = ["E741"]
+"obscura/tui/app.py" = ["F811"]
 "tests/e2e/test_admin_webhooks.py" = ["E741"]
-"tests/unit/sdk/auth/test_auth_middleware.py" = ["E402"]
-"tests/unit/sdk/core/test_config_env.py" = ["E712"]
-"tests/unit/sdk/telemetry/test_telemetry_metrics.py" = ["F401"]
-"tests/unit/sdk/test_legacy_module/test_crawlers.py" = ["F401"]
-"tests/unit/sdk/test_legacy_module/test_sync_integration.py" = ["F541"]
-"tests/unit/sdk/backends/test_copilot_models.py" = ["F405"]
+"tests/unit/obscura/auth/test_auth_middleware.py" = ["E402"]
+"tests/unit/obscura/core/test_config_env.py" = ["E712"]
+"tests/unit/obscura/telemetry/test_telemetry_metrics.py" = ["F401"]
+"tests/unit/obscura/test_legacy_module/test_crawlers.py" = ["F401"]
+"tests/unit/obscura/test_legacy_module/test_sync_integration.py" = ["F541"]
+"tests/unit/obscura/providers/test_copilot_models.py" = ["F405"]
+"demos/a2a/agents.py" = ["E402"]
+"demos/backend_agents/common.py" = ["F811"]

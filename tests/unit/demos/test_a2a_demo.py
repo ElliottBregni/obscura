@@ -22,15 +22,15 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
-from sdk.a2a.client import A2AClient
-from sdk.a2a.tool_adapter import register_remote_agent_as_tool
-from sdk.a2a.types import (
+from obscura.integrations.a2a.client import A2AClient
+from obscura.integrations.a2a.tool_adapter import register_remote_agent_as_tool
+from obscura.integrations.a2a.types import (
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatusUpdateEvent,
     TextPart,
 )
-from sdk.internal.tools import ToolRegistry
+from obscura.core.tools import ToolRegistry
 
 from demos.a2a.agents import (
     create_investigator_app,

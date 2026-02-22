@@ -11,7 +11,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sdk.internal.tools import tool
+from obscura.core.tools import tool
 
 # ---------------------------------------------------------------------------
 # Mock data — realistic customer/order/ticket corpus

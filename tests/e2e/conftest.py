@@ -20,10 +20,10 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 
-from sdk.auth.models import AuthenticatedUser
-from sdk.auth.rbac import get_current_user
-from sdk.config import ObscuraConfig
-from sdk.server import create_app
+from obscura.auth.models import AuthenticatedUser
+from obscura.auth.rbac import get_current_user
+from obscura.core.config import ObscuraConfig
+from obscura.server import create_app
 
 
 # ---------------------------------------------------------------------------
@@ -329,9 +329,9 @@ def client() -> Iterator[TestClient]:
     )
 
     with (
-        patch("sdk.deps.get_runtime", side_effect=_mock_get_runtime),
-        patch("sdk.memory.MemoryStore", _FakeMemoryStore),
-        patch("sdk.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
+        patch("obscura.deps.get_runtime", side_effect=_mock_get_runtime),
+        patch("obscura.memory.MemoryStore", _FakeMemoryStore),
+        patch("obscura.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
     ):
         app = create_app(config)
         # Bypass RBAC: return a test user with all roles
@@ -352,9 +352,9 @@ def client_no_auth_override() -> Iterator[TestClient]:
     )
 
     with (
-        patch("sdk.deps.get_runtime", side_effect=_mock_get_runtime),
-        patch("sdk.memory.MemoryStore", _FakeMemoryStore),
-        patch("sdk.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
+        patch("obscura.deps.get_runtime", side_effect=_mock_get_runtime),
+        patch("obscura.memory.MemoryStore", _FakeMemoryStore),
+        patch("obscura.vector_memory.VectorMemoryStore", _FakeVectorMemoryStore),
     ):
         app = create_app(config)
         # NO dependency override - tests real auth flow

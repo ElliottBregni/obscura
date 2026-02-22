@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from sdk.mcp.config_loader import discover_mcp_servers
-from sdk.skills.docs_loader import load_markdown_skill_documents
+from obscura.integrations.mcp.config_loader import discover_mcp_servers
+from obscura.skills.docs_loader import load_markdown_skill_documents
 
 
 @pytest.mark.integration

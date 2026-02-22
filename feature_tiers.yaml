@@ -1,0 +1,43 @@
+# Feature Tier Manifest
+# Defines stability guarantees per module.
+# CI prevents experimental features from leaking into stable imports.
+
+stable:
+  - obscura.core
+  - obscura.core.client
+  - obscura.core.types
+  - obscura.core.tools
+  - obscura.core.config
+  - obscura.core.auth
+  - obscura.core.handlers
+  - obscura.core.sessions
+  - obscura.core.stream
+  - obscura.core.paths
+  - obscura.core.context
+  - obscura.providers
+  - obscura.auth
+  - obscura.memory
+
+beta:
+  - obscura.tools
+  - obscura.tools.system
+  - obscura.tools.policy
+  - obscura.tools.providers
+  - obscura.integrations.mcp
+  - obscura.agent
+  - obscura.core.agent_loop
+  - obscura.telemetry
+  - obscura.server
+  - obscura.routes
+  - obscura.deps
+  - obscura.cli
+  - obscura.tui
+  - obscura.vector_memory
+  - obscura.heartbeat
+
+experimental:
+  - obscura.integrations.a2a
+  - obscura.openclaw_bridge
+  - obscura.parity
+  - obscura.skills
+  - obscura.demo

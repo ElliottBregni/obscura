@@ -64,8 +64,8 @@ def temp_memory_dirs(
 
     # Reset singleton caches so each test gets a fresh DB
     try:
-        from sdk.memory import MemoryStore
-        from sdk.vector_memory import VectorMemoryStore
+        from obscura.memory import MemoryStore
+        from obscura.vector_memory import VectorMemoryStore
 
         MemoryStore.reset_instances()
         VectorMemoryStore.reset_instances()
@@ -75,10 +75,10 @@ def temp_memory_dirs(
 
 # Ensure test-local BackendBridge (tui) respects .client attribute assignment
 try:
-    from tests.unit.sdk.tui import test_tui_backend_bridge as _tbb
+    from tests.unit.obscura.tui import test_tui_backend_bridge as _tbb
 
     if not isinstance(getattr(_tbb.BackendBridge, "client", None), property):
-        from sdk.tui.backend_bridge import BackendBridge as RealBridge
+        from obscura.tui.backend_bridge import BackendBridge as RealBridge
 
         _tbb.BackendBridge = RealBridge
 
@@ -155,7 +155,7 @@ except Exception:
 def patch_backend_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     """Re-apply BackendBridge patches after test module load."""
     try:
-        from tests.unit.sdk.tui import test_tui_backend_bridge as tbb
+        from tests.unit.obscura.tui import test_tui_backend_bridge as tbb
 
         def _get(self: Any) -> Any:
             return getattr(self, "_client", None)
@@ -236,7 +236,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     run_e2e: bool = bool(config.getoption("--run-e2e") if config else False)
 
     for item in items:
-        if item.nodeid.startswith("tests/unit/sdk/tui/test_tui_backend_bridge.py"):
+        if item.nodeid.startswith("tests/unit/obscura/tui/test_tui_backend_bridge.py"):
             item.add_marker(
                 pytest.mark.xfail(
                     reason="TUI bridge shim not required for pipeline", strict=False

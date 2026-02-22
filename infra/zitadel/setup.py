@@ -182,7 +182,7 @@ async def _bootstrap(
     """Run the full bootstrap using the sdk.auth.zitadel module."""
     # Import here so this script can also run standalone without the SDK installed
     try:
-        from sdk.auth.zitadel import bootstrap
+        from obscura.auth.zitadel import bootstrap
 
         result = await bootstrap(
             base_url,

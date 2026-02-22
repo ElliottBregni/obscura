@@ -23,8 +23,8 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 os.environ.setdefault("OBSCURA_LOG_LEVEL", "WARNING")
 
 # Now import after env vars are set
-from sdk.server import create_app
-from sdk.config import ObscuraConfig
+from obscura.server import create_app
+from obscura.core.config import ObscuraConfig
 import uvicorn
 
 

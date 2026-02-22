@@ -9,18 +9,18 @@ from typing import Any, override
 
 from httpx import ASGITransport
 
-from sdk.a2a.agent_card import AgentCardGenerator
-from sdk.a2a.client import A2AClient
-from sdk.a2a.service import A2AService
-from sdk.a2a.store import InMemoryTaskStore
-from sdk.a2a.transports.jsonrpc import create_jsonrpc_router
-from sdk.a2a.transports.rest import create_rest_router, create_wellknown_router
-from sdk.a2a.transports.sse import create_sse_router
-from sdk.a2a.types import Task
-from sdk.agent.agents import AgentRuntime, MCPConfig
-from sdk.auth.models import AuthenticatedUser
-from sdk.demo.framework import DemoAgentConfig, run_demo_prompt
-from sdk.internal.paths import resolve_obscura_mcp_dir
+from obscura.integrations.a2a.agent_card import AgentCardGenerator
+from obscura.integrations.a2a.client import A2AClient
+from obscura.integrations.a2a.service import A2AService
+from obscura.integrations.a2a.store import InMemoryTaskStore
+from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
+from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.sse import create_sse_router
+from obscura.integrations.a2a.types import Task
+from obscura.agent.agents import AgentRuntime, MCPConfig
+from obscura.auth.models import AuthenticatedUser
+from obscura.demo.framework import DemoAgentConfig, run_demo_prompt
+from obscura.core.paths import resolve_obscura_mcp_dir
 
 
 @dataclass(frozen=True)

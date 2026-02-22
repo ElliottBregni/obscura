@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sdk.agent.agents import AgentRuntime
-from sdk.auth.models import AuthenticatedUser
-from sdk.demo.framework import DemoAgentConfig, make_demo_user, run_demo_prompt
+from obscura.agent.agents import AgentRuntime
+from obscura.auth.models import AuthenticatedUser
+from obscura.demo.framework import DemoAgentConfig, make_demo_user, run_demo_prompt
 
 
 @dataclass(frozen=True)

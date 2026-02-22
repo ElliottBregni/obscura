@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sdk.internal.types import AgentContext, AgentPhase, HookPoint, ContentBlock, Message, Role
+from obscura.core.types import AgentContext, AgentPhase, HookPoint, ContentBlock, Message, Role
 
 from demos.support.agents import (
     InvestigationResult,

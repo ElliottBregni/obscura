@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import Any, override
 from urllib.error import HTTPError
 
-from sdk.internal.types import AgentContext
-from sdk.agent.agent import BaseAgent
+from obscura.core.types import AgentContext
+from obscura.agent.agent import BaseAgent
 
 
 # ---------------------------------------------------------------------------
@@ -789,7 +789,7 @@ async def async_main(argv: list[str] | None = None) -> int:
             return 0
 
     # Full run — use the SDK
-    from sdk.client import ObscuraClient
+    from obscura.core.client import ObscuraClient
 
     async with ObscuraClient(
         "copilot",

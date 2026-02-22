@@ -7,12 +7,12 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator, Sequence
 
-from sdk.demo.framework import (
+from obscura.demo.framework import (
     DemoAgentConfig,
     demo_agent_session,
     required_args_tool_guard,
 )
-from sdk.internal.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent, AgentEventKind
 
 
 def _role_for_backend(backend: str) -> str:

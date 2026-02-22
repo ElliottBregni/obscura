@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from sdk.agent.system_tools import (
+from obscura.tools.system import (
     append_text_file,
     discover_all_commands,
     get_environment,

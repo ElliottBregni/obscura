@@ -15,9 +15,9 @@ from typing import override
 
 import pytest
 
-from sdk.mcp.catalog import MCPServersOrgCatalogProvider, write_catalog_config
-from sdk.mcp.catalog import MCPRegistryAPICatalogProvider
-from sdk.mcp.config_loader import discover_mcp_servers
+from obscura.integrations.mcp.catalog import MCPServersOrgCatalogProvider, write_catalog_config
+from obscura.integrations.mcp.catalog import MCPRegistryAPICatalogProvider
+from obscura.integrations.mcp.config_loader import discover_mcp_servers
 
 
 @dataclass(frozen=True)

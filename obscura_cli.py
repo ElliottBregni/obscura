@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sdk.cli.chat_cli import main
+from obscura.cli.chat_cli import main
 
 
 if __name__ == "__main__":

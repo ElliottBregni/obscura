@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from demos.mcp.run_generic_mcp_agent import add_server
-from sdk.mcp.config_loader import build_runtime_server_configs, discover_mcp_servers
+from obscura.integrations.mcp.config_loader import build_runtime_server_configs, discover_mcp_servers
 
 
 @dataclass(frozen=True)

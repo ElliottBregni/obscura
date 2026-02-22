@@ -16,7 +16,7 @@ import logging
 import sys
 
 from demos.support.orchestrator import SupportPipeline
-from sdk.demo.framework import make_demo_user
+from obscura.demo.framework import make_demo_user
 
 
 # ---------------------------------------------------------------------------

@@ -31,16 +31,16 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from sdk.a2a.client import A2AClient
-from sdk.a2a.tool_adapter import register_remote_agent_as_tool
-from sdk.a2a.types import (
+from obscura.integrations.a2a.client import A2AClient
+from obscura.integrations.a2a.tool_adapter import register_remote_agent_as_tool
+from obscura.integrations.a2a.types import (
     AgentCard,
     StreamEvent,
     Task,
     TaskArtifactUpdateEvent,
     TextPart,
 )
-from sdk.internal.tools import ToolRegistry
+from obscura.core.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 

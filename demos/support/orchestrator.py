@@ -22,11 +22,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sdk.agent.agent import BaseAgent
-from sdk.auth.models import AuthenticatedUser
-from sdk.client import ObscuraClient
-from sdk.internal.types import HookPoint
-from sdk.telemetry.hooks import register_telemetry_hooks
+from obscura.agent.agent import BaseAgent
+from obscura.auth.models import AuthenticatedUser
+from obscura.core.client import ObscuraClient
+from obscura.core.types import HookPoint
+from obscura.telemetry.hooks import register_telemetry_hooks
 
 from demos.support.agents import (
     InvestigationResult,

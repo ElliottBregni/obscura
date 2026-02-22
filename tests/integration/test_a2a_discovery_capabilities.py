@@ -8,13 +8,13 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from sdk.a2a.agent_card import AgentCardGenerator
-from sdk.a2a.client import A2AClient
-from sdk.a2a.service import A2AService
-from sdk.a2a.store import InMemoryTaskStore
-from sdk.a2a.transports.jsonrpc import create_jsonrpc_router
-from sdk.a2a.transports.rest import create_rest_router, create_wellknown_router
-from sdk.a2a.transports.sse import create_sse_router
+from obscura.integrations.a2a.agent_card import AgentCardGenerator
+from obscura.integrations.a2a.client import A2AClient
+from obscura.integrations.a2a.service import A2AService
+from obscura.integrations.a2a.store import InMemoryTaskStore
+from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
+from obscura.integrations.a2a.transports.rest import create_rest_router, create_wellknown_router
+from obscura.integrations.a2a.transports.sse import create_sse_router
 
 
 def _build_app() -> FastAPI:

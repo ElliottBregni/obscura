@@ -17,11 +17,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING, override
 
-from sdk.agent.agent import BaseAgent
-from sdk.internal.types import AgentContext, HookPoint
+from obscura.agent.agent import BaseAgent
+from obscura.core.types import AgentContext, HookPoint
 
 if TYPE_CHECKING:
-    from sdk.client import ObscuraClient
+    from obscura.core.client import ObscuraClient
 
 logger = logging.getLogger(__name__)
 
@@ -382,7 +382,7 @@ class InvestigatorAgent(BaseAgent):
 
         steps = [
             f"Search past tickets for similar issues in category '{category}'",
-            f"Search knowledge base for resolution guides",
+            "Search knowledge base for resolution guides",
         ]
 
         if analysis.get("customer_id"):

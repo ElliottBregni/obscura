@@ -28,7 +28,7 @@ from demos.a2a.agents import (
 )
 from demos.a2a.orchestrator import A2APipeline, A2AResult
 from demos.support.run import SAMPLE_TICKETS
-from sdk.a2a.types import TaskStatusUpdateEvent, TextPart
+from obscura.integrations.a2a.types import TaskStatusUpdateEvent, TextPart
 
 
 # ---------------------------------------------------------------------------
