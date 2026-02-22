@@ -26,8 +26,8 @@ except (
     # Provide fallbacks so the module can be imported even when the optional
     # `python-jose` dependency is not installed. Runtime checks will raise an
     # informative ImportError when JWT functionality is actually used.
-    JWTError = Exception
-    ExpiredSignatureError = Exception
+    JWTError: type[Exception] = Exception
+    ExpiredSignatureError: type[Exception] = Exception
     jwt = None
     _jose_available = False
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -260,8 +260,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     )
                 },
             )
-        except (JWTError, ValueError) as exc:  # pyright: ignore[reportUnknownVariableType]
-            logger.warning("JWT validation failed: %s", str(exc))  # pyright: ignore[reportUnknownArgumentType]
+        except (JWTError, ValueError) as exc:
+            logger.warning("JWT validation failed: %s", str(exc))
             _emit_auth_audit(
                 request.url.path, "unknown", "", "denied", reason="invalid_token"
             )

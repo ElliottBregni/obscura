@@ -19,22 +19,22 @@ from obscura.core.paths import resolve_obscura_mcp_dir
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
 # In-memory template store
-_agent_templates: dict[str, dict[str, Any]] = {}
+agent_templates: dict[str, dict[str, Any]] = {}
 
 
 def get_agent_templates() -> dict[str, dict[str, Any]]:
     """Read-only access to agent templates (for admin stats/tests)."""
-    return _agent_templates
+    return agent_templates
 
 
 def clear_agent_templates() -> None:
     """Clear agent templates (testing helper)."""
-    _agent_templates.clear()
+    agent_templates.clear()
 
 
 def get_agent_templates_view() -> dict[str, dict[str, Any]]:
     """Return a shallow copy for safe read access."""
-    return dict(_agent_templates)
+    return dict(agent_templates)
 
 
 # -- CRUD -----------------------------------------------------------------
@@ -475,7 +475,7 @@ async def template_create(
         "created_at": datetime.now(UTC).isoformat(),
     }
 
-    _agent_templates[template_id] = template
+    agent_templates[template_id] = template
 
     audit(
         "template.create",
@@ -494,7 +494,7 @@ async def template_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agent templates."""
-    templates: list[dict[str, Any]] = list(_agent_templates.values())
+    templates: list[dict[str, Any]] = list(agent_templates.values())
     return JSONResponse(
         content={
             "templates": templates,
@@ -509,7 +509,7 @@ async def template_get(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Get a specific agent template."""
-    template = _agent_templates.get(template_id)
+    template = agent_templates.get(template_id)
     if template is None:
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
     return JSONResponse(content=template)
@@ -521,10 +521,10 @@ async def template_delete(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Delete an agent template."""
-    if template_id not in _agent_templates:
+    if template_id not in agent_templates:
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
 
-    del _agent_templates[template_id]
+    del agent_templates[template_id]
 
     audit("template.delete", user, f"template:{template_id}", "delete", "success")
 
@@ -543,7 +543,7 @@ async def agent_spawn_from_template(
     if not template_id:
         raise HTTPException(status_code=400, detail="template_id is required")
 
-    template = _agent_templates.get(template_id)
+    template = agent_templates.get(template_id)
     if template is None:
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
 

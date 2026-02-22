@@ -19,6 +19,11 @@ router = APIRouter(prefix="/api/v1", tags=["admin"])
 _rate_limits: dict[str, dict[str, Any]] = {}
 
 
+def reset_rate_limits() -> None:
+    """Clear rate limits. Used by test fixtures to prevent cross-test pollution."""
+    _rate_limits.clear()
+
+
 # -- audit logs ------------------------------------------------------------
 
 

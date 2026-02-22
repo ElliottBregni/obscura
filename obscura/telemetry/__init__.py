@@ -17,7 +17,7 @@ Usage::
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from obscura.core.config import ObscuraConfig
@@ -159,8 +159,9 @@ def _setup_fastapi_instrumentation(config: ObscuraConfig) -> None:
     if not config.otel_enabled:
         return
     try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # pyright: ignore[reportMissingTypeStubs]
+        from importlib import import_module
 
-        FastAPIInstrumentor().instrument()
-    except ImportError:
+        instrumentor_mod: Any = import_module("opentelemetry.instrumentation.fastapi")
+        instrumentor_mod.FastAPIInstrumentor().instrument()
+    except (ImportError, AttributeError):
         pass

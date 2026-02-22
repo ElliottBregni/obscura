@@ -160,7 +160,8 @@ class CopilotBackend:
         if self._auth.byok_provider:
             client_opts["provider"] = self._auth.byok_provider
 
-        self._client = CopilotClient(client_opts if client_opts else None)  # type: ignore[arg-type]
+        opts: Any = client_opts if client_opts else None
+        self._client = CopilotClient(opts)
         await self._client.start()
 
         # Create default session
@@ -536,7 +537,7 @@ def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[...
         # If event has no type field, silently ignore (don't call through)
 
     # Tag the handler so the SDK can identify it
-    handler._event_type = event_type  # type: ignore[attr-defined]
+    setattr(handler, "_event_type", event_type)
     return handler
 
 

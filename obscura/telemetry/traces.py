@@ -23,7 +23,7 @@ import importlib
 import functools
 import inspect
 import os
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -132,7 +132,7 @@ def traced(
                         span.record_exception(exc)
                         raise
 
-            return async_wrapper  # type: ignore[return-value]
+            return cast(F, async_wrapper)
         else:
 
             @functools.wraps(fn)
@@ -158,7 +158,7 @@ def traced(
                         span.record_exception(exc)
                         raise
 
-            return sync_wrapper  # type: ignore[return-value]
+            return cast(F, sync_wrapper)
 
     return decorator
 

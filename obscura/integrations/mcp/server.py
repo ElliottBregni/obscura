@@ -24,7 +24,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from obscura.agent.agents import AgentConfig, AgentRuntime
 from obscura.auth.models import AuthenticatedUser
@@ -737,7 +737,7 @@ class ObscuraMCPServer:
 
         entries: list[dict[str, Any]] = []
         if isinstance(raw, list):
-            entries = list(raw)  # type: ignore[arg-type]
+            entries = cast(list[dict[str, Any]], raw)
 
         entries.append({
             "role": role,
@@ -771,7 +771,7 @@ class ObscuraMCPServer:
 
         messages: list[dict[str, Any]] = []
         if isinstance(raw, list):
-            messages = list(raw)  # type: ignore[arg-type]
+            messages = cast(list[dict[str, Any]], raw)
 
         if not messages:
             return {

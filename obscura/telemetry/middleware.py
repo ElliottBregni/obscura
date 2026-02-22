@@ -20,30 +20,20 @@ from __future__ import annotations
 
 import importlib
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, override
 
-try:
-    from starlette.middleware.base import BaseHTTPMiddleware
-
-    _has_starlette = True
-except ImportError:
-    BaseHTTPMiddleware = Any
-    Request = Any
-    Response = Any
-    _has_starlette = False
+from starlette.middleware.base import BaseHTTPMiddleware
 
 
-class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
+class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):
     """ASGI middleware that enriches OTel spans with user identity and request IDs."""
 
+    @override
     async def dispatch(
         self,
         request: Any,
         call_next: Callable[..., Any],
     ) -> Any:
-        if not _has_starlette:
-            raise ImportError("Starlette is required for ObscuraTelemetryMiddleware")
-
         # Generate request ID
         request_id: str = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 

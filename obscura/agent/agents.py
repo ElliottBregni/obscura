@@ -44,6 +44,7 @@ from obscura.core.types import ToolSpec
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.auth.models import AuthenticatedUser
 from obscura.core.client import ObscuraClient
+from obscura.agent.peers import AgentRef, PeerInvocationEnvelope, PeerRegistry
 from obscura.memory import MemoryStore
 
 if TYPE_CHECKING:
@@ -671,6 +672,49 @@ class Agent:
         )
         await self.runtime.route_message(message)
 
+    async def invoke_peer(
+        self,
+        target: AgentRef | str,
+        prompt: str,
+        *,
+        timeout_seconds: float | None = None,
+        use_loop: bool = False,
+        max_turns: int | None = None,
+        **context: Any,
+    ) -> str:
+        """Invoke another local peer agent and return text output."""
+        return await self.runtime.invoke_peer(
+            target,
+            prompt,
+            caller_agent_id=self.id,
+            timeout_seconds=timeout_seconds,
+            use_loop=use_loop,
+            max_turns=max_turns,
+            **context,
+        )
+
+    async def stream_peer(
+        self,
+        target: AgentRef | str,
+        prompt: str,
+        *,
+        timeout_seconds: float | None = None,
+        use_loop: bool = False,
+        max_turns: int | None = None,
+        **context: Any,
+    ) -> AsyncIterator[str]:
+        """Stream response from another local peer agent."""
+        async for chunk in self.runtime.stream_peer(
+            target,
+            prompt,
+            caller_agent_id=self.id,
+            timeout_seconds=timeout_seconds,
+            use_loop=use_loop,
+            max_turns=max_turns,
+            **context,
+        ):
+            yield chunk
+
     async def receive_messages(self) -> AsyncIterator[AgentMessage]:
         """Receive messages sent to this agent."""
         while True:
@@ -824,10 +868,12 @@ class AgentRuntime:
 
     def __init__(self, user: AuthenticatedUser | None = None):
         self.user = user
+        self.runtime_id = f"runtime-{uuid.uuid4().hex[:8]}"
         self._agents: dict[str, Agent] = {}
         self._lock = asyncio.Lock()
         self._message_bus: asyncio.Queue[AgentMessage] = asyncio.Queue()
         self._bus_task: asyncio.Task[None] | None = None
+        self._peer_registry = PeerRegistry(self)
 
     # Public observability helpers
     @property
@@ -844,6 +890,11 @@ class AgentRuntime:
     def message_bus(self) -> asyncio.Queue[AgentMessage]:
         """Access the message bus queue for testing."""
         return self._message_bus
+
+    @property
+    def peer_registry(self) -> PeerRegistry:
+        """Registry for local peer discovery and resolution."""
+        return self._peer_registry
 
     async def start(self) -> None:
         """Start the message bus."""
@@ -976,6 +1027,110 @@ class AgentRuntime:
         """Route a message to its target agent(s)."""
         await self._message_bus.put(message)
 
+    @staticmethod
+    def _peer_calls_enabled() -> bool:
+        raw = os.environ.get("OBSCURA_PEER_CALLS_ENABLED", "false").strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _inject_peer_envelope(
+        context: dict[str, Any],
+        *,
+        caller_agent_id: str,
+        target_agent_id: str,
+        mode: str,
+    ) -> dict[str, Any]:
+        out = dict(context)
+        envelope = PeerInvocationEnvelope(
+            caller_agent_id=caller_agent_id,
+            target_agent_id=target_agent_id,
+            mode=cast(Any, mode),
+        )
+        out["_peer_request"] = envelope.model_dump(mode="json")
+        return out
+
+    async def invoke_peer(
+        self,
+        target: AgentRef | str,
+        prompt: str,
+        *,
+        caller_agent_id: str = "system",
+        timeout_seconds: float | None = None,
+        use_loop: bool = False,
+        max_turns: int | None = None,
+        **context: Any,
+    ) -> str:
+        """Invoke a local peer in blocking mode and return text."""
+        if not self._peer_calls_enabled():
+            raise RuntimeError(
+                "Peer calls are disabled. Set OBSCURA_PEER_CALLS_ENABLED=true."
+            )
+        agent = self.peer_registry.resolve(target)
+        if agent is None:
+            raise ValueError(f"Peer target not found: {target}")
+        mode = "loop" if use_loop else "blocking"
+        merged_context = self._inject_peer_envelope(
+            context,
+            caller_agent_id=caller_agent_id,
+            target_agent_id=agent.id,
+            mode=mode,
+        )
+        timeout = timeout_seconds if timeout_seconds is not None else agent.config.timeout_seconds
+        if use_loop:
+            call = agent.run_loop(prompt, max_turns=max_turns, **merged_context)
+        else:
+            call = agent.run(prompt, **merged_context)
+        result = await asyncio.wait_for(call, timeout=timeout)
+        return str(result)
+
+    async def stream_peer(
+        self,
+        target: AgentRef | str,
+        prompt: str,
+        *,
+        caller_agent_id: str = "system",
+        timeout_seconds: float | None = None,
+        use_loop: bool = False,
+        max_turns: int | None = None,
+        **context: Any,
+    ) -> AsyncIterator[str]:
+        """Invoke a local peer in streaming mode."""
+        if not self._peer_calls_enabled():
+            raise RuntimeError(
+                "Peer calls are disabled. Set OBSCURA_PEER_CALLS_ENABLED=true."
+            )
+        agent = self.peer_registry.resolve(target)
+        if agent is None:
+            raise ValueError(f"Peer target not found: {target}")
+        mode = "stream_loop" if use_loop else "streaming"
+        merged_context = self._inject_peer_envelope(
+            context,
+            caller_agent_id=caller_agent_id,
+            target_agent_id=agent.id,
+            mode=mode,
+        )
+        timeout = timeout_seconds if timeout_seconds is not None else agent.config.timeout_seconds
+        if not use_loop:
+            async def _direct_stream() -> AsyncIterator[str]:
+                async for chunk in agent.stream(prompt, **merged_context):
+                    yield chunk
+
+            async for item in _stream_with_timeout(_direct_stream(), timeout):
+                yield item
+            return
+
+        async def _loop_stream() -> AsyncIterator[str]:
+            async for event in agent.stream_loop(
+                prompt,
+                max_turns=max_turns,
+                **merged_context,
+            ):
+                if event.kind == AgentEventKind.TEXT_DELTA:
+                    yield event.text
+
+        async for item in _stream_with_timeout(_loop_stream(), timeout):
+            yield item
+
     async def _message_bus_loop(self) -> None:
         """Background task to route messages."""
         while True:
@@ -1034,3 +1189,17 @@ class AgentRuntime:
         else:
             results = await asyncio.gather(*tasks)
             return list(results)
+
+
+async def _stream_with_timeout(
+    stream: AsyncIterator[str],
+    timeout_seconds: float,
+) -> AsyncIterator[str]:
+    """Yield streaming items with per-chunk timeout enforcement."""
+    iterator = stream.__aiter__()
+    while True:
+        try:
+            item = await asyncio.wait_for(iterator.__anext__(), timeout=timeout_seconds)
+        except StopAsyncIteration:
+            break
+        yield item

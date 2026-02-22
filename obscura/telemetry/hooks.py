@@ -17,7 +17,7 @@ Usage::
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from obscura.agent.agent import BaseAgent
@@ -35,7 +35,7 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
     # Shared state for timing phases and tool calls
     _phase_starts: dict[str, float] = {}
     _tool_starts: dict[str, float] = {}
-    _context_tokens: dict[str, object] = {}  # for context.detach()
+    _context_tokens: dict[str, Any] = {}  # for context.detach()
 
     agent_name = getattr(agent, "name", getattr(agent, "_name", "agent"))
 
@@ -108,7 +108,7 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
 
 
 def _start_phase_span(
-    phase: str, agent_name: str, tokens: dict[str, object] | None = None
+    phase: str, agent_name: str, tokens: dict[str, Any] | None = None
 ) -> None:
     """Start an OTel span for an agent phase."""
     try:
@@ -135,7 +135,7 @@ def _end_phase_span(
     phase: str,
     agent_name: str,
     start_time: float | None,
-    tokens: dict[str, object] | None = None,
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     """End the current phase span and record duration metric."""
     try:
@@ -147,7 +147,7 @@ def _end_phase_span(
         # Detach context token to prevent leaks
         token = tokens.pop(f"phase.{phase}", None) if tokens else None
         if token is not None:
-            context.detach(token)  # type: ignore[arg-type]
+            context.detach(token)
     except ImportError:
         pass
 
@@ -165,7 +165,7 @@ def _end_phase_span(
             pass
 
 
-def _start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) -> None:
+def _start_tool_span(tool_name: str, tokens: dict[str, Any] | None = None) -> None:
     """Start an OTel span for a tool call."""
     try:
         from opentelemetry import trace
@@ -186,7 +186,7 @@ def _start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) ->
 
 
 def _end_tool_span(
-    tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None
+    tool_name: str, start_time: float | None, tokens: dict[str, Any] | None = None
 ) -> None:
     """End the current tool span and record metrics."""
     try:
@@ -198,14 +198,14 @@ def _end_tool_span(
         # Detach context token to prevent leaks
         token = tokens.pop(f"tool.{tool_name}", None) if tokens else None
         if token is not None:
-            context.detach(token)  # type: ignore[arg-type]
+            context.detach(token)
     except ImportError:
         pass
 
 
 # Public wrappers for testing/observability
 def start_phase_span(
-    phase: str, agent_name: str, tokens: dict[str, object] | None = None
+    phase: str, agent_name: str, tokens: dict[str, Any] | None = None
 ) -> None:
     _start_phase_span(phase, agent_name, tokens)
 
@@ -214,17 +214,17 @@ def end_phase_span(
     phase: str,
     agent_name: str,
     start_time: float | None,
-    tokens: dict[str, object] | None = None,
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     _end_phase_span(phase, agent_name, start_time, tokens)
 
 
-def start_tool_span(tool_name: str, tokens: dict[str, object] | None = None) -> None:
+def start_tool_span(tool_name: str, tokens: dict[str, Any] | None = None) -> None:
     _start_tool_span(tool_name, tokens)
 
 
 def end_tool_span(
-    tool_name: str, start_time: float | None, tokens: dict[str, object] | None = None
+    tool_name: str, start_time: float | None, tokens: dict[str, Any] | None = None
 ) -> None:
     _end_tool_span(tool_name, start_time, tokens)
     status = "success"

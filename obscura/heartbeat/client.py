@@ -322,7 +322,7 @@ class AgentHeartbeatClient:
             return metrics
 
         try:
-            import psutil  # pyright: ignore[reportMissingModuleSource]
+            import psutil
 
             # CPU usage
             metrics.cpu_percent = psutil.cpu_percent(interval=0.1)

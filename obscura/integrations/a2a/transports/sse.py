@@ -47,7 +47,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
     router = APIRouter(prefix="/a2a/v1", tags=["A2A SSE"])
 
     @router.post("/tasks/streaming")
-    async def stream_task(body: StreamRequest):  # type: ignore[no-untyped-def]
+    async def stream_task(body: StreamRequest) -> Any:
         """Stream a new task's execution as SSE events."""
         from sse_starlette.sse import EventSourceResponse
 
@@ -81,7 +81,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
         return EventSourceResponse(event_generator())
 
     @router.post("/tasks/{task_id}:subscribe")
-    async def subscribe_task(task_id: str):  # type: ignore[no-untyped-def]
+    async def subscribe_task(task_id: str) -> Any:
         """Subscribe to real-time updates for an existing task."""
         from sse_starlette.sse import EventSourceResponse
 
@@ -109,5 +109,8 @@ def create_sse_router(service: A2AService) -> APIRouter:
                 }
 
         return EventSourceResponse(event_generator())
+
+    # Registered via decorator; reference to suppress reportUnusedFunction
+    _ = stream_task, subscribe_task
 
     return router

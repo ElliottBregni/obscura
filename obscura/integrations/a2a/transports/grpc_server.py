@@ -191,8 +191,8 @@ async def start_grpc_server(
         ),
     }
 
-    handler: Any = grpc.method_service_handler(None, method_handlers)  # type: ignore[attr-defined]
-    server.add_generic_rpc_handlers([handler])  # pyright: ignore[reportUnknownArgumentType]
+    handler = grpc.method_service_handler(None, method_handlers)
+    server.add_generic_rpc_handlers([handler])
 
     server.add_insecure_port(f"[::]:{port}")
     await server.start()

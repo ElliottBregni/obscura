@@ -156,7 +156,7 @@ def tool(
                 return _traced_tool_call_async(name, fn, *args, **kwargs)
             return _traced_tool_call(name, fn, *args, **kwargs)
 
-        wrapper.spec = spec  # type: ignore[attr-defined]
+        setattr(wrapper, "spec", spec)
         return wrapper
 
     return decorator

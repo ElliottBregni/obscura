@@ -31,6 +31,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 @pytest.fixture(autouse=True)
+def reset_shared_state() -> None:
+    """Reset module-level mutable state to prevent cross-test pollution."""
+    from obscura.deps import reset_audit_logs
+    from obscura.routes.admin import reset_rate_limits
+
+    reset_audit_logs()
+    reset_rate_limits()
+
+
+@pytest.fixture(autouse=True)
 def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force telemetry off so tests don't attempt OTLP export."""
     monkeypatch.setenv("OTEL_ENABLED", "false")

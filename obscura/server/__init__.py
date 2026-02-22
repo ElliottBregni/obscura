@@ -136,7 +136,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         try:
             from obscura.telemetry.middleware import ObscuraTelemetryMiddleware
 
-            app.add_middleware(ObscuraTelemetryMiddleware)  # pyright: ignore[reportArgumentType]
+            app.add_middleware(ObscuraTelemetryMiddleware)
         except ImportError:
             logger.debug("Telemetry middleware not available; skipping")
 

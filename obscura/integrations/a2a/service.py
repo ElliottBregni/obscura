@@ -299,7 +299,8 @@ class A2AService:
 
         # Return current task state
         task = await self._store.get_task(task_id)
-        return task or await self._store.get_task(task_id)  # type: ignore[return-value]
+        assert task is not None, f"Task {task_id} not found after transition"
+        return task
 
     # ------------------------------------------------------------------
     # Agent execution internals

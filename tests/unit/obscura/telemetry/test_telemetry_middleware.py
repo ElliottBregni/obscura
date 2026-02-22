@@ -12,7 +12,7 @@ from obscura.telemetry.middleware import (
 
 def _make_app() -> FastAPI:
     app = FastAPI()
-    app.add_middleware(ObscuraTelemetryMiddleware)  # pyright: ignore[reportArgumentType]
+    app.add_middleware(ObscuraTelemetryMiddleware)
 
     @app.get("/test")
     async def test_endpoint():  # pyright: ignore[reportUnusedFunction]

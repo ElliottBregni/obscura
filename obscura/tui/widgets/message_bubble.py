@@ -75,7 +75,7 @@ class MessageBubble(Widget):
             )
             # Content
             yield Static(
-                self._render_content(),
+                self._format_content(),
                 classes="message-content",
                 markup=True,
             )
@@ -90,7 +90,7 @@ class MessageBubble(Widget):
 
     # -- Content rendering --------------------------------------------------
 
-    def _render_content(self) -> str:  # pyright: ignore[reportIncompatibleMethodOverride,reportImplicitOverride]
+    def _format_content(self) -> str:
         """Render message content with basic markup.
 
         Uses Textual's built-in Rich markup for formatting.
@@ -113,7 +113,7 @@ class MessageBubble(Widget):
         """
         self._content += delta
         if self._content_widget:
-            self._content_widget.update(self._render_content())
+            self._content_widget.update(self._format_content())
 
     def add_thinking_block(self) -> ThinkingBlock:
         """Add a new ThinkingBlock to this message.
@@ -164,7 +164,7 @@ class MessageBubble(Widget):
         self._finalized = True
         # Final render with full content
         if self._content_widget:
-            self._content_widget.update(self._render_content())
+            self._content_widget.update(self._format_content())
 
     @property
     def content(self) -> str:

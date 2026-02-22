@@ -22,7 +22,7 @@ from obscura.auth.capability import (
     CapabilityTier,
     CapabilityToken,
     PRIVILEGED_ROLES,
-    _reset_signing_key,  # pyright: ignore[reportPrivateUsage]
+    reset_signing_key,
     generate_capability_token,
     resolve_tier,
     validate_capability_token,
@@ -61,9 +61,9 @@ def _make_user(
 @pytest.fixture(autouse=True)
 def _reset_key() -> Any:  # pyright: ignore[reportUnusedFunction]
     """Reset the signing key between tests to ensure isolation."""
-    _reset_signing_key()
+    reset_signing_key()
     yield
-    _reset_signing_key()
+    reset_signing_key()
 
 
 # ===========================================================================
@@ -241,7 +241,7 @@ class TestCapabilityTokenValidation:
         user = _make_user()
         token = generate_capability_token(user, "s1")
         # Reset to get a new random key
-        _reset_signing_key()
+        reset_signing_key()
         assert validate_capability_token(token) is False
 
     def test_is_expired_method(self) -> None:

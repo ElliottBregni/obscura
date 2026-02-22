@@ -261,13 +261,13 @@ class RedisTaskStore:
     async def connect(self) -> None:
         """Connect to Redis."""
         try:
-            import redis.asyncio as aioredis  # type: ignore[import-untyped]
+            import redis.asyncio as aioredis
 
-            self._redis: Any = aioredis.from_url(  # pyright: ignore[reportUnknownMemberType]
+            self._redis = aioredis.from_url(
                 self._redis_url,
                 decode_responses=True,
             )
-            await self._redis.ping()  # pyright: ignore[reportUnknownMemberType]
+            await self._redis.ping()
             logger.info("Connected to Redis at %s", self._redis_url)
         except ImportError:
             raise ImportError(

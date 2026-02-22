@@ -138,7 +138,7 @@ def _get_signing_key() -> bytes:
     return _signing_key
 
 
-def _reset_signing_key() -> None:  # pyright: ignore[reportUnusedFunction]
+def reset_signing_key() -> None:
     """Reset the cached signing key (for testing only)."""
     global _signing_key  # noqa: PLW0603
     _signing_key = None

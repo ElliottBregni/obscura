@@ -13,12 +13,9 @@ from fastapi.responses import JSONResponse
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit, get_runtime
-from obscura.routes.agents import _agent_templates as _imported_agent_templates  # pyright: ignore[reportPrivateUsage]
+from obscura.routes.agents import agent_templates
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
-
-# Re-export with proper typing so the rest of the file is clean.
-agent_templates: dict[str, dict[str, Any]] = _imported_agent_templates
 
 
 # In-memory stores

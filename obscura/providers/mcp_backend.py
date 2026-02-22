@@ -382,8 +382,8 @@ class MCPBackendMixin:
     def _parent_register_tool(self, spec: ToolSpec) -> None:
         """Call register_tool on the next class in MRO (the concrete backend)."""
         # super() resolves at runtime via MRO to the concrete backend's register_tool.
-        # We wrap it here so pyright can see the typed signature.
-        super().register_tool(spec)  # type: ignore[misc]
+        register: Any = getattr(super(), "register_tool")
+        register(spec)
 
     async def start(self) -> None:
         """Start the backend and MCP tools."""

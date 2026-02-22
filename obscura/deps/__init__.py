@@ -78,6 +78,11 @@ audit_logs: list[dict[str, Any]] = []
 MAX_AUDIT_LOGS = 10000
 
 
+def reset_audit_logs() -> None:
+    """Clear audit logs. Used by test fixtures to prevent cross-test pollution."""
+    audit_logs.clear()
+
+
 def audit(
     event_type: str,
     user: AuthenticatedUser,
@@ -187,9 +192,10 @@ async def authenticate_websocket(
         import jwt as pyjwt
 
         jwks: JWKSCache = websocket.app.state.jwks_cache
+        key: Any = jwks.keys
         payload = pyjwt.decode(
             token,
-            jwks.keys,  # type: ignore[arg-type]  # JWKS keys list accepted at runtime
+            key,
             algorithms=["RS256"],
             audience=config.auth_audience,
             issuer=config.auth_issuer,
