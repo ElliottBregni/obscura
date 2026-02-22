@@ -206,6 +206,50 @@ class TestAgentRuntime:
         await runtime.stop()
 
     @pytest.mark.asyncio
+    async def test_lifecycle_hook_emits_spawn_start_ready_stop(
+        self, test_user: AuthenticatedUser
+    ) -> None:
+        events: list[str] = []
+
+        def _hook(event: Any) -> None:
+            kind = getattr(event, "kind", "")
+            if isinstance(kind, str):
+                events.append(kind)
+
+        runtime = AgentRuntime(user=test_user, lifecycle_hook=_hook)
+        await runtime.start()
+
+        with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
+            with patch("obscura.agent.agents.ObscuraClient") as MockClient:
+                instance = AsyncMock()
+                instance.start = AsyncMock(return_value=None)
+                instance.stop = AsyncMock(return_value=None)
+                MockClient.return_value = instance
+
+                agent = runtime.spawn(
+                    "hook-agent",
+                    model="claude",
+                    enable_system_tools=False,
+                )
+                agent.heartbeat_enabled = False
+                await agent.start()
+
+        await runtime.stop()
+
+        required_order = [
+            "runtime.started",
+            "agent.spawned",
+            "agent.starting",
+            "agent.ready",
+            "runtime.stopping",
+            "agent.stopping",
+            "agent.stopped",
+            "runtime.stopped",
+        ]
+        positions = [events.index(kind) for kind in required_order]
+        assert positions == sorted(positions)
+
+    @pytest.mark.asyncio
     async def test_message_routing(self, runtime: AgentRuntime) -> None:
         await runtime.start()
 

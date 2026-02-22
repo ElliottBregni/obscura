@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
+from obscura.integrations.a2a.client import A2AClient
 
 if TYPE_CHECKING:
     from obscura.agent.agents import Agent, AgentRuntime
@@ -22,6 +23,33 @@ class AgentRef(BaseModel):
     model: str
     status: str
     capabilities: tuple[str, ...] = ()
+
+
+class RemoteAgentRef(BaseModel):
+    """Reference to a remote A2A peer endpoint/agent."""
+
+    kind: Literal["a2a_remote"] = "a2a_remote"
+    url: str
+    name: str = ""
+    status: str = "configured"
+    capabilities: tuple[str, ...] = ()
+    skills: tuple[str, ...] = ()
+    description: str = ""
+
+
+def _default_local_refs() -> list[AgentRef]:
+    return []
+
+
+def _default_remote_refs() -> list[RemoteAgentRef]:
+    return []
+
+
+class PeerCatalog(BaseModel):
+    """Unified catalog containing local and remote peers."""
+
+    local: list[AgentRef] = Field(default_factory=_default_local_refs)
+    remote: list[RemoteAgentRef] = Field(default_factory=_default_remote_refs)
 
 
 class PeerInvocationEnvelope(BaseModel):
@@ -61,3 +89,46 @@ class PeerRegistry:
         target_id = target.agent_id if isinstance(target, AgentRef) else str(target)
         return self._runtime.get_agent(target_id)
 
+    async def discover_remote(
+        self,
+        urls: list[str],
+        *,
+        auth_token: str | None = None,
+        fetch_cards: bool = False,
+    ) -> list[RemoteAgentRef]:
+        """Return remote A2A peers from configured URLs (optionally via discover())."""
+        refs: list[RemoteAgentRef] = []
+        for url in urls:
+            if not fetch_cards:
+                refs.append(RemoteAgentRef(url=url))
+                continue
+
+            client = A2AClient(url, auth_token=auth_token)
+            try:
+                await client.connect()
+                card = await client.discover()
+                capability_names: list[str] = []
+                if bool(getattr(card.capabilities, "streaming", False)):
+                    capability_names.append("streaming")
+                if bool(getattr(card.capabilities, "push_notifications", False)):
+                    capability_names.append("push_notifications")
+                if bool(getattr(card.capabilities, "extended_card", False)):
+                    capability_names.append("extended_card")
+                refs.append(
+                    RemoteAgentRef(
+                        url=url,
+                        name=str(getattr(card, "name", "") or ""),
+                        status="discovered",
+                        capabilities=tuple(capability_names),
+                        skills=tuple(skill.name for skill in card.skills),
+                        description=str(getattr(card, "description", "") or ""),
+                    )
+                )
+            except Exception:
+                refs.append(RemoteAgentRef(url=url, status="error"))
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+        return refs

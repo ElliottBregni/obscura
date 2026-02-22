@@ -10,6 +10,7 @@ Both are normalized to ``AsyncIterator[StreamChunk]``.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, AsyncIterator
 
 from obscura.core.types import ChunkKind, StreamChunk, StreamMetadata
@@ -368,10 +369,30 @@ class ClaudeIteratorAdapter:
                     )
                 )
             elif block_type == "ToolUseBlock":
+                tool_id = getattr(block, "id", "")
                 chunks.append(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_START,
                         tool_name=getattr(block, "name", ""),
+                        tool_use_id=tool_id,
+                        raw=block,
+                        native_event=block,
+                    )
+                )
+                # Emit tool input as a single delta (mirrors streaming path)
+                block_input = getattr(block, "input", None)
+                if block_input is not None:
+                    chunks.append(
+                        StreamChunk(
+                            kind=ChunkKind.TOOL_USE_DELTA,
+                            tool_input_delta=json.dumps(block_input),
+                            raw=block,
+                            native_event=block,
+                        )
+                    )
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_END,
                         raw=block,
                         native_event=block,
                     )

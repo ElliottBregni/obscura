@@ -6,9 +6,15 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from obscura.agent.agents import Agent, AgentRuntime
+from obscura.agent.agents import (
+    Agent,
+    AgentRuntime,
+    RuntimeLifecycleEvent,
+    RuntimeLifecycleHook,
+)
 from obscura.auth.models import AuthenticatedUser
 from obscura.core.types import ToolCallInfo
 
@@ -26,6 +32,17 @@ class DemoAgentConfig:
 
 
 ToolConfirmGuard = Callable[[ToolCallInfo], bool | Awaitable[bool]]
+
+
+def default_lifecycle_logger(event: RuntimeLifecycleEvent) -> None:
+    """Print concise lifecycle progress for demo sessions."""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    name = event.agent_name or "-"
+    model = event.model or "-"
+    print(
+        f"[{timestamp}] [{event.kind}] agent={name} model={model} {event.message}",
+        flush=True,
+    )
 
 
 def make_demo_user(role: str) -> AuthenticatedUser:
@@ -48,9 +65,20 @@ async def demo_agent_session(
     runtime_cls: type[AgentRuntime] = AgentRuntime,
     start_timeout_seconds: float = 20.0,
     spawn_kwargs: dict[str, Any] | None = None,
+    lifecycle_hook: RuntimeLifecycleHook | None = default_lifecycle_logger,
 ) -> AsyncIterator[Agent]:
     """Create/start a demo runtime+agent and always clean up."""
-    runtime = runtime_cls(user=user or make_demo_user(config.role))
+    runtime_user = user or make_demo_user(config.role)
+    try:
+        runtime = runtime_cls(
+            user=runtime_user,
+            lifecycle_hook=lifecycle_hook,
+        )
+    except TypeError:
+        runtime = runtime_cls(user=runtime_user)
+        if lifecycle_hook is not None and hasattr(runtime, "set_lifecycle_hook"):
+            setter = getattr(runtime, "set_lifecycle_hook")
+            setter(lifecycle_hook)
     try:
         try:
             await asyncio.wait_for(runtime.start(), timeout=start_timeout_seconds)
@@ -100,6 +128,7 @@ async def run_demo_prompt(
     start_timeout_seconds: float = 20.0,
     run_timeout_seconds: float = 120.0,
     spawn_kwargs: dict[str, Any] | None = None,
+    lifecycle_hook: RuntimeLifecycleHook | None = default_lifecycle_logger,
 ) -> str:
     """Run prompt against a demo agent and return text output."""
     async with demo_agent_session(
@@ -108,6 +137,7 @@ async def run_demo_prompt(
         runtime_cls=runtime_cls,
         start_timeout_seconds=start_timeout_seconds,
         spawn_kwargs=spawn_kwargs,
+        lifecycle_hook=lifecycle_hook,
     ) as agent:
         if use_loop:
             try:

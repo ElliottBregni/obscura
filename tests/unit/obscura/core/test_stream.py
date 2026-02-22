@@ -229,6 +229,8 @@ class TestClaudeIteratorAdapter:
         tool_block: Any = MagicMock()
         type(tool_block).__name__ = "ToolUseBlock"
         tool_block.name = "read_file"
+        tool_block.id = "tool-abc"
+        tool_block.input = {"path": "/tmp"}
 
         msg: Any = MagicMock()
         type(msg).__name__ = "AssistantMessage"
@@ -241,8 +243,14 @@ class TestClaudeIteratorAdapter:
         chunks: list[StreamChunk] = []
         async for c in adapter:
             chunks.append(c)
+        # Full lifecycle: START → DELTA (input) → END
+        assert len(chunks) == 3
         assert chunks[0].kind == ChunkKind.TOOL_USE_START
         assert chunks[0].tool_name == "read_file"
+        assert chunks[0].tool_use_id == "tool-abc"
+        assert chunks[1].kind == ChunkKind.TOOL_USE_DELTA
+        assert chunks[1].tool_input_delta == '{"path": "/tmp"}'
+        assert chunks[2].kind == ChunkKind.TOOL_USE_END
 
     @pytest.mark.asyncio
     async def test_assistant_message_tool_result_block(self) -> None:
@@ -417,6 +425,8 @@ class TestClaudeIteratorAdapter:
         tool_block: Any = MagicMock()
         type(tool_block).__name__ = "ToolUseBlock"
         tool_block.name = "tool1"
+        tool_block.id = "tool-xyz"
+        tool_block.input = {"query": "test"}
 
         msg: Any = MagicMock()
         type(msg).__name__ = "AssistantMessage"
@@ -429,9 +439,12 @@ class TestClaudeIteratorAdapter:
         chunks: list[StreamChunk] = []
         async for c in adapter:
             chunks.append(c)
-        assert len(chunks) == 2
+        # text + tool(START + DELTA + END) = 4 chunks
+        assert len(chunks) == 4
         assert chunks[0].kind == ChunkKind.TEXT_DELTA
         assert chunks[1].kind == ChunkKind.TOOL_USE_START
+        assert chunks[2].kind == ChunkKind.TOOL_USE_DELTA
+        assert chunks[3].kind == ChunkKind.TOOL_USE_END
 
     @pytest.mark.asyncio
     async def test_assistant_message_no_content(self) -> None:

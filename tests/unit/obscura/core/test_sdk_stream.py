@@ -174,8 +174,14 @@ class TestClaudeIteratorAdapter:
         async for chunk in adapter:
             chunks.append(chunk)
 
+        # Full lifecycle: START → DELTA (input) → END
+        assert len(chunks) == 3
         assert chunks[0].kind == ChunkKind.TOOL_USE_START
         assert chunks[0].tool_name == "read_file"
+        assert chunks[0].tool_use_id == "tool-123"
+        assert chunks[1].kind == ChunkKind.TOOL_USE_DELTA
+        assert chunks[1].tool_input_delta == '{"key": "value"}'
+        assert chunks[2].kind == ChunkKind.TOOL_USE_END
 
     @pytest.mark.asyncio
     async def test_result_message_is_done(self) -> None:
@@ -189,7 +195,10 @@ class TestClaudeIteratorAdapter:
 
     @pytest.mark.asyncio
     async def test_system_message_skipped(self) -> None:
-        messages: list[Any] = [_FakeSystemMessage(), _FakeAssistantMessage([_FakeTextBlock("hi")])]
+        messages: list[Any] = [
+            _FakeSystemMessage(),
+            _FakeAssistantMessage([_FakeTextBlock("hi")]),
+        ]
         adapter = ClaudeIteratorAdapter(_async_iter(messages))
 
         chunks: list[StreamChunk] = []
@@ -215,7 +224,10 @@ class TestClaudeIteratorAdapter:
         async for chunk in adapter:
             chunks.append(chunk)
 
-        assert len(chunks) == 3
+        # thinking + text + tool(START + DELTA + END) = 5 chunks
+        assert len(chunks) == 5
         assert chunks[0].kind == ChunkKind.THINKING_DELTA
         assert chunks[1].kind == ChunkKind.TEXT_DELTA
         assert chunks[2].kind == ChunkKind.TOOL_USE_START
+        assert chunks[3].kind == ChunkKind.TOOL_USE_DELTA
+        assert chunks[4].kind == ChunkKind.TOOL_USE_END

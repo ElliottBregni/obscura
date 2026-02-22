@@ -31,9 +31,10 @@ import asyncio
 import logging
 import os
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, cast
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, cast
 
 from pydantic import BaseModel, Field
 
@@ -44,7 +45,12 @@ from obscura.core.types import ToolSpec
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.auth.models import AuthenticatedUser
 from obscura.core.client import ObscuraClient
-from obscura.agent.peers import AgentRef, PeerInvocationEnvelope, PeerRegistry
+from obscura.agent.peers import (
+    AgentRef,
+    PeerCatalog,
+    PeerInvocationEnvelope,
+    PeerRegistry,
+)
 from obscura.memory import MemoryStore
 
 if TYPE_CHECKING:
@@ -65,6 +71,10 @@ def _default_mcp_config_path() -> str:
     return str(resolve_obscura_mcp_dir())
 
 
+def _empty_details_map() -> dict[str, Any]:
+    return {}
+
+
 class AgentStatus(Enum):
     """Agent lifecycle states."""
 
@@ -74,6 +84,25 @@ class AgentStatus(Enum):
     COMPLETED = auto()  # Finished successfully
     FAILED = auto()  # Error occurred
     STOPPED = auto()  # Manually stopped
+
+
+@dataclass(frozen=True)
+class RuntimeLifecycleEvent:
+    """Lifecycle event emitted by the runtime/agent startup pipeline."""
+
+    kind: str
+    runtime_id: str
+    agent_id: str | None = None
+    agent_name: str | None = None
+    model: str | None = None
+    message: str = ""
+    details: dict[str, Any] = field(default_factory=_empty_details_map)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+RuntimeLifecycleHook = Callable[
+    [RuntimeLifecycleEvent], None | Awaitable[None]
+]
 
 
 class MCPConfig(BaseModel):
@@ -262,12 +291,27 @@ class Agent:
             ToolProviderRegistry,
         )
 
+        await self.runtime.emit_lifecycle_event(
+            kind="agent.starting",
+            agent=self,
+            message="Starting backend client and tool providers.",
+        )
+
         self._client = ObscuraClient(
             self.config.model,
             system_prompt=self.config.system_prompt,
             user=self.user,
         )
-        await self._client.start()
+        try:
+            await self._client.start()
+        except Exception as exc:
+            await self.runtime.emit_lifecycle_event(
+                kind="agent.start_failed",
+                agent=self,
+                message="Backend client failed to start.",
+                details={"error": str(exc)},
+            )
+            raise
 
         provider_registry = ToolProviderRegistry()
 
@@ -347,6 +391,11 @@ class Agent:
 
         self.status = AgentStatus.WAITING
         self._update_state()
+        await self.runtime.emit_lifecycle_event(
+            kind="agent.ready",
+            agent=self,
+            message="Agent is ready to accept prompts.",
+        )
 
     async def run(self, prompt: str, **context: Any) -> Any:
         """
@@ -715,6 +764,19 @@ class Agent:
         ):
             yield chunk
 
+    async def discover_peers(
+        self,
+        *,
+        include_self: bool = False,
+        discover_remote: bool = False,
+    ) -> PeerCatalog:
+        """Discover local and configured A2A remote peers."""
+        return await self.runtime.discover_peers_for_agent(
+            self.id,
+            include_self=include_self,
+            discover_remote=discover_remote,
+        )
+
     async def receive_messages(self) -> AsyncIterator[AgentMessage]:
         """Receive messages sent to this agent."""
         while True:
@@ -790,6 +852,11 @@ class Agent:
 
     async def stop(self) -> None:
         """Stop the agent and cleanup."""
+        await self.runtime.emit_lifecycle_event(
+            kind="agent.stopping",
+            agent=self,
+            message="Stopping agent and releasing resources.",
+        )
         self.status = AgentStatus.STOPPED
         if self._client:
             try:
@@ -814,6 +881,11 @@ class Agent:
         if self._task and not self._task.done():
             self._task.cancel()
         self._update_state()
+        await self.runtime.emit_lifecycle_event(
+            kind="agent.stopped",
+            agent=self,
+            message="Agent stopped.",
+        )
 
     async def stop_graceful(self, timeout: float = 5.0) -> None:
         """Stop the agent gracefully with a timeout."""
@@ -866,7 +938,11 @@ class AgentRuntime:
     - Cleanup stopped agents
     """
 
-    def __init__(self, user: AuthenticatedUser | None = None):
+    def __init__(
+        self,
+        user: AuthenticatedUser | None = None,
+        lifecycle_hook: RuntimeLifecycleHook | None = None,
+    ):
         self.user = user
         self.runtime_id = f"runtime-{uuid.uuid4().hex[:8]}"
         self._agents: dict[str, Agent] = {}
@@ -874,6 +950,7 @@ class AgentRuntime:
         self._message_bus: asyncio.Queue[AgentMessage] = asyncio.Queue()
         self._bus_task: asyncio.Task[None] | None = None
         self._peer_registry = PeerRegistry(self)
+        self._lifecycle_hook = lifecycle_hook
 
     # Public observability helpers
     @property
@@ -896,12 +973,120 @@ class AgentRuntime:
         """Registry for local peer discovery and resolution."""
         return self._peer_registry
 
+    def set_lifecycle_hook(self, hook: RuntimeLifecycleHook | None) -> None:
+        """Set or clear lifecycle hook used for runtime and agent events."""
+        self._lifecycle_hook = hook
+
+    async def emit_lifecycle_event(
+        self,
+        *,
+        kind: str,
+        agent: Agent | None = None,
+        message: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        hook = self._lifecycle_hook
+        if hook is None:
+            return
+        event = RuntimeLifecycleEvent(
+            kind=kind,
+            runtime_id=self.runtime_id,
+            agent_id=agent.id if agent is not None else None,
+            agent_name=agent.config.name if agent is not None else None,
+            model=agent.config.model if agent is not None else None,
+            message=message,
+            details=details or {},
+        )
+        try:
+            result = hook(event)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            logger.exception("Lifecycle hook failed for event %s", kind)
+
+    def emit_lifecycle_event_sync(
+        self,
+        *,
+        kind: str,
+        agent: Agent | None = None,
+        message: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        hook = self._lifecycle_hook
+        if hook is None:
+            return
+        event = RuntimeLifecycleEvent(
+            kind=kind,
+            runtime_id=self.runtime_id,
+            agent_id=agent.id if agent is not None else None,
+            agent_name=agent.config.name if agent is not None else None,
+            model=agent.config.model if agent is not None else None,
+            message=message,
+            details=details or {},
+        )
+        try:
+            result = hook(event)
+            if asyncio.iscoroutine(result):
+                try:
+                    asyncio.get_running_loop().create_task(result)
+                except RuntimeError:
+                    logger.debug(
+                        "Dropped async lifecycle event %s; no running event loop",
+                        kind,
+                    )
+        except Exception:
+            logger.exception("Lifecycle hook failed for event %s", kind)
+
+    async def discover_peers_for_agent(
+        self,
+        agent_id: str,
+        *,
+        include_self: bool = False,
+        discover_remote: bool = False,
+    ) -> PeerCatalog:
+        """Return a unified local+remote peer catalog for one agent."""
+        agent = self.get_agent(agent_id)
+        if agent is None:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        local_refs = self.peer_registry.discover()
+        if not include_self:
+            local_refs = [ref for ref in local_refs if ref.agent_id != agent_id]
+
+        remote_urls: list[str] = []
+        auth_token: str | None = None
+        remote_cfg = agent.config.a2a_remote_tools
+        if bool(remote_cfg.get("enabled", False)):
+            raw_urls = remote_cfg.get("urls", [])
+            if isinstance(raw_urls, list):
+                remote_urls = [
+                    str(url) for url in cast(list[Any], raw_urls) if str(url).strip()
+                ]
+            if "auth_token" in remote_cfg and remote_cfg["auth_token"] is not None:
+                auth_token = str(remote_cfg["auth_token"])
+
+        remote_refs = await self.peer_registry.discover_remote(
+            remote_urls,
+            auth_token=auth_token,
+            fetch_cards=discover_remote,
+        )
+        return PeerCatalog(local=local_refs, remote=remote_refs)
+
     async def start(self) -> None:
         """Start the message bus."""
         self._bus_task = asyncio.create_task(self._message_bus_loop())
+        await self.emit_lifecycle_event(
+            kind="runtime.started",
+            message="Runtime message bus started.",
+        )
 
     async def stop(self) -> None:
         """Stop all agents and cleanup."""
+        await self.emit_lifecycle_event(
+            kind="runtime.stopping",
+            message="Runtime stopping; shutting down agents.",
+            details={"agent_count": len(self._agents)},
+        )
         if self._bus_task:
             self._bus_task.cancel()
             try:
@@ -913,6 +1098,10 @@ class AgentRuntime:
             for agent in list(self._agents.values()):
                 await agent.stop()
             self._agents.clear()
+        await self.emit_lifecycle_event(
+            kind="runtime.stopped",
+            message="Runtime stopped.",
+        )
 
     def spawn(
         self,
@@ -946,6 +1135,11 @@ class AgentRuntime:
 
         # Store reference
         self._agents[agent_id] = agent
+        self.emit_lifecycle_event_sync(
+            kind="agent.spawned",
+            agent=agent,
+            message="Agent spawned.",
+        )
 
         # Register with heartbeat monitor if enabled
         heartbeat_enabled = (

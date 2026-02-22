@@ -177,6 +177,33 @@ async def agent_list_tools(
     )
 
 
+@router.get("/agents/{agent_id}/peers")
+async def agent_list_peers(
+    agent_id: str,
+    include_self: bool = False,
+    discover_remote: bool = False,
+    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+) -> JSONResponse:
+    """List local peers and configured A2A remote peers for an agent."""
+    runtime = await get_runtime(user)
+    agent = runtime.get_agent(agent_id)
+
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    catalog = await agent.discover_peers(
+        include_self=include_self,
+        discover_remote=discover_remote,
+    )
+    return JSONResponse(
+        content={
+            "agent_id": agent_id,
+            "local": [ref.model_dump(mode="json") for ref in catalog.local],
+            "remote": [ref.model_dump(mode="json") for ref in catalog.remote],
+        }
+    )
+
+
 @router.post("/agents/{agent_id}/run")
 async def agent_run(
     agent_id: str,

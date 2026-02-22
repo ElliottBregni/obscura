@@ -60,6 +60,7 @@ def _make_mock_agent(
     mock.stop = AsyncMock()
     mock.run = AsyncMock(return_value="result text")
     mock.list_registered_tools = MagicMock(return_value=[])
+    mock.discover_peers = AsyncMock(return_value=MagicMock(local=[], remote=[]))
     return mock
 
 
@@ -293,6 +294,51 @@ class TestAgentListTools:
         mock_get_runtime.return_value = runtime
 
         resp = client.get("/api/v1/agents/nonexistent/tools")
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"]
+
+
+class TestAgentListPeers:
+    @patch("obscura.routes.agents.get_runtime")
+    def test_list_peers_success(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        agent = _make_mock_agent()
+        local_ref = MagicMock()
+        local_ref.model_dump.return_value = {
+            "kind": "local",
+            "agent_id": "agent-2",
+        }
+        remote_ref = MagicMock()
+        remote_ref.model_dump.return_value = {
+            "kind": "a2a_remote",
+            "url": "https://a2a.local",
+            "status": "configured",
+        }
+        catalog = MagicMock(local=[local_ref], remote=[remote_ref])
+        agent.discover_peers = AsyncMock(return_value=catalog)
+
+        runtime = _make_mock_runtime([agent])
+        mock_get_runtime.return_value = runtime
+
+        resp = client.get("/api/v1/agents/agent-1/peers?include_self=false&discover_remote=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_id"] == "agent-1"
+        assert len(data["local"]) == 1
+        assert len(data["remote"]) == 1
+        assert data["local"][0]["kind"] == "local"
+        assert data["remote"][0]["kind"] == "a2a_remote"
+
+    @patch("obscura.routes.agents.get_runtime")
+    def test_list_peers_not_found(
+        self, mock_get_runtime: MagicMock, client: TestClient
+    ) -> None:
+        runtime = AsyncMock()
+        runtime.get_agent = MagicMock(return_value=None)
+        mock_get_runtime.return_value = runtime
+
+        resp = client.get("/api/v1/agents/nonexistent/peers")
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"]
 

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from obscura.agent.agents import Agent, AgentRuntime
-from obscura.agent.peers import AgentRef
+from obscura.agent.peers import AgentRef, RemoteAgentRef
 from obscura.auth.models import AuthenticatedUser
 
 
@@ -45,6 +45,40 @@ class TestPeerRegistry:
         assert a.id in ids
         assert b.id in ids
         assert all(ref.kind == "local" for ref in refs)
+
+    @pytest.mark.asyncio
+    async def test_runtime_discover_peers_merges_local_and_remote(
+        self, runtime: AgentRuntime
+    ) -> None:
+        source = _spawn(runtime, "source")
+        target = _spawn(runtime, "target")
+        source.config.a2a_remote_tools = {
+            "enabled": True,
+            "urls": ["https://a2a.one", "https://a2a.two"],
+            "auth_token": "token",
+        }
+
+        with patch.object(
+            runtime.peer_registry,
+            "discover_remote",
+            AsyncMock(
+                return_value=[
+                    RemoteAgentRef(url="https://a2a.one"),
+                    RemoteAgentRef(url="https://a2a.two"),
+                ]
+            ),
+        ) as mocked_remote:
+            catalog = await runtime.discover_peers_for_agent(
+                source.id,
+                include_self=False,
+                discover_remote=False,
+            )
+
+        local_ids = {ref.agent_id for ref in catalog.local}
+        assert source.id not in local_ids
+        assert target.id in local_ids
+        assert len(catalog.remote) == 2
+        mocked_remote.assert_awaited_once()
 
 
 class TestPeerInvoke:

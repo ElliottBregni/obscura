@@ -2,8 +2,21 @@
 
 from obscura.agent.agent import BaseAgent
 from obscura.core.agent_loop import AgentLoop
-from obscura.agent.agents import Agent, AgentRuntime, MCPConfig, AgentStatus
-from obscura.agent.peers import AgentRef, PeerInvocationEnvelope, PeerRegistry
+from obscura.agent.agents import (
+    Agent,
+    AgentRuntime,
+    MCPConfig,
+    AgentStatus,
+    RuntimeLifecycleEvent,
+    RuntimeLifecycleHook,
+)
+from obscura.agent.peers import (
+    AgentRef,
+    PeerCatalog,
+    PeerInvocationEnvelope,
+    PeerRegistry,
+    RemoteAgentRef,
+)
 
 __all__ = [
     "BaseAgent",
@@ -12,7 +25,11 @@ __all__ = [
     "MCPConfig",
     "AgentStatus",
     "AgentLoop",
+    "RuntimeLifecycleEvent",
+    "RuntimeLifecycleHook",
     "AgentRef",
+    "RemoteAgentRef",
+    "PeerCatalog",
     "PeerRegistry",
     "PeerInvocationEnvelope",
 ]
