@@ -43,3 +43,9 @@ Requires-Dist: structlog>=23.0.0; extra == "telemetry"
 Provides-Extra: tui
 Requires-Dist: textual>=0.45.0; extra == "tui"
 Requires-Dist: rich>=14.0.0; extra == "tui"
+Provides-Extra: a2a
+Requires-Dist: redis[hiredis]>=5.0.0; extra == "a2a"
+Requires-Dist: grpcio>=1.60.0; extra == "a2a"
+Requires-Dist: grpcio-tools>=1.60.0; extra == "a2a"
+Requires-Dist: grpcio-reflection>=1.60.0; extra == "a2a"
+Requires-Dist: protobuf>=4.25.0; extra == "a2a"

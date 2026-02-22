@@ -1,3 +1,3 @@
 [console_scripts]
-obscura = sdk.cli.chat_cli:main
-obscura-sdk = sdk.cli:main
+obscura = obscura.cli.chat_cli:main
+obscura-sdk = obscura.cli:main
