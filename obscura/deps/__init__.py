@@ -172,9 +172,17 @@ async def authenticate_websocket(
 ) -> AuthenticatedUser | None:
     """Validate JWT token from WebSocket query params."""
     from obscura.auth.middleware import JWKSCache
+    from obscura.auth.rbac import user_from_api_key
 
     token = websocket.query_params.get("token", "")
+    api_key = websocket.query_params.get("api_key", "")
     config: ObscuraConfig | None = getattr(websocket.app.state, "config", None)
+
+    # API keys are accepted for websocket clients because browsers cannot set
+    # arbitrary headers in the WebSocket handshake.
+    api_user = user_from_api_key(api_key)
+    if api_user is not None:
+        return api_user
 
     if config is None or not config.auth_enabled:
         from obscura.auth.rbac import AGENT_READ_ROLES

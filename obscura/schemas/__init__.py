@@ -81,6 +81,8 @@ class SessionResponse(BaseModel):
 
     session_id: str
     backend: str
+    created_at: str | None = None
+    source: str | None = None
 
 
 class SyncRequest(BaseModel):

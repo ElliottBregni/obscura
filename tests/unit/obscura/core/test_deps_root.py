@@ -176,3 +176,42 @@ class TestAuthenticateWebsocket:
 
         user = await authenticate_websocket(mock_ws)
         assert user is not None
+
+    @pytest.mark.asyncio
+    async def test_api_key_query_param_authenticates(self):
+        from obscura.deps import authenticate_websocket
+
+        mock_ws = MagicMock()
+        mock_ws.query_params = {"api_key": "obscura-dev-key-123"}
+        mock_app_state = MagicMock()
+        mock_app_state.config = ObscuraConfig(auth_enabled=True)
+        mock_ws.app.state = mock_app_state
+
+        with patch(
+            "obscura.auth.rbac.user_from_api_key",
+            return_value=AuthenticatedUser(
+                user_id="dev-user",
+                email="dev@obscura.local",
+                roles=("admin",),
+                org_id="local",
+                token_type="api_key",
+                raw_token="obscura-dev-key-123",
+            ),
+        ):
+            user = await authenticate_websocket(mock_ws)
+        assert user is not None
+        assert user.token_type == "api_key"
+        assert user.user_id == "dev-user"
+
+    @pytest.mark.asyncio
+    async def test_invalid_api_key_returns_none(self):
+        from obscura.deps import authenticate_websocket
+
+        mock_ws = MagicMock()
+        mock_ws.query_params = {"api_key": "invalid-key"}
+        mock_app_state = MagicMock()
+        mock_app_state.config = ObscuraConfig(auth_enabled=True)
+        mock_ws.app.state = mock_app_state
+
+        user = await authenticate_websocket(mock_ws)
+        assert user is None

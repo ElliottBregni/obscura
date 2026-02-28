@@ -149,7 +149,28 @@ Multi-stage build:
 ### Full Stack
 
 ```bash
-docker compose up
+./scripts/compose-env.sh dev up --watch
+
+# or include host OAuth passthrough for dev
+./scripts/dev-compose-oauth-up.sh
+
+# environment overlays
+./scripts/compose-env.sh staging up -d --build
+./scripts/compose-env.sh prod up -d --build
+```
+
+### SDLC Targets
+
+```bash
+make dev-up
+make dev-check
+make dev-auth-fix
+
+make staging-up
+make staging-check
+
+make prod-up
+make prod-check
 ```
 
 Services:
@@ -157,6 +178,7 @@ Services:
 | Service | Port | Description |
 |---------|------|-------------|
 | `obscura-sdk` | 8080 | Obscura API server |
+| `web-ui` | 5173 | React admin portal (includes `/approvals`) |
 | `redis` | 6379 | A2A pub/sub |
 | `zitadel` | 8081 | OIDC auth provider |
 | `cockroachdb` | 26257 | Identity store (for Zitadel) |
@@ -207,4 +229,8 @@ Key files:
 | `ownership.md` | Module owners and required tests |
 | `config/mcp-config.json` | MCP server configuration template |
 | `Dockerfile` | Multi-stage production build |
-| `docker-compose.yml` | Full local dev stack |
+| `docker-compose.base.yml` | Shared stack definition for all environments |
+| `docker-compose.dev.yml` | Local development overlay |
+| `docker-compose.staging.yml` | Staging overlay |
+| `docker-compose.prod.yml` | Production overlay |
+| `config/env/*.env` | Environment-specific runtime defaults |

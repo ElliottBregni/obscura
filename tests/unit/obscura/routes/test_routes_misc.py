@@ -34,6 +34,22 @@ class TestHealthRoute:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
+    def test_auth_diagnostics(self, client: TestClient) -> None:
+        resp = client.get("/api/v1/auth/diagnostics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "auth_enabled" in data
+        assert "issuer" in data
+        assert "jwks_uri" in data
+        assert "audience" in data
+
+    def test_providers_health(self, client: TestClient) -> None:
+        resp = client.get("/api/v1/providers/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "providers" in data
+        assert isinstance(data["providers"], list)
+
 
 class TestWebhookRoutes:
     def test_create_webhook(self, client: TestClient) -> None:
@@ -218,6 +234,29 @@ class TestSendRoutes:
         assert kwargs["native"] is None
         assert kwargs["request"].prompt == "hello"
         assert kwargs["request"].mode.value == "unified"
+
+    @patch("obscura.routes.send.sync_session_turn")
+    def test_send_syncs_session_turn_to_vector_memory(
+        self, mock_sync_turn: Any, app: Any, client: TestClient
+    ) -> None:
+        mock_client: Any = AsyncMock()
+        mock_client.send.return_value = MagicMock(text="hello back")
+        mock_client.stop = AsyncMock()
+        mock_client.capability_tier = "B"
+        mock_factory: Any = AsyncMock()
+        mock_factory.create.return_value = mock_client
+        app.state.client_factory = mock_factory
+
+        resp = client.post(
+            "/api/v1/send",
+            json={
+                "backend": "copilot",
+                "prompt": "hello",
+                "session_id": "sess-sync-1",
+            },
+        )
+        assert resp.status_code == 200
+        mock_sync_turn.assert_called_once()
 
     def test_send_endpoint_native_payload(self, app: Any, client: TestClient) -> None:
         mock_client: Any = AsyncMock()

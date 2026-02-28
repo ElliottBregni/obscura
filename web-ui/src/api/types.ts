@@ -225,6 +225,7 @@ export interface Session {
   session_id: string;
   backend: string;
   created_at?: string;
+  source?: 'live' | 'ingested';
 }
 
 // ========== Capabilities ==========

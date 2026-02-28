@@ -102,6 +102,34 @@ class TestResolveGithubToken:
                 with pytest.raises(ValueError, match="Copilot auth"):
                     resolve_github_token(None)
 
+    def test_cmd_fallback(self):
+        with patch.dict(
+            os.environ,
+            {"OBSCURA_GITHUB_TOKEN_CMD": "echo gh-cmd-token"},
+            clear=True,
+        ):
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "gh-cmd-token\n"
+            with patch("subprocess.run", return_value=mock_result):
+                assert resolve_github_token(None) == "gh-cmd-token"
+
+    def test_env_first_prefers_env_over_cmd(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GH_TOKEN": "env-token",
+                "OBSCURA_GITHUB_TOKEN_CMD": "echo gh-cmd-token",
+                "OBSCURA_AUTH_MODE": "env_first",
+            },
+            clear=True,
+        ):
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "gh-cmd-token\n"
+            with patch("subprocess.run", return_value=mock_result):
+                assert resolve_github_token(None) == "env-token"
+
 
 class TestResolveAnthropicKey:
     def test_explicit(self):

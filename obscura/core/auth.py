@@ -90,11 +90,26 @@ def _resolve_github_token(explicit: str | None) -> str:
     if explicit:
         return explicit
 
+    token_cmd = os.environ.get("OBSCURA_GITHUB_TOKEN_CMD", "").strip()
+
     if _is_env_first_mode():
         for var in _COPILOT_ENV_VARS:
             token = os.environ.get(var)
             if token:
                 return token
+        if token_cmd:
+            try:
+                result = subprocess.run(
+                    shlex.split(token_cmd),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
         try:
             result = subprocess.run(
                 ["gh", "auth", "token"],
@@ -122,6 +137,20 @@ def _resolve_github_token(explicit: str | None) -> str:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
+        if token_cmd:
+            try:
+                result = subprocess.run(
+                    shlex.split(token_cmd),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+
         for var in _COPILOT_ENV_VARS:
             token = os.environ.get(var)
             if token:
@@ -129,7 +158,8 @@ def _resolve_github_token(explicit: str | None) -> str:
 
     raise ValueError(
         "Copilot auth requires one of: "
-        f"{', '.join(_COPILOT_ENV_VARS)} env var, or `gh auth login`."
+        f"{', '.join(_COPILOT_ENV_VARS)} env var, "
+        "OBSCURA_GITHUB_TOKEN_CMD, or `gh auth login`."
     )
 
 

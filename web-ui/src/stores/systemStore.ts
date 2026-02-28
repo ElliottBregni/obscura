@@ -13,7 +13,7 @@ interface SystemState {
 export const useSystemStore = create<SystemState>()((set) => ({
   wsConnected: false,
   serverReachable: true,
-  authEnabled: false,
+  authEnabled: true,
 
   setWsConnected: (connected) => set({ wsConnected: connected }),
   setServerReachable: (reachable) => set({ serverReachable: reachable }),

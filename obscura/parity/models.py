@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from obscura.core.types import Backend
 
@@ -43,14 +44,46 @@ class BackendParityProfile:
     supports: tuple[FeatureSupport, ...]
 
 
+class ScenarioStepKind(str, Enum):
+    """Kind of scenario step."""
+
+    USER_PROMPT = "user_prompt"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    ASSERT_TEXT = "assert_text"
+    ASSERT_EVENT = "assert_event"
+
+
+@dataclass(frozen=True)
+class ScenarioStep:
+    """One step in a structured scenario sequence."""
+
+    kind: ScenarioStepKind
+    text: str = ""
+    tool_name: str = ""
+    tool_input: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    tool_result: str = ""
+    expected_event: str = ""
+
+
 @dataclass(frozen=True)
 class ScenarioSpec:
-    """One reusable parity scenario."""
+    """One reusable parity scenario.
+
+    ``steps`` is an ordered sequence for the AgentLoopScenarioExecutor.
+    ``tool_mode`` controls tool middleware behavior:
+    - ``"live"``   — tools execute normally
+    - ``"record"`` — tools execute and results are saved as fixtures
+    - ``"replay"`` — tool calls return saved fixtures (no real execution)
+    """
 
     id: str
     title: str
     feature_ids: tuple[str, ...]
     backend: Backend
+    steps: tuple[ScenarioStep, ...] = ()
+    tool_mode: str = "live"  # "live" | "record" | "replay"
+    fixtures_dir: str = ""
 
 
 @dataclass(frozen=True)

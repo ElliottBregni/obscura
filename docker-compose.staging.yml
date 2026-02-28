@@ -1,0 +1,47 @@
+services:
+  obscura-sdk:
+    ports:
+      - "18080:8080"
+      - "15051:50051"
+    volumes:
+      - type: bind
+        source: ${HOME}/.obscura-staging
+        target: /home/obscura/.obscura
+      - type: bind
+        source: ${HOME}/.config/gh
+        target: /home/obscura/.config/gh
+
+  web-ui:
+    ports:
+      - "15173:5173"
+
+  redis:
+    ports:
+      - "16379:6379"
+
+  zitadel:
+    ports:
+      - "18081:8080"
+
+  cockroachdb:
+    ports:
+      - "26258:26257"
+
+  otel-collector:
+    ports:
+      - "14317:4317"
+      - "14318:4318"
+      - "18888:8888"
+
+  jaeger:
+    ports:
+      - "16687:16686"
+      - "14251:14250"
+
+  prometheus:
+    ports:
+      - "19090:9090"
+
+  grafana:
+    ports:
+      - "13000:3000"

@@ -136,7 +136,9 @@ obscura-sdk observe
 | `OBSCURA_URL` | `http://localhost:8080` | API base URL (for Click CLI) |
 | `OBSCURA_TOKEN` | `local-dev-token` | Auth token (for Click CLI) |
 | `GITHUB_TOKEN` | -- | Copilot auth |
+| `OBSCURA_GITHUB_TOKEN_CMD` | -- | Copilot token command fallback |
 | `ANTHROPIC_API_KEY` | -- | Claude auth |
+| `OBSCURA_CLAUDE_TOKEN_CMD` | -- | Claude token command fallback |
 | `OPENAI_API_KEY` | -- | OpenAI auth |
 | `MOONSHOT_API_KEY` | -- | Moonshot auth |
 | `OBSCURA_LOCALLLM_BASE_URL` | `http://localhost:1234/v1` | Local LLM server |

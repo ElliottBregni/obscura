@@ -6,13 +6,17 @@ export async function fetchApi<T>(
   options?: RequestInit
 ): Promise<T> {
   const { token, apiKey } = useAuthStore.getState();
+  const devApiKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
+  const forceDevApiKey = import.meta.env.VITE_FORCE_DEV_API_KEY === 'true';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string>),
   };
 
-  if (token) {
+  if (forceDevApiKey && devApiKey) {
+    headers['X-API-Key'] = devApiKey;
+  } else if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   } else if (apiKey) {
     headers['X-API-Key'] = apiKey;

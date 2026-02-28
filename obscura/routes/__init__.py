@@ -3,6 +3,7 @@ obscura.routes -- FastAPI route modules for the Obscura API.
 """
 
 from obscura.routes.admin import router as admin_router
+from obscura.routes.auth_status import router as auth_status_router
 from obscura.routes.capabilities import router as capabilities_router
 from obscura.routes.agent_groups import router as agent_groups_router
 from obscura.routes.agents import router as agents_router
@@ -36,6 +37,7 @@ all_routers = [
     workflows_router,
     webhooks_router,
     admin_router,
+    auth_status_router,
     heartbeat_router,
     heartbeat_ws_router,
     capabilities_router,

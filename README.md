@@ -194,8 +194,8 @@ obscura/
 
 | Backend | Environment Variables |
 |---------|----------------------|
-| Copilot | `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` |
-| Claude | `ANTHROPIC_API_KEY` or `claude auth status` |
+| Copilot | `GITHUB_TOKEN`, `GH_TOKEN`, `OBSCURA_GITHUB_TOKEN_CMD`, or `gh auth token` |
+| Claude | `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`, `OBSCURA_CLAUDE_TOKEN_CMD`, or `claude auth status` |
 | OpenAI | `OPENAI_API_KEY` |
 | Moonshot | `MOONSHOT_API_KEY` or `OPENAI_API_KEY` |
 | LocalLLM | `OBSCURA_LOCALLLM_BASE_URL` (default: `http://localhost:1234/v1`) |
@@ -232,11 +232,56 @@ ruff format --check .
 ### Docker
 
 ```bash
-# Build
-docker build -t obscura .
+# Dev stack (base + dev overlay)
+./scripts/compose-env.sh dev up -d --build
 
-# Full stack (app + Redis + Zitadel + OTEL + Jaeger + Prometheus + Grafana)
-docker compose up
+# Dev stack with live UI file sync (Compose watch)
+./scripts/compose-env.sh dev up --watch
+
+# Full stack with host OAuth passthrough (dev helper)
+./scripts/dev-compose-oauth-up.sh
+
+# Staging and prod overlays
+./scripts/compose-env.sh staging up -d --build
+./scripts/compose-env.sh prod up -d --build
+```
+
+SDLC command surface (recommended):
+```bash
+make dev-up
+make dev-check
+make staging-up
+make prod-up
+```
+
+Environment files live in:
+- `config/env/dev.env`
+- `config/env/staging.env`
+- `config/env/prod.env`
+
+OAuth in Docker:
+- Copilot host OAuth inheritance is enabled by default via mounted `~/.config/gh`.
+- `./scripts/dev-compose-oauth-up.sh` also injects `GH_TOKEN`/`GITHUB_TOKEN` from `gh auth token` on the host.
+- Copilot OAuth inside container: `docker exec -it obscura-sdk gh auth login` (persists via mounted `~/.config/gh`).
+- Claude OAuth cannot be reliably inherited from macOS keychain; use `ANTHROPIC_API_KEY`/`CLAUDE_API_KEY` or run Claude login inside a container image that includes the Claude CLI.
+- Auth diagnostics endpoints:
+  - `GET /api/v1/auth/diagnostics` (ingress auth status)
+  - `GET /api/v1/providers/health` (egress provider auth readiness)
+
+Local parity run (same auth defaults as compose):
+```bash
+./scripts/run-local-from-compose-env.sh
+```
+
+Auth bootstrap readiness check:
+```bash
+./scripts/dev-auth-bootstrap-check.sh
+# optionally start required services first:
+./scripts/dev-auth-bootstrap-check.sh --start
+# auto-remediate safe defaults and re-check:
+./scripts/dev-auth-bootstrap-check.sh --fix
+# run against a specific overlay:
+OBSCURA_ENV=staging ./scripts/dev-auth-bootstrap-check.sh --start
 ```
 
 ### PR Requirements

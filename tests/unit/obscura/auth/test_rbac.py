@@ -16,7 +16,12 @@ from fastapi.testclient import TestClient
 
 from obscura.auth.middleware import JWKSCache, JWTAuthMiddleware
 from obscura.auth.models import AuthenticatedUser
-from obscura.auth.rbac import get_current_user, require_any_role, require_role
+from obscura.auth.rbac import (
+    get_current_user,
+    require_any_role,
+    require_role,
+    user_from_api_key,
+)
 
 # Re-use the test key infrastructure from test_auth_middleware
 from tests.unit.obscura.auth.test_auth_middleware import (
@@ -145,6 +150,13 @@ class TestGetCurrentUser:
     def test_401_without_token(self, client: TestClient) -> None:
         resp = client.get("/api/v1/me")
         assert resp.status_code == 401
+
+    def test_user_from_api_key_helper(self) -> None:
+        user = user_from_api_key("obscura-dev-key-123")
+        if user is None:
+            pytest.skip("Default development API key not loaded in this environment")
+        assert user.user_id
+        assert user.token_type == "api_key"
 
 
 class TestRequireRole:

@@ -18,6 +18,7 @@ from obscura.core.types import (
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import ClientFactory, audit
+from obscura.routes.session_sync import sync_session_turn
 from obscura.schemas import SendRequest, SendResponse, StreamRequest
 
 router = APIRouter(prefix="/api/v1", tags=["agent"])
@@ -77,6 +78,18 @@ async def send(
             native=body.native,
             request=unified_req,
         )
+        if body.session_id:
+            try:
+                sync_session_turn(
+                    user=user,
+                    session_id=body.session_id,
+                    backend=body.backend,
+                    prompt=body.prompt,
+                    response=msg.text,
+                    mode=body.mode,
+                )
+            except Exception:
+                pass
         audit(
             "agent.send",
             user,
@@ -121,6 +134,7 @@ async def stream(
             model_alias=body.model_alias,
             system_prompt=body.system_prompt,
         )
+        response_text_parts: list[str] = []
         try:
             if body.session_id:
                 ref = SessionRef(
@@ -165,6 +179,8 @@ async def stream(
                 payload: dict[str, str] = {}
                 if chunk.text:
                     payload["text"] = chunk.text
+                    if chunk.kind.value == "text_delta":
+                        response_text_parts.append(chunk.text)
                 if chunk.tool_name:
                     payload["tool_name"] = chunk.tool_name
                 if chunk.tool_input_delta:
@@ -183,6 +199,18 @@ async def stream(
                     "event": chunk.kind.value,
                     "data": json.dumps(payload),
                 }
+            if body.session_id:
+                try:
+                    sync_session_turn(
+                        user=user,
+                        session_id=body.session_id,
+                        backend=body.backend,
+                        prompt=body.prompt,
+                        response="".join(response_text_parts),
+                        mode=body.mode,
+                    )
+                except Exception:
+                    pass
         finally:
             await client.stop()
 

@@ -55,6 +55,8 @@ from obscura.memory import MemoryStore
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import InteractionBus
+    from obscura.manifest.lazy import LazyManifestProxy
+    from obscura.manifest.models import AgentManifest
     from obscura.providers.mcp_backend import MCPBackend
     from obscura.heartbeat.client import AgentHeartbeatClient
     from obscura.tools.providers import ToolProviderRegistry
@@ -139,6 +141,52 @@ class AgentConfig(BaseModel):
     enable_system_tools: bool = True
     a2a_remote_tools: dict[str, Any] = Field(default_factory=dict)
 
+    # Delegation
+    can_delegate: bool = False
+    delegate_allowlist: list[str] = Field(default_factory=list)
+    max_delegation_depth: int = 3
+
+    # Tool allowlist (None = all tools allowed)
+    tool_allowlist: list[str] | None = None
+
+    @classmethod
+    def from_manifest(cls, manifest: AgentManifest) -> AgentConfig:
+        """Build an :class:`AgentConfig` from an :class:`AgentManifest`.
+
+        Maps manifest fields to config fields and builds ``MCPConfig``
+        from ``mcp_server_refs``.
+        """
+        from obscura.manifest.lazy import LazyManifestProxy
+
+        proxy = LazyManifestProxy(manifest)
+
+        # Build MCP config from manifest refs
+        mcp_configs = proxy.mcp_configs
+        mcp_enabled = bool(mcp_configs) or manifest.mcp_servers != "auto"
+        server_names: list[str] = []
+        if isinstance(manifest.mcp_servers, list):
+            server_names = list(manifest.mcp_servers)
+
+        mcp = MCPConfig(
+            enabled=mcp_enabled,
+            servers=mcp_configs,
+            server_names=server_names,
+        )
+
+        return cls(
+            name=manifest.name,
+            model=manifest.model,
+            system_prompt=proxy.system_prompt,
+            max_iterations=manifest.max_turns,
+            tools=list(manifest.tools),
+            tags=list(manifest.tags),
+            mcp=mcp,
+            can_delegate=manifest.can_delegate,
+            delegate_allowlist=list(manifest.delegate_allowlist),
+            max_delegation_depth=manifest.max_delegation_depth,
+            tool_allowlist=list(manifest.tool_allowlist) if manifest.tool_allowlist is not None else None,
+        )
+
 
 class AgentState(BaseModel):
     """Serializable state of an agent."""
@@ -180,11 +228,13 @@ class Agent:
         config: AgentConfig,
         user: AuthenticatedUser,
         runtime: AgentRuntime,
+        manifest_proxy: LazyManifestProxy | None = None,
     ):
         self.id = agent_id
         self.config = config
         self.user = user
         self.runtime = runtime
+        self.manifest_proxy = manifest_proxy
         self.status = AgentStatus.PENDING
         self.created_at = datetime.now(UTC)
         self.updated_at = self.created_at
@@ -384,6 +434,21 @@ class Agent:
 
         await provider_registry.install_all(ToolProviderContext(agent=self))
         self._tool_provider_registry = provider_registry
+
+        # Merge manifest hooks into the agent's client hook registry
+        if self.manifest_proxy is not None:
+            manifest_hooks = self.manifest_proxy.hook_registry
+            if manifest_hooks.count > 0:
+                from obscura.core.hooks import HookRegistry
+
+                # If the client has a hook registry, merge; otherwise set it
+                existing: HookRegistry | None = getattr(
+                    self._client, "hooks", None
+                )
+                if existing is not None:
+                    existing.merge(manifest_hooks)
+                else:
+                    setattr(self._client, "hooks", manifest_hooks)
 
         # Initialize heartbeat client if enabled
         if self._heartbeat_enabled:
@@ -1119,6 +1184,7 @@ class AgentRuntime:
         system_prompt: str = "",
         memory_namespace: str = "default",
         parent_agent_id: str | None = None,
+        manifest_proxy: LazyManifestProxy | None = None,
         **config_kwargs: Any,
     ) -> Agent:
         """
@@ -1140,7 +1206,7 @@ class AgentRuntime:
 
         if self.user is None:
             raise RuntimeError("AgentRuntime requires a user to spawn agents")
-        agent = Agent(agent_id, config, self.user, self)
+        agent = Agent(agent_id, config, self.user, self, manifest_proxy=manifest_proxy)
 
         # Store reference
         self._agents[agent_id] = agent
@@ -1167,6 +1233,31 @@ class AgentRuntime:
                     f"Failed to register agent {agent_id} with heartbeat monitor: {e}"
                 )
 
+        return agent
+
+    def spawn_from_manifest(self, manifest: AgentManifest) -> Agent:
+        """Spawn an agent from a manifest definition.
+
+        Builds ``AgentConfig`` from the manifest, creates a
+        :class:`LazyManifestProxy` for deferred resolution, and returns
+        the agent instance (not started).
+        """
+        from obscura.manifest.lazy import LazyManifestProxy
+
+        proxy = LazyManifestProxy(manifest)
+        config = AgentConfig.from_manifest(manifest)
+
+        agent_id = f"agent-{uuid.uuid4().hex[:8]}"
+        if self.user is None:
+            raise RuntimeError("AgentRuntime requires a user to spawn agents")
+        agent = Agent(agent_id, config, self.user, self, manifest_proxy=proxy)
+
+        self._agents[agent_id] = agent
+        self.emit_lifecycle_event_sync(
+            kind="agent.spawned",
+            agent=agent,
+            message="Agent spawned from manifest.",
+        )
         return agent
 
     async def spawn_and_run(

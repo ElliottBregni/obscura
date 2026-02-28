@@ -29,10 +29,13 @@ export function useWebSocket({
     if (!enabled) return;
 
     const { token, apiKey } = useAuthStore.getState();
+    const devApiKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
+    const forceDevApiKey = import.meta.env.VITE_FORCE_DEV_API_KEY === 'true';
     let url = `${WS_URL}${path}`;
 
     const params = new URLSearchParams();
-    if (token) params.set('token', token);
+    if (forceDevApiKey && devApiKey) params.set('api_key', devApiKey);
+    else if (token) params.set('token', token);
     else if (apiKey) params.set('api_key', apiKey);
     if (params.toString()) url += `?${params}`;
 

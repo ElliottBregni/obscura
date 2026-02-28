@@ -5,7 +5,9 @@ import {
   useSessions,
   useCreateSession,
   useDeleteSession,
+  useIngestSessions,
 } from '@/api/hooks/useSessions';
+import { useSessionBroadcastSync } from '@/hooks/useSessionBroadcastSync';
 import { BACKENDS } from '@/lib/constants';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -81,6 +83,10 @@ function SessionDetailPanel({ session }: { session: Session }) {
           <p className="text-xs font-medium text-muted-foreground">Backend</p>
           <p className="mt-0.5 text-sm">{session.backend}</p>
         </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Source</p>
+          <p className="mt-0.5 text-sm">{session.source ?? 'live'}</p>
+        </div>
         {startTime && (
           <div>
             <p className="text-xs font-medium text-muted-foreground">Start Time</p>
@@ -101,13 +107,16 @@ function SessionDetailPanel({ session }: { session: Session }) {
 }
 
 export default function SessionsPage() {
+  useSessionBroadcastSync(true);
   const sessionsQuery = useSessions();
   const createSession = useCreateSession();
   const deleteSession = useDeleteSession();
+  const ingestSessions = useIngestSessions();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedBackend, setSelectedBackend] = useState<string>(BACKENDS[0].value);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'live' | 'ingested'>('all');
 
   const handleCreate = useCallback(() => {
     createSession.mutate(
@@ -137,6 +146,20 @@ export default function SessionsPage() {
     [deleteSession, expandedId],
   );
 
+  const handleIngest = useCallback(() => {
+    ingestSessions.mutate(
+      {},
+      {
+        onSuccess: (result) => {
+          toast.success(
+            `Ingested ${result.ingested} sessions (${result.skipped} skipped, ${result.entries} indexed)`,
+          );
+        },
+        onError: (err) => toast.error(`Ingest failed: ${String(err)}`),
+      },
+    );
+  }, [ingestSessions]);
+
   if (sessionsQuery.isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -156,6 +179,10 @@ export default function SessionsPage() {
   }
 
   const sessions = sessionsQuery.data ?? [];
+  const filteredSessions =
+    sourceFilter === 'all'
+      ? sessions
+      : sessions.filter((s) => (s.source ?? 'live') === sourceFilter);
 
   const backendLabel = (value: string) =>
     BACKENDS.find((b) => b.value === value)?.label ?? value;
@@ -167,20 +194,44 @@ export default function SessionsPage() {
         <div className="flex items-center gap-3">
           <MonitorSmartphone className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-bold tracking-tight">Sessions</h1>
-          <Badge variant="secondary">{sessions.length}</Badge>
+          <Badge variant="secondary">{filteredSessions.length}</Badge>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          Create Session
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select
+            value={sourceFilter}
+            onValueChange={(value) =>
+              setSourceFilter(value as 'all' | 'live' | 'ingested')
+            }
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Filter source" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Sessions</SelectItem>
+              <SelectItem value="live">Live Sessions</SelectItem>
+              <SelectItem value="ingested">Ingested Sessions</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            onClick={handleIngest}
+            disabled={ingestSessions.isPending}
+          >
+            {ingestSessions.isPending ? 'Ingesting...' : 'Ingest System Sessions'}
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Create Session
+          </Button>
+        </div>
       </div>
 
       {/* Table */}
-      {!sessions.length ? (
+      {!filteredSessions.length ? (
         <EmptyState
           icon={MonitorSmartphone}
-          title="No Sessions"
-          description="Create a session to start interacting with an agent backend."
+          title="No Sessions In View"
+          description="Try a different source filter or ingest system sessions."
           action={
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-1.5 h-4 w-4" />
@@ -200,7 +251,7 @@ export default function SessionsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sessions.map((session) => {
+              {filteredSessions.map((session) => {
                 const isExpanded = expandedId === session.session_id;
                 return (
                   <>
@@ -224,6 +275,9 @@ export default function SessionsPage() {
                       <TableCell>
                         <Badge variant="secondary">
                           {backendLabel(session.backend)}
+                        </Badge>
+                        <Badge variant="outline" className="ml-2">
+                          {session.source ?? 'live'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">

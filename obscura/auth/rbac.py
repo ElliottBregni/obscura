@@ -95,6 +95,27 @@ def _load_api_keys() -> None:
 _load_api_keys()
 
 
+def user_from_api_key(api_key: str | None) -> AuthenticatedUser | None:
+    """Return an authenticated API key user, or ``None`` when key is invalid."""
+    if not api_key:
+        return None
+    key_data = _api_keys.get(api_key)
+    if not key_data:
+        return None
+    user_id = str(key_data["user_id"])
+    email = str(key_data["email"])
+    roles_val = key_data["roles"]
+    roles = tuple(roles_val) if isinstance(roles_val, list) else (str(roles_val),)
+    return AuthenticatedUser(
+        user_id=user_id,
+        email=email,
+        roles=roles,
+        org_id="local",
+        token_type="api_key",
+        raw_token=api_key,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core dependency: extract user from request
 # ---------------------------------------------------------------------------
@@ -116,21 +137,9 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     auth_enabled = getattr(config, "auth_enabled", True) if config else True
 
     # 1. Check API key header (works even when auth is enabled)
-    api_key = request.headers.get("X-API-Key")
-    if api_key and api_key in _api_keys:
-        key_data = _api_keys[api_key]
-        user_id = str(key_data["user_id"])
-        email = str(key_data["email"])
-        roles_val = key_data["roles"]
-        roles = tuple(roles_val) if isinstance(roles_val, list) else (str(roles_val),)
-        return AuthenticatedUser(
-            user_id=user_id,
-            email=email,
-            roles=roles,
-            org_id="local",
-            token_type="api_key",
-            raw_token=api_key,
-        )
+    api_user = user_from_api_key(request.headers.get("X-API-Key"))
+    if api_user is not None:
+        return api_user
 
     # 2. If auth is disabled, return mock user
     if not auth_enabled:

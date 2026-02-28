@@ -424,6 +424,8 @@ class AgentEventKind(enum.Enum):
     TURN_START = "turn_start"
     AGENT_DONE = "agent_done"
     ERROR = "error"
+    SESSION_PAUSED = "session_paused"
+    USER_INPUT = "user_input"
 
 
 @dataclass

@@ -155,7 +155,10 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             logger.debug("Telemetry middleware not available; skipping")
 
     if config.auth_enabled:
-        jwks_cache = JWKSCache(config.auth_jwks_uri)
+        jwks_cache = JWKSCache(
+            config.auth_jwks_uri,
+            host_header=config.auth_host_header,
+        )
         app.state.jwks_cache = jwks_cache
         app.add_middleware(
             JWTAuthMiddleware,

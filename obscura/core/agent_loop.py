@@ -10,11 +10,19 @@ Works with all backends (Copilot, Claude, OpenAI, LocalLLM).
 Usage::
 
     from obscura.core.agent_loop import AgentLoop
+    from obscura.core.hooks import HookRegistry
+    from obscura.core.event_store import SQLiteEventStore
     from obscura.core.types import AgentEventKind
 
-    loop = AgentLoop(backend, tool_registry, max_turns=10)
+    hooks = HookRegistry()
+    store = SQLiteEventStore("/tmp/events.db")
 
-    async for event in loop.run("Fix the auth bug"):
+    loop = AgentLoop(
+        backend, tool_registry,
+        hooks=hooks, event_store=store,
+    )
+
+    async for event in loop.run("Fix the auth bug", session_id="sess-1"):
         match event.kind:
             case AgentEventKind.TEXT_DELTA:
                 print(event.text, end="")
@@ -55,6 +63,9 @@ from obscura.core.types import (
     ToolSpec,
 )
 
+from obscura.core.event_store import EventRecord, EventStoreProtocol
+from obscura.core.hooks import HookRegistry
+
 logger = logging.getLogger(__name__)
 
 # Type alias for confirmation callbacks.
@@ -81,6 +92,14 @@ class AgentLoop:
         Optional async/sync callback invoked before each tool execution.
         Return ``True`` to approve, ``False`` to deny (tool result will
         be "Tool call denied by user").
+    hooks:
+        Optional :class:`HookRegistry`.  Before/after hooks fire on every
+        event the loop emits.
+    event_store:
+        Optional :class:`EventStoreProtocol`.  When provided, every emitted
+        event is persisted to durable storage.
+    agent_name:
+        Identifier for the agent (stored in the session record).
     """
 
     def __init__(
@@ -91,12 +110,45 @@ class AgentLoop:
         max_turns: int = 10,
         on_confirm: ConfirmationCallback | None = None,
         capability_token: Any | None = None,
+        hooks: HookRegistry | None = None,
+        event_store: EventStoreProtocol | None = None,
+        agent_name: str = "agent_loop",
+        tool_allowlist: list[str] | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
         self._max_turns = max_turns
         self._on_confirm = on_confirm
         self._capability_token = capability_token
+        self._hooks = hooks
+        self._event_store = event_store
+        self._agent_name = agent_name
+        self._tool_allowlist = tool_allowlist
+
+        # Pause / mid-run input state
+        self._should_pause = False
+        self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    # ------------------------------------------------------------------
+    # Pause / mid-run input public API
+    # ------------------------------------------------------------------
+
+    def request_pause(self) -> None:
+        """Request the loop to pause at the next turn boundary.
+
+        The current turn will complete normally.  After emitting
+        TURN_COMPLETE the loop emits SESSION_PAUSED and returns.
+        Thread-safe.
+        """
+        self._should_pause = True
+
+    def inject_user_input(self, text: str) -> None:
+        """Queue a user message to inject at the next turn boundary.
+
+        The text becomes the prompt for the next model turn and a
+        USER_INPUT event is emitted.  Thread-safe.
+        """
+        self._user_input_queue.put_nowait(text)
 
     @property
     def max_turns(self) -> int:
@@ -104,11 +156,60 @@ class AgentLoop:
         return self._max_turns
 
     # ------------------------------------------------------------------
+    # Event emission (hooks + persistence)
+    # ------------------------------------------------------------------
+
+    async def _emit(
+        self,
+        event: AgentEvent,
+        session_id: str | None,
+    ) -> AgentEvent | None:
+        """Run before-hooks → persist → return event (or None if suppressed).
+
+        After-hooks run separately via :meth:`_post_emit`.
+        """
+        current = event
+
+        # Before-hooks
+        if self._hooks is not None:
+            result = await self._hooks.run_before(current)
+            if result is None:
+                return None
+            current = result
+
+        # Persist
+        if self._event_store is not None and session_id is not None:
+            await self._event_store.append(session_id, current)
+
+        return current
+
+    async def _post_emit(self, event: AgentEvent) -> None:
+        """Run after-hooks for an already-yielded event."""
+        if self._hooks is not None:
+            await self._hooks.run_after(event)
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    async def run(self, prompt: str, **kwargs: Any) -> AsyncIterator[AgentEvent]:
+    async def run(
+        self,
+        prompt: str,
+        *,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[AgentEvent]:
         """Run the agent loop, yielding events as they occur.
+
+        Parameters
+        ----------
+        prompt:
+            The initial user prompt.
+        session_id:
+            Optional durable session ID.  When provided (and an event store
+            is configured), events are persisted and the session can be
+            resumed later.  If ``None``, a transient ID is generated and
+            nothing is persisted.
 
         Yields
         ------
@@ -116,27 +217,138 @@ class AgentLoop:
             TURN_START, TEXT_DELTA, THINKING_DELTA, TOOL_CALL, TOOL_RESULT,
             TURN_COMPLETE, and finally AGENT_DONE (or ERROR).
         """
-        turn = 0
-        current_prompt = prompt
-        accumulated_text = ""
+        # Reset pause state for this run
+        self._should_pause = False
+
+        # Create durable session if store is wired
+        sid = session_id
+        if self._event_store is not None and sid is not None:
+            existing = await self._event_store.get_session(sid)
+            if existing is None:
+                await self._event_store.create_session(sid, self._agent_name)
+
+        async for event in self._run_inner(prompt, sid, 0, "", kwargs):
+            yield event
+
+    async def resume(
+        self,
+        session_id: str,
+        *,
+        prompt: str = "",
+        **kwargs: Any,
+    ) -> AsyncIterator[AgentEvent]:
+        """Resume a paused session from the event store.
+
+        Parameters
+        ----------
+        session_id:
+            The session to resume.  Must exist and have status PAUSED.
+        prompt:
+            Optional override prompt.  If empty, the reconstructed prompt
+            from the last run is used.
+
+        Raises
+        ------
+        RuntimeError
+            If no event store is configured.
+        ValueError
+            If the session does not exist or is not paused.
+        """
+        if self._event_store is None:
+            raise RuntimeError("Cannot resume without an event store")
+
+        session = await self._event_store.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session {session_id!r} not found")
+
+        from obscura.core.event_store import SessionStatus
+
+        if session.status != SessionStatus.PAUSED:
+            raise ValueError(
+                f"Session {session_id!r} is {session.status.value}, not paused"
+            )
+
+        # Reconstruct state from persisted events
+        events = await self._event_store.get_events(session_id)
+        turn, acc_text, messages, last_prompt = AgentLoop.reconstruct_state(events)
+
+        # Transition back to RUNNING
+        await self._event_store.update_status(session_id, SessionStatus.RUNNING)
+
+        # Reset pause flag
+        self._should_pause = False
+
+        resume_prompt = prompt if prompt else last_prompt
+        resume_kwargs: dict[str, Any] = dict(kwargs)
+        if messages:
+            resume_kwargs["messages"] = messages
+
+        async for event in self._run_inner(
+            resume_prompt, session_id, turn, acc_text, resume_kwargs,
+        ):
+            yield event
+
+    # ------------------------------------------------------------------
+    # Inner loop (shared by run + resume)
+    # ------------------------------------------------------------------
+
+    async def _call_stream(
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
+    ) -> AsyncIterator[StreamChunk]:
+        """Call backend.stream with kwargs, isolating type-unsafe spread."""
+        if self._backend is None:
+            raise RuntimeError("No backend configured")
+        async for chunk in self._backend.stream(prompt, **kwargs):
+            yield chunk
+
+    async def _run_inner(
+        self,
+        prompt: str,
+        session_id: str | None,
+        start_turn: int,
+        accumulated_text: str,
+        stream_kwargs: dict[str, Any],
+    ) -> AsyncIterator[AgentEvent]:
+        """Core loop body shared by :meth:`run` and :meth:`resume`."""
+        turn: int = start_turn
+        current_prompt: str = prompt
+        kwargs: dict[str, Any] = stream_kwargs
+        _prev_event: AgentEvent | None = None
 
         while turn < self._max_turns:
             turn += 1
-            yield AgentEvent(kind=AgentEventKind.TURN_START, turn=turn)
+
+            # Run post-hook for the previous event before emitting next
+            if _prev_event is not None:
+                await self._post_emit(_prev_event)
+                _prev_event = None
+
+            turn_start = AgentEvent(kind=AgentEventKind.TURN_START, turn=turn)
+            emitted = await self._emit(turn_start, session_id)
+            if emitted is not None:
+                yield emitted
+                _prev_event = emitted
 
             tool_calls: list[ToolCallInfo] = []
-            turn_text = ""
-            _current_tool_name = ""
-            _current_tool_input_json = ""
+            turn_text: str = ""
+            _current_tool_name: str = ""
+            _current_tool_input_json: str = ""
             _current_tool_raw: Any = None
 
             try:
-                if self._backend is None:
-                    raise RuntimeError("No backend configured")
-                async for chunk in self._backend.stream(current_prompt, **kwargs):
+                async for chunk in self._call_stream(current_prompt, kwargs):
                     event = self._map_chunk(chunk, turn)
                     if event is not None:
-                        yield event
+                        # Run post-hook for previous, then emit new
+                        if _prev_event is not None:
+                            await self._post_emit(_prev_event)
+                            _prev_event = None
+                        emitted = await self._emit(event, session_id)
+                        if emitted is not None:
+                            yield emitted
+                            _prev_event = emitted
 
                     # Accumulate text
                     if chunk.kind == ChunkKind.TEXT_DELTA:
@@ -153,6 +365,21 @@ class AgentLoop:
                                 _current_tool_raw,
                             )
                             tool_calls.append(tc)
+                            # Emit TOOL_CALL with full input
+                            tc_ev = AgentEvent(
+                                kind=AgentEventKind.TOOL_CALL,
+                                tool_name=tc.name,
+                                tool_input=tc.input,
+                                turn=turn,
+                                raw=tc.raw,
+                            )
+                            if _prev_event is not None:
+                                await self._post_emit(_prev_event)
+                                _prev_event = None
+                            emitted = await self._emit(tc_ev, session_id)
+                            if emitted is not None:
+                                yield emitted
+                                _prev_event = emitted
                         _current_tool_name = chunk.tool_name
                         _current_tool_input_json = ""
                         _current_tool_raw = chunk.raw
@@ -169,6 +396,21 @@ class AgentLoop:
                                 _current_tool_raw,
                             )
                             tool_calls.append(tc)
+                            # Emit TOOL_CALL with full input
+                            tc_ev = AgentEvent(
+                                kind=AgentEventKind.TOOL_CALL,
+                                tool_name=tc.name,
+                                tool_input=tc.input,
+                                turn=turn,
+                                raw=tc.raw,
+                            )
+                            if _prev_event is not None:
+                                await self._post_emit(_prev_event)
+                                _prev_event = None
+                            emitted = await self._emit(tc_ev, session_id)
+                            if emitted is not None:
+                                yield emitted
+                                _prev_event = emitted
                             _current_tool_name = ""
                             _current_tool_input_json = ""
                             _current_tool_raw = None
@@ -181,36 +423,150 @@ class AgentLoop:
                         _current_tool_raw,
                     )
                     tool_calls.append(tc)
+                    # Emit TOOL_CALL with full input
+                    tc_ev = AgentEvent(
+                        kind=AgentEventKind.TOOL_CALL,
+                        tool_name=tc.name,
+                        tool_input=tc.input,
+                        turn=turn,
+                        raw=tc.raw,
+                    )
+                    if _prev_event is not None:
+                        await self._post_emit(_prev_event)
+                        _prev_event = None
+                    emitted = await self._emit(tc_ev, session_id)
+                    if emitted is not None:
+                        yield emitted
+                        _prev_event = emitted
 
             except Exception as exc:
-                yield AgentEvent(
+                err_event = AgentEvent(
                     kind=AgentEventKind.ERROR,
                     text=str(exc),
                     turn=turn,
                     raw=exc,
                 )
+                if _prev_event is not None:
+                    await self._post_emit(_prev_event)
+                emitted = await self._emit(err_event, session_id)
+                if emitted is not None:
+                    yield emitted
+                    await self._post_emit(emitted)
+                # Mark session failed
+                if self._event_store is not None and session_id is not None:
+                    from obscura.core.event_store import SessionStatus
+
+                    try:
+                        await self._event_store.update_status(
+                            session_id, SessionStatus.FAILED
+                        )
+                    except Exception:
+                        pass
                 return
 
             accumulated_text += turn_text
-            yield AgentEvent(
+
+            # Emit TURN_COMPLETE
+            if _prev_event is not None:
+                await self._post_emit(_prev_event)
+                _prev_event = None
+            tc_event = AgentEvent(
                 kind=AgentEventKind.TURN_COMPLETE, turn=turn, text=turn_text
             )
+            emitted = await self._emit(tc_event, session_id)
+            if emitted is not None:
+                yield emitted
+                _prev_event = emitted
+
+            # ----------------------------------------------------------
+            # Turn boundary: check pause / user input before next turn
+            # ----------------------------------------------------------
+
+            # Pause check — current turn completed, pause before next
+            if self._should_pause:
+                if _prev_event is not None:
+                    await self._post_emit(_prev_event)
+                    _prev_event = None
+                pause_event = AgentEvent(
+                    kind=AgentEventKind.SESSION_PAUSED,
+                    turn=turn,
+                    text="Session paused at turn boundary",
+                )
+                emitted = await self._emit(pause_event, session_id)
+                if emitted is not None:
+                    yield emitted
+                    await self._post_emit(emitted)
+                # Mark session paused
+                if self._event_store is not None and session_id is not None:
+                    from obscura.core.event_store import SessionStatus
+
+                    try:
+                        await self._event_store.update_status(
+                            session_id, SessionStatus.PAUSED
+                        )
+                    except Exception:
+                        pass
+                return
+
+            # Mid-run user input — drain queue, use as next prompt
+            if not self._user_input_queue.empty():
+                if _prev_event is not None:
+                    await self._post_emit(_prev_event)
+                    _prev_event = None
+                user_text = self._user_input_queue.get_nowait()
+                ui_event = AgentEvent(
+                    kind=AgentEventKind.USER_INPUT,
+                    turn=turn,
+                    text=user_text,
+                )
+                emitted = await self._emit(ui_event, session_id)
+                if emitted is not None:
+                    yield emitted
+                    _prev_event = emitted
+                # Override the next prompt with the user's input
+                current_prompt = user_text
+                # Skip tool execution for this turn — go straight to
+                # next model call with the injected prompt.
+                # Remove "messages" from kwargs so the backend doesn't
+                # replay stale tool results.
+                kwargs.pop("messages", None)
+                continue
 
             # No tool calls → model is done
             if not tool_calls:
-                yield AgentEvent(
+                if _prev_event is not None:
+                    await self._post_emit(_prev_event)
+                    _prev_event = None
+                done_event = AgentEvent(
                     kind=AgentEventKind.AGENT_DONE,
                     turn=turn,
                     text=accumulated_text,
                 )
+                emitted = await self._emit(done_event, session_id)
+                if emitted is not None:
+                    yield emitted
+                    await self._post_emit(emitted)
+                # Mark session completed
+                if self._event_store is not None and session_id is not None:
+                    from obscura.core.event_store import SessionStatus
+
+                    try:
+                        await self._event_store.update_status(
+                            session_id, SessionStatus.COMPLETED
+                        )
+                    except Exception:
+                        pass
                 return
 
             # Execute tool calls and build results for next turn
             tool_results = await self._execute_tools(tool_calls, turn)
 
-            # Yield tool events
+            # Yield tool result events
             for result in tool_results:
-                yield AgentEvent(
+                if _prev_event is not None:
+                    await self._post_emit(_prev_event)
+                    _prev_event = None
+                tr_event = AgentEvent(
                     kind=AgentEventKind.TOOL_RESULT,
                     tool_name=result.tool,
                     tool_use_id=result.tool_use_id,
@@ -219,6 +575,10 @@ class AgentLoop:
                     turn=turn,
                     raw=result,
                 )
+                emitted = await self._emit(tr_event, session_id)
+                if emitted is not None:
+                    yield emitted
+                    _prev_event = emitted
 
             # Build structured messages for backends that support it,
             # with plain-text fallback as the prompt.
@@ -235,20 +595,40 @@ class AgentLoop:
             kwargs = {**kwargs, "messages": structured}
 
         # Hit max turns
-        yield AgentEvent(
+        if _prev_event is not None:
+            await self._post_emit(_prev_event)
+        done_event = AgentEvent(
             kind=AgentEventKind.AGENT_DONE,
             turn=turn,
             text=accumulated_text,
         )
+        emitted = await self._emit(done_event, session_id)
+        if emitted is not None:
+            yield emitted
+            await self._post_emit(emitted)
+        # Mark session completed
+        if self._event_store is not None and session_id is not None:
+            from obscura.core.event_store import SessionStatus
+
+            try:
+                await self._event_store.update_status(session_id, SessionStatus.COMPLETED)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Convenience: run and collect final text
     # ------------------------------------------------------------------
 
-    async def run_to_completion(self, prompt: str, **kwargs: Any) -> str:
+    async def run_to_completion(
+        self,
+        prompt: str,
+        *,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Run the loop and return the concatenated text output."""
         text_parts: list[str] = []
-        async for event in self.run(prompt, **kwargs):
+        async for event in self.run(prompt, session_id=session_id, **kwargs):
             if event.kind == AgentEventKind.TEXT_DELTA:
                 text_parts.append(event.text)
         return "".join(text_parts)
@@ -275,6 +655,26 @@ class AgentLoop:
                 context=ToolCallContext(trace_id=uuid.uuid4().hex, policy="default"),
             )
             started = time.monotonic()
+
+            # Tool allowlist enforcement
+            if self._tool_allowlist is not None and tc.name not in self._tool_allowlist:
+                err = ToolExecutionError(
+                    type=ToolErrorType.UNAUTHORIZED,
+                    message=f"Tool '{tc.name}' not in allowlist.",
+                    safe_to_retry=False,
+                )
+                results.append(
+                    ToolResultEnvelope(
+                        call_id=call.call_id,
+                        tool=call.tool,
+                        status="error",
+                        error=err,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        tool_use_id=tc.tool_use_id,
+                        raw=tc.raw,
+                    )
+                )
+                continue
 
             # Confirmation gate
             if self._on_confirm is not None:
@@ -529,13 +929,9 @@ class AgentLoop:
                 turn=turn,
                 raw=chunk.raw,
             )
-        if chunk.kind == ChunkKind.TOOL_USE_START:
-            return AgentEvent(
-                kind=AgentEventKind.TOOL_CALL,
-                tool_name=chunk.tool_name,
-                turn=turn,
-                raw=chunk.raw,
-            )
+        # Note: TOOL_CALL events are emitted *after* the full tool call
+        # is parsed (in the main loop), not here at TOOL_USE_START.
+        # This ensures the persisted TOOL_CALL includes tool_input.
         if chunk.kind == ChunkKind.ERROR:
             return AgentEvent(
                 kind=AgentEventKind.ERROR,
@@ -760,6 +1156,116 @@ class AgentLoop:
     def format_tool_results(results: list[tuple[ToolCallInfo, str, bool]]) -> str:
         """Public wrapper to format tool results (testing)."""
         return AgentLoop._format_tool_results(results)
+
+    @staticmethod
+    def reconstruct_state(
+        events: list[EventRecord],
+    ) -> tuple[int, str, list[Message], str]:
+        """Reconstruct loop state from persisted events for resume.
+
+        Returns
+        -------
+        (turn, accumulated_text, messages, last_prompt)
+            - turn: last completed turn number
+            - accumulated_text: all text deltas concatenated
+            - messages: structured tool call/result Message pairs
+            - last_prompt: the most recent prompt text
+        """
+        turn = 0
+        accumulated_text = ""
+        last_prompt = ""
+        messages: list[Message] = []
+
+        # Group tool calls and results per turn for structured message rebuild
+        current_turn_tool_calls: list[ToolCallInfo] = []
+        current_turn_tool_results: list[ToolResultEnvelope] = []
+        current_turn_text = ""
+        current_turn = 0
+
+        for rec in events:
+            kind_str = rec.payload.get("kind", "")
+            event_turn = int(rec.payload.get("turn", 0))
+
+            # When we enter a new turn, flush any accumulated tool pairs
+            if event_turn > current_turn and current_turn > 0:
+                if current_turn_tool_calls and current_turn_tool_results:
+                    pair = AgentLoop._build_structured_tool_messages(
+                        current_turn_tool_calls,
+                        current_turn_tool_results,
+                        current_turn_text,
+                    )
+                    messages.extend(pair)
+                    last_prompt = AgentLoop._format_tool_results_envelopes(
+                        current_turn_tool_results
+                    )
+                current_turn_tool_calls = []
+                current_turn_tool_results = []
+                current_turn_text = ""
+                current_turn = event_turn
+
+            if kind_str == AgentEventKind.TURN_COMPLETE.value:
+                turn = event_turn
+
+            elif kind_str == AgentEventKind.TEXT_DELTA.value:
+                text = str(rec.payload.get("text", ""))
+                accumulated_text += text
+                current_turn_text += text
+
+            elif kind_str == AgentEventKind.TOOL_CALL.value:
+                raw_input = rec.payload.get("tool_input")
+                tool_input: dict[str, Any] = (
+                    cast(dict[str, Any], raw_input)
+                    if isinstance(raw_input, dict)
+                    else {}
+                )
+                tc = ToolCallInfo(
+                    tool_use_id=str(rec.payload.get("tool_use_id", "")),
+                    name=str(rec.payload.get("tool_name", "")),
+                    input=tool_input,
+                )
+                current_turn_tool_calls.append(tc)
+
+            elif kind_str == AgentEventKind.TOOL_RESULT.value:
+                result_text = str(rec.payload.get("tool_result", ""))
+                is_error = bool(rec.payload.get("is_error", False))
+                tr = ToolResultEnvelope(
+                    call_id=str(rec.payload.get("tool_use_id", "")),
+                    tool=str(rec.payload.get("tool_name", "")),
+                    status="error" if is_error else "ok",
+                    result=None if is_error else result_text,
+                    error=(
+                        ToolExecutionError(
+                            type=ToolErrorType.UNKNOWN,
+                            message=result_text,
+                            safe_to_retry=False,
+                        )
+                        if is_error
+                        else None
+                    ),
+                    tool_use_id=str(rec.payload.get("tool_use_id", "")),
+                )
+                current_turn_tool_results.append(tr)
+
+            elif kind_str == AgentEventKind.USER_INPUT.value:
+                last_prompt = str(rec.payload.get("text", ""))
+
+            # Track current turn
+            if event_turn > 0:
+                current_turn = event_turn
+
+        # Flush final turn's tool pairs
+        if current_turn_tool_calls and current_turn_tool_results:
+            pair = AgentLoop._build_structured_tool_messages(
+                current_turn_tool_calls,
+                current_turn_tool_results,
+                current_turn_text,
+            )
+            messages.extend(pair)
+            last_prompt = AgentLoop._format_tool_results_envelopes(
+                current_turn_tool_results
+            )
+
+        return turn, accumulated_text, messages, last_prompt
 
 
 # ---------------------------------------------------------------------------

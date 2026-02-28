@@ -1,0 +1,170 @@
+services:
+  obscura-sdk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${OBSCURA_SDK_IMAGE:-obscura-sdk:local}
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - /app/scripts/wait-for-jwks.sh && exec /app/.venv/bin/uvicorn obscura.server:create_app --factory --host 0.0.0.0 --port 8080
+    environment:
+      OBSCURA_AUTH_ENABLED: ${OBSCURA_AUTH_ENABLED:-true}
+      OBSCURA_AUTH_ISSUER: ${OBSCURA_AUTH_ISSUER:-http://localhost}
+      OBSCURA_AUTH_JWKS_URI: ${OBSCURA_AUTH_JWKS_URI:-http://zitadel:8080/oauth/v2/keys}
+      OBSCURA_AUTH_HOST_HEADER: ${OBSCURA_AUTH_HOST_HEADER:-localhost}
+      OBSCURA_AUTH_AUDIENCE: ${OBSCURA_AUTH_AUDIENCE:-obscura-sdk}
+      OBSCURA_JWKS_STRICT: ${OBSCURA_JWKS_STRICT:-false}
+      OBSCURA_JWKS_WAIT_TIMEOUT_SECS: ${OBSCURA_JWKS_WAIT_TIMEOUT_SECS:-60}
+      OBSCURA_JWKS_WAIT_INTERVAL_SECS: ${OBSCURA_JWKS_WAIT_INTERVAL_SECS:-3}
+      OBSCURA_API_KEYS: ${OBSCURA_API_KEYS:-}
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-obscura-sdk}
+      OBSCURA_LOG_LEVEL: ${OBSCURA_LOG_LEVEL:-INFO}
+      OBSCURA_LOG_FORMAT: ${OBSCURA_LOG_FORMAT:-json}
+      OBSCURA_DEFAULT_BACKEND: ${OBSCURA_DEFAULT_BACKEND:-copilot}
+      OBSCURA_AUTH_MODE: ${OBSCURA_AUTH_MODE:-oauth_first}
+      OBSCURA_GITHUB_TOKEN_CMD: ${OBSCURA_GITHUB_TOKEN_CMD:-}
+      OBSCURA_CLAUDE_TOKEN_CMD: ${OBSCURA_CLAUDE_TOKEN_CMD:-}
+      OBSCURA_A2A_ENABLED: ${OBSCURA_A2A_ENABLED:-true}
+      OBSCURA_A2A_REDIS_URL: ${OBSCURA_A2A_REDIS_URL:-redis://redis:6379}
+      OBSCURA_A2A_GRPC_PORT: ${OBSCURA_A2A_GRPC_PORT:-50051}
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+    depends_on:
+      zitadel:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  web-ui:
+    build:
+      context: ./web-ui
+      dockerfile: Dockerfile.dev
+    image: ${OBSCURA_WEB_IMAGE:-obscura-web-ui:local}
+    environment:
+      VITE_PROXY_TARGET: ${VITE_PROXY_TARGET:-http://obscura-sdk:8080}
+      VITE_WS_PROXY_TARGET: ${VITE_WS_PROXY_TARGET:-ws://obscura-sdk:8080}
+      VITE_DEV_API_KEY: ${VITE_DEV_API_KEY:-obscura-dev-key-123}
+      VITE_FORCE_DEV_API_KEY: ${VITE_FORCE_DEV_API_KEY:-true}
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
+    depends_on:
+      obscura-sdk:
+        condition: service_started
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v2.64.1
+    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
+    environment:
+      ZITADEL_DATABASE_COCKROACH_HOST: cockroachdb
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_EXTERNALPORT: 8081
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: "admin@obscura.local"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: "ObscuraDev1!"
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.2.4
+    command: start-single-node --insecure --store=attrs=ssd,path=/var/lib/cockroach/
+    volumes:
+      - cockroach-data:/var/lib/cockroach
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./infra/otel/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: obscura
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/otel/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/otel/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - jaeger
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+volumes:
+  cockroach-data:
+  prometheus-data:
+  grafana-data:
+  redis-data:
+
+networks:
+  obscura-net:
+    name: obscura-net
+    driver: bridge

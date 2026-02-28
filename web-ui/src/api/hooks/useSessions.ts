@@ -33,3 +33,27 @@ export function useDeleteSession() {
     },
   });
 }
+
+export function useIngestSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req?: {
+      agent?: 'codex' | 'claude' | 'copilot';
+      force?: boolean;
+      copy_to_pwd?: boolean;
+      copy_overwrite?: boolean;
+    }) =>
+      fetchApi<{ success: boolean; ingested: number; skipped: number; entries: number }>(
+        '/api/v1/sessions/ingest',
+        {
+          method: 'POST',
+          body: JSON.stringify(req ?? {}),
+        }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['vector-memory'] });
+      queryClient.invalidateQueries({ queryKey: ['memory'] });
+    },
+  });
+}

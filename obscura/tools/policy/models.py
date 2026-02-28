@@ -30,6 +30,23 @@ class ToolPolicy:
     full_access: bool = False
 
 
+    @classmethod
+    def from_permission_config(
+        cls,
+        name: str,
+        allow: list[str] | None = None,
+        deny: list[str] | None = None,
+        base_dir: Path | None = None,
+    ) -> ToolPolicy:
+        """Build a :class:`ToolPolicy` from manifest permission lists."""
+        return cls(
+            name=name,
+            allow_list=frozenset(allow) if allow else frozenset(),
+            deny_list=frozenset(deny) if deny else frozenset(),
+            base_dir=base_dir,
+        )
+
+
 @dataclass(frozen=True)
 class PolicyResult:
     """Outcome of evaluating a :class:`ToolPolicy` against a tool invocation."""

@@ -51,9 +51,12 @@ _JWKS_CACHE_TTL = 300  # 5 minutes
 class JWKSCache:
     """Thread-safe, TTL-based cache for JSON Web Key Sets."""
 
-    def __init__(self, jwks_uri: str, *, ttl: int = _JWKS_CACHE_TTL) -> None:
+    def __init__(
+        self, jwks_uri: str, *, ttl: int = _JWKS_CACHE_TTL, host_header: str = ""
+    ) -> None:
         self._jwks_uri = jwks_uri
         self._ttl = ttl
+        self._host_header = host_header
         self._keys: list[dict[str, Any]] = []
         self._fetched_at: float = 0.0
 
@@ -84,7 +87,8 @@ class JWKSCache:
         """Fetch keys from the JWKS endpoint."""
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(self._jwks_uri)
+                headers = {"Host": self._host_header} if self._host_header else None
+                resp = await client.get(self._jwks_uri, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
                 self._keys = data.get("keys", [])

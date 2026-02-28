@@ -17,9 +17,14 @@ Usage::
 
 from __future__ import annotations
 
+import fnmatch
 from pathlib import Path
+from typing import Any
 
+from obscura.core.frontmatter import parse_frontmatter
 from obscura.core.types import Backend
+
+from typing import cast
 
 
 # Agent target mapping — must match sync.py AGENT_TARGET_MAP
@@ -92,6 +97,60 @@ class ContextLoader:
         if f.is_file():
             return f.read_text(encoding="utf-8").strip()
         return ""
+
+    def load_instructions_filtered(self, file_context: str = "") -> str:
+        """Load instruction files, filtering by ``applyTo`` frontmatter globs.
+
+        If an instruction file has an ``applyTo`` field in its frontmatter,
+        it is only included when *file_context* matches one of the listed
+        glob patterns.  Files without ``applyTo`` are always included.
+        """
+        instructions_dir = self.agent_dir / "instructions"
+        if not instructions_dir.is_dir():
+            return ""
+        parts: list[str] = []
+        for f in sorted(instructions_dir.rglob("*.md")):
+            if not f.is_file():
+                continue
+            raw = f.read_text(encoding="utf-8").strip()
+            if not raw:
+                continue
+            result = parse_frontmatter(raw, source_path=f)
+            apply_to_raw: Any = result.metadata.get("applyTo", result.metadata.get("apply_to"))
+
+            if apply_to_raw and file_context:
+                patterns: list[str] = []
+                if isinstance(apply_to_raw, str):
+                    patterns = [p.strip() for p in apply_to_raw.split(",") if p.strip()]
+                elif isinstance(apply_to_raw, list):
+                    patterns = [str(p) for p in cast("list[Any]", apply_to_raw)]
+                if patterns and not any(fnmatch.fnmatch(file_context, p) for p in patterns):
+                    continue
+
+            body = result.body.strip()
+            if body:
+                parts.append(body)
+        return "\n\n---\n\n".join(parts)
+
+    def load_skills_with_metadata(self) -> list[tuple[dict[str, Any], str]]:
+        """Load skill documents as ``(metadata, body)`` tuples.
+
+        If a skill file has YAML frontmatter, ``metadata`` will contain
+        the parsed fields (e.g. ``name``, ``description``, ``allowed-tools``).
+        """
+        skills_dir = self.agent_dir / "skills"
+        if not skills_dir.is_dir():
+            return []
+        results: list[tuple[dict[str, Any], str]] = []
+        for f in sorted(skills_dir.rglob("*.md")):
+            if not f.is_file():
+                continue
+            raw = f.read_text(encoding="utf-8").strip()
+            if not raw:
+                continue
+            result = parse_frontmatter(raw, source_path=f)
+            results.append((result.metadata, result.body))
+        return results
 
     def load_system_prompt(self, additional: str = "") -> str:
         """Build a system prompt from CLAUDE.md + instructions + skills + optional extra."""

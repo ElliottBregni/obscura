@@ -29,6 +29,7 @@ class ObscuraConfig(BaseModel):
     auth_enabled: bool = True
     auth_issuer: str = "http://zitadel:8080"
     auth_jwks_uri: str = ""  # defaults to {auth_issuer}/.well-known/jwks.json
+    auth_host_header: str = ""
     auth_audience: str = "obscura-sdk"
 
     # Telemetry (OpenTelemetry)
@@ -70,6 +71,7 @@ class ObscuraConfig(BaseModel):
             == "true",
             auth_issuer=os.environ.get("OBSCURA_AUTH_ISSUER", "http://zitadel:8080"),
             auth_jwks_uri=os.environ.get("OBSCURA_AUTH_JWKS_URI", ""),
+            auth_host_header=os.environ.get("OBSCURA_AUTH_HOST_HEADER", ""),
             auth_audience=os.environ.get("OBSCURA_AUTH_AUDIENCE", "obscura-sdk"),
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",

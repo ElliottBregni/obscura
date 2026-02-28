@@ -9,29 +9,62 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const token = useAuthStore((s) => s.token);
+  const apiKey = useAuthStore((s) => s.apiKey);
+  const setApiKey = useAuthStore((s) => s.setApiKey);
   const setAuthEnabled = useSystemStore((s) => s.setAuthEnabled);
   const setServerReachable = useSystemStore((s) => s.setServerReachable);
+  const devApiKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
+  const forceDevApiKey = import.meta.env.VITE_FORCE_DEV_API_KEY === 'true';
 
   // Check server health on mount to determine if auth is enabled
   useEffect(() => {
     async function checkHealth() {
+      if (forceDevApiKey && devApiKey && apiKey !== devApiKey) {
+        setApiKey(devApiKey);
+      }
+      const healthEndpoint = API_URL ? `${API_URL}/api/v1/health` : '/api/v1/health';
+      const headers: Record<string, string> = {};
+      if (forceDevApiKey && devApiKey) {
+        headers['X-API-Key'] = devApiKey;
+      } else if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      } else if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       try {
-        const resp = await fetch(`${API_URL}/health`);
+        const resp = await fetch(healthEndpoint, { headers });
         if (resp.ok) {
-          const data = await resp.json();
-          setAuthEnabled(data.auth_enabled ?? false);
+          setAuthEnabled(true);
           setServerReachable(true);
+          if (!token && !apiKey && devApiKey) {
+            setApiKey(devApiKey);
+          }
         } else if (resp.status === 401) {
+          setAuthEnabled(true);
+          setServerReachable(true);
+          if (!token && !apiKey && devApiKey) {
+            setApiKey(devApiKey);
+          }
+        } else {
           setAuthEnabled(true);
           setServerReachable(true);
         }
       } catch {
+        setAuthEnabled(true);
         setServerReachable(false);
       }
     }
 
     checkHealth();
-  }, [token, setAuthEnabled, setServerReachable]);
+  }, [
+    apiKey,
+    devApiKey,
+    forceDevApiKey,
+    setApiKey,
+    setAuthEnabled,
+    setServerReachable,
+    token,
+  ]);
 
   return <>{children}</>;
 }

@@ -40,11 +40,61 @@ class ToolProvider(Protocol):
 
 class SystemToolProvider:
     async def install(self, context: ToolProviderContext) -> None:
+        # Check if agent has delegation configured
+        delegation_spec = self._build_delegation_tool(context)
+        allowlist = self._get_tool_allowlist(context)
+
         for tool_spec in get_system_tool_specs():
+            # Skip tools not in allowlist (if configured)
+            if allowlist is not None and tool_spec.name not in allowlist:
+                continue
+            # Replace stub task tool with real delegation tool if available
+            if tool_spec.name == "task" and delegation_spec is not None:
+                await _register_tool(context.agent, delegation_spec)
+                continue
             await _register_tool(context.agent, tool_spec)
 
     async def uninstall(self, context: ToolProviderContext) -> None:
         return None
+
+    @staticmethod
+    def _get_tool_allowlist(context: ToolProviderContext) -> list[str] | None:
+        """Extract tool_allowlist from agent config, or None if unset."""
+        try:
+            config = getattr(context.agent, "config", None)
+            if config is not None:
+                allowlist: list[str] | None = getattr(config, "tool_allowlist", None)
+                return allowlist
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _build_delegation_tool(context: ToolProviderContext) -> Any:
+        """Build a real delegation tool if the agent supports it."""
+        try:
+            from obscura.agent.agents import AgentConfig
+            from obscura.tools.delegation import DelegationContext, make_task_tool
+
+            agent = context.agent
+            config: AgentConfig | None = getattr(agent, "config", None)
+            if config is None or not config.can_delegate:
+                return None
+
+            peer_registry = getattr(
+                getattr(agent, "runtime", None), "peer_registry", None
+            )
+
+            ctx = DelegationContext(
+                peer_registry=peer_registry,
+                can_delegate=config.can_delegate,
+                delegate_allowlist=list(config.delegate_allowlist),
+                max_delegation_depth=config.max_delegation_depth,
+                caller_agent_id=getattr(agent, "id", ""),
+            )
+            return make_task_tool(ctx)
+        except Exception:
+            return None
 
 
 class MCPToolProvider:
