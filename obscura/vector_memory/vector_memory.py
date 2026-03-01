@@ -44,8 +44,8 @@ from obscura.vector_memory.backends import (
 try:
     from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
 except ImportError:
-    QDRANT_AVAILABLE = False
-    QdrantBackend = None  # type: ignore
+    QDRANT_AVAILABLE: bool 
+    QdrantBackend: callable = lambda *args, **kwargs: None  # type: ignore
 from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 
@@ -145,8 +145,7 @@ class VectorMemoryStore:
                 mode = os.environ.get("OBSCURA_QDRANT_MODE", "local")
                 path = os.environ.get("OBSCURA_QDRANT_PATH")
                 url = os.environ.get("OBSCURA_QDRANT_URL")
-                api_key = os.environ.get("OBSCURA_QDRANT_API_KEY")
-
+                api_key = os.environ.get("OBSCURA_QDRANT_API_KEY")xe
                 return QdrantBackend(
                     config=config,
                     mode=mode,
