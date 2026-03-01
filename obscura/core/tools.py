@@ -40,6 +40,30 @@ class ToolRegistry:
             "execute_code": "run_python3",
             "run_code": "run_python3",
             "code": "run_python3",
+            # file write — LLMs often use Claude Code names
+            "write": "write_text_file",
+            "write_file": "write_text_file",
+            "writefile": "write_text_file",
+            "create_file": "write_text_file",
+            "save_file": "write_text_file",
+            # file read
+            "read": "read_text_file",
+            "read_file": "read_text_file",
+            "readfile": "read_text_file",
+            "cat": "read_text_file",
+            "view_file": "read_text_file",
+            # file append
+            "append": "append_text_file",
+            "append_file": "append_text_file",
+            # edit (map to write as closest equivalent)
+            "edit": "write_text_file",
+            "edit_file": "write_text_file",
+            # directory
+            "ls": "list_directory",
+            "list_dir": "list_directory",
+            "listdir": "list_directory",
+            "glob": "list_directory",
+            "mkdir": "make_directory",
             # web search
             "websearch": "web_search",
             "web_search": "web_search",
@@ -80,7 +104,14 @@ class ToolRegistry:
         direct = self._tools.get(name)
         if direct is not None:
             return direct
-        canonical = self._alias_targets.get(_normalize_tool_name(name))
+        # Strip Claude SDK MCP prefix: mcp__<server>__<tool> → <tool>
+        stripped = name
+        if name.startswith("mcp__") and name.count("__") >= 2:
+            stripped = name.split("__", 2)[-1]
+            direct = self._tools.get(stripped)
+            if direct is not None:
+                return direct
+        canonical = self._alias_targets.get(_normalize_tool_name(stripped))
         if canonical is None:
             return None
         return self._tools.get(canonical)

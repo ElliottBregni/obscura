@@ -491,8 +491,14 @@ class ClaudeBackend:
 
         if self._model:
             opts["model"] = self._model
-        if self._system_prompt:
-            opts["system_prompt"] = self._sanitize_system_prompt(self._system_prompt)
+
+        # Build system prompt with dynamic tool listing
+        prompt = self._system_prompt or ""
+        if self._tools:
+            tool_section = self._build_tool_listing()
+            prompt = f"{prompt}\n\n{tool_section}" if prompt else tool_section
+        if prompt:
+            opts["system_prompt"] = self._sanitize_system_prompt(prompt)
         if self._permission_mode:
             opts["permission_mode"] = self._permission_mode
         if self._cwd:
@@ -526,12 +532,28 @@ class ClaudeBackend:
         if hooks:
             opts["hooks"] = hooks
 
-        # Apply tool policy to restrict tools
-        if self._tools:
-            self._tool_policy.apply_to_claude(opts, self._tools)
+        # Apply tool policy to filter tools
+        if self._tools and self._tool_policy:
+            filtered = self._tool_policy.filter_tools(self._tools)
+            if len(filtered) < len(self._tools):
+                # Only allow filtered tool names via Claude's allowed_tools
+                allowed = [f"mcp__obscura_tools__{t.name}" for t in filtered]
+                opts["allowed_tools"] = allowed
 
         opts.update(overrides)
         return ClaudeAgentOptions(**opts)
+
+    def _build_tool_listing(self) -> str:
+        """Build a human-readable tool listing for the system prompt."""
+        lines = ["## Available Tools", ""]
+        lines.append("You have the following tools. Use these EXACT names when calling tools:")
+        lines.append("")
+        for spec in self._tools:
+            desc = (spec.description or "").split("\n")[0][:120]
+            lines.append(f"- `{spec.name}`: {desc}")
+        lines.append("")
+        lines.append("Do NOT invent tool names. If none of these tools fit, tell the user.")
+        return "\n".join(lines)
 
     def _build_mcp_tools(self) -> dict[str, Any]:
         """Convert registered ToolSpecs to a Claude in-process MCP server."""

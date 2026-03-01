@@ -184,39 +184,89 @@ async def send_message(
         async def confirm_cb(tc: ToolCallInfo) -> bool:
             return await _cli_confirm(ctx, tc.name, tc.input)
 
-    # Start streaming
-    stream = ctx.client.run_loop(
-        text,
-        max_turns=ctx.max_turns,
-        event_store=ctx.store,
-        session_id=ctx.session_id,
-        auto_complete=False,
-        on_confirm=confirm_cb,
-        **loop_kwargs,
+    # ── Token-aware auto-compact ────────────────────────────────────────────
+    # Use provider-specific thresholds from ctx.client so Claude (200k),
+    # OpenAI (128k/16k), Copilot (128k), and Codex (128k) all get the
+    # right limits without hard-coding numbers here.
+    from obscura.cli.commands import _estimate_tokens, cmd_compact
+
+    _compact_threshold = ctx.client.context_compact_threshold  # 70% of window
+    _warn_threshold = ctx.client.context_warn_threshold        # 50% of window
+
+    _pre_tokens = _estimate_tokens(
+        "".join(t for _, t in ctx.message_history) + text
     )
+    if _pre_tokens > _compact_threshold:
+        console.print(
+            f"[yellow]⚡ Auto-compacting context (~{_pre_tokens:,} tokens, "
+            f"limit {ctx.client.context_window:,}) …[/]"
+        )
+        await cmd_compact("6", ctx)
+
+    # ── Streaming with graceful retry on context-limit errors ────────────────
+    async def _stream_with_retry(attempt: int = 0) -> list[str]:
+        _buf: list[str] = []
+        _s = ctx.client.run_loop(
+            text,
+            max_turns=ctx.max_turns,
+            event_store=ctx.store,
+            session_id=ctx.session_id,
+            auto_complete=False,
+            on_confirm=confirm_cb,
+            **loop_kwargs,
+        )
+        try:
+            with patch_stdout():
+                async for event in _s:
+                    renderer.handle(event)
+                    try:
+                        preview = ""
+                        if getattr(event, "text", None):
+                            preview = event.text[:200]
+                        elif getattr(event, "tool_result", None):
+                            preview = str(event.tool_result)[:200]
+                        elif getattr(event, "tool_input", None):
+                            preview = str(event.tool_input)[:200]
+                        tool_names = (
+                            [event.tool_name]
+                            if getattr(event, "tool_name", None)
+                            else []
+                        )
+                        trace_mod.append_event(
+                            event.kind.name,
+                            preview=preview,
+                            tool_names=tool_names,
+                        )
+                    except Exception:
+                        pass
+                    if event.kind == AgentEventKind.TEXT_DELTA:
+                        _buf.append(event.text)
+                    _track_file_event(event.kind, ctx, event)
+        except KeyboardInterrupt:
+            pass
+        except Exception as exc:
+            _err = str(exc).lower()
+            _is_ctx_err = any(
+                kw in _err
+                for kw in (
+                    "prompt is too long",
+                    "context window",
+                    "too many tokens",
+                    "maximum context length",
+                    "request too large",
+                )
+            )
+            if _is_ctx_err and attempt == 0:
+                console.print(
+                    "[red]⚠ Context limit reached — auto-compacting and retrying…[/]"
+                )
+                await cmd_compact("4", ctx)
+                return await _stream_with_retry(attempt=1)
+            raise
+        return _buf
 
     try:
-        # Ensure any console printing during streaming doesn't clobber an active prompt.
-        with patch_stdout():
-            async for event in stream:
-                renderer.handle(event)
-                # record a lightweight trace entry
-                try:
-                    preview = ""
-                    if getattr(event, "text", None):
-                        preview = event.text[:200]
-                    elif getattr(event, "tool_result", None):
-                        preview = str(event.tool_result)[:200]
-                    elif getattr(event, "tool_input", None):
-                        preview = str(event.tool_input)[:200]
-                    tool_names = [event.tool_name] if getattr(event, "tool_name", None) else []
-                    trace_mod.append_event(event.kind.name, preview=preview, tool_names=tool_names)
-                except Exception:
-                    pass
-
-                if event.kind == AgentEventKind.TEXT_DELTA:
-                    accumulated.append(event.text)
-                _track_file_event(event.kind, ctx, event)
+        accumulated = await _stream_with_retry()
     except KeyboardInterrupt:
         pass
     finally:
@@ -236,6 +286,16 @@ async def send_message(
     ctx.message_history.append(("user", text))
     if response_text:
         ctx.message_history.append(("assistant", response_text))
+
+    # Post-send token nudge (between warn and compact thresholds)
+    _post_tokens = _estimate_tokens("".join(t for _, t in ctx.message_history))
+    if _warn_threshold < _post_tokens <= _compact_threshold:
+        console.print(
+            f"[dim yellow]  Context: ~{_post_tokens:,} tokens "
+            f"({int(_post_tokens / ctx.client.context_window * 100)}% of "
+            f"{ctx.client.context_window:,}). "
+            f"Auto-compact at {_compact_threshold:,}.[/]"
+        )
 
     # Parse plan if in PLAN mode
     _maybe_parse_plan(response_text, ctx)
@@ -298,26 +358,26 @@ async def _repl(
         custom_sections=custom_sections,
     )
 
+    # Gather system tools BEFORE client starts so they're available for
+    # tool listing in the system prompt and for the Claude SDK MCP server.
+    system_tools: list[Any] = []
+    if tools_enabled:
+        try:
+            from obscura.tools.system import get_system_tool_specs
+
+            system_tools = get_system_tool_specs()
+        except Exception:
+            pass
+    tool_count = len(system_tools)
+
     # Build client (MCP servers connect during start())
     async with ObscuraClient(
         backend,
         model=model,
         system_prompt=combined_system,
+        tools=system_tools or None,
         mcp_servers=mcp_configs or None,
     ) as client:
-
-        # Register built-in system tools
-        tool_count = 0
-        if tools_enabled:
-            try:
-                from obscura.tools.system import get_system_tool_specs
-
-                specs = get_system_tool_specs()
-                for spec in specs:
-                    client.register_tool(spec)
-                tool_count = len(specs)
-            except Exception:
-                pass
 
         # Session resume
         if session_id:

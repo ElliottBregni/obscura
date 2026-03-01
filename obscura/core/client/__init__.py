@@ -195,10 +195,14 @@ class ObscuraClient:
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
-        """Initialize the backend connection and MCP servers."""
-        await self._backend.start()
+        """Initialize the backend connection and MCP servers.
 
-        # Connect to MCP servers and register their tools
+        MCP servers are connected BEFORE the backend starts so that all
+        tools (system + MCP) are registered and visible to the backend
+        when it builds its options (e.g. Claude SDK tool listing and
+        system prompt).
+        """
+        # Connect to MCP servers and register their tools FIRST
         if self._mcp_server_configs:
             from obscura.integrations.mcp.types import (
                 MCPConnectionConfig,
@@ -216,6 +220,7 @@ class ObscuraClient:
                         args=server.get("args", []),
                         url=server.get("url"),
                         env=server.get("env", {}),
+                        name=server.get("name", ""),
                     )
                 )
 
@@ -233,6 +238,10 @@ class ObscuraClient:
                     "Check server connectivity. Connection errors: %s",
                     self._mcp_backend.connection_errors,
                 )
+
+        # NOW start the backend — all tools are registered, so the Claude
+        # SDK will build its MCP server and system prompt with full tool info.
+        await self._backend.start()
 
     async def stop(self) -> None:
         """Gracefully shut down."""
@@ -605,6 +614,44 @@ class ObscuraClient:
     def circuit_registry(self) -> Any:
         """Access the circuit breaker registry (testing / admin)."""
         return self._circuit_registry
+
+    # -- Context window / token awareness ------------------------------------
+
+    @property
+    def context_window(self) -> int:
+        """Return context window size (tokens) for the active backend + model.
+
+        Provider-specific limits per backend (tokens):
+            claude   -> 200,000  (all current models)
+            openai   -> 128,000  (gpt-4 family); 16,385 for gpt-3.5-turbo
+            copilot  -> 128,000
+            codex    -> 128,000
+            *        -> 100,000  (safe unknown fallback)
+        """
+        _PROVIDER_DEFAULTS: dict[str, int] = {
+            "claude": 200_000,
+            "openai": 128_000,
+            "copilot": 128_000,
+            "codex": 128_000,
+        }
+        provider = self._backend_type.value
+        model_id = self._model or ""
+
+        # OpenAI gpt-3.5-turbo has a smaller window than the gpt-4 family
+        if provider == "openai" and "3.5" in model_id:
+            return 16_385
+
+        return _PROVIDER_DEFAULTS.get(provider, 100_000)
+
+    @property
+    def context_compact_threshold(self) -> int:
+        """Token count at which auto-compaction triggers (70% of context window)."""
+        return int(self.context_window * 0.70)
+
+    @property
+    def context_warn_threshold(self) -> int:
+        """Token count at which a soft warning is emitted (50% of context window)."""
+        return int(self.context_window * 0.50)
 
     def _enrich_prompt(self, prompt: str) -> str:
         """Prepend relevant memory context to prompt (best-effort)."""
