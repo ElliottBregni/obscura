@@ -1,0 +1,280 @@
+# =============================================================================
+# Obscura — Full local development stack
+# =============================================================================
+# Usage:
+#   docker compose up -d          # start everything
+#   docker compose up -d --build  # rebuild obscura-sdk image
+#   docker compose up --watch     # live sync for web-ui files
+#   docker compose logs -f        # tail all logs
+#   docker compose down -v        # tear down (remove volumes)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Obscura SDK — the main application
+  # ---------------------------------------------------------------------------
+  obscura-sdk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: obscura-sdk:local
+    container_name: obscura-sdk
+    ports:
+      - "8080:8080"
+      - "50051:50051"  # A2A gRPC
+    volumes:
+      # Development: expose host filesystem + local Obscura state to container.
+      # Note: Docker Desktop may require adding host paths to File Sharing.
+      - type: bind
+        source: /
+        target: /host
+      - type: bind
+        source: ${HOME}/.obscura
+        target: /home/obscura/.obscura
+      # OAuth inheritance from host machine (read-only).
+      - type: bind
+        source: ${HOME}/.config/gh
+        target: /home/obscura/.config/gh
+      # Optional Claude state passthrough (currently read-only).
+      - type: bind
+        source: ${HOME}/.claude
+        target: /home/obscura/.claude
+      - type: bind
+        source: ${HOME}/.claude.json
+        target: /home/obscura/.claude.json
+    environment:
+      # Auth (Zitadel)
+      OBSCURA_AUTH_ENABLED: "true"
+      # Zitadel issues localhost-scoped tokens in this dev setup.
+      OBSCURA_AUTH_ISSUER: "http://localhost"
+      # Fetch JWKS over Docker network while preserving expected Host header.
+      OBSCURA_AUTH_JWKS_URI: "http://zitadel:8080/oauth/v2/keys"
+      OBSCURA_AUTH_HOST_HEADER: "localhost"
+      OBSCURA_AUTH_AUDIENCE: "obscura-sdk"
+      OBSCURA_API_KEYS: "obscura-dev-key-123:dev-user:admin,agent:copilot,agent:claude,agent:localllm,agent:openai,agent:moonshot,agent:read,sync:write,sessions:manage"
+      # Telemetry (OpenTelemetry)
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_SERVICE_NAME: "obscura-sdk"
+      # Logging
+      OBSCURA_LOG_LEVEL: "DEBUG"
+      OBSCURA_LOG_FORMAT: "json"
+      # Backend
+      OBSCURA_DEFAULT_BACKEND: "copilot"
+      OBSCURA_AUTH_MODE: "oauth_first"
+      # Copilot OAuth inheritance: read token from mounted ~/.config/gh/hosts.yml
+      OBSCURA_GITHUB_TOKEN_CMD: "python /app/scripts/print_gh_oauth_token.py"
+      # Optional Claude token command (override in shell/.env as needed)
+      OBSCURA_CLAUDE_TOKEN_CMD: "${OBSCURA_CLAUDE_TOKEN_CMD:-}"
+      # Database (PostgreSQL)
+      OBSCURA_DB_TYPE: "postgresql"
+      OBSCURA_PG_HOST: "postgres"
+      OBSCURA_PG_PORT: "5432"
+      OBSCURA_PG_DATABASE: "obscura"
+      OBSCURA_PG_USER: "obscura_user"
+      OBSCURA_PG_PASSWORD: "${OBSCURA_DB_PASSWORD:-changeme123}"
+      OBSCURA_PG_MIN_CONNECTIONS: "2"
+      OBSCURA_PG_MAX_CONNECTIONS: "10"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      zitadel:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - obscura-net
+    restart: unless-stopped
+  web-ui:
+    build:
+      context: ./web-ui
+      dockerfile: Dockerfile.dev
+    image: obscura-web-ui:local
+    container_name: obscura-web-ui
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_PROXY_TARGET: "http://obscura-sdk:8080"
+      VITE_WS_PROXY_TARGET: "ws://obscura-sdk:8080"
+      VITE_DEV_API_KEY: "obscura-dev-key-123"
+      VITE_FORCE_DEV_API_KEY: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      obscura-sdk:
+        condition: service_started
+    develop:
+      watch:
+        - action: sync
+          path: ./web-ui/src
+          target: /app/src
+        - action: sync
+          path: ./web-ui/index.html
+          target: /app/index.html
+        - action: sync+restart
+          path: ./web-ui/vite.config.ts
+          target: /app/vite.config.ts
+        - action: rebuild
+          path: ./web-ui/package.json
+        - action: rebuild
+          path: ./web-ui/package-lock.json
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — Session and event persistence
+  # PostgreSQL — Session and event persistence  
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: obscura-postgres
+    environment:
+      POSTGRES_DB: obscura
+      POSTGRES_USER: obscura_user
+      POSTGRES_PASSWORD: ${OBSCURA_DB_PASSWORD:-changeme123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      timeout: 3s
+      retries: 5
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Zitadel — OIDC identity provider
+  # ---------------------------------------------------------------------------
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v2.64.1
+    container_name: zitadel
+    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
+    environment:
+      ZITADEL_DATABASE_COCKROACH_HOST: cockroachdb
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_EXTERNALPORT: 8081
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: "admin@obscura.local"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: "ObscuraDev1!"
+    ports:
+      - "8081:8080"
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.2.4
+    container_name: cockroachdb
+    command: start-single-node --insecure --store=attrs=ssd,path=/var/lib/cockroach/
+    ports:
+      - "26257:26257"
+    volumes:
+      - cockroach-data:/var/lib/cockroach
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # OpenTelemetry Collector
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # gRPC OTLP
+      - "4318:4318"   # HTTP OTLP
+      - "8888:8888"   # Collector metrics
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Jaeger — Distributed tracing UI
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14250:14250"  # gRPC (collector)
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — Metrics collection
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    volumes:
+      - ./infra/otel/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Grafana — Dashboards
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: obscura
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/otel/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/otel/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - jaeger
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  cockroach-data:
+  prometheus-data:
+  grafana-data:
+  redis-data:
+  postgres-data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  obscura-net:
+    name: obscura-net
+    driver: bridge

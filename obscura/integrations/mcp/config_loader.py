@@ -224,6 +224,7 @@ def build_runtime_server_configs(
     runtime_servers: list[dict[str, Any]] = []
     for server in ordered_servers:
         payload: dict[str, Any] = {
+            "name": server.name,
             "transport": server.transport.value,
             "env": dict(server.env),
             "tools": list(server.tools),

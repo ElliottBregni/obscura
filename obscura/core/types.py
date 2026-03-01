@@ -118,10 +118,14 @@ class Message:
     """Normalized message from either backend.
 
     The ``raw`` field holds the original SDK object for escape-hatch access.
+    All messages are tagged with session_id, agent_name, and model for full traceability.
     """
 
     role: Role
     content: list[ContentBlock]
+    session_id: str | None = None
+    agent_name: str | None = None
+    model: str | None = None
     raw: Any = None
     backend: Backend | None = None
 

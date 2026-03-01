@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import difflib
+import fnmatch
 import html as _html
 import json
 import os
 import platform
 import re
 import shutil
+import stat as stat_module
+import subprocess
 import sys
+import time as _time
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib import error as url_error
@@ -448,70 +454,52 @@ async def run_python(
     required_tier="privileged",
 )
 async def web_search(query: str, max_results: int = 5) -> str:
+    """Search the web via DuckDuckGo HTML scraping (no API key required)."""
     limit = max(1, min(int(max_results), 20))
     encoded = url_parse.quote_plus(query)
-    endpoint = (
-        "https://api.duckduckgo.com/"
-        f"?q={encoded}&format=json&no_redirect=1&no_html=1&skip_disambig=1"
-    )
-    payload = json.loads(await web_fetch(endpoint, timeout_seconds=20.0))
-    if not payload.get("ok", False):
-        return json.dumps(payload)
+    endpoint = f"https://html.duckduckgo.com/html/?q={encoded}"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Referer": "https://duckduckgo.com/",
+    }
 
+    # Fetch raw HTML directly (web_fetch strips tags, we need structure)
     try:
-        parsed_raw = json.loads(str(payload.get("body", "{}")))
-    except Exception:
-        return _json_error("search_parse_failed")
-    parsed = _string_key_dict(parsed_raw)
-    if parsed is None:
-        return _json_error("search_parse_failed")
+        req = url_request.Request(endpoint, headers=headers)
+        with url_request.urlopen(req, timeout=20) as resp:
+            raw_html = resp.read(500_000).decode("utf-8", errors="replace")
+    except Exception as exc:
+        return _json_error("web_search_fetch_failed", detail=str(exc))
+
+    clean = lambda s: re.sub(r"<[^>]+>", "", _html.unescape(s)).strip()
+
+    titles   = [clean(t) for t in re.findall(r'class="result__a"[^>]*>(.*?)</a>', raw_html)]
+    snippets = [clean(s) for s in re.findall(r'class="result__snippet"[^>]*>(.*?)</span>', raw_html, re.DOTALL)]
+    hrefs    = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', raw_html)
+    urls_fb  = [clean(u) for u in re.findall(r'class="result__url"[^>]*>\s*(.*?)\s*</a>', raw_html, re.DOTALL)]
 
     items: list[dict[str, str]] = []
-    heading = str(parsed.get("Heading", "")).strip()
-    abstract = str(parsed.get("AbstractText", "")).strip()
-    abstract_url = str(parsed.get("AbstractURL", "")).strip()
-    if abstract:
-        items.append({"title": heading or query, "url": abstract_url, "snippet": abstract})
-
-    related_raw = parsed.get("RelatedTopics", [])
-    related = cast(list[Any], related_raw) if isinstance(related_raw, list) else []
-    for entry in related:
-        entry_map = _string_key_dict(entry)
-        if entry_map is None:
+    for i, title in enumerate(titles):
+        if len(items) >= limit:
+            break
+        if not title:
             continue
-        topics_raw = entry_map.get("Topics")
-        topics = cast(list[Any], topics_raw) if isinstance(topics_raw, list) else None
-        if topics is not None:
-            for nested in topics:
-                if len(items) >= limit:
-                    break
-                nested_map = _string_key_dict(nested)
-                if nested_map is None:
-                    continue
-                text = str(nested_map.get("Text", "")).strip()
-                first_url = str(nested_map.get("FirstURL", "")).strip()
-                if text:
-                    items.append(
-                        {
-                            "title": text.split(" - ", 1)[0],
-                            "url": first_url,
-                            "snippet": text,
-                        }
-                    )
-            continue
+        href = hrefs[i] if i < len(hrefs) else ""
+        # DDG wraps hrefs in a redirect — extract uddg param if present
+        if "uddg=" in href:
+            uddg_match = re.search(r"uddg=([^&]+)", href)
+            href = url_parse.unquote_plus(uddg_match.group(1)) if uddg_match else href
+        url = href or (urls_fb[i] if i < len(urls_fb) else "")
+        snippet = snippets[i] if i < len(snippets) else ""
+        items.append({"title": title, "url": url, "snippet": snippet})
 
-        text = str(entry_map.get("Text", "")).strip()
-        first_url = str(entry_map.get("FirstURL", "")).strip()
-        if text:
-            items.append(
-                {
-                    "title": text.split(" - ", 1)[0],
-                    "url": first_url,
-                    "snippet": text,
-                }
-            )
-
-    return json.dumps({"ok": True, "query": query, "count": len(items[:limit]), "results": items[:limit]})
+    return json.dumps({"ok": True, "query": query, "count": len(items), "results": items})
 
 
 @tool(

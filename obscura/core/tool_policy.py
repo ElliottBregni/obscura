@@ -157,114 +157,28 @@ class ToolPolicy:
         value = os.environ.get(var_name, "false").lower()
         allow_native = value in ("true", "1", "yes")
         return cls(allow_native=allow_native)
-    
-    # -- Backend application methods ----------------------------------------
-    
-    def apply_to_copilot(
-        self,
-        config: dict[str, Any],
-        tools: list[ToolSpec],
-    ) -> None:
-        """Apply this policy to Copilot SDK session config.
-        
-        Modifies the config dict in-place to restrict tool access according
-        to this policy.
-        
-        Args:
-            config: Copilot session config dict (will be modified)
-            tools: List of registered custom tools
-            
+
+    @classmethod
+    def subagent_only(cls) -> ToolPolicy:
+        """Create a policy for sub-agents: only run_shell is permitted.
+
+        All native Claude / Copilot / OpenAI tools are blocked.  The only
+        custom tool allowed is ``run_shell`` (bash execution).  This is the
+        policy automatically applied by ``inject_subagent_context()`` when a
+        child agent is spawned via the Task-tool delegation system.
+
+        Returns:
+            ToolPolicy with allow_native=False and allowed_tools=["run_shell"]
+
         Example::
-        
-            config = {"model": "gpt-4", "tools": custom_tools}
-            policy.apply_to_copilot(config, custom_tools)
-            # config now has "allowed_tools" if policy restricts
+
+            policy = ToolPolicy.subagent_only()
+            # allow_native=False, allowed_tools=["run_shell"]
         """
-        if not self.allow_native and tools:
-            # Restrict to only our custom tools (block Copilot native tools)
-            allowed = self.allowed_tools or [t.name for t in tools]
-            
-            # Apply denied list
-            if self.denied_tools:
-                allowed = [t for t in allowed if t not in self.denied_tools]
-            
-            if allowed:
-                config["allowed_tools"] = allowed
+        ## TODO implement subagent-only policy:allow tools
+        return cls(allow_native=False, allowed_tools=["run_shell"])
     
-    def apply_to_claude(
-        self,
-        opts: dict[str, Any],
-        tools: list[ToolSpec],
-    ) -> None:
-        """Apply this policy to Claude SDK options.
-        
-        Claude uses MCP naming convention for custom tools, so this method
-        handles the name translation automatically.
-        
-        Args:
-            opts: Claude SDK options dict (will be modified)
-            tools: List of registered custom tools
-            
-        Example::
-        
-            opts = {"model": "claude-3-5-sonnet", "mcp_servers": {...}}
-            policy.apply_to_claude(opts, custom_tools)
-            # opts now has "allowed_tools" with MCP-prefixed names
-        """
-        if not self.allow_native and tools:
-            # Claude uses MCP naming convention for custom tools
-            tool_prefix = "mcp__obscura_tools__"
-            
-            if self.allowed_tools:
-                # Map allowed tool names to MCP format
-                allowed = [f"{tool_prefix}{name}" for name in self.allowed_tools]
-            else:
-                # Allow all registered custom tools
-                allowed = [f"{tool_prefix}{t.name}" for t in tools]
-            
-            # Apply denied list
-            if self.denied_tools:
-                denied_prefixed = [f"{tool_prefix}{t}" for t in self.denied_tools]
-                allowed = [t for t in allowed if t not in denied_prefixed]
-            
-            if allowed:
-                opts["allowed_tools"] = allowed
-    
-    def apply_to_openai(
-        self,
-        config: dict[str, Any],
-        tools: list[ToolSpec],
-    ) -> None:
-        """Apply this policy to OpenAI-compatible backend config.
-        
-        OpenAI doesn't have native tools in the same way, so this mainly
-        filters the custom tools list.
-        
-        Args:
-            config: OpenAI request config dict (will be modified)
-            tools: List of registered custom tools
-            
-        Example::
-        
-            config = {"model": "gpt-4", "tools": all_tools}
-            policy.apply_to_openai(config, all_tools)
-            # config["tools"] now filtered by policy
-        """
-        if not tools:
-            return
-        
-        # Filter tools based on policy
-        effective_tools = tools
-        
-        if self.allowed_tools:
-            effective_tools = [t for t in tools if t.name in self.allowed_tools]
-        
-        if self.denied_tools:
-            effective_tools = [t for t in effective_tools if t.name not in self.denied_tools]
-        
-        if effective_tools:
-            # OpenAI expects tools in the request, not separate allowed_tools
-            config["tools"] = effective_tools
+
     
     # -- Utility methods ----------------------------------------------------
     

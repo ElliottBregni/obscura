@@ -84,6 +84,18 @@ export function useAgentStream(options: StreamOptions) {
           const err = await response.text();
           store.getState().setError(`Stream failed: ${response.status} ${err}`);
           return;
+
+        // Capture session ID from response headers
+        const sessionId = response.headers.get('X-Session-ID');
+        if (sessionId) {
+          store.getState().setSessionId(sessionId);
+        }
+
+        // Capture session ID from response headers
+        const sessionId = response.headers.get('X-Session-ID');
+        if (sessionId) {
+          store.getState().setSessionId(sessionId);
+        }
         }
 
         const reader = response.body?.getReader();

@@ -1,0 +1,177 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obscura"
+version = "0.2.0"
+description = "Obscura - Multi-agent context management with TUI"
+requires-python = ">=3.13"
+dependencies = [
+    "github-copilot-sdk>=0.1.0",
+    "claude-agent-sdk>=0.1.0",
+    "openai>=1.0.0",
+    "httpx>=0.27.0",
+    "numpy>=2.1.0",
+    "python-jose[cryptography]>=3.3.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "structlog>=23.0.0",
+    "qdrant-client>=1.17.0",
+    "psycopg2-binary>=2.9.9",
+    "click>=8.3.1",
+    "rich>=14.3.2",
+    "prompt-toolkit>=3.0.50",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "cryptography>=42.0",
+    "fastapi>=0.128.4",
+    "uvicorn>=0.40.0",
+    "sse-starlette>=3.2.0",
+    "pyright>=1.1.390",
+    "ruff>=0.8.0",
+    "pytest-cov>=6.0",
+]
+server = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-jose[cryptography]>=3.3.0",
+    "httpx>=0.27.0",
+    "sse-starlette>=2.1.0",
+]
+telemetry = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "structlog>=23.0.0",
+]
+tui = [
+    "textual>=0.45.0",
+    "rich>=14.0.0",
+]
+a2a = [
+    "redis[hiredis]>=5.0.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "grpcio-reflection>=1.60.0",
+    "protobuf>=4.25.0",
+]
+
+[project.scripts]
+obscura = "obscura.cli:main"
+
+[dependency-groups]
+dev = [
+    "fastapi>=0.128.4",
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "python-jose>=3.5.0",
+    "sse-starlette>=3.2.0",
+    "uvicorn>=0.40.0",
+    "pyright>=1.1.390",
+    "ruff>=0.8.0",
+    "pytest-cov>=6.0",
+]
+
+# Package discovery - explicitly define what to include
+[tool.setuptools]
+packages = [
+    "obscura",
+    "obscura.core",
+    "obscura.core.client",
+    "obscura.providers",
+    "obscura.tools",
+    "obscura.tools.system",
+    "obscura.tools.policy",
+    "obscura.tools.providers",
+    "obscura.integrations",
+    "obscura.integrations.mcp",
+    "obscura.integrations.a2a",
+    "obscura.integrations.a2a.transports",
+    "obscura.auth",
+    "obscura.agent",
+    "obscura.memory",
+    "obscura.vector_memory",
+    "obscura.telemetry",
+    "obscura.server",
+    "obscura.routes",
+    "obscura.deps",
+    "obscura.cli",
+    "obscura.tui",
+    "obscura.tui.widgets",
+    "obscura.parity",
+    "obscura.heartbeat",
+    "obscura.skills",
+    "obscura.demo",
+    "obscura.schemas",
+]
+
+[tool.setuptools.package-data]
+obscura = ["py.typed"]
+
+# Exclude non-package directories
+[tool.setuptools.exclude-package-data]
+obscura = ["tests/*", "helm/*", "infra/*", "docs/*", "web-ui/*", "examples/*", "scripts/*"]
+
+# End-to-end test configuration
+[tool.pytest.ini_options]
+testpaths = ["tests", "tests/e2e"]
+addopts = "-v --tb=short"
+norecursedirs = ["_archive", ".worktrees"]
+asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end tests (slow, require server)",
+    "unit: fast unit tests",
+    "integration: integration tests",
+]
+
+[tool.coverage.run]
+source = ["obscura"]
+omit = ["obscura/tui/*", "tests/*"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"infra/zitadel/setup.py" = ["E402"]
+"scripts/sync.py" = ["F541"]
+"scripts/test_server.py" = ["F541"]
+"obscura/agent/agent.py" = ["E402"]
+"obscura/agent/agents.py" = ["E402"]
+"obscura/providers/claude.py" = ["E402"]
+"obscura/providers/copilot.py" = ["E402"]
+"obscura/providers/localllm.py" = ["E402"]
+"obscura/providers/openai.py" = ["E402"]
+"obscura/core/client/__init__.py" = ["E402"]
+"obscura/deps/__init__.py" = ["E402"]
+"obscura/integrations/mcp/server.py" = ["F811"]
+"obscura/routes/admin.py" = ["E741"]
+"obscura/tui/app.py" = ["F811"]
+"tests/e2e/test_admin_webhooks.py" = ["E741"]
+"tests/unit/obscura/auth/test_auth_middleware.py" = ["E402"]
+"tests/unit/obscura/core/test_config_env.py" = ["E712"]
+"tests/unit/obscura/telemetry/test_telemetry_metrics.py" = ["F401"]
+"tests/unit/obscura/test_legacy_module/test_crawlers.py" = ["F401"]
+"tests/unit/obscura/test_legacy_module/test_sync_integration.py" = ["F541"]
+"tests/unit/obscura/providers/test_copilot_models.py" = ["F405"]
+"demos/a2a/agents.py" = ["E402"]
+"demos/backend_agents/common.py" = ["F811"]

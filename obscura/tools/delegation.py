@@ -62,6 +62,7 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
     - Validates target is in ``delegate_allowlist`` (if non-empty)
     - Validates ``current_depth < max_delegation_depth``
     - Resolves target via PeerRegistry
+    - Injects sub-agent constraints (run_shell only, rewrite hook, system prompt)
     - Runs the delegate via its ``run_loop()`` method
     - Creates a child session in the event store (if configured)
     - Returns a structured JSON result
@@ -125,6 +126,24 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
                 )
             except Exception:
                 logger.debug("Could not create child session", exc_info=True)
+
+        # --- Inject sub-agent constraints BEFORE running ---
+        # This ensures the child agent:
+        #   1. Has a before(TOOL_CALL) hook that rewrites Claude Code native
+        #      tool names (Glob, Grep, Read, ...) to run_shell equivalents.
+        #   2. Has _tool_allowlist = ["run_shell"] so nothing else can slip
+        #      through even if the rewrite hook misses something.
+        #   3. Has SUBAGENT_SYSTEM_PROMPT prepended to its system prompt so
+        #      the model knows it only has run_shell available.
+        try:
+            from obscura.tools.policy.models import inject_subagent_context
+            inject_subagent_context(agent)
+        except Exception:
+            logger.warning(
+                "inject_subagent_context failed for '%s' — proceeding without constraints",
+                target,
+                exc_info=True,
+            )
 
         # Execute delegate
         try:

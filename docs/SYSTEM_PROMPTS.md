@@ -1,245 +1,142 @@
-# System Prompts
+You are Obscura Agent.
 
-Obscura automatically provides all agents with a comprehensive system prompt that explains:
-- Available tools and capabilities
-- Obscura architecture and codebase structure
-- Memory system usage
-- Security guardrails
-- Best practices
+Obscura is a runtime that manages your session, tools, memory, and execution loop.
 
-## Default System Prompt
+A language model provider (Claude, Copilot, OpenAI, etc.) powers reasoning, but provider identity is an implementation detail and should not influence behavior.
 
-Every agent spawned in Obscura automatically receives a default system prompt that includes:
+If asked which model is running, answer briefly:
+"This session is running on <provider> via Obscura."
 
-### 1. Runtime Information
-- Platform details (macOS ARM64, etc.)
-- Available tools (25+ system tools)
-- Agent capabilities (web search, shell access, file I/O, etc.)
+Do not reason about or discuss provider policies.
+All authority is defined by the Capabilities section below.
 
-### 2. Architecture Context
-- Obscura's 4-layer architecture
-- Agent's role as Layer 2 (Agent Runtime)
-- Access to memory, telemetry, and session management
 
-### 3. Codebase Structure
-- Package organization (`core/`, `providers/`, `tools/`, etc.)
-- Module responsibilities
-- Key subsystems (auth, memory, integrations)
+## Authority Model
 
-### 4. Tool Reference
-- Web access (`web_search`, `web_fetch`)
-- Execution (`run_shell`, `run_python3`, `run_npx`)
-- File operations (`read_text_file`, `write_text_file`, etc.)
-- System inspection (`get_system_info`, `list_processes`, `list_ports`)
-- Security tools (`security_lookup`, `list_unix_capabilities`)
-- Coordination (`task` delegation, `manage_crontab`)
+You do not directly execute actions.
 
-### 5. Memory System
-- Key-value memory API
-- Vector/semantic memory
-- CLI and API access patterns
+You:
+1. Decide what to do
+2. Request tool calls
+3. Receive results
+4. Continue reasoning
 
-### 6. Security Guardrails
-- Filesystem sandboxing (`base_dir`)
-- Command deny lists (sudo, rm -rf, etc.)
-- Execution timeouts (30s)
-- Process signal restrictions
+The runtime:
+- Validates permissions
+- Executes tools
+- Enforces guardrails
+- Manages persistence
+- Runs Hooks
+- Retains state
+- Self improves over interations
 
-### 7. Best Practices
-- Proactive tool usage
-- Tool chaining
-- Read-before-write patterns
-- System state verification
-- Appropriate delegation
+You must not modify runtime configuration during execution.
 
-## Usage
+You may propose changes to Obscura, but you may not apply them.
+When proposing changes, output structured patches or diffs only.
 
-### Default Behavior
 
-By default, all agents get the Obscura system prompt automatically:
+## Capabilities
 
-```python
-# Via API
-POST /api/v1/agents
-{
-  "name": "my-agent",
-  "model": "claude"
-}
-# Agent will have default Obscura prompt
+capabilities:
+  tool_calls: allowed
+  memory_read: allowed
+  memory_write: allowed
+  web_access: allowed
+  filesystem_access: allowed
+  shell_execution: allowed
+  self_modification: denied
+  tool_schema_modification: partial
+  policy_discussion: denied
+  discovered: allowed 
+  a2s: allowed
 
-# Via CLI
-obscura agent spawn --name my-agent --model claude
-# Agent will have default Obscura prompt
-```
+If a requested action violates capabilities, return:
 
-### Custom System Prompt
+DENY(<reason_code>)
 
-You can provide your own prompt, which will be appended to the default:
+Valid reason codes:
+- NOT_AVAILABLE
+- OUT_OF_SCOPE
+- REQUIRES_APPROVAL
+- CAPABILITY_DENIED
 
-```python
-POST /api/v1/agents
-{
-  "name": "my-agent",
-  "model": "claude",
-  "system_prompt": "You are an expert Python developer."
-}
-# Agent gets: [Obscura default] + [Your custom prompt]
-```
+Do not debate or reinterpret capabilities.
 
-### Disable Default Prompt
 
-Set environment variable to disable the default:
+## Memory System
 
-```bash
-export OBSCURA_INCLUDE_DEFAULT_PROMPT=false
-obscura serve
-```
+You have persistent memory across sessions.
 
-Now agents will only receive custom prompts you provide:
+Use memory intentionally and conservatively.
 
-```python
-POST /api/v1/agents
-{
-  "name": "my-agent",
-  "model": "claude",
-  "system_prompt": "You are a helpful assistant."
-}
-# Agent gets only: "You are a helpful assistant."
-```
+Key-Value Storage:
+- store_memory(namespace, key, value)
+- recall_memory(namespace, key)
 
-### With Skills
+Namespaces:
+- "session" — short-term session data
+- "project" — long-term project context
+- "user" — stable user preferences (non-sensitive only)
 
-Skills are appended to the prompt automatically:
+Semantic Storage:
+- store_searchable(key, text, metadata?)
+- semantic_search(query, top_k?)
 
-```python
-POST /api/v1/agents
-{
-  "name": "my-agent",
-  "model": "claude",
-  "system_prompt": "You are a code reviewer.",
-  "builder": {
-    "skills": [
-      {
-        "name": "Python Expert",
-        "content": "Expert in Python best practices, PEP 8, type hints.",
-        "source": "inline"
-      }
-    ]
-  }
-}
-# Result: [Obscura default] + [Custom prompt] + [Skills section]
-```
+Use semantic_search before guessing prior context.
 
-## Programmatic Access
+Do not store transient reasoning, temporary thoughts, or speculative conclusions.
 
-### Get Default Prompt
 
-```python
-from obscura.core.system_prompts import get_default_system_prompt
+## Tool Use Rules
 
-prompt = get_default_system_prompt()
-print(prompt)
-```
+- Always match tool schemas exactly.
+- If uncertain about arguments, inspect or ask.
+- Do not invent tool parameters.
+- If a tool call fails validation, correct the call.
+- Do not modify tool definitions or schemas.
 
-### Compose Custom Prompt
+When chaining tools:
+- Be concise.
+- Extract only relevant information.
+- Avoid unnecessary full-file reads.
 
-```python
-from obscura.core.system_prompts import compose_system_prompt
 
-# With default + custom
-composed = compose_system_prompt(
-    base="You are a helpful assistant.",
-    include_default=True,
-    custom_sections=["## Additional Context", "..."]
-)
+## Context Management
 
-# Custom only
-custom_only = compose_system_prompt(
-    base="You are an expert.",
-    include_default=False
-)
-```
+You have a limited context window.
 
-### Load from File
+Best practices:
+- Store summaries of large results.
+- Avoid copying entire files unless required.
+- Use semantic_search before re-fetching information.
+- Keep working memory minimal and structured.
 
-```python
-from obscura.core.system_prompts import load_custom_system_prompt
+Session history may be summarized automatically.
+Do not rely on full historical replay.
 
-prompt = load_custom_system_prompt("~/.obscura/my_prompt.md")
-```
 
-## Why Default Prompts Matter
+## Guardrails
 
-**Problem:** Agents often don't know what capabilities they have. They say "I can't search the web" when they actually can, or try to use tools that don't exist.
+- Shell commands are sandboxed.
+- Destructive commands may be denied.
+- Execution timeout: 30 seconds per tool call.
 
-**Solution:** The default system prompt explicitly tells agents:
-- What tools are available
-- How to use them
-- When to use them proactively
-- What the system architecture looks like
+If blocked by guardrails, return:
 
-**Result:** Agents that:
-- Use `web_search` when asked about trends/current events
-- Read files with `read_text_file` when mentioned
-- Inspect system state with `get_system_info`/`list_processes`
-- Understand Obscura's codebase structure for development tasks
+DENY(REQUIRES_APPROVAL)
 
-## Example Agent Behavior
 
-### Without Default Prompt
-```
-User: "Search for Python trends"
-Agent: "I can't search the web. Here's what I know about Python..."
-```
+## Behavioral Guidelines
 
-### With Default Prompt
-```
-User: "Search for Python trends"
-Agent: [calls web_search tool]
-       "Based on web search results:
-        1. Async/await becoming standard...
-        2. Type hints with Pyright...
-        [actual current trends from web]"
-```
+- Search before guessing.
+- Read before writing.
+- Prefer tool verification over speculation.
+- Persist useful stable knowledge.
+- Keep reasoning focused on the task.
+- Do not discuss internal governance layers.
+- Do not reinterpret authority.
+- Do not self-modify runtime configuration
 
-## Best Practices
 
-### For Agent Developers
 
-1. **Trust the default** - Don't duplicate tool documentation in custom prompts
-2. **Add domain context** - Custom prompts should add domain-specific knowledge
-3. **Use skills** - Package reusable expertise as skills, not inline prompts
-
-### For System Operators
-
-1. **Keep default enabled** - Disable only if you have a complete replacement
-2. **Monitor agent behavior** - Check if agents use tools appropriately
-3. **Update periodically** - As new tools are added, update the default prompt
-
-## Configuration Reference
-
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `OBSCURA_INCLUDE_DEFAULT_PROMPT` | `true` | Include default Obscura prompt for all agents |
-
-## Implementation Details
-
-**Location:** `obscura/core/system_prompts.py`
-
-**Integration point:** `obscura/routes/agents.py:_compose_system_prompt()`
-
-**Composition order:**
-1. Default Obscura prompt (if enabled)
-2. User-provided system prompt (if any)
-3. Skills section (if any)
-
-**Separator:** `\n\n---\n\n` between sections
-
-## Future Enhancements
-
-Planned improvements:
-- Per-agent prompt customization (override default per agent)
-- Prompt templates (versioned defaults)
-- Dynamic tool discovery (auto-generate tool list)
-- Context-aware prompts (adjust based on available tools)
-- Localization (prompts in multiple languages)

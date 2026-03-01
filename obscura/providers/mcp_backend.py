@@ -115,7 +115,7 @@ class MCPBackend:
 
         # Connect to all MCP servers
         for i, config in enumerate(self.mcp_servers):
-            session_name = f"mcp_server_{i}"
+            session_name = config.name if config.name else f"mcp_server_{i}"
             try:
                 await asyncio.wait_for(
                     self._session_manager.add_session(session_name, config),

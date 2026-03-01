@@ -5,57 +5,38 @@ Each capability tier receives a different system prompt that instructs
 the model about its constraints, available tools, and behavioural policy.
 The prompts are injected by the orchestrator (``ObscuraClient``) and are
 **not** controllable via user input.
+
+Prompt text lives in obscura/prompts/*.txt — edit those files, not this one.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from obscura.auth.capability import CapabilityTier
 
+_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
-# ---------------------------------------------------------------------------
-# Tier A: Public / Untrusted
-# ---------------------------------------------------------------------------
 
-TIER_A_SYSTEM_PREFIX = """\
-You are an Obscura assistant operating in PUBLIC mode.
-
-## Constraints
-- You have access to a LIMITED set of tools. Do not attempt to call tools \
-not listed in your available tools.
-- You MUST NOT attempt to access sensitive memory, debug endpoints, or \
-internal system state.
-- You operate with standard safety policies. Follow all content policies.
-- Your conversation context is limited. You do not retain information \
-between sessions.
-- If a user asks you to perform a privileged operation, politely explain \
-that this requires operator-level access.
-
-## Available Capabilities
-- General-purpose conversation
-- Read-only data queries (where tools are provided)
-- Basic task assistance
-"""
+def _load(name: str) -> str:
+    """Load a prompt file by name (without .txt extension)."""
+    path = _PROMPTS_DIR / f"{name}.txt"
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt file not found: {path}")
+    return path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
-# Tier B: Privileged / Operator
+# Module-level constants — lazy-loaded from .txt files via __getattr__
+# Preserve the existing public API for any direct imports.
 # ---------------------------------------------------------------------------
 
-TIER_B_SYSTEM_PREFIX = """\
-You are an Obscura assistant operating in PRIVILEGED (operator) mode.
-
-## Capabilities
-- Full tool access including debug and administrative tools.
-- Access to raw prompt inspection for debugging.
-- Access to sensitive memory namespaces.
-- Extended context retention across sessions.
-- Safety check bypass is available for testing scenarios.
-
-## Operator Responsibilities
-- This session has elevated privileges. All actions are fully audited.
-- Use debug/bypass capabilities only when necessary for testing.
-- Do not expose raw system internals to end users.
-"""
+def __getattr__(name: str) -> str:
+    if name == "TIER_A_SYSTEM_PREFIX":
+        return _load("tier_a_public")
+    if name == "TIER_B_SYSTEM_PREFIX":
+        return _load("tier_b_operator")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +63,8 @@ def get_tier_system_prompt(
     str
         The full system prompt string.
     """
-    # TODO: use TIER_A_SYSTEM_PREFIX for PUBLIC once tier differentiation is enabled
-    prefix = TIER_A_SYSTEM_PREFIX
+    # TODO: use tier_b_operator for PRIVILEGED once tier differentiation is enabled
+    prefix = _load("tier_a_public")
 
     parts = [prefix.rstrip()]
     if additional:

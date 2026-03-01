@@ -140,23 +140,25 @@ class QdrantBackend:
         query_embedding: list[float],
         namespace: str | None,
         top_k: int,
-        threshold: float | None,
-        filters: list[MetadataFilter] | None,
+        threshold: float | None = None,
+        filters: list[MetadataFilter] | None = None,
     ) -> list[VectorEntry]:
         must = (
             [FieldCondition(key="namespace", match=MatchValue(value=namespace))]
             if namespace
             else []
         )
-        results = self.client.search(
-            self.collection_name,
-            query_embedding,
+        response = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_embedding,
             query_filter=Filter(must=must) if must else None,
             limit=top_k,
             score_threshold=threshold,
+            with_payload=True,
+            with_vectors=False,
         )
         entries = []
-        for hit in results:
+        for hit in response.points:
             if "expires_at" in hit.payload and datetime.now(
                 UTC,
             ) > datetime.fromisoformat(hit.payload["expires_at"]):
@@ -168,7 +170,7 @@ class QdrantBackend:
                         key=hit.payload["key"],
                     ),
                     text=hit.payload["text"],
-                    embedding=hit.vector if hasattr(hit, "vector") else [],
+                    embedding=[],
                     metadata=hit.payload.get("metadata", {}),
                     memory_type=hit.payload.get("memory_type", "general"),
                     created_at=datetime.fromisoformat(hit.payload["created_at"]),

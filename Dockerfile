@@ -19,7 +19,7 @@ COPY scripts/ scripts/
 FROM python:3.13.5-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gh ca-certificates nodejs npm \
+    && apt-get install -y --no-install-recommends gh ca-certificates nodejs npm libpq-dev \
     && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 

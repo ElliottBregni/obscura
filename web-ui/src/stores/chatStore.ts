@@ -22,6 +22,7 @@ interface ChatState {
   isStreaming: boolean;
   error: string | null;
   currentToolCallId: string | null;
+  sessionId: string | null;
 
   addUserMessage: (text: string) => void;
   startAssistantMessage: () => string;
@@ -32,6 +33,7 @@ interface ChatState {
   completeToolCall: (msgId: string, result: string) => void;
   finishStream: (msgId: string) => void;
   setError: (error: string) => void;
+  setSessionId: (sessionId: string | null) => void;
   clearMessages: () => void;
 }
 
@@ -42,6 +44,7 @@ export const useChatStore = create<ChatState>()((set) => ({
   isStreaming: false,
   error: null,
   currentToolCallId: null,
+  sessionId: null,
 
   addUserMessage: (text) =>
     set((s) => ({
@@ -139,6 +142,9 @@ export const useChatStore = create<ChatState>()((set) => ({
 
   setError: (error) =>
     set({ error, isStreaming: false }),
+
+  setSessionId: (sessionId) =>
+    set({ sessionId }),
 
   clearMessages: () =>
     set({ messages: [], isStreaming: false, error: null, currentToolCallId: null }),
