@@ -21,6 +21,7 @@ def _make_entry(
         text=text,
         embedding=[0.1, 0.2],
         metadata=metadata or {},
+        memory_type="general",
         created_at=created_at or datetime.now(UTC),
     )
 

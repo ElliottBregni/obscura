@@ -31,6 +31,8 @@ class VectorEntry:
     created_at: datetime
     updated_at: datetime | None = None
     score: float = 0.0
+    rerank_score: float = 0.0
+    final_score: float = 0.0
 
 
 @runtime_checkable

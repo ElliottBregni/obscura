@@ -197,7 +197,7 @@ class AgentConfig(BaseModel):
         
         return cls(
             name=manifest.name,
-            model=manifest.model,
+            provider=manifest.provider,
             system_prompt=proxy.system_prompt,
             max_iterations=manifest.max_turns,
             tools=list(manifest.tools),
@@ -1225,7 +1225,7 @@ class AgentRuntime:
 
         config = AgentConfig(
             name=name,
-            model=model,
+            provider=model,
             system_prompt=system_prompt,
             memory_namespace=memory_namespace,
             parent_agent_id=parent_agent_id,

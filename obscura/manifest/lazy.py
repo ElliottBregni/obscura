@@ -127,7 +127,7 @@ class LazyManifestProxy:
     def _resolve_mcp_configs(self) -> list[dict[str, Any]]:
         """Resolve MCP server refs to runtime-ready configs."""
         configs: list[dict[str, Any]] = []
-        for ref in self._manifest.mcp_server_refs:
+        for ref in self._manifest.mcp_servers:
             config: dict[str, Any] = {
                 "transport": ref.transport,
                 "command": ref.command,

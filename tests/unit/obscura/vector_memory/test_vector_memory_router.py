@@ -21,7 +21,8 @@ def _make_entry(
         embedding=[0.1],
         metadata={},
         created_at=datetime.now(UTC),
-        final_score=score,
+        score=score,
+        memory_type="general",
     )
 
 

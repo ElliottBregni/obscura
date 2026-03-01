@@ -947,10 +947,29 @@ class AgentLoop:
 
     @staticmethod
     def _render_tool_result_text(result: ToolResultEnvelope) -> str:
+        # Hard cap: truncate any single tool result to prevent context blowout
+        _MAX_RESULT_CHARS = 8000
+
+        def _encode(obj: Any) -> str:
+            """Encode as TOON (~40% fewer tokens), fall back to JSON."""
+            try:
+                import toons
+                return toons.dumps(obj)
+            except Exception:
+                return json.dumps(obj, default=str)
+
+        def _cap(text: str) -> str:
+            if len(text) <= _MAX_RESULT_CHARS:
+                return text
+            return (
+                text[:_MAX_RESULT_CHARS]
+                + f"\n... [truncated, {len(text):,} chars total]"
+            )
+
         if result.status == "ok":
             if isinstance(result.result, str):
-                return result.result
-            return json.dumps(result.result, default=str)
+                return _cap(result.result)
+            return _cap(_encode(result.result))
         if result.error is None:
             return "Tool error"
         payload = {
@@ -959,7 +978,7 @@ class AgentLoop:
             "retry_after_ms": result.error.retry_after_ms,
             "safe_to_retry": result.error.safe_to_retry,
         }
-        return json.dumps(payload, default=str)
+        return _cap(_encode(payload))
 
     @staticmethod
     def _map_chunk(chunk: StreamChunk, turn: int) -> AgentEvent | None:

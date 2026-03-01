@@ -88,6 +88,9 @@ class REPLContext:
     # Mode manager (lazy)
     _mode_manager: Any = field(default=None, repr=False)
 
+    # Vector memory store (None if disabled)
+    vector_store: Any = field(default=None, repr=False)
+
     # Agent runtime (lazy-created on first /agent or /fleet command)
     _runtime: Any = field(default=None, repr=False)
 
@@ -1384,6 +1387,66 @@ async def _a2a_list_agents(ctx: REPLContext) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Memory
+# ---------------------------------------------------------------------------
+
+
+async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
+    """Show vector memory stats, search, or clear auto-saved memories."""
+    if ctx.vector_store is None:
+        print_warning(
+            "Vector memory is disabled. Set OBSCURA_VECTOR_MEMORY=on to enable."
+        )
+        return None
+
+    parts = args.strip().split(maxsplit=1)
+    subcmd = parts[0] if parts else "stats"
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if subcmd == "stats":
+        try:
+            stats = ctx.vector_store.get_stats()
+            print_info("Vector Memory Stats:")
+            for k, v in stats.items():
+                console.print(f"  [dim]{k}:[/] {v}")
+        except Exception as exc:
+            print_error(f"Could not get stats: {exc}")
+
+    elif subcmd == "search":
+        if not rest:
+            print_warning("Usage: /memory search <query>")
+            return None
+        try:
+            results = ctx.vector_store.search_reranked(
+                rest, top_k=5, recency_weight=0.2
+            )
+            if not results:
+                print_info("No results found.")
+            else:
+                for i, r in enumerate(results, 1):
+                    text_preview = r.text[:150].replace("\n", " ")
+                    console.print(
+                        f"  [bold]{i}.[/] (score: {r.score:.2f}) {text_preview}"
+                    )
+        except Exception as exc:
+            print_error(f"Search failed: {exc}")
+
+    elif subcmd == "clear":
+        try:
+            from obscura.cli.vector_memory_bridge import CLI_NAMESPACE
+
+            count = ctx.vector_store.clear_namespace(CLI_NAMESPACE)
+            print_ok(f"Cleared {count} auto-saved memories from CLI namespace.")
+        except Exception as exc:
+            print_error(f"Clear failed: {exc}")
+
+    else:
+        print_info("Usage: /memory [stats|search <query>|clear]")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -1418,6 +1481,8 @@ COMMANDS: dict[str, CommandHandler] = {
     "discover": cmd_discover,
     "mcp": cmd_mcp,
     "a2a": cmd_a2a,
+    # Memory
+    "memory": cmd_memory,
 }
 
 # Subcommand completions for readline tab-complete
@@ -1447,6 +1512,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "mcp": ["discover", "list", "select", "env", "install"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "tail-trace": [],
+    "memory": ["stats", "search", "clear"],
 }
 
 

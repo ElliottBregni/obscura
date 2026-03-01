@@ -44,6 +44,12 @@ from obscura.cli.render import (
 )
 from prompt_toolkit.patch_stdout import patch_stdout
 from obscura.cli import trace as trace_mod
+from obscura.cli.vector_memory_bridge import (
+    auto_save_turn,
+    init_vector_store,
+    load_startup_memories,
+    search_relevant_context,
+)
 from obscura.core.client import ObscuraClient
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
 from obscura.core.paths import resolve_obscura_home
@@ -190,24 +196,41 @@ async def send_message(
     # right limits without hard-coding numbers here.
     from obscura.cli.commands import _estimate_tokens, cmd_compact
 
-    _compact_threshold = ctx.client.context_compact_threshold  # 70% of window
-    _warn_threshold = ctx.client.context_warn_threshold        # 50% of window
+    _context_window = ctx.client.context_window
+    _compact_threshold = int(_context_window * 0.60)  # compact at 60%
+    _warn_threshold = ctx.client.context_warn_threshold  # 50% of window
+
+    # Update the system tool's token tracker so the LLM can introspect
+    from obscura.tools.system import update_token_usage
 
     _pre_tokens = _estimate_tokens(
         "".join(t for _, t in ctx.message_history) + text
     )
+    update_token_usage(
+        input_tokens=_pre_tokens,
+        context_window=_context_window,
+        compact_threshold=_compact_threshold,
+    )
+
     if _pre_tokens > _compact_threshold:
         console.print(
             f"[yellow]⚡ Auto-compacting context (~{_pre_tokens:,} tokens, "
-            f"limit {ctx.client.context_window:,}) …[/]"
+            f"60% of {_context_window:,}) …[/]"
         )
         await cmd_compact("6", ctx)
+
+    # ── Vector memory pre-search ──────────────────────────────────────────
+    augmented_text = text
+    if ctx.vector_store is not None:
+        vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
+        if vm_context:
+            augmented_text = f"{vm_context}\n\n---\n\n{text}"
 
     # ── Streaming with graceful retry on context-limit errors ────────────────
     async def _stream_with_retry(attempt: int = 0) -> list[str]:
         _buf: list[str] = []
         _s = ctx.client.run_loop(
-            text,
+            augmented_text,
             max_turns=ctx.max_turns,
             event_store=ctx.store,
             session_id=ctx.session_id,
@@ -241,6 +264,18 @@ async def send_message(
                         pass
                     if event.kind == AgentEventKind.TEXT_DELTA:
                         _buf.append(event.text)
+                    # Mid-loop auto-compact: check after each tool result
+                    if event.kind == AgentEventKind.TOOL_RESULT:
+                        _mid_tokens = _estimate_tokens(
+                            "".join(t for _, t in ctx.message_history)
+                            + str(event.tool_result or "")
+                        )
+                        if _mid_tokens > _compact_threshold:
+                            console.print(
+                                f"[yellow]⚡ Mid-loop auto-compact "
+                                f"(~{_mid_tokens:,} tokens)…[/]"
+                            )
+                            await cmd_compact("6", ctx)
                     _track_file_event(event.kind, ctx, event)
         except KeyboardInterrupt:
             pass
@@ -258,9 +293,9 @@ async def send_message(
             )
             if _is_ctx_err and attempt == 0:
                 console.print(
-                    "[red]⚠ Context limit reached — auto-compacting and retrying…[/]"
+                    "[red]⚠ Context limit reached — aggressive compact and retry…[/]"
                 )
-                await cmd_compact("4", ctx)
+                await cmd_compact("2", ctx)
                 return await _stream_with_retry(attempt=1)
             raise
         return _buf
@@ -287,14 +322,31 @@ async def send_message(
     if response_text:
         ctx.message_history.append(("assistant", response_text))
 
-    # Post-send token nudge (between warn and compact thresholds)
+    # ── Vector memory auto-save ───────────────────────────────────────────
+    if ctx.vector_store is not None and response_text:
+        turn_num = len([m for m in ctx.message_history if m[0] == "user"])
+        auto_save_turn(
+            ctx.vector_store,
+            ctx.session_id,
+            text,
+            response_text,
+            turn_number=turn_num,
+        )
+
+    # Post-send: update token tracker and show nudge
     _post_tokens = _estimate_tokens("".join(t for _, t in ctx.message_history))
+    update_token_usage(
+        input_tokens=_post_tokens,
+        output_tokens=len(response_text) // 4,
+        context_window=_context_window,
+        compact_threshold=_compact_threshold,
+    )
     if _warn_threshold < _post_tokens <= _compact_threshold:
         console.print(
             f"[dim yellow]  Context: ~{_post_tokens:,} tokens "
-            f"({int(_post_tokens / ctx.client.context_window * 100)}% of "
-            f"{ctx.client.context_window:,}). "
-            f"Auto-compact at {_compact_threshold:,}.[/]"
+            f"({int(_post_tokens / _context_window * 100)}% of "
+            f"{_context_window:,}). "
+            f"Auto-compact at {_compact_threshold:,} (60%).[/]"
         )
 
     # Parse plan if in PLAN mode
@@ -340,9 +392,23 @@ async def _repl(
     if tools_enabled:
         mcp_configs, mcp_names = _discover_mcp()
 
+    # Create authenticated user for vector memory + memory tools
+    import os
+    from obscura.auth.models import AuthenticatedUser
+
+    cli_user = AuthenticatedUser(
+        user_id=os.environ.get("USER", "local"),
+        email="cli@obscura.local",
+        roles=("operator",),
+        org_id="local",
+        token_type="user",
+        raw_token="",
+    )
+
+    # Initialize vector memory store
+    vector_store = init_vector_store(cli_user)
 
     # Compose system prompt: default Obscura identity + user prompt + session memory
-    import os
     from obscura.core.context import load_obscura_memory
     from obscura.core.system_prompts import compose_system_prompt
 
@@ -351,11 +417,18 @@ async def _repl(
         include_default = False
 
     memory_context = load_obscura_memory(sid, db_path)
-    custom_sections = [memory_context] if memory_context else None
+    custom_sections: list[str] = [memory_context] if memory_context else []
+
+    # Inject vector memory context at session start
+    if vector_store is not None:
+        vm_startup = load_startup_memories(vector_store, sid, top_k=3)
+        if vm_startup:
+            custom_sections.append(vm_startup)
+
     combined_system = compose_system_prompt(
         base=system,
         include_default=include_default,
-        custom_sections=custom_sections,
+        custom_sections=custom_sections or None,
     )
 
     # Gather system tools BEFORE client starts so they're available for
@@ -368,6 +441,17 @@ async def _repl(
             system_tools = get_system_tool_specs()
         except Exception:
             pass
+
+        # Add memory tools (semantic_search, store_searchable, etc.)
+        if vector_store is not None:
+            try:
+                from obscura.tools.memory_tools import make_memory_tool_specs
+
+                memory_tools = make_memory_tool_specs(cli_user)
+                system_tools.extend(memory_tools)
+            except Exception:
+                pass
+
     tool_count = len(system_tools)
 
     # Build client (MCP servers connect during start())
@@ -405,6 +489,7 @@ async def _repl(
             tools_enabled=tools_enabled,
             mcp_configs=mcp_configs,
             confirm_enabled=confirm,
+            vector_store=vector_store,
         )
 
         # --- Single-shot mode ---

@@ -49,9 +49,9 @@ def _make_agent(
 
 class TestAgentConfig:
     def test_default_config(self) -> None:
-        config = AgentConfig(name="test-agent", model="claude")
+        config = AgentConfig(name="test-agent", provider="claude")
         assert config.name == "test-agent"
-        assert config.model == "claude"
+        assert config.provider == "claude"
         assert config.system_prompt == ""
         assert config.memory_namespace == "default"
         assert config.max_iterations == 10
@@ -61,7 +61,7 @@ class TestAgentConfig:
     def test_custom_config(self) -> None:
         config = AgentConfig(
             name="custom",
-            model="copilot",
+            provider="copilot",
             system_prompt="You are helpful.",
             memory_namespace="project:x",
             max_iterations=5,
@@ -77,7 +77,7 @@ class TestAgentConfig:
         assert config.tags == ["prod", "v2"]
 
     def test_mcp_config_default(self) -> None:
-        config = AgentConfig(name="test", model="claude")
+        config = AgentConfig(name="test", provider="claude")
         assert config.mcp.enabled is False
         assert config.mcp.servers == []
         assert config.mcp.config_path.endswith(".obscura/mcp")
@@ -122,7 +122,7 @@ class TestAgentRuntime:
 
         assert agent.id.startswith("agent-")
         assert agent.config.name == "test-agent"
-        assert agent.config.model == "claude"
+        assert agent.config.provider == "claude"
         assert agent.status == AgentStatus.PENDING
 
         await runtime.stop()
@@ -405,7 +405,7 @@ class TestBackendSpecificAgents:
                 system_prompt="",
                 user=runtime.user,
             )
-            assert agent.config.model == model_name
+            assert agent.config.provider == model_name
             assert agent.status == AgentStatus.WAITING
 
     @pytest.mark.asyncio
@@ -435,7 +435,7 @@ class TestBackendSpecificAgents:
 
         result = await agent.run("backend smoke task")
 
-        assert agent.config.model == model_name
+        assert agent.config.provider == model_name
         assert result == response_text
         assert agent.status == AgentStatus.COMPLETED
 

@@ -15,25 +15,53 @@ from demos.a2a.run_aper_10_agents import WorkflowA2AService, run_workflow
 from obscura.agent.agent import BaseAgent
 from obscura.tools.system import (
     append_text_file,
+    call_dynamic_tool,
+    clipboard_read,
+    clipboard_write,
+    code_sandbox,
+    context_window_status,
+    copilot_query,
+    copy_path,
+    create_tool,
+    diff_files,
     discover_all_commands,
+    download_file,
+    edit_text_file,
+    file_info,
+    find_files,
     get_environment,
     get_system_info,
     get_system_tool_specs,
+    git_branch,
+    git_commit,
+    git_diff,
+    git_log,
+    git_status,
+    grep_files,
+    http_request,
+    json_query,
     list_directory,
+    list_dynamic_tools,
     list_listening_ports,
     list_processes,
     list_system_tools,
     list_unix_capabilities,
     make_directory,
     manage_crontab,
+    move_path,
     read_text_file,
     remove_path,
     run_command,
     run_npx,
+    run_python,
     run_python3,
     run_shell,
     security_lookup,
     signal_process,
+    task,
+    tree_directory,
+    web_fetch,
+    web_search,
     which_command,
     write_text_file,
 )
@@ -68,12 +96,21 @@ class _SystemToolsAPERAgent(BaseAgent):
                 payload = {"ok": False, "error": str(exc)}
             tool_results[name] = payload
 
+        # Execution tools
         await _call("run_python3", run_python3("print('aper-system-ok')"))
+        await _call("run_python", run_python("print('aper-python-ok')"))
         await _call("run_npx", run_npx(["--version"]))
         await _call("run_command", run_command("echo", args=["aper-system-command"]))
         await _call("run_shell", run_shell("echo aper-shell-ok"))
+        # Web tools (may fail without network, that's ok)
+        await _call("web_fetch", web_fetch("http://localhost:0/test"))
+        await _call("web_search", web_search("test query"))
+        # Delegation
+        await _call("task", task("test prompt"))
+        # System discovery
         await _call("which_command", which_command("python3"))
         await _call("discover_all_commands", discover_all_commands(limit=120))
+        # Filesystem — basic
         await _call("make_directory", make_directory(str(temp_dir)))
         await _call(
             "write_text_file",
@@ -82,6 +119,48 @@ class _SystemToolsAPERAgent(BaseAgent):
         await _call("append_text_file", append_text_file(str(temp_file), "world\n"))
         await _call("read_text_file", read_text_file(str(temp_file)))
         await _call("list_directory", list_directory(str(self._workspace)))
+        # Filesystem — advanced
+        await _call("grep_files", grep_files("hello", str(self._workspace)))
+        await _call("find_files", find_files(str(self._workspace), pattern="*.txt"))
+        await _call(
+            "edit_text_file",
+            edit_text_file(str(temp_file), "hello", "greetings"),
+        )
+        copy_dst = self._workspace / "notes_copy.txt"
+        await _call("copy_path", copy_path(str(temp_file), str(copy_dst)))
+        move_dst = self._workspace / "notes_moved.txt"
+        await _call("move_path", move_path(str(copy_dst), str(move_dst)))
+        await _call("file_info", file_info(str(temp_file)))
+        await _call("tree_directory", tree_directory(str(self._workspace)))
+        await _call("diff_files", diff_files(str(temp_file), str(move_dst)))
+        # Git tools (may fail in temp dir, that's ok)
+        await _call("git_status", git_status(cwd=str(self._workspace)))
+        await _call("git_diff", git_diff(cwd=str(self._workspace)))
+        await _call("git_log", git_log(cwd=str(self._workspace)))
+        await _call("git_commit", git_commit("test", cwd=str(self._workspace)))
+        await _call("git_branch", git_branch("list", cwd=str(self._workspace)))
+        # Utility tools
+        await _call("download_file", download_file("http://localhost:0/test", str(self._workspace / "dl.bin")))
+        await _call("http_request", http_request("http://localhost:0/test"))
+        await _call("clipboard_read", clipboard_read())
+        await _call("clipboard_write", clipboard_write("test"))
+        await _call(
+            "json_query",
+            json_query("name", data='{"name": "test"}'),
+        )
+        # Context window
+        await _call("context_window_status", context_window_status())
+        # Dynamic tools + sandbox
+        await _call(
+            "create_tool",
+            create_tool("test_adder", "Add two numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}, "return json.dumps({'ok': True, 'result': kwargs.get('a', 0) + kwargs.get('b', 0)})"),
+        )
+        await _call("call_dynamic_tool", call_dynamic_tool("test_adder", {"a": 1, "b": 2}))
+        await _call("list_dynamic_tools", list_dynamic_tools())
+        await _call("code_sandbox", code_sandbox("python", "print('sandbox-ok')"))
+        # Copilot GPT-5 Mini (may fail if copilot not installed, that's ok)
+        await _call("copilot_query", copilot_query("say hello"))
+        # System info
         await _call("get_environment", get_environment(prefix="PATH"))
         await _call("get_system_info", get_system_info())
         await _call("list_processes", list_processes())

@@ -27,6 +27,7 @@ dependencies = [
     "click>=8.3.1",
     "rich>=14.3.2",
     "prompt-toolkit>=3.0.50",
+    "toons>=0.5.0",
 ]
 
 [project.optional-dependencies]
