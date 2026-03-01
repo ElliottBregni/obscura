@@ -406,22 +406,8 @@ class CopilotBackend:
 
     async def list_models(self) -> list[RegistryModelInfo]:
         """List models available from Copilot (hybrid approach)."""
-        try:
-            # Try to use copilot_models package if available
-            from copilot_models import COPILOT_MODELS
-            return [
-                RegistryModelInfo(
-                    id=model["id"],
-                    name=model.get("name", model["id"]),
-                    provider="copilot",
-                    supports_tools=model.get("supports_tools", True),
-                    supports_vision=model.get("supports_vision", False),
-                )
-                for model in COPILOT_MODELS
-            ]
-        except ImportError:
-            # Fallback to known models
-            return self._get_fallback_models()
+            # Use fallback only for now TODO: Verify we can pull model info from.. somewhere
+        return self._get_fallback_models()
 
     def get_default_model(self) -> str:
         """Return the default model for this provider."""
@@ -436,7 +422,7 @@ class CopilotBackend:
         return [
             RegistryModelInfo(
                 id="auto",
-                name="Copilot Auto (Best Available)",
+                name="gpt-5-mini", # DEFUALT DO NOT TOUCH - NIGCOST SAVINGS
                 provider="copilot",
                 supports_tools=True,
                 supports_vision=True,

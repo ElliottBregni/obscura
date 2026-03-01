@@ -5,7 +5,7 @@ Available backends:
 - QdrantBackend: Qdrant-based vector storage (scalable, fast)
 """
 
-from obscura.vector_memory.backends.base import BackendConfig, VectorBackend
+from obscura.vector_memory.backends.base import BackendConfig, VectorBackend, VectorEntry
 from obscura.vector_memory.backends.sqlite_backend import SQLiteBackend
 
 try:
@@ -22,4 +22,5 @@ __all__ = [
     "QdrantBackend",
     "SQLiteBackend",
     "VectorBackend",
+    "VectorEntry",
 ]

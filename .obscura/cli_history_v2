@@ -148,3 +148,62 @@
 
 # 2026-02-28 18:54:50.916146
 +i think it is. You just used it and i signed in? check mcp's
+
+# 2026-02-28 20:39:05.877242
++ 
++
++
+
+# 2026-02-28 20:39:14.093389
++hey
+
+# 2026-02-28 20:39:40.229710
++I miss some of the rich text features from chat_history.py
+
+# 2026-02-28 20:45:38.258636
++can you confirm how the memory hooks work? I want to make sure you are writing and retreiving from the vector memory store often 
+
+# 2026-02-28 20:48:23.294027
++yes make a habit to cli 
+
+# 2026-02-28 21:00:07.603543
++great. So im still seeing some tool call errors with sub agents. Can you track all the information to tool calls to semantic data too? For now atleast while we continue to build this out. Im going to need you to use docker and shell to ensure that the k8's deployment and all components of the deployment and ui work, autho support is important for provider callls.... we will come back to these  instructions. MOST IMPORTANT NEXT TASK: Make sure --continue or --resume session_id is a feature in the not only the cli but throughout the code base. I want to start continuing your sessions but i need a clear way to resume any agent session 
+
+# 2026-02-28 21:10:05.515865
++ok my next task. Please give me a way to hot reload this cli session. Please stop imeediantly when you have this. compact current context for later 
+
+# 2026-02-28 21:10:50.793737
++are we now hotreloading?
+
+# 2026-02-28 21:12:03.871285
++ok are we saving out vectory memory correct?
+
+# 2026-02-28 21:35:24.683001
++yo 
+
+# 2026-02-28 21:35:57.070597
++what do you know about the recent upgrades? use vectory memory?
+
+# 2026-02-28 21:37:03.965380
++thats super cool. The output looks pretty good !
+
+# 2026-02-28 21:37:50.614028
++did this fail or no ?   ✗ {"type": "NOT_FOUND", "message": "Unknown tool: report_intent. Available: mcp_server_0.fetch, mcp_server_1.read_file, mcp_server_1.read_text_file, mcp_server_1.read_media_file, mcp_server_1.read_multi
++  ✗ {"type": "NOT_FOUND", "message": "Unknown tool: fetch_copilot_cli_documentation. Available: mcp_server_0.fetch, mcp_server_1.read_file, mcp_server_1.read_text_file, mcp_server_1.read_media_file, mcp_s
++
++ I dont understand?
+
+# 2026-02-28 21:39:07.297474
++there should be some information about session updates ect.. tool calls have been flaky. I need you to look at the copilot implementation 
+
+# 2026-02-28 21:39:19.490697
++also. You are running gpt-5-mini right??
+
+# 2026-02-28 21:39:41.760711
++what? 
+
+# 2026-02-28 21:40:23.066533
++i need to upgrade to postgres SQL.. 
+
+# 2026-02-28 21:41:26.018965
++hello?

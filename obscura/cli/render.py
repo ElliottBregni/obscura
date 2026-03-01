@@ -13,6 +13,22 @@ from datetime import datetime
 
 from obscura.core.types import AgentEvent, AgentEventKind
 
+import re
+
+
+def _sanitize_text(s: str) -> str:
+    """Remove ANSI escape/control sequences from text for safe printing."""
+    if not s:
+        return ""
+    try:
+        # Remove CSI sequences (ESC [ ... ) and other common ANSI sequences
+        cleaned = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", s)
+        # Remove other control characters (except newline and tab)
+        cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", cleaned)
+        return cleaned
+    except Exception:
+        return s
+
 
 class OutputManager:
     """Lightweight output manager for routing internal debug and prints.
@@ -34,10 +50,31 @@ class OutputManager:
             self._buffer.append(message)
         except Exception:
             pass
+
+        # Sanitize common control/ANSI sequences so internals don't pollute the prompt
+        try:
+            import re
+
+            cleaned = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", message)
+        except Exception:
+            cleaned = message
+
         if self.env == "cli":
             # Use the real console to print internals with dim style when in CLI
             try:
-                Console().print(f"[dim][internal][/]{message}")
+                # prefer parsing ANSI and printing safely
+                Console().print(Text.from_ansi(cleaned))
+            except Exception:
+                try:
+                    Console().print(f"[dim][internal][/]{cleaned}")
+                except Exception:
+                    pass
+        else:
+            # keep sanitized version in non-cli buffers
+            try:
+                # replace buffer entry with cleaned version for diagnostics
+                if self._buffer:
+                    self._buffer[-1] = cleaned
             except Exception:
                 pass
 
@@ -155,13 +192,14 @@ class StreamRenderer:
             if text.strip():
                 # Add a small blank line for visual buffer before assistant output
                 console.print()
-                # Always print the content to the chat
-                console.print(Markdown(text))
+                # Always print the content to the chat (sanitize ANSI/control chars)
+                safe_text = _sanitize_text(text)
+                console.print(Markdown(safe_text))
                 # If using external status, keep it active with a concise timestamped preview
                 if self._external_status is not None:
                     try:
                         ts = datetime.now().strftime("%H:%M:%S")
-                        preview = text.strip().replace('\n', ' ')[:120]
+                        preview = safe_text.strip().replace('\n', ' ')[:120]
                         self._external_status.update(f"› assistant [{ts}]: {preview}")  # type: ignore[attr-defined]
                     except Exception:
                         pass
@@ -219,13 +257,14 @@ class StreamRenderer:
         if len(arg_str) > 120:
             arg_str = arg_str[:117] + "..."
 
+        sanitized_args = _sanitize_text(arg_str)
         label = f"  [bold cyan]⚡ {name}[/]"
-        if arg_str:
-            label += f"  [dim]{arg_str}[/]"
+        if sanitized_args:
+            label += f"  [dim]{sanitized_args}[/]"
         
-        # Capture as internal output as well
+        # Capture as internal output as well (sanitized)
         try:
-            output.capture_internal(f"TOOL_CALL {name} {arg_str}")
+            output.capture_internal(f"TOOL_CALL {name} {sanitized_args}")
         except Exception:
             pass
 
@@ -250,7 +289,8 @@ class StreamRenderer:
             self._status = None
 
     def _show_tool_result(self, event: AgentEvent) -> None:
-        snippet = (event.tool_result or "")[:200]
+        raw_snippet = (event.tool_result or "")[:200]
+        snippet = _sanitize_text(raw_snippet)
         style = "red" if event.is_error else "dim"
         prefix = "✗" if event.is_error else "→"
         out = f"  [{style}]{prefix} {snippet}[/]"
@@ -333,11 +373,11 @@ def render_event(event: AgentEvent) -> None:
     """Simple single-event renderer (no Markdown accumulation)."""
     match event.kind:
         case AgentEventKind.TEXT_DELTA:
-            console.print(event.text, end="")
+            console.print(_sanitize_text(event.text), end="")
         case AgentEventKind.TOOL_CALL:
-            console.print(f"\n  [dim]⚡ {event.tool_name}[/]")
+            console.print(f"\n  [dim]⚡ {_sanitize_text(event.tool_name)}[/]")
         case AgentEventKind.TOOL_RESULT:
-            snippet = (event.tool_result or "")[:120]
+            snippet = _sanitize_text((event.tool_result or "")[:120])
             console.print(f"  [dim]→ {snippet}[/]")
         case _:
             pass
@@ -440,10 +480,11 @@ def render_agent_output(output: Any) -> None:
     """Render an AgentOutput from the InteractionBus."""
     if not output.text:
         return
+    safe_text = _sanitize_text(output.text)
     if output.is_final:
-        console.print(f"  [bold cyan]{output.agent_name}:[/] {output.text}")
+        console.print(f"  [bold cyan]{_sanitize_text(output.agent_name)}:[/] {safe_text}")
     else:
-        console.print(output.text, end="")
+        console.print(safe_text, end="")
 
 
 # ---------------------------------------------------------------------------
