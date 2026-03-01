@@ -369,9 +369,16 @@ class AgentLoop:
             _current_tool_name: str = ""
             _current_tool_input_json: str = ""
             _current_tool_raw: Any = None
+            _seen_tool_use: bool = False
 
             try:
                 async for chunk in self._call_stream(current_prompt, kwargs):
+                    # Suppress text generated after a tool_use block in the
+                    # same turn — models often hallucinate tool outcomes
+                    # (e.g. "permission denied") before seeing the real result.
+                    if chunk.kind == ChunkKind.TEXT_DELTA and _seen_tool_use:
+                        continue
+
                     event = self._map_chunk(chunk, turn)
                     if event is not None:
                         # Run post-hook for previous, then emit new
@@ -389,6 +396,7 @@ class AgentLoop:
 
                     # Collect tool calls
                     if chunk.kind == ChunkKind.TOOL_USE_START:
+                        _seen_tool_use = True
                         # Flush previous tool if any (fallback for backends
                         # that don't emit TOOL_USE_END)
                         if _current_tool_name:
