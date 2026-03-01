@@ -89,6 +89,13 @@ class ToolRegistry:
 
     def register(self, spec: ToolSpec) -> None:
         self._tools[spec.name] = spec
+        # MCP tools are registered with dotted names (e.g. "fetch.fetch")
+        # but the Claude SDK sanitizes dots to underscores in tool names.
+        # Register the underscored variant so both forms resolve.
+        if "." in spec.name:
+            underscored = spec.name.replace(".", "_")
+            if underscored not in self._tools:
+                self._tools[underscored] = spec
 
     def register_alias(self, alias: str, canonical: str) -> None:
         """Map *alias* to an already-registered *canonical* tool name.
@@ -109,6 +116,15 @@ class ToolRegistry:
         if name.startswith("mcp__") and name.count("__") >= 2:
             stripped = name.split("__", 2)[-1]
             direct = self._tools.get(stripped)
+            if direct is not None:
+                return direct
+        # Try dot ↔ underscore variants (Claude SDK sanitizes dots to underscores)
+        if "." in stripped:
+            direct = self._tools.get(stripped.replace(".", "_"))
+            if direct is not None:
+                return direct
+        elif "_" in stripped:
+            direct = self._tools.get(stripped.replace("_", ".", 1))
             if direct is not None:
                 return direct
         canonical = self._alias_targets.get(_normalize_tool_name(stripped))
