@@ -27,6 +27,7 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
+from obscura.core.tool_policy import ToolPolicy
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,9 @@ class ObscuraClient:
         async with ObscuraClient("openai", model="gpt-4o") as client:
             response = await client.send("summarize this")
 
+        async with ObscuraClient("codex", model="gpt-5") as client:
+            response = await client.send("summarize this")
+
         async with ObscuraClient("moonshot", model="kimi-2.5") as client:
             response = await client.send("summarize this")
 
@@ -67,18 +71,27 @@ class ObscuraClient:
         system_prompt: str = "",
         tools: list[ToolSpec] | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
+        # Skill loading
+        lazy_load_skills: bool = False,
+        skill_filter: list[str] | None = None,
         # Claude-specific
         permission_mode: str = "default",
         cwd: str | None = None,
         # Copilot-specific
         streaming: bool = True,
+        # Tool policy
+        tool_policy: ToolPolicy | None = None,
         # HTTP server context
         user: object | None = None,
+        # Prompt injection control
+        inject_tier_prompt: bool = False,  # opt-in: prepend tier system prompt
+        inject_claude_context: bool = False,  # opt-in: load ~/.claude/ context
     ) -> None:
         if isinstance(backend, str):
             backend = Backend(backend)
         self._backend_type = backend
         self._user = user
+        self._tool_policy = tool_policy or ToolPolicy.custom_only()  # Default: block native tools
 
         # Resolve model via copilot_models aliases
         resolved_model = self._resolve_model(
@@ -108,23 +121,48 @@ class ObscuraClient:
                 if isinstance(user, _AuthUser):
                     session_id = _uuid.uuid4().hex
                     self._capability_token = generate_capability_token(user, session_id)
-                    # Inject tier-appropriate system prompt
-                    system_prompt = get_tier_system_prompt(
-                        self._capability_token.tier,
-                        additional=system_prompt,
-                    )
+                    if inject_tier_prompt:
+                        # Inject tier-appropriate system prompt
+                        system_prompt = get_tier_system_prompt(
+                            self._capability_token.tier,
+                            additional=system_prompt,
+                        )
             except Exception:
                 pass  # Degrade gracefully if capability module not available
 
-        # Inject ~/.claude context (CLAUDE.md + instructions + skills) for ALL backends
-        try:
-            from obscura.core.context import ContextLoader
-            loader = ContextLoader(Backend.CLAUDE)
-            claude_ctx = loader.load_system_prompt()
-            if claude_ctx:
-                system_prompt = f"{claude_ctx}\n\n{system_prompt}" if system_prompt else claude_ctx
-        except Exception:
-            pass
+        # Inject ~/.claude context (CLAUDE.md + instructions + skills)
+        # Off by default — Obscura uses its own system prompts
+        if inject_claude_context:
+            try:
+                from obscura.core.context import ContextLoader
+                loader = ContextLoader(
+                    backend,
+                    lazy_load_skills=lazy_load_skills,
+                    skill_filter=skill_filter,
+                )
+                claude_ctx = loader.load_system_prompt()
+                if claude_ctx:
+                    system_prompt = f"{claude_ctx}\n\n{system_prompt}" if system_prompt else claude_ctx
+            except Exception:
+                pass
+
+        # -- Reliability infrastructure ------------------------------------------
+        # Circuit breaker (per-backend, shared via registry if passed in)
+        from obscura.core.circuit_breaker import CircuitBreakerRegistry
+
+        self._circuit_registry = CircuitBreakerRegistry()
+
+        # Retry config
+        self._max_retries = 2
+        self._retry_initial_backoff = 0.5
+
+        # LLM cache (opt-in, set via configure_cache)
+        self._cache: Any = None  # LLMCache | None
+        self._model = resolved_model or ""
+        self._system_prompt = system_prompt
+
+        # Current agent loop (set during run_loop, exposed for mid-run input)
+        self._current_loop: Any = None
 
         # Store MCP server configs for lazy initialization in start().
         # MCP tools are connected via Obscura's own MCPBackend so they
@@ -142,6 +180,7 @@ class ObscuraClient:
             permission_mode=permission_mode,
             cwd=cwd,
             streaming=streaming,
+            tool_policy=self._tool_policy,
         )
 
         # Register tools with backend (filtered by capability tier)
@@ -215,8 +254,32 @@ class ObscuraClient:
         """Send prompt, wait for full response."""
         import time as _time
 
+        from obscura.core.retry import with_retry
+
         # Apply prompt injection filter and memory enrichment
         prompt = self._enrich_prompt(self._filter_prompt(prompt))
+
+        # Check cache (opt-in)
+        if self._cache is not None:
+            from obscura.core.llm_cache import LLMCache
+
+            cache: LLMCache = self._cache
+            cache_key = LLMCache.make_key(
+                self._backend_type.value, self._model, self._system_prompt, prompt
+            )
+            cached = cache.get(cache_key)
+            if cached is not None:
+                _record_cache_hit(self._backend_type.value)
+                from obscura.core.types import ContentBlock, Role
+
+                return Message(
+                    role=Role.ASSISTANT,
+                    content=[ContentBlock(kind="text", text=cached.response_text)],
+                )
+        else:
+            cache_key = ""
+
+        circuit = self._circuit_registry.get(self._backend_type.value)
 
         tracer = _get_client_tracer()
         with tracer.start_as_current_span("obscura.core.client.send") as span:
@@ -224,10 +287,29 @@ class ObscuraClient:
             _set_span_attr(span, "obscura.method", "send")
             start = _time.monotonic()
             try:
-                result = await self._backend.send(prompt, **kwargs)
+                result = await with_retry(
+                    self._backend.send,
+                    prompt,
+                    max_retries=self._max_retries,
+                    initial_backoff=self._retry_initial_backoff,
+                    circuit=circuit,
+                    **kwargs,
+                )
                 duration = _time.monotonic() - start
                 _record_request_metric(self._backend_type.value, "send", "success")
                 _record_request_duration(self._backend_type.value, "send", duration)
+
+                # Store in cache
+                if self._cache is not None and cache_key:
+                    text = getattr(result, "text", "")
+                    if text:
+                        self._cache.put(
+                            cache_key,
+                            text,
+                            backend=self._backend_type.value,
+                            model=self._model,
+                        )
+
                 return result
             except Exception:
                 duration = _time.monotonic() - start
@@ -239,8 +321,17 @@ class ObscuraClient:
         """Send prompt, yield streaming chunks."""
         import time as _time
 
+        from obscura.core.circuit_breaker import CircuitOpenError
+
         # Apply prompt injection filter and memory enrichment
         prompt = self._enrich_prompt(self._filter_prompt(prompt))
+
+        # Check circuit breaker before streaming (no retry on streams)
+        circuit = self._circuit_registry.get(self._backend_type.value)
+        if not circuit.allow_request():
+            raise CircuitOpenError(
+                circuit.name, circuit.time_until_half_open()
+            )
 
         tracer = _get_client_tracer()
         span = tracer.start_span("obscura.core.client.stream")
@@ -252,8 +343,10 @@ class ObscuraClient:
             async for chunk in self._backend.stream(prompt, **kwargs):
                 _record_stream_chunk(self._backend_type.value, chunk.kind.value)
                 yield chunk
+            circuit.record_success()
         except Exception:
             status = "error"
+            circuit.record_failure()
             raise
         finally:
             duration = _time.monotonic() - start
@@ -269,6 +362,10 @@ class ObscuraClient:
         *,
         max_turns: int = 10,
         on_confirm: Callable[..., Any] | None = None,
+        event_store: Any | None = None,
+        session_id: str | None = None,
+        auto_complete: bool = True,
+        load_session_history: bool = True,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with automatic tool execution.
@@ -294,17 +391,57 @@ class ObscuraClient:
         on_confirm:
             Optional callback ``(ToolCallInfo) -> bool`` invoked before
             each tool execution. Return False to deny.
+        event_store:
+            Optional :class:`EventStoreProtocol`.  When provided, events
+            are persisted to durable storage.
+        session_id:
+            Optional session ID for event persistence.
+        auto_complete:
+            When False, the loop will not mark the session COMPLETED
+            on finish — the caller manages the session lifecycle.
         """
         from obscura.core.agent_loop import AgentLoop
+
+        # Load session history if enabled
+        initial_messages = None
+        if load_session_history and session_id:
+            try:
+                from obscura.core.context import load_session_messages
+                from obscura.core.paths import resolve_obscura_home
+                db_path = resolve_obscura_home() / "events.db"
+                initial_messages = load_session_messages(session_id, db_path, max_turns=5)
+                if initial_messages:
+                    _logger.debug(f"Loaded {len(initial_messages)} messages from session {session_id}")
+            except Exception as e:
+                _logger.warning(f"Could not load session history: {e}")
+
+
+        # For Claude: route confirmation through PreToolUse hook instead of
+        # AgentLoop.on_confirm (Claude SDK executes tools internally via MCP,
+        # so the loop's confirmation gate is never reached).
+        loop_confirm = on_confirm
+        if on_confirm and self._backend_type == Backend.CLAUDE:
+            from obscura.core.types import ToolCallInfo
+
+            def _wrap_confirm(name: str, inp: dict[str, Any]) -> bool:
+                return on_confirm(ToolCallInfo(name=name, input=inp))  # type: ignore[arg-type]
+
+            self._backend.enable_confirmation(_wrap_confirm)
+            loop_confirm = None  # don't double-gate
 
         loop = AgentLoop(
             self._backend,
             self._tool_registry,
             max_turns=max_turns,
-            on_confirm=on_confirm,
+            on_confirm=loop_confirm,
             capability_token=self._capability_token,
+            event_store=event_store,
+            auto_complete=auto_complete,
+            backend_name=self._backend_type.value,
+            model_name=self._model,
         )
-        return loop.run(prompt, **kwargs)
+        self._current_loop = loop
+        return loop.run(prompt, session_id=session_id, initial_messages=initial_messages, **kwargs)
 
     async def run_loop_to_completion(
         self,
@@ -317,12 +454,28 @@ class ObscuraClient:
         """Run the agent loop and return the final concatenated text."""
         from obscura.core.agent_loop import AgentLoop
 
+        # Load session history if enabled
+        initial_messages = None
+        if load_session_history and session_id:
+            try:
+                from obscura.core.context import load_session_messages
+                from obscura.core.paths import resolve_obscura_home
+                db_path = resolve_obscura_home() / "events.db"
+                initial_messages = load_session_messages(session_id, db_path, max_turns=5)
+                if initial_messages:
+                    _logger.debug(f"Loaded {len(initial_messages)} messages from session {session_id}")
+            except Exception as e:
+                _logger.warning(f"Could not load session history: {e}")
+
+
         loop = AgentLoop(
             self._backend,
             self._tool_registry,
             max_turns=max_turns,
             on_confirm=on_confirm,
             capability_token=self._capability_token,
+            backend_name=self._backend_type.value,
+            model_name=self._model,
         )
         return await loop.run_to_completion(prompt, **kwargs)
 
@@ -389,6 +542,15 @@ class ObscuraClient:
         return self._backend
 
     @property
+    def current_loop(self) -> Any | None:
+        """The currently-running AgentLoop, if any.
+
+        Exposed so the CLI can call ``inject_user_input()`` or
+        ``request_pause()`` while the loop is streaming.
+        """
+        return self._current_loop
+
+    @property
     def backend_type(self) -> Backend:
         """Which backend is active."""
         return self._backend_type
@@ -421,6 +583,28 @@ class ObscuraClient:
                 ...
         """
         return self._backend.capabilities()
+
+    # -- Reliability configuration -------------------------------------------
+
+    def configure_retry(
+        self, *, max_retries: int = 2, initial_backoff: float = 0.5
+    ) -> None:
+        """Set retry parameters for ``send()``."""
+        self._max_retries = max_retries
+        self._retry_initial_backoff = initial_backoff
+
+    def configure_cache(
+        self, *, max_entries: int = 1000, default_ttl: float = 300.0
+    ) -> None:
+        """Enable the LLM response cache for ``send()``."""
+        from obscura.core.llm_cache import LLMCache
+
+        self._cache = LLMCache(max_entries=max_entries, default_ttl=default_ttl)
+
+    @property
+    def circuit_registry(self) -> Any:
+        """Access the circuit breaker registry (testing / admin)."""
+        return self._circuit_registry
 
     def _enrich_prompt(self, prompt: str) -> str:
         """Prepend relevant memory context to prompt (best-effort)."""
@@ -495,6 +679,7 @@ class ObscuraClient:
         permission_mode: str,
         cwd: str | None,
         streaming: bool,
+        tool_policy: ToolPolicy | None = None,
     ) -> BackendProtocol:
         """Instantiate the appropriate backend."""
         if backend == Backend.COPILOT:
@@ -506,6 +691,7 @@ class ObscuraClient:
                 system_prompt=system_prompt,
                 mcp_servers=mcp_servers,
                 streaming=streaming,
+                tool_policy=tool_policy,
             )
 
         if backend == Backend.CLAUDE:
@@ -518,6 +704,7 @@ class ObscuraClient:
                 mcp_servers=mcp_servers,
                 permission_mode=permission_mode,
                 cwd=cwd,
+                tool_policy=tool_policy,
             )
 
         if backend == Backend.LOCALLLM:
@@ -534,6 +721,16 @@ class ObscuraClient:
             from obscura.providers.openai import OpenAIBackend
 
             return OpenAIBackend(
+                auth=auth,
+                model=model,
+                system_prompt=system_prompt,
+                mcp_servers=mcp_servers,
+            )
+
+        if backend == Backend.CODEX:
+            from obscura.providers.codex import CodexBackend
+
+            return CodexBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
@@ -607,6 +804,15 @@ def _record_stream_chunk(backend: str, chunk_kind: str) -> None:
 
         m = get_metrics()
         m.stream_chunks_total.add(1, {"backend": backend, "chunk_kind": chunk_kind})
+    except Exception:
+        pass
+
+
+def _record_cache_hit(backend: str) -> None:
+    try:
+        from obscura.telemetry.metrics import get_metrics
+
+        get_metrics().cache_hits.add(1, {"backend": backend})
     except Exception:
         pass
 

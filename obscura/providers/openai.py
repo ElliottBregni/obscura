@@ -45,6 +45,7 @@ from obscura.providers.models import (
     ModelInfo,
     ToolCallDefinition,
 )
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 
 class OpenAIBackend:
@@ -192,7 +193,7 @@ class OpenAIBackend:
         )
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("openai.send") as span:
-            _set_span_attr(span, "backend", "openai")
+            _set_span_attr(span, "backend", self._backend_type.value)
             _set_span_attr(span, "model", self._model)
 
             await self._run_hooks(
@@ -275,7 +276,7 @@ class OpenAIBackend:
         )
         tracer = _get_backend_tracer()
         span = tracer.start_span("openai.stream")
-        _set_span_attr(span, "backend", "openai")
+        _set_span_attr(span, "backend", self._backend_type.value)
         _set_span_attr(span, "model", self._model)
         finish_reason = ""
         try:
@@ -511,11 +512,99 @@ class OpenAIBackend:
 
     # -- OpenAI-specific methods (escape hatch) ------------------------------
 
-    async def list_models(self) -> list[dict[str, Any]]:
-        """List models available from the provider."""
-        self._ensure_client()
-        models = await self._client.models.list()
-        return [ModelInfo.from_openai(m).to_dict() for m in models.data]
+    async def list_models(self) -> list[RegistryModelInfo]:
+        """List models available from the provider via API with fallback."""
+        try:
+            if self._client is None:
+                return self._get_fallback_models()
+            models_response = await self._client.models.list()
+            model_list = []
+            for model in models_response.data:
+                # Filter to OpenAI chat models only
+                if not model.id.startswith(('gpt-', 'o1-', 'o3-', 'chatgpt-')):
+                    continue
+
+                # Infer capabilities from model ID
+                supports_vision = 'vision' in model.id.lower()
+                _no_tool_models = ('o1-preview', 'o1-mini')
+                supports_tools = not any(model.id.startswith(p) for p in _no_tool_models)
+
+                model_list.append(RegistryModelInfo(
+                    id=model.id,
+                    name=self._format_model_name(model.id),
+                    provider="openai",
+                    supports_tools=supports_tools,
+                    supports_vision=supports_vision,
+                ))
+            return model_list if model_list else self._get_fallback_models()
+        except Exception:
+            # API failure - return fallback models
+            return self._get_fallback_models()
+
+    def get_default_model(self) -> str:
+        """Return the default model for this provider."""
+        return "gpt-4o"
+
+    def validate_model(self, model_id: str) -> bool:
+        """Check if a model ID is valid for OpenAI."""
+        valid_prefixes = ('gpt-', 'o1-', 'o3-', 'chatgpt-', 'text-')
+        return any(model_id.startswith(prefix) for prefix in valid_prefixes)
+
+    def _format_model_name(self, model_id: str) -> str:
+        """Convert model ID to human-readable name."""
+        # gpt-4o → GPT-4o
+        # gpt-4-turbo → GPT-4 Turbo
+        # o1-preview → O1 Preview
+        name = model_id.replace('gpt-', 'GPT-').replace('o1-', 'O1-').replace('o3-', 'O3-')
+        name = name.replace('-', ' ').title()
+        return name
+
+    def _get_fallback_models(self) -> list[RegistryModelInfo]:
+        """Fallback list when API is unavailable (NOT source of truth)."""
+        return [
+            RegistryModelInfo(
+                id="gpt-4o",
+                name="GPT-4o",
+                provider="openai",
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            RegistryModelInfo(
+                id="gpt-4o-mini",
+                name="GPT-4o Mini",
+                provider="openai",
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            RegistryModelInfo(
+                id="o3-mini",
+                name="O3 Mini",
+                provider="openai",
+                supports_tools=True,
+                supports_vision=False,
+            ),
+            RegistryModelInfo(
+                id="o1",
+                name="O1",
+                provider="openai",
+                supports_tools=True,
+                supports_vision=False,
+            ),
+            RegistryModelInfo(
+                id="gpt-4-turbo",
+                name="GPT-4 Turbo",
+                provider="openai",
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            RegistryModelInfo(
+                id="gpt-4",
+                name="GPT-4",
+                provider="openai",
+                supports_tools=True,
+                supports_vision=False,
+            ),
+        ]
 
     # -- Internals -----------------------------------------------------------
 
@@ -564,11 +653,16 @@ class OpenAIBackend:
         if isinstance(native, ProviderNativeRequest):
             if self._backend_type == Backend.MOONSHOT and native.moonshot is not None:
                 return native.moonshot
+            if self._backend_type == Backend.CODEX and native.codex is not None:
+                return native.codex
             return native.openai
         if isinstance(native, Mapping):
             if self._backend_type == Backend.MOONSHOT:
                 if "moonshot" in native and isinstance(native["moonshot"], Mapping):
                     return cast(Mapping[str, Any], native["moonshot"])
+            if self._backend_type == Backend.CODEX:
+                if "codex" in native and isinstance(native["codex"], Mapping):
+                    return cast(Mapping[str, Any], native["codex"])
             if "openai" in native and isinstance(native["openai"], Mapping):
                 return cast(Mapping[str, Any], native["openai"])
             return cast(Mapping[str, Any], native)

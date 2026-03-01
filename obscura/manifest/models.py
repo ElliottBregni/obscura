@@ -58,33 +58,24 @@ class SkillManifest(BaseModel):
 
 
 class InstructionManifest(BaseModel):
-    """Parsed instruction file with optional applyTo globs."""
-
+    """Instruction manifest for context-specific agent behavior."""
+    
     apply_to: list[str] = Field(default_factory=_empty_str_list)
     body: str = ""
-    source_path: Path | None = None
-
+    
     model_config = {"arbitrary_types_allowed": True}
 
 
 class MCPServerRef(BaseModel):
-    """MCP server reference from agent frontmatter or servers.json."""
-
+    """Reference to an MCP (Model Context Protocol) server configuration."""
+    
     name: str
     transport: str = "stdio"
     command: str = ""
     args: list[str] = Field(default_factory=_empty_str_list)
     env: dict[str, str] = Field(default_factory=_empty_dict)
-    url: str = ""
-    description: str = ""
-
-
-def _empty_hook_list() -> list[HookDefinition]:
-    return []
-
-
-def _empty_skill_list() -> list[SkillManifest]:
-    return []
+    
+    model_config = {"arbitrary_types_allowed": True}
 
 
 def _empty_instruction_list() -> list[InstructionManifest]:
@@ -97,35 +88,19 @@ def _empty_mcp_refs() -> list[MCPServerRef]:
 
 class AgentManifest(BaseModel):
     """Complete parsed agent manifest from an ``*.agent.md`` file.
-
-    YAML frontmatter maps to structured config fields.
-    The markdown body becomes ``system_prompt``.
     """
-
-    # Identity
     name: str
     description: str = ""
-    model: str = "copilot"
-
-    # System prompt (from markdown body)
+    provider: str = "copilot"
+    model_id: str | None = None
     system_prompt: str = ""
-
-    # Tool configuration
     tools: list[str] = Field(default_factory=_empty_str_list)
     tool_allowlist: list[str] | None = None
-
-    # MCP configuration
-    mcp_servers: list[str] | str = "auto"
-    mcp_server_refs: list[MCPServerRef] = Field(default_factory=_empty_mcp_refs)
-
-    # Permissions
+    mcp_servers: list[MCPServerRef] = Field(default_factory=_empty_mcp_refs)
     permissions: PermissionConfig = Field(default_factory=PermissionConfig)
+    hooks: list[HookDefinition] = Field(default_factory=list)
 
-    # Hooks (per-agent)
-    hooks: list[HookDefinition] = Field(default_factory=_empty_hook_list)
-
-    # Skills
-    skills: list[SkillManifest] = Field(default_factory=_empty_skill_list)
+    skills_config: dict[str, Any] = Field(default_factory=dict)
 
     # Instructions
     instructions: list[InstructionManifest] = Field(
@@ -146,6 +121,17 @@ class AgentManifest(BaseModel):
     source_path: Path | None = None
 
     model_config = {"arbitrary_types_allowed": True}
+
+    @property
+    def model(self) -> str:
+        """Deprecated: use provider instead."""
+        import warnings
+        warnings.warn(
+            "AgentManifest.model is deprecated. Use .provider instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.provider
 
 
 def normalize_frontmatter_key(key: str) -> str:
@@ -178,7 +164,7 @@ def agent_manifest_from_frontmatter(
     }
 
     _DIRECT_FIELDS = {
-        "name", "description", "model", "tools", "tool_allowlist",
+        "name", "description", "provider", "model_id", "tools", "tool_allowlist",
         "mcp_servers", "can_delegate", "delegate_allowlist",
         "max_delegation_depth", "agent_type", "max_turns", "tags",
     }
@@ -202,5 +188,14 @@ def agent_manifest_from_frontmatter(
             if isinstance(h_item, dict):
                 hook_defs.append(HookDefinition(**cast("dict[str, Any]", h_item)))
         kwargs["hooks"] = hook_defs
+
+    # Skills loading config (lazy_load, filter)
+    raw_skills: Any = normalised.get("skills")
+    if isinstance(raw_skills, dict):
+        kwargs["skills_config"] = cast("dict[str, Any]", raw_skills)
+
+    # Backward compatibility: accept 'model' field and map to 'provider'
+    if "model" in normalised and "provider" not in normalised:
+        kwargs["provider"] = normalised["model"]
 
     return AgentManifest(**kwargs)

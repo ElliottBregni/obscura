@@ -34,6 +34,7 @@ from obscura.core.types import (
     ToolChoice,
     ToolSpec,
 )
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
 from obscura.providers.models import (
     ChatMessage,
     CompletionParams,
@@ -494,6 +495,45 @@ class LocalLLMBackend:
             }
 
     # -- Internals -----------------------------------------------------------
+
+
+    # -- Provider Registry (model discovery) ---------------------------------
+
+    async def list_models(self) -> list[RegistryModelInfo]:
+        """List models from local LLM server at runtime."""
+        self._ensure_client()
+        try:
+            # Query the server's models endpoint
+            response = await self._client.get("/v1/models")
+            models_data = response.json() if hasattr(response, 'json') else response
+            
+            model_list = []
+            for model in models_data.get("data", []):
+                model_id = model.get("id", "unknown")
+                # Infer capabilities from model name
+                supports_tools = any(keyword in model_id.lower() 
+                                   for keyword in ["tool", "function", "agent"])
+                supports_vision = "vision" in model_id.lower()
+                
+                model_list.append(RegistryModelInfo(
+                    id=model_id,
+                    name=model.get("name", model_id),
+                    provider="localllm",
+                    supports_tools=supports_tools,
+                    supports_vision=supports_vision,
+                ))
+            return model_list
+        except Exception:
+            # Server unavailable or no models endpoint
+            return []
+
+    def get_default_model(self) -> str | None:
+        """Return the default model for this provider."""
+        return None  # Let the local server choose
+
+    def validate_model(self, model_id: str) -> bool:
+        """Check if a model ID is valid for LocalLLM."""
+        return True  # Server validates at runtime
 
     def _ensure_client(self) -> None:
         if self._client is None:

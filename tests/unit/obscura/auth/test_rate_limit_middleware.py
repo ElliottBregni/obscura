@@ -81,10 +81,11 @@ def _make_app_with_user(
                 request.state.user = user
             return await call_next(request)
 
-    # Rate limit checks user, so it must run after user injection
-    # Starlette applies middleware in reverse order
-    app.add_middleware(_UserInjector)
+    # Starlette applies middleware in reverse add order (last added = outermost)
+    # We want: UserInjector → RateLimitMiddleware → app
+    # So add RateLimitMiddleware first, then UserInjector (outer)
     app.add_middleware(RateLimitMiddleware, limiter=limiter)
+    app.add_middleware(_UserInjector)
 
     return app
 

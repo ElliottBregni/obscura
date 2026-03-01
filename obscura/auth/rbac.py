@@ -11,6 +11,7 @@ Roles
 - ``agent:claude``    -- may invoke the Claude backend
 - ``agent:localllm``  -- may invoke the LocalLLM backend
 - ``agent:openai``    -- may invoke the OpenAI backend
+- ``agent:codex``     -- may invoke the Codex backend
 - ``agent:moonshot``  -- may invoke the Moonshot/Kimi backend
 - ``agent:read``      -- read-only agent access (send / stream)
 - ``sync:write``      -- trigger vault sync
@@ -36,6 +37,7 @@ AGENT_WRITE_ROLES = (
     "agent:claude",
     "agent:localllm",
     "agent:openai",
+    "agent:codex",
     "agent:moonshot",
 )
 """Roles that may spawn, run, stop, or mutate agents."""

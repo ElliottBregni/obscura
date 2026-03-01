@@ -68,6 +68,26 @@ from obscura.core.hooks import HookRegistry
 
 logger = logging.getLogger(__name__)
 
+# Parameter name aliases for cross-provider compatibility.
+# Maps provider-specific parameter names to canonical tool parameter names.
+PARAMETER_ALIASES: dict[str, dict[str, str]] = {
+    "write_text_file": {
+        "content": "text",  # Copilot/OpenAI uses 'content', we use 'text'
+        "file_path": "path",
+        "filepath": "path",
+    },
+    "read_text_file": {
+        "file_path": "path",
+        "filepath": "path",
+    },
+    "append_text_file": {
+        "content": "text",
+        "file_path": "path",
+        "filepath": "path",
+    },
+}
+
+
 # Type alias for confirmation callbacks.
 # Receives a ToolCallInfo, returns True (approve) or False (deny).
 ConfirmationCallback = Callable[[ToolCallInfo], Awaitable[bool] | bool]
@@ -114,6 +134,9 @@ class AgentLoop:
         event_store: EventStoreProtocol | None = None,
         agent_name: str = "agent_loop",
         tool_allowlist: list[str] | None = None,
+        auto_complete: bool = True,
+        backend_name: str = "",
+        model_name: str = "",
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -124,6 +147,9 @@ class AgentLoop:
         self._event_store = event_store
         self._agent_name = agent_name
         self._tool_allowlist = tool_allowlist
+        self._auto_complete = auto_complete
+        self._backend_name = backend_name
+        self._model_name = model_name
 
         # Pause / mid-run input state
         self._should_pause = False
@@ -197,6 +223,7 @@ class AgentLoop:
         prompt: str,
         *,
         session_id: str | None = None,
+        initial_messages: list[Message] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run the agent loop, yielding events as they occur.
@@ -225,9 +252,14 @@ class AgentLoop:
         if self._event_store is not None and sid is not None:
             existing = await self._event_store.get_session(sid)
             if existing is None:
-                await self._event_store.create_session(sid, self._agent_name)
+                await self._event_store.create_session(
+                    sid,
+                    self._agent_name,
+                    backend=self._backend_name,
+                    model=self._model_name,
+                )
 
-        async for event in self._run_inner(prompt, sid, 0, "", kwargs):
+        async for event in self._run_inner(prompt, sid, 0, "", kwargs, initial_messages):
             yield event
 
     async def resume(
@@ -310,6 +342,7 @@ class AgentLoop:
         start_turn: int,
         accumulated_text: str,
         stream_kwargs: dict[str, Any],
+        initial_messages: list | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Core loop body shared by :meth:`run` and :meth:`resume`."""
         turn: int = start_turn
@@ -453,7 +486,7 @@ class AgentLoop:
                     yield emitted
                     await self._post_emit(emitted)
                 # Mark session failed
-                if self._event_store is not None and session_id is not None:
+                if self._auto_complete and self._event_store is not None and session_id is not None:
                     from obscura.core.event_store import SessionStatus
 
                     try:
@@ -547,7 +580,7 @@ class AgentLoop:
                     yield emitted
                     await self._post_emit(emitted)
                 # Mark session completed
-                if self._event_store is not None and session_id is not None:
+                if self._auto_complete and self._event_store is not None and session_id is not None:
                     from obscura.core.event_store import SessionStatus
 
                     try:
@@ -607,7 +640,7 @@ class AgentLoop:
             yield emitted
             await self._post_emit(emitted)
         # Mark session completed
-        if self._event_store is not None and session_id is not None:
+        if self._auto_complete and self._event_store is not None and session_id is not None:
             from obscura.core.event_store import SessionStatus
 
             try:
@@ -803,6 +836,14 @@ class AgentLoop:
         enumerate every LLM-convention parameter.
         """
         handler = spec.handler
+        
+        # Normalize parameter names based on known aliases
+        if spec.name in PARAMETER_ALIASES:
+            aliases = PARAMETER_ALIASES[spec.name]
+            for alias, canonical in aliases.items():
+                if alias in inputs and canonical not in inputs:
+                    inputs[canonical] = inputs.pop(alias)
+        
         try:
             if inspect.iscoroutinefunction(handler):
                 return await handler(**inputs)

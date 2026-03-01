@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from obscura.schemas.templates import APERProfileSchema, A2ARemoteToolsSpecSchema
 
@@ -37,7 +37,15 @@ class AgentBuilderSpawnSchema(BaseModel):
     """Builder-style spawn payload for API parity with AgentBuilder."""
 
     name: str = Field(default="unnamed")
-    model: str = Field(default="copilot")
+    provider: str = Field(default="copilot", description="Backend: copilot, claude, openai, etc.")
+    model_id: str | None = Field(default=None, description="Specific model ID (optional)")
+    
+    # Deprecated field for backward compatibility
+    model: str | None = Field(
+        default=None,
+        description="DEPRECATED: Use 'provider' instead.",
+        deprecated=True,
+    )
     system_prompt: str = Field(default="")
     memory_namespace: str = Field(default="default")
     max_iterations: int = Field(default=10, ge=1)
@@ -57,6 +65,20 @@ class AgentBuilderSpawnSchema(BaseModel):
     mcp_server_names: list[str] = Field(default_factory=_default_str_list)
     mcp_primary_server_name: str = Field(default="github")
     mcp_resolve_env: bool = Field(default=True)
+    @model_validator(mode='after')
+    def migrate_model_field(self):
+        """Migrate deprecated 'model' field to 'provider'."""
+        if self.model is not None and self.provider == "copilot":
+            import warnings
+            warnings.warn(
+                "The 'model' field is deprecated. Use 'provider' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.provider = self.model
+        return self
+
+    
     a2a_remote_tools: A2ARemoteToolsSpecSchema | dict[str, Any] | None = Field(
         default=None
     )
@@ -66,7 +88,15 @@ class AgentSpawnRequest(BaseModel):
     """POST /api/v1/agents body."""
 
     name: str = Field(default="unnamed")
-    model: str = Field(default="copilot")
+    provider: str = Field(default="copilot", description="Backend: copilot, claude, openai, etc.")
+    model_id: str | None = Field(default=None, description="Specific model ID (optional)")
+    
+    # Deprecated field for backward compatibility
+    model: str | None = Field(
+        default=None,
+        description="DEPRECATED: Use 'provider' instead.",
+        deprecated=True,
+    )
     system_prompt: str = Field(default="")
     memory_namespace: str = Field(default="default")
     max_iterations: int = Field(default=10, ge=1)
@@ -75,6 +105,20 @@ class AgentSpawnRequest(BaseModel):
     parent_agent_id: str | None = Field(default=None)
     tags: list[str] = Field(default_factory=_default_str_list)
     mcp: MCPRuntimeSchema | dict[str, Any] | None = Field(default=None)
+    @model_validator(mode='after')
+    def migrate_model_field(self):
+        """Migrate deprecated 'model' field to 'provider'."""
+        if self.model is not None and self.provider == "copilot":
+            import warnings
+            warnings.warn(
+                "The 'model' field is deprecated. Use 'provider' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.provider = self.model
+        return self
+
+    
     a2a_remote_tools: A2ARemoteToolsSpecSchema | dict[str, Any] | None = Field(
         default=None
     )

@@ -129,7 +129,9 @@ class AgentConfig(BaseModel):
     """Configuration for an agent instance."""
 
     name: str
-    model: str  # "copilot", "claude", "localllm", "openai", or "moonshot"
+    provider: str  # "copilot", "claude", "localllm", "openai", or "moonshot"
+
+    model_id: str | None = None  # Specific model (optional, uses provider default if None)
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
@@ -148,6 +150,21 @@ class AgentConfig(BaseModel):
 
     # Tool allowlist (None = all tools allowed)
     tool_allowlist: list[str] | None = None
+    
+    # Skill loading configuration
+    lazy_load_skills: bool = False
+    skill_filter: list[str] | None = None
+    @property
+    def model(self) -> str:
+        """Deprecated: use provider instead."""
+        import warnings
+        warnings.warn(
+            "AgentConfig.model is deprecated. Use .provider instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.provider
+
 
     @classmethod
     def from_manifest(cls, manifest: AgentManifest) -> AgentConfig:
@@ -173,6 +190,11 @@ class AgentConfig(BaseModel):
             server_names=server_names,
         )
 
+        # Extract skills loading config (lazy_load, filter)
+        skills_cfg = manifest.skills_config
+        lazy_load = bool(skills_cfg.get("lazy_load", False))
+        skill_filter = skills_cfg.get("filter", None)
+        
         return cls(
             name=manifest.name,
             model=manifest.model,
@@ -185,6 +207,8 @@ class AgentConfig(BaseModel):
             delegate_allowlist=list(manifest.delegate_allowlist),
             max_delegation_depth=manifest.max_delegation_depth,
             tool_allowlist=list(manifest.tool_allowlist) if manifest.tool_allowlist is not None else None,
+            lazy_load_skills=lazy_load,
+            skill_filter=skill_filter,
         )
 
 
@@ -335,6 +359,7 @@ class Agent:
         from obscura.tools.providers import (
             A2ARemoteToolProvider,
             MCPToolProvider,
+            MemoryToolProvider,
             SystemToolProvider,
             ToolProviderContext,
             ToolProviderRegistry,
@@ -410,6 +435,9 @@ class Agent:
 
         if self.config.enable_system_tools:
             provider_registry.add(SystemToolProvider())
+
+        # Always enable memory tools for authenticated users
+        provider_registry.add(MemoryToolProvider())
 
         a2a_remote_config = self.config.a2a_remote_tools
         if bool(a2a_remote_config.get("enabled", False)):

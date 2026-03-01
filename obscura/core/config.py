@@ -46,6 +46,23 @@ class ObscuraConfig(BaseModel):
     capability_secret: str = ""  # HMAC signing key; empty = random per-process
     capability_ttl: int = 3600  # Token lifetime in seconds
 
+    # Rate limiting
+    rate_limit_rpm: int = 100  # requests per minute per user
+    rate_limit_concurrent: int = 10  # max concurrent requests per user
+
+    # Circuit breaker
+    circuit_breaker_threshold: int = 5  # failures before opening
+    circuit_breaker_recovery: float = 30.0  # seconds before half-open
+
+    # Retry
+    max_retries: int = 2
+    retry_initial_backoff: float = 0.5
+
+    # LLM cache
+    cache_enabled: bool = False  # opt-in
+    cache_max_entries: int = 1000
+    cache_default_ttl: float = 300.0  # 5 minutes
+
     # A2A (Agent-to-Agent protocol)
     a2a_enabled: bool = False
     a2a_redis_url: str = ""  # empty = use InMemoryTaskStore
@@ -86,6 +103,32 @@ class ObscuraConfig(BaseModel):
             # Capability system
             capability_secret=os.environ.get("OBSCURA_CAPABILITY_SECRET", ""),
             capability_ttl=int(os.environ.get("OBSCURA_CAPABILITY_TTL", "3600")),
+            # Rate limiting
+            rate_limit_rpm=int(os.environ.get("OBSCURA_RATE_LIMIT_RPM", "100")),
+            rate_limit_concurrent=int(
+                os.environ.get("OBSCURA_RATE_LIMIT_CONCURRENT", "10")
+            ),
+            # Circuit breaker
+            circuit_breaker_threshold=int(
+                os.environ.get("OBSCURA_CIRCUIT_BREAKER_THRESHOLD", "5")
+            ),
+            circuit_breaker_recovery=float(
+                os.environ.get("OBSCURA_CIRCUIT_BREAKER_RECOVERY", "30.0")
+            ),
+            # Retry
+            max_retries=int(os.environ.get("OBSCURA_MAX_RETRIES", "2")),
+            retry_initial_backoff=float(
+                os.environ.get("OBSCURA_RETRY_INITIAL_BACKOFF", "0.5")
+            ),
+            # Cache
+            cache_enabled=os.environ.get("OBSCURA_CACHE_ENABLED", "false").lower()
+            == "true",
+            cache_max_entries=int(
+                os.environ.get("OBSCURA_CACHE_MAX_ENTRIES", "1000")
+            ),
+            cache_default_ttl=float(
+                os.environ.get("OBSCURA_CACHE_DEFAULT_TTL", "300.0")
+            ),
             # A2A
             a2a_enabled=os.environ.get("OBSCURA_A2A_ENABLED", "false").lower()
             == "true",

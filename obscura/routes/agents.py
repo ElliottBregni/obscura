@@ -19,20 +19,19 @@ from obscura.approvals import (
 )
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
+from obscura.core.paths import resolve_obscura_mcp_dir
+from obscura.core.system_prompts import compose_system_prompt as compose_default_prompt
 from obscura.core.types import ToolCallInfo
 from obscura.deps import audit, get_runtime
-from obscura.core.paths import resolve_obscura_mcp_dir
-
-router = APIRouter(prefix="/api/v1", tags=["agents"])
-
-# Template store (in-memory + optional SQLite)
 from obscura.routes import template_store
+from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
 from obscura.schemas.templates import (
     SpawnFromTemplateRequest,
     TemplateCreateRequest,
     TemplateUpdateRequest,
 )
-from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
+
+router = APIRouter(prefix="/api/v1", tags=["agents"])
 
 # Backwards-compatible alias: workflows.py imports this dict directly
 agent_templates = template_store.get_all()
@@ -93,7 +92,7 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
 
     model_raw = _resolve_spawn_field(body, builder, "model", "copilot")
     model = str(model_raw)
-    valid_models = ("copilot", "claude", "localllm", "openai", "moonshot")
+    valid_models = ("copilot", "claude", "localllm", "openai", "codex", "moonshot")
     if model not in valid_models:
         raise HTTPException(
             status_code=400,
@@ -757,17 +756,33 @@ async def template_delete(
 
 
 def _compose_system_prompt(template: dict[str, Any]) -> str:
-    """Build system prompt with skills injected (mirrors AgentBuilder pattern)."""
-    base: str = template.get("system_prompt", "")
+    """Build system prompt with Obscura defaults + skills."""
+    import os
+
+    user_prompt: str = template.get("system_prompt", "")
     skills: list[dict[str, Any]] = template.get("skills", [])
-    if not skills:
-        return base
-    parts: list[str] = [base, "", "## Loaded Skills"]
-    for skill in skills:
-        parts.append(f"### {skill['name']} (source: {skill.get('source', 'inline')})")
-        parts.append(str(skill.get("content", "")).strip())
-        parts.append("")
-    return "\n".join(parts).strip()
+
+    # Build skills section if present
+    skill_parts: list[str] = []
+    if skills:
+        skill_parts.append("## Loaded Skills")
+        for skill in skills:
+            skill_parts.append(f"### {skill['name']} (source: {skill.get('source', 'inline')})")
+            skill_parts.append(str(skill.get("content", "")).strip())
+            skill_parts.append("")
+
+    skills_section = "\n".join(skill_parts).strip() if skill_parts else ""
+
+    # Check env var to disable default prompt if needed
+    include_default = os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "true"
+
+    custom_sections = [skills_section] if skills_section else None
+
+    return compose_default_prompt(
+        base=user_prompt,
+        include_default=include_default,
+        custom_sections=custom_sections,
+    )
 
 
 def _build_mcp_config(template: dict[str, Any]) -> Any:

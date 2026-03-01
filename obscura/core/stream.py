@@ -107,14 +107,9 @@ class EventToIteratorBridge:
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
         name = ""
-        if (
-            hasattr(event, "data")
-            and hasattr(event.data, "tool_name")
-            and event.data.tool_name
-        ):
-            name = event.data.tool_name
-        elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
-            name = event.data.name
+        data = getattr(event, "data", None)
+        if data is not None:
+            name = getattr(data, "tool_name", "") or getattr(data, "name", "") or ""
         self.push(
             StreamChunk(
                 kind=ChunkKind.TOOL_USE_START,
@@ -123,6 +118,35 @@ class EventToIteratorBridge:
                 native_event=event,
             )
         )
+        # Extract tool input from event and emit as TOOL_USE_DELTA so the
+        # agent loop can parse arguments.  Copilot events carry input in
+        # various attributes; try common locations.
+        if data is not None:
+            tool_input: Any = None
+            for attr in ("tool_input", "input", "arguments", "parameters"):
+                val = getattr(data, attr, None)
+                if val is not None:
+                    tool_input = val
+                    break
+            # Also check dict-style access
+            if tool_input is None and isinstance(data, dict):
+                for key in ("tool_input", "input", "arguments", "parameters"):
+                    if key in data:
+                        tool_input = data[key]
+                        break
+            if tool_input is not None:
+                if isinstance(tool_input, str):
+                    delta = tool_input
+                else:
+                    delta = json.dumps(tool_input)
+                self.push(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_input_delta=delta,
+                        raw=event,
+                        native_event=event,
+                    )
+                )
 
     def on_tool_end(self, event: Any) -> None:
         """Map tool execution end."""

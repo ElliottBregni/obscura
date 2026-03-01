@@ -334,6 +334,16 @@ class TestResolveAuth:
         assert result.openai_api_key == "key"
         assert result.openai_base_url == "http://custom"
 
+    def test_codex(self):
+        config = AuthConfig(openai_api_key="key", openai_base_url="http://custom")
+        result = resolve_auth(Backend.CODEX, config)
+        assert result.openai_api_key == "key"
+        assert result.openai_base_url == "http://custom"
+
+    def test_codex_without_explicit_credentials_is_allowed(self):
+        result = resolve_auth(Backend.CODEX, AuthConfig())
+        assert result.openai_api_key is None
+
     def test_localllm(self):
         result = resolve_auth(Backend.LOCALLLM)
         assert result.localllm_base_url is not None

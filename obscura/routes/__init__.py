@@ -11,6 +11,7 @@ from obscura.routes.health import router as health_router
 from obscura.routes.heartbeat import router as heartbeat_router
 from obscura.routes.heartbeat import ws_router as heartbeat_ws_router
 from obscura.routes.memory import router as memory_router
+from obscura.routes.models import router as models_router
 from obscura.routes.observe import router as observe_router
 from obscura.routes.send import router as send_router
 from obscura.routes.sessions import router as sessions_router
@@ -41,5 +42,6 @@ all_routers = [
     heartbeat_router,
     heartbeat_ws_router,
     capabilities_router,
+    models_router,
     skills_router,
 ]

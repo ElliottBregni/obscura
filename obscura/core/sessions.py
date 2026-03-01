@@ -1,9 +1,14 @@
 """
 obscura.internal.sessions — Lightweight session tracking across backends.
 
-Backends handle actual session persistence. This store provides a
-unified index so the CLI can list and resume sessions across both
-Copilot and Claude without querying each SDK separately.
+``SessionStore`` provides in-memory runtime tracking for active sessions.
+Backends that need to map session IDs to SDK objects (threads, etc.) use
+this store.
+
+.. deprecated::
+    ``PersistentSessionStore`` is deprecated.  The unified event store
+    (``obscura.core.event_store.SQLiteEventStore``) is now the single
+    source of truth for all session metadata.
 """
 
 from __future__ import annotations
@@ -62,16 +67,14 @@ class SessionStore:
 class PersistentSessionStore(SessionStore):
     """File-backed session store for agent recovery after interruption.
 
+    .. deprecated::
+        Use ``SQLiteEventStore`` from ``obscura.core.event_store`` instead.
+        The unified event store is now the single source of truth for
+        session metadata, including backend, model, and source info.
+
     Serialises the session index to a JSON file so it survives process
     restarts.  Call :meth:`save` after mutations and :meth:`load` at
     startup.
-
-    Usage::
-
-        store = PersistentSessionStore(Path("~/.obscura/sessions.json"))
-        store.load()          # restore from disk
-        store.add(ref)
-        store.save()          # flush to disk
     """
 
     def __init__(self, path: Path) -> None:

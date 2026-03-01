@@ -30,10 +30,12 @@ class TestBackend:
     def test_values(self) -> None:
         assert Backend.COPILOT.value == "copilot"
         assert Backend.CLAUDE.value == "claude"
+        assert Backend.CODEX.value == "codex"
 
     def test_from_string(self) -> None:
         assert Backend("copilot") is Backend.COPILOT
         assert Backend("claude") is Backend.CLAUDE
+        assert Backend("codex") is Backend.CODEX
 
 
 # ---------------------------------------------------------------------------

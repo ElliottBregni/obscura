@@ -38,7 +38,7 @@ class AuthConfig(BaseModel):
     anthropic_api_key: str | None = None
     # Copilot BYOK (Bring Your Own Key)
     byok_provider: dict[str, Any] | None = None
-    # OpenAI-compatible (OpenAI, OpenRouter, Together, etc.)
+    # OpenAI-compatible (OpenAI/Codex, OpenRouter, Together, etc.)
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     # Moonshot/Kimi (OpenAI-compatible)
@@ -315,6 +315,23 @@ def _resolve_codex_oauth_token() -> str | None:
     return None
 
 
+def _has_codex_cli_oauth() -> bool:
+    """Return True when Codex CLI reports an active OAuth login."""
+    try:
+        status = subprocess.run(
+            ["codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+    status_text = f"{status.stdout}\n{status.stderr}"
+    return status.returncode == 0 and "Logged in" in status_text
+
+
 def _resolve_openai_base_url(explicit: str | None) -> str | None:
     """Resolve an OpenAI base URL (optional — defaults to OpenAI's API)."""
     if explicit:
@@ -512,6 +529,14 @@ def resolve_auth(
         key = _resolve_openai_key(config.openai_api_key)
         base_url = _resolve_openai_base_url(config.openai_base_url)
         return AuthConfig(openai_api_key=key, openai_base_url=base_url)
+
+    if backend == Backend.CODEX:
+        # Codex SDK lane may use either OAuth state or explicit API key.
+        # Defer strict validation to provider.start() for clearer runtime errors.
+        return AuthConfig(
+            openai_api_key=config.openai_api_key,
+            openai_base_url=config.openai_base_url,
+        )
 
     if backend == Backend.LOCALLLM:
         base_url = _resolve_localllm_base_url(config.localllm_base_url)

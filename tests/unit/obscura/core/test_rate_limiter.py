@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import patch
 
 from obscura.core.rate_limiter import RateLimiter, RateLimitResult
 
@@ -158,12 +157,12 @@ class TestRateLimiterSlidingWindow:
 
 class TestRateLimiterClear:
     def test_clear_resets_all(self) -> None:
-        limiter = RateLimiter(default_rpm=1)
+        limiter = RateLimiter(default_rpm=5)
         limiter.acquire("u1")
         limiter.set_limits("u1", rpm=500)
         limiter.clear()
-        # After clear, defaults apply and no history
+        # After clear, custom limits removed, history cleared
         limits = limiter.get_limits("u1")
-        assert limits["rpm"] == 100  # back to default
+        assert limits["rpm"] == 5  # back to constructor default
         result = limiter.acquire("u1")
         assert result.allowed is True

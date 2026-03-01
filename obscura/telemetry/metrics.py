@@ -194,6 +194,40 @@ class ObscuraMetrics:
         "Total number of stream chunks emitted",
     )
 
+    # -- Rate limit metrics ----------------------------------------------------
+    rate_limit_rejections = _LazyMetric(
+        "create_counter",
+        "obscura_rate_limit_rejections_total",
+        "Total number of rate-limited requests",
+    )
+
+    # -- Circuit breaker metrics -----------------------------------------------
+    circuit_breaker_trips = _LazyMetric(
+        "create_counter",
+        "obscura_circuit_breaker_trips_total",
+        "Circuit breaker state transitions",
+    )
+
+    # -- Retry metrics ---------------------------------------------------------
+    retry_attempts = _LazyMetric(
+        "create_counter",
+        "obscura_retry_attempts_total",
+        "Total retry attempts",
+    )
+
+    # -- Cache metrics ---------------------------------------------------------
+    cache_hits = _LazyMetric(
+        "create_counter",
+        "obscura_cache_hits_total",
+        "LLM cache hits",
+    )
+
+    cache_misses = _LazyMetric(
+        "create_counter",
+        "obscura_cache_misses_total",
+        "LLM cache misses",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Singleton access

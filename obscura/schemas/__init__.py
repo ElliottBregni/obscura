@@ -13,7 +13,7 @@ class SendRequest(BaseModel):
     """Request body for POST /api/v1/send."""
 
     backend: str = Field(
-        default="copilot", description="Backend: 'copilot' or 'claude'"
+        default="copilot", description="Backend (for example: copilot, claude, codex)"
     )
     prompt: str = Field(..., min_length=1, description="User prompt text")
     model: str | None = Field(default=None, description="Raw model ID")
@@ -47,7 +47,7 @@ class StreamRequest(BaseModel):
     """Request body for POST /api/v1/stream."""
 
     backend: str = Field(
-        default="copilot", description="Backend: 'copilot' or 'claude'"
+        default="copilot", description="Backend (for example: copilot, claude, codex)"
     )
     prompt: str = Field(..., min_length=1, description="User prompt text")
     model: str | None = Field(default=None, description="Raw model ID")
@@ -72,7 +72,7 @@ class SessionCreateRequest(BaseModel):
     """Request body for POST /api/v1/sessions."""
 
     backend: str = Field(
-        default="copilot", description="Backend: 'copilot' or 'claude'"
+        default="copilot", description="Backend (for example: copilot, claude, codex)"
     )
 
 

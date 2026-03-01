@@ -1,0 +1,20 @@
+--- obscura/cli/__init__.py.orig
++++ obscura/cli/__init__.py
+@@ -299,10 +299,16 @@
+     if tools_enabled:
+         mcp_configs, mcp_names = _discover_mcp()
+ 
++    # Load Obscura session memory from .obscura/events.db
++    from obscura.core.context import load_obscura_memory
++    memory_context = load_obscura_memory(sid, db_path)
++    combined_system = f"{system}\n\n{memory_context}" if memory_context else system
++
+     # Build client (MCP servers connect during start())
+     async with ObscuraClient(
+         backend,
+         model=model,
+-        system_prompt=system,
++        system_prompt=combined_system,
+         mcp_servers=mcp_configs or None,
+     ) as client:
+ 

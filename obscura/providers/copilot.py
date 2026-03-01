@@ -15,6 +15,7 @@ from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
 from obscura.core.tools import ToolRegistry
+from obscura.core.tool_policy import ToolPolicy
 from obscura.core.types import (
     AgentHookConfig,
     AgentEvent,
@@ -31,6 +32,7 @@ from obscura.core.types import (
     ToolChoice,
     ToolSpec,
 )
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 
 # ---------------------------------------------------------------------------
@@ -49,12 +51,14 @@ class CopilotBackend:
         system_prompt: str = "",
         mcp_servers: list[dict[str, Any]] | None = None,
         streaming: bool = True,
+    tool_policy: ToolPolicy | None = None,
     ) -> None:
         self._auth = auth
         self._model = model
         self._system_prompt = system_prompt
         self._mcp_servers = mcp_servers or []
         self._streaming = streaming
+        self._tool_policy = tool_policy or ToolPolicy.from_env()
 
         # SDK objects (set on start())
         self._client: Any = None
@@ -397,6 +401,48 @@ class CopilotBackend:
 
     # -- Internals -----------------------------------------------------------
 
+
+    # -- Provider Registry (model discovery) ---------------------------------
+
+    async def list_models(self) -> list[RegistryModelInfo]:
+        """List models available from Copilot (hybrid approach)."""
+        try:
+            # Try to use copilot_models package if available
+            from copilot_models import COPILOT_MODELS
+            return [
+                RegistryModelInfo(
+                    id=model["id"],
+                    name=model.get("name", model["id"]),
+                    provider="copilot",
+                    supports_tools=model.get("supports_tools", True),
+                    supports_vision=model.get("supports_vision", False),
+                )
+                for model in COPILOT_MODELS
+            ]
+        except ImportError:
+            # Fallback to known models
+            return self._get_fallback_models()
+
+    def get_default_model(self) -> str:
+        """Return the default model for this provider."""
+        return "auto"  # Copilot chooses best model
+
+    def validate_model(self, model_id: str) -> bool:
+        """Check if a model ID is valid for Copilot."""
+        return True  # Copilot validates internally
+
+    def _get_fallback_models(self) -> list[RegistryModelInfo]:
+        """Fallback list when copilot_models package unavailable."""
+        return [
+            RegistryModelInfo(
+                id="auto",
+                name="Copilot Auto (Best Available)",
+                provider="copilot",
+                supports_tools=True,
+                supports_vision=True,
+            ),
+        ]
+
     def _ensure_client(self) -> None:
         if self._client is None:
             raise RuntimeError("CopilotBackend not started. Call start() first.")
@@ -424,7 +470,9 @@ class CopilotBackend:
         if self._mcp_servers:
             config["mcp_servers"] = self._mcp_servers
         if self._tools:
-            config["tools"] = self._tools  # Backend translates ToolSpecs
+            config["tools"] = self._tools
+            # Apply tool policy to restrict native tools
+            self._tool_policy.apply_to_copilot(config, self._tools)
 
         # Apply hook mappings
         hooks = self.build_hooks_config()

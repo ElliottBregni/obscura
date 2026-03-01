@@ -139,6 +139,27 @@ class A2ARemoteToolProvider:
         self._clients.clear()
 
 
+class MemoryToolProvider:
+    """Provides memory and vector storage tools to agents."""
+
+    async def install(self, context: ToolProviderContext) -> None:
+        from obscura.auth.models import AuthenticatedUser
+        from obscura.tools.memory_tools import make_memory_tool_specs
+
+        # Get user from agent
+        user: AuthenticatedUser | None = getattr(context.agent, "user", None)
+        if user is None:
+            logger.warning("MemoryToolProvider: No user found on agent, skipping")
+            return
+
+        # Register memory tools
+        for tool_spec in make_memory_tool_specs(user):
+            await _register_tool(context.agent, tool_spec)
+
+    async def uninstall(self, context: ToolProviderContext) -> None:
+        return None
+
+
 class ToolProviderRegistry:
     def __init__(self) -> None:
         self._providers: list[ToolProvider] = []

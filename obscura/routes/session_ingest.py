@@ -1,4 +1,4 @@
-"""System session ingestion from ~/.obscura into per-user memory stores."""
+"""System session ingestion from ~/.obscura into the unified event store."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from obscura.auth.models import AuthenticatedUser
+from obscura.core.event_store import SQLiteEventStore, SessionStatus
 
 _INDEX_FILE = Path.home() / ".obscura" / "agents" / "sessions" / "INDEX.jsonl"
 _OBSCURA_HOME = Path.home() / ".obscura"
@@ -90,17 +91,17 @@ def _load_index_entries(agent: str | None = None) -> list[dict[str, Any]]:
     return entries
 
 
-def _ingest_entries_for_user(
-    user: AuthenticatedUser,
+def _ingest_entries(
+    store: SQLiteEventStore,
     entries: list[dict[str, Any]],
+    *,
     force: bool = False,
+    user: AuthenticatedUser | None = None,
 ) -> tuple[int, int]:
-    from obscura.memory import MemoryStore
-    from obscura.vector_memory import VectorMemoryStore
+    """Ingest INDEX.jsonl entries into the unified event store.
 
-    memory = MemoryStore.for_user(user)
-    vector = VectorMemoryStore.for_user(user)
-
+    Also indexes summaries/turns into VectorMemoryStore for semantic search.
+    """
     ingested = 0
     skipped = 0
 
@@ -110,17 +111,78 @@ def _ingest_entries_for_user(
         if not session_id or not agent:
             continue
 
-        if not force and memory.get(session_id, namespace="sessions") is not None:
+        # Check if already ingested (sync call — this runs in a thread)
+        existing = store._get_session_sync(session_id)
+        if existing is not None and not force:
             skipped += 1
             continue
 
-        memory.set(session_id, entry, namespace="sessions")
+        # Build metadata from all extra INDEX fields
+        metadata: dict[str, Any] = {}
+        for key in (
+            "turns", "cwds", "git_branch", "git_repo", "tools_used",
+            "agent_version", "source_path", "synced_path",
+        ):
+            if key in entry:
+                metadata[key] = entry[key]
 
-        summary_text = str(entry.get("topic") or entry.get("summary") or "").strip()
-        if summary_text:
+        summary = str(entry.get("topic") or entry.get("summary") or "").strip()
+        model = str(entry.get("model") or "").strip()
+        project = str(entry.get("project") or "").strip()
+        message_count = int(entry.get("message_count", 0))
+
+        if existing is not None and force:
+            # Update existing session
+            store._update_session_sync(
+                session_id,
+                summary=summary,
+                message_count=message_count,
+                metadata=metadata,
+            )
+        else:
+            # Create new session as 'ingested' + 'completed'
+            store._create_session_sync(
+                session_id,
+                agent,
+                backend=agent,
+                model=model,
+                source="ingested",
+                project=project,
+                summary=summary,
+                metadata=metadata,
+            )
+            # Mark completed (ingested sessions aren't running)
+            try:
+                store._update_status_sync(session_id, SessionStatus.COMPLETED)
+            except ValueError:
+                pass
+
+        # Index into VectorMemoryStore for semantic search
+        if user is not None:
+            _index_to_vector_memory(user, session_id, agent, entry, summary)
+
+        ingested += 1
+
+    return ingested, skipped
+
+
+def _index_to_vector_memory(
+    user: AuthenticatedUser,
+    session_id: str,
+    agent: str,
+    entry: dict[str, Any],
+    summary: str,
+) -> None:
+    """Index session summary and turns into VectorMemoryStore."""
+    try:
+        from obscura.vector_memory import VectorMemoryStore
+
+        vector = VectorMemoryStore.for_user(user)
+
+        if summary:
             vector.set(
                 key=f"{session_id}:summary",
-                text=summary_text,
+                text=summary,
                 namespace="sessions",
                 memory_type="summary",
                 metadata={
@@ -156,10 +218,8 @@ def _ingest_entries_for_user(
                         "message_count": entry.get("message_count", 0),
                     },
                 )
-
-        ingested += 1
-
-    return ingested, skipped
+    except Exception:
+        pass  # vector indexing is best-effort
 
 
 def sync_and_ingest_system_sessions(
@@ -169,8 +229,9 @@ def sync_and_ingest_system_sessions(
     force: bool = False,
     copy_to_pwd: bool = False,
     copy_overwrite: bool = True,
+    store: SQLiteEventStore | None = None,
 ) -> dict[str, Any]:
-    """Run agent session sync from ~/.obscura, then ingest into user memory."""
+    """Run agent session sync from ~/.obscura, then ingest into unified event store."""
     copy_result: dict[str, Any] | None = None
     if copy_to_pwd:
         copy_result = copy_obscura_to_pwd(overwrite=copy_overwrite)
@@ -191,8 +252,16 @@ def sync_and_ingest_system_sessions(
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or "agent_sync failed")
 
+    # Use provided store or create one at the default location
+    if store is None:
+        from obscura.core.paths import resolve_obscura_home
+
+        store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+
     entries = _load_index_entries(agent=agent)
-    ingested, skipped = _ingest_entries_for_user(user, entries, force=force)
+    ingested, skipped = _ingest_entries(
+        store, entries, force=force, user=user,
+    )
 
     return {
         "synced": True,

@@ -55,6 +55,9 @@ async def send(
                 openai=body.native.get("openai")
                 if isinstance(body.native.get("openai"), dict)
                 else None,
+                codex=body.native.get("codex")
+                if isinstance(body.native.get("codex"), dict)
+                else None,
                 claude=body.native.get("claude")
                 if isinstance(body.native.get("claude"), dict)
                 else None,
@@ -152,6 +155,9 @@ async def stream(
                 native_payload = ProviderNativeRequest(
                     openai=body.native.get("openai")
                     if isinstance(body.native.get("openai"), dict)
+                    else None,
+                    codex=body.native.get("codex")
+                    if isinstance(body.native.get("codex"), dict)
                     else None,
                     claude=body.native.get("claude")
                     if isinstance(body.native.get("claude"), dict)

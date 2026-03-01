@@ -175,6 +175,18 @@ obscura/
 
 ## Configuration
 
+## Debug & internals
+
+- `OBSCURA_OUTPUT_MODE` — set to `json` to emit structured machine-readable agent output, or `plain` for human-friendly rendering.
+- `OBSCURA_CAPTURE_PRINTS` — set to `1` to capture stdout/stderr produced by tools/agents into internal buffers for inspection.
+
+Viewing internals
+
+- Obscura writes lightweight JSONL traces to `logs/trace.log` (rotating). Use the REPL command `/tail-trace [n]` to view recent events (default 50) in a readable format.
+
+
+## Configuration
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OBSCURA_AUTH_ENABLED` | `true` | Enable JWT authentication |
@@ -298,6 +310,7 @@ OBSCURA_ENV=staging ./scripts/dev-auth-bootstrap-check.sh --start
 | [Architecture](docs/02-25-25-arch.md) | Design principles, layers, modes |
 | [Memory](docs/MEMORY.md) | Memory system: namespaces, TTL, multi-tenancy |
 | [Agents](docs/AGENTS.md) | Agent runtime: lifecycle, coordination, streaming |
+| [System Prompts](docs/SYSTEM_PROMPTS.md) | Default prompts, tool awareness, codebase context |
 | [Auth Guide](docs/AUTH_GUIDE.md) | Zitadel setup, RBAC, JWT |
 | [MCP](docs/MCP-README.md) | Model Context Protocol integration |
 | [Vector Memory](docs/VECTOR_MEMORY.md) | Semantic search with embeddings |

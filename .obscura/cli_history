@@ -1,0 +1,21 @@
+yo 
+im having some issues with my project obscura
+how do you have this context?
+ahh okay. Well you are running inside the project now 
+i am trying to ensure that you have the correct memory context and not claudes main system prompt/session schema 
+I need help to bypass agent/tool/session in favor of .obscura/session 
+why would i do 2? i want you to use the SQLlite DB at session start instead of claude session
+so, at the start of a conversation via the cli, how can i get you claude or copilot or codex to default to this memory schema, save and get memories? do i need to write claude MD files? Do i need to spawn agents differently? Am i not injecting the correct system prompts from the cli code that give the obscura knowledge?
+option 3 too. This also needs to work system wide whenever i spawn an obscura agent
+Traceback (most recent call last):
+  File "/Users/elliottbregni/.pyenv/versions/3.13.0/bin/obscura", line 7, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/elliottbregni/.pyenv/versions/3.13.0/lib/python3.13/site-packages/click/core.py", line 1485, in __call__
+/3.13.0/lib/python3.13/site-packages/click/core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+hello
+where is your memory stored and where do you store you sessions?
+hello!
+who are you?
+who powers you?

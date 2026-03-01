@@ -9,11 +9,13 @@ unified interface. Claude's async-iterator model maps naturally to our
 from __future__ import annotations
 
 from typing import Any, AsyncIterator, Callable, cast
+import re
 
 from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
 from obscura.core.tools import ToolRegistry
+from obscura.core.tool_policy import ToolPolicy
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -29,6 +31,7 @@ from obscura.core.types import (
     ToolChoice,
     ToolSpec,
 )
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 
 # ---------------------------------------------------------------------------
@@ -48,13 +51,15 @@ class ClaudeBackend:
         mcp_servers: list[dict[str, Any]] | None = None,
         permission_mode: str = "default",
         cwd: str | None = None,
+    tool_policy: ToolPolicy | None = None,
     ) -> None:
         self._auth = auth
-        self._model = model or "claude-sonnet-4-5-20250929"
+        self._model = model or "claude-sonnet-4-6"
         self._system_prompt = system_prompt
         self._mcp_servers = mcp_servers or []
         self._permission_mode = permission_mode
         self._cwd = cwd
+        self._tool_policy = tool_policy or ToolPolicy.from_env()
 
         # SDK objects (set on start())
         self._client: Any = None
@@ -140,6 +145,37 @@ class ClaudeBackend:
                 "mcp_inprocess",
                 "native_client",
             ),
+        )
+
+    # -- Confirmation gate (PreToolUse hook) ----------------------------------
+
+    def enable_confirmation(
+        self, confirm_fn: Callable[[str, dict[str, Any]], bool]
+    ) -> None:
+        """Register a PreToolUse hook that gates tool calls on user approval.
+
+        Because Claude SDK executes tools internally via MCP, the normal
+        ``AgentLoop.on_confirm`` callback is never reached.  This method
+        installs a ``PreToolUse`` hook that intercepts tool calls inside the
+        SDK and prompts the user through *confirm_fn*.
+
+        Parameters
+        ----------
+        confirm_fn:
+            ``(tool_name, tool_input) -> bool``.  Return True to allow.
+        """
+
+        def _pre_tool_hook(
+            tool_name: str = "",
+            tool_input: dict[str, Any] | None = None,
+            **kw: Any,
+        ) -> dict[str, Any] | None:
+            if not confirm_fn(tool_name, tool_input or {}):
+                return {"denied": True, "reason": "Tool call denied by user."}
+            return None  # allow
+
+        self._hooks.setdefault(HookPoint.PRE_TOOL_USE, []).append(
+            _pre_tool_hook,
         )
 
     # -- Lifecycle -----------------------------------------------------------
@@ -279,6 +315,69 @@ class ClaudeBackend:
         # The new session ID will come from the next ResultMessage
         return ref  # Caller should send a message to get the new session ID
 
+
+    # -- Provider Registry (model discovery) ---------------------------------
+
+    async def list_models(self) -> list[RegistryModelInfo]:
+        """List models available from Claude SDK catalog."""
+        return [
+            RegistryModelInfo(
+                id="claude-opus-4-6",
+                name="Claude Opus 4.6",
+                provider="claude",
+                context_window=200000,
+                max_output_tokens=32000,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            RegistryModelInfo(
+                id="claude-sonnet-4-6",
+                name="Claude Sonnet 4.6",
+                provider="claude",
+                context_window=200000,
+                max_output_tokens=16000,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            RegistryModelInfo(
+                id="claude-haiku-4-5-20251001",
+                name="Claude Haiku 4.5",
+                provider="claude",
+                context_window=200000,
+                max_output_tokens=8192,
+                supports_tools=True,
+                supports_vision=True,
+            ),
+            RegistryModelInfo(
+                id="claude-sonnet-4-5-20250929",
+                name="Claude Sonnet 4.5",
+                provider="claude",
+                context_window=200000,
+                max_output_tokens=8192,
+                supports_tools=True,
+                supports_vision=True,
+                deprecated=True,
+            ),
+            RegistryModelInfo(
+                id="claude-opus-4-20250514",
+                name="Claude Opus 4",
+                provider="claude",
+                context_window=200000,
+                max_output_tokens=4096,
+                supports_tools=True,
+                supports_vision=True,
+                deprecated=True,
+            ),
+        ]
+
+    def get_default_model(self) -> str:
+        """Return the default model for this provider."""
+        return "claude-sonnet-4-6"
+
+    def validate_model(self, model_id: str) -> bool:
+        """Check if a model ID is valid for Claude."""
+        return model_id.startswith('claude-')
+
     # -- Agent loop ----------------------------------------------------------
 
     def run_loop(
@@ -357,6 +456,33 @@ class ClaudeBackend:
             return cast(dict[str, Any], choice)
         return {}
 
+    def _sanitize_system_prompt(self, prompt: str) -> str:
+        """Strip Claude identity claims from system prompt.
+        
+        Removes phrases that inject Claude-specific identity to allow
+        Obscura agents to run without claiming to be Claude/Anthropic.
+        """
+        # Patterns to remove
+        patterns = [
+            r"You are Claude[,\.]?",
+            r"I am Claude[,\.]?",
+            r"an? AI assistant (made |created |built )?by Anthropic",
+            r"You are an? (helpful )?AI assistant",
+            r"I am an? (helpful )?AI assistant",
+            r"assistant (made |created |built )?by Anthropic",
+            r"with access to specialized skills\.?\s*",
+        ]
+        
+        sanitized = prompt
+        for pattern in patterns:
+            sanitized = re.sub(pattern, "", sanitized, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+        
+        return sanitized
+
+
     def _build_options(self, **overrides: Any) -> Any:
         """Build ClaudeAgentOptions for the SDK."""
         from claude_agent_sdk import ClaudeAgentOptions
@@ -366,7 +492,7 @@ class ClaudeBackend:
         if self._model:
             opts["model"] = self._model
         if self._system_prompt:
-            opts["system_prompt"] = self._system_prompt
+            opts["system_prompt"] = self._sanitize_system_prompt(self._system_prompt)
         if self._permission_mode:
             opts["permission_mode"] = self._permission_mode
         if self._cwd:
@@ -400,10 +526,9 @@ class ClaudeBackend:
         if hooks:
             opts["hooks"] = hooks
 
-        # Allowed tools: expose custom tools by MCP name
+        # Apply tool policy to restrict tools
         if self._tools:
-            allowed = [f"mcp__obscura_tools__{t.name}" for t in self._tools]
-            opts["allowed_tools"] = allowed
+            self._tool_policy.apply_to_claude(opts, self._tools)
 
         opts.update(overrides)
         return ClaudeAgentOptions(**opts)

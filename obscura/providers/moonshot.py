@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from obscura.providers.openai import OpenAIBackend
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
 from obscura.core.auth import AuthConfig
 from obscura.core.types import Backend
 

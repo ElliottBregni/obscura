@@ -74,7 +74,8 @@ class TemplateCreateRequest(BaseModel):
 
     # Basic fields (existing)
     name: str = Field(default="unnamed-template", min_length=1)
-    model: str = Field(default="claude")
+    provider: str = Field(default="claude", description="Backend provider")
+    model_id: str | None = Field(default=None, description="Specific model ID (optional)")
     system_prompt: str = Field(default="")
     timeout_seconds: float = Field(default=300.0, gt=0)
     max_iterations: int = Field(default=10, ge=1)

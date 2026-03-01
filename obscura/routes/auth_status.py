@@ -62,6 +62,7 @@ async def providers_health(
         _provider_status(Backend.COPILOT),
         _provider_status(Backend.CLAUDE),
         _provider_status(Backend.OPENAI),
+        _provider_status(Backend.CODEX),
         _provider_status(Backend.MOONSHOT),
         _provider_status(Backend.LOCALLLM),
     ]

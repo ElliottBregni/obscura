@@ -63,6 +63,89 @@ class TestSessionLifecycle:
         assert len(running) == 1
         assert running[0].id == "b"
 
+    @pytest.mark.asyncio
+    async def test_create_session_with_metadata(
+        self, store: SQLiteEventStore
+    ) -> None:
+        rec = await store.create_session(
+            "sess-m",
+            agent="oncall",
+            backend="claude",
+            model="claude-sonnet-4-5-20250929",
+            source="live",
+            project="myapp",
+            summary="debugging auth",
+            metadata={"git_branch": "main"},
+        )
+        assert rec.backend == "claude"
+        assert rec.model == "claude-sonnet-4-5-20250929"
+        assert rec.source == "live"
+        assert rec.project == "myapp"
+        assert rec.summary == "debugging auth"
+        assert rec.metadata == {"git_branch": "main"}
+
+    @pytest.mark.asyncio
+    async def test_get_session_returns_new_fields(
+        self, store: SQLiteEventStore
+    ) -> None:
+        await store.create_session(
+            "s", agent="a", backend="copilot", model="gpt-4o",
+        )
+        rec = await store.get_session("s")
+        assert rec is not None
+        assert rec.backend == "copilot"
+        assert rec.model == "gpt-4o"
+        assert rec.source == "live"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_filter_by_backend(
+        self, store: SQLiteEventStore
+    ) -> None:
+        await store.create_session("a", agent="x", backend="claude")
+        await store.create_session("b", agent="y", backend="copilot")
+        claude_sessions = await store.list_sessions(backend="claude")
+        assert len(claude_sessions) == 1
+        assert claude_sessions[0].id == "a"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_filter_by_source(
+        self, store: SQLiteEventStore
+    ) -> None:
+        await store.create_session("a", agent="x", source="live")
+        await store.create_session("b", agent="y", source="ingested")
+        ingested = await store.list_sessions(source="ingested")
+        assert len(ingested) == 1
+        assert ingested[0].id == "b"
+
+    @pytest.mark.asyncio
+    async def test_update_session_metadata(
+        self, store: SQLiteEventStore
+    ) -> None:
+        await store.create_session("s", agent="a")
+        await store.update_session(
+            "s",
+            summary="new summary",
+            message_count=42,
+            metadata={"tools_used": ["search"]},
+        )
+        rec = await store.get_session("s")
+        assert rec is not None
+        assert rec.summary == "new summary"
+        assert rec.message_count == 42
+        assert rec.metadata == {"tools_used": ["search"]}
+
+    @pytest.mark.asyncio
+    async def test_old_sessions_get_defaults(
+        self, store: SQLiteEventStore
+    ) -> None:
+        """Sessions created without new fields should have sensible defaults."""
+        rec = await store.create_session("old", agent="a")
+        assert rec.backend == ""
+        assert rec.model == ""
+        assert rec.source == "live"
+        assert rec.message_count == 0
+        assert rec.metadata == {}
+
 
 # ---------------------------------------------------------------------------
 # Status transitions

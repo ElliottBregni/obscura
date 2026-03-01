@@ -10,7 +10,7 @@ Usage::
     from obscura.core.event_store import SQLiteEventStore, SessionStatus
 
     store = SQLiteEventStore("/tmp/events.db")
-    await store.create_session("sess-1", agent="oncall")
+    await store.create_session("sess-1", agent="oncall", backend="claude", model="claude-sonnet-4-5-20250929")
     await store.append("sess-1", event)
     events = await store.get_events("sess-1")
 """
@@ -22,7 +22,7 @@ import enum
 import json
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -86,15 +86,26 @@ VALID_TRANSITIONS: dict[SessionStatus, frozenset[SessionStatus]] = {
 # ---------------------------------------------------------------------------
 
 
+def _empty_dict() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True)
 class SessionRecord:
     """Persistent session metadata."""
 
     id: str
     status: SessionStatus
-    active_agent: str
-    created_at: datetime
-    updated_at: datetime
+    backend: str = ""
+    model: str = ""
+    active_agent: str = ""
+    source: str = "live"
+    project: str = ""
+    summary: str = ""
+    message_count: int = 0
+    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -121,6 +132,13 @@ class EventStoreProtocol(Protocol):
         self,
         session_id: str,
         agent: str,
+        *,
+        backend: str = "",
+        model: str = "",
+        source: str = "live",
+        project: str = "",
+        summary: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> SessionRecord: ...
 
     async def get_session(self, session_id: str) -> SessionRecord | None: ...
@@ -129,6 +147,15 @@ class EventStoreProtocol(Protocol):
         self,
         session_id: str,
         status: SessionStatus,
+    ) -> None: ...
+
+    async def update_session(
+        self,
+        session_id: str,
+        *,
+        summary: str | None = None,
+        message_count: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None: ...
 
     async def append(
@@ -148,6 +175,8 @@ class EventStoreProtocol(Protocol):
         self,
         *,
         status: SessionStatus | None = None,
+        backend: str | None = None,
+        source: str | None = None,
     ) -> list[SessionRecord]: ...
 
 
@@ -179,6 +208,39 @@ def _deserialize_payload(raw: str) -> dict[str, Any]:
     if not isinstance(result, dict):
         return {}
     return cast(dict[str, Any], result)
+
+
+_SESSION_COLS = (
+    "id, status, backend, model, active_agent, source, project, "
+    "summary, message_count, metadata, created_at, updated_at"
+)
+
+
+def _row_to_session(row: sqlite3.Row) -> SessionRecord:
+    """Convert a DB row to a SessionRecord."""
+    raw_meta = row["metadata"]
+    meta: dict[str, Any] = {}
+    if raw_meta:
+        try:
+            parsed = json.loads(raw_meta)
+            if isinstance(parsed, dict):
+                meta = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return SessionRecord(
+        id=row["id"],
+        status=SessionStatus(row["status"]),
+        backend=row["backend"] or "",
+        model=row["model"] or "",
+        active_agent=row["active_agent"] or "",
+        source=row["source"] or "live",
+        project=row["project"] or "",
+        summary=row["summary"] or "",
+        message_count=int(row["message_count"] or 0),
+        metadata=meta,
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
 
 
 class SQLiteEventStore:
@@ -233,44 +295,94 @@ class SQLiteEventStore:
         )
         conn.commit()
 
+        # Migrate: add unified session columns (idempotent)
+        _migrations: list[tuple[str, str]] = [
+            ("backend", "TEXT NOT NULL DEFAULT ''"),
+            ("model", "TEXT NOT NULL DEFAULT ''"),
+            ("source", "TEXT NOT NULL DEFAULT 'live'"),
+            ("project", "TEXT NOT NULL DEFAULT ''"),
+            ("summary", "TEXT NOT NULL DEFAULT ''"),
+            ("message_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+        ]
+        for col_name, col_def in _migrations:
+            try:
+                conn.execute(
+                    f"ALTER TABLE sessions ADD COLUMN {col_name} {col_def}"
+                )
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+        # Add indexes for new columns
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_sessions_backend ON sessions(backend)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)",
+        ]:
+            conn.execute(idx_sql)
+        conn.commit()
+
     # -- sync helpers (run in thread) ----------------------------------------
 
     def _create_session_sync(
         self,
         session_id: str,
         agent: str,
+        *,
+        backend: str = "",
+        model: str = "",
+        source: str = "live",
+        project: str = "",
+        summary: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> SessionRecord:
         now = datetime.now(UTC).isoformat()
+        meta_json = json.dumps(metadata or {}, default=str)
         conn = self._conn()
         conn.execute(
-            "INSERT INTO sessions (id, status, active_agent, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (session_id, SessionStatus.RUNNING.value, agent, now, now),
+            "INSERT INTO sessions "
+            "(id, status, backend, model, active_agent, source, project, "
+            " summary, message_count, metadata, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+            (
+                session_id,
+                SessionStatus.RUNNING.value,
+                backend,
+                model,
+                agent,
+                source,
+                project,
+                summary,
+                meta_json,
+                now,
+                now,
+            ),
         )
         conn.commit()
         return SessionRecord(
             id=session_id,
             status=SessionStatus.RUNNING,
+            backend=backend,
+            model=model,
             active_agent=agent,
+            source=source,
+            project=project,
+            summary=summary,
+            message_count=0,
+            metadata=metadata or {},
             created_at=datetime.fromisoformat(now),
             updated_at=datetime.fromisoformat(now),
         )
 
     def _get_session_sync(self, session_id: str) -> SessionRecord | None:
         row = self._conn().execute(
-            "SELECT id, status, active_agent, created_at, updated_at "
-            "FROM sessions WHERE id = ?",
+            f"SELECT {_SESSION_COLS} FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         if row is None:
             return None
-        return SessionRecord(
-            id=row["id"],
-            status=SessionStatus(row["status"]),
-            active_agent=row["active_agent"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-        )
+        return _row_to_session(row)
 
     def _update_status_sync(
         self,
@@ -295,6 +407,41 @@ class SQLiteEventStore:
         conn.execute(
             "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
             (status.value, now, session_id),
+        )
+        conn.commit()
+
+    def _update_session_sync(
+        self,
+        session_id: str,
+        *,
+        summary: str | None = None,
+        message_count: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        conn = self._conn()
+        sets: list[str] = []
+        params: list[Any] = []
+
+        if summary is not None:
+            sets.append("summary = ?")
+            params.append(summary)
+        if message_count is not None:
+            sets.append("message_count = ?")
+            params.append(message_count)
+        if metadata is not None:
+            sets.append("metadata = ?")
+            params.append(json.dumps(metadata, default=str))
+
+        if not sets:
+            return
+
+        sets.append("updated_at = ?")
+        params.append(datetime.now(UTC).isoformat())
+        params.append(session_id)
+
+        conn.execute(
+            f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?",
+            params,
         )
         conn.commit()
 
@@ -351,29 +498,29 @@ class SQLiteEventStore:
     def _list_sessions_sync(
         self,
         status: SessionStatus | None = None,
+        backend: str | None = None,
+        source: str | None = None,
     ) -> list[SessionRecord]:
         conn = self._conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+
         if status is not None:
-            rows = conn.execute(
-                "SELECT id, status, active_agent, created_at, updated_at "
-                "FROM sessions WHERE status = ? ORDER BY updated_at DESC",
-                (status.value,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, status, active_agent, created_at, updated_at "
-                "FROM sessions ORDER BY updated_at DESC"
-            ).fetchall()
-        return [
-            SessionRecord(
-                id=row["id"],
-                status=SessionStatus(row["status"]),
-                active_agent=row["active_agent"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-            )
-            for row in rows
-        ]
+            clauses.append("status = ?")
+            params.append(status.value)
+        if backend is not None:
+            clauses.append("backend = ?")
+            params.append(backend)
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
+
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = conn.execute(
+            f"SELECT {_SESSION_COLS} FROM sessions{where} ORDER BY updated_at DESC",
+            params,
+        ).fetchall()
+        return [_row_to_session(row) for row in rows]
 
     # -- async public API ----------------------------------------------------
 
@@ -381,8 +528,25 @@ class SQLiteEventStore:
         self,
         session_id: str,
         agent: str,
+        *,
+        backend: str = "",
+        model: str = "",
+        source: str = "live",
+        project: str = "",
+        summary: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> SessionRecord:
-        return await asyncio.to_thread(self._create_session_sync, session_id, agent)
+        return await asyncio.to_thread(
+            self._create_session_sync,
+            session_id,
+            agent,
+            backend=backend,
+            model=model,
+            source=source,
+            project=project,
+            summary=summary,
+            metadata=metadata,
+        )
 
     async def get_session(self, session_id: str) -> SessionRecord | None:
         return await asyncio.to_thread(self._get_session_sync, session_id)
@@ -393,6 +557,22 @@ class SQLiteEventStore:
         status: SessionStatus,
     ) -> None:
         await asyncio.to_thread(self._update_status_sync, session_id, status)
+
+    async def update_session(
+        self,
+        session_id: str,
+        *,
+        summary: str | None = None,
+        message_count: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self._update_session_sync,
+            session_id,
+            summary=summary,
+            message_count=message_count,
+            metadata=metadata,
+        )
 
     async def append(
         self,
@@ -413,8 +593,12 @@ class SQLiteEventStore:
         self,
         *,
         status: SessionStatus | None = None,
+        backend: str | None = None,
+        source: str | None = None,
     ) -> list[SessionRecord]:
-        return await asyncio.to_thread(self._list_sessions_sync, status)
+        return await asyncio.to_thread(
+            self._list_sessions_sync, status, backend, source,
+        )
 
     def close(self) -> None:
         """Close the thread-local connection."""

@@ -9,7 +9,6 @@ from __future__ import annotations
 import enum
 import threading
 import time
-from typing import Any
 
 
 class CircuitState(enum.Enum):
@@ -173,11 +172,9 @@ class CircuitBreakerRegistry:
         recovery_timeout: float = 30.0,
         half_open_max: int = 1,
     ) -> None:
-        self._defaults = {
-            "failure_threshold": failure_threshold,
-            "recovery_timeout": recovery_timeout,
-            "half_open_max": half_open_max,
-        }
+        self._failure_threshold = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._half_open_max = half_open_max
         self._breakers: dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 
@@ -186,7 +183,10 @@ class CircuitBreakerRegistry:
         with self._lock:
             if backend not in self._breakers:
                 self._breakers[backend] = CircuitBreaker(
-                    backend, **self._defaults
+                    backend,
+                    failure_threshold=self._failure_threshold,
+                    recovery_timeout=self._recovery_timeout,
+                    half_open_max=self._half_open_max,
                 )
             return self._breakers[backend]
 

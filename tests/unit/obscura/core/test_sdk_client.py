@@ -138,6 +138,21 @@ class TestBackendSelection:
         assert isinstance(client.backend_impl, MoonshotBackend)
         assert client.backend_type is Backend.MOONSHOT
 
+    def test_codex_backend_created(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Backend.CODEX should create a CodexBackend."""
+        status = MagicMock()
+        status.returncode = 0
+        status.stdout = ""
+        status.stderr = "Logged in using ChatGPT\n"
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("CODEX_API_KEY", raising=False)
+        with patch("subprocess.run", return_value=status):
+            client = ObscuraClient("codex")
+        from obscura.providers.codex import CodexBackend
+
+        assert isinstance(client.backend_impl, CodexBackend)
+        assert client.backend_type is Backend.CODEX
+
     def test_invalid_backend(self) -> None:
         """Invalid backend string should raise ValueError."""
         with pytest.raises(ValueError):
@@ -274,6 +289,7 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     client._capability_token = None  # pyright: ignore[reportPrivateUsage]
     client._mcp_server_configs = []  # pyright: ignore[reportPrivateUsage]
     client._mcp_backend = None  # pyright: ignore[reportPrivateUsage]
+    client._current_loop = None  # pyright: ignore[reportPrivateUsage]
     return client, mock_backend
 
 

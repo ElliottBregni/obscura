@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from obscura.core.types import Backend, SessionRef
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import require_role
+from obscura.core.event_store import SQLiteEventStore
+from obscura.core.types import Backend, SessionRef
 from obscura.deps import ClientFactory, audit
 from obscura.routes.session_ingest import (
     preflight_system_session_ingest,
@@ -26,41 +27,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
 
-def _append_ingested_sessions(
-    results: list[SessionResponse],
-    user: AuthenticatedUser,
-) -> list[SessionResponse]:
-    """Merge memory-ingested system sessions into the live session list."""
-    from obscura.memory import MemoryStore
+def _get_event_store(request: Request) -> SQLiteEventStore:
+    """Get the shared event store from app state."""
+    store: SQLiteEventStore | None = getattr(request.app.state, "event_store", None)
+    if store is None:
+        from obscura.core.paths import resolve_obscura_home
 
-    seen = {(r.backend, r.session_id) for r in results}
-    store = MemoryStore.for_user(user)
-    for mem_key in store.list_keys(namespace="sessions"):
-        raw = store.get(mem_key.key, namespace="sessions")
-        if not isinstance(raw, dict):
-            continue
-        payload = raw
-        backend = str(payload.get("agent") or payload.get("backend") or "").strip()
-        session_id = str(payload.get("id") or mem_key.key).strip()
-        if not backend or not session_id:
-            continue
-        dedupe_key = (backend, session_id)
-        if dedupe_key in seen:
-            continue
-        results.append(
-            SessionResponse(
-                session_id=session_id,
-                backend=backend,
-                created_at=(
-                    str(payload.get("started") or payload.get("created_at"))
-                    if (payload.get("started") or payload.get("created_at"))
-                    else None
-                ),
-                source="ingested",
-            )
-        )
-        seen.add(dedupe_key)
-    return results
+        store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        request.app.state.event_store = store
+    return store
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -110,40 +85,30 @@ async def create_session(
 async def list_sessions(
     request: Request,
     user: AuthenticatedUser = Depends(require_role("sessions:manage")),
+    backend: str | None = None,
+    source: str | None = None,
 ) -> list[SessionResponse]:
-    """List available sessions across all backends."""
-    results: list[SessionResponse] = []
-    for backend_name in ("copilot", "claude"):
-        factory: ClientFactory = request.app.state.client_factory
-        try:
-            client = await factory.create(backend_name, user=user)
-            try:
-                refs = await client.list_sessions()
-                for ref in refs:
-                    results.append(
-                        SessionResponse(
-                            session_id=ref.session_id,
-                            backend=ref.backend.value,
-                            source="live",
-                        )
-                    )
-            finally:
-                await client.stop()
-        except ValueError:
-            # Missing provider credentials is expected in many dev setups.
-            # Surface this via /api/v1/providers/health instead of log noise.
-            continue
-        except Exception:
-            logger.debug("Could not list sessions for %s", backend_name, exc_info=True)
-    return _append_ingested_sessions(results, user)
+    """List all sessions from the unified event store."""
+    store = _get_event_store(request)
+    records = await store.list_sessions(backend=backend, source=source)
+    return [
+        SessionResponse(
+            session_id=rec.id,
+            backend=rec.backend,
+            created_at=rec.created_at.isoformat() if rec.created_at else None,
+            source=rec.source,
+        )
+        for rec in records
+    ]
 
 
 @router.post("/sessions/ingest")
 async def ingest_sessions(
     body: dict[str, Any] | None = None,
+    request: Request = None,  # type: ignore[assignment]
     user: AuthenticatedUser = Depends(require_role("sessions:manage")),
 ) -> JSONResponse:
-    """Ingest system sessions from ~/.obscura into memory + vector memory."""
+    """Ingest system sessions from ~/.obscura into the unified event store."""
     payload = body or {}
     agent_raw = payload.get("agent")
     agent = str(agent_raw).strip() if agent_raw else None
@@ -156,6 +121,9 @@ async def ingest_sessions(
     copy_to_pwd = bool(payload.get("copy_to_pwd", False))
     copy_overwrite = bool(payload.get("copy_overwrite", True))
 
+    # Pass the shared event store
+    store = _get_event_store(request) if request else None
+
     try:
         result = await asyncio.to_thread(
             sync_and_ingest_system_sessions,
@@ -164,6 +132,7 @@ async def ingest_sessions(
             force=force,
             copy_to_pwd=copy_to_pwd,
             copy_overwrite=copy_overwrite,
+            store=store,
         )
     except Exception as exc:
         audit(

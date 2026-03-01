@@ -22,6 +22,7 @@ DEFAULT_ROLES = [
     "admin",
     "agent:copilot",
     "agent:claude",
+    "agent:codex",
     "agent:read",
     "sync:write",
     "sessions:manage",

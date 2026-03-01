@@ -154,6 +154,17 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
         except ImportError:
             logger.debug("Telemetry middleware not available; skipping")
 
+    # Rate limiting (after auth so request.state.user is populated)
+    from obscura.auth.rate_limit_middleware import RateLimitMiddleware
+    from obscura.core.rate_limiter import RateLimiter
+
+    rate_limiter = RateLimiter(
+        default_rpm=config.rate_limit_rpm,
+        default_concurrent=config.rate_limit_concurrent,
+    )
+    app.state.rate_limiter = rate_limiter
+    app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
+
     if config.auth_enabled:
         jwks_cache = JWKSCache(
             config.auth_jwks_uri,
