@@ -17,6 +17,7 @@ psycopg2-binary>=2.9.9
 click>=8.3.1
 rich>=14.3.2
 prompt-toolkit>=3.0.50
+toons>=0.5.0
 
 [a2a]
 redis[hiredis]>=5.0.0

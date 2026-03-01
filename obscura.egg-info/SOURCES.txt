@@ -38,6 +38,7 @@ obscura/cli/mcp_commands.py
 obscura/cli/prompt.py
 obscura/cli/render.py
 obscura/cli/trace.py
+obscura/cli/vector_memory_bridge.py
 obscura/core/__init__.py
 obscura/core/agent_loop.py
 obscura/core/auth.py
@@ -59,7 +60,6 @@ obscura/core/sessions.py
 obscura/core/stream.py
 obscura/core/system_prompts.py
 obscura/core/tool_policy.py
-obscura/core/tool_policy_new.py
 obscura/core/tools.py
 obscura/core/types.py
 obscura/core/client/__init__.py
@@ -195,4 +195,3 @@ obscura/vector_memory/vector_memory.py
 obscura/vector_memory/vector_memory_filters.py
 obscura/vector_memory/vector_memory_rerank.py
 obscura/vector_memory/vector_memory_router.py
-sdk/__init__.py

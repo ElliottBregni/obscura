@@ -22,6 +22,7 @@ Requires-Dist: psycopg2-binary>=2.9.9
 Requires-Dist: click>=8.3.1
 Requires-Dist: rich>=14.3.2
 Requires-Dist: prompt-toolkit>=3.0.50
+Requires-Dist: toons>=0.5.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
