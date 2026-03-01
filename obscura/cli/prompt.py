@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import shutil
 import os
+import subprocess
+from dataclasses import dataclass, field
 from typing import override
 
 from prompt_toolkit import PromptSession
@@ -22,6 +24,81 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 
 from obscura.core.paths import resolve_obscura_home
+
+
+# ---------------------------------------------------------------------------
+# PromptStatus — live state shown in the banner above the input box
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PromptStatus:
+    """Mutable state bag read by print_status_banner() on every prompt call."""
+
+    model: str = ""
+    branch: str = ""
+    ctx_pct: int = 0          # 0-100
+    ctx_tokens: int = 0
+    ctx_window: int = 0
+    mode: str = ""
+
+
+def _get_git_branch() -> str:
+    """Return the current git branch name, or '' if not in a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+            return branch if branch and branch != "HEAD" else ""
+    except Exception:
+        pass
+    return ""
+
+
+def print_status_banner(status: PromptStatus) -> None:
+    """Print a one-line status banner above the input separator.
+
+    Layout:  ⎇ main  ·  claude-opus-4  ·  ctx 42%  ·  code
+    Uses Rich markup via the shared console.
+    """
+    from obscura.cli.render import console
+    from rich.markup import escape as markup_escape
+
+    parts: list[str] = []
+
+    if status.branch:
+        parts.append(f"[bold cyan]⎇ {markup_escape(status.branch)}[/]")
+
+    if status.model:
+        parts.append(f"[dim]{markup_escape(status.model)}[/]")
+
+    if status.ctx_pct > 0 or status.ctx_tokens > 0:
+        pct = status.ctx_pct
+        if pct >= 80:
+            color = "bold red"
+        elif pct >= 60:
+            color = "yellow"
+        else:
+            color = "dim green"
+        ctx_str = f"ctx {pct}%"
+        if status.ctx_tokens:
+            ctx_str += f" ({status.ctx_tokens:,})"
+        parts.append(f"[{color}]{ctx_str}[/]")
+
+    if status.mode:
+        parts.append(f"[dim]mode: {markup_escape(status.mode)}[/]")
+
+    if not parts:
+        return
+
+    sep = "  [dim]·[/]  "
+    line = sep.join(parts)
+    console.print(f"  {line}", highlight=False)
 
 
 # ---------------------------------------------------------------------------

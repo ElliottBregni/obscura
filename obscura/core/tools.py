@@ -205,6 +205,11 @@ class ToolRegistry:
             "browsersnapshot": "browser_snapshot",
             "browserclick": "browser_click",
             "browserfill": "browser_fill",
+            # task tracking (Claude Code name → Obscura name)
+            "todowrite": "todo_write",
+            "todo": "todo_write",
+            "update_todos": "todo_write",
+            "write_todos": "todo_write",
         }
 
     def register(self, spec: ToolSpec) -> None:

@@ -9,6 +9,8 @@ import os
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape as markup_escape
+from rich.markup import escape as markup_escape
+from rich.markup import escape as markup_escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
@@ -43,11 +45,11 @@ def _sanitize_text(s: str) -> str:
         # CSI sequences: ESC [ ... final-byte
         cleaned = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", s)
         # OSC sequences: ESC ] ... (ST or BEL)
-        cleaned = re.sub(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)", "", cleaned)
+        cleaned = re.sub(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)", "", cleaned)
         # DCS / PM / APC / SOS sequences
-        cleaned = re.sub(r"\x1B[PX^_][^\x1B]*(?:\x1B\\|$)", "", cleaned)
+        cleaned = re.sub(r"\x1B[PX^_][^\x1B]*(?:\x1B\\\\|$)", "", cleaned)
         # Lone ESC + one char
-        cleaned = re.sub(r"\x1B[@-Z\\-_]", "", cleaned)
+        cleaned = re.sub(r"\x1B[@-Z\\\\-_]", "", cleaned)
         # Bare ESC
         cleaned = re.sub(r"\x1B", "", cleaned)
         # C0 controls (keep TAB \x09, LF \x0A, CR \x0D)
@@ -55,8 +57,6 @@ def _sanitize_text(s: str) -> str:
         return cleaned
     except Exception:
         return s
-
-
 def _detect_language(text: str) -> str | None:
     """Try to detect language from content for syntax highlighting."""
     stripped = text.strip()
@@ -135,7 +135,7 @@ class OutputManager:
                 Console().print(Text.from_ansi(cleaned))
             except Exception:
                 try:
-                    Console().print(f"[dim][internal][/]{markup_escape(cleaned)}")
+                    Console().print(f"[dim][internal][/]{cleaned}")
                 except Exception:
                     pass
         else:
@@ -258,7 +258,7 @@ class StreamRenderer:
 
             case AgentEventKind.CONTEXT_COMPACT:
                 console.print(
-                    f"  [yellow]⚡ {markup_escape(_sanitize_text(event.text))}[/]"
+                    f"  [yellow]⚡ {event.text}[/]"
                 )
 
             case _:
@@ -292,7 +292,7 @@ class StreamRenderer:
         preview = "".join(self._thinking_buf).strip().replace("\n", " ")
         if len(preview) > 80:
             preview = "..." + preview[-77:]
-        label = f"[bold {THINKING_COLOR}]  thinking[/] [{THINKING_COLOR} dim]{markup_escape(preview)}[/]"
+        label = f"[bold {THINKING_COLOR}]  thinking[/] [{THINKING_COLOR} dim]{preview}[/]"
         if self._external_status is not None:
             try:
                 self._external_status.update(label)  # type: ignore[attr-defined]
@@ -328,7 +328,7 @@ class StreamRenderer:
                 if self._external_status is not None:
                     try:
                         ts = datetime.now().strftime("%H:%M:%S")
-                        preview = markup_escape(safe_text.strip().replace('\n', ' ')[:120])
+                        preview = safe_text.strip().replace('\n', ' ')[:120]
                         self._external_status.update(  # type: ignore[attr-defined]
                             f"[{ACCENT_DIM}]  assistant [{ts}]: {preview}[/]"
                         )
@@ -344,7 +344,7 @@ class StreamRenderer:
                 if self._external_status is not None:
                     try:
                         ts = datetime.now().strftime("%H:%M:%S")
-                        preview = markup_escape(("[thinking] " + text.strip()).replace('\n', ' ')[:120])
+                        preview = ("[thinking] " + text.strip()).replace('\n', ' ')[:120]
                         self._external_status.update(  # type: ignore[attr-defined]
                             f"[{THINKING_COLOR}]  thinking [{ts}]: {preview}[/]"
                         )
@@ -383,7 +383,7 @@ class StreamRenderer:
             sv = str(v)
             if len(sv) > 60:
                 sv = sv[:57] + "..."
-            parts.append(f"[dim]{k}=[/]{markup_escape(sv)}")
+            parts.append(f"[dim]{k}=[/]{sv}")
         arg_str = ", ".join(parts)
         if len(arg_str) > 140:
             arg_str = arg_str[:137] + "..."
@@ -396,14 +396,14 @@ class StreamRenderer:
 
         # Tool call: icon + name + args on one line
         console.print(
-            f"\n  [{TOOL_COLOR}]  {markup_escape(name)}[/]  [dim]{sanitized_args}[/]"
+            f"\n  [{TOOL_COLOR}]  {markup_escape(name)}[/]  [dim]{markup_escape(sanitized_args)}[/]"
         )
 
         if self._external_status is not None:
             try:
                 ts = datetime.now().strftime("%H:%M:%S")
                 self._external_status.update(  # type: ignore[attr-defined]
-                    f"[{TOOL_COLOR}]  running {markup_escape(name)}...[/]"
+                    f"[{TOOL_COLOR}]  running {name}...[/]"
                 )
             except Exception:
                 pass
@@ -447,7 +447,7 @@ class StreamRenderer:
         if self._external_status is not None:
             try:
                 ts = datetime.now().strftime("%H:%M:%S")
-                preview = markup_escape(_sanitize_text(raw[:80]).replace('\n', ' '))
+                preview = _sanitize_text(raw[:80]).replace('\n', ' ')
                 self._external_status.update(  # type: ignore[attr-defined]
                     f"[{ACCENT_DIM}]  done [{ts}]: {preview}[/]"
                 )
@@ -646,11 +646,11 @@ def render_agent_output(output_ev: Any) -> None:
     """Render an AgentOutput from the InteractionBus."""
     if not output_ev.text:
         return
-    safe_text = markup_escape(_sanitize_text(output_ev.text))
+    safe_text = _sanitize_text(output_ev.text)
     if output_ev.is_final:
-        console.print(f"  [bold {ACCENT}]{markup_escape(_sanitize_text(output_ev.agent_name))}:[/] {safe_text}")
+        console.print(f"  [bold {ACCENT}]{markup_escape(_sanitize_text(output_ev.agent_name))}:[/] {markup_escape(safe_text)}")
     else:
-        console.print(safe_text, end="")
+        console.print(markup_escape(safe_text), end="")
 
 
 # ---------------------------------------------------------------------------
@@ -658,90 +658,8 @@ def render_agent_output(output_ev: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _banner_overhaul_block(solid_color: str | None = None) -> None:
-    """Print OVERHAUL block letters.
-
-    Oscillates green <-> blue by default (Overhaul site palette).
-    Pass solid_color (raw ANSI escape str) to use a single colour instead.
-    """
-    import sys
-
-    RESET = "\033[0m"
-    BOLD  = "\033[1m"
-    GREEN = "\033[38;5;35m"
-    BLUE  = "\033[38;5;39m"
-    GRAY  = "\033[38;5;240m"
-
-    lines = [
-        "  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557  \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2557",
-        " \u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551",
-        " \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551",
-        " \u2588\u2588\u2551   \u2588\u2588\u2551\u255a\u2588\u2588\u2557 \u2588\u2588\u2554\u255d\u2588\u2588\u2554\u2550\u2550\u255d  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551",
-        " \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d \u255a\u2588\u2588\u2588\u2588\u2554\u255d \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557",
-        "  \u255a\u2550\u2550\u2550\u2550\u2550\u255d   \u255a\u2550\u2550\u2550\u255d  \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d",
-    ]
-    sys.stdout.write("\n")
-    for i, line in enumerate(lines):
-        c = solid_color if solid_color else (GREEN if i % 2 == 0 else BLUE)
-        sys.stdout.write(f"  {BOLD}{c}{line}{RESET}\n")
-    sys.stdout.write(f"\n{GRAY}  {chr(0x2501) * 66}{RESET}\n")
-    sys.stdout.flush()
-
-
-def _banner_obscura_by_overhaul() -> None:
-    """Print OBSCURA (cyan/teal oscillating) then 'by OVERHAUL' (green/blue)."""
-    import sys
-
-    RESET = "\033[0m"
-    BOLD  = "\033[1m"
-    CYAN  = "\033[38;5;51m"
-    TEAL  = "\033[38;5;37m"
-    GREEN = "\033[38;5;35m"
-    GRAY  = "\033[38;5;240m"
-
-    obscura_lines = [
-        "  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 ",
-        " \u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557",
-        " \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551     \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551",
-        " \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u255a\u2550\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551     \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551",
-        " \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551",
-        "  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d",
-    ]
-    sys.stdout.write("\n")
-    for i, line in enumerate(obscura_lines):
-        c = CYAN if i % 2 == 0 else TEAL
-        sys.stdout.write(f"  {BOLD}{c}{line}{RESET}\n")
-
-    by_line = "         by  O V E R H A U L"
-    sys.stdout.write(f"\n  {BOLD}{GREEN}{by_line}{RESET}\n")
-    sys.stdout.write(f"\n{GRAY}  {chr(0x2501) * 60}{RESET}\n")
-    sys.stdout.flush()
-
-
 def _obscura_ascii_banner() -> None:
-    """Print the startup ASCII art banner — theme driven by FLAGS.banner_theme."""
-    try:
-        from obscura.core.feature_flags import FLAGS, BannerTheme
-
-        if not FLAGS.banner_enabled or FLAGS.banner_theme == BannerTheme.NONE:
-            return
-
-        if FLAGS.banner_theme == BannerTheme.OVERHAUL_GREEN_BLUE:
-            _banner_overhaul_block()
-            return
-
-        if FLAGS.banner_theme == BannerTheme.OVERHAUL_ORANGE:
-            _banner_overhaul_block(solid_color="\033[38;5;208m")
-            return
-
-        if FLAGS.banner_theme == BannerTheme.OBSCURA_BY_OVERHAUL:
-            _banner_obscura_by_overhaul()
-            return
-
-    except Exception:
-        pass  # fall through to default if feature_flags import fails
-
-    # OBSCURA_DEFAULT — original oscillating purple/blue wave
+    """Print the oscillating OBSCURA ASCII art banner to stdout."""
     letters = {
         "O": [" ### ", "#   #", "#   #", "#   #", " ### "],
         "B": ["#### ", "#   #", "#### ", "#   #", "#### "],
@@ -820,22 +738,22 @@ def print_banner(
 
 def print_error(msg: str) -> None:
     """Print an error message."""
-    console.print(f"[bold {ERROR_COLOR}]  error:[/] {markup_escape(msg)}")
+    console.print(f"[bold {ERROR_COLOR}]  error:[/] {msg}")
 
 
 def print_info(msg: str) -> None:
     """Print an info message."""
-    console.print(f"[dim {ACCENT_DIM}]  {markup_escape(msg)}[/]")
+    console.print(f"[dim {ACCENT_DIM}]  {msg}[/]")
 
 
 def print_warning(msg: str) -> None:
     """Print a warning message."""
-    console.print(f"[{WARN_COLOR}]  {markup_escape(msg)}[/]")
+    console.print(f"[{WARN_COLOR}]  {msg}[/]")
 
 
 def print_ok(msg: str) -> None:
     """Print a success message."""
-    console.print(f"[bold {OK_COLOR}]  {markup_escape(msg)}[/]")
+    console.print(f"[bold {OK_COLOR}]  {msg}[/]")
 
 
 # ---------------------------------------------------------------------------

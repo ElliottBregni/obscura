@@ -2458,6 +2458,68 @@ async def list_unix_capabilities() -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Todo list — lightweight task tracker for agent planning
+# ---------------------------------------------------------------------------
+
+_todo_items: list[dict[str, str]] = []
+
+
+@tool(
+    "todo_write",
+    (
+        "Create or update a task list to track progress. "
+        "Accepts a JSON array of todo objects, each with 'content' (str), "
+        "'status' ('pending'|'in_progress'|'completed'), and 'activeForm' (str, "
+        "present-tense description shown while task runs). "
+        "Replaces the full list each call. Returns the updated list."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "todos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                        },
+                        "activeForm": {"type": "string"},
+                    },
+                    "required": ["content", "status"],
+                },
+                "description": "The full todo list (replaces previous).",
+            },
+        },
+        "required": ["todos"],
+    },
+)
+async def todo_write(todos: Any = None) -> str:
+    global _todo_items
+    if todos is None:
+        todos = []
+    if isinstance(todos, str):
+        try:
+            todos = json.loads(todos)
+        except (json.JSONDecodeError, ValueError):
+            return json.dumps({"ok": False, "error": "todos must be a JSON array"})
+    if not isinstance(todos, list):
+        return json.dumps({"ok": False, "error": "todos must be a JSON array"})
+    _todo_items = [
+        {
+            "content": str(t.get("content", "")),
+            "status": str(t.get("status", "pending")),
+            "activeForm": str(t.get("activeForm", "")),
+        }
+        for t in todos
+        if isinstance(t, dict)
+    ]
+    return json.dumps({"ok": True, "count": len(_todo_items), "todos": _todo_items})
+
+
 @tool(
     "list_system_tools",
     "List available built-in system tools and their metadata.",
@@ -2544,6 +2606,8 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast(ToolSpec, getattr(cast(Any, manage_crontab), "spec")),
         cast(ToolSpec, getattr(cast(Any, list_unix_capabilities), "spec")),
         cast(ToolSpec, getattr(cast(Any, list_system_tools), "spec")),
+        # Task tracking
+        cast(ToolSpec, getattr(cast(Any, todo_write), "spec")),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():
