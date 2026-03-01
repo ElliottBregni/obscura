@@ -1,0 +1,49 @@
+# =============================================================================
+# Kind cluster config for Obscura local development
+# =============================================================================
+# Usage: kind create cluster --config infra/k8s/kind-config.yaml --name obscura
+#
+# Pinned to kindest/node:v1.35.0. Uses kubeadm v1beta4 format (required for
+# K8s >=1.35) and containerd host-based registry config (the old
+# registry.mirrors TOML format was removed in containerd 2.x).
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f
+    kubeadmConfigPatches:
+      - |
+        apiVersion: kubeadm.k8s.io/v1beta4
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            - name: "node-labels"
+              value: "ingress-ready=true"
+    extraPortMappings:
+      # Obscura SDK API
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Jaeger UI
+      - containerPort: 30686
+        hostPort: 16686
+        protocol: TCP
+      # Grafana
+      - containerPort: 30300
+        hostPort: 3000
+        protocol: TCP
+      # Prometheus
+      - containerPort: 30900
+        hostPort: 9090
+        protocol: TCP
+
+  - role: worker
+    image: kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f
+
+# containerd host-based registry config (replaces deprecated registry.mirrors)
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

@@ -1,0 +1,21 @@
+apiVersion: v2
+name: obscura
+description: Obscura multi-agent LLM context management system
+type: application
+version: 0.1.0
+appVersion: "0.2.0"
+
+keywords:
+  - ai
+  - agent
+  - llm
+  - context-management
+
+maintainers:
+  - name: Elliott Bregni
+
+dependencies:
+  - name: zitadel
+    version: "8.x.x"
+    repository: "https://charts.zitadel.com"
+    condition: zitadel.enabled

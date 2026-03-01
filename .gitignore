@@ -1,0 +1,74 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Obsidian metadata
+.obsidian/
+.DS_Store
+
+# Symlinked repos (tracked in their respective repos)
+repos/
+repo/
+
+# Agent system-level symlinks (machine-specific paths)
+agents/copilot
+agents/claude
+
+# Agent CLI state (synced bidirectionally, user-specific configs)
+# Not committed to vault repo (local sync only)
+*-cli/
+
+# Package files (MCP servers, plugins, etc.)
+**/pkg/
+pkg/
+*.pkg
+
+# Vault-only folders (can be committed to vault repo if desired)
+scratch/
+thinking/
+_attachments/
+scratch/*
+thinking/*
+
+crawlers/*
+crawlers/
+
+tests/__pycache__
+__pycache__
+node_modules/
+
+# Infrastructure secrets
+infra/zitadel/machinekey.json
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Docker
+.env
+
+# Helm dependencies (downloaded charts)
+helm/obscura/charts/
+helm/obscura/Chart.lock
+scripts/test_private_key.pem
+scripts/test_jwks.json
+obscura.egg-info
+logs/
+audit.jsonl
+.obscura/
+.claude/
+.pytest_caache/
+.worktrees/
+.vscode/
+.venv/
+obscura.egg-info/
+research_findings/
+scripts/
+docker-compose.base.yml
+docker-compose.dev.yml
+docker-compose.prod.yml
+docker-compose.staging.yml
+partity_matrix
+tests/integration/
+tests
+.sh 
+docs/*

@@ -1,0 +1,175 @@
+# =============================================================================
+# Obscura — Default Helm values
+# =============================================================================
+
+# -- Number of SDK replicas
+replicaCount: 1
+
+# -- Container image configuration
+image:
+  repository: obscura-sdk
+  tag: ""  # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# -- Override chart name
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Kubernetes service configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+# -- Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ---------------------------------------------------------------------------
+# Auth (Zitadel OIDC)
+# ---------------------------------------------------------------------------
+auth:
+  enabled: true
+  issuer: "http://zitadel:8080"
+  audience: "obscura-sdk"
+
+# ---------------------------------------------------------------------------
+# Telemetry (OpenTelemetry)
+# ---------------------------------------------------------------------------
+telemetry:
+  enabled: true
+  otelEndpoint: "http://otel-collector:4317"
+  serviceName: "obscura-sdk"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  format: "json"
+
+# ---------------------------------------------------------------------------
+# LLM Backends
+# ---------------------------------------------------------------------------
+backends:
+  default: "copilot"
+  copilot:
+    enabled: true
+  claude:
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# API key secrets — names of existing K8s Secrets, or set inline
+# When inline values are provided, the chart creates the Secret.
+# ---------------------------------------------------------------------------
+secrets:
+  # Set to an existing secret name to skip chart-managed secret creation
+  existingSecret: ""
+  # Inline values (used only when existingSecret is empty)
+  githubToken: ""
+  anthropicApiKey: ""
+
+# ---------------------------------------------------------------------------
+# Resource requests & limits
+# ---------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Probes
+# ---------------------------------------------------------------------------
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# ---------------------------------------------------------------------------
+# Ingress (optional)
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: obscura.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# ---------------------------------------------------------------------------
+# Autoscaling (optional)
+# ---------------------------------------------------------------------------
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ---------------------------------------------------------------------------
+# Pod-level settings
+# ---------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}
+
+# ---------------------------------------------------------------------------
+# Security context
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# ---------------------------------------------------------------------------
+# Zitadel subchart values
+# ---------------------------------------------------------------------------
+zitadel:
+  enabled: true
+  replicaCount: 1
+  zitadel:
+    masterkey: "MasterkeyNeedsToHave32Characters"
+    configmapConfig:
+      ExternalSecure: false
+      ExternalDomain: zitadel
+      ExternalPort: 8080
+      TLS:
+        Enabled: false
+    secretConfig: {}
+  cockroachdb:
+    single-node: true
+    statefulset:
+      replicas: 1
+    storage:
+      persistentVolume:
+        size: 1Gi
