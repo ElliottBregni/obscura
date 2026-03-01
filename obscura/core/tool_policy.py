@@ -251,47 +251,22 @@ class ToolPolicy:
     def apply_to_copilot(self, config: dict[str, Any], tools: list[ToolSpec]) -> None:
         """Apply this ToolPolicy to a Copilot SDK session config in-place.
 
-        The Copilot SDK expects a list of tool definitions under the "tools"
-        key. This method will filter that list according to the policy and
-        serialize ToolSpec objects to plain dicts where necessary. It will
-        also add a simple "tool_permissions" block when native tools are
-        disallowed so the SDK can enforce the restriction.
+        For Copilot, do not remove or block provider-native tools here — always
+        allow native tools to be present in the session config. This method
+        simply serializes given ToolSpec objects (or dicts) into the format
+        expected by the Copilot SDK and places them on config["tools"].
         """
         # If no tools present, nothing to do
         if not tools:
             return
 
-        # Filter tools by name allow/deny lists (custom tools)
-        filtered: list[ToolSpec] = tools
-        if self.allowed_tools:
-            filtered = [t for t in filtered if t.name in self.allowed_tools]
-        if self.denied_tools:
-            filtered = [t for t in filtered if t.name not in self.denied_tools]
-
-        # If native tools are blocked, attempt to remove any tools that look
-        # like provider-native entries. Heuristic: native tools may be passed
-        # as dicts or have a name starting with an underscore or "copilot.".
-        if not self.allow_native:
-            def is_native_tool(t: ToolSpec | dict) -> bool:
-                name = t.name if hasattr(t, "name") else (t.get("name") if isinstance(t, dict) else "")
-                if not name:
-                    return False
-                return name.startswith("_") or name.startswith("copilot.") or name.startswith("claude.")
-
-            filtered = [t for t in filtered if not is_native_tool(t)]
-
-            # Add a minimal hint for the Copilot SDK to block native tools if
-            # it recognizes such a config key. This is non-fatal if the SDK
-            # ignores it.
-            config.setdefault("tool_permissions", {})["allow_native"] = False
-
-        # Serialize ToolSpec objects to dicts expected by the SDK
+        # Serialize ToolSpec objects to dicts expected by the SDK without
+        # attempting to heuristically remove native tools.
         serialized: list[dict[str, Any]] = []
-        for t in filtered:
+        for t in tools:
             if isinstance(t, dict):
                 serialized.append(t)
                 continue
-            # Only include minimal fields the SDK needs: name, description, parameters
             serialized.append(
                 {
                     "name": t.name,
