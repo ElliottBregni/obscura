@@ -157,7 +157,15 @@ if config.CAPTURE_PRINTS:
     builtins.print = _capturing_print
 
 # ---- Main console: COLOR ENABLED ----
-console = Console(force_terminal=True, legacy_windows=False)
+# Preserve the real stdout fd before prompt_toolkit's patch_stdout() can
+# replace sys.stdout with a StdoutProxy.  Rich resolves sys.stdout at
+# print-time, so without this the ANSI escapes get mangled through the proxy.
+import os as _os, sys as _sys
+
+_real_stdout_fd = _os.dup(_sys.stdout.fileno())
+_real_stdout = _os.fdopen(_real_stdout_fd, "w", closefd=False)
+
+console = Console(file=_real_stdout, force_terminal=True, legacy_windows=False)
 
 # Active renderer for expand-preview hotkey (set by send_message)
 _active_renderer: "StreamRenderer" | None = None
@@ -236,6 +244,11 @@ class StreamRenderer:
                 self._stop_thinking_spinner()
                 self._flush_all()
                 print_error(event.text)
+
+            case AgentEventKind.CONTEXT_COMPACT:
+                console.print(
+                    f"  [yellow]⚡ {event.text}[/]"
+                )
 
             case _:
                 pass

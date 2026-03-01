@@ -262,18 +262,6 @@ async def send_message(
                     pass
                 if event.kind == AgentEventKind.TEXT_DELTA:
                     _buf.append(event.text)
-                # Mid-loop auto-compact: check after each tool result
-                if event.kind == AgentEventKind.TOOL_RESULT:
-                    _mid_tokens = _estimate_tokens(
-                        "".join(t for _, t in ctx.message_history)
-                        + str(event.tool_result or "")
-                    )
-                    if _mid_tokens > _compact_threshold:
-                        console.print(
-                            f"[yellow]⚡ Mid-loop auto-compact "
-                            f"(~{_mid_tokens:,} tokens)…[/]"
-                        )
-                        await cmd_compact("6", ctx)
                 _track_file_event(event.kind, ctx, event)
         except KeyboardInterrupt:
             pass

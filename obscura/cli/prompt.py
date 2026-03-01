@@ -96,8 +96,10 @@ _RULE_CHAR = "\u2500"  # ─
 
 def print_separator() -> None:
     """Print a thin horizontal rule across the terminal width."""
+    from obscura.cli.render import console
+
     width = shutil.get_terminal_size((80, 24)).columns
-    print(f"\033[2m{_RULE_CHAR * width}\033[0m")
+    console.print(f"[dim]{_RULE_CHAR * width}[/]", highlight=False)
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +204,7 @@ async def bordered_prompt(session: PromptSession[str]) -> str:
     avoid very aggressive horizontal rules that break flow.
     """
     print_separator()
-    with patch_stdout():
+    with patch_stdout(raw=True):
         result = await session.prompt_async()
     # add a small blank line after input instead of a full separator to reduce visual noise
     print()
@@ -219,7 +221,7 @@ async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
     session: PromptSession[str] = PromptSession()
     try:
         # Wrap with patch_stdout to avoid interleaved prints when other tasks log.
-        with patch_stdout():
+        with patch_stdout(raw=True):
             return (await session.prompt_async(message)).strip().lower()
     except (EOFError, KeyboardInterrupt):
         return "n"

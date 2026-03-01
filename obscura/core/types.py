@@ -432,6 +432,7 @@ class AgentEventKind(enum.Enum):
     ERROR = "error"
     SESSION_PAUSED = "session_paused"
     USER_INPUT = "user_input"
+    CONTEXT_COMPACT = "context_compact"
 
 
 @dataclass

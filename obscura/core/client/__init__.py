@@ -438,6 +438,11 @@ class ObscuraClient:
             self._backend.enable_confirmation(_wrap_confirm)
             loop_confirm = None  # don't double-gate
 
+        # Default context budget: 50% of context window, in chars (~4 chars/token)
+        context_budget = kwargs.pop("context_budget", 0)
+        if not context_budget:
+            context_budget = int(self.context_window * 0.50 * 4)
+
         loop = AgentLoop(
             self._backend,
             self._tool_registry,
@@ -448,6 +453,7 @@ class ObscuraClient:
             auto_complete=auto_complete,
             backend_name=self._backend_type.value,
             model_name=self._model,
+            context_budget=context_budget,
         )
         self._current_loop = loop
         return loop.run(prompt, session_id=session_id, initial_messages=initial_messages, **kwargs)

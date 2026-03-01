@@ -137,6 +137,7 @@ class AgentLoop:
         auto_complete: bool = True,
         backend_name: str = "",
         model_name: str = "",
+        context_budget: int = 0,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -150,6 +151,8 @@ class AgentLoop:
         self._auto_complete = auto_complete
         self._backend_name = backend_name
         self._model_name = model_name
+        self._context_budget = context_budget  # 0 = unlimited (chars)
+        self._accumulated_chars = 0
 
         # Pause / mid-run input state
         self._should_pause = False
@@ -634,6 +637,31 @@ class AgentLoop:
             # persist full tool call/result history.  Merge rather
             # than replace so callers' kwargs (e.g. tool_choice) survive.
             kwargs = {**kwargs, "messages": structured}
+
+            # Context budget: track accumulated chars and compact when
+            # the internal message list grows too large.
+            if self._context_budget > 0:
+                turn_chars = sum(
+                    len(self._render_tool_result_text(r)) for r in tool_results
+                ) + len(turn_text)
+                self._accumulated_chars += turn_chars
+                if self._accumulated_chars > self._context_budget:
+                    kwargs, dropped, freed = self._compact_messages(kwargs)
+                    compact_event = AgentEvent(
+                        kind=AgentEventKind.CONTEXT_COMPACT,
+                        turn=turn,
+                        text=(
+                            f"Compacted {dropped} tool turns "
+                            f"({freed:,} chars freed)"
+                        ),
+                    )
+                    if _prev_event is not None:
+                        await self._post_emit(_prev_event)
+                        _prev_event = None
+                    emitted = await self._emit(compact_event, session_id)
+                    if emitted is not None:
+                        yield emitted
+                        _prev_event = emitted
 
         # Hit max turns
         if _prev_event is not None:
@@ -1171,6 +1199,61 @@ class AgentLoop:
         )
 
         return [assistant_msg, result_msg]
+
+    def _compact_messages(
+        self,
+        kwargs: dict[str, Any],
+    ) -> tuple[dict[str, Any], int, int]:
+        """Compact accumulated structured messages to stay within budget.
+
+        Keeps the last 2 message pairs (4 Messages) and replaces older
+        pairs with a brief text summary.
+
+        Returns (updated_kwargs, dropped_pairs, freed_chars).
+        """
+        messages: list[Message] = kwargs.get("messages", [])
+        if len(messages) <= 4:
+            return kwargs, 0, 0
+
+        # Messages come in pairs: (assistant, tool_result)
+        keep = messages[-4:]  # last 2 pairs
+        old = messages[:-4]
+
+        # Estimate chars being freed
+        old_chars = 0
+        tool_names: list[str] = []
+        for msg in old:
+            for block in msg.content:
+                old_chars += len(getattr(block, "text", "") or "")
+                if getattr(block, "tool_name", None):
+                    tool_names.append(block.tool_name)
+
+        # Unique tool names for summary
+        seen: set[str] = set()
+        unique_tools: list[str] = []
+        for t in tool_names:
+            if t not in seen:
+                seen.add(t)
+                unique_tools.append(t)
+
+        dropped_pairs = len(old) // 2
+        summary = (
+            f"[Compacted: {dropped_pairs} earlier tool turns. "
+            f"Tools used: {', '.join(unique_tools[:10])}]"
+        )
+
+        summary_msg = Message(
+            role=Role.ASSISTANT,
+            content=[ContentBlock(kind="text", text=summary)],
+        )
+
+        new_kwargs = {**kwargs, "messages": [summary_msg] + keep}
+        self._accumulated_chars = sum(
+            len(getattr(b, "text", "") or "")
+            for m in keep
+            for b in m.content
+        )
+        return new_kwargs, dropped_pairs, old_chars
 
     @staticmethod
     def _format_tool_results(
