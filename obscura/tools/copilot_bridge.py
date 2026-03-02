@@ -115,6 +115,12 @@ def glob_impl(pattern: str, path: str = ".") -> str:
     return result.stdout if result.stdout else "No files found"
 
 
+def report_intent_impl(intent: str) -> str:
+    """Record the agent's current intent. No-op acknowledgement."""
+    import json
+    return json.dumps({"ok": True, "intent": intent})
+
+
 def make_copilot_bridge_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
     """Create Copilot CLI bridge tool specs."""
     

@@ -504,27 +504,62 @@ async def web_search(query: str, max_results: int = 5) -> str:
 
 @tool(
     "task",
-    "Compatibility tool for agent task delegation. Returns a structured status.",
+    (
+        "Delegate a sub-task to a local Obscura agent subprocess. "
+        "Spawns 'obscura -p <prompt>' and returns the captured output. "
+        "Use 'target' to specify an agent_type hint (e.g. 'explore', 'bash'); "
+        "omit for default."
+    ),
     {
         "type": "object",
         "properties": {
-            "prompt": {"type": "string"},
-            "target": {"type": "string"},
+            "prompt": {"type": "string", "description": "The task to delegate."},
+            "target": {
+                "type": "string",
+                "description": "Optional agent type hint (e.g. 'explore', 'bash').",
+            },
         },
         "required": ["prompt"],
     },
     required_tier="privileged",
 )
-async def task(prompt: str, target: str = "") -> str:
-    return json.dumps(
-        {
-            "ok": False,
-            "error": "task_delegation_not_configured",
+async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) -> str:
+    obscura_bin = _resolve_command("obscura")
+    cmd = [obscura_bin, "-p", prompt]
+    if target:
+        cmd += ["--agent-type", target]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return json.dumps({"ok": False, "error": "timeout", "prompt": prompt})
+        output = stdout.decode("utf-8", errors="replace").strip()
+        err = stderr.decode("utf-8", errors="replace").strip()
+        return json.dumps({
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "result": output,
+            "stderr": err,
             "prompt": prompt,
             "target": target,
-            "message": "Configure A2A remote tools to enable real delegation.",
-        }
-    )
+        })
+    except Exception as exc:
+        return json.dumps({
+            "ok": False,
+            "error": "delegation_failed",
+            "message": str(exc),
+            "prompt": prompt,
+            "target": target,
+        })
 
 
 @tool(
@@ -2031,16 +2066,18 @@ _dynamic_tools: dict[str, ToolSpec] = {}
                 ),
             },
         },
-        "required": ["name", "description", "parameters", "code"],
+        "required": ["name", "description", "code"],
     },
     required_tier="privileged",
 )
 async def create_tool(
     name: str,
     description: str,
-    parameters: dict[str, Any],
     code: str,
+    parameters: dict[str, Any] | None = None,
 ) -> str:
+    if parameters is None:
+        parameters = {"type": "object", "properties": {}}
     clean_name = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
     if not clean_name:
         return _json_error("invalid_tool_name")
@@ -2521,6 +2558,24 @@ async def todo_write(todos: Any = None) -> str:
 
 
 @tool(
+    "report_intent",
+    "Report the agent's current intent or plan before acting. Call this before starting any significant task to surface what you are about to do.",
+    {
+        "type": "object",
+        "properties": {
+            "intent": {
+                "type": "string",
+                "description": "The agent's current intent or high-level plan",
+            }
+        },
+        "required": ["intent"],
+    },
+)
+async def report_intent(intent: str) -> str:
+    return json.dumps({"ok": True, "intent": intent})
+
+
+@tool(
     "list_system_tools",
     "List available built-in system tools and their metadata.",
     {
@@ -2608,6 +2663,8 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast(ToolSpec, getattr(cast(Any, list_system_tools), "spec")),
         # Task tracking
         cast(ToolSpec, getattr(cast(Any, todo_write), "spec")),
+        # Agent intent reporting
+        cast(ToolSpec, getattr(cast(Any, report_intent), "spec")),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():
