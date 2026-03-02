@@ -40,6 +40,7 @@ class HookDefinition(BaseModel):
     event: str
     bash: str = ""
     module: str = ""
+    matcher: str = ""  # tool name filter; empty = wildcard (all tools)
     timeout_sec: int = 10
     comment: str = ""
 

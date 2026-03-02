@@ -251,32 +251,24 @@ class ToolPolicy:
     def apply_to_copilot(self, config: dict[str, Any], tools: list[ToolSpec]) -> None:
         """Apply this ToolPolicy to a Copilot SDK session config in-place.
 
-        For Copilot, do not remove or block provider-native tools here — always
-        allow native tools to be present in the session config. This method
-        simply serializes given ToolSpec objects (or dicts) into the format
-        expected by the Copilot SDK and places them on config["tools"].
+        Filters registered tools through ``allowed_tools``/``denied_tools``
+        and sets ``config["tools"]`` to the filtered ToolSpec objects (the
+        Copilot SDK requires objects with a ``.name`` attribute).  Also sets
+        ``config["allowed_tools"]`` when native tools are blocked so the
+        model can only call filtered tool names.
         """
-        # If no tools present, nothing to do
         if not tools:
             return
 
-        # Serialize ToolSpec objects to dicts expected by the SDK without
-        # attempting to heuristically remove native tools.
-        serialized: list[dict[str, Any]] = []
-        for t in tools:
-            if isinstance(t, dict):
-                serialized.append(t)
-                continue
-            serialized.append(
-                {
-                    "name": t.name,
-                    "description": getattr(t, "description", ""),
-                    "parameters": getattr(t, "parameters", {}),
-                }
-            )
+        # Apply allow/deny filtering — keeps ToolSpec objects intact so
+        # the Copilot SDK can access .name on each tool.
+        filtered_tools: list[ToolSpec] = self.filter_tools(tools)
+        config["tools"] = filtered_tools
 
-        # Mutate the config in place
-        config["tools"] = serialized
+        # When native tools are blocked, set an explicit allowlist so
+        # only the filtered tool names are available to the model.
+        if not self.allow_native:
+            config["allowed_tools"] = [t.name for t in filtered_tools]
     
     def __repr__(self) -> str:
         """String representation for debugging."""

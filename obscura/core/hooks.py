@@ -237,6 +237,9 @@ def _make_command_before_hook(defn: HookDefinition) -> BeforeHook:
     async def _hook(event: AgentEvent) -> AgentEvent | None:
         if not defn.bash:
             return event
+        # Matcher filtering: skip if matcher is set and doesn't match tool name
+        if defn.matcher and event.tool_name != defn.matcher:
+            return event  # pass through unmodified
         try:
             payload = json.dumps({
                 "event": event.kind.value,
@@ -273,6 +276,9 @@ def _make_command_after_hook(defn: HookDefinition) -> AfterHook:
 
     async def _hook(event: AgentEvent) -> None:
         if not defn.bash:
+            return
+        # Matcher filtering: skip if matcher doesn't match tool name
+        if defn.matcher and event.tool_name != defn.matcher:
             return
         try:
             payload = json.dumps({

@@ -1,0 +1,650 @@
+diff --git a/obscura/cli/__init__.py b/obscura/cli/__init__.py
+index c42dfcbc..eed94ce8 100644
+--- a/obscura/cli/__init__.py
++++ b/obscura/cli/__init__.py
+@@ -1,4 +1,4 @@
+-"""obscura.cli — Claude Code-style REPL for Obscura.
++"""obscura.cli â Claude Code-style REPL for Obscura.
+ 
+ Single entry point: ``obscura`` drops into an interactive REPL.
+ Slash commands (``/help``, ``/agent``, ``/session``, etc.) for actions;
+@@ -19,17 +19,20 @@ Usage::
+ from __future__ import annotations
+ 
+ import asyncio
++import time
+ import uuid
+ from pathlib import Path
+ from typing import Any
+ 
+ import click
+ 
++from obscura import config
+ from obscura.cli.commands import (
+     COMPLETIONS,
+     REPLContext,
+     _FILE_WRITE_TOOLS,
+     handle_command,
++    set_secret_menu_visibility,
+ )
+ from obscura.cli.prompt import (
+     bordered_prompt,
+@@ -39,7 +42,9 @@ from obscura.cli.prompt import (
+ from obscura.cli.render import (
+     StreamRenderer,
+     console,
++    export_transcript_markdown,
+     print_banner,
++    print_user_turn,
+     render_plan,
+ )
+ from obscura.cli import trace as trace_mod
+@@ -54,6 +59,71 @@ from obscura.core.event_store import SQLiteEventStore, SessionStatus
+ from obscura.core.paths import resolve_obscura_home
+ from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
+ 
++_CONTEXT_WARNING_BANDS: tuple[int, ...] = (25, 50, 75)
++
++
++# ---------------------------------------------------------------------------
++# Session artifact helpers
++# ---------------------------------------------------------------------------
++
++
++def _session_dir(session_id: str) -> Path:
++    return resolve_obscura_home() / "sessions" / session_id
++
++
++def _write_session_transcript(session_id: str, history: list[tuple[str, str]]) -> None:
++    try:
++        session_dir = _session_dir(session_id)
++        session_dir.mkdir(parents=True, exist_ok=True)
++        transcript_path = session_dir / "transcript"
++        transcript_path.write_text(export_transcript_markdown(history), encoding="utf-8")
++    except Exception:
++        pass
++
++
++def _copilot_budget_pct(tokens: int, context_window: int) -> int:
++    """Percent of Copilot's default soft context budget consumed."""
++    budget_tokens = max(int(context_window * 0.50), 1)
++    return int((tokens / budget_tokens) * 100)
++
++
++def _emit_context_warnings(ctx: REPLContext, tokens: int, context_window: int) -> None:
++    """Emit one-time warnings as context usage crosses 25/50/75%."""
++    if context_window <= 0:
++        return
++
++    pct = int((tokens / context_window) * 100)
++
++    # Allow warnings to retrigger after compaction if usage drops back below a band.
++    ctx.context_warning_bands_seen = {
++        band for band in ctx.context_warning_bands_seen if pct >= band
++    }
++
++    crossed = [
++        band
++        for band in _CONTEXT_WARNING_BANDS
++        if pct >= band and band not in ctx.context_warning_bands_seen
++    ]
++    if not crossed:
++        return
++
++    for band in crossed:
++        color = "dim yellow" if band < 75 else "yellow"
++        msg = (
++            f"[{color}]  Context warning: ~{tokens:,} tokens "
++            f"({pct}% of {context_window:,}) crossed {band}%.[/]"
++        )
++        if ctx.backend == "copilot":
++            budget_pct = _copilot_budget_pct(tokens, context_window)
++            budget_tokens = int(context_window * 0.50)
++            msg = (
++                f"{msg}\n"
++                f"[{color}]  Copilot budget: {budget_pct}% of "
++                f"{budget_tokens:,} token soft budget.[/]"
++            )
++        console.print(msg)
++        ctx.context_warning_bands_seen.add(band)
++
+ 
+ # ---------------------------------------------------------------------------
+ # MCP discovery
+@@ -85,8 +155,16 @@ def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
+ 
+ async def _cli_confirm(ctx: REPLContext, tool_name: str, tool_input: dict[str, Any]) -> bool:
+     """Prompt user to approve a tool call. Returns True to allow."""
+-    if tool_name in ctx.confirm_always:
++    if tool_name in ctx.confirm_allow:
+         return True
++    if tool_name in ctx.confirm_deny:
++        console.print(f"\n[red]Denied by policy:[/] [bold]{tool_name}[/]")
++        return False
++    if ctx.confirm_default == "approve":
++        return True
++    if ctx.confirm_default == "deny":
++        console.print(f"\n[red]Denied by default policy:[/] [bold]{tool_name}[/]")
++        return False
+ 
+     console.print(f"\n[yellow]Tool:[/] [bold]{tool_name}[/]")
+     for k, v in tool_input.items():
+@@ -95,12 +173,96 @@ async def _cli_confirm(ctx: REPLContext, tool_name: str, tool_input: dict[str, A
+             sv = sv[:77] + "..."
+         console.print(f"  [dim]{k}=[/]{sv}")
+ 
+-    answer = await confirm_prompt_async("Allow? [y/n/always] ")
++    for attempt in range(2):
++        answer = await confirm_prompt_async(
++            "Approve tool call? [a]pprove/[d]eny/[A]lways/[N]ever (default: deny) "
++        )
++        decision = _parse_confirm_decision(answer)
++        if decision == "always":
++            ctx.confirm_allow.add(tool_name)
++            ctx.confirm_deny.discard(tool_name)
++            return True
++        if decision == "never":
++            ctx.confirm_deny.add(tool_name)
++            ctx.confirm_allow.discard(tool_name)
++            return False
++        if decision == "approve":
++            return True
++        if decision == "deny":
++            return False
++        if attempt == 0:
++            console.print(
++                "[red]Invalid response.[/] Enter approve/deny/always/never."
++            )
+ 
+-    if answer == "always":
+-        ctx.confirm_always.add(tool_name)
++    # Fail closed after one retry.
++    console.print("[red]Invalid approval response; denying tool call.[/]")
++    return False
++
++
++def _parse_confirm_decision(answer: str) -> str | None:
++    """Normalize confirmation input to one of: approve|deny|always|never."""
++    val = answer.strip().lower()
++    compact = " ".join(val.split())
++    first = compact.split(" ", 1)[0] if compact else ""
++
++    if compact in {"always"} or first in {"always"}:
++        return "always"
++    if compact in {"never"} or first in {"never"}:
++        return "never"
++    if compact in {"approve", "a", "y", "yes"} or first in {"approve", "a", "y", "yes"}:
++        return "approve"
++    if compact in {"deny", "d", "n", "no", ""} or first in {"deny", "d", "n", "no"}:
++        return "deny"
++    # Accept common longer confirmations from model/tool text.
++    if compact.startswith("yes"):
++        return "approve"
++    if compact.startswith("no"):
++        return "deny"
++    return None
++
++
++def _summarize_command(tool_input: dict[str, Any]) -> str:
++    """Best-effort command preview for task surface."""
++    for key in ("cmd", "command", "input", "script"):
++        raw = tool_input.get(key)
++        if raw:
++            text = str(raw).replace("\n", " ").strip()
++            return text[:120] + ("..." if len(text) > 120 else "")
++    return str(tool_input)[:120]
++
++
++def _is_python_execution(tool_name: str, tool_input: dict[str, Any]) -> bool:
++    """Heuristic: identify python executions from tool calls."""
++    if "python" in tool_name.lower():
+         return True
+-    return answer in ("y", "yes")
++    payload = " ".join(str(v).lower() for v in tool_input.values())
++    hints = ("python ", "python3", "uv run python", "pytest", "ipython")
++    return any(h in payload for h in hints)
++
++
++def _track_task_surface_event(ctx: REPLContext, ev: Any) -> None:
++    """Track python tool executions for /tasks."""
++    if ev.kind == AgentEventKind.TOOL_CALL:
++        if not _is_python_execution(ev.tool_name, ev.tool_input):
++            return
++        task_id = f"py-{len(ctx.python_tasks) + len(ctx._pending_python_tasks) + 1}"
++        ctx._pending_python_tasks[ev.tool_use_id] = {
++            "id": task_id,
++            "status": "running",
++            "tool": ev.tool_name,
++            "command": _summarize_command(ev.tool_input),
++        }
++        return
++
++    if ev.kind == AgentEventKind.TOOL_RESULT:
++        pending = ctx._pending_python_tasks.pop(ev.tool_use_id, None)
++        if pending is None:
++            return
++        pending["status"] = "error" if getattr(ev, "is_error", False) else "done"
++        ctx.python_tasks.append(pending)
++        if len(ctx.python_tasks) > 50:
++            ctx.python_tasks = ctx.python_tasks[-50:]
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -161,17 +323,97 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
+ # ---------------------------------------------------------------------------
+ 
+ 
++async def _cli_heartbeat(
++    start_time: float,
++    got_output: asyncio.Event,
++    *,
++    first_ping: float = 120.0,
++    interval: float = 30.0,
++) -> None:
++    """Print keepalive dots if the agent takes longer than `first_ping` seconds
++    to produce any output. After the first ping, repeats every `interval` s."""
++    try:
++        await asyncio.wait_for(got_output.wait(), timeout=first_ping)
++    except asyncio.TimeoutError:
++        pass
++    else:
++        return  # output arrived â nothing to do
++
++    # First ping
++    elapsed = time.time() - start_time
++    console.print(
++        f"[dim]  â£¿ still workingâ¦ ({elapsed:.0f}s)[/]",
++        highlight=False,
++    )
++
++    # Repeat every `interval` seconds until output arrives
++    while True:
++        try:
++            await asyncio.wait_for(got_output.wait(), timeout=interval)
++        except asyncio.TimeoutError:
++            elapsed = time.time() - start_time
++            console.print(
++                f"[dim]  â£¿ still workingâ¦ ({elapsed:.0f}s)[/]",
++                highlight=False,
++            )
++        else:
++            return
++
++
++async def _cli_heartbeat(
++    start_time: float,
++    got_output: asyncio.Event,
++    *,
++    first_ping: float = 120.0,
++    interval: float = 30.0,
++) -> None:
++    """Print keepalive dots if the agent takes longer than `first_ping` seconds
++    to produce any output. After the first ping, repeats every `interval` s."""
++    try:
++        await asyncio.wait_for(got_output.wait(), timeout=first_ping)
++    except asyncio.TimeoutError:
++        pass
++    else:
++        return  # output arrived — nothing to do
++
++    # First ping
++    elapsed = time.time() - start_time
++    console.print(
++        f"[dim]  ⧿ still working… ({elapsed:.0f}s)[/]",
++        highlight=False,
++    )
++
++    # Repeat every `interval` seconds until output arrives
++    while True:
++        try:
++            await asyncio.wait_for(got_output.wait(), timeout=interval)
++        except asyncio.TimeoutError:
++            elapsed = time.time() - start_time
++            console.print(
++                f"[dim]  ⧿ still working… ({elapsed:.0f}s)[/]",
++                highlight=False,
++            )
++        else:
++            return
++
++
+ async def send_message(
+     ctx: REPLContext,
+     text: str,
+     loop_kwargs: dict[str, Any],
+     external_status: object | None = None,
++    spinner_enabled: bool = True,
+ ) -> str:
+     """Send a chat message and stream the response with Markdown rendering.
+ 
+     Returns the accumulated assistant text.
+     """
+-    renderer = StreamRenderer(external_status=external_status)
++    print_user_turn(text)
++    renderer = StreamRenderer(
++        external_status=external_status,
++        spinner_enabled=spinner_enabled,
++        model_name=ctx.model,
++    )
+     # Register active renderer so prompt can expand previews while streaming
+     try:
+         from obscura.cli.render import set_active_renderer
+@@ -189,7 +431,7 @@ async def send_message(
+         async def confirm_cb(tc: ToolCallInfo) -> bool:
+             return await _cli_confirm(ctx, tc.name, tc.input)
+ 
+-    # ── Token-aware auto-compact ────────────────────────────────────────────
++    # ââ Token-aware auto-compact ââââââââââââââââââââââââââââââââââââââââââââ
+     # Use provider-specific thresholds from ctx.client so Claude (200k),
+     # OpenAI (128k/16k), Copilot (128k), and Codex (128k) all get the
+     # right limits without hard-coding numbers here.
+@@ -210,22 +452,29 @@ async def send_message(
+         context_window=_context_window,
+         compact_threshold=_compact_threshold,
+     )
++    _emit_context_warnings(ctx, _pre_tokens, _context_window)
+ 
+     if _pre_tokens > _compact_threshold:
+         console.print(
+-            f"[yellow]⚡ Auto-compacting context (~{_pre_tokens:,} tokens, "
+-            f"60% of {_context_window:,}) …[/]"
++            f"[yellow]â¡ Auto-compacting context (~{_pre_tokens:,} tokens, "
++            f"60% of {_context_window:,}) â¦[/]"
+         )
+         await cmd_compact("6", ctx)
+ 
+-    # ── Vector memory pre-search ──────────────────────────────────────────
++    # ââ Vector memory pre-search ââââââââââââââââââââââââââââââââââââââââââ
+     augmented_text = text
+     if ctx.vector_store is not None:
+         vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
+         if vm_context:
+             augmented_text = f"{vm_context}\n\n---\n\n{text}"
+ 
+-    # ── Streaming with graceful retry on context-limit errors ────────────────
++    # ââ Streaming with graceful retry on context-limit errors ââââââââââââââââ
++    _hb_start = time.time()
++    _got_output: asyncio.Event = asyncio.Event()
++    _hb_task: asyncio.Task[None] = asyncio.create_task(
++        _cli_heartbeat(_hb_start, _got_output)
++    )
++
+     async def _stream_with_retry(attempt: int = 0) -> list[str]:
+         _buf: list[str] = []
+         _s = ctx.client.run_loop(
+@@ -240,6 +489,22 @@ async def send_message(
+         try:
+             async for event in _s:
+                 renderer.handle(event)
++                # Resolve confirmation gates emitted by the agent loop
++                if (
++                    event.kind == AgentEventKind.CONFIRMATION_REQUEST
++                    and event.approval_future is not None
++                    and not event.approval_future.done()
++                ):
++                    try:
++                        answer = await confirm_prompt_async(
++                            "  Approve tool call? [y/n] "
++                        )
++                        approved = answer.strip().lower() in (
++                            "y", "yes", "a", "approve",
++                        )
++                        event.approval_future.set_result(approved)
++                    except Exception:
++                        event.approval_future.set_result(False)
+                 try:
+                     preview = ""
+                     if getattr(event, "text", None):
+@@ -261,8 +526,10 @@ async def send_message(
+                 except Exception:
+                     pass
+                 if event.kind == AgentEventKind.TEXT_DELTA:
++                    _got_output.set()
+                     _buf.append(event.text)
+                 _track_file_event(event.kind, ctx, event)
++                _track_task_surface_event(ctx, event)
+         except KeyboardInterrupt:
+             pass
+         except Exception as exc:
+@@ -279,7 +546,7 @@ async def send_message(
+             )
+             if _is_ctx_err and attempt == 0:
+                 console.print(
+-                    "[red]⚠ Context limit reached — aggressive compact and retry…[/]"
++                    "[red]â  Context limit reached â aggressive compact and retryâ¦[/]"
+                 )
+                 await cmd_compact("2", ctx)
+                 return await _stream_with_retry(attempt=1)
+@@ -291,6 +558,12 @@ async def send_message(
+     except KeyboardInterrupt:
+         pass
+     finally:
++        _got_output.set()  # unblock heartbeat so it exits cleanly
++        _hb_task.cancel()
++        try:
++            await _hb_task
++        except asyncio.CancelledError:
++            pass
+         renderer.finish()
+         try:
+             from obscura.cli.render import set_active_renderer
+@@ -308,7 +581,7 @@ async def send_message(
+     if response_text:
+         ctx.message_history.append(("assistant", response_text))
+ 
+-    # ── Vector memory auto-save ───────────────────────────────────────────
++    # ââ Vector memory auto-save âââââââââââââââââââââââââââââââââââââââââââ
+     if ctx.vector_store is not None and response_text:
+         turn_num = len([m for m in ctx.message_history if m[0] == "user"])
+         auto_save_turn(
+@@ -334,9 +607,11 @@ async def send_message(
+             f"{_context_window:,}). "
+             f"Auto-compact at {_compact_threshold:,} (60%).[/]"
+         )
++    _emit_context_warnings(ctx, _post_tokens, _context_window)
+ 
+     # Parse plan if in PLAN mode
+     _maybe_parse_plan(response_text, ctx)
++    _write_session_transcript(ctx.session_id, ctx.message_history)
+ 
+     return response_text
+ 
+@@ -357,11 +632,12 @@ async def _repl(
+     confirm: bool,
+     no_default_prompt: bool = False,
+ ) -> None:
+-    """Core async loop — runs the interactive REPL or single-shot."""
++    """Core async loop â runs the interactive REPL or single-shot."""
+     # Event store
+     db_path = resolve_obscura_home() / "events.db"
+     store = SQLiteEventStore(db_path)
+     sid = session_id or uuid.uuid4().hex
++    session_artifact_dir = _session_dir(sid)
+ 
+     # Load .env best-effort
+     try:
+@@ -440,6 +716,11 @@ async def _repl(
+ 
+     tool_count = len(system_tools)
+ 
++    # Load project hooks from .obscura/settings.json + .obscura/hooks/
++    from obscura.core.settings import load_all_hooks
++
++    project_hooks = load_all_hooks()
++
+     # Build client (MCP servers connect during start())
+     async with ObscuraClient(
+         backend,
+@@ -447,6 +728,7 @@ async def _repl(
+         system_prompt=combined_system,
+         tools=system_tools or None,
+         mcp_servers=mcp_configs or None,
++        hooks=project_hooks if project_hooks.count > 0 else None,
+     ) as client:
+ 
+         # Session resume
+@@ -473,10 +755,12 @@ async def _repl(
+             system_prompt=combined_system,
+             max_turns=max_turns,
+             tools_enabled=tools_enabled,
++            log_level=getattr(config, "LOG_LEVEL", "medium"),
+             mcp_configs=mcp_configs,
+             confirm_enabled=confirm,
+             vector_store=vector_store,
+         )
++        set_secret_menu_visibility(ctx.secret_menu_unlocked)
+ 
+         # --- Single-shot mode ---
+         if prompt:
+@@ -494,8 +778,42 @@ async def _repl(
+ 
+         # --- Interactive REPL ---
+         mm = ctx.get_mode_manager()
+-        toolbar = f"mode: {mm.current.value} \u00b7 esc+enter multiline \u00b7 /help"
+-        session = create_prompt_session(COMPLETIONS, toolbar_text=toolbar)
++        toolbar = (
++            f"mode: {mm.current.value} \u00b7 esc esc edit previous "
++            "\u00b7 esc enter editor \u00b7 /help"
++        )
++        def _hud_provider() -> dict[str, Any]:
++            running_bg = sum(
++                1 for t in ctx.background_tasks if t.get("status") == "running"
++            )
++            running_py = len(ctx._pending_python_tasks)
++            return {
++                "right_enabled": ctx.ui_right_menu_enabled,
++                "model_enabled": ctx.ui_menu_items.get("reasoning", True),
++                "menu_items": [
++                    ("tasks", f"{running_bg + running_py}" if ctx.ui_menu_items.get("tasks", True) else ""),
++                    ("approvals", "on" if (ctx.confirm_enabled and ctx.ui_menu_items.get("approvals", True)) else ""),
++                    ("reasoning", "on" if ctx.ui_menu_items.get("reasoning", True) else ""),
++                ],
++            }
++
++        def _toggle_menu() -> None:
++            ctx.ui_right_menu_enabled = not ctx.ui_right_menu_enabled
++
++        def _toggle_item(name: str) -> None:
++            ctx.ui_menu_items[name] = not ctx.ui_menu_items.get(name, True)
++
++        session = create_prompt_session(
++            COMPLETIONS,
++            toolbar_text=toolbar,
++            hud_provider=_hud_provider,
++            hud_actions={
++                "toggle_menu": _toggle_menu,
++                "toggle_tasks": lambda: _toggle_item("tasks"),
++                "toggle_approvals": lambda: _toggle_item("approvals"),
++                "toggle_reasoning": lambda: _toggle_item("reasoning"),
++            },
++        )
+         print_banner(
+             backend,
+             model,
+@@ -505,6 +823,16 @@ async def _repl(
+             mode=mm.current.value,
+         )
+ 
++        try:
++            from obscura.cli import render as render_mod
++
++            render_mod.output.configure_session_log_path(session_artifact_dir)
++            render_mod.output.capture_internal(
++                f"INFO session_artifacts={session_artifact_dir}"
++            )
++        except Exception:
++            pass
++
+         background_tasks: set[asyncio.Task] = set()
+         try:
+             while True:
+@@ -528,6 +856,12 @@ async def _repl(
+                         break
+                     continue
+ 
++                # @ command â natural agent routing
++                if user_input.startswith("@"):
++                    from obscura.cli.commands import cmd_at
++                    await cmd_at(user_input[1:], ctx)
++                    continue
++
+                 # Rebuild loop_kwargs in case tools were toggled
+                 if not ctx.tools_enabled:
+                     loop_kwargs["tool_choice"] = ToolChoice.none()
+@@ -535,14 +869,29 @@ async def _repl(
+                     loop_kwargs.pop("tool_choice", None)
+ 
+                 # Chat message: run send_message in background so REPL remains responsive.
+-                status = console.status("[dim]› Streaming response...[/]", spinner="dots")
+-                try:
+-                    status.start()
+-                except Exception:
+-                    pass
+-
+-                task = asyncio.create_task(send_message(ctx, user_input, loop_kwargs, external_status=status))
++                # Keep Rich spinners disabled here; prompt_toolkit owns cursor rendering.
++                task = asyncio.create_task(
++                    send_message(
++                        ctx,
++                        user_input,
++                        loop_kwargs,
++                        external_status=None,
++                        spinner_enabled=False,
++                    )
++                )
+                 background_tasks.add(task)
++                ctx.task_seq += 1
++                task_row: dict[str, str] = {
++                    "id": f"bg-{ctx.task_seq}",
++                    "status": "running",
++                    "kind": "chat",
++                    "preview": user_input[:100] + ("..." if len(user_input) > 100 else ""),
++                    "started_at": str(time.monotonic()),
++                }
++                ctx.background_tasks.append(task_row)
++                ctx._background_task_refs[task_row["id"]] = task
++                if len(ctx.background_tasks) > 50:
++                    ctx.background_tasks = ctx.background_tasks[-50:]
+ 
+                 # Remove task from set when done
+                 def _on_done(t: asyncio.Task) -> None:
+@@ -550,10 +899,26 @@ async def _repl(
+                         background_tasks.discard(t)
+                     except Exception:
+                         pass
+-                    try:
+-                        status.stop()
+-                    except Exception:
+-                        pass
++                    if t.cancelled():
++                        task_row["status"] = "cancelled"
++                        ctx._background_task_refs.pop(task_row["id"], None)
++                        return
++                    exc = t.exception()
++                    if exc is not None:
++                        task_row["status"] = "error"
++                        task_row["preview"] = (
++                            f"{task_row['preview']} | {str(exc)[:80]}"
++                        )
++                        try:
++                            console.print(
++                                f"[red]Background task {task_row['id']} failed:[/] "
++                                f"{str(exc)[:200]}"
++                            )
++                        except Exception:
++                            pass
++                    else:
++                        task_row["status"] = "done"
++                    ctx._background_task_refs.pop(task_row["id"], None)
+ 
+                 task.add_done_callback(_on_done)
+ 
+@@ -617,7 +982,7 @@ def main(
+     confirm: bool,
+     no_default_prompt: bool,
+ ) -> None:
+-    """Obscura — AI agent REPL."""
++    """Obscura â AI agent REPL."""
+     try:
+         asyncio.run(
+             _repl(backend, model, system, session, max_turns, tools, prompt, confirm, no_default_prompt)

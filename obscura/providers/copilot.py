@@ -422,7 +422,7 @@ class CopilotBackend:
         return [
             RegistryModelInfo(
                 id="auto",
-                name="gpt-5-mini", # DEFUALT DO NOT TOUCH - NIGCOST SAVINGS
+                name="gpt-5-mini",  # Default low-cost model
                 provider="copilot",
                 supports_tools=True,
                 supports_vision=True,

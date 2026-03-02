@@ -33,3 +33,13 @@ def resolve_obscura_skills_dir(cwd: Path | None = None) -> Path:
 def resolve_agents_sessions_dir(cwd: Path | None = None) -> Path:
     """Resolve directory for synced agent sessions."""
     return resolve_obscura_home(cwd) / "agents" / "sessions"
+
+
+def resolve_obscura_hooks_dir(cwd: Path | None = None) -> Path:
+    """Resolve directory containing hook scripts."""
+    return resolve_obscura_home(cwd) / "hooks"
+
+
+def resolve_obscura_settings(cwd: Path | None = None) -> Path:
+    """Resolve path to ``.obscura/settings.json``."""
+    return resolve_obscura_home(cwd) / "settings.json"

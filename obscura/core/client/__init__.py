@@ -81,6 +81,8 @@ class ObscuraClient:
         streaming: bool = True,
         # Tool policy
         tool_policy: ToolPolicy | None = None,
+        # Project hooks
+        hooks: Any | None = None,
         # HTTP server context
         user: object | None = None,
         # Prompt injection control
@@ -92,6 +94,7 @@ class ObscuraClient:
         self._backend_type = backend
         self._user = user
         self._tool_policy = tool_policy or ToolPolicy.custom_only()  # Default: block native tools
+        self._hooks = hooks
 
         # Resolve model via copilot_models aliases
         resolved_model = self._resolve_model(
@@ -449,6 +452,7 @@ class ObscuraClient:
             max_turns=max_turns,
             on_confirm=loop_confirm,
             capability_token=self._capability_token,
+            hooks=self._hooks,
             event_store=event_store,
             auto_complete=auto_complete,
             backend_name=self._backend_type.value,
@@ -468,20 +472,6 @@ class ObscuraClient:
     ) -> str:
         """Run the agent loop and return the final concatenated text."""
         from obscura.core.agent_loop import AgentLoop
-
-        # Load session history if enabled
-        initial_messages = None
-        if load_session_history and session_id:
-            try:
-                from obscura.core.context import load_session_messages
-                from obscura.core.paths import resolve_obscura_home
-                db_path = resolve_obscura_home() / "events.db"
-                initial_messages = load_session_messages(session_id, db_path, max_turns=5)
-                if initial_messages:
-                    _logger.debug(f"Loaded {len(initial_messages)} messages from session {session_id}")
-            except Exception as e:
-                _logger.warning(f"Could not load session history: {e}")
-
 
         loop = AgentLoop(
             self._backend,
