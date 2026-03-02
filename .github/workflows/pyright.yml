@@ -16,7 +16,7 @@ jobs:
       # - uses: ModernizedAI/github-actions/pyright@main
       #   with:
       #     python-version: '3.13.5'
-      #     install-command: 'pip install -e ".[dev,server,telemetry,tui]"'
+      #     install-command: 'pip install -e ".[dev,server,telemetry]"'
 
       - name: Set up Python 3.13.5
         uses: actions/setup-python@v5
@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,server,telemetry,tui]"
+          pip install -e ".[dev,server,telemetry]"
 
       - name: Run Pyright (strict mode)
         run: pyright

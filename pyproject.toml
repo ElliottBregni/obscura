@@ -54,10 +54,6 @@ telemetry = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "structlog>=23.0.0",
 ]
-tui = [
-    "textual>=0.45.0",
-    "rich>=14.0.0",
-]
 a2a = [
     "redis[hiredis]>=5.0.0",
     "grpcio>=1.60.0",
@@ -107,8 +103,6 @@ packages = [
     "obscura.deps",
     "obscura.cli",
     "obscura.cli.app",
-    "obscura.tui",
-    "obscura.tui.widgets",
     "obscura.parity",
     "obscura.heartbeat",
     "obscura.skills",
@@ -137,7 +131,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["obscura"]
-omit = ["obscura/tui/*", "tests/*"]
+omit = ["tests/*"]
 
 [tool.coverage.report]
 fail_under = 85
@@ -164,7 +158,6 @@ ignore = ["E501"]
 "obscura/deps/__init__.py" = ["E402"]
 "obscura/integrations/mcp/server.py" = ["F811"]
 "obscura/routes/admin.py" = ["E741"]
-"obscura/tui/app.py" = ["F811"]
 "tests/e2e/test_admin_webhooks.py" = ["E741"]
 "tests/unit/obscura/auth/test_auth_middleware.py" = ["E402"]
 "tests/unit/obscura/core/test_config_env.py" = ["E712"]
