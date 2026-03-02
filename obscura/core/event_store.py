@@ -451,20 +451,27 @@ class SQLiteEventStore:
         event: AgentEvent,
     ) -> EventRecord:
         conn = self._conn()
-        row = conn.execute(
-            "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM events WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        seq = row["max_seq"] + 1
-        now = datetime.now(UTC).isoformat()
-        payload = _serialize_event(event)
+        # BEGIN IMMEDIATE serialises concurrent writers — prevents
+        # two tasks reading the same MAX(seq) and colliding on INSERT.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM events WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            seq = row["max_seq"] + 1
+            now = datetime.now(UTC).isoformat()
+            payload = _serialize_event(event)
 
-        conn.execute(
-            "INSERT INTO events (session_id, seq, kind, payload, timestamp) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (session_id, seq, event.kind.value, payload, now),
-        )
-        conn.commit()
+            conn.execute(
+                "INSERT INTO events (session_id, seq, kind, payload, timestamp) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (session_id, seq, event.kind.value, payload, now),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
         return EventRecord(
             session_id=session_id,
