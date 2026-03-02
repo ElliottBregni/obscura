@@ -1,5 +1,5 @@
 """
-obscura.tui.modes -- TUI mode system.
+obscura.cli.app.modes -- CLI mode system.
 
 Defines the TUIMode enum and ModeManager state machine that governs
 mode transitions and mode-specific behavior (system prompts, allowed
@@ -167,7 +167,7 @@ _MODE_SYSTEM_PROMPTS: dict[TUIMode, str] = {
 
 
 # ---------------------------------------------------------------------------
-# FileChange (used by Code/Diff modes -- re-exported from diff_engine)
+# FileChange (used by Code/Diff modes)
 # ---------------------------------------------------------------------------
 
 
@@ -187,7 +187,7 @@ class FileChange:
 
 
 class ModeManager:
-    """State machine for TUI mode transitions.
+    """State machine for mode transitions.
 
     Tracks the current mode, pending file changes from Code mode,
     the active plan from Plan mode, and provides mode-specific

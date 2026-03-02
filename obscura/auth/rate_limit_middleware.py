@@ -31,7 +31,7 @@ _EXEMPT_PREFIXES = (
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Enforce per-user rate limits on API requests.
 
-    Must be installed *after* ``JWTAuthMiddleware`` in the middleware
+    Must be installed *after* ``APIKeyAuthMiddleware`` in the middleware
     stack so ``request.state.user`` is populated.
     """
 
@@ -47,7 +47,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
             return await call_next(request)
 
-        # Extract user (set by JWTAuthMiddleware)
+        # Extract user (set by APIKeyAuthMiddleware)
         user = getattr(request.state, "user", None)
         if user is None:
             # No auth context — let downstream handle it

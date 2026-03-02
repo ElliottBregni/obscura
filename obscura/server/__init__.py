@@ -21,7 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from obscura.auth.middleware import JWKSCache, JWTAuthMiddleware
+from obscura.auth.middleware import APIKeyAuthMiddleware
 from obscura.core.config import ObscuraConfig
 from obscura.deps import ClientFactory
 
@@ -51,15 +51,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(
             "Could not initialize telemetry; continuing without observability"
         )
-
-    # Warm the JWKS cache
-    if config.auth_enabled:
-        jwks: JWKSCache = app.state.jwks_cache
-        try:
-            await jwks.refresh()
-            logger.info("JWKS cache warmed (%d keys)", len(jwks.keys))
-        except Exception:
-            logger.warning("Could not pre-fetch JWKS; will retry on first request")
 
     # Initialize A2A server
     if config.a2a_enabled and hasattr(app.state, "a2a_server"):
@@ -166,17 +157,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 
     if config.auth_enabled:
-        jwks_cache = JWKSCache(
-            config.auth_jwks_uri,
-            host_header=config.auth_host_header,
-        )
-        app.state.jwks_cache = jwks_cache
-        app.add_middleware(
-            JWTAuthMiddleware,
-            jwks_cache=jwks_cache,
-            issuer=config.auth_issuer,
-            audience=config.auth_audience,
-        )
+        app.add_middleware(APIKeyAuthMiddleware)
 
     cors_origins = os.environ.get(
         "OBSCURA_CORS_ORIGINS",

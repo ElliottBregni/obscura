@@ -583,7 +583,7 @@ def render_diff_summary(changes: list[Any]) -> None:
     if not changes:
         print_info("No file changes in this session.")
         return
-    from obscura.tui.diff_engine import DiffEngine
+    from obscura.cli.app.diff_engine import DiffEngine
 
     engine = DiffEngine()
     hunk_idx = 0

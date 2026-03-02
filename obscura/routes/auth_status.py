@@ -42,12 +42,9 @@ async def auth_diagnostics(
     config = request.app.state.config
     payload = {
         "auth_enabled": bool(config.auth_enabled),
-        "issuer": str(config.auth_issuer),
-        "jwks_uri": str(config.auth_jwks_uri),
-        "audience": str(config.auth_audience),
+        "auth_mode": "api_key",
         "request_auth_type": user.token_type,
         "request_user_id": user.user_id,
-        "has_authorization_header": bool(request.headers.get("Authorization")),
         "has_api_key_header": bool(request.headers.get("X-API-Key")),
     }
     return JSONResponse(content=payload)

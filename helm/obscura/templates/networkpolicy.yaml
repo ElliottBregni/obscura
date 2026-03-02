@@ -23,14 +23,6 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Allow traffic to Zitadel (OIDC)
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: zitadel
-      ports:
-        - port: 8080
-          protocol: TCP
     # Allow traffic to OTel Collector
     - to:
         - podSelector:

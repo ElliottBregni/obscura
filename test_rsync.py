@@ -214,7 +214,7 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     if mm is None:
         return
 
-    from obscura.tui.modes import TUIMode
+    from obscura.cli.app.modes import TUIMode
 
     if mm.current != TUIMode.PLAN:
         return
@@ -222,7 +222,7 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     if not response_text.strip():
         return
 
-    from obscura.tui.modes import Plan
+    from obscura.cli.app.modes import Plan
 
     plan = Plan.parse(response_text)
     if plan.steps:

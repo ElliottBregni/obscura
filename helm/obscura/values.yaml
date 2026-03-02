@@ -27,12 +27,10 @@ serviceAccount:
   name: ""
 
 # ---------------------------------------------------------------------------
-# Auth (Zitadel OIDC)
+# Auth
 # ---------------------------------------------------------------------------
 auth:
   enabled: true
-  issuer: "http://zitadel:8080"
-  audience: "obscura-sdk"
 
 # ---------------------------------------------------------------------------
 # Telemetry (OpenTelemetry)
@@ -151,25 +149,3 @@ securityContext:
     drop:
       - ALL
 
-# ---------------------------------------------------------------------------
-# Zitadel subchart values
-# ---------------------------------------------------------------------------
-zitadel:
-  enabled: true
-  replicaCount: 1
-  zitadel:
-    masterkey: "MasterkeyNeedsToHave32Characters"
-    configmapConfig:
-      ExternalSecure: false
-      ExternalDomain: zitadel
-      ExternalPort: 8080
-      TLS:
-        Enabled: false
-    secretConfig: {}
-  cockroachdb:
-    single-node: true
-    statefulset:
-      replicas: 1
-    storage:
-      persistentVolume:
-        size: 1Gi

@@ -13,9 +13,3 @@ keywords:
 
 maintainers:
   - name: Elliott Bregni
-
-dependencies:
-  - name: zitadel
-    version: "8.x.x"
-    repository: "https://charts.zitadel.com"
-    condition: zitadel.enabled

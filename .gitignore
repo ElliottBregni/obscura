@@ -38,7 +38,6 @@ __pycache__
 node_modules/
 
 # Infrastructure secrets
-infra/zitadel/machinekey.json
 *.tfstate
 *.tfstate.backup
 .terraform/

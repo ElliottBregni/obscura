@@ -10,8 +10,6 @@ data:
   OBSCURA_PORT: "8080"
   # Auth
   OBSCURA_AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
-  OBSCURA_AUTH_ISSUER: {{ .Values.auth.issuer | quote }}
-  OBSCURA_AUTH_AUDIENCE: {{ .Values.auth.audience | quote }}
   # Telemetry
   OTEL_ENABLED: {{ .Values.telemetry.enabled | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.telemetry.otelEndpoint | quote }}

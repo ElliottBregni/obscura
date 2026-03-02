@@ -9,9 +9,8 @@ to this unified config.
 from __future__ import annotations
 
 import os
-from typing import Self
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 
 class ObscuraConfig(BaseModel):
@@ -25,12 +24,8 @@ class ObscuraConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
 
-    # Auth (Zitadel)
-    auth_enabled: bool = True
-    auth_issuer: str = "http://zitadel:8080"
-    auth_jwks_uri: str = ""  # defaults to {auth_issuer}/.well-known/jwks.json
-    auth_host_header: str = ""
-    auth_audience: str = "obscura-sdk"
+    # Auth
+    auth_enabled: bool = False  # default off for dev; set OBSCURA_AUTH_ENABLED=true in prod
 
     # Telemetry (OpenTelemetry)
     otel_enabled: bool = True
@@ -71,12 +66,6 @@ class ObscuraConfig(BaseModel):
     a2a_agent_name: str = "Obscura Agent"
     a2a_agent_description: str = ""
 
-    @model_validator(mode="after")
-    def _set_jwks_uri(self) -> Self:
-        if not self.auth_jwks_uri:
-            self.auth_jwks_uri = f"{self.auth_issuer.rstrip('/')}/.well-known/jwks.json"
-        return self
-
     @classmethod
     def from_env(cls) -> ObscuraConfig:
         """Build config from environment variables with sensible defaults."""
@@ -84,12 +73,8 @@ class ObscuraConfig(BaseModel):
             host=os.environ.get("OBSCURA_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_PORT", "8080")),
             # Auth
-            auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "true").lower()
+            auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "false").lower()
             == "true",
-            auth_issuer=os.environ.get("OBSCURA_AUTH_ISSUER", "http://zitadel:8080"),
-            auth_jwks_uri=os.environ.get("OBSCURA_AUTH_JWKS_URI", ""),
-            auth_host_header=os.environ.get("OBSCURA_AUTH_HOST_HEADER", ""),
-            auth_audience=os.environ.get("OBSCURA_AUTH_AUDIENCE", "obscura-sdk"),
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
             otel_endpoint=os.environ.get(

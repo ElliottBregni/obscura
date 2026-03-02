@@ -43,14 +43,8 @@ services:
         source: ${HOME}/.claude.json
         target: /home/obscura/.claude.json
     environment:
-      # Auth (Zitadel)
+      # Auth
       OBSCURA_AUTH_ENABLED: "true"
-      # Zitadel issues localhost-scoped tokens in this dev setup.
-      OBSCURA_AUTH_ISSUER: "http://localhost"
-      # Fetch JWKS over Docker network while preserving expected Host header.
-      OBSCURA_AUTH_JWKS_URI: "http://zitadel:8080/oauth/v2/keys"
-      OBSCURA_AUTH_HOST_HEADER: "localhost"
-      OBSCURA_AUTH_AUDIENCE: "obscura-sdk"
       OBSCURA_API_KEYS: "obscura-dev-key-123:dev-user:admin,agent:copilot,agent:claude,agent:localllm,agent:openai,agent:moonshot,agent:read,sync:write,sessions:manage"
       # Telemetry (OpenTelemetry)
       OTEL_ENABLED: "true"
@@ -117,7 +111,6 @@ services:
       timeout: 3s
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/app/zitadel", "ready"]
       interval: 10s
       timeout: 5s
       retries: 10

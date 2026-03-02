@@ -11,10 +11,9 @@ service:
   type: NodePort
   nodePort: 30080
 
-# Disable auth for local dev (or set to false to skip Zitadel requirement)
+# Disable auth for local dev
 auth:
   enabled: false
-  issuer: "http://zitadel:8080"
 
 # Local telemetry endpoints
 telemetry:
@@ -34,26 +33,6 @@ resources:
   limits:
     cpu: 250m
     memory: 256Mi
-
-# Zitadel subchart — reduced footprint
-zitadel:
-  enabled: true
-  replicaCount: 1
-  zitadel:
-    masterkey: "MasterkeyNeedsToHave32Characters"
-    configmapConfig:
-      ExternalSecure: false
-      ExternalDomain: localhost
-      ExternalPort: 8081
-      TLS:
-        Enabled: false
-  cockroachdb:
-    single-node: true
-    statefulset:
-      replicas: 1
-    storage:
-      persistentVolume:
-        size: 512Mi
 
 # No ingress locally
 ingress:

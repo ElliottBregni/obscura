@@ -170,11 +170,9 @@ def record_sync_metric(status: str) -> None:
 async def authenticate_websocket(
     websocket: WebSocket,
 ) -> AuthenticatedUser | None:
-    """Validate JWT token from WebSocket query params."""
-    from obscura.auth.middleware import JWKSCache
+    """Validate API key from WebSocket query params."""
     from obscura.auth.rbac import user_from_api_key
 
-    token = websocket.query_params.get("token", "")
     api_key = websocket.query_params.get("api_key", "")
     config: ObscuraConfig | None = getattr(websocket.app.state, "config", None)
 
@@ -193,30 +191,9 @@ async def authenticate_websocket(
             roles=AGENT_READ_ROLES,
             org_id="local",
             token_type="user",
-            raw_token=token,
+            raw_token="",
         )
 
-    try:
-        import jwt as pyjwt
-
-        jwks: JWKSCache = websocket.app.state.jwks_cache
-        key: Any = jwks.keys
-        payload = pyjwt.decode(
-            token,
-            key,
-            algorithms=["RS256"],
-            audience=config.auth_audience,
-            issuer=config.auth_issuer,
-        )
-        return AuthenticatedUser(
-            user_id=payload.get("sub", "unknown"),
-            email=payload.get("email", ""),
-            roles=tuple(payload.get("urn:zitadel:iam:org:project:roles", {}).keys())
-            or ("agent:read",),
-            org_id=payload.get("org_id", ""),
-            token_type="user",
-            raw_token=token,
-        )
-    except Exception:
-        logger.warning("WebSocket auth failed for token")
-        return None
+    # Auth enabled but no valid API key
+    logger.warning("WebSocket auth failed: no valid API key")
+    return None

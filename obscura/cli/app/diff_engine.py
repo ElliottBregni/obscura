@@ -1,5 +1,5 @@
 """
-obscura.tui.diff_engine -- Diff computation, hunk parsing, and patch application.
+obscura.cli.app.diff_engine -- Diff computation, hunk parsing, and patch application.
 
 Uses Python's built-in ``difflib`` to compute unified diffs, then parses
 them into structured hunks that can be selectively accepted or rejected.

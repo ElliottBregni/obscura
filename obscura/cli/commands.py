@@ -24,6 +24,7 @@ from obscura.cli.render import (
 )
 from obscura.core.client import ObscuraClient
 from obscura.cli import trace as trace_mod
+from obscura.cli.control_commands import cmd_heartbeat, cmd_policies, cmd_replay, cmd_status
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
 from obscura.core.types import AgentEventKind, Backend, SessionRef
 
@@ -97,7 +98,7 @@ class REPLContext:
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self._mode_manager is None:
-            from obscura.tui.modes import ModeManager, TUIMode
+            from obscura.cli.app.modes import ModeManager, TUIMode
 
             self._mode_manager = ModeManager(TUIMode.CODE)
         return self._mode_manager
@@ -221,7 +222,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  [cyan]/backend[/] [name]      Show or switch backend (copilot, claude, codex)",
         "  [cyan]/model[/] [name]        Show or switch model",
         "  [cyan]/system[/] <prompt>     Set system prompt",
-        "  [cyan]/tools[/] [on|off]      Show or toggle tools",
+        "  [cyan]/tools[/] [on|off|list] Show, toggle, or list tools",
         "  [cyan]/confirm[/] [on|off]    Tool approval gates",
         "",
         " [bold]Modes[/]",
@@ -244,6 +245,13 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         " [bold]Session[/]",
         "  [cyan]/session[/] [cmd]       list | new | <id>",
         "  [cyan]/discover[/] [cat] [n]  Discover popular MCP tools",
+        "",
+        " [bold]Control[/]",
+        "  [cyan]/heartbeat[/]           Session health check (no LLM)",
+        "  [cyan]/status[/]              Alias for /heartbeat",
+        "  [cyan]/tools[/] [on|off|list] Show, toggle, or list tools",
+        "  [cyan]/policies[/]            List policy versions",
+        "  [cyan]/replay[/] <run_id>     Replay supervisor run events",
     ]
     console.print("\n".join(lines))
     return None
@@ -341,8 +349,27 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
     elif val == "off":
         ctx.tools_enabled = False
         print_ok("Tools disabled.")
+    elif val == "list":
+        try:
+            tools = ctx.client.list_tools()
+            if not tools:
+                print_info("No tools registered.")
+                return None
+            from obscura.cli.render import TOOL_COLOR
+            table = Table(title="Registered Tools", expand=False)
+            table.add_column("#", justify="right", style="dim", width=4)
+            table.add_column("name", style=TOOL_COLOR, no_wrap=True)
+            table.add_column("description", max_width=60)
+            for i, t in enumerate(tools, 1):
+                desc = getattr(t, "description", "") or ""
+                if len(desc) > 60:
+                    desc = desc[:57] + "..."
+                table.add_row(str(i), t.name, desc)
+            console.print(table)
+        except Exception as exc:
+            print_error(f"Failed to list tools: {exc}")
     else:
-        print_error("Usage: /tools [on|off]")
+        print_error("Usage: /tools [on|off|list]")
     return None
 
 
@@ -374,7 +401,7 @@ async def cmd_confirm(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
     """Switch interaction mode."""
-    from obscura.tui.modes import TUIMode
+    from obscura.cli.app.modes import TUIMode
 
     mm = ctx.get_mode_manager()
     val = args.strip().lower()
@@ -507,7 +534,7 @@ async def _diff_accept_reject(
     val: str, ctx: REPLContext, *, accept: bool
 ) -> str | None:
     """Accept or reject hunks."""
-    from obscura.tui.diff_engine import DiffEngine
+    from obscura.cli.app.diff_engine import DiffEngine
 
     if not ctx._file_changes:
         print_info("No file changes.")
@@ -543,7 +570,7 @@ async def _diff_accept_reject(
 
 async def _diff_apply(ctx: REPLContext) -> str | None:
     """Apply accepted hunks to disk."""
-    from obscura.tui.diff_engine import DiffEngine
+    from obscura.cli.app.diff_engine import DiffEngine
 
     if not ctx._file_changes:
         print_info("No file changes.")
@@ -1483,6 +1510,12 @@ COMMANDS: dict[str, CommandHandler] = {
     "a2a": cmd_a2a,
     # Memory
     "memory": cmd_memory,
+    # Control
+    "heartbeat": cmd_heartbeat,
+    "hb": cmd_heartbeat,
+    "status": cmd_status,
+    "policies": cmd_policies,
+    "replay": cmd_replay,
 }
 
 # Subcommand completions for readline tab-complete
@@ -1495,7 +1528,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "backend": ["copilot", "claude", "codex"],
     "model": [],
     "system": [],
-    "tools": ["on", "off"],
+    "tools": ["on", "off", "list"],
     "confirm": ["on", "off"],
     "mode": ["ask", "plan", "code"],
     "plan": [],
@@ -1513,6 +1546,11 @@ COMPLETIONS: dict[str, list[str]] = {
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "tail-trace": [],
     "memory": ["stats", "search", "clear"],
+    "heartbeat": ["--json"],
+    "hb": ["--json"],
+    "status": ["--json"],
+    "policies": [],
+    "replay": [],
 }
 
 

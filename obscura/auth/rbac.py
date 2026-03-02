@@ -127,9 +127,9 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     """FastAPI dependency that returns the authenticated user.
 
     Checks in order:
-    1. X-API-Key header (if OBSCURA_AUTH_ENABLED=true)
-    2. JWT token (from middleware, set in request.state.user)
-    3. Mock user (if auth is disabled)
+    1. X-API-Key header
+    2. Mock user (if auth is disabled)
+    3. User from middleware (set in request.state.user)
 
     Raises:
         HTTPException(401): if no valid auth found.
