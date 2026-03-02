@@ -145,7 +145,7 @@ class VectorMemoryStore:
                 mode = os.environ.get("OBSCURA_QDRANT_MODE", "local")
                 path = os.environ.get("OBSCURA_QDRANT_PATH")
                 url = os.environ.get("OBSCURA_QDRANT_URL")
-                api_key = os.environ.get("OBSCURA_QDRANT_API_KEY")xe
+                api_key = os.environ.get("OBSCURA_QDRANT_API_KEY")
                 return QdrantBackend(
                     config=config,
                     mode=mode,
