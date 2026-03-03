@@ -15,7 +15,7 @@ Multi-backend AI agent runtime with 53 tools, vector memory, multi-agent orchest
 ```bash
 git clone <repo-url>
 cd obscura-main
-pip install -e ".[dev,server,telemetry,tui]"
+pip install -e ".[dev]"
 ```
 
 ## CLI Usage
