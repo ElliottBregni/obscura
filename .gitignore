@@ -67,7 +67,7 @@ docker-compose.dev.yml
 docker-compose.prod.yml
 docker-compose.staging.yml
 partity_matrix
-tests/integration/
-tests
+
+
 .sh 
 docs/*
