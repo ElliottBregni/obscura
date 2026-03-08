@@ -1,0 +1,42 @@
+id: data-gov
+name: Data.gov
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: native
+trust_level: builtin
+description: >
+  Data.gov dataset search — query the US federal open data catalog (CKAN API with HTML fallback).
+
+capabilities:
+  - id: data.gov.search
+    description: Search datasets on catalog.data.gov
+    tools:
+      - data_gov.search
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: data_gov.search
+    description: Search datasets on catalog.data.gov using CKAN API with HTML fallback
+    parameters:
+      type: object
+      properties:
+        q:
+          type: string
+          description: Search query
+        rows:
+          type: integer
+          description: Number of results to return
+        start:
+          type: integer
+          description: Pagination offset
+      required: [q]
+    handler: "obscura.tools.providers.data_gov:search_datasets"
+    capability: data.gov.search
+    side_effects: read
+
+healthcheck:
+  type: callable
+  target: "obscura.tools.providers.data_gov:search_datasets"
+  interval_seconds: 600

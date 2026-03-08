@@ -1,0 +1,144 @@
+id: m365
+name: Microsoft 365
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: >
+  Microsoft 365 tools — SharePoint Online, Entra ID (AAD), Teams, Microsoft Graph
+  via the m365 CLI binary.
+
+config:
+  OBSCURA_ENABLE_M365:
+    type: string
+    required: false
+    description: Set to 1 to enable even without m365 binary on PATH
+
+capabilities:
+  - id: m365.core
+    description: Run arbitrary m365 CLI commands and generic Graph API requests
+    tools:
+      - m365
+      - m365.graph.request
+    requires_approval: true
+    default_grant: false
+
+  - id: m365.sharepoint
+    description: SharePoint Online — sites, files, upload, download, delete
+    tools:
+      - m365.spo.site.list
+      - m365.spo.site.get
+      - m365.spo.file.add
+      - m365.spo.file.get
+      - m365.spo.file.download
+      - m365.spo.file.delete
+    requires_approval: false
+    default_grant: true
+
+  - id: m365.identity
+    description: Entra ID (Azure AD) — user and group management
+    tools:
+      - m365.aad.user.get
+      - m365.aad.user.list
+      - m365.groups.list
+    requires_approval: false
+    default_grant: true
+
+  - id: m365.teams
+    description: Microsoft Teams — send channel messages
+    tools:
+      - m365.teams.message.send
+    requires_approval: true
+    default_grant: false
+
+  - id: m365.graph.drive
+    description: Microsoft Graph drive listing
+    tools:
+      - m365.graph.drive.list
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: m365
+    description: Run the Microsoft 365 CLI (m365) directly
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.core
+    side_effects: write
+
+  - name: m365.graph.request
+    description: Generic Microsoft Graph API request
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.core
+    side_effects: write
+
+  - name: m365.spo.site.list
+    description: List SharePoint Online sites
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.sharepoint
+    side_effects: read
+
+  - name: m365.spo.site.get
+    description: Get SharePoint Online site metadata
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.sharepoint
+    side_effects: read
+
+  - name: m365.spo.file.add
+    description: Upload a local file to a SharePoint site folder
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.sharepoint
+    side_effects: write
+
+  - name: m365.spo.file.get
+    description: Get SharePoint file metadata
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.sharepoint
+    side_effects: read
+
+  - name: m365.spo.file.download
+    description: Download a SharePoint file to local path
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.sharepoint
+    side_effects: write
+
+  - name: m365.spo.file.delete
+    description: Delete a SharePoint file
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.sharepoint
+    side_effects: write
+
+  - name: m365.aad.user.get
+    description: Get Entra ID (AAD) user by UPN or ID
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.identity
+    side_effects: read
+
+  - name: m365.aad.user.list
+    description: List Entra ID (AAD) users
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.identity
+    side_effects: read
+
+  - name: m365.groups.list
+    description: List groups via Microsoft Graph
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.identity
+    side_effects: read
+
+  - name: m365.teams.message.send
+    description: Send a message to a Teams channel
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.teams
+    side_effects: write
+
+  - name: m365.graph.drive.list
+    description: List drives via Microsoft Graph
+    handler: "obscura.tools.providers.m365:M365Provider"
+    capability: m365.graph.drive
+    side_effects: read
+
+healthcheck:
+  type: binary
+  target: m365
+  interval_seconds: 300

@@ -1,0 +1,151 @@
+id: huggingface
+name: Hugging Face Hub
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: >
+  Hugging Face Hub tools — repos, models, datasets, Spaces via the hf CLI binary.
+
+config:
+  OBSCURA_ENABLE_HF:
+    type: string
+    required: false
+    description: Set to 1 to enable even without hf binary on PATH
+
+capabilities:
+  - id: hf.core
+    description: Run arbitrary hf CLI commands and identity checks
+    tools:
+      - hf
+      - hf.whoami
+    requires_approval: false
+    default_grant: true
+
+  - id: hf.repo
+    description: Hugging Face repository operations — create, clone, list, upload, download, sync, delete
+    tools:
+      - hf.repo.create
+      - hf.repo.clone
+      - hf.repo.list
+      - hf.repo.upload
+      - hf.repo.download
+      - hf.repo.push
+      - hf.repo.sync
+      - hf.repo.upload_from_url
+      - hf.repo.delete
+      - hf.repo.describe
+    requires_approval: false
+    default_grant: true
+
+  - id: hf.spaces
+    description: Hugging Face Spaces — create and list
+    tools:
+      - hf.spaces.create
+      - hf.spaces.list
+    requires_approval: false
+    default_grant: true
+
+  - id: hf.models
+    description: Hugging Face model discovery
+    tools:
+      - hf.model.list
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: hf
+    description: Run the Hugging Face Hub CLI (hf) directly
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.core
+    side_effects: write
+
+  - name: hf.whoami
+    description: Return current Hugging Face user identity
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.core
+    side_effects: read
+
+  - name: hf.repo.create
+    description: Create a Hugging Face repo (model or dataset)
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.clone
+    description: Clone a Hugging Face repo via git
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.list
+    description: List user repos
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: read
+
+  - name: hf.repo.upload
+    description: Upload file(s) to a Hugging Face repo
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.download
+    description: Download a file from a Hugging Face repo
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: read
+
+  - name: hf.repo.push
+    description: Run git push inside a local repo directory
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.sync
+    description: Pull and push a local git repo (sync with HF)
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.upload_from_url
+    description: Download a remote URL and upload it to a HF repo
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.delete
+    description: Delete a Hugging Face repo
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: write
+
+  - name: hf.repo.describe
+    description: Describe a Hugging Face repo (info)
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.repo
+    side_effects: read
+
+  - name: hf.spaces.create
+    description: Create a Hugging Face Space
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.spaces
+    side_effects: write
+
+  - name: hf.spaces.list
+    description: List Hugging Face Spaces
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.spaces
+    side_effects: read
+
+  - name: hf.model.list
+    description: List models on Hugging Face Hub
+    handler: "obscura.tools.providers.hf:HFProvider"
+    capability: hf.models
+    side_effects: read
+
+healthcheck:
+  type: binary
+  target: hf
+  interval_seconds: 300

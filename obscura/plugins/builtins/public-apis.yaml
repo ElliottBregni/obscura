@@ -1,0 +1,122 @@
+id: public-apis
+name: Public APIs
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: native
+trust_level: builtin
+description: >
+  Public APIs discovery and dynamic tool creation — discover free APIs, generate
+  HTTP wrapper tools on-the-fly, and persist them across sessions.
+
+capabilities:
+  - id: public.apis.discover
+    description: Discover and browse public APIs by category or description
+    tools:
+      - public_apis.discover
+      - public_apis.get
+    requires_approval: false
+    default_grant: true
+
+  - id: public.apis.create
+    description: Create, persist, and manage dynamic API wrapper tools
+    tools:
+      - public_apis.create_tool
+      - public_apis.list_persisted
+      - public_apis.remove_persisted
+    requires_approval: true
+    default_grant: false
+
+tools:
+  - name: public_apis.discover
+    description: Discover public APIs by category, HTTPS, auth, or description substring
+    parameters:
+      type: object
+      properties:
+        category:
+          type: string
+          description: Filter by API category
+        https:
+          type: boolean
+          description: Filter to HTTPS-only APIs
+        auth:
+          type: string
+          description: Filter by auth type
+        description_contains:
+          type: string
+          description: Substring search in description
+        limit:
+          type: integer
+          description: Max results
+      required: []
+    handler: "obscura.tools.providers.public_apis:PublicAPIsProvider"
+    capability: public.apis.discover
+    side_effects: read
+
+  - name: public_apis.get
+    description: Get metadata for a public API entry by name or link
+    parameters:
+      type: object
+      properties:
+        name_or_link:
+          type: string
+          description: API name or link to look up
+      required: [name_or_link]
+    handler: "obscura.tools.providers.public_apis:PublicAPIsProvider"
+    capability: public.apis.discover
+    side_effects: read
+
+  - name: public_apis.create_tool
+    description: Create and register a dynamic ToolSpec for a public API entry
+    parameters:
+      type: object
+      properties:
+        api_name:
+          type: string
+          description: Name of the API from discover results
+        tool_name:
+          type: string
+          description: Custom tool name (optional)
+        method:
+          type: string
+          description: HTTP method (GET, POST, etc.)
+        path:
+          type: string
+          description: API endpoint path
+        headers:
+          type: object
+          description: Custom headers
+        query_params:
+          type: object
+          description: Default query parameters
+        persist:
+          type: boolean
+          description: Whether to save tool across sessions
+      required: [api_name]
+    handler: "obscura.tools.providers.public_apis:PublicAPIsProvider"
+    capability: public.apis.create
+    side_effects: write
+
+  - name: public_apis.list_persisted
+    description: List persisted dynamic public_apis tools
+    handler: "obscura.tools.providers.public_apis:PublicAPIsProvider"
+    capability: public.apis.create
+    side_effects: read
+
+  - name: public_apis.remove_persisted
+    description: Remove a persisted dynamic tool by name
+    parameters:
+      type: object
+      properties:
+        tool_name:
+          type: string
+          description: Name of the tool to remove
+      required: [tool_name]
+    handler: "obscura.tools.providers.public_apis:PublicAPIsProvider"
+    capability: public.apis.create
+    side_effects: write
+
+healthcheck:
+  type: callable
+  target: "obscura.tools.providers.public_apis:PublicAPIsProvider"
+  interval_seconds: 600

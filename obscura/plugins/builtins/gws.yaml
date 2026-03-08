@@ -1,0 +1,191 @@
+id: gws
+name: Google Workspace
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: >
+  Google Workspace tools — Drive, Sheets, Gmail, Calendar, Chat via the gws CLI binary.
+
+config:
+  OBSCURA_ENABLE_GWS:
+    type: string
+    required: false
+    description: Set to 1 to enable even without gws binary on PATH
+
+capabilities:
+  - id: gws.core
+    description: Run arbitrary gws CLI commands and inspect schemas
+    tools:
+      - gws
+      - gws.schema.inspect
+    requires_approval: true
+    default_grant: false
+
+  - id: gws.drive
+    description: Google Drive file operations — list, get, upload, download, copy, delete, permissions
+    tools:
+      - gws.drive.files.list
+      - gws.drive.files.get
+      - gws.drive.files.upload
+      - gws.drive.files.download_to_path
+      - gws.drive.files.create_folder
+      - gws.drive.files.copy
+      - gws.drive.files.delete
+      - gws.drive.permissions.list
+      - gws.drive.permissions.create
+    requires_approval: false
+    default_grant: true
+
+  - id: gws.sheets
+    description: Google Sheets — create spreadsheets and read values
+    tools:
+      - gws.sheets.spreadsheets.create
+      - gws.sheets.spreadsheets.values.get
+    requires_approval: false
+    default_grant: true
+
+  - id: gws.gmail
+    description: Gmail — send messages and messages with attachments
+    tools:
+      - gws.gmail.users.messages.send
+      - gws.gmail.users.messages.send_with_attachments
+    requires_approval: true
+    default_grant: false
+
+  - id: gws.calendar
+    description: Google Calendar — insert, list, and delete events
+    tools:
+      - gws.calendar.events.insert
+      - gws.calendar.events.list
+      - gws.calendar.events.delete
+    requires_approval: false
+    default_grant: true
+
+  - id: gws.chat
+    description: Google Chat — send messages to spaces
+    tools:
+      - gws.chat.spaces.messages.create
+    requires_approval: true
+    default_grant: false
+
+tools:
+  - name: gws
+    description: Run the Google Workspace CLI directly (escape hatch)
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.core
+    side_effects: write
+
+  - name: gws.schema.inspect
+    description: Return method/schema introspection for a gws named resource
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.core
+    side_effects: read
+
+  - name: gws.drive.files.list
+    description: List Google Drive files
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: read
+
+  - name: gws.drive.files.get
+    description: Get Drive file metadata
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: read
+
+  - name: gws.drive.files.upload
+    description: Upload a local file to Google Drive
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: write
+
+  - name: gws.drive.files.download_to_path
+    description: Download a Drive file to a local path
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: write
+
+  - name: gws.drive.files.create_folder
+    description: Create a folder in Google Drive
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: write
+
+  - name: gws.drive.files.copy
+    description: Copy a Drive file to a new location/name
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: write
+
+  - name: gws.drive.files.delete
+    description: Delete a Google Drive file
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: write
+
+  - name: gws.drive.permissions.list
+    description: List Drive file permissions
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: read
+
+  - name: gws.drive.permissions.create
+    description: Create a Drive file permission (share)
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.drive
+    side_effects: write
+
+  - name: gws.sheets.spreadsheets.create
+    description: Create a Google Sheet
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.sheets
+    side_effects: write
+
+  - name: gws.sheets.spreadsheets.values.get
+    description: Get values from a Google Sheet range
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.sheets
+    side_effects: read
+
+  - name: gws.gmail.users.messages.send
+    description: Send a Gmail message
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.gmail
+    side_effects: write
+
+  - name: gws.gmail.users.messages.send_with_attachments
+    description: Send a Gmail message with file attachments
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.gmail
+    side_effects: write
+
+  - name: gws.chat.spaces.messages.create
+    description: Send a message to a Google Chat space
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.chat
+    side_effects: write
+
+  - name: gws.calendar.events.insert
+    description: Insert a Google Calendar event
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.calendar
+    side_effects: write
+
+  - name: gws.calendar.events.list
+    description: List Google Calendar events
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.calendar
+    side_effects: read
+
+  - name: gws.calendar.events.delete
+    description: Delete a Google Calendar event
+    handler: "obscura.tools.providers.gws:GWSProvider"
+    capability: gws.calendar
+    side_effects: write
+
+healthcheck:
+  type: binary
+  target: gws
+  interval_seconds: 300
