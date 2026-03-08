@@ -15,6 +15,14 @@ config:
     required: false
     description: Set to 1 to enable even without m365 binary on PATH
 
+bootstrap:
+  deps:
+    - type: npm
+      package: "@pnp/cli-microsoft365"
+      optional: true
+    - type: binary
+      package: m365
+
 capabilities:
   - id: m365.core
     description: Run arbitrary m365 CLI commands and generic Graph API requests

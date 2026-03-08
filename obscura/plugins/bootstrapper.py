@@ -1,0 +1,278 @@
+"""Plugin bootstrapper — installs runtime dependencies declared in manifests.
+
+Handles pip, uv, npx, npm, cargo, and binary-check dependencies.
+Called by the loader pipeline *before* handler resolution.
+
+Usage::
+
+    from obscura.plugins.bootstrapper import run_bootstrap
+
+    result = run_bootstrap(spec)
+    if not result.ok:
+        print(f"Bootstrap failed: {result.errors}")
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from typing import Any
+
+from obscura.plugins.models import BootstrapDep, BootstrapSpec, PluginSpec
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Result model
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BootstrapResult:
+    """Outcome of running bootstrap for a plugin."""
+
+    plugin_id: str
+    ok: bool = True
+    installed: list[str] = field(default_factory=list)   # deps that were installed
+    skipped: list[str] = field(default_factory=list)      # already present
+    errors: list[str] = field(default_factory=list)       # hard failures
+    warnings: list[str] = field(default_factory=list)     # optional dep failures
+
+
+# ---------------------------------------------------------------------------
+# Dependency checkers
+# ---------------------------------------------------------------------------
+
+
+def _is_pip_installed(package: str) -> bool:
+    """Check if a pip package is importable or installed."""
+    name = package.split("[")[0].split(">=")[0].split("==")[0].split("<")[0].strip()
+    # Normalize: dashes → underscores for import check
+    import_name = name.replace("-", "_").lower()
+    try:
+        __import__(import_name)
+        return True
+    except ImportError:
+        pass
+    # Fallback: check pip list
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "show", name],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _is_binary_available(name: str) -> bool:
+    """Check if a binary is on PATH."""
+    return shutil.which(name) is not None
+
+
+def _is_npm_installed(package: str) -> bool:
+    """Check if an npm package is installed globally."""
+    try:
+        result = subprocess.run(
+            ["npm", "list", "-g", package, "--depth=0"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Installers
+# ---------------------------------------------------------------------------
+
+
+def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install a pip package."""
+    pkg = dep.package + dep.version if dep.version else dep.package
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", pkg],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via uv tool install."""
+    if not _is_binary_available("uv"):
+        return _install_pip(dep)  # fallback to pip
+
+    pkg = dep.package + dep.version if dep.version else dep.package
+    try:
+        result = subprocess.run(
+            ["uv", "tool", "install", pkg],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return True, ""
+        # uv tool install may fail if already installed — that's fine
+        if "already installed" in result.stderr.lower():
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _install_npx(dep: BootstrapDep) -> tuple[bool, str]:
+    """npx packages are run on-demand, just verify npx is available."""
+    if _is_binary_available("npx"):
+        return True, ""
+    return False, "npx not found — install Node.js"
+
+
+def _install_npm(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install an npm package globally."""
+    pkg = dep.package
+    try:
+        result = subprocess.run(
+            ["npm", "install", "-g", pkg],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _install_cargo(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via cargo install."""
+    if not _is_binary_available("cargo"):
+        return False, "cargo not found — install Rust toolchain"
+    pkg = dep.package
+    try:
+        result = subprocess.run(
+            ["cargo", "install", pkg],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _check_binary(dep: BootstrapDep) -> tuple[bool, str]:
+    """Verify a binary is on PATH (no install — just a check)."""
+    if _is_binary_available(dep.package):
+        return True, ""
+    return False, f"Binary '{dep.package}' not found on PATH"
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher
+# ---------------------------------------------------------------------------
+
+_INSTALLERS = {
+    "pip": (_is_pip_installed, _install_pip),
+    "uv": (_is_pip_installed, _install_uv),
+    "npx": (lambda p: _is_binary_available("npx"), _install_npx),
+    "npm": (_is_npm_installed, _install_npm),
+    "cargo": (_is_binary_available, _install_cargo),
+    "binary": (_is_binary_available, _check_binary),
+}
+
+
+def _bootstrap_dep(dep: BootstrapDep) -> tuple[str, bool, str]:
+    """Bootstrap a single dependency. Returns (action, success, error)."""
+    checker, installer = _INSTALLERS.get(dep.type, (None, None))
+    if checker is None or installer is None:
+        return "error", False, f"Unknown dep type: {dep.type}"
+
+    # Check if already present
+    try:
+        if checker(dep.package):
+            return "skipped", True, ""
+    except Exception:
+        pass
+
+    # Install
+    logger.info("Installing %s dependency: %s %s", dep.type, dep.package, dep.version)
+    ok, err = installer(dep)
+    if ok:
+        return "installed", True, ""
+    return "error", False, err
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
+    """Run the bootstrap pipeline for a plugin.
+
+    Checks each declared dependency and installs if missing.
+    Returns a result with installed/skipped/error lists.
+    """
+    result = BootstrapResult(plugin_id=spec.id)
+
+    if spec.bootstrap is None:
+        return result
+
+    bootstrap = spec.bootstrap
+
+    for dep in bootstrap.deps:
+        action, ok, err = _bootstrap_dep(dep)
+        label = f"{dep.type}:{dep.package}"
+
+        if action == "skipped":
+            result.skipped.append(label)
+        elif action == "installed":
+            result.installed.append(label)
+            logger.info("Installed %s for plugin %s", label, spec.id)
+        else:
+            if dep.optional:
+                result.warnings.append(f"{label}: {err}")
+                logger.warning("Optional dep %s failed for %s: %s", label, spec.id, err)
+            else:
+                result.errors.append(f"{label}: {err}")
+                result.ok = False
+                logger.error("Required dep %s failed for %s: %s", label, spec.id, err)
+
+    # Run post_install command if all required deps succeeded
+    if result.ok and bootstrap.post_install:
+        try:
+            proc = subprocess.run(
+                bootstrap.post_install, shell=True,
+                capture_output=True, text=True, timeout=120,
+            )
+            if proc.returncode != 0:
+                result.warnings.append(f"post_install failed: {proc.stderr.strip()}")
+        except Exception as exc:
+            result.warnings.append(f"post_install failed: {exc}")
+
+    # Run check_command to verify
+    if result.ok and bootstrap.check_command:
+        try:
+            proc = subprocess.run(
+                bootstrap.check_command, shell=True,
+                capture_output=True, text=True, timeout=30,
+            )
+            if proc.returncode != 0:
+                result.warnings.append(f"check_command failed: {proc.stderr.strip()}")
+        except Exception as exc:
+            result.warnings.append(f"check_command failed: {exc}")
+
+    return result
+
+
+__all__ = [
+    "run_bootstrap",
+    "BootstrapResult",
+]

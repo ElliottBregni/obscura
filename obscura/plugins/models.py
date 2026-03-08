@@ -63,6 +63,43 @@ def validate_plugin_id(plugin_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Bootstrap
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BootstrapDep:
+    """A single dependency that must be present for a plugin to work."""
+
+    type: str           # "pip" | "uv" | "npx" | "binary" | "npm" | "cargo"
+    package: str        # package name or binary name
+    version: str = ""   # version constraint (e.g. ">=1.0.0")
+    optional: bool = False
+
+    def __post_init__(self) -> None:
+        if self.type not in ("pip", "uv", "npx", "binary", "npm", "cargo"):
+            raise ValueError(
+                f"Unknown bootstrap dep type: {self.type!r} — "
+                f"must be one of: pip, uv, npx, binary, npm, cargo"
+            )
+        if not self.package.strip():
+            raise ValueError("Bootstrap dep package must not be empty")
+
+
+@dataclass(frozen=True)
+class BootstrapSpec:
+    """Declares how to install a plugin's runtime dependencies.
+
+    The loader runs bootstrap before handler resolution. Each dep is
+    checked (already installed?) and installed if missing.
+    """
+
+    deps: tuple[BootstrapDep, ...] = field(default_factory=tuple)
+    post_install: str = ""     # optional shell command to run after deps installed
+    check_command: str = ""    # command to verify bootstrap succeeded (e.g. "gws --version")
+
+
+# ---------------------------------------------------------------------------
 # Healthcheck
 # ---------------------------------------------------------------------------
 
@@ -258,6 +295,9 @@ class PluginSpec:
     install_hook: str | None = None
     bootstrap_hook: str | None = None
 
+    # Bootstrap (dependency installation)
+    bootstrap: BootstrapSpec | None = None
+
     # Health
     healthcheck: HealthcheckSpec | None = None
 
@@ -337,6 +377,8 @@ __all__ = [
     "InstructionSpec",
     "PolicyHintSpec",
     "HealthcheckSpec",
+    "BootstrapSpec",
+    "BootstrapDep",
     "ConfigRequirement",
     "SOURCE_TYPES",
     "RUNTIME_TYPES",

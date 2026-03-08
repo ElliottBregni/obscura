@@ -33,6 +33,11 @@ tools:
     side_effects: read
     handler: obscura.tools.providers.coingecko:_handler_trending
 
+bootstrap:
+  deps:
+    - type: pip
+      package: httpx
+
 healthcheck:
   type: http
   target: https://api.coingecko.com/api/v3/ping

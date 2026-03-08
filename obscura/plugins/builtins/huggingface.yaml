@@ -14,6 +14,14 @@ config:
     required: false
     description: Set to 1 to enable even without hf binary on PATH
 
+bootstrap:
+  deps:
+    - type: pip
+      package: huggingface_hub[cli]
+      optional: true
+    - type: binary
+      package: hf
+
 capabilities:
   - id: hf.core
     description: Run arbitrary hf CLI commands and identity checks

@@ -83,6 +83,11 @@ policy_hints:
     recommended_action: approve
     reason: Write operations should require user confirmation
 
+bootstrap:
+  deps:
+    - type: pip
+      package: xdk
+
 healthcheck:
   type: callable
   target: obscura.tools.providers.x:healthcheck

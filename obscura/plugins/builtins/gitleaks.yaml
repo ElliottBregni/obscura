@@ -23,6 +23,11 @@ tools:
     side_effects: read
     handler: obscura.tools.providers.gitleaks:_handler_scan_repo
 
+bootstrap:
+  deps:
+    - type: binary
+      package: gitleaks
+
 healthcheck:
   type: binary
   target: gitleaks

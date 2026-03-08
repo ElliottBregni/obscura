@@ -39,6 +39,11 @@ tools:
     side_effects: read
     handler: obscura.tools.providers.notion:_handler_query_database
 
+bootstrap:
+  deps:
+    - type: pip
+      package: httpx
+
 healthcheck:
   type: callable
   target: obscura.tools.providers.notion:healthcheck

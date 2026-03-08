@@ -14,6 +14,14 @@ config:
     required: false
     description: Set to 1 to enable even without gws binary on PATH
 
+bootstrap:
+  deps:
+    - type: pip
+      package: gws-cli
+      optional: true
+    - type: binary
+      package: gws
+
 capabilities:
   - id: gws.core
     description: Run arbitrary gws CLI commands and inspect schemas

@@ -104,6 +104,11 @@ tools:
     side_effects: read
     handler: obscura.tools.providers.notebooklm:_handler_get_audio_overview
 
+bootstrap:
+  deps:
+    - type: uv
+      package: notebooklm-mcp-server
+
 healthcheck:
   type: binary
   target: notebooklm-mcp

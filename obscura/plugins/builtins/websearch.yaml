@@ -38,6 +38,15 @@ tools:
     side_effects: read
     handler: obscura.tools.providers.websearch:_handler_summarize
 
+bootstrap:
+  deps:
+    - type: cargo
+      package: websearch
+      optional: true
+    - type: binary
+      package: websearch
+  check_command: "websearch --version"
+
 healthcheck:
   type: binary
   target: websearch

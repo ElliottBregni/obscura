@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from obscura.plugins.models import (
+    BootstrapDep,
+    BootstrapSpec,
     CapabilitySpec,
     ConfigRequirement,
     HealthcheckSpec,
@@ -198,6 +200,38 @@ def _parse_healthcheck(
     )
 
 
+def _parse_bootstrap(
+    raw: dict[str, Any] | list[dict[str, Any]] | None,
+) -> BootstrapSpec | None:
+    if not raw:
+        return None
+    # Support shorthand list-of-deps or full spec
+    if isinstance(raw, list):
+        raw = {"deps": raw}
+    deps_raw = raw.get("deps", [])
+    deps: list[BootstrapDep] = []
+    for entry in deps_raw:
+        if isinstance(entry, str):
+            # Shorthand: "pip:requests>=2.0" or "binary:gws"
+            if ":" in entry:
+                dep_type, pkg = entry.split(":", 1)
+            else:
+                dep_type, pkg = "pip", entry
+            deps.append(BootstrapDep(type=dep_type, package=pkg))
+        elif isinstance(entry, dict):
+            deps.append(BootstrapDep(
+                type=entry.get("type", "pip"),
+                package=entry.get("package", ""),
+                version=entry.get("version", ""),
+                optional=entry.get("optional", False),
+            ))
+    return BootstrapSpec(
+        deps=tuple(deps),
+        post_install=raw.get("post_install", ""),
+        check_command=raw.get("check_command", ""),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -234,6 +268,7 @@ def parse_manifest(
             policy_hints=_parse_policy_hints(data.get("policy_hints")),
             install_hook=data.get("install_hook"),
             bootstrap_hook=data.get("bootstrap_hook"),
+            bootstrap=_parse_bootstrap(data.get("bootstrap")),
             healthcheck=_parse_healthcheck(data.get("healthcheck")),
         )
     except ManifestError:

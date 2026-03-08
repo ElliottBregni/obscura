@@ -278,7 +278,7 @@ class PluginLoader:
     ) -> PluginStatus:
         """Run the full loading pipeline for a single PluginSpec.
 
-        Pipeline: validate → check_config → create_provider → register
+        Pipeline: validate → check_config → bootstrap → create_provider → register
         """
         status = PluginStatus(plugin_id=spec.id, state="discovered")
 
@@ -299,7 +299,29 @@ class PluginLoader:
             logger.info("Plugin %s disabled (missing config: %s)", spec.id, missing)
             return status
 
-        # 3. Create provider
+        # 3. Bootstrap dependencies
+        if spec.bootstrap and spec.bootstrap.deps:
+            try:
+                from obscura.plugins.bootstrapper import run_bootstrap
+
+                bootstrap_result = run_bootstrap(spec)
+                if not bootstrap_result.ok:
+                    status.state = "failed"
+                    status.error = f"Bootstrap failed: {'; '.join(bootstrap_result.errors)}"
+                    logger.warning("Plugin %s bootstrap failed: %s", spec.id, bootstrap_result.errors)
+                    return status
+                if bootstrap_result.installed:
+                    logger.info(
+                        "Plugin %s bootstrapped: installed %s",
+                        spec.id, ", ".join(bootstrap_result.installed),
+                    )
+            except Exception as exc:
+                status.state = "failed"
+                status.error = f"Bootstrap error: {exc}"
+                logger.exception("Plugin %s bootstrap error: %s", spec.id, exc)
+                return status
+
+        # 4. Create provider
         try:
             provider = ManifestToolProvider(spec)
             provider_registry.add(provider)
