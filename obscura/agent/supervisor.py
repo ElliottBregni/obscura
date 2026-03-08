@@ -73,6 +73,7 @@ class TriggerDefinition:
     description: str = ""
     notify_user: bool = False
     priority: str = "normal"  # "low" | "normal" | "high" | "critical"
+    imessage: dict[str, Any] | None = None  # {"contacts": [...], "poll_interval": 30}
 
 
 @dataclass
@@ -164,12 +165,21 @@ class SupervisorConfig:
         with resolved.open() as f:
             raw: dict[str, Any] = yaml.safe_load(f) or {}
 
+        # Known fields for AgentDefinition / TriggerDefinition
+        import dataclasses as _dc
+        _agent_fields = {f.name for f in _dc.fields(AgentDefinition)}
+        _trigger_fields = {f.name for f in _dc.fields(TriggerDefinition)}
+
         agents: list[AgentDefinition] = []
         raw_agents: list[dict[str, Any]] = raw.get("agents", [])
         for entry in raw_agents:
             raw_triggers: list[dict[str, Any]] = entry.pop("triggers", [])
-            triggers = [TriggerDefinition(**t) for t in raw_triggers]
-            agents.append(AgentDefinition(**entry, triggers=triggers))
+            triggers = [
+                TriggerDefinition(**{k: v for k, v in t.items() if k in _trigger_fields})
+                for t in raw_triggers
+            ]
+            filtered = {k: v for k, v in entry.items() if k in _agent_fields}
+            agents.append(AgentDefinition(**filtered, triggers=triggers))
 
         return cls(agents=agents)
 
@@ -375,6 +385,7 @@ class AgentSupervisor:
     ) -> None:
         from obscura.agent.daemon_agent import (
             DaemonAgent,
+            IMessageTrigger,
             ScheduleTrigger,
             Trigger,
         )
@@ -388,6 +399,18 @@ class AgentSupervisor:
                         cron=tdef.schedule,
                         prompt=tdef.prompt,
                         description=tdef.description,
+                        notify_user=tdef.notify_user,
+                        priority=priority,
+                    )
+                )
+            elif tdef.imessage is not None:
+                im_cfg = tdef.imessage
+                triggers.append(
+                    IMessageTrigger(
+                        contacts=tuple(im_cfg.get("contacts", [])),
+                        poll_interval=im_cfg.get("poll_interval", 30),
+                        prompt=tdef.prompt,
+                        description=tdef.description or "iMessage polling",
                         notify_user=tdef.notify_user,
                         priority=priority,
                     )

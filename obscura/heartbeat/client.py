@@ -37,6 +37,7 @@ class HeartbeatClientConfig(BaseModel):
     include_system_metrics: bool = True
     tags: list[str] = []
     version: str = "0.1.0"
+    auth_token: str | None = None
 
 
 class AgentHeartbeatClient:
@@ -166,7 +167,13 @@ class AgentHeartbeatClient:
 
         self._running = True
         self._start_time = time.time()
-        self._http_client = httpx.AsyncClient(timeout=self.config.timeout)
+        headers: dict[str, str] = {}
+        if self.config.auth_token:
+            headers["Authorization"] = f"Bearer {self.config.auth_token}"
+        self._http_client = httpx.AsyncClient(
+            timeout=self.config.timeout,
+            headers=headers,
+        )
 
         # Send initial heartbeat immediately
         await self._send_heartbeat()

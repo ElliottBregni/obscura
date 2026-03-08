@@ -246,6 +246,9 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  [cyan]/session[/] [cmd]       list | new | <id>",
         "  [cyan]/discover[/] [cat] [n]  Discover popular MCP tools",
         "",
+        " [bold]Workspace[/]",
+        "  [cyan]/init[/] [--force]      Init local .obscura/ workspace",
+        "",
         " [bold]Control[/]",
         "  [cyan]/heartbeat[/]           Session health check (no LLM)",
         "  [cyan]/status[/]              Alias for /heartbeat",
@@ -779,6 +782,14 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                 if name in agent_configs:
                     cfg = agent_configs[name]
 
+                    # Daemon agents are auto-started, not manually spawned
+                    if cfg.get("type") == "daemon":
+                        print_warning(
+                            f"'{name}' is a daemon agent (auto-started at session start). "
+                            "Use /agent list to see running daemons."
+                        )
+                        return None
+
                     # Build AgentManifest from YAML config
                     # Extract skills config dict if present
                     skills_cfg = cfg.get("skills", {})
@@ -792,7 +803,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                         max_turns=cfg.get("max_turns", 10),
                         tools=cfg.get("tools", []),
                         tags=cfg.get("tags", []),
-                        mcp_servers=cfg.get("mcp_servers", "auto"),
+                        mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
                         skills_config=skills_cfg,
                     )
 
@@ -888,6 +899,82 @@ async def _agent_run(args: str, ctx: REPLContext) -> str | None:
         print_error(str(exc))
     return None
 
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Delegation -- spawn a one-shot subagent on a different backend
+# ---------------------------------------------------------------------------
+
+_DELEGATE_ROUTES: dict[str, str] = {
+    "review": "claude",
+    "analysis": "claude",
+    "summarize": "copilot",
+    "codegen": "openai",
+    "testgen": "openai",
+    "support": "copilot",
+}
+
+
+async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
+    """Spawn a one-shot subagent on a different backend.
+
+    Usage: /delegate <task_type|--model MODEL> <prompt>
+    Routes: review/analysis->claude  summarize/support->copilot  codegen/testgen->openai
+    """
+    tokens = shlex.split(args) if args else []
+    if not tokens:
+        print_info("Usage: /delegate <task_type|--model MODEL> <prompt>")
+        return None
+    model: str | None = None
+    task_type = ""
+    prompt_tokens: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "--model" and i + 1 < len(tokens):
+            model = tokens[i + 1]; i += 2
+        elif not task_type and not model and i == 0:
+            task_type = tokens[i]; i += 1
+        else:
+            prompt_tokens = tokens[i:]; break
+    if not prompt_tokens:
+        print_error("No prompt provided."); return None
+    prompt = " ".join(prompt_tokens)
+    if model is None:
+        model = _DELEGATE_ROUTES.get(task_type.strip().lower(), ctx.backend)
+    agent_name = "delegate-" + (task_type or model) + "-" + uuid.uuid4().hex[:6]
+    runtime = await ctx.get_runtime()
+    agent = runtime.spawn(
+        agent_name, model=model,
+        system_prompt="You are a specialized " + (task_type or model) + " subagent. Complete the task concisely.",
+    )
+    await agent.start()
+    print_info("=> Delegating to [" + model + "] ...")
+    from obscura.cli.render import render_event
+    output_lines: list[str] = []
+    try:
+        async for event in agent.stream_loop(prompt):
+            render_event(event)
+            if hasattr(event, "text") and event.text:
+                output_lines.append(event.text)
+        console.print()
+    except Exception as exc:
+        print_error("Delegation failed: " + str(exc)); return None
+    finally:
+        try: await agent.stop()
+        except Exception: pass
+    if output_lines and ctx.client and hasattr(ctx.client, "inject_context"):
+        summary = "".join(output_lines)
+        ctx.client.inject_context("[Delegated to " + model + "]\n" + summary)
+        print_ok("Injected " + str(len(summary)) + " chars into context")
+    return None
 
 # ---------------------------------------------------------------------------
 # Handlers — interaction bus (attention requests)
@@ -1020,7 +1107,7 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
                             max_turns=cfg.get("max_turns", 10),
                             tools=cfg.get("tools", []),
                             tags=cfg.get("tags", []),
-                            mcp_servers=cfg.get("mcp_servers", "auto"),
+                            mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
                             skills_config=s_cfg,
                         )
                         agent = runtime.spawn_from_manifest(manifest)
@@ -1474,6 +1561,28 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Workspace init
+# ---------------------------------------------------------------------------
+
+
+async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
+    """Initialise a local .obscura/ workspace in the current directory."""
+    from obscura.core.workspace import WorkspaceExistsError, init_workspace
+
+    force = "--force" in args
+    try:
+        ws = init_workspace(force=force)
+        print_ok(f"Workspace initialised at {ws}")
+    except WorkspaceExistsError:
+        print_warning(
+            ".obscura/ already exists. Use /init --force to reinitialise."
+        )
+    except Exception as exc:
+        print_error(f"Init failed: {exc}")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -1500,6 +1609,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "compact": cmd_compact,
     # Agents
     "agent": cmd_agent,
+    "delegate": cmd_delegate,
     "fleet": cmd_fleet,
     "attention": cmd_attention,
     "tail-trace": cmd_tail_trace,
@@ -1510,6 +1620,8 @@ COMMANDS: dict[str, CommandHandler] = {
     "a2a": cmd_a2a,
     # Memory
     "memory": cmd_memory,
+    # Workspace
+    "init": cmd_init,
     # Control
     "heartbeat": cmd_heartbeat,
     "hb": cmd_heartbeat,
@@ -1538,6 +1650,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "context": [],
     "compact": [],
     "agent": ["spawn", "list", "stop", "run"],
+    "delegate": ["codegen", "review", "analysis", "summarize", "testgen", "support", "--model"],
     "fleet": ["spawn", "status", "run", "delegate", "stop"],
     "attention": ["respond"],
     "session": ["list", "new"],
@@ -1545,6 +1658,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "mcp": ["discover", "list", "select", "env", "install"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "tail-trace": [],
+    "init": ["--force"],
     "memory": ["stats", "search", "clear"],
     "heartbeat": ["--json"],
     "hb": ["--json"],

@@ -32,6 +32,10 @@ from obscura.cli.commands import (
     handle_command,
 )
 from obscura.cli.prompt import (
+    PromptStatus,
+    StreamingStatus,
+    _get_git_branch,
+    animate_spinner,
     bordered_prompt,
     confirm_prompt_async,
     create_prompt_session,
@@ -76,6 +80,32 @@ def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
     except Exception:
         pass
     return [], []
+
+
+def _discover_agents() -> list[str]:
+    """Read agent names from ~/.obscura/agents.yaml without instantiating AgentRuntime.
+
+    Fully lazy — just parses YAML names, deduplicates, returns list.
+    Returns empty list on any error.
+    """
+    try:
+        import yaml  # type: ignore[import-untyped]
+
+        agents_yaml = resolve_obscura_home() / "agents.yaml"
+        if not agents_yaml.exists():
+            return []
+        with open(agents_yaml) as f:
+            config = yaml.safe_load(f) or {}
+        seen: set[str] = set()
+        names: list[str] = []
+        for agent in config.get("agents", []):
+            name = agent.get("name", "")
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+        return names
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -165,14 +195,13 @@ async def send_message(
     ctx: REPLContext,
     text: str,
     loop_kwargs: dict[str, Any],
-    external_status: object | None = None,
-    spinner_enabled: bool = True,
+    streaming_status: StreamingStatus | None = None,
 ) -> str:
     """Send a chat message and stream the response with Markdown rendering.
 
     Returns the accumulated assistant text.
     """
-    renderer = StreamRenderer(external_status=external_status)
+    renderer = StreamRenderer(streaming_status=streaming_status)
     # Register active renderer so prompt can expand previews while streaming
     try:
         from obscura.cli.render import set_active_renderer
@@ -343,6 +372,92 @@ async def send_message(
 
 
 # ---------------------------------------------------------------------------
+# iMessage daemon
+# ---------------------------------------------------------------------------
+
+
+async def _start_imessage_daemon(
+    client: Any,
+) -> asyncio.Task[None] | None:
+    """Start iMessage daemon if configured in agents.yaml. Returns the task."""
+    from obscura.agent.supervisor import SupervisorConfig
+    from obscura.agent.daemon_agent import DaemonAgent, IMessageTrigger, Trigger
+    from obscura.agent.interaction import InteractionBus
+    from obscura.cli.render import console as _console
+    from obscura.core.client import ObscuraClient
+
+    config_path = Path.home() / ".obscura" / "agents.yaml"
+    if not config_path.exists():
+        return None
+
+    cfg = SupervisorConfig.from_yaml(config_path)
+    # Find daemon agents with iMessage triggers
+    for agent_def in cfg.agents:
+        if agent_def.type != "daemon":
+            continue
+        im_triggers = [t for t in agent_def.triggers if t.imessage is not None]
+        if not im_triggers:
+            continue
+
+        from obscura.agent.daemon_agent import IMessageTrigger as _IMT
+        triggers: list[Any] = []
+        for tdef in im_triggers:
+            im_cfg = tdef.imessage or {}
+            triggers.append(_IMT(
+                contacts=tuple(im_cfg.get("contacts", [])),
+                poll_interval=im_cfg.get("poll_interval", 30),
+                notify_user=tdef.notify_user,
+                priority=tdef.priority,
+            ))
+
+        bus = InteractionBus()
+
+        async def _on_output(output: Any) -> None:
+            text = getattr(output, "text", str(output))
+            source = getattr(output, "source", agent_def.name)
+            _console.print(f"[dim]\\[{source}][/] {text}")
+
+        bus.on_output(_on_output)
+
+        # Suppress daemon startup logs — the bottom toolbar shows daemon
+        # status, so raw StreamHandler output would corrupt the prompt UI.
+        import logging as _logging
+        _logging.getLogger("obscura.agent.daemon_agent").setLevel(_logging.WARNING)
+
+        # Create a SEPARATE client for the daemon so it doesn't contend
+        # with the REPL's client for backend access
+        daemon_client = ObscuraClient(
+            agent_def.model,
+            system_prompt=agent_def.system_prompt,
+        )
+        await daemon_client.__aenter__()
+
+        daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
+        daemon._bus = bus  # type: ignore[attr-defined]
+
+        task: asyncio.Task[None] = asyncio.create_task(
+            daemon.run_forever(),  # type: ignore[arg-type]
+            name=f"daemon-{agent_def.name}",
+        )
+
+        def _on_task_done(t: asyncio.Task[None]) -> None:  # type: ignore[type-arg]
+            exc = t.exception() if not t.cancelled() else None
+            if exc:
+                _console.print(f"[red]Daemon task crashed: {exc}[/]")
+            elif t.cancelled():
+                _console.print("[dim]Daemon task cancelled[/]")
+            else:
+                _console.print("[dim]Daemon task completed[/]")
+
+        task.add_done_callback(_on_task_done)
+        # Stash client on the task so we can close it later
+        task._daemon_client = daemon_client  # type: ignore[attr-defined]
+        return task
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Async REPL
 # ---------------------------------------------------------------------------
 
@@ -507,8 +622,11 @@ async def _repl(
 
         # --- Interactive REPL ---
         mm = ctx.get_mode_manager()
-        toolbar = f"mode: {mm.current.value} · esc+enter multiline · /help"
-        session = create_prompt_session(COMPLETIONS, toolbar_text=toolbar)
+        ss = StreamingStatus()
+
+        # Lazy agent discovery — reads agents.yaml names only, no runtime created
+        available_agents = _discover_agents() or None
+
         print_banner(
             backend,
             model,
@@ -516,12 +634,69 @@ async def _repl(
             tool_count=tool_count,
             mcp_servers=mcp_names or None,
             mode=mm.current.value,
+            available_agents=available_agents,
         )
 
-        background_tasks: set[asyncio.Task] = set()
+        # Start iMessage daemon if configured
+        daemon_task: asyncio.Task[None] | None = None
+        _daemon_client: Any = None
+        try:
+            daemon_task = await _start_imessage_daemon(ctx.client)
+        except Exception as exc:
+            from obscura.cli.render import print_warning
+            print_warning(f"iMessage daemon failed to start: {exc}")
+
+        # Live status shown in the bottom toolbar — mutated before each prompt
+        prompt_status = PromptStatus(
+            model=model or "",
+            branch=_get_git_branch(),
+            session_id=sid,
+            mode=mm.current.value,
+        )
+
+        def _refresh_prompt_status() -> None:
+            """Refresh mutable fields of prompt_status before each prompt."""
+            prompt_status.mode = mm.current.value
+            prompt_status.model = ctx.model or ""
+            # Collect running agents from runtime (if active)
+            running: list[str] = []
+            if ctx._runtime is not None:
+                try:
+                    from obscura.agent.agents import AgentStatus as _AS
+                    for agent in ctx._runtime.list_agents(status=_AS.RUNNING):
+                        running.append(agent.config.name)
+                except Exception:
+                    pass
+            # Include daemon task if alive
+            if daemon_task is not None and not daemon_task.done():
+                task_name = daemon_task.get_name()
+                label = task_name.removeprefix("daemon-") if task_name.startswith("daemon-") else task_name
+                if label not in running:
+                    running.append(label)
+            prompt_status.running_agents = running
+            # Token context tracking
+            from obscura.cli.commands import _estimate_tokens
+            total = sum(len(t) for _, t in ctx.message_history)
+            tokens = total // 4
+            window = ctx.client.context_window
+            prompt_status.ctx_tokens = tokens
+            prompt_status.ctx_window = window
+            prompt_status.ctx_pct = int(tokens / window * 100) if window else 0
+
+        session = create_prompt_session(
+            COMPLETIONS,
+            streaming_status=ss,
+            prompt_status=prompt_status,
+        )
+
+        # Background spinner animation for the toolbar
+        spinner_task = asyncio.create_task(animate_spinner(ss))
+
+        background_tasks: set[asyncio.Task[str]] = set()
         try:
             while True:
                 try:
+                    _refresh_prompt_status()
                     user_input = await bordered_prompt(session)
                 except (EOFError, KeyboardInterrupt):
                     console.print()
@@ -547,31 +722,36 @@ async def _repl(
                 else:
                     loop_kwargs.pop("tool_choice", None)
 
-                # Chat message: run send_message in background so REPL remains responsive.
-                status = console.status("[dim]› Streaming response...[/]", spinner="dots")
-                try:
-                    status.start()
-                except Exception:
-                    pass
-
-                task = asyncio.create_task(send_message(ctx, user_input, loop_kwargs, external_status=status))
+                # Chat message: run in background so prompt stays responsive.
+                # The StreamingStatus drives the toolbar spinner instead of
+                # console.status() which conflicts with patch_stdout.
+                task = asyncio.create_task(
+                    send_message(ctx, user_input, loop_kwargs, streaming_status=ss)
+                )
                 background_tasks.add(task)
 
-                # Remove task from set when done
-                def _on_done(t: asyncio.Task) -> None:
-                    try:
-                        background_tasks.discard(t)
-                    except Exception:
-                        pass
-                    try:
-                        status.stop()
-                    except Exception:
-                        pass
+                def _on_done(t: asyncio.Task[str]) -> None:
+                    background_tasks.discard(t)
+                    ss.reset()
 
                 task.add_done_callback(_on_done)
 
         finally:
-            # Wait for any streaming tasks to finish before shutdown
+            spinner_task.cancel()
+            if daemon_task is not None:
+                if not daemon_task.done():
+                    daemon_task.cancel()
+                    try:
+                        await daemon_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                # Close the daemon's dedicated client
+                dc = getattr(daemon_task, "_daemon_client", None)
+                if dc is not None:
+                    try:
+                        await dc.__aexit__(None, None, None)
+                    except Exception:
+                        pass
             if background_tasks:
                 await asyncio.gather(*background_tasks, return_exceptions=True)
             await ctx.stop_runtime()
@@ -589,7 +769,7 @@ async def _repl(
 # ---------------------------------------------------------------------------
 
 
-@click.command()
+@click.group(invoke_without_command=True)
 @click.argument("prompt", required=False, default=None)
 @click.option(
     "-b",
@@ -601,6 +781,14 @@ async def _repl(
 @click.option("-m", "--model", default=None, help="Model ID override.")
 @click.option("-s", "--system", default="", help="System prompt.")
 @click.option("--session", default=None, help="Resume session by ID.")
+@click.option(
+    "--continue",
+    "resume_last",
+    is_flag=True,
+    default=False,
+    help="Resume the most recent session.",
+)
+@click.option("--resume", default=None, help="Resume session by ID (alias for --session).")
 @click.option("--max-turns", default=10, type=int, help="Max agent loop turns.")
 @click.option(
     "--tools",
@@ -619,21 +807,59 @@ async def _repl(
     default=False,
     help="Skip the default Obscura system prompt.",
 )
+@click.pass_context
 def main(
+    ctx: click.Context,
     prompt: str | None,
     backend: str,
     model: str | None,
     system: str,
     session: str | None,
+    resume_last: bool,
+    resume: str | None,
     max_turns: int,
     tools: str,
     confirm: bool,
     no_default_prompt: bool,
 ) -> None:
     """Obscura — AI agent REPL."""
+    # If a subcommand was invoked, let Click handle it
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # Resolve session ID: --resume > --session > --continue (last session)
+    resolved_session = resume or session
+    if not resolved_session and resume_last:
+        try:
+            import sqlite3
+            db_path = resolve_obscura_home() / "events.db"
+            con = sqlite3.connect(str(db_path))
+            row = con.execute(
+                "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
+            con.close()
+            if row:
+                resolved_session = row[0]
+        except Exception:
+            pass
     try:
         asyncio.run(
-            _repl(backend, model, system, session, max_turns, tools, prompt, confirm, no_default_prompt)
+            _repl(backend, model, system, resolved_session, max_turns, tools, prompt, confirm, no_default_prompt)
         )
     except KeyboardInterrupt:
-        pass
+        pass  # graceful exit on Ctrl-C
+
+
+@main.command()
+@click.option("--force", is_flag=True, default=False, help="Reinitialise even if .obscura/ exists.")
+def init(force: bool) -> None:
+    """Initialise a local .obscura/ workspace in the current directory."""
+    from obscura.core.workspace import WorkspaceExistsError, init_workspace
+
+    try:
+        ws = init_workspace(force=force)
+        click.echo(f"Workspace initialised at {ws}")
+    except WorkspaceExistsError:
+        click.echo(".obscura/ already exists. Use --force to reinitialise.")
+    except Exception as exc:
+        click.echo(f"Init failed: {exc}", err=True)

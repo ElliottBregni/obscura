@@ -936,6 +936,7 @@ class Agent:
                 monitor_url=monitor_url,
                 interval=interval,
                 tags=self.config.tags,
+                auth_token=getattr(self.user, "raw_token", None),
             )
             await self._heartbeat_client.start()
             logger.debug(f"Started heartbeat client for agent {self.id}")

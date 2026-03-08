@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 from uuid import uuid4
@@ -49,6 +50,7 @@ __all__ = [
     "FileWatchTrigger",
     "MemoryChangeTrigger",
     "PeerMessageTrigger",
+    "IMessageTrigger",
 ]
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,15 @@ class PeerMessageTrigger(Trigger):
     from_agent: str = "*"  # "*" = any peer
 
 
+@dataclass(frozen=True)
+class IMessageTrigger(Trigger):
+    """Fires when a new iMessage arrives from configured contacts."""
+
+    kind: str = "imessage"
+    contacts: tuple[str, ...] = ()  # phone numbers or emails
+    poll_interval: int = 30  # seconds
+
+
 # ---------------------------------------------------------------------------
 # DaemonAgent
 # ---------------------------------------------------------------------------
@@ -150,6 +161,10 @@ class DaemonAgent:
         self._stopped = False
         self._trigger_count = 0
         self._scheduler_task: asyncio.Task[None] | None = None
+        # Multi-turn iMessage conversation state: sender -> list of {role, text}
+        self._conversations: dict[str, list[dict[str, str]]] = {}
+        self._conversation_timestamps: dict[str, float] = {}
+        self._session_timeout: float = 3600.0  # 1 hour inactivity resets thread
 
     # -- Public properties ---------------------------------------------------
 
@@ -193,13 +208,15 @@ class DaemonAgent:
         )
 
         try:
+            logger.info("[%s] main loop entering", self._name)
             while not self._stopped:
                 trigger = await self._get_next_trigger()
                 if trigger is None:
+                    logger.info("[%s] got None trigger, continuing", self._name)
                     continue
 
-                logger.debug(
-                    "[%s] processing trigger #%d kind=%s",
+                logger.info(
+                    "[%s] dequeued trigger #%d kind=%s",
                     self._name,
                     self._trigger_count,
                     trigger.kind,
@@ -252,6 +269,10 @@ class DaemonAgent:
         The default implementation sends ``trigger.prompt`` through the
         LLM tool loop and optionally notifies the user.
         """
+        if trigger.kind == "imessage":
+            await self._handle_imessage_trigger(trigger)
+            return
+
         prompt = trigger.prompt
         if not prompt:
             prompt = (
@@ -273,37 +294,160 @@ class DaemonAgent:
                 priority=trigger.priority,
             )
 
+    async def _handle_imessage_trigger(self, trigger: Trigger) -> None:
+        """Process an incoming iMessage: run agent loop, send reply (multi-turn)."""
+        from obscura.integrations.imessage import IMessageClient
+
+        sender = trigger.data.get("sender", "unknown")
+        text = trigger.data.get("text", "")
+        logger.info("[%s] handling iMessage from %s: %s", self._name, sender, text[:50])
+
+        # -- Conversation thread management ----------------------------------
+        now = time.monotonic()
+        last_ts = self._conversation_timestamps.get(sender, 0.0)
+        if now - last_ts > self._session_timeout:
+            # Stale or new thread — start fresh
+            self._conversations[sender] = []
+            logger.debug("[%s] started new iMessage thread for %s", self._name, sender)
+        self._conversation_timestamps[sender] = now
+
+        thread = self._conversations[sender]
+        thread.append({"role": "user", "text": text})
+
+        # -- Build prompt with history context --------------------------------
+        history_lines: list[str] = []
+        for turn in thread[:-1]:  # all but the latest (included in the prompt below)
+            role_label = "Them" if turn["role"] == "user" else "You"
+            history_lines.append(f"{role_label}: {turn['text']}")
+
+        if history_lines:
+            history_block = "\n".join(history_lines)
+            prompt = (
+                f"You are in a multi-turn iMessage conversation with {sender}.\n\n"
+                f"Conversation so far:\n{history_block}\n\n"
+                f"Their latest message:\n\"{text}\"\n\n"
+                f"Write your reply message ONLY — just the text you want to send back. "
+                f"Do NOT use any tools. Do NOT describe what you would do. "
+                f"Do NOT mention tools, capabilities, or limitations. "
+                f"Just write the actual reply message as plain text. "
+                f"The system will automatically send it as an iMessage."
+            )
+        else:
+            prompt = (
+                f"You received an iMessage from {sender}:\n\n"
+                f"\"{text}\"\n\n"
+                f"Write your reply message ONLY — just the text you want to send back. "
+                f"Do NOT use any tools. Do NOT describe what you would do. "
+                f"Do NOT mention tools, capabilities, or limitations. "
+                f"Just write the actual reply message as plain text. "
+                f"The system will automatically send it as an iMessage."
+            )
+
+        # Fresh session per message — Copilot's session state machine gets
+        # stuck after a completed stream() call, causing subsequent calls to
+        # hang.  Conversation history is already in the prompt, so session
+        # state isn't needed.
+        logger.info("[%s] calling LLM for iMessage from %s", self._name, sender)
+        try:
+            await self._client.reset_session()
+            result = await asyncio.wait_for(
+                self._client.run_loop_to_completion(prompt, max_turns=1),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("[%s] LLM call timed out for message from %s", self._name, sender)
+            await self._emit_output(
+                f"[iMessage from {sender}]: {text}\n\n[Reply]: (timed out)",
+                is_final=True,
+            )
+            return
+        except Exception:
+            logger.exception("[%s] LLM call failed for message from %s", self._name, sender)
+            await self._emit_output(
+                f"[iMessage from {sender}]: {text}\n\n[Reply]: (error)",
+                is_final=True,
+            )
+            return
+        logger.info("[%s] LLM returned for %s: %s", self._name, sender, result[:80])
+
+        # Append assistant reply to thread
+        thread.append({"role": "assistant", "text": result})
+        self._conversation_timestamps[sender] = time.monotonic()
+
+        # -- Send reply via iMessage -----------------------------------------
+        all_contacts = [
+            c
+            for t in self._static_triggers
+            if isinstance(t, IMessageTrigger)
+            for c in t.contacts
+        ]
+        client = IMessageClient(all_contacts)
+        sent = await client.send_message(sender, result)
+        if not sent:
+            logger.error("[%s] Failed to send iMessage reply to %s", self._name, sender)
+
+        # Emit to InteractionBus (shows in CLI)
+        thread_len = len([t for t in thread if t["role"] == "user"])
+        await self._emit_output(
+            f"[iMessage from {sender}] (turn {thread_len}): {text}\n\n[Reply]: {result}",
+            is_final=True,
+        )
+
+        if trigger.notify_user:
+            await self._request_attention(
+                f"iMessage from {sender}: {text[:100]}\nReply: {result[:100]}",
+                priority=trigger.priority,
+            )
+
     # -- Internal helpers ----------------------------------------------------
 
     async def _get_next_trigger(self) -> Trigger | None:
         """Block until a trigger arrives, or return ``None`` if stopped."""
         while not self._stopped:
             try:
-                trigger = await asyncio.wait_for(
-                    self._trigger_queue.get(), timeout=1.0,
-                )
+                trigger = self._trigger_queue.get_nowait()
                 if trigger.kind == "__stop__":
                     return None
                 return trigger
-            except asyncio.TimeoutError:
-                continue
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.5)
         return None
 
     async def _run_schedulers(self) -> None:
-        """Background task that evaluates cron triggers every 60 s."""
+        """Background task that evaluates cron triggers and polls iMessage."""
+        tasks: list[asyncio.Task[None]] = []
+
         schedule_triggers = [
             t for t in self._static_triggers if isinstance(t, ScheduleTrigger)
         ]
-        if not schedule_triggers:
+        if schedule_triggers:
+            tasks.append(asyncio.create_task(self._poll_schedules(schedule_triggers)))
+
+        imessage_triggers = [
+            t for t in self._static_triggers if isinstance(t, IMessageTrigger)
+        ]
+        if imessage_triggers:
+            tasks.append(asyncio.create_task(self._poll_imessages(imessage_triggers)))
+
+        if not tasks:
             return
 
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _poll_schedules(self, triggers: list[ScheduleTrigger]) -> None:
+        """Evaluate cron triggers every 60 s."""
         while not self._stopped:
             try:
                 await asyncio.sleep(60.0)
             except asyncio.CancelledError:
                 return
 
-            for trigger in schedule_triggers:
+            for trigger in triggers:
                 if self._stopped:
                     return
                 if _cron_matches_now(trigger.cron):
@@ -313,6 +457,82 @@ class DaemonAgent:
                         trigger.description or trigger.cron,
                     )
                     await self._trigger_queue.put(trigger)
+
+    async def _poll_imessages(self, triggers: list[IMessageTrigger]) -> None:
+        """Poll iMessage for new messages from configured contacts."""
+        from obscura.integrations.imessage import IMessageClient, IMessageState
+
+        # Merge contacts and use smallest interval
+        all_contacts = list({c for t in triggers for c in t.contacts})
+        interval = min(t.poll_interval for t in triggers)
+
+        client = IMessageClient(all_contacts)
+        await client.check_access()
+
+        state = IMessageState()
+        if state.last_rowid == 0:
+            state.initialize_from_db(client.db_path)
+
+        # Track seen GUIDs to deduplicate (essential for AppleScript fallback
+        # which doesn't filter by since_rowid)
+        seen_guids: set[str] = set()
+
+        logger.info(
+            "[%s] iMessage polling started: contacts=%s interval=%ds",
+            self._name,
+            all_contacts,
+            interval,
+        )
+
+        while not self._stopped:
+            try:
+                await asyncio.sleep(float(interval))
+            except asyncio.CancelledError:
+                return
+
+            if self._stopped:
+                return
+
+            try:
+                messages = await client.poll_unread(state.last_rowid)
+                if messages:
+                    logger.info(
+                        "[%s] polled %d message(s), last_rowid=%d, seen=%d",
+                        self._name, len(messages), state.last_rowid, len(seen_guids),
+                    )
+            except Exception:
+                logger.exception("[%s] iMessage poll failed", self._name)
+                continue
+
+            for msg in messages:
+                if msg.guid in seen_guids:
+                    continue
+                seen_guids.add(msg.guid)
+                state.update(msg.rowid)
+                logger.info(
+                    "[%s] new message from %s: rowid=%d guid=%s",
+                    self._name, msg.sender, msg.rowid, msg.guid[:12],
+                )
+                # Find matching trigger for notification prefs
+                matching = triggers[0]
+                for t in triggers:
+                    if msg.sender in t.contacts:
+                        matching = t
+                        break
+
+                fire_trigger = Trigger(
+                    kind="imessage",
+                    description=f"iMessage from {msg.sender}",
+                    notify_user=matching.notify_user,
+                    priority=matching.priority,
+                    data={
+                        "sender": msg.sender,
+                        "text": msg.text,
+                        "guid": msg.guid,
+                        "date": msg.date.isoformat(),
+                    },
+                )
+                await self._trigger_queue.put(fire_trigger)
 
     async def _emit_output(
         self,
