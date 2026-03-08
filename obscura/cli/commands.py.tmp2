@@ -208,9 +208,6 @@ class REPLContext:
     # Agent runtime (lazy-created on first /agent or /fleet command)
     _runtime: Any = field(default=None, repr=False)
 
-    # Background swarm tasks: {swarm_id: {task, assignments, results, ...}}
-    _swarm_runs: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
-
     # Slash-skill state (metadata lazy-loaded, bodies loaded on activation)
     _lazy_skill_loader: LazySkillLoader | None = field(default=None, repr=False)
     active_skills: list[str] = field(default_factory=list)
@@ -890,16 +887,28 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_session(args: str, ctx: REPLContext) -> str | None:
-    """Session management: list, new, switch, or resume by ID.
-
-    Usage:
-        /session            — list sessions + interactive switch
-        /session list       — list sessions (no interactive picker)
-        /session switch     — interactive session picker
-        /session new        — start a new session
-        /session <id>       — switch to session by ID (prefix match)
-    """
+    """Session management: list, new, or resume by ID."""
     sub = args.strip()
+
+    if sub == "list" or not sub:
+        sessions = await ctx.store.list_sessions()
+        if not sessions:
+            print_info("No sessions.")
+            return None
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Session", style="cyan")
+        table.add_column("Status", style="yellow")
+        table.add_column("Agent", style="green")
+        table.add_column("Created", style="dim")
+        for s in sessions[:20]:
+            table.add_row(
+                s.id[:12],
+                s.status.value,
+                s.active_agent,
+                s.created_at.strftime("%Y-%m-%d %H:%M"),
+            )
+        console.print(table)
+        return None
 
     if sub == "new":
         new_id = uuid.uuid4().hex
@@ -907,184 +916,29 @@ async def cmd_session(args: str, ctx: REPLContext) -> str | None:
         print_ok(f"New session: {new_id}")
         return None
 
-    # Fetch all sessions
-    sessions = await ctx.store.list_sessions()
-
-    # --- list / default: show table ---
-    if sub in ("list", "switch", ""):
-        if not sessions:
-            print_info("No sessions.")
-            return None
-
-        _session_print_table(sessions, ctx.session_id)
-
-        # Interactive picker for bare /session or /session switch
-        if sub != "list":
-            await _session_interactive_switch(sessions, ctx)
-
+    # Resume by ID
+    existing = await ctx.store.get_session(sub)
+    if existing is None:
+        print_error(f"Session {sub} not found.")
         return None
-
-    # --- Resume by ID (prefix match) ---
-    await _session_switch_by_id(sub, sessions, ctx)
-    return None
-
-
-def _session_print_table(
-    sessions: list[Any],
-    current_id: str,
-) -> None:
-    """Print sessions table split into active vs completed."""
-    active_statuses = {
-        SessionStatus.RUNNING,
-        SessionStatus.WAITING_FOR_TOOL,
-        SessionStatus.WAITING_FOR_USER,
-    }
-    active = [s for s in sessions if s.status in active_statuses]
-    other = [s for s in sessions if s.status not in active_statuses]
-
-    def _build_table(
-        rows: list[Any],
-        title: str,
-        header_style: str = "bold",
-    ) -> Table:
-        tbl = Table(
-            show_header=True,
-            header_style=header_style,
-            title=title,
-        )
-        tbl.add_column("", width=2)  # current indicator
-        tbl.add_column("Session", style="cyan", no_wrap=True)
-        tbl.add_column("Status", style="yellow")
-        tbl.add_column("Backend", style="dim")
-        tbl.add_column("Model", style="dim")
-        tbl.add_column("Agent", style="green")
-        tbl.add_column("Msgs", style="dim", justify="right")
-        tbl.add_column("Created", style="dim")
-        for s in rows[:20]:
-            indicator = "[bold cyan]\u2192[/]" if s.id == current_id else ""
-            tbl.add_row(
-                indicator,
-                s.id[:12],
-                s.status.value,
-                s.backend or "-",
-                s.model or "-",
-                s.active_agent or "-",
-                str(s.message_count) if s.message_count else "-",
-                s.created_at.strftime("%Y-%m-%d %H:%M"),
-            )
-        return tbl
-
-    if active:
-        console.print(_build_table(active, f"Active ({len(active)})"))
-    if other:
-        style = "bold dim" if active else "bold"
-        console.print(
-            _build_table(other[:10], f"Completed ({len(other)})", style)
-        )
-
-
-async def _session_interactive_switch(
-    sessions: list[Any],
-    ctx: REPLContext,
-) -> None:
-    """Present interactive picker and switch to the selected session."""
-    # Build choices: other sessions (not current)
-    switchable = [s for s in sessions if s.id != ctx.session_id]
-    if not switchable:
-        print_info("No other sessions to switch to.")
-        return
-
-    choices: list[str] = []
-    session_map: dict[str, Any] = {}
-    for s in switchable[:15]:
-        label = (
-            f"{s.id[:8]} · {s.status.value}"
-            f" · {s.active_agent or s.backend or 'default'}"
-        )
-        choices.append(label)
-        session_map[label] = s
-
-    choices.append("cancel")
-
+    ctx.session_id = sub
     try:
-        from obscura.cli.widgets import (
-            AttentionWidgetRequest,
-            confirm_attention,
+        await ctx.client.resume_session(
+            SessionRef(session_id=sub, backend=Backend(ctx.backend))
         )
-
-        result = await confirm_attention(
-            AttentionWidgetRequest(
-                request_id="session_switch",
-                agent_name="system",
-                message="Switch to session:",
-                actions=tuple(choices),
-            ),
-        )
-        if result.action == "cancel":
-            return
-
-        selected = session_map.get(result.action)
-        if selected is not None:
-            await _do_session_switch(selected.id, ctx)
-    except Exception:
-        pass
-
-
-async def _session_switch_by_id(
-    partial_id: str,
-    sessions: list[Any],
-    ctx: REPLContext,
-) -> None:
-    """Switch to a session by exact or prefix match."""
-    # Try exact match first
-    existing = await ctx.store.get_session(partial_id)
-    if existing is not None:
-        await _do_session_switch(partial_id, ctx)
-        return
-
-    # Try prefix match
-    matches = [s for s in sessions if s.id.startswith(partial_id)]
-    if len(matches) == 1:
-        await _do_session_switch(matches[0].id, ctx)
-        return
-
-    if len(matches) > 1:
+    except Exception as exc:
         print_warning(
-            f"Ambiguous prefix '{partial_id}' — matches "
-            f"{len(matches)} sessions. Be more specific."
+            f"Resume failed for session {sub[:12]}: {exc}. "
+            "Using a fresh backend session."
         )
-        for m in matches[:5]:
-            console.print(f"  [cyan]{m.id[:12]}[/] · {m.status.value}")
-        return
-
-    print_error(f"Session '{partial_id}' not found.")
-
-
-async def _do_session_switch(session_id: str, ctx: REPLContext) -> None:
-    """Switch to a different session.
-
-    We intentionally skip ``resume_session`` — calling it with an ID from
-    a previous process can crash the backend subprocess (e.g. Copilot SDK
-    exits with code 1, killing the message reader).  Instead we just
-    update the session_id and reset the backend to a fresh conversation
-    state.  The event store still has the full history for the session.
-    """
-    old_id = ctx.session_id
-    ctx.session_id = session_id
-
-    try:
-        await ctx.client.reset_session()
-        print_ok(f"Switched to session: {session_id[:12]}")
-    except Exception:
-        # reset_session failed — backend might be dead; full recreate
         try:
-            await ctx.recreate_client(ctx.backend, ctx.model)
-            print_ok(f"Switched to session: {session_id[:12]} (reconnected)")
-        except Exception as exc:
-            # Can't recover — revert
-            ctx.session_id = old_id
-            print_error(f"Failed to switch session: {exc}")
-            return
+            await ctx.client.reset_session()
+        except Exception:
+            pass
+        print_ok(f"Using local session context: {sub}")
+        return None
+    print_ok(f"Resumed session: {sub}")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1345,6 +1199,7 @@ async def _agent_run(args: str, ctx: REPLContext) -> str | None:
     except Exception as exc:
         print_error(str(exc))
     return None
+
 
 
 
@@ -1635,17 +1490,17 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
         from pathlib import Path as P
         import yaml
         from obscura.manifest.models import AgentManifest
-
+        
         agents_yaml = P.home() / ".obscura" / "agents.yaml"
         manifest_loaded = False
-
+        
         if agents_yaml.exists():
             try:
                 with open(agents_yaml) as f:
                     config = yaml.safe_load(f)
                     agent_configs = {a["name"]: a for a in config.get("agents", [])}
-
-                    if name in agent_configs and agent_configs[name].get("enabled", True):
+                    
+                    if name in agent_configs:
                         cfg = agent_configs[name]
                         s_cfg = cfg.get("skills", {})
                         if not isinstance(s_cfg, dict):
@@ -1667,7 +1522,7 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
                         manifest_loaded = True
             except Exception:
                 pass
-
+        
         if not manifest_loaded:
             agent = runtime.spawn(name, model=model)
         await agent.start()
@@ -1899,77 +1754,6 @@ class _SwarmAssignment:
     rationale: str
 
 
-# Keyword → agent mapping for fast (no-LLM) planning
-_SWARM_KEYWORD_MAP: list[tuple[list[str], str, str]] = [
-    # (keywords, agent_name, rationale)
-    (["code", "implement", "write", "function", "class", "module", "refactor", "feature"],
-     "code-architect", "Code implementation task"),
-    (["python", "pip", "pytest", "type hint", "pep", "dataclass", "pydantic"],
-     "python-dev", "Python-specific task"),
-    (["test", "unit test", "coverage", "assert", "mock", "fixture"],
-     "python-dev", "Testing task"),
-    (["bug", "fix", "error", "crash", "traceback", "debug", "breakpoint"],
-     "debugger", "Debugging task"),
-    (["review", "pr", "pull request", "code review", "lint"],
-     "github-pr-reviewer", "Code review task"),
-    (["security", "vuln", "cve", "auth", "xss", "injection", "pentest"],
-     "security-researcher", "Security analysis task"),
-    (["deploy", "docker", "k8s", "ci", "cd", "pipeline", "infra", "terraform"],
-     "devops-engineer", "Infrastructure/DevOps task"),
-    (["research", "analyze", "investigate", "compare", "benchmark"],
-     "research-analyst", "Research/analysis task"),
-    (["doc", "readme", "api doc", "changelog", "tutorial"],
-     "technical-writer", "Documentation task"),
-    (["design", "ux", "ui", "wireframe", "mockup", "layout"],
-     "ux-designer", "Design task"),
-    (["data", "ml", "model", "dataset", "train", "predict", "pandas"],
-     "data-scientist", "Data science task"),
-    (["prompt", "system prompt", "instruct"],
-     "prompt-engineer", "Prompt engineering task"),
-    (["product", "prd", "roadmap", "prioritize", "stakeholder"],
-     "product-manager", "Product management task"),
-    (["content", "blog", "copy", "seo", "marketing"],
-     "content-writer", "Content creation task"),
-]
-
-
-def _swarm_plan_fast(
-    task: str,
-    agent_configs: dict[str, dict[str, Any]],
-) -> list[_SwarmAssignment]:
-    """Fast keyword-based planning — no LLM call needed."""
-    task_lower = task.lower()
-    matched: dict[str, _SwarmAssignment] = {}
-
-    for keywords, agent_name, rationale in _SWARM_KEYWORD_MAP:
-        if agent_name not in agent_configs:
-            continue
-        for kw in keywords:
-            if kw in task_lower and agent_name not in matched:
-                matched[agent_name] = _SwarmAssignment(
-                    agent_name=agent_name,
-                    prompt=task,
-                    rationale=rationale,
-                )
-                break
-
-    if not matched:
-        # Default: use assistant if available, else first non-daemon agent
-        fallback = "assistant"
-        if fallback not in agent_configs:
-            for name, cfg in agent_configs.items():
-                if cfg.get("type", "loop") != "daemon":
-                    fallback = name
-                    break
-        matched[fallback] = _SwarmAssignment(
-            agent_name=fallback,
-            prompt=task,
-            rationale="General-purpose fallback",
-        )
-
-    return list(matched.values())
-
-
 _SWARM_PLAN_PROMPT = """\
 You are a task decomposition planner for a multi-agent system.
 
@@ -2003,12 +1787,12 @@ resolve any contradictions, and produce a unified answer. Be concise.
 """
 
 
-async def _swarm_plan_smart(
+async def _swarm_plan(
     task: str,
     agent_configs: dict[str, dict[str, Any]],
     ctx: REPLContext,
 ) -> list[_SwarmAssignment]:
-    """LLM-based planning — slower but smarter decomposition."""
+    """Use the session LLM to decompose *task* into agent assignments."""
     from obscura.tools.swarm import build_agent_catalog
 
     catalog = build_agent_catalog(agent_configs)
@@ -2077,7 +1861,10 @@ async def _swarm_run_agent(
                 ),
                 skills_config=s_cfg,
             )
-            agent = runtime.spawn_from_manifest(manifest)
+            agent = runtime.spawn_from_manifest(
+                manifest,
+                provider_override=model_override,
+            )
         else:
             agent = runtime.spawn(
                 name,
@@ -2128,162 +1915,31 @@ async def _swarm_synthesize(
         return agent_results
 
 
-async def _swarm_background(
-    swarm_id: str,
-    task: str,
-    assignments: list[_SwarmAssignment],
-    runtime: Any,
-    agent_configs: dict[str, dict[str, Any]],
-    model_override: str | None,
-    synthesize: bool,
-    ctx: REPLContext,
-) -> None:
-    """Background coroutine that runs all swarm agents and collects results."""
-    import asyncio as _aio
-
-    run = ctx._swarm_runs[swarm_id]
-    run["status"] = "running"
-
-    coros = [
-        _swarm_run_agent(
-            assignment=assignment,
-            runtime=runtime,
-            agent_configs=agent_configs,
-            model_override=model_override,
-            ctx=ctx,
-        )
-        for assignment in assignments
-    ]
-
-    try:
-        results: list[tuple[str, str]] = await _aio.gather(*coros)
-        run["results"] = results
-
-        # Synthesize
-        if synthesize and len(results) > 1:
-            summary = await _swarm_synthesize(task, results, ctx)
-        else:
-            summary = "\n\n".join(
-                f"## {name}\n{output}" for name, output in results
-            )
-
-        run["summary"] = summary
-        run["status"] = "done"
-
-        # Inject into context
-        if summary and ctx.client and hasattr(ctx.client, "inject_context"):
-            ctx.client.inject_context(
-                f"[Swarm results for: {task[:80]}]\n{summary}"
-            )
-
-        # Notify user
-        print_ok(f"Swarm [{swarm_id}] complete — /swarm status to see results")
-
-    except Exception as exc:
-        run["status"] = "failed"
-        run["error"] = str(exc)
-        print_error(f"Swarm [{swarm_id}] failed: {exc}")
-
-
 async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
-    """Autonomous multi-agent swarm — runs in background.
+    """Autonomous multi-agent task decomposition and parallel execution.
 
-    Usage:
-      /swarm [--model MODEL] [--no-synth] [--smart] <task description>
-      /swarm status              Show all swarm runs
-      /swarm results [id]        Show results of a swarm run
-      /swarm stop [id|all]       Cancel running swarm(s)
+    Usage: /swarm [--model MODEL] [--no-synth] <task description>
+
+    Analyzes the task, picks agents from agents.yaml, runs them in
+    parallel (each with its own agentic loop), and injects a synthesis
+    back into context.
     """
     import asyncio as _aio
+
+    from rich.markdown import Markdown
+    from rich.rule import Rule
 
     from obscura.tools.swarm import load_agent_configs
 
     tokens = shlex.split(args) if args else []
     if not tokens:
         print_info(
-            "Usage:\n"
-            "  /swarm <task>            Launch a swarm\n"
-            "  /swarm status            Show swarm runs\n"
-            "  /swarm results [id]      Show results\n"
-            "  /swarm stop [id|all]     Cancel swarm(s)\n"
-            "\n"
-            "Flags: --model MODEL  --no-synth  --smart"
+            "Usage: /swarm [--model MODEL] [--no-synth] <task description>"
         )
         return None
 
-    sub = tokens[0]
-
-    # --- /swarm status ---
-    if sub == "status":
-        if not ctx._swarm_runs:
-            print_info("No swarm runs.")
-            return None
-        table = Table(show_header=True, header_style="bold", title="Swarm Runs")
-        table.add_column("ID", style="cyan", width=10)
-        table.add_column("Task", style="dim", max_width=40)
-        table.add_column("Agents", style="yellow", width=8)
-        table.add_column("Status", style="green")
-        for sid, run in ctx._swarm_runs.items():
-            agent_names = ", ".join(a.agent_name for a in run["assignments"])
-            status = run["status"]
-            if status == "running":
-                # Count finished
-                results = run.get("results", [])
-                status = f"running ({len(results)}/{len(run['assignments'])})"
-            table.add_row(sid, run["task"][:40], agent_names, status)
-        console.print(table)
-        return None
-
-    # --- /swarm results [id] ---
-    if sub == "results":
-        from rich.markdown import Markdown
-        from rich.rule import Rule
-
-        target = tokens[1] if len(tokens) > 1 else None
-        runs = ctx._swarm_runs
-        if target:
-            matches = {k: v for k, v in runs.items() if k.startswith(target)}
-        else:
-            # Show latest
-            matches = dict(list(runs.items())[-1:]) if runs else {}
-        if not matches:
-            print_info("No matching swarm run.")
-            return None
-        colors = ["cyan", "magenta", "yellow", "green", "blue", "red"]
-        for sid, run in matches.items():
-            console.print(Rule(f"[bold]Swarm {sid}[/] — {run['status']}", style="bold"))
-            if run.get("summary"):
-                console.print(Markdown(run["summary"]))
-            elif run.get("results"):
-                for idx, (name, output) in enumerate(run["results"]):
-                    color = colors[idx % len(colors)]
-                    console.print(Rule(f"[bold {color}]{name}[/]", style=color))
-                    if output.strip():
-                        console.print(Markdown(output))
-                    console.print()
-            elif run.get("error"):
-                print_error(run["error"])
-            else:
-                print_info("Still running...")
-            console.print()
-        return None
-
-    # --- /swarm stop [id|all] ---
-    if sub == "stop":
-        target = tokens[1] if len(tokens) > 1 else "all"
-        for sid, run in list(ctx._swarm_runs.items()):
-            if target == "all" or sid.startswith(target):
-                task_obj = run.get("_task")
-                if task_obj and not task_obj.done():
-                    task_obj.cancel()
-                    run["status"] = "cancelled"
-                    print_ok(f"Cancelled swarm {sid}")
-        return None
-
-    # --- /swarm <task> — launch new swarm ---
     model_override: str | None = None
     synthesize = True
-    smart_plan = False
     task_tokens: list[str] = []
     i = 0
     while i < len(tokens):
@@ -2292,9 +1948,6 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
             i += 2
         elif tokens[i] == "--no-synth":
             synthesize = False
-            i += 1
-        elif tokens[i] == "--smart":
-            smart_plan = True
             i += 1
         else:
             task_tokens = tokens[i:]
@@ -2313,12 +1966,9 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
         return None
 
     # Plan decomposition
+    print_info("Planning swarm decomposition...")
     try:
-        if smart_plan:
-            print_info("Planning swarm decomposition (LLM)...")
-            assignments = await _swarm_plan_smart(task, agent_configs, ctx)
-        else:
-            assignments = _swarm_plan_fast(task, agent_configs)
+        assignments = await _swarm_plan(task, agent_configs, ctx)
     except Exception as exc:
         print_error(f"Swarm planning failed: {exc}")
         return None
@@ -2338,39 +1988,55 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
     console.print(table)
     console.print()
 
-    # Launch in background
+    # Launch all agents concurrently
     runtime = await ctx.get_runtime()
-    swarm_id = uuid.uuid4().hex[:6]
+    print_info(f"Launching {len(assignments)} agents in parallel...")
 
-    run_state: dict[str, Any] = {
-        "task": task,
-        "assignments": assignments,
-        "status": "starting",
-        "results": [],
-        "summary": None,
-        "error": None,
-        "_task": None,
-    }
-    ctx._swarm_runs[swarm_id] = run_state
-
-    bg_task = _aio.create_task(
-        _swarm_background(
-            swarm_id=swarm_id,
-            task=task,
-            assignments=assignments,
+    coros = [
+        _swarm_run_agent(
+            assignment=assignment,
             runtime=runtime,
             agent_configs=agent_configs,
             model_override=model_override,
-            synthesize=synthesize,
             ctx=ctx,
         )
-    )
-    run_state["_task"] = bg_task
+        for assignment in assignments
+    ]
 
-    print_ok(
-        f"Swarm [{swarm_id}] launched with {len(assignments)} agents — "
-        "prompt is free. Use /swarm status or /swarm results to check."
-    )
+    try:
+        results: list[tuple[str, str]] = await _aio.gather(*coros)
+    except KeyboardInterrupt:
+        console.print("[dim][interrupted][/]")
+        return None
+
+    # Display results
+    console.print()
+    colors = ["cyan", "magenta", "yellow", "green", "blue", "red"]
+
+    for idx, (name, output) in enumerate(results):
+        color = colors[idx % len(colors)]
+        console.print(Rule(f"[bold {color}]{name}[/]", style=color))
+        if output.strip():
+            console.print(Markdown(output))
+        console.print()
+
+    # Synthesize
+    if synthesize and len(results) > 1:
+        print_info("Synthesizing results...")
+        summary = await _swarm_synthesize(task, results, ctx)
+    else:
+        summary = "\n\n".join(
+            f"## {name}\n{output}" for name, output in results
+        )
+
+    # Inject into context
+    if summary and ctx.client and hasattr(ctx.client, "inject_context"):
+        ctx.client.inject_context(
+            f"[Swarm results for: {task[:80]}]\n{summary}"
+        )
+        print_ok(f"Injected {len(summary)} chars into context")
+
+    console.print(Rule("[bold green]Swarm Complete[/]", style="green"))
     return None
 
 
@@ -2490,11 +2156,11 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
     try:
         async with A2AClient(url.strip()) as client:
             card = await client.discover()
-
+            
             table = Table(title=f"Agent: {card.name}", show_header=True)
             table.add_column("Property", style="cyan", no_wrap=True)
             table.add_column("Value", style="green")
-
+            
             table.add_row("Name", card.name)
             table.add_row("URL", card.url)
             table.add_row("Description", card.description or "—")
@@ -2503,14 +2169,14 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
             table.add_row("Skills", str(len(card.skills)))
             table.add_row("Streaming", "✓" if card.capabilities.streaming else "✗")
             table.add_row("Push Notifications", "✓" if card.capabilities.pushNotifications else "✗")
-
+            
             console.print(table)
-
+            
             if card.skills:
                 print_info(f"\n{len(card.skills)} Skills:")
                 for skill in card.skills:
                     console.print(f"  • [bold]{skill.name}[/bold]: {skill.description}")
-
+                    
     except Exception as exc:
         print_error(f"Discovery failed: {exc}")
     return None
@@ -2524,7 +2190,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
         return None
 
     url, message = parts
-
+    
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
@@ -2535,9 +2201,9 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
         async with A2AClient(url) as client:
             print_info(f"Sending message to {url}...")
             task = await client.send_message(message, blocking=True)
-
+            
             print_ok(f"Task {task.id} completed ({task.status.state.value})")
-
+            
             # Display response
             if task.history:
                 for msg in task.history:
@@ -2546,7 +2212,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
                         for part in msg.parts:
                             if hasattr(part, 'text'):
                                 console.print(part.text)
-
+                                
     except Exception as exc:
         print_error(f"Send failed: {exc}")
     return None
@@ -2560,7 +2226,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
         return None
 
     url, message = parts
-
+    
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
@@ -2575,7 +2241,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
                     console.print(f"[dim]Status: {event.status.state.value}[/dim]")
                 elif event.kind == "artifact-update":
                     console.print(f"[green]Artifact: {event.artifact.name or 'unnamed'}[/green]")
-
+                    
     except Exception as exc:
         print_error(f"Stream failed: {exc}")
     return None
@@ -2586,7 +2252,7 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
     if not url:
         print_error("Usage: /a2a list <url>")
         return None
-
+    
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
@@ -2596,27 +2262,27 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
     try:
         async with A2AClient(url.strip()) as client:
             tasks, next_cursor = await client.list_tasks(limit=20)
-
+            
             if not tasks:
                 print_info("No tasks found")
                 return None
-
+                
             table = Table(title=f"Tasks on {url}", show_header=True)
             table.add_column("Task ID", style="cyan", no_wrap=True)
             table.add_column("State", style="yellow")
             table.add_column("Messages", style="magenta")
-
+            
             for task in tasks:
                 table.add_row(
                     task.id[:12] + "...",
                     task.status.state.value,
                     str(len(task.history))
                 )
-
+            
             console.print(table)
             if next_cursor:
                 print_info(f"More tasks available (cursor: {next_cursor[:12]}...)")
-
+                
     except Exception as exc:
         print_error(f"List failed: {exc}")
     return None
@@ -3179,9 +2845,9 @@ COMPLETIONS: dict[str, list[str]] = {
     "skill": ["list", "load", "unload", "active", "clear"],
     "delegate": ["codegen", "review", "analysis", "summarize", "testgen", "support", "--model"],
     "fleet": ["spawn", "status", "run", "delegate", "stop"],
-    "swarm": ["status", "results", "stop", "--model", "--no-synth", "--smart"],
+    "swarm": ["--model", "--no-synth"],
     "attention": ["respond"],
-    "session": ["list", "new", "switch"],
+    "session": ["list", "new"],
     "discover": ["web", "filesystem", "git", "database", "ai", "cloud", "search"],
     "mcp": ["discover", "list", "select", "env", "install"],
     "a2a": ["discover", "send", "stream", "list", "agents"],

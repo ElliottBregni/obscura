@@ -16,10 +16,15 @@ Constants mirror openclaw exactly:
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_TOKENIZER: Any | None = None
+_TOKENIZER_READY = False
 
 # Mirrors openclaw's context-window-guard.ts constants
 CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000    # Block if available tokens < this
@@ -84,15 +89,66 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
+    return _estimate_tokens_cached(text)
+
+
+def _get_tokenizer() -> Any | None:
+    """Load and cache tokenizer once per process."""
+    global _TOKENIZER, _TOKENIZER_READY
+    if _TOKENIZER_READY:
+        return _TOKENIZER
+    _TOKENIZER_READY = True
     try:
         import tiktoken
+
         try:
-            enc = tiktoken.get_encoding("cl100k_base")
+            _TOKENIZER = tiktoken.get_encoding("cl100k_base")
         except Exception:
-            enc = tiktoken.get_encoding("gpt2")
-        return len(enc.encode(text))
+            _TOKENIZER = tiktoken.get_encoding("gpt2")
     except ImportError:
-        return max(1, int(len(text.split()) / 0.75))
+        _TOKENIZER = None
+    return _TOKENIZER
+
+
+@lru_cache(maxsize=8192)
+def _estimate_tokens_cached(text: str) -> int:
+    """Cached token estimator for repeated prompt/history fragments."""
+    enc = _get_tokenizer()
+    if enc is not None:
+        return len(enc.encode(text))
+    return max(1, int(len(text.split()) / 0.75))
+
+
+def estimate_message_tokens(msg: Any) -> int:
+    """Estimate tokens for a single message, including per-message overhead."""
+    total = 0
+    content = getattr(msg, "content", None)
+    if content is None and isinstance(msg, dict):
+        content = msg.get("content")
+    if content is None:
+        content = str(msg)
+
+    if isinstance(content, str):
+        total += estimate_tokens(content)
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text", "")
+                if not text:
+                    try:
+                        text = json.dumps(block)
+                    except Exception:
+                        text = str(block)
+                total += estimate_tokens(str(text))
+            elif hasattr(block, "text"):
+                total += estimate_tokens(str(block.text))
+            else:
+                total += estimate_tokens(str(block))
+    else:
+        total += estimate_tokens(str(content))
+
+    total += 4  # per-message role/format overhead
+    return total
 
 
 def estimate_messages_tokens(messages: list[Any]) -> int:
@@ -101,34 +157,7 @@ def estimate_messages_tokens(messages: list[Any]) -> int:
     Handles both string and list content (tool_use blocks, text blocks).
     Adds 4 tokens overhead per message for role/formatting.
     """
-    total = 0
-    for msg in messages:
-        content = getattr(msg, "content", None)
-        if content is None:
-            content = str(msg)
-
-        if isinstance(content, str):
-            total += estimate_tokens(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    text = block.get("text", "")
-                    if not text:
-                        import json
-                        try:
-                            text = json.dumps(block)
-                        except Exception:
-                            text = str(block)
-                    total += estimate_tokens(str(text))
-                elif hasattr(block, "text"):
-                    total += estimate_tokens(str(block.text))
-                else:
-                    total += estimate_tokens(str(block))
-        else:
-            total += estimate_tokens(str(content))
-
-        total += 4  # per-message role/format overhead
-    return total
+    return sum(estimate_message_tokens(msg) for msg in messages)
 
 
 @dataclass

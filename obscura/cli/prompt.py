@@ -8,6 +8,7 @@ concurrent input during streaming.
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import random
 import shutil
 import os
@@ -111,6 +112,7 @@ class PromptStatus:
     mode: str = ""
     session_id: str = ""
     running_agents: list[str] = field(default_factory=lambda: list[str]())
+    task_count: int = 0
 
 
 def _get_git_branch() -> str:
@@ -314,11 +316,47 @@ def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
         # ignore invalid key spec
         pass
 
+    # Expand last thinking block
+    @kb.add("c-t")
+    def _expand_thinking(event: object) -> None:  # pyright: ignore[reportUnusedFunction]
+        _expand_thinking_action()
+
     return kb
+
+
+def _expand_thinking_action() -> None:
+    """Print the last thinking block from the active renderer."""
+    try:
+        from obscura.cli.render import _active_renderer, console, THINKING_COLOR
+        from rich.panel import Panel
+        from rich.text import Text
+
+        if _active_renderer is None:
+            console.print("[dim]No active session.[/]")
+            return
+        last = _active_renderer.get_last_thinking()
+        if not last:
+            console.print("[dim]No thinking blocks available.[/]")
+            return
+        console.print()
+        console.print(
+            Panel(
+                Text(last, style="dim italic"),
+                title=f"[{THINKING_COLOR}]reasoning (expanded)[/]",
+                title_align="left",
+                border_style="dim magenta",
+                expand=False,
+                padding=(0, 1),
+            )
+        )
+        console.print()
+    except Exception:
+        pass
 
 
 # Public helper for tests to call expand action
 expand_preview = _expand_preview_action
+expand_thinking = _expand_thinking_action
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +381,11 @@ def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
         top.append(f"session {short_id}")
 
     if prompt_status.running_agents:
-        agents_str = " ".join(f"{n} ●" for n in prompt_status.running_agents)
+        agents_str = " ".join(f"{_html.escape(n)} ●" for n in prompt_status.running_agents)
         top.append(agents_str)
+
+    if prompt_status.task_count > 0:
+        top.append(f"tasks: {prompt_status.task_count} ●")
 
     # Always show context — empty on startup, fills in as conversation grows
     pct = prompt_status.ctx_pct
@@ -357,7 +398,7 @@ def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
     bot: list[str] = []
 
     if prompt_status.mode:
-        bot.append(f"mode: {prompt_status.mode}")
+        bot.append(f"mode: {_html.escape(prompt_status.mode)}")
 
     bot.append("esc+enter multiline")
     bot.append("/help")
@@ -392,13 +433,14 @@ def create_prompt_session(
     # Fixed thinking delta line above ❯ — always reserved, never collapses.
     def _message() -> HTML:
         if _status is not None and _status.active:
-            frame = _status.spinner_char
-            label = _status.text or "working..."
+            frame = _html.escape(_status.spinner_char)
+            label = _html.escape(_status.text or "working...")
             preview = _status.preview
             if preview:
                 max_prev = shutil.get_terminal_size((80, 24)).columns - len(label) - 10
                 if len(preview) > max_prev:
                     preview = preview[:max_prev - 3] + "..."
+                preview = _html.escape(preview)
                 return HTML(
                     f"<status-line><status-spinner>{frame}</status-spinner> {label}"
                     f" <status-preview>{preview}</status-preview></status-line>\n"

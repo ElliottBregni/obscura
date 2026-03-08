@@ -130,6 +130,21 @@ class TestResolveGithubToken:
             with patch("subprocess.run", return_value=mock_result):
                 assert resolve_github_token(None) == "env-token"
 
+    def test_gh_cli_cmd_override(self):
+        with patch.dict(os.environ, {"OBSCURA_GH_CLI_CMD": "/custom/bin/gh"}, clear=True):
+            cli_result = MagicMock()
+            cli_result.returncode = 0
+            cli_result.stdout = "oauth-token\n"
+            with patch("subprocess.run", return_value=cli_result) as mock_run:
+                assert resolve_github_token(None) == "oauth-token"
+                mock_run.assert_called_with(
+                    ["/custom/bin/gh", "auth", "token"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+
 
 class TestResolveAnthropicKey:
     def test_explicit(self):
@@ -231,6 +246,31 @@ class TestResolveOpenAIKey:
                 with pytest.raises(ValueError, match="OpenAI auth"):
                     resolve_openai_key(None)
 
+    def test_codex_cli_cmd_and_auth_file_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OBSCURA_CODEX_CLI_CMD": "/custom/bin/codex",
+                "OBSCURA_CODEX_AUTH_FILE": "/tmp/custom-auth.json",
+            },
+            clear=True,
+        ):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = "Logged in using ChatGPT\n"
+            status.stderr = ""
+            with patch("subprocess.run", return_value=status) as mock_run:
+                fake_payload = '{"tokens": {"access_token": "codex-oauth-token"}}'
+                with patch("pathlib.Path.read_text", return_value=fake_payload):
+                    assert resolve_openai_key(None) == "codex-oauth-token"
+                    mock_run.assert_called_with(
+                        ["/custom/bin/codex", "login", "status"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+
     def test_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="OpenAI auth"):
@@ -318,6 +358,22 @@ class TestResolveAuth:
             with patch("subprocess.run", return_value=status):
                 result = resolve_auth(Backend.CLAUDE)
                 assert result.anthropic_api_key is None
+
+    def test_claude_cli_cmd_override(self):
+        with patch.dict(os.environ, {"OBSCURA_CLAUDE_CLI_CMD": "/custom/bin/claude"}, clear=True):
+            status = MagicMock()
+            status.returncode = 0
+            status.stdout = '{"loggedIn": true}'
+            with patch("subprocess.run", return_value=status) as mock_run:
+                result = resolve_auth(Backend.CLAUDE)
+                assert result.anthropic_api_key is None
+                mock_run.assert_called_with(
+                    ["/custom/bin/claude", "auth", "status", "--json"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
 
     def test_claude_oauth_fallback_not_logged_in(self):
         with patch.dict(os.environ, {}, clear=True):

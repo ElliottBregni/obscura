@@ -233,6 +233,7 @@ class StreamRenderer:
         self._text_buf: list[str] = []
         self._thinking_buf: list[str] = []
         self._all_text: list[str] = []
+        self._thinking_blocks: list[str] = []  # completed thinking blocks
         self._in_thinking = False
         # StreamingStatus from prompt.py (toolbar spinner)
         self._ss: object | None = streaming_status
@@ -332,18 +333,22 @@ class StreamRenderer:
                 self._print_reasoning(text)
 
     def _print_reasoning(self, text: str) -> None:
-        """Display reasoning/thinking in a subtle bordered panel."""
+        """Display reasoning as a collapsed one-liner; full text stored for Ctrl+T."""
         safe = _sanitize_text(text.strip())
+        self._thinking_blocks.append(safe)
+        word_count = len(safe.split())
         console.print(
-            Panel(
-                Text(safe, style="dim italic"),
-                title=f"[{THINKING_COLOR}]reasoning[/]",
-                title_align="left",
-                border_style="dim magenta",
-                expand=False,
-                padding=(0, 1),
-            )
+            f"  [{THINKING_COLOR}]\u25b6 Thinking[/]  "
+            f"[dim]({word_count} words \u2014 Ctrl+T to expand)[/]"
         )
+
+    def get_thinking_blocks(self) -> list[str]:
+        """Return all completed thinking blocks from this session."""
+        return list(self._thinking_blocks)
+
+    def get_last_thinking(self) -> str:
+        """Return the most recent thinking block."""
+        return self._thinking_blocks[-1] if self._thinking_blocks else ""
 
     def _flush_all(self) -> None:
         self._flush_thinking()
@@ -352,31 +357,24 @@ class StreamRenderer:
     # -- tool display --------------------------------------------------------
 
     def _show_tool_call(self, event: AgentEvent) -> None:
-        name = event.tool_name
-        parts: list[str] = []
-        for k, v in event.tool_input.items():
-            sv = str(v)
-            if len(sv) > 60:
-                sv = sv[:57] + "..."
-            parts.append(f"[dim]{k}=[/]{markup_escape(sv)}")
-        arg_str = ", ".join(parts)
-        if len(arg_str) > 140:
-            arg_str = arg_str[:137] + "..."
+        from obscura.cli.tool_summaries import summarize_tool_call
 
-        sanitized_args = _sanitize_text(arg_str)
+        name = event.tool_name
+        summary = summarize_tool_call(name, event.tool_input)
+
         try:
-            output.capture_internal(f"TOOL_CALL {name} {_sanitize_text(', '.join(parts))}")
+            output.capture_internal(f"TOOL_CALL {name} {_sanitize_text(summary)}")
         except Exception:
             pass
 
         console.print(
-            f"\n  [{TOOL_COLOR}]  {markup_escape(name)}[/]  [dim]{sanitized_args}[/]"
+            f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]"
         )
 
         # Update toolbar status
         if self._ss is not None:
             self._ss.active = True  # type: ignore[attr-defined]
-            self._ss.text = f"running {name}..."  # type: ignore[attr-defined]
+            self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]
             self._ss.preview = ""  # type: ignore[attr-defined]
 
     def _show_tool_result(self, event: AgentEvent) -> None:
@@ -384,23 +382,15 @@ class StreamRenderer:
         is_err = event.is_error
 
         if is_err:
-            console.print(f"  [{ERROR_COLOR}]  {markup_escape(_sanitize_text(raw[:200]))}[/]")
+            err_text = _sanitize_text(raw[:200]).replace("\n", " ")
+            console.print(f"  [{ERROR_COLOR}]\u2718 {markup_escape(err_text)}[/]")
             return
 
-        snippet = raw[:2000]
-        highlighted = _render_structured(snippet)
-        if highlighted is not None:
-            console.print(
-                Panel(
-                    highlighted,
-                    border_style="dim green",
-                    expand=False,
-                    padding=(0, 0),
-                )
-            )
-        else:
-            short = markup_escape(_sanitize_text(raw[:300]))
-            console.print(f"  [dim {OK_COLOR}]  {short}[/]")
+        # Compact success: one-line snippet
+        snippet = _sanitize_text(raw[:120]).replace("\n", " ")
+        if len(snippet) > 80:
+            snippet = snippet[:77] + "..."
+        console.print(f"  [dim {OK_COLOR}]\u2714 {markup_escape(snippet)}[/]")
 
     def finish(self) -> None:
         self._stop_status()
@@ -457,21 +447,25 @@ class LabeledStreamRenderer(StreamRenderer):
 
 def render_event(event: AgentEvent) -> None:
     """Simple single-event renderer (no Markdown accumulation)."""
+    from obscura.cli.tool_summaries import summarize_tool_call
+
     match event.kind:
         case AgentEventKind.TEXT_DELTA:
             console.print(_sanitize_text(event.text), end="")
         case AgentEventKind.THINKING_DELTA:
-            safe = markup_escape(_sanitize_text(event.text))
-            console.print(f"[dim italic {THINKING_COLOR}]{safe}[/]", end="")
+            pass  # thinking accumulated by StreamRenderer; silent in legacy path
         case AgentEventKind.TOOL_CALL:
+            summary = summarize_tool_call(event.tool_name, event.tool_input)
             console.print(
-                f"\n  [{TOOL_COLOR}]  {markup_escape(_sanitize_text(event.tool_name))}[/]"
+                f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]"
             )
         case AgentEventKind.TOOL_RESULT:
-            snippet = markup_escape(_sanitize_text((event.tool_result or "")[:120]))
-            style = ERROR_COLOR if event.is_error else "dim green"
-            prefix = "" if event.is_error else ""
-            console.print(f"  [{style}]{prefix} {snippet}[/]")
+            raw = (event.tool_result or "")[:120]
+            snippet = markup_escape(_sanitize_text(raw).replace("\n", " "))
+            if event.is_error:
+                console.print(f"  [{ERROR_COLOR}]\u2718 {snippet}[/]")
+            else:
+                console.print(f"  [dim {OK_COLOR}]\u2714 {snippet}[/]")
         case _:
             pass
 
@@ -750,7 +744,10 @@ def print_banner(
     if info_line:
         console.print(f"  {info_line}")
     if available_agents:
-        console.print(f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   [dim]/agent spawn <name>[/]")
+        console.print(
+            f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   "
+            "[dim]/agent spawn <name> or @name <prompt>[/]"
+        )
     console.print()
     console.print(f"  [dim]Type [bold]/help[/bold] for commands, [bold]/quit[/bold] to exit.[/]")
     console.print()

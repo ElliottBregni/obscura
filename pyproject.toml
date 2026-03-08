@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "github-copilot-sdk>=0.1.0",
     "claude-agent-sdk>=0.1.0",
+    "openai-codex-sdk>=0.1.0",
     "openai>=1.0.0",
     "httpx>=0.27.0",
     "numpy>=2.1.0",

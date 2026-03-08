@@ -45,6 +45,24 @@ class IMessageState:
         except (sqlite3.OperationalError, sqlite3.DatabaseError):
             logger.debug("Could not initialize from chat.db; will set on first poll")
 
+    def clamp_to_db_max(self, db_path: Path) -> None:
+        """Clamp state to current max ROWID if persisted state is ahead."""
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            row = con.execute("SELECT MAX(ROWID) FROM message").fetchone()
+            con.close()
+            max_rowid = int(row[0]) if row and row[0] else 0
+            if self._last_rowid > max_rowid:
+                logger.warning(
+                    "iMessage state ROWID (%d) ahead of DB max (%d); clamping",
+                    self._last_rowid,
+                    max_rowid,
+                )
+                self._last_rowid = max_rowid
+                self._save()
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
+            logger.debug("Could not clamp iMessage state against chat.db")
+
     def _load(self) -> None:
         if self._path.is_file():
             try:

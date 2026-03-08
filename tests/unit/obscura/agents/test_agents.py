@@ -403,6 +403,9 @@ class TestBackendSpecificAgents:
             mock_client_ctor.assert_called_once_with(
                 model_name,
                 system_prompt="",
+                lazy_load_skills=False,
+                skill_filter=None,
+                inject_claude_context=True,
                 user=runtime.user,
             )
             assert agent.config.provider == model_name

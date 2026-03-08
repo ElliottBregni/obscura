@@ -46,9 +46,9 @@ class TestCodexBackend:
     async def test_start_requires_sdk(self) -> None:
         backend = CodexBackend(_auth())
         backend._import_sdk_class = lambda: (_ for _ in ()).throw(  # type: ignore[method-assign]
-            RuntimeError("Codex Python SDK not found")
+            RuntimeError("Official OpenAI Codex SDK not found")
         )
-        with pytest.raises(RuntimeError, match="Codex Python SDK not found"):
+        with pytest.raises(RuntimeError, match="Official OpenAI Codex SDK not found"):
             await backend.start()
 
     @pytest.mark.asyncio

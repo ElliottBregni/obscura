@@ -80,13 +80,7 @@ class AgentHeartbeatClient:
             interval: Seconds between heartbeats
             **kwargs: Additional configuration options
         """
-        config_fields = set(
-            getattr(
-                HeartbeatClientConfig,
-                "model_fields",
-                getattr(HeartbeatClientConfig, "__fields__", {}),
-            ).keys()
-        )
+        config_fields = set(HeartbeatClientConfig.model_fields.keys())
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
 
         self.config = HeartbeatClientConfig(
@@ -168,7 +162,7 @@ class AgentHeartbeatClient:
         self._running = True
         self._start_time = time.time()
         headers: dict[str, str] = {}
-        if self.config.auth_token:
+        if self.config.auth_token and self.config.auth_token.strip():
             headers["Authorization"] = f"Bearer {self.config.auth_token}"
         self._http_client = httpx.AsyncClient(
             timeout=self.config.timeout,

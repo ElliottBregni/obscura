@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -118,6 +119,25 @@ class TestIMessageClientSend:
             script = call_args[0][2]  # third positional arg is the script
             assert '\\"hello\\"' in script
 
+    @pytest.mark.asyncio
+    async def test_send_returns_false_on_timeout(self) -> None:
+        client = IMessageClient(["+1234567890"])
+        mock_proc = AsyncMock()
+
+        async def _hang() -> tuple[bytes, bytes]:
+            await asyncio.sleep(60)
+            return (b"", b"")
+
+        mock_proc.communicate.side_effect = _hang
+        mock_proc.returncode = 0
+        mock_proc.kill = Mock()
+        mock_proc.wait = AsyncMock(return_value=0)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await client.send_message("+1234567890", "Hello")
+            assert result is False
+            mock_proc.kill.assert_called_once()
+
 
 class TestIMessageClientSQLiteRead:
     @pytest.mark.asyncio
@@ -205,3 +225,39 @@ class TestIMessageClientSQLiteRead:
         messages = await client.poll_unread(0)
         assert len(messages) == 1
         assert messages[0].text == "from them"
+
+    @pytest.mark.asyncio
+    async def test_poll_rechecks_access_and_recovers(self) -> None:
+        client = IMessageClient(["+1"])
+        client._use_sqlite = False
+        client._next_access_recheck_at = 0.0
+        client._next_warn_at = 9999.0
+        expected = [
+            IMessage(
+                rowid=1,
+                guid="g",
+                text="hi",
+                sender="+1",
+                date=datetime.now(tz=timezone.utc),
+                is_from_me=False,
+            )
+        ]
+        with patch("time.monotonic", return_value=1.0):
+            with patch.object(client, "check_access", AsyncMock(return_value=True)):
+                with patch.object(client, "_poll_sqlite", AsyncMock(return_value=expected)):
+                    out = await client.poll_unread(0)
+        assert out == expected
+
+    @pytest.mark.asyncio
+    async def test_poll_rate_limits_disabled_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = IMessageClient(["+1"])
+        client._use_sqlite = False
+        client._next_access_recheck_at = 1000.0
+        client._next_warn_at = 0.0
+        with patch("time.monotonic", side_effect=[10.0, 10.5]):
+            await client.poll_unread(0)
+            await client.poll_unread(0)
+        warnings = [
+            r for r in caplog.records if "ingest disabled" in r.getMessage()
+        ]
+        assert len(warnings) == 1

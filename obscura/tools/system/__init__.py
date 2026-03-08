@@ -2597,6 +2597,286 @@ async def list_system_tools() -> str:
     return json.dumps({"ok": True, "count": len(data), "tools": data})
 
 
+# ---------------------------------------------------------------------------
+# ask_user — interactive choice/question tool
+# ---------------------------------------------------------------------------
+
+# Module-level callback set by the CLI layer.  When ``None`` the tool falls
+# back to returning an error asking the model to rephrase as a text question.
+_ask_user_callback: Any = None
+
+
+def set_ask_user_callback(cb: Any) -> None:
+    """Register the CLI callback for the ``ask_user`` tool."""
+    global _ask_user_callback
+    _ask_user_callback = cb
+
+
+@tool(
+    "ask_user",
+    "Present the user with a question and a set of choices, and return "
+    "their selection.  Use this when you need the user to pick between "
+    "options or confirm a decision before proceeding.",
+    {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The question to present to the user.",
+            },
+            "choices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of choices the user can pick from. "
+                "If empty, a free-text input is shown instead.",
+            },
+            "allow_custom": {
+                "type": "boolean",
+                "description": "If true, the user can type a custom response "
+                "in addition to the listed choices. Defaults to false.",
+            },
+        },
+        "required": ["question"],
+    },
+)
+async def ask_user(
+    question: str,
+    choices: list[str] | None = None,
+    allow_custom: bool = False,
+) -> str:
+    """Present choices to the user via the TUI widget and return the selection."""
+    if _ask_user_callback is None:
+        return _json_error(
+            "no_ui",
+            detail="Interactive UI not available. "
+            "Ask the user directly in your text response instead.",
+        )
+
+    try:
+        result = await _ask_user_callback(
+            question=question,
+            choices=choices or [],
+            allow_custom=allow_custom,
+        )
+        return json.dumps({"ok": True, "selected": result})
+    except Exception as exc:
+        return _json_error("ask_user_failed", detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# user_interact — unified permission / notification / question tool
+# ---------------------------------------------------------------------------
+
+# Module-level callback set by the CLI layer.
+_user_interact_callback: Any = None
+
+
+def set_user_interact_callback(cb: Any) -> None:
+    """Register the CLI callback for the ``user_interact`` tool."""
+    global _user_interact_callback
+    _user_interact_callback = cb
+
+
+async def _handle_ui_permission(action: str, reason: str, risk: str) -> str:
+    """Handle permission mode of user_interact."""
+    if _user_interact_callback is None:
+        return _json_error(
+            "no_ui",
+            detail="Interactive UI not available. "
+            "Ask the user directly in your text response instead.",
+        )
+    try:
+        result = await _user_interact_callback(
+            mode="permission", action=action, reason=reason, risk=risk,
+        )
+        approved = result.get("approved", False)
+        return json.dumps({
+            "ok": True,
+            "approved": approved,
+            "action": "approve" if approved else "deny",
+        })
+    except Exception as exc:
+        return _json_error("permission_failed", detail=str(exc))
+
+
+async def _handle_ui_notify(
+    title: str, message: str, priority: str, channels: list[str] | None,
+) -> str:
+    """Handle notify mode of user_interact."""
+    resolved_channels = channels or ["tui", "bell"]
+    delivered: list[str] = []
+
+    # TUI channel — uses callback if available
+    if "tui" in resolved_channels:
+        if _user_interact_callback is not None:
+            try:
+                await _user_interact_callback(
+                    mode="notify", title=title, message=message, priority=priority,
+                )
+                delivered.append("tui")
+            except Exception:
+                pass
+
+    # OS notification channel — use NativeNotifier
+    if "os" in resolved_channels:
+        try:
+            from obscura.notifications.native import NativeNotifier
+            from obscura.agent.interaction import AttentionPriority
+
+            prio_map = {
+                "low": AttentionPriority.LOW,
+                "normal": AttentionPriority.NORMAL,
+                "high": AttentionPriority.HIGH,
+                "critical": AttentionPriority.CRITICAL,
+            }
+            notifier = NativeNotifier()
+            await notifier.notify(
+                title,
+                message,
+                priority=prio_map.get(priority, AttentionPriority.NORMAL),
+                sound=False,  # sound handled separately via "sound" channel
+            )
+            delivered.append("os")
+        except Exception:
+            pass
+
+    # Terminal bell
+    if "bell" in resolved_channels:
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+        delivered.append("bell")
+
+    # Sound (macOS only via NativeNotifier)
+    if "sound" in resolved_channels:
+        try:
+            if sys.platform == "darwin":
+                import asyncio as _asyncio
+
+                proc = await _asyncio.create_subprocess_exec(
+                    "afplay",
+                    "/System/Library/Sounds/Glass.aiff",
+                    stdout=_asyncio.subprocess.DEVNULL,
+                    stderr=_asyncio.subprocess.DEVNULL,
+                )
+                await proc.communicate()
+                delivered.append("sound")
+        except Exception:
+            pass
+
+    return json.dumps({"ok": True, "delivered": True, "channels": delivered})
+
+
+async def _handle_ui_question(
+    question: str, choices: list[str] | None, allow_custom: bool,
+) -> str:
+    """Handle question mode of user_interact."""
+    if _user_interact_callback is None:
+        return _json_error(
+            "no_ui",
+            detail="Interactive UI not available. "
+            "Ask the user directly in your text response instead.",
+        )
+    try:
+        result = await _user_interact_callback(
+            mode="question",
+            question=question,
+            choices=choices or [],
+            allow_custom=allow_custom,
+        )
+        return json.dumps({"ok": True, "selected": result.get("selected", "")})
+    except Exception as exc:
+        return _json_error("question_failed", detail=str(exc))
+
+
+@tool(
+    "user_interact",
+    "Interact with the user. Supports three modes: "
+    "'permission' to request approval for an action (with risk level), "
+    "'notify' to alert the user via TUI/OS/bell/sound (no response needed), "
+    "'question' to ask a question with optional choices.",
+    {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["permission", "notify", "question"],
+                "description": "Interaction mode.",
+            },
+            "action": {
+                "type": "string",
+                "description": "(permission) The action being requested.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "(permission) Why this action is needed.",
+            },
+            "risk": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"],
+                "description": "(permission) Risk level affecting visual styling.",
+            },
+            "title": {
+                "type": "string",
+                "description": "(notify) Notification title.",
+            },
+            "message": {
+                "type": "string",
+                "description": "(notify/permission) Message body.",
+            },
+            "priority": {
+                "type": "string",
+                "enum": ["low", "normal", "high", "critical"],
+                "description": "(notify) Priority level affecting delivery channels.",
+            },
+            "channels": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["tui", "os", "bell", "sound"]},
+                "description": "(notify) Delivery channels. Default: ['tui', 'bell'].",
+            },
+            "question": {
+                "type": "string",
+                "description": "(question) The question to present.",
+            },
+            "choices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "(question) Optional list of choices.",
+            },
+            "allow_custom": {
+                "type": "boolean",
+                "description": "(question) Allow free-text response alongside choices.",
+            },
+        },
+        "required": ["mode"],
+    },
+)
+async def user_interact(
+    mode: str,
+    # permission params
+    action: str = "",
+    reason: str = "",
+    risk: str = "low",
+    # notify params
+    title: str = "",
+    message: str = "",
+    priority: str = "normal",
+    channels: list[str] | None = None,
+    # question params
+    question: str = "",
+    choices: list[str] | None = None,
+    allow_custom: bool = False,
+) -> str:
+    """Unified user interaction tool with permission, notify, and question modes."""
+    if mode == "permission":
+        return await _handle_ui_permission(action, reason, risk)
+    elif mode == "notify":
+        return await _handle_ui_notify(title, message, priority, channels)
+    elif mode == "question":
+        return await _handle_ui_question(question, choices, allow_custom)
+    else:
+        return _json_error("invalid_mode", detail=f"Unknown mode: {mode}")
+
+
 def get_system_tool_specs() -> list[ToolSpec]:
     """Return default system tool specs for agent runtime."""
     static_specs = [
@@ -2665,6 +2945,9 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast(ToolSpec, getattr(cast(Any, todo_write), "spec")),
         # Agent intent reporting
         cast(ToolSpec, getattr(cast(Any, report_intent), "spec")),
+        # User interaction
+        cast(ToolSpec, getattr(cast(Any, ask_user), "spec")),
+        cast(ToolSpec, getattr(cast(Any, user_interact), "spec")),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():

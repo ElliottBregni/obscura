@@ -146,6 +146,10 @@ def auto_save_turn(
 
     def _save() -> None:
         try:
+            # Skip persisting transport/debug noise from MCP server logs.
+            if _is_mcp_noise_turn(user_text, assistant_text):
+                return
+
             timestamp = datetime.now(UTC).isoformat()
             key = f"turn_{session_id}_{turn_number}_{timestamp}"
 
@@ -173,6 +177,27 @@ def auto_save_turn(
     thread.start()
 
 
+def clear_mcp_noise_memories(store: VectorMemoryStore) -> int:
+    """Delete only MCP-log-like memories from the CLI namespace."""
+    removed = 0
+    try:
+        keys = store.list_keys(namespace=CLI_NAMESPACE)
+    except Exception:
+        return 0
+
+    for key in keys:
+        try:
+            entry = store.get(key)
+            if entry is None:
+                continue
+            if _is_mcp_noise_text(entry.text):
+                if store.delete(key):
+                    removed += 1
+        except Exception:
+            continue
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
@@ -193,3 +218,26 @@ def _format_memories_section(
         lines.append(f"{i}. (score: {score_str}) {text}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _is_mcp_noise_turn(user_text: str, assistant_text: str) -> bool:
+    combined = f"{user_text}\n{assistant_text}"
+    return _is_mcp_noise_text(combined)
+
+
+def _is_mcp_noise_text(text: str) -> bool:
+    s = text.lower()
+    markers = (
+        "mcp server",
+        "/mcp ",
+        "mcp:",
+        "jsonrpc",
+        "tool_use_start",
+        "tool_use_delta",
+        "tool_result",
+        "invalid_request_body",
+        "stdio transport",
+        "anthropic.tools.beta.messages",
+    )
+    hit_count = sum(1 for marker in markers if marker in s)
+    return hit_count >= 2

@@ -490,10 +490,6 @@ async def send_message(
                     "dead process",
                     "cannot send message",
                     "can't send message",
-                    "cannot write to terminated",
-                    "write to terminated process",
-                    "terminated process",
-                    "exit code",
                     "session is closed",
                     "session closed",
                 )
@@ -509,17 +505,12 @@ async def send_message(
                 )
             if _is_dead_session_err and not dead_session_retry_used:
                 console.print(
-                    "[yellow]⚠ Backend session became stale — recreating and retrying once…[/]"
+                    "[yellow]⚠ Backend session became stale — resetting and retrying once…[/]"
                 )
                 try:
                     await ctx.client.reset_session()
                 except Exception:
-                    # reset_session can't revive a dead process;
-                    # full recreate is needed
-                    try:
-                        await ctx.recreate_client(ctx.backend, ctx.model)
-                    except Exception:
-                        pass
+                    pass
                 return await _stream_with_retry(
                     context_retry_used=context_retry_used,
                     dead_session_retry_used=True,
@@ -825,72 +816,6 @@ async def _repl(
         except Exception:
             pass
 
-    # Wire the user_interact callback for permission/notify/question modes
-    if tools_enabled:
-        try:
-            from obscura.tools.system import set_user_interact_callback
-
-            async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
-                mode = kwargs.get("mode", "question")
-
-                if mode == "permission":
-                    from obscura.cli.widgets import (
-                        PermissionWidgetRequest,
-                        confirm_permission,
-                    )
-                    result = await confirm_permission(
-                        PermissionWidgetRequest(
-                            action=kwargs.get("action", ""),
-                            reason=kwargs.get("reason", ""),
-                            risk=kwargs.get("risk", "low"),
-                        )
-                    )
-                    return {"approved": result.action == "approve"}
-
-                elif mode == "notify":
-                    from obscura.cli.widgets import (
-                        NotifyWidgetRequest,
-                        render_notification_banner,
-                    )
-                    render_notification_banner(
-                        NotifyWidgetRequest(
-                            title=kwargs.get("title", ""),
-                            message=kwargs.get("message", ""),
-                            priority=kwargs.get("priority", "normal"),
-                        )
-                    )
-                    return {}
-
-                else:  # question mode (default)
-                    from obscura.cli.widgets import (
-                        ModelQuestionRequest,
-                        ask_model_question,
-                        confirm_attention,
-                        AttentionWidgetRequest,
-                    )
-                    choices = kwargs.get("choices", [])
-                    question = kwargs.get("question", "")
-                    if choices:
-                        result = await confirm_attention(
-                            AttentionWidgetRequest(
-                                request_id="user_interact",
-                                agent_name="assistant",
-                                message=question,
-                                priority="normal",
-                                actions=tuple(choices),
-                            )
-                        )
-                        return {"selected": result.action}
-                    else:
-                        result = await ask_model_question(
-                            ModelQuestionRequest(question=question)
-                        )
-                        return {"selected": result.text}
-
-            set_user_interact_callback(_user_interact_handler)
-        except Exception:
-            pass
-
     # Load project hooks from .obscura/settings.json and .obscura/hooks/
     project_hooks = None
     try:
@@ -1014,16 +939,20 @@ async def _repl(
             # Include daemon task if alive
             if daemon_task is not None and not daemon_task.done():
                 task_name = daemon_task.get_name()
-                label = task_name.removeprefix("daemon-") if task_name.startswith("daemon-") else task_name
+                label = (
+                    task_name.removeprefix("daemon-")
+                    if task_name.startswith("daemon-")
+                    else task_name
+                )
                 if label not in running:
                     running.append(label)
             prompt_status.running_agents = running
-            # Count active tasks (agents in non-terminal states + daemon)
+            # Count active tasks (non-terminal agents + daemon)
             task_count = 0
             if ctx._runtime is not None:
                 try:
-                    from obscura.agent.agents import AgentStatus as _AS2
-                    _active = {_AS2.RUNNING, _AS2.WAITING, _AS2.PENDING}
+                    from obscura.agent.agents import AgentStatus as _AS
+                    _active = {_AS.RUNNING, _AS.WAITING, _AS.PENDING}
                     task_count += sum(
                         1 for a in ctx._runtime.list_agents()
                         if a.status in _active
