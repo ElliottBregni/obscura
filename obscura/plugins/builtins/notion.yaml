@@ -1,0 +1,45 @@
+id: notion
+name: Notion Integration
+version: "1.0.0"
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+author: obscura-team
+description: >
+  Notion workspace integration. Search pages, read page content,
+  and query databases.
+
+config:
+  NOTION_API_KEY:
+    type: secret
+    required: true
+    description: Notion integration API key
+
+capabilities:
+  - id: notion.read
+    description: Read Notion pages and databases
+    tools: [notion_search, notion_get_page, notion_query_database]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: notion_search
+    description: Search Notion workspace
+    capability: notion.read
+    side_effects: read
+    handler: obscura.tools.providers.notion:_handler_search
+  - name: notion_get_page
+    description: Get a Notion page by ID
+    capability: notion.read
+    side_effects: read
+    handler: obscura.tools.providers.notion:_handler_get_page
+  - name: notion_query_database
+    description: Query a Notion database
+    capability: notion.read
+    side_effects: read
+    handler: obscura.tools.providers.notion:_handler_query_database
+
+healthcheck:
+  type: callable
+  target: obscura.tools.providers.notion:healthcheck
+  interval_seconds: 300

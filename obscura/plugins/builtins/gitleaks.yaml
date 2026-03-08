@@ -1,0 +1,29 @@
+id: gitleaks
+name: Gitleaks Secret Scanner
+version: "1.0.0"
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+author: obscura-team
+description: >
+  Secret detection via the gitleaks CLI binary. Scans repositories
+  for accidentally committed secrets, tokens, and credentials.
+
+capabilities:
+  - id: security.scan
+    description: Scan repositories for leaked secrets
+    tools: [gitleaks_scan_repo]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: gitleaks_scan_repo
+    description: Scan a repository for leaked secrets
+    capability: security.scan
+    side_effects: read
+    handler: obscura.tools.providers.gitleaks:_handler_scan_repo
+
+healthcheck:
+  type: binary
+  target: gitleaks
+  interval_seconds: 600

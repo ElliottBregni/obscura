@@ -1,0 +1,89 @@
+id: x-twitter
+name: X (Twitter) Integration
+version: "1.0.0"
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+author: obscura-team
+description: >
+  X (Twitter) platform integration via the XDK. Provides tweet search,
+  user lookup, timeline access, and posting capabilities.
+
+config:
+  X_BEARER_TOKEN:
+    type: secret
+    required: true
+    description: X API bearer token (for read operations)
+  X_ACCESS_TOKEN:
+    type: secret
+    required: false
+    description: X API access token (for write operations)
+
+capabilities:
+  - id: social.read
+    description: Read tweets, users, and timelines
+    tools: [x_search_tweets, x_get_user, x_get_tweet, x_user_timeline, x_user_mentions]
+    requires_approval: false
+    default_grant: true
+  - id: social.write
+    description: Post tweets and interact
+    tools: [x_post_tweet, x_reply_tweet, x_retweet, x_like_tweet]
+    requires_approval: true
+    default_grant: false
+
+tools:
+  - name: x_search_tweets
+    description: Search for tweets
+    capability: social.read
+    side_effects: read
+    handler: obscura.tools.providers.x:_handler_search_tweets
+  - name: x_get_user
+    description: Get user profile
+    capability: social.read
+    side_effects: read
+    handler: obscura.tools.providers.x:_handler_get_user
+  - name: x_get_tweet
+    description: Get a specific tweet
+    capability: social.read
+    side_effects: read
+    handler: obscura.tools.providers.x:_handler_get_tweet
+  - name: x_user_timeline
+    description: Get user timeline
+    capability: social.read
+    side_effects: read
+    handler: obscura.tools.providers.x:_handler_user_timeline
+  - name: x_user_mentions
+    description: Get user mentions
+    capability: social.read
+    side_effects: read
+    handler: obscura.tools.providers.x:_handler_user_mentions
+  - name: x_post_tweet
+    description: Post a new tweet
+    capability: social.write
+    side_effects: write
+    handler: obscura.tools.providers.x:_handler_post_tweet
+  - name: x_reply_tweet
+    description: Reply to a tweet
+    capability: social.write
+    side_effects: write
+    handler: obscura.tools.providers.x:_handler_reply_tweet
+  - name: x_retweet
+    description: Retweet a tweet
+    capability: social.write
+    side_effects: write
+    handler: obscura.tools.providers.x:_handler_retweet
+  - name: x_like_tweet
+    description: Like a tweet
+    capability: social.write
+    side_effects: write
+    handler: obscura.tools.providers.x:_handler_like_tweet
+
+policy_hints:
+  - capability_id: social.write
+    recommended_action: approve
+    reason: Write operations should require user confirmation
+
+healthcheck:
+  type: callable
+  target: obscura.tools.providers.x:healthcheck
+  interval_seconds: 300

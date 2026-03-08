@@ -1,0 +1,39 @@
+id: coingecko
+name: CoinGecko Crypto Data
+version: "1.0.0"
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+author: obscura-team
+description: >
+  Cryptocurrency market data from the CoinGecko public API. Provides
+  price lookups, market data, and trending coins.
+
+capabilities:
+  - id: crypto.market
+    description: Cryptocurrency market data
+    tools: [cg_price, cg_market_chart, cg_trending]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: cg_price
+    description: Get current price for one or more cryptocurrencies
+    capability: crypto.market
+    side_effects: read
+    handler: obscura.tools.providers.coingecko:_handler_price
+  - name: cg_market_chart
+    description: Get historical market chart data
+    capability: crypto.market
+    side_effects: read
+    handler: obscura.tools.providers.coingecko:_handler_market_chart
+  - name: cg_trending
+    description: Get trending coins
+    capability: crypto.market
+    side_effects: read
+    handler: obscura.tools.providers.coingecko:_handler_trending
+
+healthcheck:
+  type: http
+  target: https://api.coingecko.com/api/v3/ping
+  interval_seconds: 300

@@ -1,0 +1,99 @@
+id: system-tools
+name: System Tools
+version: "1.0.0"
+source_type: builtin
+runtime_type: native
+trust_level: builtin
+author: obscura-team
+description: >
+  Core system tools for shell execution, file I/O, git operations,
+  web browsing, and task delegation. Always loaded.
+
+capabilities:
+  - id: shell.exec
+    description: Execute shell commands
+    tools: [run_shell]
+    requires_approval: false
+    default_grant: true
+  - id: file.read
+    description: Read files and directories
+    tools: [read_text_file, list_directory]
+    requires_approval: false
+    default_grant: true
+  - id: file.write
+    description: Create and edit files
+    tools: [write_text_file, edit_text_file]
+    requires_approval: false
+    default_grant: true
+  - id: git.ops
+    description: Git operations
+    tools: [git_diff, git_log, git_status, git_commit]
+    requires_approval: false
+    default_grant: true
+  - id: web.browse
+    description: Web browsing and search
+    tools: [web_search, fetch_url]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: run_shell
+    description: Execute a shell command
+    capability: shell.exec
+    side_effects: write
+    handler: obscura.tools.system:run_shell
+  - name: read_text_file
+    description: Read a text file
+    capability: file.read
+    side_effects: read
+    handler: obscura.tools.system:read_text_file
+  - name: list_directory
+    description: List directory contents
+    capability: file.read
+    side_effects: read
+    handler: obscura.tools.system:list_directory
+  - name: write_text_file
+    description: Write or create a text file
+    capability: file.write
+    side_effects: write
+    handler: obscura.tools.system:write_text_file
+  - name: edit_text_file
+    description: Edit a text file with search/replace
+    capability: file.write
+    side_effects: write
+    handler: obscura.tools.system:edit_text_file
+  - name: git_diff
+    description: Show git diff
+    capability: git.ops
+    side_effects: read
+    handler: obscura.tools.system:git_diff
+  - name: git_log
+    description: Show git log
+    capability: git.ops
+    side_effects: read
+    handler: obscura.tools.system:git_log
+  - name: git_status
+    description: Show git status
+    capability: git.ops
+    side_effects: read
+    handler: obscura.tools.system:git_status
+  - name: git_commit
+    description: Create a git commit
+    capability: git.ops
+    side_effects: write
+    handler: obscura.tools.system:git_commit
+  - name: web_search
+    description: Search the web
+    capability: web.browse
+    side_effects: read
+    handler: obscura.tools.system:web_search
+  - name: fetch_url
+    description: Fetch a URL
+    capability: web.browse
+    side_effects: read
+    handler: obscura.tools.system:fetch_url
+
+healthcheck:
+  type: callable
+  target: obscura.tools.system:healthcheck
+  interval_seconds: 600

@@ -1,0 +1,155 @@
+id: alphavantage
+name: Alpha Vantage Financial Data
+version: "1.0.0"
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+author: obscura-team
+description: >
+  Financial market data from Alpha Vantage API. Provides stock quotes,
+  time series, technical indicators, forex, crypto, and fundamentals.
+
+config:
+  ALPHAVANTAGE_API_KEY:
+    type: secret
+    required: true
+    description: Alpha Vantage API key
+
+capabilities:
+  - id: finance.quotes
+    description: Real-time and historical stock quotes
+    tools: [av_quote, av_intraday, av_daily, av_weekly, av_monthly]
+    requires_approval: false
+    default_grant: true
+  - id: finance.indicators
+    description: Technical analysis indicators
+    tools: [av_sma, av_ema, av_rsi, av_macd, av_bbands, av_stoch, av_adx, av_cci, av_aroon, av_ad, av_obv]
+    requires_approval: false
+    default_grant: true
+  - id: finance.fundamentals
+    description: Company fundamentals and financials
+    tools: [av_overview, av_income_statement, av_balance_sheet, av_cash_flow, av_earnings]
+    requires_approval: false
+    default_grant: true
+  - id: finance.forex
+    description: Foreign exchange rates
+    tools: [av_currency_exchange_rate]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: av_quote
+    description: Get real-time stock quote
+    capability: finance.quotes
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_quote
+  - name: av_intraday
+    description: Intraday time series
+    capability: finance.quotes
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_intraday
+  - name: av_daily
+    description: Daily time series
+    capability: finance.quotes
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_daily
+  - name: av_weekly
+    description: Weekly time series
+    capability: finance.quotes
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_weekly
+  - name: av_monthly
+    description: Monthly time series
+    capability: finance.quotes
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_monthly
+  - name: av_sma
+    description: Simple Moving Average
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_sma
+  - name: av_ema
+    description: Exponential Moving Average
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_ema
+  - name: av_rsi
+    description: Relative Strength Index
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_rsi
+  - name: av_macd
+    description: MACD indicator
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_macd
+  - name: av_bbands
+    description: Bollinger Bands
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_bbands
+  - name: av_stoch
+    description: Stochastic oscillator
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_stoch
+  - name: av_adx
+    description: Average Directional Index
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_adx
+  - name: av_cci
+    description: Commodity Channel Index
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_cci
+  - name: av_aroon
+    description: Aroon indicator
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_aroon
+  - name: av_ad
+    description: Chaikin A/D line
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_ad
+  - name: av_obv
+    description: On Balance Volume
+    capability: finance.indicators
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_obv
+  - name: av_overview
+    description: Company overview and fundamentals
+    capability: finance.fundamentals
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_overview
+  - name: av_income_statement
+    description: Income statement
+    capability: finance.fundamentals
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_income_statement
+  - name: av_balance_sheet
+    description: Balance sheet
+    capability: finance.fundamentals
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_balance_sheet
+  - name: av_cash_flow
+    description: Cash flow statement
+    capability: finance.fundamentals
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_cash_flow
+  - name: av_earnings
+    description: Earnings data
+    capability: finance.fundamentals
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_earnings
+  - name: av_currency_exchange_rate
+    description: Real-time currency exchange rate
+    capability: finance.forex
+    side_effects: read
+    handler: obscura.tools.providers.alphavantage:_handler_currency_exchange_rate
+
+healthcheck:
+  type: callable
+  target: obscura.tools.providers.alphavantage:healthcheck
+  interval_seconds: 300

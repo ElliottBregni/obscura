@@ -1,0 +1,44 @@
+id: websearch
+name: Web Search CLI
+version: "1.0.0"
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+author: obscura-team
+description: >
+  Web search via the websearch Rust CLI binary. Provides web search,
+  news search, image search, and URL summarization.
+
+capabilities:
+  - id: search.web
+    description: Search the web and retrieve results
+    tools: [websearch_search, websearch_news, websearch_images, websearch_summarize]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: websearch_search
+    description: Search the web
+    capability: search.web
+    side_effects: read
+    handler: obscura.tools.providers.websearch:_handler_search
+  - name: websearch_news
+    description: Search news articles
+    capability: search.web
+    side_effects: read
+    handler: obscura.tools.providers.websearch:_handler_news
+  - name: websearch_images
+    description: Search images
+    capability: search.web
+    side_effects: read
+    handler: obscura.tools.providers.websearch:_handler_images
+  - name: websearch_summarize
+    description: Summarize a URL
+    capability: search.web
+    side_effects: read
+    handler: obscura.tools.providers.websearch:_handler_summarize
+
+healthcheck:
+  type: binary
+  target: websearch
+  interval_seconds: 300

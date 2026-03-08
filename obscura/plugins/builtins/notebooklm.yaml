@@ -1,0 +1,110 @@
+id: notebooklm
+name: NotebookLM Research Tools
+version: "1.0.0"
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+author: obscura-team
+description: >
+  Google NotebookLM integration via the notebooklm-mcp-server CLI binary.
+  Provides notebook management, source management, note operations, and
+  audio overview generation.
+
+capabilities:
+  - id: research.notebooks
+    description: Create and manage research notebooks
+    tools: [nlm_create_notebook, nlm_list_notebooks, nlm_get_notebook, nlm_delete_notebook]
+    requires_approval: false
+    default_grant: true
+  - id: research.sources
+    description: Manage notebook sources
+    tools: [nlm_add_source, nlm_list_sources, nlm_get_source, nlm_delete_source]
+    requires_approval: false
+    default_grant: true
+  - id: research.notes
+    description: Create and manage notes
+    tools: [nlm_create_note, nlm_list_notes, nlm_get_note, nlm_delete_note]
+    requires_approval: false
+    default_grant: true
+  - id: research.audio
+    description: Generate audio overviews
+    tools: [nlm_generate_audio_overview, nlm_get_audio_overview]
+    requires_approval: false
+    default_grant: true
+
+tools:
+  - name: nlm_create_notebook
+    description: Create a new NotebookLM notebook
+    capability: research.notebooks
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_create_notebook
+  - name: nlm_list_notebooks
+    description: List all notebooks
+    capability: research.notebooks
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_list_notebooks
+  - name: nlm_get_notebook
+    description: Get notebook details
+    capability: research.notebooks
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_get_notebook
+  - name: nlm_delete_notebook
+    description: Delete a notebook
+    capability: research.notebooks
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_delete_notebook
+  - name: nlm_add_source
+    description: Add a source to a notebook
+    capability: research.sources
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_add_source
+  - name: nlm_list_sources
+    description: List sources in a notebook
+    capability: research.sources
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_list_sources
+  - name: nlm_get_source
+    description: Get source details
+    capability: research.sources
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_get_source
+  - name: nlm_delete_source
+    description: Delete a source
+    capability: research.sources
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_delete_source
+  - name: nlm_create_note
+    description: Create a note in a notebook
+    capability: research.notes
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_create_note
+  - name: nlm_list_notes
+    description: List notes in a notebook
+    capability: research.notes
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_list_notes
+  - name: nlm_get_note
+    description: Get note details
+    capability: research.notes
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_get_note
+  - name: nlm_delete_note
+    description: Delete a note
+    capability: research.notes
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_delete_note
+  - name: nlm_generate_audio_overview
+    description: Generate an audio overview from notebook content
+    capability: research.audio
+    side_effects: write
+    handler: obscura.tools.providers.notebooklm:_handler_generate_audio_overview
+  - name: nlm_get_audio_overview
+    description: Get audio overview status and URL
+    capability: research.audio
+    side_effects: read
+    handler: obscura.tools.providers.notebooklm:_handler_get_audio_overview
+
+healthcheck:
+  type: binary
+  target: notebooklm-mcp
+  interval_seconds: 300
