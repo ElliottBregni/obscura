@@ -1,0 +1,24 @@
+id: jq
+name: jq
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: JSON transformation with jq.
+capabilities:
+  - id: dev.jq
+    description: Process and transform JSON.
+    tools: [jq_eval]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: jq_eval
+    description: Evaluate jq expression on JSON input.
+    capability: dev.jq
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:jq_eval
+bootstrap:
+  deps:
+    - type: binary
+      package: jq

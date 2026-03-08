@@ -1,0 +1,24 @@
+id: shodan
+name: Shodan
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+description: Shodan internet-connected device search.
+config:
+  SHODAN_API_KEY:
+    type: secret
+    required: true
+capabilities:
+  - id: internet.shodan
+    description: Search internet-connected devices.
+    tools: [shodan_search]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: shodan_search
+    description: Search Shodan.
+    capability: internet.shodan
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:shodan_search

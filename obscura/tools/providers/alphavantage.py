@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import httpx
 
@@ -12,7 +13,7 @@ def _api_key() -> str:
     return os.environ["ALPHAVANTAGE_API_KEY"]
 
 
-async def _get(params: dict) -> dict:
+async def _get(params: dict[str, Any]) -> dict[str, Any]:
     params["apikey"] = _api_key()
     try:
         async with httpx.AsyncClient() as client:
@@ -26,7 +27,7 @@ async def _get(params: dict) -> dict:
 # ── Quotes & Time Series ─────────────────────────────────────────────
 
 
-async def _handler_quote(symbol: str, **kwargs: object) -> dict:
+async def _handler_quote(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "GLOBAL_QUOTE", "symbol": symbol})
 
 
@@ -40,15 +41,15 @@ async def _handler_intraday(
     })
 
 
-async def _handler_daily(symbol: str, **kwargs: object) -> dict:
+async def _handler_daily(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "TIME_SERIES_DAILY", "symbol": symbol})
 
 
-async def _handler_weekly(symbol: str, **kwargs: object) -> dict:
+async def _handler_weekly(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "TIME_SERIES_WEEKLY", "symbol": symbol})
 
 
-async def _handler_monthly(symbol: str, **kwargs: object) -> dict:
+async def _handler_monthly(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "TIME_SERIES_MONTHLY", "symbol": symbol})
 
 
@@ -208,23 +209,23 @@ async def _handler_obv(
 # ── Fundamentals ──────────────────────────────────────────────────────
 
 
-async def _handler_overview(symbol: str, **kwargs: object) -> dict:
+async def _handler_overview(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "OVERVIEW", "symbol": symbol})
 
 
-async def _handler_income_statement(symbol: str, **kwargs: object) -> dict:
+async def _handler_income_statement(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "INCOME_STATEMENT", "symbol": symbol})
 
 
-async def _handler_balance_sheet(symbol: str, **kwargs: object) -> dict:
+async def _handler_balance_sheet(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "BALANCE_SHEET", "symbol": symbol})
 
 
-async def _handler_cash_flow(symbol: str, **kwargs: object) -> dict:
+async def _handler_cash_flow(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "CASH_FLOW", "symbol": symbol})
 
 
-async def _handler_earnings(symbol: str, **kwargs: object) -> dict:
+async def _handler_earnings(symbol: str, **kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "EARNINGS", "symbol": symbol})
 
 
@@ -244,5 +245,5 @@ async def _handler_currency_exchange_rate(
 # ── Healthcheck ───────────────────────────────────────────────────────
 
 
-async def healthcheck(**kwargs: object) -> dict:
+async def healthcheck(**kwargs: Any) -> dict[str, Any]:
     return await _get({"function": "GLOBAL_QUOTE", "symbol": "IBM"})

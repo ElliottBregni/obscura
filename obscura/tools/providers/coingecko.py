@@ -1,6 +1,8 @@
 """CoinGecko free-tier provider handlers."""
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 BASE_URL = "https://api.coingecko.com/api/v3"
@@ -9,8 +11,8 @@ BASE_URL = "https://api.coingecko.com/api/v3"
 async def _handler_price(
     ids: str,
     vs_currencies: str = "usd",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -27,8 +29,8 @@ async def _handler_market_chart(
     id: str,
     vs_currency: str = "usd",
     days: int = 7,
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -41,7 +43,7 @@ async def _handler_market_chart(
         return {"error": str(e)}
 
 
-async def _handler_trending(**kwargs: object) -> dict:
+async def _handler_trending(**kwargs: Any) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{BASE_URL}/search/trending")

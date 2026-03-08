@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from obscura.plugins.models import BootstrapDep, BootstrapSpec, PluginSpec
@@ -71,8 +72,18 @@ def _is_pip_installed(package: str) -> bool:
 
 
 def _is_binary_available(name: str) -> bool:
-    """Check if a binary is on PATH."""
-    return shutil.which(name) is not None
+    """Check if a binary is on PATH or in the current Python env's bin dir."""
+    if shutil.which(name) is not None:
+        return True
+    # Also check the venv/env bin directory (pip-installed CLIs land here)
+    env_bin = Path(sys.prefix) / "bin" / name
+    if env_bin.is_file():
+        return True
+    # Check ~/.local/bin (user pip installs)
+    local_bin = Path.home() / ".local" / "bin" / name
+    if local_bin.is_file():
+        return True
+    return False
 
 
 def _is_npm_installed(package: str) -> bool:
@@ -174,6 +185,44 @@ def _check_binary(dep: BootstrapDep) -> tuple[bool, str]:
     return False, f"Binary '{dep.package}' not found on PATH"
 
 
+def _install_brew(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via Homebrew (macOS/Linux)."""
+    if not _is_binary_available("brew"):
+        return False, "brew not found — install Homebrew: https://brew.sh"
+    pkg = dep.package
+    try:
+        result = subprocess.run(
+            ["brew", "install", pkg],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _install_pipx(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via pipx (isolated CLI tool installs)."""
+    # Try pipx first, fall back to uv tool install, then pip
+    for cmd in (["pipx", "install"], ["uv", "tool", "install"]):
+        if not _is_binary_available(cmd[0]):
+            continue
+        try:
+            result = subprocess.run(
+                [*cmd, dep.package],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                return True, ""
+            if "already" in result.stderr.lower():
+                return True, ""
+        except Exception:
+            continue
+    # Final fallback: pip install into current env
+    return _install_pip(dep)
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -185,6 +234,8 @@ _INSTALLERS = {
     "npm": (_is_npm_installed, _install_npm),
     "cargo": (_is_binary_available, _install_cargo),
     "binary": (_is_binary_available, _check_binary),
+    "brew": (_is_binary_available, _install_brew),
+    "pipx": (lambda p: _is_binary_available(p), _install_pipx),
 }
 
 

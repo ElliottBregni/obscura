@@ -1,0 +1,24 @@
+id: flightaware
+name: FlightAware
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Aircraft and cargo flight intelligence via FlightAware.
+config:
+  FLIGHTAWARE_API_KEY:
+    type: secret
+    required: true
+capabilities:
+  - id: logistics.flightaware
+    description: Query FlightAware AeroAPI.
+    tools: [flightaware_call]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: flightaware_call
+    description: Call FlightAware AeroAPI endpoint path.
+    capability: logistics.flightaware
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:flightaware_call

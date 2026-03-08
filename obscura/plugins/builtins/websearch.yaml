@@ -45,6 +45,7 @@ bootstrap:
       optional: true
     - type: binary
       package: websearch
+      optional: true
   check_command: "websearch --version"
 
 healthcheck:

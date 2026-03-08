@@ -225,6 +225,19 @@ class PluginLoader:
         self._loaded: dict[str, PluginStatus] = {}
         self._specs: list[PluginSpec] = []
 
+        # Read lenient_builtins from workspace config
+        self._lenient_builtins = True
+        try:
+            from obscura.core.workspace import load_workspace_config
+            config = load_workspace_config()
+            self._lenient_builtins = (
+                config.get("plugins", {})
+                .get("bootstrap", {})
+                .get("lenient_builtins", True)
+            )
+        except Exception:
+            pass  # default to lenient
+
     # -- Discovery ---------------------------------------------------------
 
     def discover_builtins(self) -> list[PluginSpec]:
@@ -286,8 +299,15 @@ class PluginLoader:
         """Run the full loading pipeline for a single PluginSpec.
 
         Pipeline: validate → check_config → bootstrap → create_provider → register
+
+        Respects ``plugins.bootstrap.lenient_builtins`` from workspace config.yaml.
+        When lenient (default), builtin plugins whose config or bootstrap fails
+        still get their tools registered.
         """
         status = PluginStatus(plugin_id=spec.id, state="discovered")
+
+        # Determine if this builtin should be treated leniently
+        lenient = spec.source_type == "builtin" and self._lenient_builtins
 
         # 1. Validate
         errors = validate_plugin_spec(spec)
@@ -298,35 +318,50 @@ class PluginLoader:
             logger.warning("Plugin %s failed validation: %s", spec.id, status.error)
             return status
 
-        # 2. Check config
+        # 2. Check config — lenient builtins warn but still register tools
         config_ok, missing = _check_config(spec)
         if not config_ok:
-            status.state = "disabled"
-            status.error = f"Missing config: {', '.join(missing)}"
-            logger.info("Plugin %s disabled (missing config: %s)", spec.id, missing)
-            return status
+            if lenient:
+                logger.info(
+                    "Plugin %s missing config (%s) — tools registered but may fail at runtime",
+                    spec.id, ", ".join(missing),
+                )
+            else:
+                status.state = "disabled"
+                status.error = f"Missing config: {', '.join(missing)}"
+                logger.info("Plugin %s disabled (missing config: %s)", spec.id, missing)
+                return status
 
-        # 3. Bootstrap dependencies
+        # 3. Bootstrap dependencies — lenient builtins warn but still register tools
         if spec.bootstrap and spec.bootstrap.deps:
             try:
                 from obscura.plugins.bootstrapper import run_bootstrap
 
                 bootstrap_result = run_bootstrap(spec)
                 if not bootstrap_result.ok:
-                    status.state = "failed"
-                    status.error = f"Bootstrap failed: {'; '.join(bootstrap_result.errors)}"
-                    logger.warning("Plugin %s bootstrap failed: %s", spec.id, bootstrap_result.errors)
-                    return status
+                    if lenient:
+                        logger.info(
+                            "Plugin %s bootstrap incomplete (%s) — tools registered but may fail at runtime",
+                            spec.id, "; ".join(bootstrap_result.errors),
+                        )
+                    else:
+                        status.state = "failed"
+                        status.error = f"Bootstrap failed: {'; '.join(bootstrap_result.errors)}"
+                        logger.warning("Plugin %s bootstrap failed: %s", spec.id, bootstrap_result.errors)
+                        return status
                 if bootstrap_result.installed:
                     logger.info(
                         "Plugin %s bootstrapped: installed %s",
                         spec.id, ", ".join(bootstrap_result.installed),
                     )
             except Exception as exc:
-                status.state = "failed"
-                status.error = f"Bootstrap error: {exc}"
-                logger.exception("Plugin %s bootstrap error: %s", spec.id, exc)
-                return status
+                if lenient:
+                    logger.info("Plugin %s bootstrap skipped: %s — tools still registered", spec.id, exc)
+                else:
+                    status.state = "failed"
+                    status.error = f"Bootstrap error: {exc}"
+                    logger.exception("Plugin %s bootstrap error: %s", spec.id, exc)
+                    return status
 
         # 4. Create provider
         try:
@@ -427,6 +462,7 @@ class PluginLoader:
     def load_all(self, provider_registry: Any) -> dict[str, Any]:
         """Load all plugins from all sources.
 
+        Respects ``plugins.load_builtins`` from workspace config.yaml.
         Returns a summary dict with counts and statuses.
         """
         results: dict[str, Any] = {
@@ -436,8 +472,20 @@ class PluginLoader:
             "legacy_local": 0,
         }
 
+        # Check config for load_builtins setting
+        load_builtins = True
+        try:
+            from obscura.core.workspace import load_workspace_config
+            config = load_workspace_config()
+            load_builtins = config.get("plugins", {}).get("load_builtins", True)
+        except Exception:
+            pass
+
         # 1. Builtins (manifest-based)
-        results["builtins"] = self.load_builtins(provider_registry)
+        if load_builtins:
+            results["builtins"] = self.load_builtins(provider_registry)
+        else:
+            logger.info("Builtin plugins disabled in config.yaml")
 
         # 2. Local manifest-based plugins
         results["local_manifest"] = self.load_local(provider_registry)
@@ -538,8 +586,54 @@ class PluginLoader:
         return list(self._specs)
 
 
+def get_all_builtin_tool_specs() -> list[Any]:
+    """Resolve all builtin plugin tools into ToolSpec instances.
+
+    Convenience function for the CLI and other non-Agent code paths that need
+    plugin tools without the full provider/context pipeline.  Respects the
+    ``plugins.load_builtins`` setting from workspace config.yaml.  Returns a
+    list of ``ToolSpec`` instances with resolved handlers.  Tools whose handler
+    cannot be resolved are silently skipped.
+    """
+    from obscura.core.types import ToolSpec
+
+    # Respect config.yaml plugins.load_builtins setting
+    try:
+        from obscura.core.workspace import load_workspace_config
+        config = load_workspace_config()
+        if not config.get("plugins", {}).get("load_builtins", True):
+            logger.info("Builtin plugins disabled in config.yaml")
+            return []
+    except Exception:
+        pass  # fallback: load builtins anyway
+
+    loader = PluginLoader()
+    specs: list[Any] = []
+    for plugin_spec in loader.discover_builtins():
+        for tool in plugin_spec.tools:
+            handler = _resolve_handler(tool.handler_ref)
+            if handler is None:
+                logger.debug(
+                    "Skipping unresolvable tool %s (%s)",
+                    tool.name, tool.handler_ref,
+                )
+                continue
+            specs.append(ToolSpec(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.parameters,
+                handler=handler,
+                side_effects=tool.side_effects,
+                required_tier=tool.required_tier,
+                timeout_seconds=tool.timeout_seconds,
+                retries=tool.retries,
+            ))
+    return specs
+
+
 __all__ = [
     "PluginLoader",
     "ManifestToolProvider",
+    "get_all_builtin_tool_specs",
     "ENTRY_POINT_GROUP",
 ]

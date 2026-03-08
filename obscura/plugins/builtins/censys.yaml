@@ -1,0 +1,27 @@
+id: censys
+name: Censys
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+description: Internet-wide host search from Censys.
+config:
+  CENSYS_API_ID:
+    type: secret
+    required: true
+  CENSYS_API_SECRET:
+    type: secret
+    required: true
+capabilities:
+  - id: internet.censys
+    description: Search exposed internet infrastructure.
+    tools: [censys_search]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: censys_search
+    description: Search Censys hosts.
+    capability: internet.censys
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:censys_search

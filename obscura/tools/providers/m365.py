@@ -53,7 +53,7 @@ async def M365Provider(**kwargs: Any) -> dict[str, Any]:
             return {"error": err or f"m365 exited with code {proc.returncode}", "output": output}
 
         try:
-            return json.loads(output)
+            return json.loads(output)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError):
             return {"output": output.strip()}
     except Exception as e:

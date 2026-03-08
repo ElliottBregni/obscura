@@ -1,0 +1,25 @@
+id: duckdb
+name: DuckDB
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: native
+trust_level: builtin
+description: Local analytical SQL engine via DuckDB.
+capabilities:
+  - id: data.duckdb
+    description: Run DuckDB SQL queries.
+    tools: [duckdb_query]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: duckdb_query
+    description: Execute a SQL query in DuckDB.
+    capability: data.duckdb
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:duckdb_query
+bootstrap:
+  deps:
+    - type: pip
+      package: duckdb
+      optional: true

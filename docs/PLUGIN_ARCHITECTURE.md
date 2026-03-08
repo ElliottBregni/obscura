@@ -198,3 +198,40 @@ Plugin configuration resolves in order:
 Every resource model carries a `version` field (semver). The loader validates
 version compatibility and the registry tracks installed versions. Future work
 includes version pinning and dependency resolution between plugins.
+
+---
+
+## Integration Matrix (YAML + Registry)
+
+The following integrations are wired through builtin YAML specs and installed
+in the plugin registry (`.obscura/plugins/registry.json`).
+
+| Integration | Plugin ID | `yaml_spec` | `registry_installed` |
+|---|---|---|---|
+| SecurityTrails API | `securitytrails` | yes | yes |
+| Censys API | `censys` | yes | yes |
+| Shodan API | `shodan` | yes | yes |
+| Polygon.io | `polygon` | yes | yes |
+| Alpha Vantage | `alphavantage` | yes | yes |
+| SEC EDGAR API | `sec-edgar` | yes | yes |
+| Sentinel Hub | `sentinel-hub` | yes | yes |
+| MarineTraffic API | `marinetraffic` | yes | yes |
+| FlightAware API | `flightaware` | yes | yes |
+| Playwright SDK/CLI | `playwright` | yes | yes |
+| Browserless | `browserless` | yes | yes |
+| DuckDB | `duckdb` | yes | yes |
+| Apache Arrow / DataFusion | `datafusion` | yes | yes |
+| ripgrep | `ripgrep` | yes | yes |
+| jq | `jq` | yes | yes |
+| fzf | `fzf` | yes | yes |
+| fd | `fd` | yes | yes |
+| Wikidata API | `wikidata` | yes | yes |
+| OpenAlex | `openalex` | yes | yes |
+| GitHub GraphQL API | `github-graphql` | yes | yes |
+| Docker Engine API | `docker-engine` | yes | yes |
+| Kubernetes API | `kubernetes-api` | yes | yes |
+| Prometheus API | `prometheus` | yes | yes |
+| Grafana API | `grafana` | yes | yes |
+| Matrix API | `matrix` | yes | yes |
+| NATS | `nats` | yes | yes |
+| OpenStreetMap Overpass API | `overpass` | yes | yes |

@@ -25,7 +25,7 @@ async def _run_websearch(*args: str) -> dict[str, Any]:
         if proc.returncode != 0:
             return {"error": err or f"websearch exited {proc.returncode}", "output": out}
         try:
-            return json.loads(out)
+            return json.loads(out)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError):
             return {"output": out.strip()}
     except Exception as e:

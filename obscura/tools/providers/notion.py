@@ -27,7 +27,7 @@ async def _handler_search(**kwargs: Any) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=15) as c:
             r = await c.post("/v1/search", json={"query": query})
             r.raise_for_status()
-            return r.json()
+            return r.json()  # type: ignore[no-any-return]
     except Exception as e:
         return {"error": str(e)}
 
@@ -40,7 +40,7 @@ async def _handler_get_page(**kwargs: Any) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=15) as c:
             r = await c.get(f"/v1/pages/{page_id}")
             r.raise_for_status()
-            return r.json()
+            return r.json()  # type: ignore[no-any-return]
     except Exception as e:
         return {"error": str(e)}
 
@@ -58,7 +58,7 @@ async def _handler_query_database(**kwargs: Any) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=15) as c:
             r = await c.post(f"/v1/databases/{db_id}/query", json=body)
             r.raise_for_status()
-            return r.json()
+            return r.json()  # type: ignore[no-any-return]
     except Exception as e:
         return {"error": str(e)}
 

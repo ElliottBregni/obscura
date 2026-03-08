@@ -108,8 +108,12 @@ bootstrap:
   deps:
     - type: uv
       package: notebooklm-mcp-server
+      optional: true
+    - type: binary
+      package: notebooklm-mcp
+      optional: true
 
 healthcheck:
   type: binary
-  target: notebooklm-mcp
+  target: notebooklm-mcp-server
   interval_seconds: 300

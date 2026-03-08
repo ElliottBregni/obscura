@@ -27,7 +27,7 @@ async def _handler_scan_repo(**kwargs: Any) -> dict[str, Any]:
             err = stderr.decode() if stderr else ""
             return {"error": err or f"gitleaks exited {proc.returncode}"}
         try:
-            findings = json.loads(out) if out.strip() else []
+            findings: list[Any] = json.loads(out) if out.strip() else []
             return {"findings": findings, "count": len(findings), "clean": len(findings) == 0}
         except (json.JSONDecodeError, ValueError):
             return {"output": out.strip(), "clean": "no leaks" in out.lower()}

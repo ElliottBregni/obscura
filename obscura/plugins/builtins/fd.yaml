@@ -1,0 +1,24 @@
+id: fd
+name: fd
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: Fast file search via fd.
+capabilities:
+  - id: dev.fd
+    description: Fast file discovery.
+    tools: [fd_find]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: fd_find
+    description: Find files by pattern with fd.
+    capability: dev.fd
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:fd_find
+bootstrap:
+  deps:
+    - type: binary
+      package: fd

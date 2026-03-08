@@ -1,0 +1,24 @@
+id: sec-edgar
+name: SEC EDGAR
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: US SEC EDGAR filing access.
+config:
+  SEC_EDGAR_USER_AGENT:
+    type: string
+    required: false
+capabilities:
+  - id: finance.sec_edgar
+    description: Access SEC filing submissions.
+    tools: [sec_edgar_submissions]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: sec_edgar_submissions
+    description: Fetch SEC submissions by CIK.
+    capability: finance.sec_edgar
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:sec_edgar_submissions

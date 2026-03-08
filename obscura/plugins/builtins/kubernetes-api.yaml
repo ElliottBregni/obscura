@@ -1,0 +1,24 @@
+id: kubernetes-api
+name: Kubernetes API
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Kubernetes inspection via kubectl.
+capabilities:
+  - id: infra.kubernetes
+    description: Query Kubernetes resources.
+    tools: [kubectl_get]
+    requires_approval: true
+    default_grant: false
+tools:
+  - name: kubectl_get
+    description: Get Kubernetes resource in JSON.
+    capability: infra.kubernetes
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:kubectl_get
+bootstrap:
+  deps:
+    - type: binary
+      package: kubectl

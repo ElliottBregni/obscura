@@ -18,9 +18,10 @@ bootstrap:
   deps:
     - type: pip
       package: huggingface_hub[cli]
-      optional: true
     - type: binary
       package: hf
+      optional: true
+  check_command: "hf version"
 
 capabilities:
   - id: hf.core

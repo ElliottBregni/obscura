@@ -1,0 +1,27 @@
+id: browserless
+name: Browserless
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Distributed browser automation via Browserless API.
+config:
+  BROWSERLESS_TOKEN:
+    type: secret
+    required: true
+  BROWSERLESS_URL:
+    type: string
+    required: false
+capabilities:
+  - id: web.browserless
+    description: Remote browser execution.
+    tools: [browserless_content]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: browserless_content
+    description: Fetch rendered page content through Browserless.
+    capability: web.browserless
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:browserless_content

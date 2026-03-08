@@ -71,16 +71,16 @@ def validate_plugin_id(plugin_id: str) -> str:
 class BootstrapDep:
     """A single dependency that must be present for a plugin to work."""
 
-    type: str           # "pip" | "uv" | "npx" | "binary" | "npm" | "cargo"
+    type: str           # "pip" | "uv" | "npx" | "binary" | "npm" | "cargo" | "brew" | "pipx"
     package: str        # package name or binary name
     version: str = ""   # version constraint (e.g. ">=1.0.0")
     optional: bool = False
 
     def __post_init__(self) -> None:
-        if self.type not in ("pip", "uv", "npx", "binary", "npm", "cargo"):
+        if self.type not in ("pip", "uv", "npx", "binary", "npm", "cargo", "brew", "pipx"):
             raise ValueError(
                 f"Unknown bootstrap dep type: {self.type!r} — "
-                f"must be one of: pip, uv, npx, binary, npm, cargo"
+                f"must be one of: pip, uv, npx, binary, npm, cargo, brew, pipx"
             )
         if not self.package.strip():
             raise ValueError("Bootstrap dep package must not be empty")

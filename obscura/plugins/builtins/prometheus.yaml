@@ -1,0 +1,24 @@
+id: prometheus
+name: Prometheus
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Metrics query integration for Prometheus.
+config:
+  PROMETHEUS_URL:
+    type: string
+    required: false
+capabilities:
+  - id: observability.prometheus
+    description: Query metric time series.
+    tools: [prometheus_query]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: prometheus_query
+    description: Execute PromQL instant query.
+    capability: observability.prometheus
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:prometheus_query

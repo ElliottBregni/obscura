@@ -1,0 +1,24 @@
+id: playwright
+name: Playwright
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: Browser automation primitives using Playwright CLI.
+capabilities:
+  - id: web.playwright
+    description: Browser automation capabilities.
+    tools: [playwright_version]
+    requires_approval: true
+    default_grant: false
+tools:
+  - name: playwright_version
+    description: Check Playwright CLI availability/version.
+    capability: web.playwright
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:playwright_version
+bootstrap:
+  deps:
+    - type: binary
+      package: npx

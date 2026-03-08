@@ -1,0 +1,24 @@
+id: nats
+name: NATS
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: cli
+trust_level: builtin
+description: NATS event bus publish primitive.
+capabilities:
+  - id: comms.nats
+    description: Publish events to NATS subjects.
+    tools: [nats_publish]
+    requires_approval: true
+    default_grant: false
+tools:
+  - name: nats_publish
+    description: Publish a NATS message.
+    capability: comms.nats
+    side_effects: write
+    handler: obscura.tools.providers.agent_primitives:nats_publish
+bootstrap:
+  deps:
+    - type: binary
+      package: nats

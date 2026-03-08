@@ -1,0 +1,25 @@
+id: datafusion
+name: Apache DataFusion
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: native
+trust_level: builtin
+description: SQL execution via Apache Arrow DataFusion.
+capabilities:
+  - id: data.datafusion
+    description: Run DataFusion SQL queries.
+    tools: [datafusion_query]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: datafusion_query
+    description: Execute SQL with DataFusion.
+    capability: data.datafusion
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datafusion_query
+bootstrap:
+  deps:
+    - type: pip
+      package: datafusion
+      optional: true

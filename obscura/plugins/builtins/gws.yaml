@@ -18,9 +18,10 @@ bootstrap:
   deps:
     - type: pip
       package: gws-cli
-      optional: true
     - type: binary
-      package: gws
+      package: gws-cli
+      optional: true
+  check_command: "gws-cli --version"
 
 capabilities:
   - id: gws.core

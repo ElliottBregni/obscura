@@ -785,6 +785,18 @@ async def _repl(
             except Exception:
                 pass
 
+        # Load all builtin plugin tools (alphavantage, websearch, gws, etc.)
+        try:
+            from obscura.plugins.loader import get_all_builtin_tool_specs
+
+            existing_names = {t.name for t in system_tools}
+            for tool in get_all_builtin_tool_specs():
+                if tool.name not in existing_names:
+                    system_tools.append(tool)
+                    existing_names.add(tool.name)
+        except Exception:
+            pass
+
     tool_count = len(system_tools)
 
     # Wire the ask_user callback so the tool can present TUI widgets
@@ -1239,14 +1251,45 @@ def main(
 
 @main.command()
 @click.option("--force", is_flag=True, default=False, help="Reinitialise even if .obscura/ exists.")
-def init(force: bool) -> None:
-    """Initialise a local .obscura/ workspace in the current directory."""
-    from obscura.core.workspace import WorkspaceExistsError, init_workspace
+@click.option("--no-bootstrap", is_flag=True, default=False, help="Skip plugin dependency bootstrapping.")
+def init(force: bool, no_bootstrap: bool) -> None:
+    """Initialise a local .obscura/ workspace and bootstrap plugin deps."""
+    from obscura.core.workspace import (
+        WorkspaceExistsError,
+        bootstrap_all_builtins,
+        init_workspace,
+    )
 
     try:
         ws = init_workspace(force=force)
         click.echo(f"Workspace initialised at {ws}")
     except WorkspaceExistsError:
         click.echo(".obscura/ already exists. Use --force to reinitialise.")
+        if no_bootstrap:
+            return
     except Exception as exc:
         click.echo(f"Init failed: {exc}", err=True)
+        return
+
+    if not no_bootstrap:
+        click.echo("Bootstrapping plugin dependencies...")
+        try:
+            summary = bootstrap_all_builtins()
+            if summary["installed"]:
+                click.echo(f"  Installed: {', '.join(summary['installed'])}")
+            if summary["skipped"]:
+                click.echo(f"  Already present: {len(summary['skipped'])} deps")
+            if summary["errors"]:
+                click.echo(f"  Failed: {', '.join(summary['errors'])}", err=True)
+            if summary["warnings"]:
+                for w in summary["warnings"]:
+                    click.echo(f"  Warning: {w}", err=True)
+            if not summary["errors"]:
+                click.echo("All plugin dependencies bootstrapped.")
+            else:
+                click.echo(
+                    "Some deps failed. Install manually: "
+                    + ", ".join(e.split(":")[0] for e in summary["errors"])
+                )
+        except Exception as exc:
+            click.echo(f"Bootstrap failed: {exc}", err=True)

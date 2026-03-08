@@ -431,7 +431,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  [cyan]/discover[/] [cat] [n]  Discover popular MCP tools",
         "",
         " [bold]Workspace[/]",
-        "  [cyan]/init[/] [--force]      Init local .obscura/ workspace",
+        "  [cyan]/init[/] [--force] [--no-bootstrap]  Init workspace + bootstrap deps",
         "",
         " [bold]Control[/]",
         "  [cyan]/heartbeat[/]           Session health check (no LLM)",
@@ -2910,19 +2910,54 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
-    """Initialise a local .obscura/ workspace in the current directory."""
-    from obscura.core.workspace import WorkspaceExistsError, init_workspace
+    """Initialise a local .obscura/ workspace and bootstrap plugins."""
+    from obscura.core.workspace import (
+        WorkspaceExistsError,
+        bootstrap_all_builtins,
+        init_workspace,
+    )
 
     force = "--force" in args
+    skip_bootstrap = "--no-bootstrap" in args
+
     try:
         ws = init_workspace(force=force)
         print_ok(f"Workspace initialised at {ws}")
     except WorkspaceExistsError:
-        print_warning(
-            ".obscura/ already exists. Use /init --force to reinitialise."
-        )
+        if not force:
+            print_warning(
+                ".obscura/ already exists. Use /init --force to reinitialise."
+            )
+            if skip_bootstrap:
+                return None
+            # Still run bootstrap even if workspace exists
     except Exception as exc:
         print_error(f"Init failed: {exc}")
+        return None
+
+    if not skip_bootstrap:
+        print_info("Bootstrapping plugin dependencies...")
+        try:
+            summary = bootstrap_all_builtins()
+            if summary["installed"]:
+                print_ok(f"Installed: {', '.join(summary['installed'])}")
+            if summary["skipped"]:
+                print_info(f"Already present: {len(summary['skipped'])} deps")
+            if summary["errors"]:
+                print_warning(f"Failed: {', '.join(summary['errors'])}")
+            if summary["warnings"]:
+                for w in summary["warnings"]:
+                    print_warning(w)
+            if not summary["errors"]:
+                print_ok("All plugin dependencies bootstrapped.")
+            else:
+                print_warning(
+                    "Some dependencies failed. Tools will register but "
+                    "may fail at runtime. Install missing deps manually."
+                )
+        except Exception as exc:
+            print_warning(f"Bootstrap step failed: {exc}")
+
     return None
 
 

@@ -1,0 +1,20 @@
+id: overpass
+name: OpenStreetMap Overpass
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Geographic intelligence from Overpass API.
+capabilities:
+  - id: geo.overpass
+    description: Query OSM infrastructure and map features.
+    tools: [overpass_query]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: overpass_query
+    description: Execute Overpass QL query.
+    capability: geo.overpass
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:overpass_query

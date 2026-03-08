@@ -22,6 +22,7 @@ bootstrap:
       optional: true
     - type: binary
       package: m365
+      optional: true
 
 capabilities:
   - id: m365.core

@@ -91,7 +91,7 @@ tools:
     description: Fetch a URL
     capability: web.browse
     side_effects: read
-    handler: obscura.tools.system:fetch_url
+    handler: obscura.tools.system:web_fetch
 
 healthcheck:
   type: callable

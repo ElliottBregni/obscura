@@ -23,6 +23,7 @@ import shutil
 import stat
 import textwrap
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +111,104 @@ def init_workspace(
     )
     _make_executable(ws / "hooks" / "session-init.sh")
 
+    # -- config.yaml --------------------------------------------------------
+    _write_if_missing(
+        dst=ws / "config.yaml",
+        content=_DEFAULT_CONFIG_YAML,
+        force=force,
+    )
+
     logger.info("Workspace initialised at %s", ws)
     return ws
+
+
+def load_workspace_config(cwd: Path | None = None) -> dict[str, Any]:
+    """Load and merge workspace config from .obscura/config.yaml.
+
+    Searches local ``.obscura/config.yaml`` first, then falls back to
+    ``~/.obscura/config.yaml``.  Returns the parsed YAML as a dict.
+    """
+    try:
+        import yaml  # noqa: PLC0415
+    except ImportError:
+        logger.debug("PyYAML not available — returning default config")
+        return _DEFAULT_CONFIG_DICT.copy()
+
+    resolved_cwd = (cwd or Path.cwd()).resolve()
+    candidates = [
+        resolved_cwd / _WORKSPACE_DIR / "config.yaml",
+        _resolve_global_home() / "config.yaml",
+    ]
+
+    merged: dict[str, Any] = _DEFAULT_CONFIG_DICT.copy()
+    for path in reversed(candidates):  # global first, then local overrides
+        if path.is_file():
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    _deep_merge(merged, data)
+                    logger.debug("Loaded config from %s", path)
+            except Exception as exc:
+                logger.warning("Failed to parse %s: %s", path, exc)
+
+    return merged
+
+
+def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
+    """Run bootstrap for all builtin plugins.
+
+    Reads ``plugins.bootstrap.*`` from the workspace config.yaml and installs
+    declared dependencies for each builtin plugin manifest.
+
+    Returns
+    -------
+    dict
+        Keys: ``installed``, ``skipped``, ``errors``, ``warnings`` — each a
+        list of ``"plugin_id: dep"`` strings.
+    """
+    from obscura.plugins.bootstrapper import run_bootstrap
+    from obscura.plugins.loader import PluginLoader
+
+    config = load_workspace_config(cwd)
+    plugins_cfg = config.get("plugins", {})
+    bootstrap_cfg = plugins_cfg.get("bootstrap", {})
+
+    # Respect config.yaml settings
+    if not plugins_cfg.get("load_builtins", True):
+        logger.info("Builtin plugins disabled in config.yaml")
+        return {"installed": [], "skipped": [], "errors": [], "warnings": []}
+
+    if not bootstrap_cfg.get("auto_install", True):
+        logger.info("Auto-install disabled in config.yaml")
+        return {"installed": [], "skipped": [], "errors": [], "warnings": []}
+
+    lenient = bootstrap_cfg.get("lenient_builtins", True)
+
+    loader = PluginLoader()
+    summary: dict[str, Any] = {
+        "installed": [],
+        "skipped": [],
+        "errors": [],
+        "warnings": [],
+    }
+
+    for spec in loader.discover_builtins():
+        if spec.bootstrap is None or not spec.bootstrap.deps:
+            continue
+        result = run_bootstrap(spec)
+        for item in result.installed:
+            summary["installed"].append(f"{spec.id}: {item}")
+        for item in result.skipped:
+            summary["skipped"].append(f"{spec.id}: {item}")
+        for item in result.errors:
+            if lenient:
+                summary["warnings"].append(f"{spec.id}: {item} (lenient)")
+            else:
+                summary["errors"].append(f"{spec.id}: {item}")
+        for item in result.warnings:
+            summary["warnings"].append(f"{spec.id}: {item}")
+
+    return summary
 
 
 def ensure_workspace(cwd: Path | None = None) -> Path:
@@ -139,6 +236,15 @@ def ensure_workspace(cwd: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
+    """Recursively merge *override* into *base* (mutates *base*)."""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
 
 
 def _resolve_global_home() -> Path:
@@ -183,6 +289,34 @@ def _make_executable(path: Path) -> None:
     """Add the executable bit for the file owner."""
     current = path.stat().st_mode
     path.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+# ---------------------------------------------------------------------------
+# Default config dict (used when config.yaml is missing or unreadable)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CONFIG_DICT: dict[str, Any] = {
+    "plugins": {
+        "load_builtins": True,
+        "bootstrap": {
+            "auto_install": True,
+            "lenient_builtins": True,
+        },
+    },
+    "mode": "code",
+    "defaults": {
+        "capabilities": {
+            "grant": [
+                "shell.exec", "file.read", "file.write", "git.ops",
+                "web.browse", "search.web", "security.scan",
+            ],
+            "deny": [],
+        },
+    },
+    "mcp": {
+        "auto_discover": True,
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -251,4 +385,41 @@ _DEFAULT_SESSION_INIT_SH = textwrap.dedent("""\
     EOF
 
     exit 0
+""")
+
+_DEFAULT_CONFIG_YAML = textwrap.dedent("""\
+    # .obscura/config.yaml — Project-level Obscura configuration
+    # Inherits from ~/.obscura/config.yaml, can override settings.
+
+    # ── Plugin Loading ─────────────────────────────────────────────────────
+    plugins:
+      load_builtins: true
+
+      bootstrap:
+        auto_install: true
+        lenient_builtins: true
+
+    # ── Default Mode ──────────────────────────────────────────────────────
+    # mode=code loads all registered tools (unrestricted)
+    # mode=ask  disables tools (conversational only)
+    # mode=plan enables read-only tools (research + planning)
+    # mode=diff enables read + git inspection tools
+    mode: code
+
+    # ── Default Capabilities ──────────────────────────────────────────────
+    defaults:
+      capabilities:
+        grant:
+          - shell.exec
+          - file.read
+          - file.write
+          - git.ops
+          - web.browse
+          - search.web
+          - security.scan
+        deny: []
+
+    # ── MCP Servers ───────────────────────────────────────────────────────
+    mcp:
+      auto_discover: true
 """)

@@ -1,0 +1,24 @@
+id: github-graphql
+name: GitHub GraphQL
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+description: GitHub GraphQL API integration.
+config:
+  GITHUB_TOKEN:
+    type: secret
+    required: true
+capabilities:
+  - id: dev.github_graphql
+    description: Analyze repositories and metadata via GraphQL.
+    tools: [github_graphql]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: github_graphql
+    description: Execute GitHub GraphQL query.
+    capability: dev.github_graphql
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:github_graphql

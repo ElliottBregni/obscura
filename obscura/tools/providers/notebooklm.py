@@ -1,23 +1,55 @@
-"""NotebookLM provider — wraps notebooklm-mcp-server CLI binary."""
+"""NotebookLM provider — wraps NotebookLM CLI binary.
+
+This provider expects a CLI that supports subcommands like
+``notebook list`` and returns JSON to stdout. The package
+``notebooklm-mcp-server`` provides such a CLI as the binary
+``notebooklm-mcp-server`` (some installs may expose it as
+``notebooklm-mcp-server`` only). By contrast, the binary
+``notebooklm-mcp`` is an MCP server entrypoint and does not
+accept these subcommands. Prefer the CLI-capable binary.
+
+You can override the binary path via the environment variable
+``OBSCURA_NOTEBOOKLM_BINARY``.
+"""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import shutil
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 async def _run_nlm(*args: str) -> dict[str, Any]:
-    binary = shutil.which("notebooklm-mcp") or shutil.which("notebooklm-mcp-server")
+    # Allow override for environments with nonstandard install locations
+    override = os.environ.get("OBSCURA_NOTEBOOKLM_BINARY")
+    binary = (
+        override
+        or shutil.which("notebooklm-mcp-server")
+        or shutil.which("notebooklm-mcp")
+    )
     if not binary:
         return {
             "error": (
-                "notebooklm-mcp binary not found on PATH. "
-                "Install with: uv pip install notebooklm-mcp-server"
+                "NotebookLM CLI not found. Install with: "
+                "uv pip install notebooklm-mcp-server, or set "
+                "OBSCURA_NOTEBOOKLM_BINARY to the CLI path"
             ),
+        }
+
+    # If the only available binary is the MCP server, surface a clear hint
+    base = os.path.basename(binary)
+    if base == "notebooklm-mcp":
+        return {
+            "error": (
+                "Detected 'notebooklm-mcp' (MCP server), which does not support CLI "
+                "subcommands like 'notebook list'. Install the CLI-capable binary "
+                "via 'uv pip install notebooklm-mcp-server' and ensure "
+                "'notebooklm-mcp-server' is on PATH, or set OBSCURA_NOTEBOOKLM_BINARY."
+            )
         }
 
     cmd = [binary, *args]
@@ -35,7 +67,7 @@ async def _run_nlm(*args: str) -> dict[str, Any]:
             return {"error": err or f"notebooklm-mcp exited with code {proc.returncode}", "output": output}
 
         try:
-            return json.loads(output)
+            return json.loads(output)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError):
             return {"output": output.strip()}
     except Exception as e:

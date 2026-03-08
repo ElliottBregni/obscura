@@ -1,0 +1,27 @@
+id: matrix
+name: Matrix
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Matrix messaging integration for agent coordination.
+config:
+  MATRIX_HOMESERVER_URL:
+    type: string
+    required: true
+  MATRIX_ACCESS_TOKEN:
+    type: secret
+    required: true
+capabilities:
+  - id: comms.matrix
+    description: Send messages to Matrix rooms.
+    tools: [matrix_send]
+    requires_approval: true
+    default_grant: false
+tools:
+  - name: matrix_send
+    description: Send a message to a Matrix room.
+    capability: comms.matrix
+    side_effects: write
+    handler: obscura.tools.providers.agent_primitives:matrix_send

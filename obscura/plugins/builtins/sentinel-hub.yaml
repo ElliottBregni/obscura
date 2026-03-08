@@ -1,0 +1,24 @@
+id: sentinel-hub
+name: Sentinel Hub
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Satellite imagery processing via Sentinel Hub.
+config:
+  SENTINELHUB_ACCESS_TOKEN:
+    type: secret
+    required: true
+capabilities:
+  - id: geo.sentinelhub
+    description: Run Sentinel Hub process API jobs.
+    tools: [sentinelhub_process]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: sentinelhub_process
+    description: Run Sentinel Hub processing request.
+    capability: geo.sentinelhub
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:sentinelhub_process

@@ -1,0 +1,24 @@
+id: polygon
+name: Polygon.io
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: sdk
+trust_level: builtin
+description: Market data and snapshots from Polygon.io.
+config:
+  POLYGON_API_KEY:
+    type: secret
+    required: true
+capabilities:
+  - id: finance.polygon
+    description: Query market snapshots.
+    tools: [polygon_snapshot]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: polygon_snapshot
+    description: Get Polygon snapshot for a ticker.
+    capability: finance.polygon
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:polygon_snapshot

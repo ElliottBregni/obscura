@@ -1,0 +1,20 @@
+id: openalex
+name: OpenAlex
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: Academic paper and research metadata via OpenAlex.
+capabilities:
+  - id: research.openalex
+    description: Search scholarly works and trends.
+    tools: [openalex_search]
+    requires_approval: false
+    default_grant: true
+tools:
+  - name: openalex_search
+    description: Search OpenAlex works.
+    capability: research.openalex
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:openalex_search

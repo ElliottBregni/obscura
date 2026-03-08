@@ -38,14 +38,21 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
     tool_name = kwargs.get("_tool_name", "")
     command = kwargs.get("command") or kwargs.get("args") or ""
 
-    binary = shutil.which("gws")
+    binary = shutil.which("gws-cli") or shutil.which("gws")
     if not binary:
-        return {
-            "error": (
-                "gws CLI binary not found on PATH. "
-                "Install with: pip install gws-cli"
-            ),
-        }
+        # Also check venv bin directory
+        import sys
+        from pathlib import Path as _Path
+        venv_bin = _Path(sys.prefix) / "bin" / "gws-cli"
+        if venv_bin.is_file():
+            binary = str(venv_bin)
+        else:
+            return {
+                "error": (
+                    "gws CLI binary not found on PATH. "
+                    "Install with: pip install gws-cli"
+                ),
+            }
 
     cmd: list[str] = [binary]
 
@@ -91,7 +98,7 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
             }
 
         try:
-            return json.loads(output)
+            return json.loads(output)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError):
             return {"output": output.strip()}
     except Exception as e:
