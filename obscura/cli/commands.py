@@ -3214,6 +3214,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "session": cmd_session,
     "discover": cmd_discover,
     "mcp": cmd_mcp,
+    "plugin": cmd_plugin,
     "a2a": cmd_a2a,
     # Memory
     "memory": cmd_memory,

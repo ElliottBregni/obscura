@@ -452,6 +452,191 @@ class Agent:
         # Always enable memory tools for authenticated users
         provider_registry.add(MemoryToolProvider())
 
+        # Register data.gov search tool (uses CKAN API; optional)
+        try:
+            from obscura.tools.providers.data_gov import make_data_gov_tool
+
+            spec = make_data_gov_tool()
+            provider_registry.add(type("_DGProvider", (), {"install": lambda self, ctx: _register_tool(ctx.agent, spec), "uninstall": lambda self, ctx: None})())
+        except Exception as exc:
+            logger.debug("Could not register data_gov tool: %s", exc)
+
+        # Register Public APIs dynamic provider (optional)
+        try:
+            from obscura.tools.providers.public_apis import PublicAPIsProvider
+
+            provider_registry.add(PublicAPIsProvider())
+        except Exception as exc:
+            logger.debug("Could not register public_apis provider: %s", exc)
+
+        # Auto-enable Google Workspace CLI provider when `gws` is present on PATH
+        # or when the environment explicitly requests it via OBSCURA_ENABLE_GWS=1.
+        try:
+            import shutil
+            import os
+
+            if os.environ.get("OBSCURA_ENABLE_GWS") == "1" or shutil.which("gws") is not None:
+                try:
+                    from obscura.tools.providers.gws import GWSProvider
+
+                    provider_registry.add(GWSProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable NotebookLM provider when `notebooklm-mcp` is present on PATH
+        # (i.e. after: uv tool install notebooklm-mcp-server)
+        try:
+            import shutil
+
+            if shutil.which("notebooklm-mcp") is not None:
+                try:
+                    from obscura.tools.providers.notebooklm import NotebookLMProvider
+
+                    provider_registry.add(NotebookLMProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable websearch provider when `websearch` binary is present on PATH
+        # (i.e. after: cargo install --git https://github.com/xynehq/websearch.git)
+        try:
+            import shutil
+
+            if shutil.which("websearch") is not None:
+                try:
+                    from obscura.tools.providers.websearch import WebSearchProvider
+
+                    provider_registry.add(WebSearchProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable Alpha Vantage financial data provider when ALPHAVANTAGE_API_KEY is set.
+        # Get a free key at: https://www.alphavantage.co/support/#api-key
+        try:
+            if os.environ.get("ALPHAVANTAGE_API_KEY") or os.environ.get("ALPHA_VANTAGE_API_KEY"):
+                try:
+                    from obscura.tools.providers.alphavantage import AlphaVantageProvider
+
+                    provider_registry.add(AlphaVantageProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable X (Twitter) provider when X_BEARER_TOKEN or X_ACCESS_TOKEN is set.
+        # Install SDK first: pip install xdk  |  get tokens: https://developer.x.com/en/portal/dashboard
+        try:
+            if os.environ.get("X_BEARER_TOKEN") or os.environ.get("X_ACCESS_TOKEN"):
+                try:
+                    from obscura.tools.providers.x import XProvider
+
+                    provider_registry.add(XProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable CoinGecko provider (optional: set OBSCURA_ENABLE_COINGECKO=1 to force)
+        try:
+            import importlib
+
+            if os.environ.get("OBSCURA_ENABLE_COINGECKO") == "1" or importlib.util.find_spec("pycoingecko") is not None:
+                try:
+                    from obscura.tools.providers.coingecko import CoinGeckoProvider
+
+                    provider_registry.add(CoinGeckoProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable Notion provider when NOTION_API_KEY is set or OBSCURA_ENABLE_NOTION=1
+        try:
+            if os.environ.get("NOTION_API_KEY") or os.environ.get("OBSCURA_ENABLE_NOTION") == "1":
+                try:
+                    from obscura.tools.providers.notion import NotionProvider
+
+                    provider_registry.add(NotionProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable gitleaks provider when `gitleaks` binary is present on PATH
+        try:
+            import shutil
+
+            if shutil.which("gitleaks") is not None or os.environ.get("OBSCURA_ENABLE_GITLEAKS") == "1":
+                try:
+                    from obscura.tools.providers.gitleaks import GitleaksProvider
+
+                    provider_registry.add(GitleaksProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Plugin discovery: new manifest-based loader + legacy entry-point/local plugins
+        try:
+            from obscura.plugins.loader import PluginLoader
+
+            plugin_loader = PluginLoader()
+            plugin_loader.load_all_enabled(provider_registry)
+        except Exception:
+            # Fallback to legacy loader if new plugin system fails
+            try:
+                from obscura.tools.plugin_loader import register_plugins
+                register_plugins(provider_registry)
+            except Exception:
+                pass
+
+        # Auto-enable Microsoft 365 CLI provider when `m365` is present on PATH
+        # or when the environment explicitly requests it via OBSCURA_ENABLE_M365=1.
+        try:
+            import shutil
+            import os
+
+            if os.environ.get("OBSCURA_ENABLE_M365") == "1" or shutil.which("m365") is not None:
+                try:
+                    from obscura.tools.providers.m365 import M365Provider
+
+                    provider_registry.add(M365Provider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
+        # Auto-enable Hugging Face Hub CLI provider when `hf` is present on PATH
+        # or when the environment explicitly requests it via OBSCURA_ENABLE_HF=1.
+        try:
+            import shutil
+            import os
+
+            if os.environ.get("OBSCURA_ENABLE_HF") == "1" or shutil.which("hf") is not None:
+                try:
+                    from obscura.tools.providers.hf import HFProvider
+
+                    provider_registry.add(HFProvider())
+                except Exception:
+                    # Non-fatal: provider is optional
+                    pass
+        except Exception:
+            pass
+
         a2a_remote_config = self.config.a2a_remote_tools
         if bool(a2a_remote_config.get("enabled", False)):
             raw_urls = a2a_remote_config.get("urls", [])
