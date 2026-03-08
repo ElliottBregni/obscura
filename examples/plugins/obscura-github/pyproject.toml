@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "obscura-github"
+version = "1.0.0"
+description = "GitHub tools reference plugin for Obscura"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.entry-points."obscura.plugins"]
+obscura-github = "obscura_github"

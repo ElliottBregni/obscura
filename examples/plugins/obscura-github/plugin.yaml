@@ -1,0 +1,149 @@
+id: obscura-github
+name: GitHub Tools
+version: "1.0.0"
+author: obscura-team
+source_type: pip
+runtime_type: native
+trust_level: verified
+description: >
+  GitHub repository tools for code search, PR review, and issue management.
+  Reference plugin demonstrating the full Obscura plugin platform.
+
+config:
+  GITHUB_TOKEN:
+    type: string
+    required: true
+    description: GitHub personal access token or fine-grained token
+
+capabilities:
+  - id: repo.read
+    description: Read repository contents, search code, list branches
+    tools:
+      - github_search_repo
+      - github_get_file
+      - github_list_branches
+    requires_approval: false
+    default_grant: true
+
+  - id: pr.comment
+    description: Comment on pull requests
+    tools:
+      - github_comment_pr
+    requires_approval: true
+    default_grant: false
+
+tools:
+  - name: github_search_repo
+    description: Search repository contents by keyword or path
+    parameters:
+      type: object
+      properties:
+        owner:
+          type: string
+          description: Repository owner (user or org)
+        repo:
+          type: string
+          description: Repository name
+        query:
+          type: string
+          description: Search query
+      required: [owner, repo, query]
+    handler: "obscura_github.tools:search_repo"
+    capability: repo.read
+
+  - name: github_get_file
+    description: Get the contents of a file from a repository
+    parameters:
+      type: object
+      properties:
+        owner:
+          type: string
+          description: Repository owner
+        repo:
+          type: string
+          description: Repository name
+        path:
+          type: string
+          description: File path within the repository
+        ref:
+          type: string
+          description: Branch, tag, or commit SHA (default HEAD)
+      required: [owner, repo, path]
+    handler: "obscura_github.tools:get_file"
+    capability: repo.read
+
+  - name: github_list_branches
+    description: List branches of a repository
+    parameters:
+      type: object
+      properties:
+        owner:
+          type: string
+          description: Repository owner
+        repo:
+          type: string
+          description: Repository name
+      required: [owner, repo]
+    handler: "obscura_github.tools:list_branches"
+    capability: repo.read
+
+  - name: github_comment_pr
+    description: Add a comment to a pull request
+    parameters:
+      type: object
+      properties:
+        owner:
+          type: string
+          description: Repository owner
+        repo:
+          type: string
+          description: Repository name
+        pr_number:
+          type: integer
+          description: Pull request number
+        body:
+          type: string
+          description: Comment body (supports Markdown)
+      required: [owner, repo, pr_number, body]
+    handler: "obscura_github.tools:comment_pr"
+    capability: pr.comment
+    side_effects: write
+
+workflows:
+  - id: review_pull_request
+    name: Review Pull Request
+    version: "1.0.0"
+    description: >
+      Automated pull request review — fetches changed files, analyzes code,
+      and posts a review comment.
+    required_capabilities:
+      - repo.read
+      - pr.comment
+    steps:
+      - tool: github_get_file
+        description: Fetch each changed file for analysis
+      - tool: github_comment_pr
+        description: Post the review summary as a PR comment
+
+instructions:
+  - id: github-review-guide
+    version: "1.0.0"
+    scope: agent
+    content: >
+      When reviewing pull requests, check for: security issues (hardcoded secrets,
+      SQL injection, XSS), missing error handling, test coverage gaps, naming
+      consistency, and documentation updates. Be constructive and specific.
+    priority: 50
+
+policy_hints:
+  - capability_id: pr.comment
+    recommended_action: approve
+    reason: Write operations on pull requests should require user confirmation
+  - capability_id: repo.read
+    recommended_action: allow
+    reason: Read-only repository access is safe by default
+
+healthcheck:
+  type: binary
+  target: gh
+  interval_seconds: 300

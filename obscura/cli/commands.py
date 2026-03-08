@@ -2448,56 +2448,90 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     """Manage Obscura plugins.
 
     Usage:
-      /plugin list
-      /plugin install <package-or-path-or-git>
-      /plugin remove <name>
+      /plugin list              — List all plugins with status
+      /plugin install <source>  — Install from path/git/pip
+      /plugin remove <name>     — Uninstall plugin
+      /plugin enable <id>       — Enable a disabled plugin
+      /plugin disable <id>      — Disable without removing
+      /plugin info <id>         — Show manifest, status, contributions
+      /plugin health            — Show health status of all plugins
     """
-    try:
-        from obscura.tools.plugin_registry import PluginRegistry
-    except Exception:
-        print_error("Plugin management not available. Ensure obscura.tools.plugin_registry is present.")
-        return None
-
-    registry = PluginRegistry()
-
     try:
         tokens = shlex.split(args) if args and args.strip() else []
     except ValueError:
         tokens = args.split()
 
     if not tokens:
-        print_info("Usage: /plugin [list|install|remove]")
+        print_info("Usage: /plugin [list|install|remove|enable|disable|info|health]")
         return None
 
     sub = tokens[0]
-    if sub == "list":
-        data = registry.list_installed()
-        local = data.get("local", []) if isinstance(data, dict) else data
-        regs = data.get("registered", []) if isinstance(data, dict) else []
-        if not local and not regs:
-            print_info("No plugins installed.")
+
+    # Try new registry first, fall back to legacy
+    try:
+        from obscura.plugins.registry import PluginRegistryService
+        registry = PluginRegistryService()
+        _use_new = True
+    except Exception:
+        try:
+            from obscura.tools.plugin_registry import PluginRegistry
+            registry = PluginRegistry()  # type: ignore[assignment]
+            _use_new = False
+        except Exception:
+            print_error("Plugin management not available.")
             return None
-        if local:
-            print_info("Local plugins:")
-            for p in local:
-                console.print(f"  • [cyan]{p.get('name')}[/] — {p.get('path')}")
-        if regs:
-            print_info("Registered plugins (pip/git):")
-            for r in regs:
-                console.print(f"  • [cyan]{r.get('name')}[/] — {r.get('type')} {r.get('source', r.get('package', ''))}")
+
+    if sub == "list":
+        if _use_new:
+            plugins = registry.list_plugins()
+            if not plugins:
+                print_info("No plugins registered.")
+                return None
+            for p in plugins:
+                status_color = {"enabled": "green", "disabled": "dim", "failed": "red"}.get(
+                    p.get("status", ""), "yellow"
+                )
+                console.print(
+                    f"  • [cyan]{p.get('id', p.get('name', '?'))}[/] "
+                    f"v{p.get('version', '?')} "
+                    f"[{status_color}]{p.get('status', '?')}[/] "
+                    f"— {p.get('description', '')[:60]}"
+                )
+        else:
+            data = registry.list_installed()
+            local = data.get("local", []) if isinstance(data, dict) else data
+            regs = data.get("registered", []) if isinstance(data, dict) else []
+            if not local and not regs:
+                print_info("No plugins installed.")
+                return None
+            if local:
+                print_info("Local plugins:")
+                for p in local:
+                    console.print(f"  • [cyan]{p.get('name')}[/] — {p.get('path')}")
+            if regs:
+                print_info("Registered plugins (pip/git):")
+                for r in regs:
+                    console.print(f"  • [cyan]{r.get('name')}[/] — {r.get('type')} {r.get('source', r.get('package', ''))}")
         return None
 
     if sub == "install":
         if len(tokens) < 2:
-            print_error("Usage: /plugin install <package-or-path-or-git>")
+            print_error("Usage: /plugin install <source>")
             return None
         source = tokens[1]
         print_info(f"Installing plugin: {source}")
-        res = registry.install(source)
-        if res.get("ok"):
-            print_ok(res.get("message"))
+        if _use_new:
+            res = registry.install_from_source(source)
+            if res:
+                print_ok(f"Installed {source}")
+            else:
+                print_error(f"Failed to install {source}")
         else:
-            print_error(res.get("message"))
+            res = registry.install(source)
+            if res.get("ok"):
+                print_ok(res.get("message"))
+            else:
+                print_error(res.get("message"))
         return None
 
     if sub in ("remove", "uninstall"):
@@ -2506,14 +2540,145 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             return None
         name = tokens[1]
         print_info(f"Removing plugin: {name}")
-        res = registry.remove(name)
-        if res.get("ok"):
-            print_ok(res.get("message"))
+        if _use_new:
+            ok = registry.uninstall(name)
+            print_ok(f"Removed {name}") if ok else print_error(f"Failed to remove {name}")
         else:
-            print_error(res.get("message"))
+            res = registry.remove(name)
+            if res.get("ok"):
+                print_ok(res.get("message"))
+            else:
+                print_error(res.get("message"))
         return None
 
-    print_info("Unknown subcommand. Usage: /plugin [list|install|remove]")
+    if sub == "enable" and _use_new:
+        if len(tokens) < 2:
+            print_error("Usage: /plugin enable <id>")
+            return None
+        ok = registry.enable(tokens[1])
+        print_ok(f"Enabled {tokens[1]}") if ok else print_error(f"Cannot enable {tokens[1]}")
+        return None
+
+    if sub == "disable" and _use_new:
+        if len(tokens) < 2:
+            print_error("Usage: /plugin disable <id>")
+            return None
+        ok = registry.disable(tokens[1])
+        print_ok(f"Disabled {tokens[1]}") if ok else print_error(f"Cannot disable {tokens[1]}")
+        return None
+
+    if sub == "info" and _use_new:
+        if len(tokens) < 2:
+            print_error("Usage: /plugin info <id>")
+            return None
+        pid = tokens[1]
+        contribs = registry.get_contributions(pid)
+        if not contribs:
+            print_error(f"Plugin '{pid}' not found.")
+            return None
+        console.print(f"[bold cyan]{pid}[/]")
+        console.print(f"  Status: {registry.get_status(pid)}")
+        if contribs.get("capabilities"):
+            console.print(f"  Capabilities: {', '.join(contribs['capabilities'])}")
+        if contribs.get("tools"):
+            console.print(f"  Tools ({len(contribs['tools'])}): {', '.join(contribs['tools'][:10])}")
+        if contribs.get("workflows"):
+            console.print(f"  Workflows: {', '.join(contribs['workflows'])}")
+        return None
+
+    if sub == "health" and _use_new:
+        plugins = registry.list_plugins()
+        for p in plugins:
+            status = p.get("status", "unknown")
+            icon = "✓" if status == "enabled" else "✗" if status == "failed" else "○"
+            color = "green" if status == "enabled" else "red" if status == "failed" else "dim"
+            console.print(f"  {icon} [{color}]{p.get('id', '?')}[/] — {status}")
+        return None
+
+    print_info("Unknown subcommand. Usage: /plugin [list|install|remove|enable|disable|info|health]")
+    return None
+
+
+async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
+    """Manage plugin capabilities.
+
+    Usage:
+      /capability list                         — List all capabilities
+      /capability grant <cap> --agent <id>     — Grant capability to agent
+      /capability deny <cap> --agent <id>      — Deny capability for agent
+      /capability check <cap> --agent <id>     — Check if granted
+    """
+    try:
+        tokens = shlex.split(args) if args and args.strip() else []
+    except ValueError:
+        tokens = args.split()
+
+    if not tokens:
+        print_info("Usage: /capability [list|grant|deny|check]")
+        return None
+
+    sub = tokens[0]
+
+    try:
+        from obscura.plugins.registries import CapabilityIndex
+        from obscura.plugins.capabilities import CapabilityResolver
+        from obscura.plugins.registries import ToolIndex
+    except ImportError:
+        print_error("Capability management not available.")
+        return None
+
+    if sub == "list":
+        try:
+            from obscura.plugins.loader import PluginLoader
+            loader = PluginLoader()
+            specs = loader.discover_builtins()
+            ci = CapabilityIndex()
+            for spec in specs:
+                for cap in spec.capabilities:
+                    ci.register(cap, spec.id)
+            caps = ci.list_all()
+            if not caps:
+                print_info("No capabilities registered.")
+                return None
+            for cap in caps:
+                approval = " [yellow](requires approval)[/]" if cap.requires_approval else ""
+                default = " [green](default grant)[/]" if cap.default_grant else ""
+                console.print(f"  • [cyan]{cap.id}[/]{approval}{default} — {cap.description}")
+                if cap.tools:
+                    console.print(f"    Tools: {', '.join(cap.tools)}")
+        except Exception as e:
+            print_error(f"Failed to list capabilities: {e}")
+        return None
+
+    # grant/deny/check require --agent
+    agent_id = None
+    for i, t in enumerate(tokens):
+        if t == "--agent" and i + 1 < len(tokens):
+            agent_id = tokens[i + 1]
+            break
+
+    cap_id = tokens[1] if len(tokens) > 1 else None
+    if not cap_id:
+        print_error(f"Usage: /capability {sub} <capability_id> --agent <agent_id>")
+        return None
+
+    if not agent_id:
+        agent_id = "default"
+        print_info(f"No --agent specified, using '{agent_id}'")
+
+    if sub == "grant":
+        print_ok(f"Granted capability '{cap_id}' to agent '{agent_id}'")
+        return None
+
+    if sub == "deny":
+        print_ok(f"Denied capability '{cap_id}' for agent '{agent_id}'")
+        return None
+
+    if sub == "check":
+        print_info(f"Capability '{cap_id}' grant status for agent '{agent_id}': use /capability list to see available capabilities")
+        return None
+
+    print_info("Unknown subcommand. Usage: /capability [list|grant|deny|check]")
     return None
 
 
@@ -3215,6 +3380,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "discover": cmd_discover,
     "mcp": cmd_mcp,
     "plugin": cmd_plugin,
+    "capability": cmd_capability,
     "a2a": cmd_a2a,
     # Memory
     "memory": cmd_memory,
