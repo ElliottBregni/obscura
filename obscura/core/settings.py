@@ -50,7 +50,9 @@ _FILENAME_EVENT_MAP: dict[str, str] = {
     "pre-tool-use": "preToolUse",
     "post-tool-use": "postToolUse",
     "session-start": "sessionStart",
+    "session-init": "sessionStart",
     "session-end": "sessionEnd",
+    "session-stop": "sessionEnd",
     "error-occurred": "errorOccurred",
 }
 

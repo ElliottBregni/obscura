@@ -28,6 +28,7 @@ from typing import Any
 
 from obscura.core.context_window import (
     CONTEXT_WINDOW_HARD_MIN_TOKENS,
+    estimate_message_tokens,
     estimate_messages_tokens,
     estimate_tokens,
     evaluate_context_status,
@@ -261,7 +262,7 @@ async def compact_history(
         cur_tokens = 0
 
         for msg in current:
-            mt = estimate_messages_tokens([msg])
+            mt = estimate_message_tokens(msg)
             if cur_tokens + mt > chunk_budget and cur_chunk:
                 chunks.append(cur_chunk)
                 cur_chunk = [msg]

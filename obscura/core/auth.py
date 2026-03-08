@@ -72,6 +72,18 @@ _LOCALLLM_BASE_URL_ENV_VARS = ("LOCALLLM_BASE_URL", "LM_STUDIO_URL", "OLLAMA_URL
 _AUTH_MODE_ENV_VAR = "OBSCURA_AUTH_MODE"
 
 
+def _resolve_cli_cmd(env_var: str, default_bin: str) -> list[str]:
+    raw = os.environ.get(env_var, "").strip()
+    if raw:
+        try:
+            parts = shlex.split(raw)
+        except ValueError:
+            parts = []
+        if parts:
+            return parts
+    return [default_bin]
+
+
 def _auth_mode() -> str:
     """Get auth resolution mode: oauth_first (default) or env_first."""
     raw = os.environ.get(_AUTH_MODE_ENV_VAR, "oauth_first").strip().lower()
@@ -91,6 +103,7 @@ def _resolve_github_token(explicit: str | None) -> str:
         return explicit
 
     token_cmd = os.environ.get("OBSCURA_GITHUB_TOKEN_CMD", "").strip()
+    gh_cmd = _resolve_cli_cmd("OBSCURA_GH_CLI_CMD", "gh")
 
     if _is_env_first_mode():
         for var in _COPILOT_ENV_VARS:
@@ -112,7 +125,7 @@ def _resolve_github_token(explicit: str | None) -> str:
                 pass
         try:
             result = subprocess.run(
-                ["gh", "auth", "token"],
+                [*gh_cmd, "auth", "token"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -126,7 +139,7 @@ def _resolve_github_token(explicit: str | None) -> str:
         # OAuth-first: gh auth token
         try:
             result = subprocess.run(
-                ["gh", "auth", "token"],
+                [*gh_cmd, "auth", "token"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -197,9 +210,10 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
 
 def _has_claude_cli_oauth() -> bool:
     """Return True when Claude CLI reports an active OAuth login."""
+    claude_cmd = _resolve_cli_cmd("OBSCURA_CLAUDE_CLI_CMD", "claude")
     try:
         result = subprocess.run(
-            ["claude", "auth", "status", "--json"],
+            [*claude_cmd, "auth", "status", "--json"],
             capture_output=True,
             text=True,
             check=False,
@@ -283,9 +297,10 @@ def _resolve_openai_key(explicit: str | None) -> str:
 
 def _resolve_codex_oauth_token() -> str | None:
     """Resolve an OpenAI-compatible bearer token from Codex OAuth state."""
+    codex_cmd = _resolve_cli_cmd("OBSCURA_CODEX_CLI_CMD", "codex")
     try:
         status = subprocess.run(
-            ["codex", "login", "status"],
+            [*codex_cmd, "login", "status"],
             capture_output=True,
             text=True,
             check=False,
@@ -298,7 +313,12 @@ def _resolve_codex_oauth_token() -> str | None:
     if status.returncode != 0 or "Logged in" not in status_text:
         return None
 
-    auth_path = Path.home() / ".codex" / "auth.json"
+    auth_path_raw = os.environ.get("OBSCURA_CODEX_AUTH_FILE", "").strip()
+    auth_path = (
+        Path(auth_path_raw).expanduser()
+        if auth_path_raw
+        else Path.home() / ".codex" / "auth.json"
+    )
     try:
         payload = json.loads(auth_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -317,9 +337,10 @@ def _resolve_codex_oauth_token() -> str | None:
 
 def _has_codex_cli_oauth() -> bool:
     """Return True when Codex CLI reports an active OAuth login."""
+    codex_cmd = _resolve_cli_cmd("OBSCURA_CODEX_CLI_CMD", "codex")
     try:
         status = subprocess.run(
-            ["codex", "login", "status"],
+            [*codex_cmd, "login", "status"],
             capture_output=True,
             text=True,
             check=False,

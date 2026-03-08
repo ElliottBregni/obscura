@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import uuid
@@ -22,10 +23,13 @@ from obscura.cli.render import (
     render_diff_summary,
     render_plan,
 )
+from obscura.core.context_window import estimate_tokens as _cw_estimate_tokens
 from obscura.core.client import ObscuraClient
 from obscura.cli import trace as trace_mod
 from obscura.cli.control_commands import cmd_heartbeat, cmd_policies, cmd_replay, cmd_status
+from obscura.core.context_lazy import LazySkillLoader, SkillMetadata
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.paths import resolve_obscura_skills_dir
 from obscura.core.types import AgentEventKind, Backend, SessionRef
 
 
@@ -33,10 +37,119 @@ from obscura.core.types import AgentEventKind, Backend, SessionRef
 # Helpers
 # ---------------------------------------------------------------------------
 
+_MESSAGE_ROLE_OVERHEAD_TOKENS = 4
+_RESPONSE_RESERVE_TOKENS = 4096
+
 
 def _estimate_tokens(text: str) -> int:
-    """Rough token estimate (~4 chars/token)."""
-    return len(text) // 4
+    """Estimate token count using shared context-window tokenizer."""
+    return _cw_estimate_tokens(text)
+
+
+def _safe_list_tools(ctx: "REPLContext") -> list[Any]:
+    """Best-effort tool list retrieval from the active client."""
+    try:
+        tools = ctx.client.list_tools()
+    except Exception:
+        return []
+    if not isinstance(tools, list):
+        return []
+    return tools
+
+
+def _estimate_tool_schema_tokens(tools: list[Any]) -> int:
+    """Estimate tokens consumed by serialized tool specs."""
+    if not tools:
+        return 0
+
+    payload: list[dict[str, Any]] = []
+    for t in tools:
+        payload.append(
+            {
+                "name": getattr(t, "name", ""),
+                "description": getattr(t, "description", ""),
+                "parameters": getattr(t, "parameters", {}),
+            }
+        )
+    return _estimate_tokens(json.dumps(payload, default=str, ensure_ascii=True))
+
+
+def _estimate_claude_tool_listing_tokens(tools: list[Any]) -> int:
+    """Estimate Claude's extra tool-listing text appended to system prompt."""
+    if not tools:
+        return 0
+
+    lines = ["## Available Tools", ""]
+    lines.append("You have the following tools. Use these EXACT names when calling tools:")
+    lines.append("")
+    for spec in tools:
+        desc = str(getattr(spec, "description", "") or "").split("\n")[0][:120]
+        lines.append(f"- `{getattr(spec, 'name', '')}`: {desc}")
+    lines.append("")
+    lines.append("Do NOT invent tool names. If none of these tools fit, tell the user.")
+    return _estimate_tokens("\n".join(lines))
+
+
+def estimate_effective_context_breakdown(
+    ctx: "REPLContext",
+    *,
+    pending_user_text: str = "",
+    include_response_reserve: bool = True,
+) -> dict[str, int]:
+    """Estimate active context usage with major request components."""
+    system_tokens = _estimate_tokens(ctx.get_effective_system_prompt())
+
+    history_tokens = 0
+    for _role, content in ctx.message_history:
+        history_tokens += _estimate_tokens(content) + _MESSAGE_ROLE_OVERHEAD_TOKENS
+
+    pending_tokens = 0
+    if pending_user_text:
+        pending_tokens = (
+            _estimate_tokens(pending_user_text) + _MESSAGE_ROLE_OVERHEAD_TOKENS
+        )
+
+    tools = _safe_list_tools(ctx)
+    tool_schema_tokens = _estimate_tool_schema_tokens(tools)
+    claude_tool_listing_tokens = (
+        _estimate_claude_tool_listing_tokens(tools)
+        if ctx.backend == "claude"
+        else 0
+    )
+
+    response_reserve_tokens = _RESPONSE_RESERVE_TOKENS if include_response_reserve else 0
+
+    total = (
+        system_tokens
+        + history_tokens
+        + pending_tokens
+        + tool_schema_tokens
+        + claude_tool_listing_tokens
+        + response_reserve_tokens
+    )
+    return {
+        "system_tokens": system_tokens,
+        "history_tokens": history_tokens,
+        "pending_tokens": pending_tokens,
+        "tool_schema_tokens": tool_schema_tokens,
+        "claude_tool_listing_tokens": claude_tool_listing_tokens,
+        "response_reserve_tokens": response_reserve_tokens,
+        "total_tokens": total,
+    }
+
+
+def estimate_effective_context_tokens(
+    ctx: "REPLContext",
+    *,
+    pending_user_text: str = "",
+    include_response_reserve: bool = True,
+) -> int:
+    """Estimate active context usage including system, tools, and reserve."""
+    return estimate_effective_context_breakdown(
+        ctx,
+        pending_user_text=pending_user_text,
+        include_response_reserve=include_response_reserve,
+    )["total_tokens"]
 
 
 # File-writing tool names we track for /diff
@@ -95,6 +208,13 @@ class REPLContext:
     # Agent runtime (lazy-created on first /agent or /fleet command)
     _runtime: Any = field(default=None, repr=False)
 
+    # Background swarm tasks: {swarm_id: {task, assignments, results, ...}}
+    _swarm_runs: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+
+    # Slash-skill state (metadata lazy-loaded, bodies loaded on activation)
+    _lazy_skill_loader: LazySkillLoader | None = field(default=None, repr=False)
+    active_skills: list[str] = field(default_factory=list)
+
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self._mode_manager is None:
@@ -137,22 +257,22 @@ class REPLContext:
             bus = self._runtime.interaction_bus
 
             async def _cli_attention_handler(request: AttentionRequest) -> None:
-                """Prompt user inline when an agent requests attention."""
-                render_attention_request(request)
-                actions = request.actions
-                prompt_str = (
-                    f"  [{'/'.join(actions)}]: "
-                    if actions and actions != ("ok",)
-                    else "  [ok]: "
+                """Prompt user inline via TUI widget when an agent requests attention."""
+                from obscura.cli.widgets import (
+                    AttentionWidgetRequest,
+                    confirm_attention,
                 )
-                from obscura.cli.prompt import confirm_prompt_async
 
-                answer = await confirm_prompt_async(prompt_str)
-                if not answer:
-                    answer = actions[0] if actions else "ok"
-                action = answer if answer in actions else actions[0]
-                text = answer if answer not in actions else ""
-                await bus.respond(request.request_id, action, text)
+                widget_request = AttentionWidgetRequest(
+                    request_id=request.request_id,
+                    agent_name=request.agent_name,
+                    message=request.message,
+                    priority=getattr(request.priority, "value", "normal"),
+                    actions=request.actions,
+                    context=request.context,
+                )
+                result = await confirm_attention(widget_request)
+                await bus.respond(request.request_id, result.action, result.text)
 
             async def _cli_output_handler(output: AgentOutput) -> None:
                 """Render agent output streamed via the bus."""
@@ -197,6 +317,65 @@ class REPLContext:
             {"path": path, "original": original, "modified": modified}
         )
 
+    def _get_skill_loader(self) -> LazySkillLoader:
+        """Get or create the lazy slash-skill loader."""
+        if self._lazy_skill_loader is None:
+            self._lazy_skill_loader = LazySkillLoader(resolve_obscura_skills_dir())
+        return self._lazy_skill_loader
+
+    def discover_slash_skills(self) -> list[SkillMetadata]:
+        """Discover slash skills (metadata-only)."""
+        return self._get_skill_loader().discover_skills()
+
+    def _resolve_skill_name(self, raw_name: str) -> str | None:
+        """Resolve a skill name by exact/case-insensitive match."""
+        needle = raw_name.strip()
+        if not needle:
+            return None
+        skills = self.discover_slash_skills()
+        for skill in skills:
+            if skill.name == needle:
+                return skill.name
+        lowered = needle.lower()
+        for skill in skills:
+            if skill.name.lower() == lowered:
+                return skill.name
+        return None
+
+    def activate_skill(self, raw_name: str) -> tuple[bool, str]:
+        """Activate a skill, lazily loading body into cache."""
+        resolved = self._resolve_skill_name(raw_name)
+        if resolved is None:
+            return False, f"Skill not found: {raw_name}"
+        body = self._get_skill_loader().load_skill_body(resolved)
+        if not body:
+            return False, f"Failed to load skill body: {resolved}"
+        if resolved not in self.active_skills:
+            self.active_skills.append(resolved)
+        return True, resolved
+
+    def deactivate_skill(self, raw_name: str) -> tuple[bool, str]:
+        """Deactivate a skill by name."""
+        resolved = self._resolve_skill_name(raw_name) or raw_name.strip()
+        if resolved not in self.active_skills:
+            return False, f"Skill not active: {raw_name}"
+        self.active_skills = [s for s in self.active_skills if s != resolved]
+        return True, resolved
+
+    def build_active_skill_context(self) -> str:
+        """Build injected context from active slash skills."""
+        if not self.active_skills:
+            return ""
+        loader = self._get_skill_loader()
+        blocks: list[str] = []
+        for name in self.active_skills:
+            body = loader.load_skill_body(name)
+            if body:
+                blocks.append(f"## Skill: {name}\n\n{body}")
+        if not blocks:
+            return ""
+        return "## Active Slash Skills\n\n" + "\n\n".join(blocks)
+
 
 # ---------------------------------------------------------------------------
 # Command type
@@ -238,6 +417,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "",
         " [bold]Agents[/]",
         "  [cyan]/agent[/] [cmd]         spawn | list | stop | run",
+        "  [cyan]/skill[/] [cmd]         list | load | unload | active | clear",
         "  [cyan]/fleet[/] [cmd]         spawn | status | run | delegate | stop",
         "  [cyan]/attention[/] [cmd]     List or respond to agent attention requests",
         "  [cyan]/tail-trace[/] [n]    Tail recent trace entries",
@@ -245,6 +425,9 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         " [bold]Session[/]",
         "  [cyan]/session[/] [cmd]       list | new | <id>",
         "  [cyan]/discover[/] [cat] [n]  Discover popular MCP tools",
+        "",
+        " [bold]Workspace[/]",
+        "  [cyan]/init[/] [--force]      Init local .obscura/ workspace",
         "",
         " [bold]Control[/]",
         "  [cyan]/heartbeat[/]           Session health check (no LLM)",
@@ -605,19 +788,58 @@ async def _diff_apply(ctx: REPLContext) -> str | None:
 
 async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
     """Show context window stats."""
-    if not ctx.message_history:
-        print_info("No messages yet.")
-        return None
-    total_text = "".join(t for _, t in ctx.message_history)
-    tokens = _estimate_tokens(total_text)
+    breakdown = estimate_effective_context_breakdown(ctx)
+    tokens = breakdown["total_tokens"]
     user_msgs = sum(1 for r, _ in ctx.message_history if r == "user")
     asst_msgs = sum(1 for r, _ in ctx.message_history if r == "assistant")
     console.print(f"Messages: {user_msgs} user, {asst_msgs} assistant")
-    console.print(f"Estimated tokens: {tokens:,}")
+    console.print(f"Estimated tokens: {tokens:,} (full request estimate)")
+    console.print(
+        "  "
+        f"system={breakdown['system_tokens']:,} "
+        f"history={breakdown['history_tokens']:,} "
+        f"tools={breakdown['tool_schema_tokens']:,}"
+    )
+    if breakdown["claude_tool_listing_tokens"]:
+        console.print(
+            f"  claude_tool_listing={breakdown['claude_tool_listing_tokens']:,}"
+        )
+    console.print(f"  response_reserve={breakdown['response_reserve_tokens']:,}")
     mm = ctx.get_mode_manager()
     console.print(f"Mode: {mm.current.value}")
     if tokens > 80_000:
         console.print("[yellow]Warning: context is large. Consider /compact[/]")
+    return None
+
+
+async def cmd_thinking(_args: str, _ctx: REPLContext) -> str | None:
+    """Show expanded thinking/reasoning blocks from the last response."""
+    from obscura.cli.render import _active_renderer, console, THINKING_COLOR
+    from rich.panel import Panel
+    from rich.text import Text
+
+    renderer = _active_renderer
+    if renderer is None:
+        console.print("[dim]No thinking blocks available.[/]")
+        return None
+
+    blocks = renderer.get_thinking_blocks()
+    if not blocks:
+        console.print("[dim]No thinking blocks in this session.[/]")
+        return None
+
+    for i, block in enumerate(blocks, 1):
+        console.print(
+            Panel(
+                Text(block, style="dim italic"),
+                title=f"[{THINKING_COLOR}]reasoning #{i}[/]",
+                title_align="left",
+                border_style="dim magenta",
+                expand=False,
+                padding=(0, 1),
+            )
+        )
+    console.print(f"[dim]{len(blocks)} thinking block(s)[/]")
     return None
 
 
@@ -633,7 +855,7 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
         return None
 
     old = ctx.message_history[:-keep]
-    before = _estimate_tokens("".join(t for _, t in ctx.message_history))
+    before = estimate_effective_context_tokens(ctx)
 
     # Build brief summary of dropped messages
     summary_lines: list[str] = []
@@ -654,10 +876,10 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     )
     await ctx.recreate_client(ctx.backend, ctx.model)
 
-    after = _estimate_tokens("".join(t for _, t in ctx.message_history))
+    after = estimate_effective_context_tokens(ctx)
     print_ok(
         f"Compacted: dropped {dropped} messages, "
-        f"~{before - after:,} tokens freed. New session: {ctx.session_id[:12]}"
+        f"~{max(0, before - after):,} effective tokens freed. New session: {ctx.session_id[:12]}"
     )
     return None
 
@@ -668,28 +890,16 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_session(args: str, ctx: REPLContext) -> str | None:
-    """Session management: list, new, or resume by ID."""
-    sub = args.strip()
+    """Session management: list, new, switch, or resume by ID.
 
-    if sub == "list" or not sub:
-        sessions = await ctx.store.list_sessions()
-        if not sessions:
-            print_info("No sessions.")
-            return None
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("Session", style="cyan")
-        table.add_column("Status", style="yellow")
-        table.add_column("Agent", style="green")
-        table.add_column("Created", style="dim")
-        for s in sessions[:20]:
-            table.add_row(
-                s.id[:12],
-                s.status.value,
-                s.active_agent,
-                s.created_at.strftime("%Y-%m-%d %H:%M"),
-            )
-        console.print(table)
-        return None
+    Usage:
+        /session            — list sessions + interactive switch
+        /session list       — list sessions (no interactive picker)
+        /session switch     — interactive session picker
+        /session new        — start a new session
+        /session <id>       — switch to session by ID (prefix match)
+    """
+    sub = args.strip()
 
     if sub == "new":
         new_id = uuid.uuid4().hex
@@ -697,19 +907,254 @@ async def cmd_session(args: str, ctx: REPLContext) -> str | None:
         print_ok(f"New session: {new_id}")
         return None
 
-    # Resume by ID
-    existing = await ctx.store.get_session(sub)
-    if existing is None:
-        print_error(f"Session {sub} not found.")
+    # Fetch all sessions
+    sessions = await ctx.store.list_sessions()
+
+    # --- list / default: show table ---
+    if sub in ("list", "switch", ""):
+        if not sessions:
+            print_info("No sessions.")
+            return None
+
+        _session_print_table(sessions, ctx.session_id)
+
+        # Interactive picker for bare /session or /session switch
+        if sub != "list":
+            await _session_interactive_switch(sessions, ctx)
+
         return None
-    ctx.session_id = sub
-    try:
-        await ctx.client.resume_session(
-            SessionRef(session_id=sub, backend=Backend(ctx.backend))
+
+    # --- Resume by ID (prefix match) ---
+    await _session_switch_by_id(sub, sessions, ctx)
+    return None
+
+
+def _session_print_table(
+    sessions: list[Any],
+    current_id: str,
+) -> None:
+    """Print sessions table split into active vs completed."""
+    active_statuses = {
+        SessionStatus.RUNNING,
+        SessionStatus.WAITING_FOR_TOOL,
+        SessionStatus.WAITING_FOR_USER,
+    }
+    active = [s for s in sessions if s.status in active_statuses]
+    other = [s for s in sessions if s.status not in active_statuses]
+
+    def _build_table(
+        rows: list[Any],
+        title: str,
+        header_style: str = "bold",
+    ) -> Table:
+        tbl = Table(
+            show_header=True,
+            header_style=header_style,
+            title=title,
         )
+        tbl.add_column("", width=2)  # current indicator
+        tbl.add_column("Session", style="cyan", no_wrap=True)
+        tbl.add_column("Status", style="yellow")
+        tbl.add_column("Backend", style="dim")
+        tbl.add_column("Model", style="dim")
+        tbl.add_column("Agent", style="green")
+        tbl.add_column("Msgs", style="dim", justify="right")
+        tbl.add_column("Created", style="dim")
+        for s in rows[:20]:
+            indicator = "[bold cyan]\u2192[/]" if s.id == current_id else ""
+            tbl.add_row(
+                indicator,
+                s.id[:12],
+                s.status.value,
+                s.backend or "-",
+                s.model or "-",
+                s.active_agent or "-",
+                str(s.message_count) if s.message_count else "-",
+                s.created_at.strftime("%Y-%m-%d %H:%M"),
+            )
+        return tbl
+
+    if active:
+        console.print(_build_table(active, f"Active ({len(active)})"))
+    if other:
+        style = "bold dim" if active else "bold"
+        console.print(
+            _build_table(other[:10], f"Completed ({len(other)})", style)
+        )
+
+
+async def _session_interactive_switch(
+    sessions: list[Any],
+    ctx: REPLContext,
+) -> None:
+    """Present interactive picker and switch to the selected session."""
+    # Build choices: other sessions (not current)
+    switchable = [s for s in sessions if s.id != ctx.session_id]
+    if not switchable:
+        print_info("No other sessions to switch to.")
+        return
+
+    choices: list[str] = []
+    session_map: dict[str, Any] = {}
+    for s in switchable[:15]:
+        label = (
+            f"{s.id[:8]} · {s.status.value}"
+            f" · {s.active_agent or s.backend or 'default'}"
+        )
+        choices.append(label)
+        session_map[label] = s
+
+    choices.append("cancel")
+
+    try:
+        from obscura.cli.widgets import (
+            AttentionWidgetRequest,
+            confirm_attention,
+        )
+
+        result = await confirm_attention(
+            AttentionWidgetRequest(
+                request_id="session_switch",
+                agent_name="system",
+                message="Switch to session:",
+                actions=tuple(choices),
+            ),
+        )
+        if result.action == "cancel":
+            return
+
+        selected = session_map.get(result.action)
+        if selected is not None:
+            await _do_session_switch(selected.id, ctx)
     except Exception:
-        pass  # best-effort resume
-    print_ok(f"Resumed session: {sub}")
+        pass
+
+
+async def _session_switch_by_id(
+    partial_id: str,
+    sessions: list[Any],
+    ctx: REPLContext,
+) -> None:
+    """Switch to a session by exact or prefix match."""
+    # Try exact match first
+    existing = await ctx.store.get_session(partial_id)
+    if existing is not None:
+        await _do_session_switch(partial_id, ctx)
+        return
+
+    # Try prefix match
+    matches = [s for s in sessions if s.id.startswith(partial_id)]
+    if len(matches) == 1:
+        await _do_session_switch(matches[0].id, ctx)
+        return
+
+    if len(matches) > 1:
+        print_warning(
+            f"Ambiguous prefix '{partial_id}' — matches "
+            f"{len(matches)} sessions. Be more specific."
+        )
+        for m in matches[:5]:
+            console.print(f"  [cyan]{m.id[:12]}[/] · {m.status.value}")
+        return
+
+    print_error(f"Session '{partial_id}' not found.")
+
+
+async def _do_session_switch(session_id: str, ctx: REPLContext) -> None:
+    """Switch to a different session.
+
+    We intentionally skip ``resume_session`` — calling it with an ID from
+    a previous process can crash the backend subprocess (e.g. Copilot SDK
+    exits with code 1, killing the message reader).  Instead we just
+    update the session_id and reset the backend to a fresh conversation
+    state.  The event store still has the full history for the session.
+    """
+    old_id = ctx.session_id
+    ctx.session_id = session_id
+
+    try:
+        await ctx.client.reset_session()
+        print_ok(f"Switched to session: {session_id[:12]}")
+    except Exception:
+        # reset_session failed — backend might be dead; full recreate
+        try:
+            await ctx.recreate_client(ctx.backend, ctx.model)
+            print_ok(f"Switched to session: {session_id[:12]} (reconnected)")
+        except Exception as exc:
+            # Can't recover — revert
+            ctx.session_id = old_id
+            print_error(f"Failed to switch session: {exc}")
+            return
+
+
+# ---------------------------------------------------------------------------
+# Handlers — skills
+# ---------------------------------------------------------------------------
+
+
+async def cmd_skill(args: str, ctx: REPLContext) -> str | None:
+    """Slash-skill management: list, load, unload, active, clear."""
+    parts = args.strip().split()
+    sub = parts[0].lower() if parts else "list"
+    rest = parts[1:]
+
+    if sub == "list":
+        skills = ctx.discover_slash_skills()
+        if not skills:
+            print_info("No skills found in .obscura/skills.")
+            return None
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Skill", style="cyan")
+        table.add_column("Active", style="green")
+        table.add_column("Invocable", style="yellow")
+        table.add_column("Description")
+        for skill in skills:
+            table.add_row(
+                skill.name,
+                "yes" if skill.name in ctx.active_skills else "",
+                "yes" if skill.user_invocable else "no",
+                skill.description or "",
+            )
+        console.print(table)
+        return None
+
+    if sub == "active":
+        if not ctx.active_skills:
+            print_info("No active slash skills.")
+            return None
+        print_info("Active skills: " + ", ".join(ctx.active_skills))
+        return None
+
+    if sub == "load":
+        if not rest:
+            print_error("Usage: /skill load <name> [name...]")
+            return None
+        for name in rest:
+            ok, result = ctx.activate_skill(name)
+            if ok:
+                print_ok(f"Loaded skill: {result}")
+            else:
+                print_error(result)
+        return None
+
+    if sub in {"unload", "remove", "rm"}:
+        if not rest:
+            print_error("Usage: /skill unload <name> [name...]")
+            return None
+        for name in rest:
+            ok, result = ctx.deactivate_skill(name)
+            if ok:
+                print_ok(f"Unloaded skill: {result}")
+            else:
+                print_error(result)
+        return None
+
+    if sub == "clear":
+        ctx.active_skills = []
+        print_ok("Cleared active slash skills.")
+        return None
+
+    print_info("Usage: /skill [list|load|unload|active|clear]")
     return None
 
 
@@ -763,11 +1208,11 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # SECURITY FIX: Load manifest from ~/.obscura/agents.yaml
-    from pathlib import Path
     import yaml
+    from obscura.core.paths import resolve_obscura_home
     from obscura.manifest.models import AgentManifest
 
-    agents_yaml = Path.home() / ".obscura" / "agents.yaml"
+    agents_yaml = resolve_obscura_home() / "agents.yaml"
     manifest_loaded = False
 
     if agents_yaml.exists():
@@ -779,6 +1224,14 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                 if name in agent_configs:
                     cfg = agent_configs[name]
 
+                    # Daemon agents are auto-started, not manually spawned
+                    if cfg.get("type") == "daemon":
+                        print_warning(
+                            f"'{name}' is a daemon agent (auto-started at session start). "
+                            "Use /agent list to see running daemons."
+                        )
+                        return None
+
                     # Build AgentManifest from YAML config
                     # Extract skills config dict if present
                     skills_cfg = cfg.get("skills", {})
@@ -787,17 +1240,22 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
 
                     manifest = AgentManifest(
                         name=cfg["name"],
-                        model=model_override or cfg.get("model", ctx.backend),
+                        provider=model_override
+                        or cfg.get("provider")
+                        or cfg.get("model", ctx.backend),
                         system_prompt=system_prompt_override or cfg.get("system_prompt", ""),
                         max_turns=cfg.get("max_turns", 10),
                         tools=cfg.get("tools", []),
                         tags=cfg.get("tags", []),
-                        mcp_servers=cfg.get("mcp_servers", "auto"),
+                        mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
                         skills_config=skills_cfg,
                     )
 
-                    # Spawn from manifest (SECURE)
-                    agent = runtime.spawn_from_manifest(manifest)
+                    # Spawn from manifest (SECURE) — pass explicit model override if given
+                    agent = runtime.spawn_from_manifest(
+                        manifest,
+                        provider_override=model_override,
+                    )
                     await agent.start()
                     print_ok(
                         f"✓ Spawned {name} from manifest (id: {agent.id[:12]}, "
@@ -888,6 +1346,185 @@ async def _agent_run(args: str, ctx: REPLContext) -> str | None:
         print_error(str(exc))
     return None
 
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Delegation -- spawn a one-shot subagent on a different backend
+# ---------------------------------------------------------------------------
+
+_DELEGATE_ROUTES: dict[str, str] = {
+    "review": "claude",
+    "analysis": "claude",
+    "summarize": "copilot",
+    "codegen": "openai",
+    "testgen": "openai",
+    "support": "copilot",
+}
+
+
+def _delegate_continuation_prompt(
+    original_prompt: str,
+    last_output: str,
+    done_if: str,
+    attempt: int,
+    max_passes: int,
+) -> str:
+    """Build a follow-up prompt when delegate completion criteria is unmet."""
+    return (
+        "Continue working on this task.\n"
+        f"Attempt {attempt} of {max_passes} did not satisfy completion criteria.\n"
+        f"Completion criteria: {done_if}\n\n"
+        "Original task:\n"
+        f"{original_prompt}\n\n"
+        "Your previous output:\n"
+        f"{last_output}\n\n"
+        "Return an updated final answer that satisfies the criteria."
+    )
+
+
+async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
+    """Spawn a one-shot subagent on a different backend.
+
+    Usage: /delegate [--mode once|loop] [--max-turns N] [--passes N] [--done-if TEXT]
+                     <task_type|--model MODEL> <prompt>
+    Routes: review/analysis->claude  summarize/support->copilot  codegen/testgen->openai
+    """
+    tokens = shlex.split(args) if args else []
+    if not tokens:
+        print_info(
+            "Usage: /delegate [--mode once|loop] [--max-turns N] [--passes N] "
+            "[--done-if TEXT] <task_type|--model MODEL> <prompt>"
+        )
+        return None
+    model: str | None = None
+    task_type = ""
+    mode = "loop"
+    max_turns: int | None = None
+    max_passes = 1
+    passes_explicit = False
+    done_if = ""
+    prompt_tokens: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "--model" and i + 1 < len(tokens):
+            model = tokens[i + 1]
+            i += 2
+        elif tokens[i] == "--mode" and i + 1 < len(tokens):
+            mode = tokens[i + 1].strip().lower()
+            if mode not in ("once", "loop"):
+                print_error("Invalid --mode. Use once or loop.")
+                return None
+            i += 2
+        elif tokens[i] == "--max-turns" and i + 1 < len(tokens):
+            try:
+                max_turns = int(tokens[i + 1])
+                if max_turns <= 0:
+                    raise ValueError
+            except ValueError:
+                print_error("--max-turns must be a positive integer.")
+                return None
+            i += 2
+        elif tokens[i] == "--passes" and i + 1 < len(tokens):
+            try:
+                max_passes = int(tokens[i + 1])
+                if max_passes <= 0:
+                    raise ValueError
+            except ValueError:
+                print_error("--passes must be a positive integer.")
+                return None
+            passes_explicit = True
+            i += 2
+        elif tokens[i] == "--done-if" and i + 1 < len(tokens):
+            done_if = tokens[i + 1].strip()
+            i += 2
+        elif not task_type and not model and i == 0:
+            task_type = tokens[i]
+            i += 1
+        else:
+            prompt_tokens = tokens[i:]
+            break
+    if not prompt_tokens:
+        print_error("No prompt provided.")
+        return None
+    if mode == "once" and done_if:
+        print_error("--done-if requires --mode loop.")
+        return None
+    if done_if and not passes_explicit and max_passes == 1:
+        max_passes = 5
+    prompt = " ".join(prompt_tokens)
+    if model is None:
+        model = _DELEGATE_ROUTES.get(task_type.strip().lower(), ctx.backend)
+    agent_name = "delegate-" + (task_type or model) + "-" + uuid.uuid4().hex[:6]
+    runtime = await ctx.get_runtime()
+    agent = runtime.spawn(
+        agent_name, model=model,
+        system_prompt="You are a specialized " + (task_type or model) + " subagent. Complete the task concisely.",
+    )
+    await agent.start()
+    print_info("=> Delegating to [" + model + "] in " + mode + " mode...")
+    from obscura.cli.render import render_event
+    collected_output: list[str] = []
+    try:
+        if mode == "once":
+            result = await agent.run(prompt)
+            result_text = str(result)
+            collected_output.append(result_text)
+            if result_text:
+                console.print(result_text)
+                console.print()
+        else:
+            loop_prompt = prompt
+            for attempt in range(1, max_passes + 1):
+                output_lines: list[str] = []
+                async for event in agent.stream_loop(loop_prompt, max_turns=max_turns):
+                    render_event(event)
+                    if hasattr(event, "text") and event.text:
+                        output_lines.append(event.text)
+                console.print()
+
+                pass_output = "".join(output_lines)
+                if pass_output:
+                    collected_output.append(pass_output)
+                if not done_if:
+                    break
+                if done_if.casefold() in pass_output.casefold():
+                    print_ok("Delegate output matched completion criteria.")
+                    break
+                if attempt >= max_passes:
+                    print_warning(
+                        "Delegate did not meet completion criteria within "
+                        + str(max_passes)
+                        + " passes."
+                    )
+                    break
+                print_info("Completion criteria unmet; continuing delegate pass...")
+                loop_prompt = _delegate_continuation_prompt(
+                    original_prompt=prompt,
+                    last_output=pass_output,
+                    done_if=done_if,
+                    attempt=attempt,
+                    max_passes=max_passes,
+                )
+    except Exception as exc:
+        print_error("Delegation failed: " + str(exc))
+        return None
+    finally:
+        try:
+            await agent.stop()
+        except Exception:
+            pass
+    if collected_output and ctx.client and hasattr(ctx.client, "inject_context"):
+        summary = "\n".join(collected_output)
+        ctx.client.inject_context("[Delegated to " + model + "]\n" + summary)
+        print_ok("Injected " + str(len(summary)) + " chars into context")
+    return None
 
 # ---------------------------------------------------------------------------
 # Handlers — interaction bus (attention requests)
@@ -998,36 +1635,39 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
         from pathlib import Path as P
         import yaml
         from obscura.manifest.models import AgentManifest
-        
+
         agents_yaml = P.home() / ".obscura" / "agents.yaml"
         manifest_loaded = False
-        
+
         if agents_yaml.exists():
             try:
                 with open(agents_yaml) as f:
                     config = yaml.safe_load(f)
                     agent_configs = {a["name"]: a for a in config.get("agents", [])}
-                    
-                    if name in agent_configs:
+
+                    if name in agent_configs and agent_configs[name].get("enabled", True):
                         cfg = agent_configs[name]
                         s_cfg = cfg.get("skills", {})
                         if not isinstance(s_cfg, dict):
                             s_cfg = {}
                         manifest = AgentManifest(
                             name=cfg["name"],
-                            model=model or cfg.get("model", ctx.backend),
+                            provider=model or cfg.get("provider") or cfg.get("model", ctx.backend),
                             system_prompt=cfg.get("system_prompt", ""),
                             max_turns=cfg.get("max_turns", 10),
                             tools=cfg.get("tools", []),
                             tags=cfg.get("tags", []),
-                            mcp_servers=cfg.get("mcp_servers", "auto"),
+                            mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
                             skills_config=s_cfg,
                         )
-                        agent = runtime.spawn_from_manifest(manifest)
+                        agent = runtime.spawn_from_manifest(
+                            manifest,
+                            provider_override=model if model != ctx.backend else None,
+                        )
                         manifest_loaded = True
             except Exception:
                 pass
-        
+
         if not manifest_loaded:
             agent = runtime.spawn(name, model=model)
         await agent.start()
@@ -1099,12 +1739,70 @@ async def _fleet_run(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
-    """Send prompt to specific agent. Usage: /fleet delegate <agent> <prompt>"""
-    parts = args.strip().split(None, 1)
-    if len(parts) < 2:
-        print_error("Usage: /fleet delegate <agent> <prompt>")
+    """Send prompt to specific agent.
+
+    Usage: /fleet delegate <agent> [--mode once|loop] [--max-turns N]
+                                [--passes N] [--done-if TEXT] <prompt>
+    """
+    tokens = shlex.split(args) if args else []
+    if len(tokens) < 2:
+        print_error(
+            "Usage: /fleet delegate <agent> [--mode once|loop] "
+            "[--max-turns N] [--passes N] [--done-if TEXT] <prompt>"
+        )
         return None
-    target, prompt = parts
+    target = tokens[0]
+    mode = "loop"
+    max_turns: int | None = None
+    max_passes = 1
+    passes_explicit = False
+    done_if = ""
+    prompt_tokens: list[str] = []
+    i = 1
+    while i < len(tokens):
+        if tokens[i] == "--mode" and i + 1 < len(tokens):
+            mode = tokens[i + 1].strip().lower()
+            if mode not in ("once", "loop"):
+                print_error("Invalid --mode. Use once or loop.")
+                return None
+            i += 2
+        elif tokens[i] == "--max-turns" and i + 1 < len(tokens):
+            try:
+                max_turns = int(tokens[i + 1])
+                if max_turns <= 0:
+                    raise ValueError
+            except ValueError:
+                print_error("--max-turns must be a positive integer.")
+                return None
+            i += 2
+        elif tokens[i] == "--passes" and i + 1 < len(tokens):
+            try:
+                max_passes = int(tokens[i + 1])
+                if max_passes <= 0:
+                    raise ValueError
+            except ValueError:
+                print_error("--passes must be a positive integer.")
+                return None
+            passes_explicit = True
+            i += 2
+        elif tokens[i] == "--done-if" and i + 1 < len(tokens):
+            done_if = tokens[i + 1].strip()
+            i += 2
+        else:
+            prompt_tokens = tokens[i:]
+            break
+    if not prompt_tokens:
+        print_error(
+            "Usage: /fleet delegate <agent> [--mode once|loop] "
+            "[--max-turns N] [--passes N] [--done-if TEXT] <prompt>"
+        )
+        return None
+    if mode == "once" and done_if:
+        print_error("--done-if requires --mode loop.")
+        return None
+    if done_if and not passes_explicit and max_passes == 1:
+        max_passes = 5
+    prompt = " ".join(prompt_tokens)
     runtime = await ctx.get_runtime()
     agent = runtime.get_agent(target)
     if agent is None:
@@ -1118,8 +1816,39 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
 
     renderer = LabeledStreamRenderer(agent.config.name, "cyan")
     try:
-        async for event in agent.stream_loop(prompt):
-            renderer.handle(event)
+        if mode == "once":
+            result = await agent.run(prompt)
+            if result:
+                console.print(str(result))
+        else:
+            loop_prompt = prompt
+            for attempt in range(1, max_passes + 1):
+                output_lines: list[str] = []
+                async for event in agent.stream_loop(loop_prompt, max_turns=max_turns):
+                    renderer.handle(event)
+                    if hasattr(event, "text") and event.text:
+                        output_lines.append(event.text)
+                pass_output = "".join(output_lines)
+                if not done_if:
+                    break
+                if done_if.casefold() in pass_output.casefold():
+                    print_ok("Delegate output matched completion criteria.")
+                    break
+                if attempt >= max_passes:
+                    print_warning(
+                        "Delegate did not meet completion criteria within "
+                        + str(max_passes)
+                        + " passes."
+                    )
+                    break
+                print_info("Completion criteria unmet; continuing delegate pass...")
+                loop_prompt = _delegate_continuation_prompt(
+                    original_prompt=prompt,
+                    last_output=pass_output,
+                    done_if=done_if,
+                    attempt=attempt,
+                    max_passes=max_passes,
+                )
     except KeyboardInterrupt:
         renderer.finish()
         console.print("[dim][interrupted][/]")
@@ -1154,6 +1883,494 @@ async def _fleet_stop(args: str, ctx: REPLContext) -> str | None:
         for a in matches:
             await a.stop()
             print_ok(f"Stopped {a.config.name} ({a.id[:12]})")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Handlers — swarm (autonomous multi-agent)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _SwarmAssignment:
+    """A single agent assignment from the swarm planning step."""
+    agent_name: str
+    prompt: str
+    rationale: str
+
+
+# Keyword → agent mapping for fast (no-LLM) planning
+_SWARM_KEYWORD_MAP: list[tuple[list[str], str, str]] = [
+    # (keywords, agent_name, rationale)
+    (["code", "implement", "write", "function", "class", "module", "refactor", "feature"],
+     "code-architect", "Code implementation task"),
+    (["python", "pip", "pytest", "type hint", "pep", "dataclass", "pydantic"],
+     "python-dev", "Python-specific task"),
+    (["test", "unit test", "coverage", "assert", "mock", "fixture"],
+     "python-dev", "Testing task"),
+    (["bug", "fix", "error", "crash", "traceback", "debug", "breakpoint"],
+     "debugger", "Debugging task"),
+    (["review", "pr", "pull request", "code review", "lint"],
+     "github-pr-reviewer", "Code review task"),
+    (["security", "vuln", "cve", "auth", "xss", "injection", "pentest"],
+     "security-researcher", "Security analysis task"),
+    (["deploy", "docker", "k8s", "ci", "cd", "pipeline", "infra", "terraform"],
+     "devops-engineer", "Infrastructure/DevOps task"),
+    (["research", "analyze", "investigate", "compare", "benchmark"],
+     "research-analyst", "Research/analysis task"),
+    (["doc", "readme", "api doc", "changelog", "tutorial"],
+     "technical-writer", "Documentation task"),
+    (["design", "ux", "ui", "wireframe", "mockup", "layout"],
+     "ux-designer", "Design task"),
+    (["data", "ml", "model", "dataset", "train", "predict", "pandas"],
+     "data-scientist", "Data science task"),
+    (["prompt", "system prompt", "instruct"],
+     "prompt-engineer", "Prompt engineering task"),
+    (["product", "prd", "roadmap", "prioritize", "stakeholder"],
+     "product-manager", "Product management task"),
+    (["content", "blog", "copy", "seo", "marketing"],
+     "content-writer", "Content creation task"),
+]
+
+
+def _swarm_plan_fast(
+    task: str,
+    agent_configs: dict[str, dict[str, Any]],
+) -> list[_SwarmAssignment]:
+    """Fast keyword-based planning — no LLM call needed."""
+    task_lower = task.lower()
+    matched: dict[str, _SwarmAssignment] = {}
+
+    for keywords, agent_name, rationale in _SWARM_KEYWORD_MAP:
+        if agent_name not in agent_configs:
+            continue
+        for kw in keywords:
+            if kw in task_lower and agent_name not in matched:
+                matched[agent_name] = _SwarmAssignment(
+                    agent_name=agent_name,
+                    prompt=task,
+                    rationale=rationale,
+                )
+                break
+
+    if not matched:
+        # Default: use assistant if available, else first non-daemon agent
+        fallback = "assistant"
+        if fallback not in agent_configs:
+            for name, cfg in agent_configs.items():
+                if cfg.get("type", "loop") != "daemon":
+                    fallback = name
+                    break
+        matched[fallback] = _SwarmAssignment(
+            agent_name=fallback,
+            prompt=task,
+            rationale="General-purpose fallback",
+        )
+
+    return list(matched.values())
+
+
+_SWARM_PLAN_PROMPT = """\
+You are a task decomposition planner for a multi-agent system.
+
+Available specialist agents:
+{agent_catalog}
+
+Task from the user:
+{task}
+
+Decompose this task into subtasks. For each subtask, assign exactly one agent \
+from the list above. Pick the best-fit agent for each subtask based on its \
+specialization. You may assign the same agent type to multiple subtasks if \
+appropriate. Use between 1 and 6 agents total.
+
+Respond with ONLY valid JSON — no markdown fences, no commentary. Format:
+
+[
+  {{"agent_name": "<name from list>", "prompt": "<specific prompt for this agent>", "rationale": "<one sentence why>"}}
+]
+"""
+
+_SWARM_SYNTH_PROMPT = """\
+You were given this task: {task}
+
+Multiple specialist agents worked on subtasks in parallel. Here are their results:
+
+{agent_results}
+
+Synthesize these results into a single coherent response. Combine insights, \
+resolve any contradictions, and produce a unified answer. Be concise.
+"""
+
+
+async def _swarm_plan_smart(
+    task: str,
+    agent_configs: dict[str, dict[str, Any]],
+    ctx: REPLContext,
+) -> list[_SwarmAssignment]:
+    """LLM-based planning — slower but smarter decomposition."""
+    from obscura.tools.swarm import build_agent_catalog
+
+    catalog = build_agent_catalog(agent_configs)
+    prompt = _SWARM_PLAN_PROMPT.format(agent_catalog=catalog, task=task)
+
+    message = await ctx.client.send(prompt)
+    raw = message.text.strip()
+
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines)
+
+    items = json.loads(raw)
+    if not isinstance(items, list):
+        raise ValueError("Expected JSON array from planner")
+
+    assignments: list[_SwarmAssignment] = []
+    for item in items:
+        name = item.get("agent_name", "assistant")
+        if name not in agent_configs:
+            if "assistant" in agent_configs:
+                name = "assistant"
+        assignments.append(_SwarmAssignment(
+            agent_name=name,
+            prompt=item.get("prompt", task),
+            rationale=item.get("rationale", ""),
+        ))
+    return assignments
+
+
+async def _swarm_run_agent(
+    assignment: _SwarmAssignment,
+    runtime: Any,
+    agent_configs: dict[str, dict[str, Any]],
+    model_override: str | None,
+    ctx: REPLContext,
+) -> tuple[str, str]:
+    """Spawn, loop, and stop a single swarm agent. Returns (name, output)."""
+    from obscura.manifest.models import AgentManifest
+
+    name = assignment.agent_name
+    agent = None
+
+    try:
+        cfg = agent_configs.get(name)
+        if cfg is not None:
+            s_cfg = cfg.get("skills", {})
+            if not isinstance(s_cfg, dict):
+                s_cfg = {}
+            manifest = AgentManifest(
+                name=cfg["name"],
+                provider=model_override or cfg.get("provider") or cfg.get("model", ctx.backend),
+                system_prompt=cfg.get("system_prompt", ""),
+                max_turns=cfg.get("max_turns", 25),
+                tools=cfg.get("tools", []),
+                tags=cfg.get("tags", []),
+                mcp_servers=(
+                    cfg.get("mcp_servers", [])
+                    if isinstance(cfg.get("mcp_servers"), list)
+                    else []
+                ),
+                skills_config=s_cfg,
+            )
+            agent = runtime.spawn_from_manifest(manifest)
+        else:
+            agent = runtime.spawn(
+                name,
+                model=model_override or ctx.backend,
+                system_prompt=f"You are a {name} specialist. Complete the task thoroughly.",
+            )
+
+        await agent.start()
+        print_info(f"  {name} ({agent.id[:12]}) started")
+
+        # Run full agentic loop
+        output_lines: list[str] = []
+        async for event in agent.stream_loop(assignment.prompt):
+            if hasattr(event, "text") and event.text:
+                output_lines.append(event.text)
+
+        result_text = "".join(output_lines)
+        print_ok(f"  {name} finished ({len(result_text)} chars)")
+        return (name, result_text)
+
+    except Exception as exc:
+        error_msg = f"Error: {exc}"
+        print_error(f"  {name}: {error_msg}")
+        return (name, error_msg)
+
+    finally:
+        if agent is not None:
+            try:
+                await agent.stop()
+            except Exception:
+                pass
+
+
+async def _swarm_synthesize(
+    task: str,
+    results: list[tuple[str, str]],
+    ctx: REPLContext,
+) -> str:
+    """Synthesize agent results using the session LLM."""
+    agent_results = "\n\n".join(
+        f"### {name}\n{output}" for name, output in results
+    )
+    prompt = _SWARM_SYNTH_PROMPT.format(task=task, agent_results=agent_results)
+    try:
+        message = await ctx.client.send(prompt)
+        return message.text
+    except Exception:
+        return agent_results
+
+
+async def _swarm_background(
+    swarm_id: str,
+    task: str,
+    assignments: list[_SwarmAssignment],
+    runtime: Any,
+    agent_configs: dict[str, dict[str, Any]],
+    model_override: str | None,
+    synthesize: bool,
+    ctx: REPLContext,
+) -> None:
+    """Background coroutine that runs all swarm agents and collects results."""
+    import asyncio as _aio
+
+    run = ctx._swarm_runs[swarm_id]
+    run["status"] = "running"
+
+    coros = [
+        _swarm_run_agent(
+            assignment=assignment,
+            runtime=runtime,
+            agent_configs=agent_configs,
+            model_override=model_override,
+            ctx=ctx,
+        )
+        for assignment in assignments
+    ]
+
+    try:
+        results: list[tuple[str, str]] = await _aio.gather(*coros)
+        run["results"] = results
+
+        # Synthesize
+        if synthesize and len(results) > 1:
+            summary = await _swarm_synthesize(task, results, ctx)
+        else:
+            summary = "\n\n".join(
+                f"## {name}\n{output}" for name, output in results
+            )
+
+        run["summary"] = summary
+        run["status"] = "done"
+
+        # Inject into context
+        if summary and ctx.client and hasattr(ctx.client, "inject_context"):
+            ctx.client.inject_context(
+                f"[Swarm results for: {task[:80]}]\n{summary}"
+            )
+
+        # Notify user
+        print_ok(f"Swarm [{swarm_id}] complete — /swarm status to see results")
+
+    except Exception as exc:
+        run["status"] = "failed"
+        run["error"] = str(exc)
+        print_error(f"Swarm [{swarm_id}] failed: {exc}")
+
+
+async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
+    """Autonomous multi-agent swarm — runs in background.
+
+    Usage:
+      /swarm [--model MODEL] [--no-synth] [--smart] <task description>
+      /swarm status              Show all swarm runs
+      /swarm results [id]        Show results of a swarm run
+      /swarm stop [id|all]       Cancel running swarm(s)
+    """
+    import asyncio as _aio
+
+    from obscura.tools.swarm import load_agent_configs
+
+    tokens = shlex.split(args) if args else []
+    if not tokens:
+        print_info(
+            "Usage:\n"
+            "  /swarm <task>            Launch a swarm\n"
+            "  /swarm status            Show swarm runs\n"
+            "  /swarm results [id]      Show results\n"
+            "  /swarm stop [id|all]     Cancel swarm(s)\n"
+            "\n"
+            "Flags: --model MODEL  --no-synth  --smart"
+        )
+        return None
+
+    sub = tokens[0]
+
+    # --- /swarm status ---
+    if sub == "status":
+        if not ctx._swarm_runs:
+            print_info("No swarm runs.")
+            return None
+        table = Table(show_header=True, header_style="bold", title="Swarm Runs")
+        table.add_column("ID", style="cyan", width=10)
+        table.add_column("Task", style="dim", max_width=40)
+        table.add_column("Agents", style="yellow", width=8)
+        table.add_column("Status", style="green")
+        for sid, run in ctx._swarm_runs.items():
+            agent_names = ", ".join(a.agent_name for a in run["assignments"])
+            status = run["status"]
+            if status == "running":
+                # Count finished
+                results = run.get("results", [])
+                status = f"running ({len(results)}/{len(run['assignments'])})"
+            table.add_row(sid, run["task"][:40], agent_names, status)
+        console.print(table)
+        return None
+
+    # --- /swarm results [id] ---
+    if sub == "results":
+        from rich.markdown import Markdown
+        from rich.rule import Rule
+
+        target = tokens[1] if len(tokens) > 1 else None
+        runs = ctx._swarm_runs
+        if target:
+            matches = {k: v for k, v in runs.items() if k.startswith(target)}
+        else:
+            # Show latest
+            matches = dict(list(runs.items())[-1:]) if runs else {}
+        if not matches:
+            print_info("No matching swarm run.")
+            return None
+        colors = ["cyan", "magenta", "yellow", "green", "blue", "red"]
+        for sid, run in matches.items():
+            console.print(Rule(f"[bold]Swarm {sid}[/] — {run['status']}", style="bold"))
+            if run.get("summary"):
+                console.print(Markdown(run["summary"]))
+            elif run.get("results"):
+                for idx, (name, output) in enumerate(run["results"]):
+                    color = colors[idx % len(colors)]
+                    console.print(Rule(f"[bold {color}]{name}[/]", style=color))
+                    if output.strip():
+                        console.print(Markdown(output))
+                    console.print()
+            elif run.get("error"):
+                print_error(run["error"])
+            else:
+                print_info("Still running...")
+            console.print()
+        return None
+
+    # --- /swarm stop [id|all] ---
+    if sub == "stop":
+        target = tokens[1] if len(tokens) > 1 else "all"
+        for sid, run in list(ctx._swarm_runs.items()):
+            if target == "all" or sid.startswith(target):
+                task_obj = run.get("_task")
+                if task_obj and not task_obj.done():
+                    task_obj.cancel()
+                    run["status"] = "cancelled"
+                    print_ok(f"Cancelled swarm {sid}")
+        return None
+
+    # --- /swarm <task> — launch new swarm ---
+    model_override: str | None = None
+    synthesize = True
+    smart_plan = False
+    task_tokens: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "--model" and i + 1 < len(tokens):
+            model_override = tokens[i + 1]
+            i += 2
+        elif tokens[i] == "--no-synth":
+            synthesize = False
+            i += 1
+        elif tokens[i] == "--smart":
+            smart_plan = True
+            i += 1
+        else:
+            task_tokens = tokens[i:]
+            break
+
+    if not task_tokens:
+        print_error("No task description provided.")
+        return None
+
+    task = " ".join(task_tokens)
+
+    # Load agent catalog
+    agent_configs = load_agent_configs()
+    if not agent_configs:
+        print_error("No agents found in ~/.obscura/agents.yaml")
+        return None
+
+    # Plan decomposition
+    try:
+        if smart_plan:
+            print_info("Planning swarm decomposition (LLM)...")
+            assignments = await _swarm_plan_smart(task, agent_configs, ctx)
+        else:
+            assignments = _swarm_plan_fast(task, agent_configs)
+    except Exception as exc:
+        print_error(f"Swarm planning failed: {exc}")
+        return None
+
+    if not assignments:
+        print_error("Planner returned no assignments.")
+        return None
+
+    # Display plan
+    console.print()
+    table = Table(show_header=True, header_style="bold", title="Swarm Plan")
+    table.add_column("#", style="yellow", width=4)
+    table.add_column("Agent", style="cyan", width=20)
+    table.add_column("Rationale", style="dim")
+    for idx, a in enumerate(assignments, 1):
+        table.add_row(str(idx), a.agent_name, a.rationale)
+    console.print(table)
+    console.print()
+
+    # Launch in background
+    runtime = await ctx.get_runtime()
+    swarm_id = uuid.uuid4().hex[:6]
+
+    run_state: dict[str, Any] = {
+        "task": task,
+        "assignments": assignments,
+        "status": "starting",
+        "results": [],
+        "summary": None,
+        "error": None,
+        "_task": None,
+    }
+    ctx._swarm_runs[swarm_id] = run_state
+
+    bg_task = _aio.create_task(
+        _swarm_background(
+            swarm_id=swarm_id,
+            task=task,
+            assignments=assignments,
+            runtime=runtime,
+            agent_configs=agent_configs,
+            model_override=model_override,
+            synthesize=synthesize,
+            ctx=ctx,
+        )
+    )
+    run_state["_task"] = bg_task
+
+    print_ok(
+        f"Swarm [{swarm_id}] launched with {len(assignments)} agents — "
+        "prompt is free. Use /swarm status or /swarm results to check."
+    )
     return None
 
 
@@ -1273,11 +2490,11 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
     try:
         async with A2AClient(url.strip()) as client:
             card = await client.discover()
-            
+
             table = Table(title=f"Agent: {card.name}", show_header=True)
             table.add_column("Property", style="cyan", no_wrap=True)
             table.add_column("Value", style="green")
-            
+
             table.add_row("Name", card.name)
             table.add_row("URL", card.url)
             table.add_row("Description", card.description or "—")
@@ -1286,14 +2503,14 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
             table.add_row("Skills", str(len(card.skills)))
             table.add_row("Streaming", "✓" if card.capabilities.streaming else "✗")
             table.add_row("Push Notifications", "✓" if card.capabilities.pushNotifications else "✗")
-            
+
             console.print(table)
-            
+
             if card.skills:
                 print_info(f"\n{len(card.skills)} Skills:")
                 for skill in card.skills:
                     console.print(f"  • [bold]{skill.name}[/bold]: {skill.description}")
-                    
+
     except Exception as exc:
         print_error(f"Discovery failed: {exc}")
     return None
@@ -1307,7 +2524,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
         return None
 
     url, message = parts
-    
+
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
@@ -1318,9 +2535,9 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
         async with A2AClient(url) as client:
             print_info(f"Sending message to {url}...")
             task = await client.send_message(message, blocking=True)
-            
+
             print_ok(f"Task {task.id} completed ({task.status.state.value})")
-            
+
             # Display response
             if task.history:
                 for msg in task.history:
@@ -1329,7 +2546,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
                         for part in msg.parts:
                             if hasattr(part, 'text'):
                                 console.print(part.text)
-                                
+
     except Exception as exc:
         print_error(f"Send failed: {exc}")
     return None
@@ -1343,7 +2560,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
         return None
 
     url, message = parts
-    
+
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
@@ -1358,7 +2575,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
                     console.print(f"[dim]Status: {event.status.state.value}[/dim]")
                 elif event.kind == "artifact-update":
                     console.print(f"[green]Artifact: {event.artifact.name or 'unnamed'}[/green]")
-                    
+
     except Exception as exc:
         print_error(f"Stream failed: {exc}")
     return None
@@ -1369,7 +2586,7 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
     if not url:
         print_error("Usage: /a2a list <url>")
         return None
-    
+
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
@@ -1379,27 +2596,27 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
     try:
         async with A2AClient(url.strip()) as client:
             tasks, next_cursor = await client.list_tasks(limit=20)
-            
+
             if not tasks:
                 print_info("No tasks found")
                 return None
-                
+
             table = Table(title=f"Tasks on {url}", show_header=True)
             table.add_column("Task ID", style="cyan", no_wrap=True)
             table.add_column("State", style="yellow")
             table.add_column("Messages", style="magenta")
-            
+
             for task in tasks:
                 table.add_row(
                     task.id[:12] + "...",
                     task.status.state.value,
                     str(len(task.history))
                 )
-            
+
             console.print(table)
             if next_cursor:
                 print_info(f"More tasks available (cursor: {next_cursor[:12]}...)")
-                
+
     except Exception as exc:
         print_error(f"List failed: {exc}")
     return None
@@ -1460,15 +2677,428 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
 
     elif subcmd == "clear":
         try:
-            from obscura.cli.vector_memory_bridge import CLI_NAMESPACE
+            from obscura.cli.vector_memory_bridge import (
+                CLI_NAMESPACE,
+                clear_mcp_noise_memories,
+            )
 
-            count = ctx.vector_store.clear_namespace(CLI_NAMESPACE)
-            print_ok(f"Cleared {count} auto-saved memories from CLI namespace.")
+            scope = rest.strip().lower()
+            if scope in {"mcp", "mcp-logs", "mcp_logs"}:
+                count = clear_mcp_noise_memories(ctx.vector_store)
+                print_ok(
+                    f"Cleared {count} MCP-related auto-saved memories from CLI namespace."
+                )
+            else:
+                count = ctx.vector_store.clear_namespace(CLI_NAMESPACE)
+                print_ok(f"Cleared {count} auto-saved memories from CLI namespace.")
         except Exception as exc:
             print_error(f"Clear failed: {exc}")
 
     else:
-        print_info("Usage: /memory [stats|search <query>|clear]")
+        print_info("Usage: /memory [stats|search <query>|clear [mcp]]")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Workspace init
+# ---------------------------------------------------------------------------
+
+
+async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
+    """Initialise a local .obscura/ workspace in the current directory."""
+    from obscura.core.workspace import WorkspaceExistsError, init_workspace
+
+    force = "--force" in args
+    try:
+        ws = init_workspace(force=force)
+        print_ok(f"Workspace initialised at {ws}")
+    except WorkspaceExistsError:
+        print_warning(
+            ".obscura/ already exists. Use /init --force to reinitialise."
+        )
+    except Exception as exc:
+        print_error(f"Init failed: {exc}")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# /running — unified dashboard of active processes
+# ---------------------------------------------------------------------------
+
+
+def _event_color(kind: str) -> str:
+    """Return a Rich color string for an event kind."""
+    _map: dict[str, str] = {
+        "text_delta": "white",
+        "thinking_delta": "dim italic",
+        "tool_call": "cyan",
+        "tool_result": "green",
+        "error": "bold red",
+        "turn_start": "yellow",
+        "turn_complete": "bold yellow",
+        "context_compact": "magenta",
+    }
+    return _map.get(kind.lower(), "dim")
+
+
+async def _running_detail(
+    agent: Any,
+    ctx: REPLContext,
+) -> None:
+    """Show mini-log detail view for a single agent."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.text import Text
+
+    state = agent.get_state()
+    parts: list[object] = []
+
+    # ── Header: agent state snapshot ──
+    s_c = "green" if state.status.name == "RUNNING" else "yellow"
+    parts.append(Text.from_markup(
+        f"[bold {s_c}]{state.status.name}[/]"
+        f"  ·  iters: {state.iteration_count}"
+        f"  ·  id: {agent.id[:12]}",
+    ))
+    if state.error_message:
+        parts.append(Text.from_markup(
+            f"[bold red]Error:[/] {state.error_message}",
+        ))
+
+    # ── Current thinking delta / active text ──
+    try:
+        from obscura.cli.render import get_active_text
+
+        active_text = get_active_text()
+        if active_text:
+            preview = active_text[-500:]
+            if len(active_text) > 500:
+                preview = "…" + preview
+            parts.append(Text(""))
+            parts.append(Text.from_markup(
+                "[bold]Thinking delta:[/]",
+            ))
+            parts.append(Text(preview, style="dim italic"))
+    except Exception:
+        pass
+
+    # ── Recent trace events ──
+    try:
+        from obscura.cli.trace import tail_entries
+
+        entries = tail_entries(30)
+        if entries:
+            parts.append(Text(""))
+            parts.append(Text.from_markup(
+                "[bold]Recent activity:[/]",
+            ))
+            shown = 0
+            for e in reversed(entries):
+                if shown >= 15:
+                    break
+                kind = e.get("kind", "?")
+                preview = e.get("preview", "")
+                tools = e.get("tool_names", [])
+                ts_raw = e.get("ts", "")
+                ts_short = (
+                    ts_raw[11:19] if len(ts_raw) > 19 else ts_raw
+                )
+                tool_tag = ""
+                if tools:
+                    tool_tag = (
+                        f" [cyan]({', '.join(tools)})[/]"
+                    )
+                if len(preview) > 80:
+                    preview = preview[:77] + "..."
+                line = (
+                    f"  [dim]{ts_short}[/]"
+                    f" [{_event_color(kind)}]{kind}[/]"
+                    f"{tool_tag}"
+                )
+                if preview:
+                    line += f" [dim]{preview}[/]"
+                parts.append(Text.from_markup(line))
+                shown += 1
+    except Exception:
+        pass
+
+    # ── Recent session events from event store ──
+    try:
+        events = await ctx.store.get_events(ctx.session_id)
+        if events:
+            keep = {
+                "tool_call", "tool_result", "error",
+                "turn_start", "turn_complete",
+                "context_compact",
+            }
+            interesting = [
+                ev for ev in events if ev.kind.value in keep
+            ]
+            tail = interesting[-10:]
+            if tail:
+                parts.append(Text(""))
+                parts.append(Text.from_markup(
+                    "[bold]Session events:[/]",
+                ))
+                for ev in tail:
+                    ts = ev.timestamp.strftime("%H:%M:%S")
+                    payload = ev.payload
+                    detail = ""
+                    if ev.kind.value == "tool_call":
+                        detail = (
+                            "→ " + payload.get("tool_name", "?")
+                        )
+                    elif ev.kind.value == "tool_result":
+                        detail = str(
+                            payload.get("result", ""),
+                        )[:60]
+                    elif ev.kind.value == "error":
+                        detail = str(
+                            payload.get("message", ""),
+                        )[:60]
+                    c = _event_color(ev.kind.value)
+                    line = (
+                        f"  [dim]{ts}[/]"
+                        f" [{c}]{ev.kind.value}[/]"
+                    )
+                    if detail:
+                        line += f" [dim]{detail}[/]"
+                    parts.append(Text.from_markup(line))
+    except Exception:
+        pass
+
+    if not parts:
+        parts.append(Text("  No data available.", style="dim"))
+
+    panel = Panel(
+        Group(*parts),
+        title=f"Agent: {agent.config.name}",
+        border_style="cyan",
+        padding=(1, 2),
+    )
+    console.print(panel)
+
+
+async def cmd_running(args: str, ctx: REPLContext) -> str | None:
+    """Show running agents, daemons, and session activity."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from obscura.agent.agents import AgentStatus
+
+    target = args.strip()
+    lines: list[object] = []
+    has_activity = False
+    selectable: list[Any] = []
+
+    # ------------------------------------------------------------------
+    # 1. Current session
+    # ------------------------------------------------------------------
+    sid_short = (
+        ctx.session_id[:8] if ctx.session_id else "none"
+    )
+    session_rec = (
+        await ctx.store.get_session(ctx.session_id)
+        if ctx.session_id
+        else None
+    )
+    status_val = (
+        session_rec.status.value if session_rec else "active"
+    )
+    session_line = (
+        f"  [bold cyan]Session:[/] {sid_short}"
+        f" · {ctx.backend or 'default'}"
+        f" · {ctx.model or 'default'}"
+        f" · {status_val}"
+    )
+    console.print(Text.from_markup(session_line))
+
+    # ------------------------------------------------------------------
+    # 2. Agents from AgentRuntime
+    # ------------------------------------------------------------------
+    agents_list: list[Any] = []
+    if ctx._runtime is not None:
+        try:
+            agents_list = ctx._runtime.list_agents()
+        except Exception:
+            pass
+
+    active_set = {
+        AgentStatus.RUNNING,
+        AgentStatus.WAITING,
+        AgentStatus.PENDING,
+    }
+
+    if agents_list:
+        active = [
+            a for a in agents_list if a.status in active_set
+        ]
+        terminal = [
+            a for a in agents_list
+            if a.status not in active_set
+        ]
+        has_activity = has_activity or bool(active)
+        selectable.extend(agents_list)
+
+        if active:
+            tbl = Table(
+                show_header=True,
+                header_style="bold",
+                title=f"Agents ({len(active)} active)",
+            )
+            tbl.add_column("#", style="dim", width=3)
+            tbl.add_column("Name", style="green")
+            tbl.add_column("Status", style="yellow")
+            tbl.add_column(
+                "Iters", style="dim", justify="right",
+            )
+            tbl.add_column("ID", style="cyan")
+            for i, a in enumerate(active, 1):
+                state = a.get_state()
+                sc = (
+                    "bold green"
+                    if a.status == AgentStatus.RUNNING
+                    else "yellow"
+                )
+                tbl.add_row(
+                    str(i),
+                    a.config.name,
+                    f"[{sc}]{a.status.name}[/]",
+                    str(state.iteration_count),
+                    a.id[:8],
+                )
+            lines.append(tbl)
+
+        if terminal:
+            tbl_d = Table(
+                show_header=True,
+                header_style="bold dim",
+                title=f"Done ({len(terminal)})",
+            )
+            tbl_d.add_column("#", style="dim", width=3)
+            tbl_d.add_column("Name", style="dim green")
+            tbl_d.add_column("Status", style="dim yellow")
+            tbl_d.add_column(
+                "Iters", style="dim", justify="right",
+            )
+            tbl_d.add_column("ID", style="dim cyan")
+            off = len(active) if active else 0
+            for i, a in enumerate(terminal, off + 1):
+                state = a.get_state()
+                tbl_d.add_row(
+                    str(i),
+                    a.config.name,
+                    a.status.name,
+                    str(state.iteration_count),
+                    a.id[:8],
+                )
+            lines.append(tbl_d)
+    else:
+        lines.append(
+            Text("  No agents spawned.", style="dim"),
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Other running sessions
+    # ------------------------------------------------------------------
+    try:
+        all_sessions = await ctx.store.list_sessions()
+        s_active = {
+            SessionStatus.RUNNING,
+            SessionStatus.WAITING_FOR_TOOL,
+        }
+        other = [
+            s for s in all_sessions
+            if s.id != ctx.session_id
+            and s.status in s_active
+        ]
+        if other:
+            has_activity = True
+            stbl = Table(
+                show_header=True,
+                header_style="bold",
+                title=(
+                    f"Other Sessions ({len(other)} running)"
+                ),
+            )
+            stbl.add_column("Session", style="cyan")
+            stbl.add_column("Status", style="yellow")
+            stbl.add_column("Agent", style="green")
+            for s in other[:10]:
+                stbl.add_row(
+                    s.id[:12],
+                    s.status.value,
+                    s.active_agent or "-",
+                )
+            lines.append(stbl)
+    except Exception:
+        pass
+
+    # ------------------------------------------------------------------
+    # Assemble panel
+    # ------------------------------------------------------------------
+    panel_items = lines or [
+        Text("  Nothing running.", style="dim"),
+    ]
+    panel = Panel(
+        Group(*panel_items),
+        title="Running",
+        border_style="cyan",
+        padding=(1, 2),
+    )
+    console.print(panel)
+
+    # ------------------------------------------------------------------
+    # 4. Direct arg: /running <name|id>
+    # ------------------------------------------------------------------
+    if target and selectable:
+        match = [
+            a for a in selectable
+            if a.config.name == target
+            or a.id.startswith(target)
+        ]
+        if match:
+            await _running_detail(match[0], ctx)
+            return None
+        print_error(f"Agent not found: {target}")
+        return None
+
+    if not has_activity and not selectable:
+        print_info("No active agents or background sessions.")
+        return None
+
+    # ------------------------------------------------------------------
+    # 5. Interactive selection → detail view
+    # ------------------------------------------------------------------
+    if selectable:
+        choices = [
+            a.config.name for a in selectable
+        ] + ["back"]
+        try:
+            from obscura.cli.widgets import (
+                AttentionWidgetRequest,
+                confirm_attention,
+            )
+
+            result = await confirm_attention(
+                AttentionWidgetRequest(
+                    request_id="running_select",
+                    agent_name="system",
+                    message="Select agent to inspect:",
+                    actions=tuple(choices),
+                ),
+            )
+            if result.action != "back":
+                match = [
+                    a for a in selectable
+                    if a.config.name == result.action
+                ]
+                if match:
+                    await _running_detail(match[0], ctx)
+        except Exception:
+            pass
 
     return None
 
@@ -1497,10 +3127,14 @@ COMMANDS: dict[str, CommandHandler] = {
     # Review
     "diff": cmd_diff,
     "context": cmd_context,
+    "thinking": cmd_thinking,
     "compact": cmd_compact,
     # Agents
     "agent": cmd_agent,
+    "skill": cmd_skill,
+    "delegate": cmd_delegate,
     "fleet": cmd_fleet,
+    "swarm": cmd_swarm,
     "attention": cmd_attention,
     "tail-trace": cmd_tail_trace,
     # Session / discovery
@@ -1510,12 +3144,15 @@ COMMANDS: dict[str, CommandHandler] = {
     "a2a": cmd_a2a,
     # Memory
     "memory": cmd_memory,
+    # Workspace
+    "init": cmd_init,
     # Control
     "heartbeat": cmd_heartbeat,
     "hb": cmd_heartbeat,
     "status": cmd_status,
     "policies": cmd_policies,
     "replay": cmd_replay,
+    "running": cmd_running,
 }
 
 # Subcommand completions for readline tab-complete
@@ -1536,21 +3173,27 @@ COMPLETIONS: dict[str, list[str]] = {
     "reject": ["all"],
     "diff": ["accept", "reject", "apply"],
     "context": [],
+    "thinking": [],
     "compact": [],
     "agent": ["spawn", "list", "stop", "run"],
+    "skill": ["list", "load", "unload", "active", "clear"],
+    "delegate": ["codegen", "review", "analysis", "summarize", "testgen", "support", "--model"],
     "fleet": ["spawn", "status", "run", "delegate", "stop"],
+    "swarm": ["status", "results", "stop", "--model", "--no-synth", "--smart"],
     "attention": ["respond"],
-    "session": ["list", "new"],
+    "session": ["list", "new", "switch"],
     "discover": ["web", "filesystem", "git", "database", "ai", "cloud", "search"],
     "mcp": ["discover", "list", "select", "env", "install"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "tail-trace": [],
+    "init": ["--force"],
     "memory": ["stats", "search", "clear"],
     "heartbeat": ["--json"],
     "hb": ["--json"],
     "status": ["--json"],
     "policies": [],
     "replay": [],
+    "running": [],
 }
 
 

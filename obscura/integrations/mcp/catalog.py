@@ -11,6 +11,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+# Registry aliases for --registry flag
+REGISTRY_ALIASES: dict[str, str] = {
+    "mcp.so": "mcpso",
+    "mcpso": "mcpso",
+    "mcpservers": "mcpservers",
+    "mcpservers.org": "mcpservers",
+    "official": "official",
+    "registry.modelcontextprotocol.io": "official",
+}
+
 
 @dataclass(frozen=True)
 class MCPCatalogEntry:
@@ -28,6 +38,177 @@ class MCPCatalogProvider(Protocol):
     def fetch_top(self, limit: int = 500) -> list[MCPCatalogEntry]:
         """Fetch top N catalog entries."""
         ...
+
+
+class MCPSoCatalogProvider:
+    """Catalog provider backed by mcp.so (default registry).
+
+    Tries the JSON API first (/api/servers), falls back to HTML scraping.
+    Supports pagination via page parameter.
+    """
+
+    def __init__(
+        self,
+        base_url: str = "https://mcp.so",
+        timeout_seconds: float = 12.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    # ------------------------------------------------------------------
+    # JSON API path (Next.js / REST)
+    # ------------------------------------------------------------------
+
+    def _try_api(self, page: int, per_page: int) -> list[dict[str, Any]] | None:
+        """Try JSON API endpoints. Returns list of raw items or None."""
+        offset = (page - 1) * per_page
+        candidates = [
+            f"{self.base_url}/api/servers?page={page}&limit={per_page}",
+            f"{self.base_url}/api/servers?offset={offset}&limit={per_page}",
+            f"{self.base_url}/api/mcp/servers?page={page}&pageSize={per_page}",
+            f"{self.base_url}/api/plugins?page={page}&limit={per_page}",
+        ]
+        for url in candidates:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "obscura/1.0",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as r:
+                    ct = r.headers.get("content-type", "")
+                    if "json" not in ct:
+                        continue
+                    payload = json.loads(r.read().decode("utf-8", errors="replace"))
+                    if isinstance(payload, list):
+                        return cast(list[dict[str, Any]], payload)
+                    if isinstance(payload, dict):
+                        for key in ("servers", "data", "items", "results", "plugins"):
+                            val = payload.get(key)
+                            if isinstance(val, list):
+                                return cast(list[dict[str, Any]], val)
+            except Exception:
+                continue
+        return None
+
+    # ------------------------------------------------------------------
+    # HTML scrape fallback
+    # ------------------------------------------------------------------
+
+    def _fetch_html_page(self, page: int) -> str:
+        url = self.base_url if page <= 1 else f"{self.base_url}?page={page}"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0 obscura/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout_seconds) as r:
+            return r.read().decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _parse_html(html_text: str) -> list[tuple[str, str, str]]:
+        """Return (slug, name, url) tuples from mcp.so HTML."""
+        results: list[tuple[str, str, str]] = []
+        seen: set[str] = set()
+        _SKIP = frozenset(
+            {"all", "search", "browse", "category", "tags", "new", "top", "about"}
+        )
+        pattern = re.compile(
+            r'href="(?P<path>/(?:servers?|mcp)/(?P<slug>[^"/?#]+))"[^>]*>(?P<label>.*?)</a>',
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        for m in pattern.finditer(html_text):
+            slug = m.group("slug").strip("/")
+            path = m.group("path")
+            if not slug or slug in seen or len(slug) < 2 or slug in _SKIP:
+                continue
+            raw_label = m.group("label")
+            label = html.unescape(re.sub(r"<[^>]+>", "", raw_label)).strip()
+            if not label or len(label) < 2:
+                label = slug.replace("-", " ").title()
+            url = f"https://mcp.so{path}"
+            results.append((slug, label, url))
+            seen.add(slug)
+        return results
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def fetch_top(self, limit: int = 500, page: int = 1) -> list[MCPCatalogEntry]:
+        """Fetch up to *limit* entries starting from *page*."""
+        if limit <= 0:
+            return []
+
+        entries: list[MCPCatalogEntry] = []
+        per_page = min(limit, 50)
+        current_page = page
+
+        while len(entries) < limit:
+            raw_items = self._try_api(current_page, per_page)
+            if raw_items is not None:
+                if not raw_items:
+                    break
+                for item in raw_items:
+                    if not isinstance(item, dict):
+                        continue
+                    item_d = cast(dict[str, Any], item)
+                    slug = str(
+                        item_d.get("slug")
+                        or item_d.get("name")
+                        or item_d.get("id")
+                        or ""
+                    ).strip()
+                    if not slug:
+                        continue
+                    label = str(
+                        item_d.get("title")
+                        or item_d.get("displayName")
+                        or item_d.get("name")
+                        or slug
+                    ).strip()
+                    url = str(
+                        item_d.get("url")
+                        or item_d.get("homepage")
+                        or item_d.get("repository")
+                        or ""
+                    )
+                    if not url:
+                        url = f"{self.base_url}/servers/{slug}"
+                    entries.append(
+                        MCPCatalogEntry(
+                            name=label,
+                            slug=slug,
+                            url=url,
+                            rank=len(entries) + 1,
+                        )
+                    )
+                    if len(entries) >= limit:
+                        break
+            else:
+                # HTML fallback
+                try:
+                    page_html = self._fetch_html_page(current_page)
+                    parsed = self._parse_html(page_html)
+                    if not parsed:
+                        break
+                    for slug, label, url in parsed:
+                        entries.append(
+                            MCPCatalogEntry(
+                                name=label,
+                                slug=slug,
+                                url=url,
+                                rank=len(entries) + 1,
+                            )
+                        )
+                        if len(entries) >= limit:
+                            break
+                except Exception:
+                    break
+
+            current_page += 1
+
+        return entries[:limit]
 
 
 class MCPServersOrgCatalogProvider:
@@ -184,6 +365,21 @@ class MCPRegistryAPICatalogProvider:
             if not cursor:
                 break
         return entries
+
+
+def get_provider_for_registry(
+    registry: str,
+) -> MCPSoCatalogProvider | MCPServersOrgCatalogProvider | MCPRegistryAPICatalogProvider:
+    """Return the appropriate catalog provider for a registry name/alias/URL."""
+    alias = REGISTRY_ALIASES.get(registry.lower(), registry.lower())
+    if alias == "mcpso":
+        return MCPSoCatalogProvider()
+    if alias == "mcpservers":
+        return MCPServersOrgCatalogProvider()
+    if alias == "official":
+        return MCPRegistryAPICatalogProvider()
+    # Unknown — treat as custom base URL for MCPSoCatalogProvider
+    return MCPSoCatalogProvider(base_url=registry.rstrip("/"))
 
 
 def catalog_entries_to_mcp_servers(

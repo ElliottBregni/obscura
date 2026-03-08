@@ -486,6 +486,16 @@ class ObscuraClient:
 
     # -- Sessions ------------------------------------------------------------
 
+    async def reset_session(self) -> None:
+        """Create a fresh backend session, discarding conversation state.
+
+        Safe to call between independent prompts (e.g. daemon triggers)
+        to avoid stale session state in event-driven backends.
+        """
+        reset_fn = getattr(self._backend, "reset_session", None)
+        if callable(reset_fn):
+            await reset_fn()
+
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new persistent session."""
         return await self._backend.create_session(**kwargs)
@@ -610,6 +620,82 @@ class ObscuraClient:
     def circuit_registry(self) -> Any:
         """Access the circuit breaker registry (testing / admin)."""
         return self._circuit_registry
+
+    # -- Context window / token awareness ------------------------------------
+
+    @property
+    def context_window(self) -> int:
+        """Return context window size (tokens) for the active backend + model.
+
+        Provider-specific limits per backend (tokens):
+            claude   -> 200,000  (all current models)
+            openai   -> 128,000  (gpt-4 family); 16,385 for gpt-3.5-turbo
+            copilot  -> 128,000
+            codex    -> 128,000
+            *        -> 100,000  (safe unknown fallback)
+        """
+        _PROVIDER_DEFAULTS: dict[str, int] = {
+            "claude": 200_000,
+            "openai": 128_000,
+            "copilot": 128_000,
+            "codex": 128_000,
+        }
+        provider = self._backend_type.value
+        model_id = self._model or ""
+
+        # OpenAI gpt-3.5-turbo has a smaller window than the gpt-4 family
+        if provider == "openai" and "3.5" in model_id:
+            return 16_385
+
+        return _PROVIDER_DEFAULTS.get(provider, 100_000)
+
+    @property
+    def context_compact_threshold(self) -> int:
+        """Token count at which auto-compaction triggers (70% of context window)."""
+        return int(self.context_window * 0.70)
+
+    @property
+    def context_warn_threshold(self) -> int:
+        """Token count at which a soft warning is emitted (50% of context window)."""
+        return int(self.context_window * 0.50)
+
+    # -- Context window / token awareness ------------------------------------
+
+    @property
+    def context_window(self) -> int:
+        """Return context window size (tokens) for the active backend + model.
+
+        Provider-specific limits per backend (tokens):
+            claude   -> 200,000  (all current models)
+            openai   -> 128,000  (gpt-4 family); 16,385 for gpt-3.5-turbo
+            copilot  -> 128,000
+            codex    -> 128,000
+            *        -> 100,000  (safe unknown fallback)
+        """
+        _PROVIDER_DEFAULTS: dict[str, int] = {
+            "claude": 200_000,
+            "openai": 128_000,
+            "copilot": 128_000,
+            "codex": 128_000,
+        }
+        provider = self._backend_type.value
+        model_id = self._model or ""
+
+        # OpenAI gpt-3.5-turbo has a smaller window than the gpt-4 family
+        if provider == "openai" and "3.5" in model_id:
+            return 16_385
+
+        return _PROVIDER_DEFAULTS.get(provider, 100_000)
+
+    @property
+    def context_compact_threshold(self) -> int:
+        """Token count at which auto-compaction triggers (70% of context window)."""
+        return int(self.context_window * 0.70)
+
+    @property
+    def context_warn_threshold(self) -> int:
+        """Token count at which a soft warning is emitted (50% of context window)."""
+        return int(self.context_window * 0.50)
 
     # -- Context window / token awareness ------------------------------------
 

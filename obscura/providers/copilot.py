@@ -172,6 +172,16 @@ class CopilotBackend:
         session_config = self.build_session_config()
         self._session = await self._client.create_session(session_config)
 
+    async def reset_session(self) -> None:
+        """Create a fresh session, discarding prior conversation state.
+
+        Needed when the session's event state machine gets stuck after
+        a completed or timed-out stream() call.
+        """
+        self._ensure_client()
+        config = self.build_session_config()
+        self._session = await self._client.create_session(config)
+
     async def stop(self) -> None:
         """Gracefully shut down the client."""
         if self._client is not None:
@@ -440,6 +450,57 @@ class CopilotBackend:
                 "No active session. Call start() or create_session() first."
             )
 
+    def _convert_tools_to_copilot(self, tools: list[ToolSpec]) -> list[Any]:
+        """Convert Obscura ToolSpec objects to Copilot SDK Tool format.
+
+        The Copilot SDK expects ``copilot.types.Tool`` objects whose handler
+        matches ``Callable[[ToolInvocation], ToolResult | Awaitable[ToolResult]]``.
+        This method wraps each ``ToolSpec.handler`` so it accepts a
+        ``ToolInvocation`` dict and returns a ``ToolResult`` TypedDict.
+        """
+        from copilot.types import Tool, ToolInvocation, ToolResult  # type: ignore[import-untyped]
+
+        converted: list[Any] = []
+        for spec in tools:
+            _handler = spec.handler
+
+            def _wrapper_factory(handler: Callable[..., Any]) -> Callable[..., Any]:
+                async def wrapped(invocation: Any) -> dict[str, Any]:
+                    import inspect as _inspect
+
+                    try:
+                        raw_args: Any = invocation.get("arguments")
+                        args = cast(dict[str, Any], raw_args) if raw_args else {}
+                        result: Any = handler(**args)
+                        if _inspect.isawaitable(result):
+                            result = await result
+                        # Normalize to ToolResult
+                        if isinstance(result, dict) and "resultType" in result:
+                            return cast(dict[str, Any], result)
+                        text = str(result) if result is not None else ""  # pyright: ignore[reportUnknownArgumentType]
+                        return {
+                            "textResultForLlm": text,
+                            "resultType": "success",
+                        }
+                    except Exception as exc:
+                        return {
+                            "textResultForLlm": f"Tool error: {exc}",
+                            "resultType": "failure",
+                            "error": str(exc),
+                        }
+
+                return wrapped
+
+            converted.append(
+                Tool(
+                    name=spec.name,
+                    description=spec.description,
+                    handler=_wrapper_factory(_handler),
+                    parameters=spec.parameters if spec.parameters else None,
+                )
+            )
+        return converted
+
     def build_session_config(self, **overrides: Any) -> dict[str, Any]:
         """Build a SessionConfig dict for the Copilot SDK."""
         config: dict[str, Any] = {}
@@ -456,9 +517,13 @@ class CopilotBackend:
         if self._mcp_servers:
             config["mcp_servers"] = self._mcp_servers
         if self._tools:
-            config["tools"] = self._tools
-            # Apply tool policy to restrict native tools
-            self._tool_policy.apply_to_copilot(config, self._tools)
+            # Filter tools first via policy
+            filtered = self._tool_policy.filter_tools(self._tools)
+            # Convert to Copilot SDK Tool format
+            config["tools"] = self._convert_tools_to_copilot(filtered)
+            # When native tools are blocked, set an explicit allowlist
+            if not self._tool_policy.allow_native:
+                config["allowed_tools"] = [t.name for t in filtered]
 
         # Apply hook mappings
         hooks = self.build_hooks_config()

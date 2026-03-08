@@ -9,7 +9,7 @@ Multi-backend AI agent runtime with 53 tools, vector memory, multi-agent orchest
 ```bash
 git clone <repo-url>
 cd obscura
-uv pip install -e .
+uv sync
 ```
 
 ## CLI Usage

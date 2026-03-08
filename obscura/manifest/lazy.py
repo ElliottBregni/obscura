@@ -128,6 +128,8 @@ class LazyManifestProxy:
         """Resolve MCP server refs to runtime-ready configs."""
         configs: list[dict[str, Any]] = []
         for ref in self._manifest.mcp_servers:
+            if not hasattr(ref, "transport"):
+                continue  # skip non-MCPServerRef items
             config: dict[str, Any] = {
                 "transport": ref.transport,
                 "command": ref.command,
@@ -140,7 +142,10 @@ class LazyManifestProxy:
         return configs
 
     def _resolve_skills(self) -> list[SkillManifest]:
-        return list(self._manifest.skills)
+        skills = getattr(self._manifest, "skills", None)
+        if skills is None:
+            return []
+        return list(skills)
 
     def _resolve_instructions(self) -> list[InstructionManifest]:
         return list(self._manifest.instructions)

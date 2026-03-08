@@ -73,6 +73,8 @@ class TriggerDefinition:
     description: str = ""
     notify_user: bool = False
     priority: str = "normal"  # "low" | "normal" | "high" | "critical"
+    imessage: dict[str, Any] | None = None  # {"contacts": [...], "poll_interval": 30}
+    message: dict[str, Any] | None = None  # {"platform": "...", "contacts": [...], ...}
 
 
 @dataclass
@@ -127,7 +129,14 @@ class SupervisorConfig:
             return cls()
 
         agents: list[AgentDefinition] = []
+        import dataclasses as _dc
+        _trigger_fields = {f.name for f in _dc.fields(TriggerDefinition)}
         for m in manifests:
+            triggers: list[TriggerDefinition] = []
+            for raw_t in m.triggers:
+                if isinstance(raw_t, dict):
+                    filtered_t = {k: v for k, v in raw_t.items() if k in _trigger_fields}
+                    triggers.append(TriggerDefinition(**filtered_t))
             agents.append(AgentDefinition(
                 name=m.name,
                 type=m.agent_type,
@@ -135,6 +144,7 @@ class SupervisorConfig:
                 system_prompt=m.system_prompt,
                 max_turns=m.max_turns,
                 mcp_servers=m.mcp_servers,
+                triggers=triggers,
                 tags=list(m.tags),
                 can_delegate=m.can_delegate,
                 delegate_allowlist=list(m.delegate_allowlist),
@@ -164,12 +174,21 @@ class SupervisorConfig:
         with resolved.open() as f:
             raw: dict[str, Any] = yaml.safe_load(f) or {}
 
+        # Known fields for AgentDefinition / TriggerDefinition
+        import dataclasses as _dc
+        _agent_fields = {f.name for f in _dc.fields(AgentDefinition)}
+        _trigger_fields = {f.name for f in _dc.fields(TriggerDefinition)}
+
         agents: list[AgentDefinition] = []
         raw_agents: list[dict[str, Any]] = raw.get("agents", [])
         for entry in raw_agents:
             raw_triggers: list[dict[str, Any]] = entry.pop("triggers", [])
-            triggers = [TriggerDefinition(**t) for t in raw_triggers]
-            agents.append(AgentDefinition(**entry, triggers=triggers))
+            triggers = [
+                TriggerDefinition(**{k: v for k, v in t.items() if k in _trigger_fields})
+                for t in raw_triggers
+            ]
+            filtered = {k: v for k, v in entry.items() if k in _agent_fields}
+            agents.append(AgentDefinition(**filtered, triggers=triggers))
 
         return cls(agents=agents)
 
@@ -375,6 +394,8 @@ class AgentSupervisor:
     ) -> None:
         from obscura.agent.daemon_agent import (
             DaemonAgent,
+            IMessageTrigger,
+            MessageTrigger,
             ScheduleTrigger,
             Trigger,
         )
@@ -388,6 +409,38 @@ class AgentSupervisor:
                         cron=tdef.schedule,
                         prompt=tdef.prompt,
                         description=tdef.description,
+                        notify_user=tdef.notify_user,
+                        priority=priority,
+                    )
+                )
+            elif tdef.imessage is not None:
+                im_cfg = tdef.imessage
+                im_data = {
+                    k: v
+                    for k, v in im_cfg.items()
+                    if k not in {"contacts", "poll_interval"}
+                }
+                triggers.append(
+                    IMessageTrigger(
+                        contacts=tuple(im_cfg.get("contacts", [])),
+                        poll_interval=im_cfg.get("poll_interval", 30),
+                        prompt=tdef.prompt,
+                        description=tdef.description or "iMessage polling",
+                        notify_user=tdef.notify_user,
+                        priority=priority,
+                        data=im_data,
+                    )
+                )
+            elif tdef.message is not None:
+                msg_cfg = tdef.message
+                triggers.append(
+                    MessageTrigger(
+                        platform=str(msg_cfg.get("platform", "imessage")),
+                        contacts=tuple(msg_cfg.get("contacts", [])),
+                        account_id=str(msg_cfg.get("account_id", "default")),
+                        poll_interval=int(msg_cfg.get("poll_interval", 30)),
+                        prompt=tdef.prompt,
+                        description=tdef.description or "Message polling",
                         notify_user=tdef.notify_user,
                         priority=priority,
                     )

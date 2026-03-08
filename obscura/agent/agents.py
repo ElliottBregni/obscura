@@ -179,10 +179,15 @@ class AgentConfig(BaseModel):
 
         # Build MCP config from manifest refs
         mcp_configs = proxy.mcp_configs
-        mcp_enabled = bool(mcp_configs) or manifest.mcp_servers != "auto"
+        # Enable MCP if there are actual server configs resolved from the
+        # manifest, OR if the manifest explicitly listed server refs.
+        mcp_enabled = bool(mcp_configs) or bool(manifest.mcp_servers)
         server_names: list[str] = []
         if isinstance(manifest.mcp_servers, list):
-            server_names = list(manifest.mcp_servers)
+            server_names = [
+                str(s) for s in manifest.mcp_servers
+                if isinstance(s, str)
+            ]
 
         mcp = MCPConfig(
             enabled=mcp_enabled,
@@ -193,7 +198,12 @@ class AgentConfig(BaseModel):
         # Extract skills loading config (lazy_load, filter)
         skills_cfg = manifest.skills_config
         lazy_load = bool(skills_cfg.get("lazy_load", False))
-        skill_filter = skills_cfg.get("filter", None)
+        raw_filter = skills_cfg.get("filter", None)
+        skill_filter = (
+            [str(item) for item in raw_filter]
+            if isinstance(raw_filter, list)
+            else None
+        )
         
         return cls(
             name=manifest.name,
@@ -374,6 +384,9 @@ class Agent:
         self._client = ObscuraClient(
             self.config.model,
             system_prompt=self.config.system_prompt,
+            lazy_load_skills=self.config.lazy_load_skills,
+            skill_filter=self.config.skill_filter,
+            inject_claude_context=True,
             user=self.user,
         )
         try:
@@ -462,6 +475,25 @@ class Agent:
 
         await provider_registry.install_all(ToolProviderContext(agent=self))
         self._tool_provider_registry = provider_registry
+
+        # Register spawn_subagent tool so agents can create sub-agents
+        try:
+            from obscura.tools.swarm import (
+                SwarmToolContext,
+                load_agent_configs,
+                make_spawn_subagent_tool,
+            )
+
+            swarm_ctx = SwarmToolContext(
+                runtime=self.runtime,
+                parent_agent_id=self.id,
+                agent_configs=load_agent_configs(),
+                backend=self.config.provider,
+            )
+            swarm_tool = make_spawn_subagent_tool(swarm_ctx)
+            self._client.register_tool(swarm_tool)
+        except Exception as exc:
+            logger.debug("Could not register spawn_subagent tool: %s", exc)
 
         # Merge manifest hooks into the agent's client hook registry
         if self.manifest_proxy is not None:
@@ -936,6 +968,7 @@ class Agent:
                 monitor_url=monitor_url,
                 interval=interval,
                 tags=self.config.tags,
+                auth_token=getattr(self.user, "raw_token", None),
             )
             await self._heartbeat_client.start()
             logger.debug(f"Started heartbeat client for agent {self.id}")
@@ -1263,14 +1296,35 @@ class AgentRuntime:
 
         return agent
 
-    def spawn_from_manifest(self, manifest: AgentManifest) -> Agent:
+    def spawn_from_manifest(
+        self,
+        manifest: AgentManifest,
+        *,
+        provider_override: str | None = None,
+    ) -> Agent:
         """Spawn an agent from a manifest definition.
 
         Builds ``AgentConfig`` from the manifest, creates a
         :class:`LazyManifestProxy` for deferred resolution, and returns
         the agent instance (not started).
+
+        Args:
+            manifest: The agent manifest to build from.
+            provider_override: When set, overrides the provider declared in
+                the manifest.  Agents with ``provider: auto`` in their
+                manifest always resolve to this value (or ``"copilot"`` if
+                no override is supplied).
         """
         from obscura.manifest.lazy import LazyManifestProxy
+
+        # Resolve "auto" provider — inherit caller's backend, or use override
+        resolved_provider: str | None = provider_override
+        if manifest.provider == "auto":
+            resolved_provider = provider_override or "copilot"
+
+        # Apply override: mutate a copy of the manifest so from_manifest picks it up
+        if resolved_provider is not None and resolved_provider != manifest.provider:
+            manifest = manifest.model_copy(update={"provider": resolved_provider})
 
         proxy = LazyManifestProxy(manifest)
         config = AgentConfig.from_manifest(manifest)

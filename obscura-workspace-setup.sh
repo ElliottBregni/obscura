@@ -37,12 +37,12 @@ make_link "$GLOBAL" "claude-json"                "$HOME/.claude.json"
 make_link "$GLOBAL" "claude-desktop"             "$HOME/Library/Application Support/Claude"
 
 echo ""; echo "== global: Obscura core =="
-make_link "$GLOBAL" "obscura-settings"           "$HOME/.obscura/providers/.claude/settings.json"
-make_link "$GLOBAL" "obscura-settings-local"     "$HOME/.obscura/providers/.claude/settings.local.json"
-make_link "$GLOBAL" "obscura-history"            "$HOME/.obscura/providers/.claude/history.jsonl"
-make_link "$GLOBAL" "obscura-projects"           "$HOME/.obscura/providers/.claude/projects"
-make_link "$GLOBAL" "obscura-plans"              "$HOME/.obscura/providers/.claude/plans"
-make_link "$GLOBAL" "obscura-mcp-cache"          "$HOME/.obscura/providers/.claude/mcp-needs-auth-cache.json"
+make_link "$GLOBAL" "obscura-settings"           "$HOME/.obscura/.claude/settings.json"
+make_link "$GLOBAL" "obscura-settings-local"     "$HOME/.obscura/.claude/settings.local.json"
+make_link "$GLOBAL" "obscura-history"            "$HOME/.obscura/.claude/history.jsonl"
+make_link "$GLOBAL" "obscura-projects"           "$HOME/.obscura/.claude/projects"
+make_link "$GLOBAL" "obscura-plans"              "$HOME/.obscura/.claude/plans"
+make_link "$GLOBAL" "obscura-mcp-cache"          "$HOME/.obscura/.claude/mcp-needs-auth-cache.json"
 
 echo ""; echo "== global: Obscura store =="
 make_link "$GLOBAL" "agents"                     "$HOME/.obscura/agents"
@@ -101,9 +101,9 @@ make_link "$LOCAL"  "hooks-json"                 "$HOME/.obscura/hooks/hooks.jso
 make_link "$LOCAL"  "hooks-dir"                  "$HOME/.obscura/hooks"
 
 echo ""; echo "== local: setup =="
-make_link "$LOCAL"  "workspace-setup.sh"         "$HOME/dev/obscura/obscura-workspace-setup.sh"
-make_link "$LOCAL"  "workspace-migrate.sh"       "$HOME/dev/obscura/obscura-migrate.sh"
-make_link "$LOCAL"  "workspace-migrate-hooks.sh" "$HOME/dev/obscura/obscura-migrate-agents-hooks.sh"
+make_link "$LOCAL"  "workspace-setup.sh"         "$HOME/dev/obscura-main/obscura-workspace-setup.sh"
+make_link "$LOCAL"  "workspace-migrate.sh"       "$HOME/dev/obscura-main/obscura-migrate.sh"
+make_link "$LOCAL"  "workspace-migrate-hooks.sh" "$HOME/dev/obscura-main/obscura-migrate-agents-hooks.sh"
 
 # ── Summary ────────────────────────────────────────────────────────────────
 

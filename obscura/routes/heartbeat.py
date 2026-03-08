@@ -28,13 +28,13 @@ ws_router = APIRouter()
 
 async def _get_heartbeat_monitor(request: Request) -> Any:
     """Get or create the heartbeat monitor."""
-    monitor = getattr(request.app.state, "heartbeat_monitor", None)
+    monitor = getattr(request.app.state, "_heartbeat_monitor", None)
     if monitor is None:
         from obscura.heartbeat import get_default_monitor
 
         monitor = get_default_monitor()
         await monitor.start()
-        setattr(request.app.state, "heartbeat_monitor", monitor)
+        setattr(request.app.state, "_heartbeat_monitor", monitor)
     return monitor
 
 
@@ -153,13 +153,13 @@ async def health_websocket(websocket: WebSocket) -> None:
     ws_clients.append(websocket)
 
     try:
-        monitor = getattr(websocket.app.state, "heartbeat_monitor", None)
+        monitor = getattr(websocket.app.state, "_heartbeat_monitor", None)
         if monitor is None:
             from obscura.heartbeat import get_default_monitor
 
             monitor = get_default_monitor()
             await monitor.start()
-            setattr(websocket.app.state, "heartbeat_monitor", monitor)
+            setattr(websocket.app.state, "_heartbeat_monitor", monitor)
 
         summary: dict[str, Any] = await monitor.get_health_summary()
         await websocket.send_json(

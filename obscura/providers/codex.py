@@ -1,9 +1,9 @@
 """
 obscura.codex_backend -- BackendProtocol implementation for Python Codex SDK.
 
-This backend uses a Python Codex SDK module when installed:
-- ``codex_sdk`` (preferred)
-- ``openai_codex_sdk`` (fallback)
+This backend uses the official OpenAI Codex SDK module:
+- ``openai_codex_sdk``
+- ``openai_codex`` (legacy module name)
 """
 
 from __future__ import annotations
@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import os
 import shutil
+import sys
 import uuid
 from typing import Any, AsyncIterator, Callable
 
@@ -33,6 +35,7 @@ from obscura.core.types import (
     StreamMetadata,
     ToolSpec,
 )
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 
 class CodexBackend:
@@ -47,7 +50,7 @@ class CodexBackend:
         mcp_servers: list[dict[str, Any]] | None = None,
     ) -> None:
         self._auth = auth
-        self._model = model or "codex"
+        self._model = model or "gpt-5"
         self._system_prompt = system_prompt
         self._mcp_servers = mcp_servers or []
 
@@ -71,8 +74,8 @@ class CodexBackend:
         """List models available for Codex (minimal implementation)."""
         return [
             RegistryModelInfo(
-                id="gpt-4",
-                name="GPT-4 (Codex)",
+                id="gpt-5",
+                name="GPT-5 (Codex)",
                 provider="codex",
                 supports_tools=True,
                 supports_vision=False,
@@ -81,7 +84,7 @@ class CodexBackend:
 
     def get_default_model(self) -> str:
         """Return the default model for Codex."""
-        return "gpt-4"
+        return "gpt-5"
 
     def validate_model(self, model_id: str) -> bool:
         """Check if a model ID is valid for Codex."""
@@ -92,7 +95,7 @@ class CodexBackend:
         return NativeHandle(
             client=self._sdk_client,
             session=self._active_session,
-            meta={"provider": self._sdk_module_name or "python-codex-sdk", "model": self._model},
+            meta={"provider": self._sdk_module_name or "openai_codex_sdk", "model": self._model},
         )
 
     def capabilities(self) -> BackendCapabilities:
@@ -103,7 +106,7 @@ class CodexBackend:
             supports_usage=False,
             supports_remote_sessions=True,
             supports_native_mode=True,
-            native_features=("python_codex_sdk", "sdk_threads"),
+            native_features=("openai_codex_sdk", "sdk_threads"),
         )
 
     async def start(self) -> None:
@@ -126,6 +129,11 @@ class CodexBackend:
             run_kwargs["model"] = self._model
         if self._system_prompt:
             run_kwargs["system_prompt"] = self._system_prompt
+        # Preserve existing reasoning controls for GPT-family models.
+        if "reasoning_effort" in kwargs:
+            run_kwargs["reasoning_effort"] = kwargs["reasoning_effort"]
+        elif isinstance(self._model, str) and self._model.lower().startswith("gpt-"):
+            run_kwargs["reasoning_effort"] = "medium"
 
         turn = await self._run_thread(thread, prompt, run_kwargs)
         text = self._extract_turn_text(turn)
@@ -194,28 +202,36 @@ class CodexBackend:
             raise RuntimeError("CodexBackend not started. Call start() first.")
 
     def _import_sdk_class(self) -> tuple[type[Any], str]:
-        for mod_name in (
-            "python_codex_sdk",  # python-codex-sdk (spdcoding/yor-dev lineage)
-            "codex_sdk",  # codex-sdk-python style imports
-            "openai_codex_sdk",  # openai-codex-sdk style imports
-        ):
+        module_candidates = ("openai_codex_sdk", "openai_codex")
+        class_candidates = ("Codex", "CodexClient", "Client")
+        import_errors: list[str] = []
+
+        for mod_name in module_candidates:
             try:
                 mod = importlib.import_module(mod_name)
-            except ImportError:
+            except ImportError as exc:
+                import_errors.append(f"{mod_name}: {exc}")
                 continue
-            sdk_cls = getattr(mod, "Codex", None)
-            if sdk_cls is not None:
-                return sdk_cls, mod_name
+
+            for cls_name in class_candidates:
+                sdk_cls = getattr(mod, cls_name, None)
+                if inspect.isclass(sdk_cls):
+                    return sdk_cls, mod_name
+
+        py_exe = sys.executable
         raise RuntimeError(
-            "Codex Python SDK not found. Install one of: "
-            "`pip install python-codex-sdk`, "
-            "`pip install codex-sdk-python`, or "
-            "`pip install openai-codex-sdk`."
+            "Official OpenAI Codex SDK not found or invalid. Install with: "
+            f"`{py_exe} -m pip install openai-codex-sdk` "
+            "(or run via your project environment, e.g. `uv run obscura ...`). "
+            f"Tried modules: {', '.join(module_candidates)}. "
+            f"Import errors: {'; '.join(import_errors) or 'none'}."
         )
 
     def _build_sdk_client(self, sdk_cls: type[Any], module_name: str) -> Any:
         """Construct SDK client, forcing codex binary path when supported."""
-        codex_path = shutil.which("codex")
+        codex_path = os.environ.get("OBSCURA_CODEX_PATH", "").strip() or shutil.which(
+            "codex"
+        )
         try:
             mod = importlib.import_module(module_name)
             options_cls = getattr(mod, "CodexOptions", None)
@@ -235,6 +251,7 @@ class CodexBackend:
         return sdk_cls()
 
     def _resolve_thread(self) -> Any:
+        thread_options = self._make_thread_options()
         thread_id = (
             self._thread_by_session.get(self._active_session, "")
             if self._active_session
@@ -244,17 +261,73 @@ class CodexBackend:
             return self._thread_obj_by_id[thread_id]
 
         if thread_id and hasattr(self._sdk_client, "resume_thread"):
-            thread = self._sdk_client.resume_thread(thread_id)
+            if thread_options is not None:
+                thread = self._sdk_client.resume_thread(thread_id, thread_options)
+            else:
+                thread = self._sdk_client.resume_thread(thread_id)
             self._thread_obj_by_id[thread_id] = thread
             return thread
 
-        thread = self._sdk_client.start_thread()
+        if thread_options is not None:
+            thread = self._sdk_client.start_thread(thread_options)
+        else:
+            thread = self._sdk_client.start_thread()
         tid = self._extract_thread_id(thread, None)
         if tid:
             self._thread_obj_by_id[tid] = thread
             if self._active_session:
                 self._thread_by_session[self._active_session] = tid
         return thread
+
+    def _make_thread_options(self) -> Any | None:
+        """Create SDK thread options that force skip_git_repo_check when supported."""
+        # Both SDK variants can expose ThreadOptions off their module.
+        # Explicitly set skip_git_repo_check to avoid trusted-repo failures when
+        # working from untrusted directories.
+        mod_name = self._sdk_module_name
+        if not mod_name:
+            return None
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            return None
+
+        thread_opts_cls = getattr(mod, "ThreadOptions", None)
+        if thread_opts_cls is None:
+            return None
+
+        kwargs: dict[str, Any] = {}
+        accepted: set[str] | None = None
+
+        try:
+            sig = inspect.signature(thread_opts_cls)
+            accepted = set(sig.parameters)
+            accepts_var_kw = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+        except (TypeError, ValueError):
+            accepts_var_kw = True
+
+        if self._model:
+            kwargs["model"] = self._model
+
+        cwd = os.getcwd()
+        if cwd:
+            if accepts_var_kw or accepted is None or "working_directory" in accepted:
+                kwargs["working_directory"] = cwd
+            elif "workingDirectory" in accepted:
+                kwargs["workingDirectory"] = cwd
+
+        if accepts_var_kw or accepted is None or "skip_git_repo_check" in accepted:
+            kwargs["skip_git_repo_check"] = True
+        elif "skipGitRepoCheck" in accepted:
+            kwargs["skipGitRepoCheck"] = True
+
+        try:
+            return thread_opts_cls(**kwargs)
+        except Exception:
+            return None
 
     async def _run_thread(
         self,

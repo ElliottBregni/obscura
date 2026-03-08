@@ -117,6 +117,7 @@ class AgentManifest(BaseModel):
     agent_type: str = "loop"
     max_turns: int = 25
     tags: list[str] = Field(default_factory=_empty_str_list)
+    triggers: list[dict[str, Any]] = Field(default_factory=list)
 
     # Source tracking
     source_path: Path | None = None
@@ -167,7 +168,7 @@ def agent_manifest_from_frontmatter(
     _DIRECT_FIELDS = {
         "name", "description", "provider", "model_id", "tools", "tool_allowlist",
         "mcp_servers", "can_delegate", "delegate_allowlist",
-        "max_delegation_depth", "agent_type", "max_turns", "tags",
+        "max_delegation_depth", "agent_type", "max_turns", "tags", "triggers",
     }
     for field_name in _DIRECT_FIELDS:
         if field_name in normalised:

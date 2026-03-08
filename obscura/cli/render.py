@@ -167,16 +167,37 @@ if config.CAPTURE_PRINTS:
 
     builtins.print = _capturing_print
 
-# ---- Main console: COLOR ENABLED ----
-# Preserve the real stdout fd before prompt_toolkit's patch_stdout() can
-# replace sys.stdout with a StdoutProxy.  Rich resolves sys.stdout at
-# print-time, so without this the ANSI escapes get mangled through the proxy.
+# ---- Main console: routes through sys.stdout for patch_stdout compat ----
+# When prompt_toolkit's patch_stdout(raw=True) is active, sys.stdout is a
+# StdoutProxy that positions output above the prompt and redraws.  By writing
+# through sys.stdout (instead of a dup'd raw fd), Rich console output no
+# longer overwrites the prompt while the agent is streaming.
 import os as _os, sys as _sys
 
-_real_stdout_fd = _os.dup(_sys.stdout.fileno())
-_real_stdout = _os.fdopen(_real_stdout_fd, "w", closefd=False)
+_real_stdout_fd = _os.dup(_sys.stdout.fileno())  # keep for fileno() queries
 
-console = Console(file=_real_stdout, force_terminal=True, legacy_windows=False)
+
+class _DynamicStdout:
+    """File-like that delegates writes to the *current* ``sys.stdout``."""
+
+    @property
+    def encoding(self) -> str:
+        return getattr(_sys.stdout, "encoding", "utf-8")
+
+    def write(self, s: str) -> int:
+        return _sys.stdout.write(s)
+
+    def flush(self) -> None:
+        _sys.stdout.flush()
+
+    def fileno(self) -> int:
+        return _real_stdout_fd
+
+    def isatty(self) -> bool:
+        return True
+
+
+console = Console(file=_DynamicStdout(), force_terminal=True, legacy_windows=False)
 
 # Active renderer for expand-preview hotkey (set by send_message)
 _active_renderer: "StreamRenderer" | None = None
@@ -202,34 +223,35 @@ def get_active_text() -> str:
 class StreamRenderer:
     """Accumulates text deltas and renders as Markdown on flush.
 
-    Shows a visible spinner while the model is busy, syntax-highlights
-    code/JSON/TOML blocks, and renders all text as rich Markdown.
+    Status updates (thinking, running tool) go to a ``StreamingStatus``
+    object that drives the prompt_toolkit toolbar spinner — no Rich
+    ``console.status()`` / cursor manipulation that would conflict with
+    ``patch_stdout``.
     """
 
-    def __init__(self, external_status: object | None = None) -> None:
+    def __init__(self, streaming_status: object | None = None) -> None:
         self._text_buf: list[str] = []
         self._thinking_buf: list[str] = []
         self._all_text: list[str] = []
+        self._thinking_blocks: list[str] = []  # completed thinking blocks
         self._in_thinking = False
-        self._status: object | None = None
-        self._external_status: object | None = external_status
-        self._thinking_status: object | None = None  # visible busy spinner
+        # StreamingStatus from prompt.py (toolbar spinner)
+        self._ss: object | None = streaming_status
 
     def handle(self, event: AgentEvent) -> None:
         match event.kind:
             case AgentEventKind.TURN_START:
-                self._start_thinking_spinner()
+                self._start_thinking()
 
             case AgentEventKind.THINKING_DELTA:
                 if not self._in_thinking:
                     self._flush_text()
                     self._in_thinking = True
                 self._thinking_buf.append(event.text)
-                # Update spinner with live preview
-                self._update_thinking_preview(event.text)
+                self._update_thinking_preview()
 
             case AgentEventKind.TEXT_DELTA:
-                self._stop_thinking_spinner()
+                self._stop_status()
                 if self._in_thinking:
                     self._flush_thinking()
                 self._text_buf.append(event.text)
@@ -239,20 +261,20 @@ class StreamRenderer:
                     pass
 
             case AgentEventKind.TOOL_CALL:
-                self._stop_thinking_spinner()
+                self._stop_status()
                 self._flush_all()
                 self._show_tool_call(event)
 
             case AgentEventKind.TOOL_RESULT:
-                self._stop_spinner()
+                self._stop_status()
                 self._show_tool_result(event)
 
             case AgentEventKind.TURN_COMPLETE | AgentEventKind.AGENT_DONE:
-                self._stop_thinking_spinner()
+                self._stop_status()
                 self._flush_all()
 
             case AgentEventKind.ERROR:
-                self._stop_thinking_spinner()
+                self._stop_status()
                 self._flush_all()
                 print_error(event.text)
 
@@ -264,53 +286,28 @@ class StreamRenderer:
             case _:
                 pass
 
-    # -- thinking spinner ---------------------------------------------------
+    # -- toolbar status helpers ---------------------------------------------
 
-    def _start_thinking_spinner(self) -> None:
-        """Show a visible spinner while the model is working."""
-        if self._external_status is not None:
-            try:
-                self._external_status.update(  # type: ignore[attr-defined]
-                    f"[{THINKING_COLOR}]  thinking...[/]"
-                )
-            except Exception:
-                pass
+    def _start_thinking(self) -> None:
+        if self._ss is not None:
+            from obscura.cli.prompt import random_thinking_message
+            self._ss.active = True  # type: ignore[attr-defined]
+            self._ss.text = random_thinking_message()  # type: ignore[attr-defined]
+            self._ss.preview = ""  # type: ignore[attr-defined]
+
+    def _update_thinking_preview(self) -> None:
+        if self._ss is None:
             return
-        if self._thinking_status is None:
-            try:
-                self._thinking_status = console.status(
-                    f"[bold {THINKING_COLOR}]  thinking...[/]",
-                    spinner="dots",
-                    spinner_style=THINKING_COLOR,
-                )
-                self._thinking_status.start()  # type: ignore[union-attr]
-            except Exception:
-                self._thinking_status = None
-
-    def _update_thinking_preview(self, delta: str) -> None:
-        """Update the spinner label with a snippet of the model's thinking."""
         preview = "".join(self._thinking_buf).strip().replace("\n", " ")
         if len(preview) > 80:
             preview = "..." + preview[-77:]
-        label = f"[bold {THINKING_COLOR}]  thinking[/] [{THINKING_COLOR} dim]{markup_escape(preview)}[/]"
-        if self._external_status is not None:
-            try:
-                self._external_status.update(label)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        elif self._thinking_status is not None:
-            try:
-                self._thinking_status.update(label)  # type: ignore[union-attr]
-            except Exception:
-                pass
+        self._ss.preview = preview  # type: ignore[attr-defined]
 
-    def _stop_thinking_spinner(self) -> None:
-        if self._thinking_status is not None:
-            try:
-                self._thinking_status.stop()  # type: ignore[union-attr]
-            except Exception:
-                pass
-            self._thinking_status = None
+    def _stop_status(self) -> None:
+        if self._ss is not None:
+            self._ss.active = False  # type: ignore[attr-defined]
+            self._ss.text = ""  # type: ignore[attr-defined]
+            self._ss.preview = ""  # type: ignore[attr-defined]
 
     # -- flush helpers -------------------------------------------------------
 
@@ -319,21 +316,12 @@ class StreamRenderer:
             text = "".join(self._text_buf)
             self._text_buf.clear()
             if text.strip():
-                console.print()
+                console.print(Rule(style="dim cyan", characters="─"))
                 safe_text = _sanitize_text(text)
                 console.print(
                     Markdown(safe_text, code_theme=CODE_THEME),
                     soft_wrap=True,
                 )
-                if self._external_status is not None:
-                    try:
-                        ts = datetime.now().strftime("%H:%M:%S")
-                        preview = markup_escape(safe_text.strip().replace('\n', ' ')[:120])
-                        self._external_status.update(  # type: ignore[attr-defined]
-                            f"[{ACCENT_DIM}]  assistant [{ts}]: {preview}[/]"
-                        )
-                    except Exception:
-                        pass
 
     def _flush_thinking(self) -> None:
         if self._thinking_buf:
@@ -341,134 +329,71 @@ class StreamRenderer:
             self._thinking_buf.clear()
             self._in_thinking = False
             if text.strip():
-                if self._external_status is not None:
-                    try:
-                        ts = datetime.now().strftime("%H:%M:%S")
-                        preview = markup_escape(("[thinking] " + text.strip()).replace('\n', ' ')[:120])
-                        self._external_status.update(  # type: ignore[attr-defined]
-                            f"[{THINKING_COLOR}]  thinking [{ts}]: {preview}[/]"
-                        )
-                    except Exception:
-                        console.print()
-                        self._print_reasoning(text)
-                else:
-                    console.print()
-                    self._print_reasoning(text)
+                console.print()
+                self._print_reasoning(text)
 
     def _print_reasoning(self, text: str) -> None:
-        """Display reasoning/thinking in a subtle bordered panel."""
+        """Display reasoning as a collapsed one-liner; full text stored for Ctrl+T."""
         safe = _sanitize_text(text.strip())
+        self._thinking_blocks.append(safe)
+        word_count = len(safe.split())
         console.print(
-            Panel(
-                Text(safe, style="dim italic"),
-                title=f"[{THINKING_COLOR}]reasoning[/]",
-                title_align="left",
-                border_style="dim magenta",
-                expand=False,
-                padding=(0, 1),
-            )
+            f"  [{THINKING_COLOR}]\u25b6 Thinking[/]  "
+            f"[dim]({word_count} words \u2014 Ctrl+T to expand)[/]"
         )
+
+    def get_thinking_blocks(self) -> list[str]:
+        """Return all completed thinking blocks from this session."""
+        return list(self._thinking_blocks)
+
+    def get_last_thinking(self) -> str:
+        """Return the most recent thinking block."""
+        return self._thinking_blocks[-1] if self._thinking_blocks else ""
 
     def _flush_all(self) -> None:
         self._flush_thinking()
         self._flush_text()
-        self._stop_spinner()
 
     # -- tool display --------------------------------------------------------
 
     def _show_tool_call(self, event: AgentEvent) -> None:
-        name = event.tool_name
-        parts: list[str] = []
-        for k, v in event.tool_input.items():
-            sv = str(v)
-            if len(sv) > 60:
-                sv = sv[:57] + "..."
-            parts.append(f"[dim]{k}=[/]{markup_escape(sv)}")
-        arg_str = ", ".join(parts)
-        if len(arg_str) > 140:
-            arg_str = arg_str[:137] + "..."
+        from obscura.cli.tool_summaries import summarize_tool_call
 
-        sanitized_args = _sanitize_text(arg_str)
+        name = event.tool_name
+        summary = summarize_tool_call(name, event.tool_input)
+
         try:
-            output.capture_internal(f"TOOL_CALL {name} {_sanitize_text(', '.join(parts))}")
+            output.capture_internal(f"TOOL_CALL {name} {_sanitize_text(summary)}")
         except Exception:
             pass
 
-        # Tool call: icon + name + args on one line
         console.print(
-            f"\n  [{TOOL_COLOR}]  {markup_escape(name)}[/]  [dim]{sanitized_args}[/]"
+            f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]"
         )
 
-        if self._external_status is not None:
-            try:
-                ts = datetime.now().strftime("%H:%M:%S")
-                self._external_status.update(  # type: ignore[attr-defined]
-                    f"[{TOOL_COLOR}]  running {markup_escape(name)}...[/]"
-                )
-            except Exception:
-                pass
-
-        try:
-            if self._external_status is None:
-                self._status = console.status(
-                    f"  [dim {TOOL_COLOR}]  running...[/]",
-                    spinner="dots",
-                    spinner_style=TOOL_COLOR,
-                )
-                self._status.start()  # type: ignore[union-attr]
-        except Exception:
-            self._status = None
+        # Update toolbar status
+        if self._ss is not None:
+            self._ss.active = True  # type: ignore[attr-defined]
+            self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]
+            self._ss.preview = ""  # type: ignore[attr-defined]
 
     def _show_tool_result(self, event: AgentEvent) -> None:
         raw = event.tool_result or ""
         is_err = event.is_error
 
         if is_err:
-            console.print(f"  [{ERROR_COLOR}]  {markup_escape(_sanitize_text(raw[:200]))}[/]")
+            err_text = _sanitize_text(raw[:200]).replace("\n", " ")
+            console.print(f"  [{ERROR_COLOR}]\u2718 {markup_escape(err_text)}[/]")
             return
 
-        # Try to syntax-highlight structured output (JSON, TOML, code)
-        snippet = raw[:2000]
-        highlighted = _render_structured(snippet)
-        if highlighted is not None:
-            console.print(
-                Panel(
-                    highlighted,
-                    border_style="dim green",
-                    expand=False,
-                    padding=(0, 0),
-                )
-            )
-        else:
-            # Plain result: show as dim text, truncated
-            short = markup_escape(_sanitize_text(raw[:300]))
-            console.print(f"  [dim {OK_COLOR}]  {short}[/]")
-
-        if self._external_status is not None:
-            try:
-                ts = datetime.now().strftime("%H:%M:%S")
-                preview = markup_escape(_sanitize_text(raw[:80]).replace('\n', ' '))
-                self._external_status.update(  # type: ignore[attr-defined]
-                    f"[{ACCENT_DIM}]  done [{ts}]: {preview}[/]"
-                )
-            except Exception:
-                pass
-
-    def _stop_spinner(self) -> None:
-        if self._status is not None:
-            try:
-                self._status.stop()  # type: ignore[union-attr]
-            except Exception:
-                pass
-            self._status = None
-        if self._external_status is not None:
-            try:
-                self._external_status.update("")  # type: ignore[attr-defined]
-            except Exception:
-                pass
+        # Compact success: one-line snippet
+        snippet = _sanitize_text(raw[:120]).replace("\n", " ")
+        if len(snippet) > 80:
+            snippet = snippet[:77] + "..."
+        console.print(f"  [dim {OK_COLOR}]\u2714 {markup_escape(snippet)}[/]")
 
     def finish(self) -> None:
-        self._stop_thinking_spinner()
+        self._stop_status()
         self._flush_all()
 
     def get_accumulated_text(self) -> str:
@@ -522,21 +447,25 @@ class LabeledStreamRenderer(StreamRenderer):
 
 def render_event(event: AgentEvent) -> None:
     """Simple single-event renderer (no Markdown accumulation)."""
+    from obscura.cli.tool_summaries import summarize_tool_call
+
     match event.kind:
         case AgentEventKind.TEXT_DELTA:
             console.print(_sanitize_text(event.text), end="")
         case AgentEventKind.THINKING_DELTA:
-            safe = markup_escape(_sanitize_text(event.text))
-            console.print(f"[dim italic {THINKING_COLOR}]{safe}[/]", end="")
+            pass  # thinking accumulated by StreamRenderer; silent in legacy path
         case AgentEventKind.TOOL_CALL:
+            summary = summarize_tool_call(event.tool_name, event.tool_input)
             console.print(
-                f"\n  [{TOOL_COLOR}]  {markup_escape(_sanitize_text(event.tool_name))}[/]"
+                f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]"
             )
         case AgentEventKind.TOOL_RESULT:
-            snippet = markup_escape(_sanitize_text((event.tool_result or "")[:120]))
-            style = ERROR_COLOR if event.is_error else "dim green"
-            prefix = "" if event.is_error else ""
-            console.print(f"  [{style}]{prefix} {snippet}[/]")
+            raw = (event.tool_result or "")[:120]
+            snippet = markup_escape(_sanitize_text(raw).replace("\n", " "))
+            if event.is_error:
+                console.print(f"  [{ERROR_COLOR}]\u2718 {snippet}[/]")
+            else:
+                console.print(f"  [dim {OK_COLOR}]\u2714 {snippet}[/]")
         case _:
             pass
 
@@ -793,6 +722,7 @@ def print_banner(
     tool_count: int = 0,
     mcp_servers: list[str] | None = None,
     mode: str = "code",
+    available_agents: list[str] | None = None,
 ) -> None:
     """Print the REPL startup banner."""
     _obscura_ascii_banner()
@@ -813,6 +743,11 @@ def print_banner(
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
+    if available_agents:
+        console.print(
+            f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   "
+            "[dim]/agent spawn <name> or @name <prompt>[/]"
+        )
     console.print()
     console.print(f"  [dim]Type [bold]/help[/bold] for commands, [bold]/quit[/bold] to exit.[/]")
     console.print()
