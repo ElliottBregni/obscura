@@ -106,6 +106,7 @@ class ToolBroker:
         self._default_timeout = default_timeout
         self._max_retries = max_retries
         self._handlers: dict[str, Callable[..., Any]] = {}
+        self._schemas: dict[str, dict[str, Any]] = {}
         self._audit_log: list[BrokerAuditEntry] = []
 
     # -- Handler registration ----------------------------------------------
@@ -113,6 +114,29 @@ class ToolBroker:
     def register_handler(self, tool_name: str, handler: Callable[..., Any]) -> None:
         """Register an execution handler for a tool."""
         self._handlers[tool_name] = handler
+
+    def register_tool(
+        self,
+        name: str,
+        handler: Callable[..., Any],
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Register a tool with handler and optional parameter schema."""
+        self._handlers[name] = handler
+        if parameters is not None:
+            self._schemas[name] = parameters
+
+    # -- Introspection -----------------------------------------------------
+
+    @property
+    def schemas(self) -> dict[str, dict[str, Any]]:
+        """Return a copy of all registered tool schemas."""
+        return dict(self._schemas)
+
+    @property
+    def registered_tools(self) -> list[str]:
+        """Return the names of all registered tool handlers."""
+        return list(self._handlers.keys())
 
     # -- Main execution path -----------------------------------------------
 

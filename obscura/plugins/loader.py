@@ -115,7 +115,13 @@ class ManifestToolProvider:
         import inspect
         from obscura.core.types import ToolSpec
 
+        raw_allowed: Any = getattr(context, "allowed_tool_names", None)
+        allowed: set[str] | None = raw_allowed if isinstance(raw_allowed, set) else None
+
         for tool_contrib in self.spec.tools:
+            if allowed is not None and tool_contrib.name not in allowed:
+                continue
+
             handler = _resolve_handler(tool_contrib.handler_ref)
             if handler is None:
                 logger.warning(
@@ -217,6 +223,7 @@ class PluginLoader:
         self._registry = registry or PluginRegistryService()
         self._plugin_dir = plugin_dir or self._registry.plugin_dir
         self._loaded: dict[str, PluginStatus] = {}
+        self._specs: list[PluginSpec] = []
 
     # -- Discovery ---------------------------------------------------------
 
@@ -327,6 +334,7 @@ class PluginLoader:
             provider_registry.add(provider)
             status.state = "enabled"
             status.enabled = True
+            self._specs.append(spec)
         except Exception as exc:
             status.state = "failed"
             status.error = str(exc)
@@ -453,6 +461,69 @@ class PluginLoader:
         """Convenience alias for ``load_all``."""
         return self.load_all(provider_registry)
 
+    def load_scoped(
+        self,
+        provider_registry: Any,
+        required_ids: list[str],
+        optional_ids: list[str],
+    ) -> dict[str, PluginStatus]:
+        """Load only the plugins listed in *required_ids* / *optional_ids*.
+
+        Discovers all specs (builtins + local), filters to those whose
+        ``spec.id`` appears in either list, and runs ``_load_spec`` on each.
+
+        Raises ``RuntimeError`` if any *required* plugin is not found or
+        fails to reach the ``enabled`` state.
+        """
+        all_specs = self.discover_builtins() + self.discover_local()
+        wanted = set(required_ids) | set(optional_ids)
+        spec_map: dict[str, PluginSpec] = {}
+        for spec in all_specs:
+            if spec.id in wanted:
+                spec_map[spec.id] = spec
+
+        results: dict[str, PluginStatus] = {}
+
+        for pid in required_ids:
+            spec = spec_map.get(pid)
+            if spec is None:
+                status = PluginStatus(
+                    plugin_id=pid, state="failed", error="not found",
+                )
+                results[pid] = status
+                self._loaded[pid] = status
+                continue
+            status = self._load_spec(spec, provider_registry)
+            results[pid] = status
+            self._loaded[pid] = status
+
+        for pid in optional_ids:
+            spec = spec_map.get(pid)
+            if spec is None:
+                logger.warning("Optional plugin %s not found — skipping", pid)
+                continue
+            status = self._load_spec(spec, provider_registry)
+            results[pid] = status
+            self._loaded[pid] = status
+            if status.state != "enabled":
+                logger.warning(
+                    "Optional plugin %s failed to load: %s", pid, status.error,
+                )
+
+        failed_required = [
+            pid for pid in required_ids
+            if pid in results and results[pid].state != "enabled"
+        ]
+        if failed_required:
+            details = "; ".join(
+                f"{pid}: {results[pid].error}" for pid in failed_required
+            )
+            raise RuntimeError(
+                f"Required plugins failed to load: {details}"
+            )
+
+        return results
+
     # -- Status queries ----------------------------------------------------
 
     def get_status(self, plugin_id: str) -> PluginStatus | None:
@@ -460,6 +531,11 @@ class PluginLoader:
 
     def list_loaded(self) -> dict[str, PluginStatus]:
         return dict(self._loaded)
+
+    @property
+    def loaded_specs(self) -> list[PluginSpec]:
+        """Return a copy of all successfully loaded PluginSpecs."""
+        return list(self._specs)
 
 
 __all__ = [

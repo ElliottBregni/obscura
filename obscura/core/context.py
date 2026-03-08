@@ -46,6 +46,8 @@ class ContextLoader:
         agent_target_map: dict[str, str] | None = None,
         lazy_load_skills: bool = False,
         skill_filter: list[str] | None = None,
+        capability_resolver: Any = None,
+        agent_id: str = "",
     ) -> None:
         self._backend = backend
         self._vault_path = vault_path or Path.home()
@@ -53,6 +55,8 @@ class ContextLoader:
         self._lazy_load_skills = lazy_load_skills
         self._skill_filter = skill_filter
         self._lazy_loader: LazySkillLoader | None = None
+        self._capability_resolver = capability_resolver
+        self._agent_id = agent_id
 
     @property
     def agent_dir(self) -> Path:
@@ -92,15 +96,26 @@ class ContextLoader:
     
     def load_skills_lazy(self) -> list[SkillMetadata]:
         """Load skill metadata only (for lazy loading).
-        
+
         Returns:
             List of skill metadata objects with minimal info
         """
         if not self._lazy_loader:
             skills_dir = self.agent_dir / "skills"
             self._lazy_loader = LazySkillLoader(skills_dir)
-        
-        return self._lazy_loader.discover_skills(filter_names=self._skill_filter)
+
+        skills = self._lazy_loader.discover_skills(filter_names=self._skill_filter)
+
+        if self._capability_resolver is not None and self._agent_id:
+            skills = [
+                s for s in skills
+                if self._capability_resolver.is_granted(
+                    self._agent_id,
+                    f"skill.{s.name.replace('-', '_')}",
+                )
+            ]
+
+        return skills
     
     def load_skill_body(self, skill_name: str) -> str | None:
         """Load full skill body on-demand.

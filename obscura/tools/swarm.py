@@ -114,7 +114,7 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
         prompt: str,
         model: str = "",
     ) -> str:
-        from obscura.manifest.models import AgentManifest
+        from obscura.manifest.models import AgentManifest, CapabilityConfig, PluginDepsConfig
 
         runtime = ctx.runtime
         if runtime is None:
@@ -129,6 +129,16 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                 s_cfg = cfg.get("skills", {})
                 if not isinstance(s_cfg, dict):
                     s_cfg = {}
+                raw_caps = cfg.get("capabilities", {})
+                cap_cfg = CapabilityConfig(
+                    grant=list(raw_caps.get("grant", [])),
+                    deny=list(raw_caps.get("deny", [])),
+                ) if isinstance(raw_caps, dict) else CapabilityConfig()
+                plugins_cfg = cfg.get("plugins", {})
+                plugin_deps = PluginDepsConfig(
+                    require=list(plugins_cfg.get("require", [])),
+                    optional=list(plugins_cfg.get("optional", [])),
+                ) if isinstance(plugins_cfg, dict) else PluginDepsConfig()
                 manifest = AgentManifest(
                     name=cfg["name"],
                     provider=model or cfg.get("model", ctx.backend),
@@ -142,6 +152,8 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                         else []
                     ),
                     skills_config=s_cfg,
+                    capabilities=cap_cfg,
+                    plugins=plugin_deps,
                 )
                 agent = runtime.spawn_from_manifest(manifest)
             else:

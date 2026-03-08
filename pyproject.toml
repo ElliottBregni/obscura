@@ -65,6 +65,16 @@ a2a = [
 metrics = [
     "psutil>=5.9.0",
 ]
+yaml = [
+    "pyyaml>=6.0",
+]
+providers = [
+    # X (Twitter) API — activate with X_BEARER_TOKEN / X_ACCESS_TOKEN env vars
+    # Docs: https://developer.x.com/en/portal/dashboard
+    "xdk>=0.4.5",
+    "pycoingecko>=3.0.0",
+    "notion-client>=2.0.0",
+]
 
 [project.scripts]
 obscura = "obscura.cli:main"

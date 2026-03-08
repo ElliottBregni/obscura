@@ -74,6 +74,9 @@ class ObscuraClient:
         # Skill loading
         lazy_load_skills: bool = False,
         skill_filter: list[str] | None = None,
+        # Capability gating for skills
+        capability_resolver: Any = None,
+        agent_id: str = "",
         # Claude-specific
         permission_mode: str = "default",
         cwd: str | None = None,
@@ -142,6 +145,8 @@ class ObscuraClient:
                     backend,
                     lazy_load_skills=lazy_load_skills,
                     skill_filter=skill_filter,
+                    capability_resolver=capability_resolver,
+                    agent_id=agent_id,
                 )
                 claude_ctx = loader.load_system_prompt()
                 if claude_ctx:
@@ -194,6 +199,11 @@ class ObscuraClient:
         )
         for t in self._tool_registry.for_tier(tier_value):
             self._backend.register_tool(t)
+
+    def set_capability_resolver(self, resolver: Any, agent_id: str) -> None:
+        """Set the capability resolver after construction (for late binding)."""
+        self._capability_resolver = resolver
+        self._agent_id = agent_id
 
     # -- Lifecycle -----------------------------------------------------------
 

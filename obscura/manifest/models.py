@@ -28,6 +28,20 @@ class PermissionConfig(BaseModel):
     deny: list[str] = Field(default_factory=_empty_str_list)
 
 
+class CapabilityConfig(BaseModel):
+    """Capability grants/denials from agent frontmatter."""
+
+    grant: list[str] = Field(default_factory=_empty_str_list)
+    deny: list[str] = Field(default_factory=_empty_str_list)
+
+
+class PluginDepsConfig(BaseModel):
+    """Plugin dependency declarations from agent frontmatter."""
+
+    require: list[str] = Field(default_factory=_empty_str_list)
+    optional: list[str] = Field(default_factory=_empty_str_list)
+
+
 class HookDefinition(BaseModel):
     """A single hook entry from hooks.json or agent frontmatter.
 
@@ -100,6 +114,9 @@ class AgentManifest(BaseModel):
     mcp_servers: list[MCPServerRef] = Field(default_factory=_empty_mcp_refs)
     permissions: PermissionConfig = Field(default_factory=PermissionConfig)
     hooks: list[HookDefinition] = Field(default_factory=list)
+
+    capabilities: CapabilityConfig = Field(default_factory=CapabilityConfig)
+    plugins: PluginDepsConfig = Field(default_factory=PluginDepsConfig)
 
     skills_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -195,6 +212,34 @@ def agent_manifest_from_frontmatter(
     raw_skills: Any = normalised.get("skills")
     if isinstance(raw_skills, dict):
         kwargs["skills_config"] = cast("dict[str, Any]", raw_skills)
+
+    # Capabilities
+    raw_caps: Any = normalised.get("capabilities")
+    if isinstance(raw_caps, dict):
+        caps_dict = cast("dict[str, Any]", raw_caps)
+        c_grant: list[str] = list(caps_dict.get("grant") or [])
+        c_deny: list[str] = list(caps_dict.get("deny") or [])
+        kwargs["capabilities"] = CapabilityConfig(grant=c_grant, deny=c_deny)
+
+    # Auto-convert skills.filter to capability grants
+    if isinstance(raw_skills, dict):
+        raw_filter = raw_skills.get("filter")
+        if isinstance(raw_filter, list):
+            skill_caps = [f"skill.{str(name).replace('-', '_')}" for name in raw_filter]
+            existing_caps: CapabilityConfig = kwargs.get("capabilities", CapabilityConfig())
+            merged_grant = list(existing_caps.grant) + skill_caps
+            kwargs["capabilities"] = CapabilityConfig(
+                grant=merged_grant,
+                deny=list(existing_caps.deny),
+            )
+
+    # Plugin dependencies
+    raw_plugins: Any = normalised.get("plugins")
+    if isinstance(raw_plugins, dict):
+        plugins_dict = cast("dict[str, Any]", raw_plugins)
+        p_require: list[str] = list(plugins_dict.get("require") or [])
+        p_optional: list[str] = list(plugins_dict.get("optional") or [])
+        kwargs["plugins"] = PluginDepsConfig(require=p_require, optional=p_optional)
 
     # Backward compatibility: accept 'model' field and map to 'provider'
     if "model" in normalised and "provider" not in normalised:

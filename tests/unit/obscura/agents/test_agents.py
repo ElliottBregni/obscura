@@ -400,14 +400,16 @@ class TestBackendSpecificAgents:
 
             await agent.start()
 
-            mock_client_ctor.assert_called_once_with(
-                model_name,
-                system_prompt="",
-                lazy_load_skills=False,
-                skill_filter=None,
-                inject_claude_context=True,
-                user=runtime.user,
-            )
+            mock_client_ctor.assert_called_once()
+            call_kwargs = mock_client_ctor.call_args
+            assert call_kwargs[0][0] == model_name
+            assert call_kwargs[1]["system_prompt"] == ""
+            assert call_kwargs[1]["lazy_load_skills"] is False
+            assert call_kwargs[1]["skill_filter"] is None
+            assert call_kwargs[1]["inject_claude_context"] is True
+            assert call_kwargs[1]["user"] == runtime.user
+            assert "capability_resolver" in call_kwargs[1]
+            assert "agent_id" in call_kwargs[1]
             assert agent.config.provider == model_name
             assert agent.status == AgentStatus.WAITING
 

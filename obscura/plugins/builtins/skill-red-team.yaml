@@ -1,0 +1,16 @@
+id: skill-red-team
+name: Skill - Red Team
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Red team skill capability — adversarial testing and security evaluation.
+
+capabilities:
+  - id: skill.red_team
+    description: Enable red team skill for adversarial testing and security evaluation
+    tools: []
+    requires_approval: false
+    default_grant: false

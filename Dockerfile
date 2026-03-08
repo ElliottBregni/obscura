@@ -18,9 +18,15 @@ COPY scripts/ scripts/
 # Stage 2: Runtime — minimal image with only the venv + app code
 FROM python:3.13.5-slim AS runtime
 
+ARG INSTALL_GWS=0
+ARG INSTALL_M365=0
+ARG INSTALL_HF=0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gh ca-certificates nodejs npm libpq-dev \
     && npm install -g @anthropic-ai/claude-code \
+    && if [ "$INSTALL_GWS" = "1" ]; then npm install -g @googleworkspace/cli || true; fi \
+    && if [ "$INSTALL_M365" = "1" ]; then npm install -g @pnp/cli-microsoft365 || true; fi \
+    && if [ "$INSTALL_HF" = "1" ]; then pip install --no-cache-dir huggingface-hub || true; fi \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r obscura && useradd -r -g obscura -d /home/obscura -m obscura

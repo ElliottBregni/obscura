@@ -301,9 +301,13 @@ class REPLContext:
         await new_client.start()
         if self.tools_enabled:
             from obscura.tools.system import get_system_tool_specs
-
-            for spec in get_system_tool_specs():
-                new_client.register_tool(spec)
+            from obscura.cli.app.modes import MODE_TOOL_GROUPS
+            all_specs = get_system_tool_specs()
+            mm = self._mode_manager
+            allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
+            for spec in all_specs:
+                if allowed is None or spec.name in allowed:
+                    new_client.register_tool(spec)
         self.client = new_client
         self.backend = backend
         self.model = model
@@ -593,19 +597,18 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
         print_info(f"Mode: {mm.current.value}")
         return None
 
-    mode_map = {"ask": TUIMode.ASK, "plan": TUIMode.PLAN, "code": TUIMode.CODE}
+    mode_map = {"ask": TUIMode.ASK, "plan": TUIMode.PLAN, "code": TUIMode.CODE, "diff": TUIMode.DIFF}
     mode = mode_map.get(val)
     if mode is None:
-        print_error("Usage: /mode ask|plan|code")
+        print_error("Usage: /mode ask|plan|code|diff")
         return None
 
     mm.switch(mode)
 
-    # ASK / PLAN modes disable tools; CODE enables them
-    if mode in (TUIMode.ASK, TUIMode.PLAN):
-        ctx.tools_enabled = False
-    elif mode == TUIMode.CODE:
-        ctx.tools_enabled = True
+    # Enable tools for any mode that has a non-empty capability group
+    from obscura.cli.app.modes import MODE_TOOL_GROUPS
+    allowed = MODE_TOOL_GROUPS.get(mode)
+    ctx.tools_enabled = allowed is None or len(allowed) > 0
 
     # Recreate client with mode-specific system prompt
     await ctx.recreate_client(ctx.backend, ctx.model)
@@ -2467,51 +2470,28 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
 
     sub = tokens[0]
 
-    # Try new registry first, fall back to legacy
     try:
         from obscura.plugins.registry import PluginRegistryService
         registry = PluginRegistryService()
-        _use_new = True
     except Exception:
-        try:
-            from obscura.tools.plugin_registry import PluginRegistry
-            registry = PluginRegistry()  # type: ignore[assignment]
-            _use_new = False
-        except Exception:
-            print_error("Plugin management not available.")
-            return None
+        print_error("Plugin management not available.")
+        return None
 
     if sub == "list":
-        if _use_new:
-            plugins = registry.list_plugins()
-            if not plugins:
-                print_info("No plugins registered.")
-                return None
-            for p in plugins:
-                status_color = {"enabled": "green", "disabled": "dim", "failed": "red"}.get(
-                    p.get("status", ""), "yellow"
-                )
-                console.print(
-                    f"  • [cyan]{p.get('id', p.get('name', '?'))}[/] "
-                    f"v{p.get('version', '?')} "
-                    f"[{status_color}]{p.get('status', '?')}[/] "
-                    f"— {p.get('description', '')[:60]}"
-                )
-        else:
-            data = registry.list_installed()
-            local = data.get("local", []) if isinstance(data, dict) else data
-            regs = data.get("registered", []) if isinstance(data, dict) else []
-            if not local and not regs:
-                print_info("No plugins installed.")
-                return None
-            if local:
-                print_info("Local plugins:")
-                for p in local:
-                    console.print(f"  • [cyan]{p.get('name')}[/] — {p.get('path')}")
-            if regs:
-                print_info("Registered plugins (pip/git):")
-                for r in regs:
-                    console.print(f"  • [cyan]{r.get('name')}[/] — {r.get('type')} {r.get('source', r.get('package', ''))}")
+        plugins = registry.list_plugins()
+        if not plugins:
+            print_info("No plugins registered.")
+            return None
+        for p in plugins:
+            status_color = {"enabled": "green", "disabled": "dim", "failed": "red"}.get(
+                p.get("status", ""), "yellow"
+            )
+            console.print(
+                f"  • [cyan]{p.get('id', p.get('name', '?'))}[/] "
+                f"v{p.get('version', '?')} "
+                f"[{status_color}]{p.get('status', '?')}[/] "
+                f"— {p.get('description', '')[:60]}"
+            )
         return None
 
     if sub == "install":
@@ -2520,18 +2500,11 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             return None
         source = tokens[1]
         print_info(f"Installing plugin: {source}")
-        if _use_new:
-            res = registry.install_from_source(source)
-            if res:
-                print_ok(f"Installed {source}")
-            else:
-                print_error(f"Failed to install {source}")
+        res = registry.install_from_source(source)
+        if res:
+            print_ok(f"Installed {source}")
         else:
-            res = registry.install(source)
-            if res.get("ok"):
-                print_ok(res.get("message"))
-            else:
-                print_error(res.get("message"))
+            print_error(f"Failed to install {source}")
         return None
 
     if sub in ("remove", "uninstall"):
@@ -2540,18 +2513,11 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             return None
         name = tokens[1]
         print_info(f"Removing plugin: {name}")
-        if _use_new:
-            ok = registry.uninstall(name)
-            print_ok(f"Removed {name}") if ok else print_error(f"Failed to remove {name}")
-        else:
-            res = registry.remove(name)
-            if res.get("ok"):
-                print_ok(res.get("message"))
-            else:
-                print_error(res.get("message"))
+        ok = registry.uninstall(name)
+        print_ok(f"Removed {name}") if ok else print_error(f"Failed to remove {name}")
         return None
 
-    if sub == "enable" and _use_new:
+    if sub == "enable":
         if len(tokens) < 2:
             print_error("Usage: /plugin enable <id>")
             return None
@@ -2559,7 +2525,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
         print_ok(f"Enabled {tokens[1]}") if ok else print_error(f"Cannot enable {tokens[1]}")
         return None
 
-    if sub == "disable" and _use_new:
+    if sub == "disable":
         if len(tokens) < 2:
             print_error("Usage: /plugin disable <id>")
             return None
@@ -2567,7 +2533,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
         print_ok(f"Disabled {tokens[1]}") if ok else print_error(f"Cannot disable {tokens[1]}")
         return None
 
-    if sub == "info" and _use_new:
+    if sub == "info":
         if len(tokens) < 2:
             print_error("Usage: /plugin info <id>")
             return None
@@ -2586,7 +2552,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             console.print(f"  Workflows: {', '.join(contribs['workflows'])}")
         return None
 
-    if sub == "health" and _use_new:
+    if sub == "health":
         plugins = registry.list_plugins()
         for p in plugins:
             status = p.get("status", "unknown")

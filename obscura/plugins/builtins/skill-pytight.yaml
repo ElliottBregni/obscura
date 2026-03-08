@@ -1,0 +1,16 @@
+id: skill-pytight
+name: Skill - Pytight
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Pytight skill capability — type-checking and linting enforcement for Python code.
+
+capabilities:
+  - id: skill.pytight
+    description: Enable pytight skill for Python type safety
+    tools: []
+    requires_approval: false
+    default_grant: false

@@ -167,6 +167,66 @@ _MODE_SYSTEM_PROMPTS: dict[TUIMode, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Mode capability groups
+#
+# Maps each TUIMode to the set of tool names available in that mode.
+#   None            => all tools (CODE mode — unrestricted)
+#   frozenset()     => no tools  (ASK mode — conversational only)
+#   frozenset({...})=> exactly those tool names
+#
+# Edit the sets below to customize each mode's capability surface, or
+# call ModeManager.set_mode_tools(mode, names) at runtime to override.
+# ---------------------------------------------------------------------------
+
+# DIFF mode: read-only filesystem + git inspection — no writes
+_DIFF_MODE_TOOLS: frozenset[str] = frozenset({
+    # Filesystem (read-only)
+    "list_directory",
+    "read_text_file",
+    "grep_files",
+    "find_files",
+    "file_info",
+    "tree_directory",
+    "diff_files",
+    # Git (inspection only)
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_branch",
+    # Utilities
+    "context_window_status",
+    "json_query",
+    "clipboard_read",
+    "clipboard_write",
+})
+
+# PLAN mode: read-only filesystem + web research — no writes, no execution
+_PLAN_MODE_TOOLS: frozenset[str] = frozenset({
+    # Filesystem (read-only)
+    "list_directory",
+    "read_text_file",
+    "grep_files",
+    "find_files",
+    "file_info",
+    "tree_directory",
+    # Web research
+    "web_fetch",
+    "web_search",
+    # System info
+    "context_window_status",
+    "get_system_info",
+})
+
+# Single source of truth: mode -> allowed tool names (None = all tools)
+MODE_TOOL_GROUPS: dict[TUIMode, frozenset[str] | None] = {
+    TUIMode.ASK:  frozenset(),       # conversational only — no tools
+    TUIMode.PLAN: _PLAN_MODE_TOOLS,  # read + research — no writes/exec
+    TUIMode.CODE: None,              # full access — all registered tools
+    TUIMode.DIFF: _DIFF_MODE_TOOLS,  # read + git inspection — no writes
+}
+
+
+# ---------------------------------------------------------------------------
 # FileChange (used by Code/Diff modes)
 # ---------------------------------------------------------------------------
 
@@ -191,7 +251,7 @@ class ModeManager:
 
     Tracks the current mode, pending file changes from Code mode,
     the active plan from Plan mode, and provides mode-specific
-    system prompts.
+    system prompts and tool capability filters.
     """
 
     def __init__(self, initial: TUIMode = TUIMode.ASK) -> None:
@@ -199,6 +259,8 @@ class ModeManager:
         self._pending_changes: list[FileChange] = []
         self._active_plan: Plan | None = None
         self._listeners: list[Any] = []
+        # Runtime overrides: mode -> tool name set (None = all)
+        self._tool_overrides: dict[TUIMode, frozenset[str] | None] = {}
 
     # -- Properties ---------------------------------------------------------
 
@@ -233,6 +295,36 @@ class ModeManager:
     def on_switch(self, callback: Any) -> None:
         """Register a mode-switch listener: callback(old_mode, new_mode)."""
         self._listeners.append(callback)
+
+    # -- Capability filtering -----------------------------------------------
+
+    def get_allowed_tool_names(self, mode: TUIMode | None = None) -> frozenset[str] | None:
+        """Return the set of tool names allowed in the given (or current) mode.
+
+        Returns:
+            None            — all tools allowed (CODE mode default)
+            frozenset()     — no tools allowed  (ASK mode default)
+            frozenset({...})— specific named tools only
+        """
+        m = mode if mode is not None else self._current
+        if m in self._tool_overrides:
+            return self._tool_overrides[m]
+        return MODE_TOOL_GROUPS.get(m, frozenset())
+
+    def set_mode_tools(self, mode: TUIMode, names: frozenset[str] | None) -> None:
+        """Override the tool allowlist for a mode at runtime.
+
+        Args:
+            mode:  The mode to configure.
+            names: frozenset of allowed tool names, or None for unrestricted.
+        """
+        self._tool_overrides[mode] = names
+
+    def tools_enabled_for_mode(self, mode: TUIMode | None = None) -> bool:
+        """Return True if the given (or current) mode has any tools enabled."""
+        allowed = self.get_allowed_tool_names(mode)
+        # None = unrestricted (all tools); non-empty set also means enabled
+        return allowed is None or len(allowed) > 0
 
     # -- System prompt ------------------------------------------------------
 

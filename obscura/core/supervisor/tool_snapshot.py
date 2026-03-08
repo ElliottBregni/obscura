@@ -251,6 +251,42 @@ class FrozenToolRegistry:
         )
         return cls(tools=tools)
 
+    @classmethod
+    def from_broker(
+        cls,
+        broker: Any,
+        allowlist: frozenset[str] | None = None,
+    ) -> FrozenToolRegistry:
+        """Build a frozen registry from a ToolBroker's registered tools.
+
+        Creates :class:`FrozenToolEntry` objects for each tool known to the
+        broker, using schemas stored via ``register_tool()``.
+
+        Args:
+            broker: A :class:`~obscura.plugins.broker.ToolBroker` instance.
+            allowlist: If provided, only include tools whose names are in this set.
+        """
+        names: list[str] = broker.registered_tools
+        schemas: dict[str, dict[str, Any]] = broker.schemas
+
+        if allowlist is not None:
+            names = [n for n in names if n in allowlist]
+
+        # Sort alphabetically for deterministic ordering
+        names.sort()
+
+        tools = tuple(
+            FrozenToolEntry(
+                name=name,
+                description="",
+                parameters=schemas.get(name, {}),
+                order_index=idx,
+                is_dynamic=False,
+            )
+            for idx, name in enumerate(names)
+        )
+        return cls(tools=tools)
+
 
 # ---------------------------------------------------------------------------
 # Persistence

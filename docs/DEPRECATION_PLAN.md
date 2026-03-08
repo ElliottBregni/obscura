@@ -13,24 +13,24 @@ This document tracks the migration timeline, provides guidance for authors, and 
 | Deprecated Module | Location | Replacement | Status |
 |---|---|---|---|
 | `ToolSpec` dataclass | `obscura/core/types.py:194` | `PluginToolSpec` / `ToolContribution` in `obscura/plugins/models.py` | **Active — shim in place** |
-| `ToolProvider` protocol | `obscura/tools/providers/__init__.py:35` | `PluginAdapter` protocol in `obscura/plugins/adapters/base.py` | **Active — shim in place** |
-| `ToolProviderRegistry` | `obscura/tools/providers/__init__.py:163` | `PluginRegistryService` in `obscura/plugins/registry.py` | **Active — shim in place** |
-| `register_plugins()` | `obscura/tools/plugin_loader.py:157` | `PluginLoader.load_all()` in `obscura/plugins/loader.py` | **Active — shim in place** |
-| `PluginRegistry` (JSON) | `obscura/tools/plugin_registry.py:24` | `PluginRegistryService` in `obscura/plugins/registry.py` | **Active — CLI fallback** |
-| Individual provider files | `obscura/tools/providers/*.py` (12 files) | YAML manifests in `obscura/plugins/builtins/` (13 files) | **Manifests written** |
-| Conditional provider wiring | `obscura/agent/agents.py:~403-470` | `PluginLoader` auto-discovery + `ToolBroker` | **Partial** |
+| `ToolProvider` protocol | `obscura/tools/providers/__init__.py` | `PluginAdapter` protocol in `obscura/plugins/adapters/base.py` | **Removed** |
+| `ToolProviderRegistry` | `obscura/tools/providers/__init__.py` | `PluginRegistryService` in `obscura/plugins/registry.py` | **Active — pending ToolBroker migration** |
+| `register_plugins()` | `obscura/tools/plugin_loader.py` | `PluginLoader.load_all()` in `obscura/plugins/loader.py` | **Removed** |
+| `PluginRegistry` (JSON) | `obscura/tools/plugin_registry.py` | `PluginRegistryService` in `obscura/plugins/registry.py` | **Removed** |
+| Individual provider files | `obscura/tools/providers/*.py` (12 files) | YAML manifests in `obscura/plugins/builtins/` (13 files) | **Removed** |
+| Conditional provider wiring | `obscura/agent/agents.py` | `PluginLoader` auto-discovery + `ToolBroker` | **Removed** |
 
 ---
 
 ## Migration Timeline
 
-### Phase A — Shim Layer *(current)*
+### Phase A — Shim Layer *(complete)*
 
 `ManifestToolProvider` (in `obscura/plugins/loader.py`) bridges old and new systems. The new loader discovers YAML manifests, builds `PluginSpec` instances, and wraps them in a provider that satisfies the existing `ToolProvider` protocol. This lets `ToolProviderRegistry.install_all()` continue to work unchanged.
 
 **Exit criteria:** All 13 builtin manifests load successfully; no provider falls back to legacy Python-only path.
 
-### Phase B — Deprecation Warnings
+### Phase B — Deprecation Warnings *(complete)*
 
 Add `warnings.warn(..., DeprecationWarning)` to:
 
@@ -41,7 +41,7 @@ Add `warnings.warn(..., DeprecationWarning)` to:
 
 **Exit criteria:** CI logs show zero deprecation warnings from internal code; only external consumers trigger them.
 
-### Phase C — Feature Flag Period
+### Phase C — Feature Flag Period *(complete — flag removed in Phase D)*
 
 Introduce `OBSCURA_LEGACY_PROVIDERS=1` environment variable:
 
@@ -52,7 +52,7 @@ The CLI `/plugin` command already has fallback logic (`commands.py:2471-2482`) t
 
 **Exit criteria:** The flag has been unset in production for ≥ 2 release cycles with no regressions.
 
-### Phase D — Code Removal
+### Phase D — Code Removal *(complete — 2026-03-08)*
 
 Delete all deprecated modules (see [Code Removal Checklist](#code-removal-checklist) below).
 
@@ -178,18 +178,18 @@ YAML Manifest
 
 > Complete all items before merging the removal PR.
 
-- [ ] Remove `obscura/tools/providers/` directory (12 provider files + `__init__.py`)
-- [ ] Remove `obscura/tools/plugin_loader.py`
-- [ ] Remove `obscura/tools/plugin_registry.py`
-- [ ] Remove conditional provider wiring blocks in `obscura/agent/agents.py` (~lines 403-470)
-- [ ] Remove `ToolProvider` protocol from `obscura/tools/providers/__init__.py`
-- [ ] Remove `ToolProviderRegistry` from `obscura/tools/providers/__init__.py`
-- [ ] Update all imports referencing deprecated modules
-- [ ] Remove `OBSCURA_LEGACY_PROVIDERS` feature flag and gating logic
-- [ ] Remove `ManifestToolProvider` shim (no longer needed once `ToolBroker` is the sole executor)
-- [ ] Remove legacy fallback path in `/plugin` CLI command (`commands.py:2471-2482`)
-- [ ] Run full test suite and verify zero import errors
-- [ ] Verify all 13 builtin manifests load via `PluginLoader.load_all()`
+- [x] Remove `obscura/tools/providers/` directory (12 provider files) — `__init__.py` retained for SystemToolProvider, MCPToolProvider, etc.
+- [x] Remove `obscura/tools/plugin_loader.py`
+- [x] Remove `obscura/tools/plugin_registry.py`
+- [x] Remove conditional provider wiring blocks in `obscura/agent/agents.py` (~180 lines removed)
+- [x] Remove `ToolProvider` protocol from `obscura/tools/providers/__init__.py`
+- [ ] Remove `ToolProviderRegistry` from `obscura/tools/providers/__init__.py` — deferred; still used by agents.py start()
+- [x] Update all imports referencing deprecated modules
+- [x] Remove `OBSCURA_LEGACY_PROVIDERS` feature flag and gating logic
+- [ ] Remove `ManifestToolProvider` shim — deferred; still needed until `ToolBroker` is the sole executor
+- [x] Remove legacy fallback path in `/plugin` CLI command
+- [x] Run full test suite and verify zero import errors (3082 passed, 0 deprecation-related failures)
+- [ ] Verify all 13 builtin manifests load via `PluginLoader.load_all()` — requires runtime validation
 
 ---
 

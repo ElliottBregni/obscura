@@ -1,0 +1,38 @@
+name: Test in built image matrix
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        install_hf: [0, 1]
+        install_gws: [0, 1]
+        install_m365: [0, 1]
+      fail-fast: false
+      max-parallel: 4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image with optional CLIs
+        run: |
+          docker build --no-cache -t obscura-test:latest \
+            --build-arg INSTALL_HF=${{ matrix.install_hf }} \
+            --build-arg INSTALL_GWS=${{ matrix.install_gws }} \
+            --build-arg INSTALL_M365=${{ matrix.install_m365 }} \
+            -f Dockerfile .
+
+      - name: Run tests inside image
+        env:
+          OBSCURA_ENABLE_HF: ${{ matrix.install_hf }}
+          OBSCURA_ENABLE_GWS: ${{ matrix.install_gws }}
+          OBSCURA_ENABLE_M365: ${{ matrix.install_m365 }}
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace obscura-test:latest /bin/bash -lc "python -m pip install -e .[test] || true; pytest -q"

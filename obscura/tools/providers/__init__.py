@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.tool_adapter import register_remote_agent_as_tool
@@ -30,12 +30,7 @@ async def _register_tool(agent: Agent, tool_spec: Any) -> None:
 @dataclass
 class ToolProviderContext:
     agent: Any
-
-
-class ToolProvider(Protocol):
-    async def install(self, context: ToolProviderContext) -> None: ...
-
-    async def uninstall(self, context: ToolProviderContext) -> None: ...
+    allowed_tool_names: set[str] | None = None
 
 
 class SystemToolProvider:
@@ -47,6 +42,9 @@ class SystemToolProvider:
         for tool_spec in get_system_tool_specs():
             # Skip tools not in allowlist (if configured)
             if allowlist is not None and tool_spec.name not in allowlist:
+                continue
+            # Skip tools not in capability-resolved set (if configured)
+            if context.allowed_tool_names is not None and tool_spec.name not in context.allowed_tool_names:
                 continue
             # Replace stub task tool with real delegation tool if available
             if tool_spec.name == "task" and delegation_spec is not None:
@@ -162,9 +160,9 @@ class MemoryToolProvider:
 
 class ToolProviderRegistry:
     def __init__(self) -> None:
-        self._providers: list[ToolProvider] = []
+        self._providers: list[Any] = []
 
-    def add(self, provider: ToolProvider) -> None:
+    def add(self, provider: Any) -> None:
         self._providers.append(provider)
 
     async def install_all(self, context: ToolProviderContext) -> None:

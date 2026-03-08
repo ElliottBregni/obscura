@@ -1,0 +1,16 @@
+id: skill-persuasion
+name: Skill - Persuasion
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Persuasion skill capability — influence tactics and framing for agent communication.
+
+capabilities:
+  - id: skill.persuasion
+    description: Enable persuasion skill for influence tactics and framing
+    tools: []
+    requires_approval: false
+    default_grant: false

@@ -1,0 +1,16 @@
+id: skill-authority
+name: Skill - Authority
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Authority skill capability — expert framing and credibility for agent responses.
+
+capabilities:
+  - id: skill.authority
+    description: Enable authority skill for expert framing and credibility
+    tools: []
+    requires_approval: false
+    default_grant: false

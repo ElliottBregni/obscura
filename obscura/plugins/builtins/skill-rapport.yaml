@@ -1,0 +1,16 @@
+id: skill-rapport
+name: Skill - Rapport
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Rapport skill capability — tone and trust calibration for agent interactions.
+
+capabilities:
+  - id: skill.rapport
+    description: Enable rapport skill for tone and trust calibration
+    tools: []
+    requires_approval: false
+    default_grant: false

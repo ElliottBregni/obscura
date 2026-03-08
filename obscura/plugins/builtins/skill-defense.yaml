@@ -1,0 +1,16 @@
+id: skill-defense
+name: Skill - Defense
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Defense skill capability — prompt hardening and guardrails for agent safety.
+
+capabilities:
+  - id: skill.defense
+    description: Enable defense skill for prompt hardening and guardrails
+    tools: []
+    requires_approval: false
+    default_grant: false

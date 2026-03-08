@@ -291,10 +291,11 @@ class TestDiscoverBuiltins:
     def test_finds_all_builtins(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
         specs = loader.discover_builtins()
-        assert len(specs) == 13
+        assert len(specs) == 20
         ids = {s.id for s in specs}
         assert "websearch" in ids
         assert "gitleaks" in ids
+        assert "skill-pytight" in ids
 
     def test_all_builtins_have_valid_ids(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)

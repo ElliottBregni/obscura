@@ -1,0 +1,16 @@
+id: skill-steering
+name: Skill - Steering
+version: "1.0.0"
+source_type: builtin
+runtime_type: content
+trust_level: builtin
+author: obscura-team
+description: >
+  Steering skill capability — output control and constraints for agent responses.
+
+capabilities:
+  - id: skill.steering
+    description: Enable steering skill for output control and constraints
+    tools: []
+    requires_approval: false
+    default_grant: false

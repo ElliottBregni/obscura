@@ -151,6 +151,10 @@ class AgentConfig(BaseModel):
     # Tool allowlist (None = all tools allowed)
     tool_allowlist: list[str] | None = None
     
+    # Capability grants
+    capabilities: dict[str, list[str]] = Field(default_factory=dict)
+    plugins: dict[str, list[str]] = Field(default_factory=dict)
+
     # Skill loading configuration
     lazy_load_skills: bool = False
     skill_filter: list[str] | None = None
@@ -217,6 +221,14 @@ class AgentConfig(BaseModel):
             delegate_allowlist=list(manifest.delegate_allowlist),
             max_delegation_depth=manifest.max_delegation_depth,
             tool_allowlist=list(manifest.tool_allowlist) if manifest.tool_allowlist is not None else None,
+            capabilities={
+                "grant": list(manifest.capabilities.grant),
+                "deny": list(manifest.capabilities.deny),
+            },
+            plugins={
+                "require": list(manifest.plugins.require),
+                "optional": list(manifest.plugins.optional),
+            },
             lazy_load_skills=lazy_load,
             skill_filter=skill_filter,
         )
@@ -283,6 +295,8 @@ class Agent:
         self._current_prompt: str = ""
         self._result: Any = None
         self._error: Exception | None = None
+        self._capability_resolver: Any = None
+        self._broker: Any = None
 
     # -- Observability/test accessors -----------------------------------
     @property
@@ -354,6 +368,16 @@ class Agent:
         self._error = err
 
     @property
+    def capability_resolver(self) -> Any:
+        """Capability resolver populated during start() if plugins are loaded."""
+        return self._capability_resolver
+
+    @property
+    def broker(self) -> Any:
+        """The agent's ToolBroker, if available."""
+        return self._broker
+
+    @property
     def memory(self) -> MemoryStore:
         """Get the agent's memory store."""
         return MemoryStore.for_user(self.user)
@@ -381,11 +405,56 @@ class Agent:
             message="Starting backend client and tool providers.",
         )
 
+        # Pre-discover plugin specs for capability resolution BEFORE client
+        plugin_loader = None
+        try:
+            from obscura.plugins.loader import PluginLoader
+            plugin_loader = PluginLoader()
+        except Exception:
+            pass
+
+        # Build capability resolver from discovered specs (before client creation
+        # so skill gating is active when the system prompt is assembled)
+        capability_resolver = None
+        allowed_tools: set[str] | None = None
+        try:
+            from obscura.plugins.capabilities import CapabilityResolver
+            from obscura.plugins.registries.capability_index import CapabilityIndex
+            from obscura.plugins.registries.tool_index import ToolIndex
+
+            cap_index = CapabilityIndex()
+            tool_idx = ToolIndex()
+
+            if plugin_loader is not None:
+                for spec in plugin_loader.discover_builtins() + plugin_loader.discover_local():
+                    for cap in spec.capabilities:
+                        cap_index.register(cap, spec.id)
+                    for tool_contrib in spec.tools:
+                        tool_idx.register(tool_contrib, spec.id)
+
+            resolver = CapabilityResolver(cap_index, tool_idx)
+            resolver.grant_defaults(self.id)
+
+            for cap_id in self.config.capabilities.get("grant", []):
+                resolver.grant(self.id, cap_id, granted_by="manifest")
+            for cap_id in self.config.capabilities.get("deny", []):
+                resolver.deny(self.id, cap_id, denied_by="manifest")
+
+            allowed_tools = resolver.resolve_tool_names(self.id)
+            self._capability_resolver = resolver
+            capability_resolver = resolver
+        except Exception as exc:
+            logger.debug("Capability resolver not available: %s", exc)
+            allowed_tools = None
+            self._capability_resolver = None
+
         self._client = ObscuraClient(
             self.config.model,
             system_prompt=self.config.system_prompt,
             lazy_load_skills=self.config.lazy_load_skills,
             skill_filter=self.config.skill_filter,
+            capability_resolver=capability_resolver,
+            agent_id=self.id,
             inject_claude_context=True,
             user=self.user,
         )
@@ -452,190 +521,17 @@ class Agent:
         # Always enable memory tools for authenticated users
         provider_registry.add(MemoryToolProvider())
 
-        # Register data.gov search tool (uses CKAN API; optional)
-        try:
-            from obscura.tools.providers.data_gov import make_data_gov_tool
-
-            spec = make_data_gov_tool()
-            provider_registry.add(type("_DGProvider", (), {"install": lambda self, ctx: _register_tool(ctx.agent, spec), "uninstall": lambda self, ctx: None})())
-        except Exception as exc:
-            logger.debug("Could not register data_gov tool: %s", exc)
-
-        # Register Public APIs dynamic provider (optional)
-        try:
-            from obscura.tools.providers.public_apis import PublicAPIsProvider
-
-            provider_registry.add(PublicAPIsProvider())
-        except Exception as exc:
-            logger.debug("Could not register public_apis provider: %s", exc)
-
-        # Auto-enable Google Workspace CLI provider when `gws` is present on PATH
-        # or when the environment explicitly requests it via OBSCURA_ENABLE_GWS=1.
-        try:
-            import shutil
-            import os
-
-            if os.environ.get("OBSCURA_ENABLE_GWS") == "1" or shutil.which("gws") is not None:
-                try:
-                    from obscura.tools.providers.gws import GWSProvider
-
-                    provider_registry.add(GWSProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable NotebookLM provider when `notebooklm-mcp` is present on PATH
-        # (i.e. after: uv tool install notebooklm-mcp-server)
-        try:
-            import shutil
-
-            if shutil.which("notebooklm-mcp") is not None:
-                try:
-                    from obscura.tools.providers.notebooklm import NotebookLMProvider
-
-                    provider_registry.add(NotebookLMProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable websearch provider when `websearch` binary is present on PATH
-        # (i.e. after: cargo install --git https://github.com/xynehq/websearch.git)
-        try:
-            import shutil
-
-            if shutil.which("websearch") is not None:
-                try:
-                    from obscura.tools.providers.websearch import WebSearchProvider
-
-                    provider_registry.add(WebSearchProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable Alpha Vantage financial data provider when ALPHAVANTAGE_API_KEY is set.
-        # Get a free key at: https://www.alphavantage.co/support/#api-key
-        try:
-            if os.environ.get("ALPHAVANTAGE_API_KEY") or os.environ.get("ALPHA_VANTAGE_API_KEY"):
-                try:
-                    from obscura.tools.providers.alphavantage import AlphaVantageProvider
-
-                    provider_registry.add(AlphaVantageProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable X (Twitter) provider when X_BEARER_TOKEN or X_ACCESS_TOKEN is set.
-        # Install SDK first: pip install xdk  |  get tokens: https://developer.x.com/en/portal/dashboard
-        try:
-            if os.environ.get("X_BEARER_TOKEN") or os.environ.get("X_ACCESS_TOKEN"):
-                try:
-                    from obscura.tools.providers.x import XProvider
-
-                    provider_registry.add(XProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable CoinGecko provider (optional: set OBSCURA_ENABLE_COINGECKO=1 to force)
-        try:
-            import importlib
-
-            if os.environ.get("OBSCURA_ENABLE_COINGECKO") == "1" or importlib.util.find_spec("pycoingecko") is not None:
-                try:
-                    from obscura.tools.providers.coingecko import CoinGeckoProvider
-
-                    provider_registry.add(CoinGeckoProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable Notion provider when NOTION_API_KEY is set or OBSCURA_ENABLE_NOTION=1
-        try:
-            if os.environ.get("NOTION_API_KEY") or os.environ.get("OBSCURA_ENABLE_NOTION") == "1":
-                try:
-                    from obscura.tools.providers.notion import NotionProvider
-
-                    provider_registry.add(NotionProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable gitleaks provider when `gitleaks` binary is present on PATH
-        try:
-            import shutil
-
-            if shutil.which("gitleaks") is not None or os.environ.get("OBSCURA_ENABLE_GITLEAKS") == "1":
-                try:
-                    from obscura.tools.providers.gitleaks import GitleaksProvider
-
-                    provider_registry.add(GitleaksProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Plugin discovery: new manifest-based loader + legacy entry-point/local plugins
-        try:
-            from obscura.plugins.loader import PluginLoader
-
-            plugin_loader = PluginLoader()
-            plugin_loader.load_all_enabled(provider_registry)
-        except Exception:
-            # Fallback to legacy loader if new plugin system fails
+        # Load plugins into provider_registry (uses already-created loader)
+        if plugin_loader is not None:
             try:
-                from obscura.tools.plugin_loader import register_plugins
-                register_plugins(provider_registry)
+                required = self.config.plugins.get("require", [])
+                optional = self.config.plugins.get("optional", [])
+                if required or optional:
+                    plugin_loader.load_scoped(provider_registry, required, optional)
+                else:
+                    plugin_loader.load_all_enabled(provider_registry)
             except Exception:
                 pass
-
-        # Auto-enable Microsoft 365 CLI provider when `m365` is present on PATH
-        # or when the environment explicitly requests it via OBSCURA_ENABLE_M365=1.
-        try:
-            import shutil
-            import os
-
-            if os.environ.get("OBSCURA_ENABLE_M365") == "1" or shutil.which("m365") is not None:
-                try:
-                    from obscura.tools.providers.m365 import M365Provider
-
-                    provider_registry.add(M365Provider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
-
-        # Auto-enable Hugging Face Hub CLI provider when `hf` is present on PATH
-        # or when the environment explicitly requests it via OBSCURA_ENABLE_HF=1.
-        try:
-            import shutil
-            import os
-
-            if os.environ.get("OBSCURA_ENABLE_HF") == "1" or shutil.which("hf") is not None:
-                try:
-                    from obscura.tools.providers.hf import HFProvider
-
-                    provider_registry.add(HFProvider())
-                except Exception:
-                    # Non-fatal: provider is optional
-                    pass
-        except Exception:
-            pass
 
         a2a_remote_config = self.config.a2a_remote_tools
         if bool(a2a_remote_config.get("enabled", False)):
@@ -658,7 +554,9 @@ class Agent:
                     )
                 )
 
-        await provider_registry.install_all(ToolProviderContext(agent=self))
+        await provider_registry.install_all(
+            ToolProviderContext(agent=self, allowed_tool_names=allowed_tools),
+        )
         self._tool_provider_registry = provider_registry
 
         # Register spawn_subagent tool so agents can create sub-agents
@@ -679,6 +577,27 @@ class Agent:
             self._client.register_tool(swarm_tool)
         except Exception as exc:
             logger.debug("Could not register spawn_subagent tool: %s", exc)
+
+        # Create agent-scoped ToolBroker
+        try:
+            from obscura.plugins.broker import ToolBroker
+            from obscura.plugins.policy import PluginPolicyEngine
+
+            policy_engine = PluginPolicyEngine()
+            broker = ToolBroker(
+                policy_engine=policy_engine,
+                capability_resolver=self._capability_resolver,
+                default_timeout=30.0,
+            )
+            # Register all installed tool handlers with the broker
+            for tool in self._client.list_tools():
+                handler = getattr(tool, "handler", None)
+                params = getattr(tool, "parameters", None)
+                if handler is not None:
+                    broker.register_tool(tool.name, handler, parameters=params)
+            self._broker = broker
+        except Exception as exc:
+            logger.debug("ToolBroker not available: %s", exc)
 
         # Merge manifest hooks into the agent's client hook registry
         if self.manifest_proxy is not None:
