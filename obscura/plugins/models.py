@@ -255,10 +255,16 @@ class ConfigRequirement:
 # ---------------------------------------------------------------------------
 
 # Valid source types
-SOURCE_TYPES = frozenset({"local", "git", "pip", "builtin"})
+SOURCE_TYPES = frozenset({
+    "local", "git", "pip", "builtin",
+    "npm", "cargo", "uv", "registry",
+})
 
 # Valid runtime types
-RUNTIME_TYPES = frozenset({"native", "cli", "sdk", "mcp", "service", "content"})
+RUNTIME_TYPES = frozenset({
+    "native", "cli", "sdk", "mcp", "service", "content",
+    "npx", "wasm", "docker", "grpc",
+})
 
 # Valid trust levels (ordered from most to least trusted)
 TRUST_LEVELS = ("builtin", "verified", "community", "untrusted")
