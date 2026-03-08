@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sample_plugin_pkg"
+version = "0.0.1"
+description = "Sample plugin package exposing obscura.tool_provider entry point"
+readme = "README.md"
+requires-python = ">=3.8"
+
+[project.entry-points]
+"obscura.tool_provider" = [
+    "sample = sample_plugin_pkg:make_provider"
+]

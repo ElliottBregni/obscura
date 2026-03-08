@@ -2444,6 +2444,79 @@ async def cmd_mcp(args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
+    """Manage Obscura plugins.
+
+    Usage:
+      /plugin list
+      /plugin install <package-or-path-or-git>
+      /plugin remove <name>
+    """
+    try:
+        from obscura.tools.plugin_registry import PluginRegistry
+    except Exception:
+        print_error("Plugin management not available. Ensure obscura.tools.plugin_registry is present.")
+        return None
+
+    registry = PluginRegistry()
+
+    try:
+        tokens = shlex.split(args) if args and args.strip() else []
+    except ValueError:
+        tokens = args.split()
+
+    if not tokens:
+        print_info("Usage: /plugin [list|install|remove]")
+        return None
+
+    sub = tokens[0]
+    if sub == "list":
+        data = registry.list_installed()
+        local = data.get("local", []) if isinstance(data, dict) else data
+        regs = data.get("registered", []) if isinstance(data, dict) else []
+        if not local and not regs:
+            print_info("No plugins installed.")
+            return None
+        if local:
+            print_info("Local plugins:")
+            for p in local:
+                console.print(f"  • [cyan]{p.get('name')}[/] — {p.get('path')}")
+        if regs:
+            print_info("Registered plugins (pip/git):")
+            for r in regs:
+                console.print(f"  • [cyan]{r.get('name')}[/] — {r.get('type')} {r.get('source', r.get('package', ''))}")
+        return None
+
+    if sub == "install":
+        if len(tokens) < 2:
+            print_error("Usage: /plugin install <package-or-path-or-git>")
+            return None
+        source = tokens[1]
+        print_info(f"Installing plugin: {source}")
+        res = registry.install(source)
+        if res.get("ok"):
+            print_ok(res.get("message"))
+        else:
+            print_error(res.get("message"))
+        return None
+
+    if sub in ("remove", "uninstall"):
+        if len(tokens) < 2:
+            print_error("Usage: /plugin remove <name>")
+            return None
+        name = tokens[1]
+        print_info(f"Removing plugin: {name}")
+        res = registry.remove(name)
+        if res.get("ok"):
+            print_ok(res.get("message"))
+        else:
+            print_error(res.get("message"))
+        return None
+
+    print_info("Unknown subcommand. Usage: /plugin [list|install|remove]")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Handlers — A2A (Agent-to-Agent)
 # ---------------------------------------------------------------------------
