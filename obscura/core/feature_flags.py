@@ -49,5 +49,5 @@ class FeatureFlags:
 # ----------------------------------------------------------------
 FLAGS = FeatureFlags(
     banner_enabled = True,
-    banner_theme   = BannerTheme.OVERHAUL_GREEN_BLUE,   # <- swap to any BannerTheme above
+    banner_theme   = BannerTheme.OBSCURA_DEFAULT,   # <- swap to any BannerTheme above
 )

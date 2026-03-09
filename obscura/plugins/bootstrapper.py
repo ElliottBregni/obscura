@@ -29,6 +29,29 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Obscura venv resolution
+# ---------------------------------------------------------------------------
+
+
+def _obscura_venv_python() -> str:
+    """Return the obscura venv Python, or sys.executable as fallback."""
+    venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    if venv_python.is_file():
+        return str(venv_python)
+    return sys.executable
+
+
+def _obscura_venv_bin() -> Path:
+    """Return the bin directory of the obscura venv, or sys.prefix/bin."""
+    venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
+    venv_bin = venv_dir / "bin"
+    if venv_bin.is_dir():
+        return venv_bin
+    return Path(sys.prefix) / "bin"
+
+
+# ---------------------------------------------------------------------------
 # Result model
 # ---------------------------------------------------------------------------
 
@@ -51,19 +74,11 @@ class BootstrapResult:
 
 
 def _is_pip_installed(package: str) -> bool:
-    """Check if a pip package is importable or installed."""
+    """Check if a pip package is installed in the obscura venv."""
     name = package.split("[")[0].split(">=")[0].split("==")[0].split("<")[0].strip()
-    # Normalize: dashes → underscores for import check
-    import_name = name.replace("-", "_").lower()
-    try:
-        __import__(import_name)
-        return True
-    except ImportError:
-        pass
-    # Fallback: check pip list
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", name],
+            [_obscura_venv_python(), "-m", "pip", "show", name],
             capture_output=True, text=True, timeout=15,
         )
         return result.returncode == 0
@@ -72,12 +87,12 @@ def _is_pip_installed(package: str) -> bool:
 
 
 def _is_binary_available(name: str) -> bool:
-    """Check if a binary is on PATH or in the current Python env's bin dir."""
-    if shutil.which(name) is not None:
+    """Check if a binary is on PATH or in the obscura venv bin dir."""
+    # Check the obscura venv bin directory first
+    obscura_bin = _obscura_venv_bin() / name
+    if obscura_bin.is_file():
         return True
-    # Also check the venv/env bin directory (pip-installed CLIs land here)
-    env_bin = Path(sys.prefix) / "bin" / name
-    if env_bin.is_file():
+    if shutil.which(name) is not None:
         return True
     # Check ~/.local/bin (user pip installs)
     local_bin = Path.home() / ".local" / "bin" / name
@@ -104,11 +119,11 @@ def _is_npm_installed(package: str) -> bool:
 
 
 def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
-    """Install a pip package."""
+    """Install a pip package into the obscura venv."""
     pkg = dep.package + dep.version if dep.version else dep.package
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--quiet", pkg],
+            [_obscura_venv_python(), "-m", "pip", "install", "--quiet", pkg],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
@@ -119,31 +134,19 @@ def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
 
 
 def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
-    """Install via uv tool install."""
+    """Install via uv pip install into the obscura venv."""
     if not _is_binary_available("uv"):
         return _install_pip(dep)  # fallback to pip
 
     pkg = dep.package + dep.version if dep.version else dep.package
+    venv_python = _obscura_venv_python()
     try:
         result = subprocess.run(
-            ["uv", "tool", "install", pkg],
+            ["uv", "pip", "install", pkg, "--python", venv_python],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
             return True, ""
-        stderr_lower = result.stderr.lower()
-        # uv tool install may fail if already installed — that's fine
-        if "already installed" in stderr_lower:
-            return True, ""
-        # Executable already exists — retry with --force
-        if "already exists" in stderr_lower:
-            retry = subprocess.run(
-                ["uv", "tool", "install", "--force", pkg],
-                capture_output=True, text=True, timeout=120,
-            )
-            if retry.returncode == 0:
-                return True, ""
-            return False, retry.stderr.strip()
         return False, result.stderr.strip()
     except Exception as exc:
         return False, str(exc)

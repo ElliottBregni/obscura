@@ -22,25 +22,21 @@ _client: Any = None
 
 
 def _ensure_venv_path() -> None:
-    """Inject the project .venv site-packages into sys.path if needed.
+    """Inject the obscura venv site-packages into sys.path if needed.
 
     The running Obscura process may use a different Python interpreter than
-    the one used to install dependencies into the project .venv.  This
-    function walks up from the package root to find a ``.venv`` directory
-    and prepends its ``site-packages`` to ``sys.path`` so that
-    ``notebooklm_mcp`` can be imported regardless of which interpreter is
-    active.
+    the one used to install dependencies into the obscura venv.  This
+    function checks ``~/.obscura/venv/`` and prepends its ``site-packages``
+    to ``sys.path`` so that ``notebooklm_mcp`` can be imported regardless
+    of which interpreter is active.
     """
-    here = Path(__file__).resolve()
-    for parent in [here, *here.parents]:
-        venv = parent / ".venv"
-        if venv.is_dir():
-            for sp in venv.glob("lib/python*/site-packages"):
-                sp_str = str(sp)
-                if sp_str not in sys.path:
-                    sys.path.insert(0, sp_str)
-                    logger.debug("notebooklm: injected venv path %s", sp_str)
-            break
+    venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
+    if venv_dir.is_dir():
+        for sp in venv_dir.glob("lib/python*/site-packages"):
+            sp_str = str(sp)
+            if sp_str not in sys.path:
+                sys.path.insert(0, sp_str)
+                logger.debug("notebooklm: injected venv path %s", sp_str)
 
 def _get_client() -> Any:
     global _client

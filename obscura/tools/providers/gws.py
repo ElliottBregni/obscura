@@ -40,10 +40,10 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
 
     binary = shutil.which("gws-cli") or shutil.which("gws")
     if not binary:
-        # Also check venv bin directory
-        import sys
+        # Check the obscura venv bin directory
+        import os
         from pathlib import Path as _Path
-        venv_bin = _Path(sys.prefix) / "bin" / "gws-cli"
+        venv_bin = _Path(os.environ.get("OBSCURA_HOME", _Path.home() / ".obscura")) / "venv" / "bin" / "gws-cli"
         if venv_bin.is_file():
             binary = str(venv_bin)
         else:
