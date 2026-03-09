@@ -6,7 +6,7 @@ in generic request/response wrappers. This avoids a hard dependency on
 ``grpcio-tools`` at development time while providing a fully functional
 gRPC transport.
 
-If protobuf-generated stubs are available (from ``sdk.a2a.proto``),
+If protobuf-generated stubs are available (from ``obscura.integrations.a2a.proto``),
 they can be used instead for native proto serialization.
 
 Usage::

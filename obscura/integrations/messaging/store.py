@@ -8,7 +8,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_state_dir
 from obscura.integrations.messaging.models import ConversationState
 
 logger = logging.getLogger(__name__)
@@ -16,9 +16,22 @@ logger = logging.getLogger(__name__)
 _DB_FILENAME = "messaging_state.db"
 
 
+def _migrate_state_file(old: Path, new: Path) -> None:
+    """Move a state file from old to new location if it exists."""
+    if old.is_file() and not new.is_file():
+        new.parent.mkdir(parents=True, exist_ok=True)
+        old.rename(new)
+        logging.getLogger(__name__).info("Migrated state file %s -> %s", old, new)
+
+
 class _SQLiteBase:
     def __init__(self, db_path: Path | None = None) -> None:
-        self._db_path = db_path or (resolve_obscura_home() / _DB_FILENAME)
+        if db_path is None:
+            new_path = resolve_obscura_state_dir() / _DB_FILENAME
+            old_path = resolve_obscura_home() / _DB_FILENAME
+            _migrate_state_file(old_path, new_path)
+            db_path = new_path
+        self._db_path = db_path
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:

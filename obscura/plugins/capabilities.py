@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def list_builtin_capabilities() -> list[str]:
+    """Return a list of all built-in capability IDs."""
+    try:
+        list: list[CapabilitySpec] = CapabilityIndex().list_all()  
+        return [cap.id for cap in list] 
+    except Exception:  
+        return ["shell.exec", "file.read", "file.write", "git.ops", "web.browse", "search.web", "security.scan"]
+
 @dataclass
 class CapabilityGrant:
     """A record of a capability granted to a grantee."""

@@ -1,5 +1,7 @@
 """Agent subpackage: base agents, runtime, and loop utilities."""
 
+from __future__ import annotations
+
 from obscura.agent.agent import BaseAgent
 from obscura.core.agent_loop import AgentLoop
 from obscura.agent.agents import (
@@ -27,6 +29,16 @@ from obscura.agent.peers import (
     RemoteAgentRef,
 )
 
+# ---------------------------------------------------------------------------
+# Agent type registry — maps spec ``agent_type`` values to concrete classes
+# ---------------------------------------------------------------------------
+
+AGENT_TYPE_REGISTRY: dict[str, type[BaseAgent]] = {
+    "loop": LoopAgent,
+    "daemon": DaemonAgent,
+    "aper": APERLoopAgent,
+}
+
 __all__ = [
     "BaseAgent",
     "Agent",
@@ -49,4 +61,6 @@ __all__ = [
     "AttentionPriority",
     "AttentionRequest",
     "UserResponse",
+    # Registry
+    "AGENT_TYPE_REGISTRY",
 ]

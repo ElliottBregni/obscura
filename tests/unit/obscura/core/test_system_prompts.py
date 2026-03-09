@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from obscura.core.system_prompts import (
+    compose_environment_context,
     compose_system_prompt,
     get_default_system_prompt,
     load_custom_system_prompt,
@@ -127,3 +128,59 @@ def test_default_prompt_has_best_practices():
     assert "Best Practices" in prompt
     assert "proactively" in prompt or "Proactively" in prompt
     assert "Read before" in prompt or "read before" in prompt
+
+
+# ===================================================================
+# compose_environment_context
+# ===================================================================
+
+
+def test_compose_environment_context_basic():
+    """All fields provided → template filled correctly."""
+    result = compose_environment_context(
+        plugin_ids=["websearch", "gitleaks", "system-tools"],
+        capabilities=["shell.exec", "file.read"],
+        agent_types=["loop", "daemon", "aper"],
+        bootstrap_summary="3/3 plugins OK",
+    )
+    assert "Available Plugins (3)" in result
+    assert "- websearch" in result
+    assert "- gitleaks" in result
+    assert "- system-tools" in result
+    assert "- shell.exec" in result
+    assert "- file.read" in result
+    assert "loop, daemon, aper" in result
+    assert "3/3 plugins OK" in result
+
+
+def test_compose_environment_context_empty():
+    """No args → valid string with sensible defaults."""
+    result = compose_environment_context()
+    assert "Available Plugins (0)" in result
+    assert "None discovered" in result
+    assert "None configured" in result
+    assert "loop (default)" in result
+    assert "All plugins bootstrapped successfully" in result
+
+
+def test_compose_environment_context_partial():
+    """Only plugin_ids provided, rest defaults."""
+    result = compose_environment_context(plugin_ids=["websearch"])
+    assert "Available Plugins (1)" in result
+    assert "- websearch" in result
+    assert "None configured" in result
+    assert "loop (default)" in result
+
+
+def test_environment_context_template_exists():
+    """The environment_context.txt template file must exist."""
+    from obscura.core.system_prompts import _PROMPTS_DIR
+
+    template_path = _PROMPTS_DIR / "environment_context.txt"
+    assert template_path.exists(), f"Missing: {template_path}"
+    content = template_path.read_text(encoding="utf-8")
+    assert "{plugin_count}" in content
+    assert "{plugin_list}" in content
+    assert "{capability_list}" in content
+    assert "{agent_types}" in content
+    assert "{bootstrap_summary}" in content

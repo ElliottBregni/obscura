@@ -76,9 +76,14 @@ def init_workspace(
     global_home = _resolve_global_home()
 
     # -- directories ---------------------------------------------------------
-    for subdir in ("mcp", "hooks", "skills", "sessions", "memory"):
+    for subdir in ("mcp", "hooks", "skills", "sessions", "memory", "state", "plugins"):
         (ws / subdir).mkdir(parents=True, exist_ok=True)
         logger.info("Created %s/", ws / subdir)
+
+    # -- specs/ scaffold -----------------------------------------------------
+    for specs_subdir in ("specs/templates", "specs/policies", "specs/workspaces"):
+        (ws / specs_subdir).mkdir(parents=True, exist_ok=True)
+        logger.info("Created %s/", ws / specs_subdir)
 
     # -- agents.yaml ---------------------------------------------------------
     _copy_or_create(
@@ -102,19 +107,36 @@ def init_workspace(
         force=force,
     )
 
-    # -- hooks/session-init.sh -----------------------------------------------
+    # -- hooks/session-init.py -----------------------------------------------
     _copy_or_create(
-        src=global_home / "hooks" / "session-init.sh",
-        dst=ws / "hooks" / "session-init.sh",
-        default_content=_DEFAULT_SESSION_INIT_SH,
+        src=global_home / "hooks" / "session-init.py",
+        dst=ws / "hooks" / "session-init.py",
+        default_content=_DEFAULT_SESSION_INIT_PY,
         force=force,
     )
-    _make_executable(ws / "hooks" / "session-init.sh")
+    _make_executable(ws / "hooks" / "session-init.py")
 
     # -- config.yaml --------------------------------------------------------
     _write_if_missing(
         dst=ws / "config.yaml",
         content=_DEFAULT_CONFIG_YAML,
+        force=force,
+    )
+
+    # -- seed specs ----------------------------------------------------------
+    _write_if_missing(
+        dst=ws / "specs" / "templates" / "base-agent.yml",
+        content=_build_default_base_agent_template(),
+        force=force,
+    )
+    _write_if_missing(
+        dst=ws / "specs" / "policies" / "safe-dev.yml",
+        content=_DEFAULT_SAFE_DEV_POLICY,
+        force=force,
+    )
+    _write_if_missing(
+        dst=ws / "specs" / "workspaces" / "default.yml",
+        content=_DEFAULT_WORKSPACE,
         force=force,
     )
 
@@ -366,25 +388,31 @@ _DEFAULT_HOOKS_JSON = (
     + "\n"
 )
 
-_DEFAULT_SESSION_INIT_SH = textwrap.dedent("""\
-    #!/usr/bin/env bash
-    # Session init hook — injects agent context into every session
+_DEFAULT_SESSION_INIT_PY = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    \"\"\"Session init hook — injects agent context into every session.
 
-    AGENTS_YAML="${OBSCURA_HOME:-$HOME/.obscura}/agents.yaml"
+    Uses load_agent_configs() to merge global + local agents.yaml,
+    then outputs a JSON hook response with the available agent names.
+    \"\"\"
+    import json
+    import sys
 
-    AGENT_NAMES=$(grep -E '^\\s+- name:' "$AGENTS_YAML" 2>/dev/null \\
-      | awk '{print $NF}' | tr '\\n' ', ' | sed 's/,$//')
+    try:
+        from obscura.tools.swarm import load_agent_configs
 
-    cat << EOF
-    {
-      "hookSpecificOutput": {
-        "hookEventName": "SessionStart",
-        "additionalContext": "Available agents: ${AGENT_NAMES}"
-      }
-    }
-    EOF
+        configs = load_agent_configs()
+        agent_names = ", ".join(sorted(configs.keys()))
+    except Exception:
+        agent_names = ""
 
-    exit 0
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": f"Available agents: {agent_names}" if agent_names else "",
+        }
+    }))
+    sys.exit(0)
 """)
 
 _DEFAULT_CONFIG_YAML = textwrap.dedent("""\
@@ -422,4 +450,73 @@ _DEFAULT_CONFIG_YAML = textwrap.dedent("""\
     # ── MCP Servers ───────────────────────────────────────────────────────
     mcp:
       auto_discover: true
+""")
+
+def _build_default_base_agent_template() -> str:
+    """Build base-agent template dynamically with all builtin plugin IDs."""
+    try:
+        from obscura.plugins.builtins import list_builtin_plugin_ids
+        from obscura.plugins.capabilities import list_builtin_capabilities
+        plugin_ids = list_builtin_plugin_ids()
+        capability_ids = ["shell.exec", "file.read", "file.write", "git.ops", "web.browse", "search.web", "security.scan"]
+    except Exception:  # noqa: BLE001
+        plugin_ids = ["system-tools", "websearch", "gitleaks"]
+        capability_ids = ["shell.exec", "file.read", "file.write", "git.ops", "web.browse", "search.web", "security.scan"]
+
+    plugins_yaml = "\n".join(f"        - {pid}" for pid in plugin_ids)
+    capabilities = "\n".join(f"            - {cid}" for cid in capability_ids)
+    return textwrap.dedent("""\
+        apiVersion: obscura/v1
+        kind: Template
+        metadata:
+          name: base-agent
+          description: Common defaults inherited by all agent templates.
+        spec:
+          provider: copilot
+          agent_type: loop
+          max_iterations: 25
+          plugins:
+    {plugins}
+          capabilities:
+            - shell.exec
+            - file.read
+            - file.write
+            - git.ops
+            - web.browse
+            - search.web
+            - security.scan
+          instructions: |
+            You are a helpful AI assistant. Analyse requests carefully
+            and invoke relevant tools when needed.
+    """).replace("{plugins}", plugins_yaml).replace("{capabilities}", capabilities)
+
+_DEFAULT_SAFE_DEV_POLICY = textwrap.dedent("""\
+    apiVersion: obscura/v1
+    kind: Policy
+    metadata:
+      name: safe-dev
+      description: Conservative policy for development workflows.
+    spec:
+      tool_denylist:
+        - dangerous_tool
+      require_confirmation:
+        - bash
+        - write_file
+        - delete_file
+      max_turns: 15
+""")
+
+_DEFAULT_WORKSPACE = textwrap.dedent("""\
+    apiVersion: obscura/v1
+    kind: Workspace
+    metadata:
+      name: default
+      description: Default workspace — all plugins, no restrictions.
+    spec:
+      agents:
+        - name: assistant
+          template: base-agent
+          mode: task
+      startup:
+        preload_plugins: true
 """)

@@ -463,9 +463,29 @@ class OpenAIBackend:
     # -- Tools ---------------------------------------------------------------
 
     def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for function calling."""
+        """Register a tool for function calling (skips duplicates)."""
+        if any(t.name == spec.name for t in self._tools):
+            return
         self._tools.append(spec)
         self._tool_registry.register(spec)
+
+    def _build_tool_listing(self) -> str:
+        """Build a human-readable tool listing for the system prompt."""
+        lines = ["## Available Tools", ""]
+        lines.append(
+            "You have the following tools. "
+            "Use these EXACT names when calling tools:"
+        )
+        lines.append("")
+        for spec in self._tools:
+            desc = (spec.description or "").split("\n")[0][:120]
+            lines.append(f"- `{spec.name}`: {desc}")
+        lines.append("")
+        lines.append(
+            "Do NOT invent tool names. "
+            "If none of these tools fit, tell the user."
+        )
+        return "\n".join(lines)
 
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
@@ -827,8 +847,16 @@ class OpenAIBackend:
         prepended (after system prompt) before the current prompt.
         """
         messages: list[dict[str, Any]] = []
-        if self._system_prompt:
-            messages.append({"role": "system", "content": self._system_prompt})
+        prompt_content = self._system_prompt or ""
+        if self._tools:
+            tool_listing = self._build_tool_listing()
+            prompt_content = (
+                f"{prompt_content}\n\n{tool_listing}"
+                if prompt_content
+                else tool_listing
+            )
+        if prompt_content:
+            messages.append({"role": "system", "content": prompt_content})
 
         # Structured multi-turn messages (from caller)
         if structured_messages:

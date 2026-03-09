@@ -107,13 +107,10 @@ tools:
 bootstrap:
   deps:
     - type: uv
-      package: notebooklm-mcp-server
-      optional: true
-    - type: binary
       package: notebooklm-mcp
-      optional: true
+      optional: false
 
 healthcheck:
-  type: binary
-  target: notebooklm-mcp-server
+  type: python_import
+  target: notebooklm_mcp.api_client
   interval_seconds: 300

@@ -20,7 +20,10 @@ from obscura.approvals import (
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.core.paths import resolve_obscura_mcp_dir
-from obscura.core.system_prompts import compose_system_prompt as compose_default_prompt
+from obscura.core.system_prompts import (
+    compose_environment_context,
+    compose_system_prompt as compose_default_prompt,
+)
 from obscura.core.types import ToolCallInfo
 from obscura.deps import audit, get_runtime
 from obscura.routes import template_store
@@ -776,12 +779,31 @@ def _compose_system_prompt(template: dict[str, Any]) -> str:
     # Check env var to disable default prompt if needed
     include_default = os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "true"
 
-    custom_sections = [skills_section] if skills_section else None
+    custom_sections: list[str] = []
+    if skills_section:
+        custom_sections.append(skills_section)
+
+    # Inject environment context (available plugins, capabilities, agent types)
+    try:
+        from obscura.agent import AGENT_TYPE_REGISTRY
+        from obscura.plugins.builtins import list_builtin_plugin_ids
+
+        raw_caps = template.get("capabilities", {})
+        cap_grants = raw_caps.get("grant", []) if isinstance(raw_caps, dict) else []
+        env_section = compose_environment_context(
+            plugin_ids=list_builtin_plugin_ids(),
+            capabilities=cap_grants,
+            agent_types=list(AGENT_TYPE_REGISTRY.keys()),
+        )
+        if env_section:
+            custom_sections.append(env_section)
+    except Exception:
+        pass  # graceful degradation — env context is optional
 
     return compose_default_prompt(
         base=user_prompt,
         include_default=include_default,
-        custom_sections=custom_sections,
+        custom_sections=custom_sections or None,
     )
 
 

@@ -1192,7 +1192,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
         print_error("Usage: /agent spawn <name> [-m model] [-s system_prompt]")
         return None
 
-    name = tokens[0]
+    name = tokens[0].lstrip("@")
     model_override = None
     system_prompt_override = None
 

@@ -363,6 +363,86 @@ class TestParseBootstrap:
         result = _parse_bootstrap(raw)
         assert result.deps[0].optional is True
 
+    def test_empty_dict_returns_none(self):
+        assert _parse_bootstrap({}) is None
+
+    def test_empty_list_returns_none(self):
+        assert _parse_bootstrap([]) is None
+
+    def test_all_dep_types_shorthand(self):
+        """All 8 dep types parse correctly in shorthand form."""
+        raw = {
+            "deps": [
+                "pip:requests",
+                "uv:ruff",
+                "npx:prettier",
+                "npm:eslint",
+                "cargo:ripgrep",
+                "binary:git",
+                "brew:jq",
+                "pipx:black",
+            ]
+        }
+        result = _parse_bootstrap(raw)
+        assert len(result.deps) == 8
+        by_type = {d.type: d.package for d in result.deps}
+        assert by_type == {
+            "pip": "requests",
+            "uv": "ruff",
+            "npx": "prettier",
+            "npm": "eslint",
+            "cargo": "ripgrep",
+            "binary": "git",
+            "brew": "jq",
+            "pipx": "black",
+        }
+
+    def test_shorthand_with_version(self):
+        """Shorthand 'pip:requests>=2.0' keeps version in package string."""
+        raw = {"deps": ["pip:requests>=2.0"]}
+        result = _parse_bootstrap(raw)
+        assert result.deps[0].type == "pip"
+        assert result.deps[0].package == "requests>=2.0"
+
+    def test_shorthand_with_extras(self):
+        """Shorthand 'pip:my-pkg[extra]' keeps extras in package string."""
+        raw = {"deps": ["pip:my-pkg[extra]"]}
+        result = _parse_bootstrap(raw)
+        assert result.deps[0].package == "my-pkg[extra]"
+
+    def test_dict_with_version(self):
+        raw = {"deps": [{"type": "pip", "package": "click", "version": ">=8.0"}]}
+        result = _parse_bootstrap(raw)
+        assert result.deps[0].version == ">=8.0"
+
+    def test_mixed_string_and_dict_deps(self):
+        raw = {"deps": ["pip:requests", {"type": "binary", "package": "git"}]}
+        result = _parse_bootstrap(raw)
+        assert len(result.deps) == 2
+        assert result.deps[0] == BootstrapDep(type="pip", package="requests")
+        assert result.deps[1].type == "binary"
+        assert result.deps[1].package == "git"
+
+    def test_post_install_preserved(self):
+        raw = {"deps": [{"type": "pip", "package": "x"}], "post_install": "echo ok"}
+        result = _parse_bootstrap(raw)
+        assert result.post_install == "echo ok"
+
+    def test_check_command_preserved(self):
+        raw = {"deps": [{"type": "pip", "package": "x"}], "check_command": "foo --version"}
+        result = _parse_bootstrap(raw)
+        assert result.check_command == "foo --version"
+
+    def test_dict_optional_true(self):
+        raw = {"deps": [{"type": "npm", "package": "pkg", "optional": True}]}
+        result = _parse_bootstrap(raw)
+        assert result.deps[0].optional is True
+
+    def test_dict_optional_defaults_false(self):
+        raw = {"deps": [{"type": "npm", "package": "pkg"}]}
+        result = _parse_bootstrap(raw)
+        assert result.deps[0].optional is False
+
 
 # ===================================================================
 # 6. Workflow, instruction, policy_hint parsing

@@ -59,7 +59,7 @@ from obscura.cli.vector_memory_bridge import (
 )
 from obscura.core.client import ObscuraClient
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir
 from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
 
 
@@ -743,7 +743,10 @@ async def _repl(
 
     # Compose system prompt: default Obscura identity + user prompt + session memory
     from obscura.core.context import load_obscura_memory
-    from obscura.core.system_prompts import compose_system_prompt
+    from obscura.core.system_prompts import (
+        compose_environment_context,
+        compose_system_prompt,
+    )
 
     include_default = not no_default_prompt
     if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
@@ -757,6 +760,24 @@ async def _repl(
         vm_startup = load_startup_memories(vector_store, sid, top_k=3)
         if vm_startup:
             custom_sections.append(vm_startup)
+
+    # Inject environment context (available plugins, capabilities, agent types)
+    try:
+        from obscura.agent import AGENT_TYPE_REGISTRY
+        from obscura.plugins.builtins import list_builtin_plugin_ids
+
+        env_section = compose_environment_context(
+            plugin_ids=list_builtin_plugin_ids(),
+            capabilities=[
+                "shell.exec", "file.read", "file.write",
+                "git.ops", "web.browse", "search.web", "security.scan",
+            ],
+            agent_types=list(AGENT_TYPE_REGISTRY.keys()),
+        )
+        if env_section:
+            custom_sections.append(env_section)
+    except Exception:
+        pass  # graceful degradation
 
     combined_system = compose_system_prompt(
         base=system,
@@ -1206,6 +1227,13 @@ async def _repl(
     default=False,
     help="Skip the default Obscura system prompt.",
 )
+@click.option(
+    "-w",
+    "--workspace",
+    "workspace_name",
+    default=None,
+    help="Load a workspace from .obscura/specs/ (e.g. 'code-mode').",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -1220,11 +1248,30 @@ def main(
     tools: str,
     confirm: bool,
     no_default_prompt: bool,
+    workspace_name: str | None,
 ) -> None:
     """Obscura — AI agent REPL."""
     # If a subcommand was invoked, let Click handle it
     if ctx.invoked_subcommand is not None:
         return
+
+    # Compile workspace if specified
+    if workspace_name is not None:
+        try:
+            from obscura.core.compiler.compile import compile_workspace
+
+            compiled_ws = compile_workspace(workspace_name, strict=False)
+            # Apply workspace config to CLI defaults
+            ws_backend = compiled_ws.config.get("default_backend")
+            if ws_backend and isinstance(ws_backend, str):
+                backend = ws_backend
+            click.echo(
+                f"Loaded workspace '{compiled_ws.name}' "
+                f"({len(compiled_ws.agents)} agents, "
+                f"{len(compiled_ws.policies)} policies)"
+            )
+        except Exception as exc:
+            click.echo(f"Failed to load workspace '{workspace_name}': {exc}", err=True)
 
     # Resolve session ID: --resume > --session > --continue (last session)
     resolved_session = resume or session
@@ -1293,3 +1340,184 @@ def init(force: bool, no_bootstrap: bool) -> None:
                 )
         except Exception as exc:
             click.echo(f"Bootstrap failed: {exc}", err=True)
+
+
+# ---------------------------------------------------------------------------
+# Workspace subcommands
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def workspace() -> None:
+    """Manage workspaces (list, inspect, compile)."""
+
+
+@workspace.command("list")
+def workspace_list() -> None:
+    """List available workspaces from specs directory."""
+    from obscura.core.compiler.loader import load_specs_dir
+
+    specs_dir = resolve_obscura_specs_dir()
+    if not specs_dir.is_dir():
+        click.echo(f"No specs directory at {specs_dir}")
+        return
+
+    registry = load_specs_dir(specs_dir)
+    if not registry.workspaces:
+        click.echo("No workspaces found.")
+        return
+
+    for name, ws in sorted(registry.workspaces.items()):
+        desc = ws.metadata.description or "(no description)"
+        n_agents = len(ws.spec.agents)
+        n_policies = len(ws.spec.policies)
+        click.echo(f"  {name:20s}  {n_agents} agents, {n_policies} policies  {desc}")
+
+
+@workspace.command("inspect")
+@click.argument("name")
+def workspace_inspect(name: str) -> None:
+    """Compile and inspect a workspace."""
+    from obscura.core.compiler.compile import compile_workspace_from_dir
+    from obscura.core.compiler.errors import CompileError
+
+    specs_dir = resolve_obscura_specs_dir()
+    try:
+        ws = compile_workspace_from_dir(name, specs_dir, strict=False)
+    except CompileError as exc:
+        click.echo(f"Compile error: {exc}", err=True)
+        return
+
+    click.echo(f"Workspace: {ws.name}")
+    click.echo(f"  Config: {ws.config or '(empty)'}")
+    click.echo(f"  Preload plugins: {ws.preload_plugins}")
+
+    if ws.policies:
+        click.echo(f"  Policies: {', '.join(p.name for p in ws.policies)}")
+    if ws.plugin_include:
+        click.echo(f"  Plugin include: {', '.join(sorted(ws.plugin_include))}")
+    if ws.plugin_exclude:
+        click.echo(f"  Plugin exclude: {', '.join(sorted(ws.plugin_exclude))}")
+    if ws.memory:
+        click.echo(f"  Memory: namespace={ws.memory.namespace} scope={ws.memory.shared_scope}")
+
+    if ws.agents:
+        click.echo(f"  Agents ({len(ws.agents)}):")
+        for a in ws.agents:
+            click.echo(
+                f"    {a.name:20s}  template={a.template_name}  "
+                f"mode={a.mode}  provider={a.provider}  "
+                f"plugins=[{', '.join(a.plugins)}]"
+            )
+
+    if ws.startup_agents:
+        click.echo(f"  Startup: {', '.join(ws.startup_agents)}")
+
+
+@workspace.command("load")
+@click.argument("name")
+def workspace_load(name: str) -> None:
+    """Compile a workspace and display its configuration for the session."""
+    from obscura.core.compiler.compile import compile_workspace
+    from obscura.core.compiler.errors import CompileError
+
+    try:
+        ws = compile_workspace(name, strict=False)
+    except CompileError as exc:
+        click.echo(f"Compile error: {exc}", err=True)
+        return
+
+    click.echo(f"Loaded workspace: {ws.name}")
+    if ws.agents:
+        click.echo(f"  Agents: {', '.join(a.name for a in ws.agents)}")
+    if ws.policies:
+        click.echo(f"  Policies: {', '.join(p.name for p in ws.policies)}")
+    if ws.plugin_include:
+        click.echo(f"  Allowed plugins: {', '.join(sorted(ws.plugin_include))}")
+    if ws.plugin_exclude:
+        click.echo(f"  Blocked plugins: {', '.join(sorted(ws.plugin_exclude))}")
+    if ws.startup_agents:
+        click.echo(f"  Startup agents: {', '.join(ws.startup_agents)}")
+    click.echo(f"  Preload plugins: {ws.preload_plugins}")
+    click.echo("Workspace compiled successfully. Use -w flag to apply at startup.")
+
+
+# ---------------------------------------------------------------------------
+# Template subcommands
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def template() -> None:
+    """Manage templates (list, inspect)."""
+
+
+@template.command("list")
+def template_list() -> None:
+    """List available templates from specs directory."""
+    from obscura.core.compiler.loader import load_specs_dir
+
+    specs_dir = resolve_obscura_specs_dir()
+    if not specs_dir.is_dir():
+        click.echo(f"No specs directory at {specs_dir}")
+        return
+
+    registry = load_specs_dir(specs_dir)
+    if not registry.templates:
+        click.echo("No templates found.")
+        return
+
+    for name, tmpl in sorted(registry.templates.items()):
+        extends = f"extends={tmpl.spec.extends}" if tmpl.spec.extends else ""
+        plugins = ", ".join(tmpl.spec.plugins) if tmpl.spec.plugins else "(none)"
+        click.echo(f"  {name:20s}  {extends:20s}  plugins=[{plugins}]")
+
+
+@template.command("inspect")
+@click.argument("name")
+def template_inspect(name: str) -> None:
+    """Inspect a template (with inheritance resolved)."""
+    from obscura.core.compiler.errors import CompileError
+    from obscura.core.compiler.loader import load_specs_dir
+    from obscura.core.compiler.merger import merge_template_chain
+    from obscura.core.compiler.resolver import resolve_template_chain
+
+    specs_dir = resolve_obscura_specs_dir()
+    registry = load_specs_dir(specs_dir)
+
+    tmpl = registry.get_template(name)
+    if tmpl is None:
+        click.echo(f"Template '{name}' not found.", err=True)
+        return
+
+    try:
+        chain = resolve_template_chain(tmpl, registry)
+        merged = merge_template_chain(chain)
+    except CompileError as exc:
+        click.echo(f"Resolution error: {exc}", err=True)
+        return
+
+    spec = merged.spec
+    click.echo(f"Template: {merged.metadata.name}")
+    if merged.metadata.description:
+        click.echo(f"  Description: {merged.metadata.description}")
+    if merged.metadata.tags:
+        click.echo(f"  Tags: {', '.join(merged.metadata.tags)}")
+    click.echo(f"  Provider: {spec.provider}")
+    if spec.model_id:
+        click.echo(f"  Model: {spec.model_id}")
+    click.echo(f"  Agent type: {spec.agent_type}")
+    click.echo(f"  Max iterations: {spec.max_iterations}")
+    if spec.plugins:
+        click.echo(f"  Plugins: {', '.join(spec.plugins)}")
+    if spec.capabilities:
+        click.echo(f"  Capabilities: {', '.join(spec.capabilities)}")
+    if spec.tool_allowlist is not None:
+        click.echo(f"  Tool allowlist: {', '.join(spec.tool_allowlist)}")
+    if spec.tool_denylist:
+        click.echo(f"  Tool denylist: {', '.join(spec.tool_denylist)}")
+    if spec.instructions:
+        preview = spec.instructions[:200]
+        if len(spec.instructions) > 200:
+            preview += "..."
+        click.echo(f"  Instructions: {preview}")

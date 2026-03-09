@@ -16,10 +16,12 @@ from obscura.plugins.bootstrapper import (
     BootstrapResult,
     _bootstrap_dep,
     _check_binary,
+    _install_brew,
     _install_cargo,
     _install_npm,
     _install_npx,
     _install_pip,
+    _install_pipx,
     _install_uv,
     _is_binary_available,
     _is_npm_installed,
@@ -218,6 +220,41 @@ class TestInstallUv:
         dep = _dep("uv", "ruff")
         ok, err = _install_uv(dep)
         assert ok is True
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_uv_executable_already_exists_retries_force(self, mock_run, mock_binary):
+        """'Executable already exists' → retry with --force."""
+        mock_binary.return_value = True
+        first_call = _proc(
+            returncode=1,
+            stderr="error: Executable already exists: ruff (use `--force` to overwrite)",
+        )
+        second_call = _proc(returncode=0)
+        mock_run.side_effect = [first_call, second_call]
+        dep = _dep("uv", "ruff")
+        ok, err = _install_uv(dep)
+        assert ok is True
+        assert err == ""
+        assert mock_run.call_count == 2
+        retry_cmd = mock_run.call_args_list[1][0][0]
+        assert "--force" in retry_cmd
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_uv_executable_exists_force_also_fails(self, mock_run, mock_binary):
+        """'Executable already exists' + --force retry also fails → error."""
+        mock_binary.return_value = True
+        first_call = _proc(
+            returncode=1,
+            stderr="error: Executable already exists: ruff (use `--force` to overwrite)",
+        )
+        second_call = _proc(returncode=1, stderr="force install failed")
+        mock_run.side_effect = [first_call, second_call]
+        dep = _dep("uv", "ruff")
+        ok, err = _install_uv(dep)
+        assert ok is False
+        assert "force install failed" in err
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
@@ -558,3 +595,105 @@ class TestBootstrapResult:
         r2 = BootstrapResult(plugin_id="b")
         r1.installed.append("pip:x")
         assert r2.installed == []
+
+
+# ===================================================================
+# 12. _install_brew
+# ===================================================================
+
+
+class TestInstallBrew:
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_brew_available_success(self, mock_run, mock_binary):
+        mock_binary.return_value = True
+        mock_run.return_value = _proc(returncode=0)
+        ok, err = _install_brew(_dep("brew", "jq"))
+        assert ok is True
+        assert err == ""
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "brew"
+        assert "jq" in cmd
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    def test_brew_not_available(self, mock_binary):
+        mock_binary.return_value = False
+        ok, err = _install_brew(_dep("brew", "jq"))
+        assert ok is False
+        assert "brew not found" in err
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_brew_install_failure(self, mock_run, mock_binary):
+        mock_binary.return_value = True
+        mock_run.return_value = _proc(returncode=1, stderr="Error: No formulae found")
+        ok, err = _install_brew(_dep("brew", "nonexistent-formula"))
+        assert ok is False
+        assert "No formulae found" in err
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_brew_exception(self, mock_run, mock_binary):
+        mock_binary.return_value = True
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="brew", timeout=300)
+        ok, err = _install_brew(_dep("brew", "jq"))
+        assert ok is False
+        assert err  # some error message
+
+
+# ===================================================================
+# 13. _install_pipx
+# ===================================================================
+
+
+class TestInstallPipx:
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_pipx_available_success(self, mock_run, mock_binary):
+        mock_binary.side_effect = lambda name: name == "pipx"
+        mock_run.return_value = _proc(returncode=0)
+        ok, err = _install_pipx(_dep("pipx", "black"))
+        assert ok is True
+        assert err == ""
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_pipx_already_installed(self, mock_run, mock_binary):
+        """'already' in stderr → still True."""
+        mock_binary.side_effect = lambda name: name == "pipx"
+        mock_run.return_value = _proc(returncode=1, stderr="black is already installed")
+        ok, err = _install_pipx(_dep("pipx", "black"))
+        assert ok is True
+
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    @patch("subprocess.run")
+    def test_pipx_missing_falls_to_uv(self, mock_run, mock_binary):
+        """pipx missing, uv found → uv tool install succeeds."""
+        mock_binary.side_effect = lambda name: name == "uv"
+        mock_run.return_value = _proc(returncode=0)
+        ok, err = _install_pipx(_dep("pipx", "ruff"))
+        assert ok is True
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "uv"
+
+    @patch("obscura.plugins.bootstrapper._install_pip")
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    def test_both_missing_falls_to_pip(self, mock_binary, mock_pip):
+        """pipx + uv missing → falls back to pip."""
+        mock_binary.return_value = False
+        mock_pip.return_value = (True, "")
+        ok, err = _install_pipx(_dep("pipx", "black"))
+        assert ok is True
+        mock_pip.assert_called_once()
+
+    @patch("obscura.plugins.bootstrapper._install_pip")
+    @patch("obscura.plugins.bootstrapper._is_binary_available")
+    def test_all_fallbacks_fail(self, mock_binary, mock_pip):
+        """pipx + uv missing, pip also fails."""
+        mock_binary.return_value = False
+        mock_pip.return_value = (False, "pip install failed")
+        ok, err = _install_pipx(_dep("pipx", "bad-tool"))
+        assert ok is False
+        assert "pip install failed" in err

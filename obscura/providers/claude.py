@@ -285,7 +285,9 @@ class ClaudeBackend:
     # -- Tools ---------------------------------------------------------------
 
     def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for use in sessions."""
+        """Register a tool for use in sessions (skips duplicates)."""
+        if any(t.name == spec.name for t in self._tools):
+            return
         self._tools.append(spec)
         self._tool_registry.register(spec)
 

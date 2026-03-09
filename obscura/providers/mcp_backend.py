@@ -123,14 +123,14 @@ class MCPBackend:
                 )
                 logger.info(f"Connected to MCP server: {session_name}")
             except asyncio.TimeoutError as e:
-                logger.error(
+                logger.debug(
                     "Timed out connecting to MCP server %s after %.1fs",
                     session_name,
                     self._connect_timeout_seconds,
                 )
                 self._connection_errors[session_name] = e
             except Exception as e:
-                logger.error(f"Failed to connect to MCP server {session_name}: {e}")
+                logger.debug(f"Failed to connect to MCP server {session_name}: {e}")
                 self._connection_errors[session_name] = e
 
         if self.mcp_servers and len(self._connection_errors) == len(self.mcp_servers):
@@ -252,12 +252,13 @@ class MCPBackend:
     # -- Tools ---------------------------------------------------------------
 
     def register_tool(self, spec: ToolSpec) -> None:
-        """
-        Register a tool.
+        """Register a tool (skips duplicates).
 
         Note: Tools are automatically loaded from MCP servers.
         Manually registered tools will be added to the list.
         """
+        if any(t.name == spec.name for t in self._tools):
+            return
         self._tools.append(spec)
         self._tool_registry.register(spec)
         logger.debug(f"Registered tool: {spec.name}")

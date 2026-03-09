@@ -251,7 +251,7 @@ class AgentHeartbeatClient:
                     )
                     return True
                 else:
-                    logger.warning(
+                    logger.debug(
                         f"Heartbeat returned {response.status_code}: {response.text}"
                     )
 

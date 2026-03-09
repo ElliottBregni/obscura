@@ -131,9 +131,19 @@ def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
         )
         if result.returncode == 0:
             return True, ""
+        stderr_lower = result.stderr.lower()
         # uv tool install may fail if already installed — that's fine
-        if "already installed" in result.stderr.lower():
+        if "already installed" in stderr_lower:
             return True, ""
+        # Executable already exists — retry with --force
+        if "already exists" in stderr_lower:
+            retry = subprocess.run(
+                ["uv", "tool", "install", "--force", pkg],
+                capture_output=True, text=True, timeout=120,
+            )
+            if retry.returncode == 0:
+                return True, ""
+            return False, retry.stderr.strip()
         return False, result.stderr.strip()
     except Exception as exc:
         return False, str(exc)
@@ -290,11 +300,11 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
         else:
             if dep.optional:
                 result.warnings.append(f"{label}: {err}")
-                logger.warning("Optional dep %s failed for %s: %s", label, spec.id, err)
+                logger.debug("Optional dep %s failed for %s: %s", label, spec.id, err)
             else:
                 result.errors.append(f"{label}: {err}")
                 result.ok = False
-                logger.error("Required dep %s failed for %s: %s", label, spec.id, err)
+                logger.debug("Required dep %s failed for %s: %s", label, spec.id, err)
 
     # Run post_install command if all required deps succeeded
     if result.ok and bootstrap.post_install:

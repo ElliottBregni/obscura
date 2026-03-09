@@ -188,6 +188,8 @@ class CodexBackend:
             self._active_session = None
 
     def register_tool(self, spec: ToolSpec) -> None:
+        if any(t.name == spec.name for t in self._tools):
+            return
         self._tools.append(spec)
         self._tool_registry.register(spec)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
@@ -44,7 +45,7 @@ def append_event(kind: str, preview: str = "", tool_names: Iterable[str] | None 
     """
     logger = _get_logger()
     payload = {
-        "ts": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "ts": datetime.now(timezone.utc).isoformat(),
         "kind": kind,
         "preview": preview or "",
         "tool_names": list(tool_names) if tool_names else [],

@@ -1,46 +1,78 @@
-"""Tests for sdk.internal.paths helpers."""
+"""Tests for obscura.core.paths — Path resolution helpers."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
-
-import pytest
+from unittest import mock
 
 from obscura.core.paths import (
+    resolve_agents_sessions_dir,
     resolve_obscura_home,
+    resolve_obscura_hooks_dir,
     resolve_obscura_mcp_dir,
+    resolve_obscura_settings,
     resolve_obscura_skills_dir,
+    resolve_obscura_specs_dir,
+    resolve_obscura_state_dir,
 )
 
 
-def test_resolve_obscura_home_prefers_local_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project_dir = tmp_path / "project"
-    project_dir.mkdir(parents=True)
-    (project_dir / ".obscura").mkdir()
-    monkeypatch.chdir(project_dir)
-    monkeypatch.delenv("OBSCURA_HOME", raising=False)
+class TestResolveObscuraHome:
+    def test_env_var_takes_priority(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_home() == tmp_path
 
-    home = resolve_obscura_home()
-    assert home == (project_dir / ".obscura").resolve()
+    def test_local_obscura_dir(self, tmp_path: Path) -> None:
+        local = tmp_path / ".obscura"
+        local.mkdir()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("OBSCURA_HOME", None)
+            result = resolve_obscura_home(tmp_path)
+            assert result == local
 
-
-def test_resolve_obscura_home_from_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    env_home = tmp_path / "custom-obscura"
-    monkeypatch.setenv("OBSCURA_HOME", str(env_home))
-
-    home = resolve_obscura_home()
-    assert home == env_home.resolve()
+    def test_falls_back_to_global(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("OBSCURA_HOME", None)
+            result = resolve_obscura_home(tmp_path)
+            assert result == (Path.home() / ".obscura").resolve()
 
 
-def test_subdirectories_follow_obscura_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    env_home = tmp_path / "custom-obscura"
-    monkeypatch.setenv("OBSCURA_HOME", str(env_home))
+class TestResolveSpecsDir:
+    def test_returns_specs_subdir(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_specs_dir() == tmp_path / "specs"
 
-    assert resolve_obscura_mcp_dir() == env_home.resolve() / "mcp"
-    assert resolve_obscura_skills_dir() == env_home.resolve() / "skills"
+    def test_with_cwd(self, tmp_path: Path) -> None:
+        local = tmp_path / ".obscura"
+        local.mkdir()
+        result = resolve_obscura_specs_dir(tmp_path)
+        assert result == local / "specs"
+
+
+class TestResolveStateDir:
+    def test_returns_state_subdir(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_state_dir() == tmp_path / "state"
+
+
+class TestOtherResolvers:
+    def test_mcp_dir(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_mcp_dir() == tmp_path / "mcp"
+
+    def test_skills_dir(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_skills_dir() == tmp_path / "skills"
+
+    def test_hooks_dir(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_hooks_dir() == tmp_path / "hooks"
+
+    def test_sessions_dir(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_agents_sessions_dir() == tmp_path / "agents" / "sessions"
+
+    def test_settings(self, tmp_path: Path) -> None:
+        with mock.patch.dict(os.environ, {"OBSCURA_HOME": str(tmp_path)}):
+            assert resolve_obscura_settings() == tmp_path / "settings.json"

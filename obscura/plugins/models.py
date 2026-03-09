@@ -108,12 +108,12 @@ class BootstrapSpec:
 class HealthcheckSpec:
     """How the runtime verifies a plugin is still functional."""
 
-    type: str           # "callable" | "http" | "binary"
+    type: str           # "callable" | "http" | "binary" | "python_import"
     target: str         # dotted path, URL, or binary name
     interval_seconds: int = 300
 
     def __post_init__(self) -> None:
-        if self.type not in ("callable", "http", "binary"):
+        if self.type not in ("callable", "http", "binary", "python_import"):
             raise ValueError(f"Unknown healthcheck type: {self.type!r}")
         if self.interval_seconds < 1:
             raise ValueError("interval_seconds must be >= 1")

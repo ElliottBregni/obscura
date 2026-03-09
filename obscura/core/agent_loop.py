@@ -883,7 +883,11 @@ class AgentLoop:
         try:
             if inspect.iscoroutinefunction(handler):
                 return await handler(**inputs)
-            return handler(**inputs)
+            result = handler(**inputs)
+            # Handle sync wrappers that return coroutines (e.g. @tool() decorator)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
         except TypeError as exc:
             if "unexpected keyword argument" not in str(exc):
                 raise
@@ -909,7 +913,10 @@ class AgentLoop:
             logger.debug("Tool %s: dropping undeclared kwargs %s", spec.name, dropped)
             if inspect.iscoroutinefunction(handler):
                 return await handler(**filtered)
-            return handler(**filtered)
+            result = handler(**filtered)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
 
     # ------------------------------------------------------------------
     # Helpers

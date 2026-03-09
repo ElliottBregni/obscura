@@ -28,7 +28,7 @@ class ObscuraA2AServer:
     agent_card:
         Pre-built agent card. If not provided, one is generated from kwargs.
     get_runtime:
-        Factory returning per-user AgentRuntime (from ``sdk.deps``).
+        Factory returning per-user AgentRuntime (from ``obscura.deps``).
     agent_model:
         Default model for spawned agents.
     agent_system_prompt:

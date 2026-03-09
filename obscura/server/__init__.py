@@ -1,7 +1,7 @@
 """
 obscura.server -- FastAPI HTTP API wrapping the ObscuraClient SDK.
 
-Endpoints are defined in ``sdk.routes.*`` and registered via
+Endpoints are defined in ``obscura.routes.*`` and registered via
 ``app.include_router()``.  This module provides the app factory,
 middleware stack, and lifespan management.
 

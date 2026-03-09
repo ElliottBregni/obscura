@@ -22,3 +22,4 @@ bootstrap:
   deps:
     - type: binary
       package: fd
+      optional: true

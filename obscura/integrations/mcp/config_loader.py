@@ -73,14 +73,18 @@ def _merge_roots(roots: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-def _resolve_default_config_path() -> Path:
+def _resolve_default_config_paths() -> list[Path]:
+    """Return MCP config paths in merge order (global first, local last)."""
+    from obscura.core.paths import resolve_all_mcp_dirs
+
+    dirs = resolve_all_mcp_dirs()
+    if dirs:
+        return dirs
+    # Fallback: single-dir behavior
     mcp_dir = resolve_obscura_mcp_dir()
     if mcp_dir.is_dir():
-        return mcp_dir
-    legacy_file = Path("config/mcp-config.json").resolve()
-    if legacy_file.exists():
-        return legacy_file
-    return mcp_dir
+        return [mcp_dir]
+    return [mcp_dir]
 
 
 def _load_roots(path: Path) -> dict[str, Any]:
@@ -135,9 +139,19 @@ def discover_mcp_servers(
     *,
     resolve_env: bool = True,
 ) -> list[DiscoveredMCPServer]:
-    """Discover MCP servers declared in a config file."""
-    path = _resolve_default_config_path() if config_path is None else Path(config_path)
-    root = _load_roots(path)
+    """Discover MCP servers from config files.
+
+    When *config_path* is None, merges global and local MCP directories
+    so that global servers are always available alongside local ones.
+    """
+    if config_path is not None:
+        root = _load_roots(Path(config_path))
+    else:
+        paths = _resolve_default_config_paths()
+        all_roots: list[dict[str, Any]] = []
+        for path in paths:
+            all_roots.append(_load_roots(path))
+        root = _merge_roots(all_roots)
     raw_servers = cast(dict[str, Any], root["mcpServers"])
     discovered: list[DiscoveredMCPServer] = []
 

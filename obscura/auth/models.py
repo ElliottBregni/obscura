@@ -42,7 +42,7 @@ VALID_ROLES: frozenset[str] = frozenset(
 class AuthenticatedUser(BaseModel):
     """Represents a validated user extracted from a JWT.
 
-    Populated by :mod:`sdk.auth.middleware` and attached to
+    Populated by :mod:`obscura.auth.middleware` and attached to
     ``request.state.user`` for downstream handlers.
     """
 

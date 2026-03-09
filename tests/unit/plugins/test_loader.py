@@ -6,7 +6,6 @@ import asyncio
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock, AsyncMock, patch
 
@@ -403,6 +402,8 @@ class TestLoadSpec:
     ) -> None:
         monkeypatch.delenv("REQUIRED_SECRET", raising=False)
         spec = _make_spec(
+            source_type="local",
+            trust_level="community",
             config_requirements=(
                 ConfigRequirement(key="REQUIRED_SECRET", required=True),
             ),
@@ -416,6 +417,8 @@ class TestLoadSpec:
 
     def test_bootstrap_failure_becomes_failed(self, tmp_path: Path) -> None:
         spec = _make_spec(
+            source_type="local",
+            trust_level="community",
             bootstrap=BootstrapSpec(
                 deps=(BootstrapDep(type="pip", package="fake-pkg"),),
             ),
@@ -443,6 +446,8 @@ class TestLoadSpec:
 
     def test_bootstrap_exception_becomes_failed(self, tmp_path: Path) -> None:
         spec = _make_spec(
+            source_type="local",
+            trust_level="community",
             bootstrap=BootstrapSpec(
                 deps=(BootstrapDep(type="pip", package="fake-pkg"),),
             ),
@@ -505,8 +510,7 @@ class TestLoadAll:
         result = loader.load_all(registry)
         assert "builtins" in result
         assert "local_manifest" in result
-        assert "entry_points" in result
-        assert "legacy_local" in result
+        assert "user_plugins" in result
 
     def test_providers_added_to_registry(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
@@ -520,72 +524,6 @@ class TestLoadAll:
         registry = _FakeProviderRegistry()
         result = loader.load_all_enabled(registry)
         assert "builtins" in result
-
-
-# ---------------------------------------------------------------------------
-# PluginLoader.load_legacy_local
-# ---------------------------------------------------------------------------
-
-
-class TestLoadLegacyLocal:
-    """Tests for PluginLoader.load_legacy_local()."""
-
-    def test_loads_python_module_with_get_provider(self, tmp_path: Path) -> None:
-        mod_file = tmp_path / "my_legacy.py"
-        mod_file.write_text(textwrap.dedent("""\
-            class _Provider:
-                name = "legacy"
-
-            def get_provider():
-                return _Provider()
-        """))
-        loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        count = loader.load_legacy_local(registry)
-        assert count == 1
-        assert hasattr(registry.providers[0], "name")
-        assert registry.providers[0].name == "legacy"
-
-    def test_loads_package_with_init(self, tmp_path: Path) -> None:
-        pkg_dir = tmp_path / "my_pkg"
-        pkg_dir.mkdir()
-        (pkg_dir / "__init__.py").write_text(textwrap.dedent("""\
-            class Provider:
-                pass
-
-            def get_provider():
-                return Provider()
-        """))
-        loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        count = loader.load_legacy_local(registry)
-        assert count == 1
-
-    def test_skips_manifest_based_dirs(self, tmp_path: Path) -> None:
-        pkg_dir = tmp_path / "manifest_plugin"
-        pkg_dir.mkdir()
-        (pkg_dir / "plugin.yaml").write_text("id: foo\nversion: 1.0.0\n")
-        (pkg_dir / "__init__.py").write_text("def get_provider(): return object()")
-        loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        count = loader.load_legacy_local(registry)
-        assert count == 0
-
-    def test_nonexistent_dir_returns_zero(self, tmp_path: Path) -> None:
-        loader = PluginLoader(plugin_dir=tmp_path / "nope")
-        registry = _FakeProviderRegistry()
-        assert loader.load_legacy_local(registry) == 0
-
-    def test_skips_non_python_files(self, tmp_path: Path) -> None:
-        (tmp_path / "readme.txt").write_text("hello")
-        loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        assert loader.load_legacy_local(registry) == 0
-
-    def test_empty_dir_returns_zero(self, tmp_path: Path) -> None:
-        loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        assert loader.load_legacy_local(registry) == 0
 
 
 # ---------------------------------------------------------------------------

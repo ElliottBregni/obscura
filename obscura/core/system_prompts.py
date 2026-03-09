@@ -78,3 +78,38 @@ def compose_system_prompt(
         parts.extend(custom_sections)
 
     return "\n\n---\n\n".join(parts).strip()
+
+
+def compose_environment_context(
+    *,
+    plugin_ids: list[str] | None = None,
+    capabilities: list[str] | None = None,
+    agent_types: list[str] | None = None,
+    bootstrap_summary: str = "",
+) -> str:
+    """Build an environment context section for the system prompt.
+
+    Loads the ``environment_context.txt`` template and fills it with
+    runtime-discovered values (plugins, capabilities, agent types).
+    Returns an empty string if the template is missing.
+    """
+    try:
+        template = _load("environment_context")
+    except FileNotFoundError:
+        return ""
+
+    ids = plugin_ids or []
+    caps = capabilities or []
+    types = agent_types or []
+
+    plugin_list = "\n".join(f"- {pid}" for pid in ids) if ids else "None discovered"
+    capability_list = "\n".join(f"- {c}" for c in caps) if caps else "None configured"
+    agent_type_list = ", ".join(types) if types else "loop (default)"
+
+    return template.format(
+        plugin_count=len(ids),
+        plugin_list=plugin_list,
+        capability_list=capability_list,
+        agent_types=agent_type_list,
+        bootstrap_summary=bootstrap_summary or "All plugins bootstrapped successfully",
+    )

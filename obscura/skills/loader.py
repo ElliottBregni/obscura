@@ -2,7 +2,7 @@
 obscura.skills.loader -- Dynamic skill loading from modules and packages.
 
 Supports loading skills from:
-- Built-in skills (sdk.skills.builtin)
+- Built-in skills (obscura.skills.builtin)
 - Python modules by path
 - Future: Skill packages from marketplace
 """

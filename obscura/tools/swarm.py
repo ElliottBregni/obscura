@@ -24,43 +24,52 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 
 from obscura.core.types import ToolSpec
 
-if TYPE_CHECKING:
-    from obscura.agent.agents import AgentRuntime
-
 logger = logging.getLogger(__name__)
 
 
 def load_agent_configs(include_disabled: bool = False) -> dict[str, dict[str, Any]]:
-    """Load agent definitions from ``~/.obscura/agents.yaml``.
+    """Load agent definitions from global and local ``agents.yaml``.
+
+    Merges ``~/.obscura/agents.yaml`` (global) with ``.obscura/agents.yaml``
+    (local).  Local definitions override global ones by name.
 
     Returns a mapping of agent name → raw config dict.
-    Deduplicates by name (last definition wins).
     Agents with ``enabled: false`` are excluded unless *include_disabled* is True.
     """
-    agents_yaml = Path.home() / ".obscura" / "agents.yaml"
-    if not agents_yaml.exists():
+    from obscura.core.paths import resolve_all_obscura_homes
+
+    local_home, global_home = resolve_all_obscura_homes()
+    candidates: list[Path] = []
+    global_yaml = global_home / "agents.yaml"
+    local_yaml = local_home / "agents.yaml"
+    if global_yaml.is_file() and global_yaml != local_yaml:
+        candidates.append(global_yaml)
+    if local_yaml.is_file():
+        candidates.append(local_yaml)
+    if not candidates:
         return {}
-    try:
-        with open(agents_yaml) as f:
-            data = yaml.safe_load(f)
-        configs: dict[str, dict[str, Any]] = {}
-        for agent_cfg in data.get("agents", []):
-            name = agent_cfg.get("name")
-            if not name:
-                continue
-            if not include_disabled and not agent_cfg.get("enabled", True):
-                continue
-            configs[name] = agent_cfg
-        return configs
-    except Exception:
-        logger.warning("Failed to load agents.yaml", exc_info=True)
-        return {}
+
+    configs: dict[str, dict[str, Any]] = {}
+    for agents_yaml in candidates:
+        try:
+            with open(agents_yaml) as f:
+                data = yaml.safe_load(f)
+            for agent_cfg in data.get("agents", []):
+                name = agent_cfg.get("name")
+                if not name:
+                    continue
+                if not include_disabled and not agent_cfg.get("enabled", True):
+                    continue
+                configs[name] = agent_cfg
+        except Exception:
+            logger.warning("Failed to load %s", agents_yaml, exc_info=True)
+    return configs
 
 
 def build_agent_catalog(agent_configs: dict[str, dict[str, Any]]) -> str:

@@ -23,27 +23,21 @@ Usage::
 from __future__ import annotations
 
 import importlib
-import importlib.metadata as metadata
-import importlib.util
 import logging
 import os
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
-from obscura.core.paths import resolve_obscura_home
-from obscura.plugins.manifest import ManifestError, parse_manifest, parse_manifest_file
+from obscura.core.paths import resolve_obscura_global_home
+from obscura.plugins.manifest import ManifestError, parse_manifest_file
 from obscura.plugins.models import (
-    ConfigRequirement,
     PluginSpec,
     PluginStatus,
 )
-from obscura.plugins.registry import PluginEntry, PluginRegistryService
-from obscura.plugins.validator import ValidationError, is_valid, validate_plugin_spec
+from obscura.plugins.registry import PluginRegistryService
+from obscura.plugins.validator import validate_plugin_spec
 
 logger = logging.getLogger(__name__)
-
-ENTRY_POINT_GROUP = "obscura.tool_provider"
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +82,13 @@ def _resolve_handler(ref: str) -> Any | None:
             else:
                 return None
         mod = importlib.import_module(module_path)
-        return getattr(mod, attr_name, None)
+        attr = getattr(mod, attr_name, None)
+        # Unwrap @tool()-decorated functions to get the original handler
+        if attr is not None and hasattr(attr, "spec"):
+            inner = getattr(attr.spec, "handler", None)
+            if inner is not None:
+                return inner
+        return attr
     except Exception as exc:
         logger.debug("Failed to resolve handler %s: %s", ref, exc)
         return None
@@ -162,52 +162,6 @@ class ManifestToolProvider:
 
 
 # ---------------------------------------------------------------------------
-# Legacy provider wrapping (for entry-point and local-dir plugins)
-# ---------------------------------------------------------------------------
-
-
-def _instantiate_legacy_provider(candidate: Any) -> Any | None:
-    """Normalize a loaded candidate into a provider instance.
-
-    Supports modules with get_provider/provider/Provider/make_provider attrs,
-    classes, and callables.
-    """
-    try:
-        if isinstance(candidate, ModuleType):
-            for attr in ("get_provider", "provider", "Provider", "make_provider"):
-                if hasattr(candidate, attr):
-                    val = getattr(candidate, attr)
-                    if callable(val):
-                        try:
-                            return val()
-                        except TypeError:
-                            return val
-                    return val
-            return None
-
-        if isinstance(candidate, type):
-            try:
-                return candidate()
-            except Exception as exc:
-                logger.exception("Failed to instantiate provider class %s: %s", candidate, exc)
-                return None
-
-        if callable(candidate):
-            try:
-                return candidate()
-            except TypeError:
-                return None
-            except Exception as exc:
-                logger.exception("Error calling provider factory %s: %s", candidate, exc)
-                return None
-
-        return candidate
-    except Exception as exc:
-        logger.exception("_instantiate_legacy_provider failed: %s", exc)
-        return None
-
-
-# ---------------------------------------------------------------------------
 # Plugin Loader
 # ---------------------------------------------------------------------------
 
@@ -255,11 +209,40 @@ class PluginLoader:
 
     def discover_local(self) -> list[PluginSpec]:
         """Discover plugins from the local plugins directory that have manifests."""
+        return self._discover_from_dir(self._plugin_dir)
+
+    def discover_user(self) -> list[PluginSpec]:
+        """Discover user-authored plugins from the global ``~/.obscura/plugins/``.
+
+        Always scans the global home regardless of whether a local ``.obscura/``
+        exists. Supports both flat YAML manifests (like builtins) and subdirectory
+        layouts (``subdir/plugin.yaml``).
+
+        If the active plugin dir already IS the global dir (no local override),
+        returns an empty list to avoid double-loading.
+        """
+        global_plugins = resolve_obscura_global_home() / "plugins"
+        if global_plugins == self._plugin_dir:
+            # Already covered by discover_local()
+            return []
+        return self._discover_from_dir(global_plugins)
+
+    @staticmethod
+    def _discover_from_dir(directory: Path) -> list[PluginSpec]:
+        """Discover plugin manifests from a directory.
+
+        Supports two layouts:
+        - **Flat YAML**: ``directory/*.yaml`` (like builtins)
+        - **Subdirectory**: ``directory/<name>/plugin.yaml`` or ``plugin.json``
+
+        Skips ``registry.json`` and non-manifest files.
+        """
         specs: list[PluginSpec] = []
-        if not self._plugin_dir.exists():
+        if not directory.exists():
             return specs
-        for entry in sorted(self._plugin_dir.iterdir()):
+        for entry in sorted(directory.iterdir()):
             if entry.is_dir():
+                # Subdirectory layout: <name>/plugin.yaml
                 manifest = entry / "plugin.yaml"
                 if not manifest.exists():
                     manifest = entry / "plugin.json"
@@ -268,26 +251,15 @@ class PluginLoader:
                         spec = parse_manifest_file(manifest)
                         specs.append(spec)
                     except ManifestError as exc:
-                        logger.warning("Skipping invalid local manifest %s: %s", manifest, exc)
-        return specs
-
-    def discover_entry_points(self) -> list[Any]:
-        """Discover legacy providers via entry points (no manifest)."""
-        providers: list[Any] = []
-        try:
-            eps = metadata.entry_points()
-            selected = eps.select(group=ENTRY_POINT_GROUP) if hasattr(eps, "select") else eps.get(ENTRY_POINT_GROUP, [])
-            for ep in selected:
+                        logger.warning("Skipping invalid manifest %s: %s", manifest, exc)
+            elif entry.suffix == ".yaml" and entry.name != "registry.json":
+                # Flat YAML layout (like builtins): *.yaml
                 try:
-                    obj = ep.load()
-                    prov = _instantiate_legacy_provider(obj)
-                    if prov is not None:
-                        providers.append(prov)
-                except Exception as exc:
-                    logger.warning("Failed to load entry point %s: %s", ep, exc)
-        except Exception as exc:
-            logger.debug("Could not read entry points: %s", exc)
-        return providers
+                    spec = parse_manifest_file(entry)
+                    specs.append(spec)
+                except ManifestError as exc:
+                    logger.debug("Skipping non-manifest YAML %s: %s", entry, exc)
+        return specs
 
     # -- Loading pipeline --------------------------------------------------
 
@@ -395,67 +367,17 @@ class PluginLoader:
             results[spec.id] = status
         return results
 
-    def load_entry_points(self, provider_registry: Any) -> int:
-        """Load legacy entry-point providers (no manifest)."""
-        providers = self.discover_entry_points()
-        for prov in providers:
-            try:
-                provider_registry.add(prov)
-            except Exception as exc:
-                logger.warning("Failed to register entry-point provider: %s", exc)
-        return len(providers)
-
-    def load_legacy_local(self, provider_registry: Any) -> int:
-        """Load legacy local plugins (no manifest, just Python modules)."""
-        count = 0
-        if not self._plugin_dir.exists():
-            return count
-        for entry in sorted(self._plugin_dir.iterdir()):
-            # Skip manifest-based plugins (handled by load_local)
-            if entry.is_dir() and (entry / "plugin.yaml").exists():
+    def load_user(self, provider_registry: Any) -> dict[str, PluginStatus]:
+        """Load user-authored plugins from global ``~/.obscura/plugins/``."""
+        results: dict[str, PluginStatus] = {}
+        for spec in self.discover_user():
+            if spec.id in self._loaded:
+                logger.debug("Skipping user plugin %s (already loaded)", spec.id)
                 continue
-            if entry.is_dir() and (entry / "plugin.json").exists():
-                continue
-            # Skip non-Python files
-            if entry.name in ("registry.json", "README.md"):
-                continue
-
-            module: ModuleType | None = None
-            try:
-                if entry.is_dir() and (entry / "__init__.py").exists():
-                    module = self._import_module(entry / "__init__.py")
-                elif entry.suffix == ".py":
-                    module = self._import_module(entry)
-                else:
-                    continue
-            except Exception:
-                continue
-
-            if module is None:
-                continue
-
-            prov = _instantiate_legacy_provider(module)
-            if prov is not None:
-                try:
-                    provider_registry.add(prov)
-                    count += 1
-                except Exception as exc:
-                    logger.warning("Failed to register local plugin %s: %s", entry, exc)
-        return count
-
-    @staticmethod
-    def _import_module(path: Path) -> ModuleType | None:
-        try:
-            name = f"obscura.plugin_{path.stem}"
-            spec = importlib.util.spec_from_file_location(name, str(path))
-            if spec is None or spec.loader is None:
-                return None
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)  # type: ignore[union-attr]
-            return module
-        except Exception as exc:
-            logger.debug("Failed to import %s: %s", path, exc)
-            return None
+            status = self._load_spec(spec, provider_registry)
+            self._loaded[spec.id] = status
+            results[spec.id] = status
+        return results
 
     # -- Main entry point --------------------------------------------------
 
@@ -468,8 +390,7 @@ class PluginLoader:
         results: dict[str, Any] = {
             "builtins": {},
             "local_manifest": {},
-            "entry_points": 0,
-            "legacy_local": 0,
+            "user_plugins": {},
         }
 
         # Check config for load_builtins setting
@@ -487,21 +408,15 @@ class PluginLoader:
         else:
             logger.info("Builtin plugins disabled in config.yaml")
 
-        # 2. Local manifest-based plugins
+        # 2. Local manifest-based plugins (project .obscura/plugins/)
         results["local_manifest"] = self.load_local(provider_registry)
 
-        # 3. Entry-point providers (legacy)
-        results["entry_points"] = self.load_entry_points(provider_registry)
-
-        # 4. Legacy local plugins (no manifest)
-        results["legacy_local"] = self.load_legacy_local(provider_registry)
+        # 3. User plugins from global ~/.obscura/plugins/ (flat YAML + subdirs)
+        results["user_plugins"] = self.load_user(provider_registry)
 
         enabled = sum(1 for s in self._loaded.values() if s.enabled)
         total = len(self._loaded)
-        logger.info(
-            "Plugin loader: %d/%d plugins enabled, %d entry-point, %d legacy-local",
-            enabled, total, results["entry_points"], results["legacy_local"],
-        )
+        logger.info("Plugin loader: %d/%d plugins enabled", enabled, total)
 
         return results
 
@@ -523,7 +438,7 @@ class PluginLoader:
         Raises ``RuntimeError`` if any *required* plugin is not found or
         fails to reach the ``enabled`` state.
         """
-        all_specs = self.discover_builtins() + self.discover_local()
+        all_specs = self.discover_builtins() + self.discover_local() + self.discover_user()
         wanted = set(required_ids) | set(optional_ids)
         spec_map: dict[str, PluginSpec] = {}
         for spec in all_specs:
@@ -587,7 +502,7 @@ class PluginLoader:
 
 
 def get_all_builtin_tool_specs() -> list[Any]:
-    """Resolve all builtin plugin tools into ToolSpec instances.
+    """Resolve all builtin and user plugin tools into ToolSpec instances.
 
     Convenience function for the CLI and other non-Agent code paths that need
     plugin tools without the full provider/context pipeline.  Respects the
@@ -598,18 +513,23 @@ def get_all_builtin_tool_specs() -> list[Any]:
     from obscura.core.types import ToolSpec
 
     # Respect config.yaml plugins.load_builtins setting
+    load_builtins = True
     try:
         from obscura.core.workspace import load_workspace_config
         config = load_workspace_config()
-        if not config.get("plugins", {}).get("load_builtins", True):
-            logger.info("Builtin plugins disabled in config.yaml")
-            return []
+        load_builtins = config.get("plugins", {}).get("load_builtins", True)
     except Exception:
         pass  # fallback: load builtins anyway
 
     loader = PluginLoader()
+    all_plugin_specs: list[PluginSpec] = []
+    if load_builtins:
+        all_plugin_specs.extend(loader.discover_builtins())
+    all_plugin_specs.extend(loader.discover_local())
+    all_plugin_specs.extend(loader.discover_user())
+
     specs: list[Any] = []
-    for plugin_spec in loader.discover_builtins():
+    for plugin_spec in all_plugin_specs:
         for tool in plugin_spec.tools:
             handler = _resolve_handler(tool.handler_ref)
             if handler is None:
@@ -635,5 +555,4 @@ __all__ = [
     "PluginLoader",
     "ManifestToolProvider",
     "get_all_builtin_tool_specs",
-    "ENTRY_POINT_GROUP",
 ]

@@ -365,13 +365,33 @@ class CopilotBackend:
     # -- Tools ---------------------------------------------------------------
 
     def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for use in sessions."""
+        """Register a tool for use in sessions (skips duplicates)."""
+        if any(t.name == spec.name for t in self._tools):
+            return
         self._tools.append(spec)
         self._tool_registry.register(spec)
 
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry for agent loop use."""
         return self._tool_registry
+
+    def _build_tool_listing(self) -> str:
+        """Build a human-readable tool listing for the system prompt."""
+        lines = ["## Available Tools", ""]
+        lines.append(
+            "You have the following tools. "
+            "Use these EXACT names when calling tools:"
+        )
+        lines.append("")
+        for spec in self._tools:
+            desc = (spec.description or "").split("\n")[0][:120]
+            lines.append(f"- `{spec.name}`: {desc}")
+        lines.append("")
+        lines.append(
+            "Do NOT invent tool names. "
+            "If none of these tools fit, tell the user."
+        )
+        return "\n".join(lines)
 
     # -- Hooks ---------------------------------------------------------------
 
@@ -507,10 +527,13 @@ class CopilotBackend:
 
         if self._model:
             config["model"] = self._model
-        if self._system_prompt:
+        prompt = self._system_prompt or ""
+        if self._tools:
+            prompt = f"{prompt}\n\n{self._build_tool_listing()}" if prompt else self._build_tool_listing()
+        if prompt:
             config["system_message"] = {
                 "mode": "append",
-                "content": self._system_prompt,
+                "content": prompt,
             }
         if self._streaming:
             config["streaming"] = True

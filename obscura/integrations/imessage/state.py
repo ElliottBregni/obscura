@@ -7,18 +7,31 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_state_dir
 
 logger = logging.getLogger(__name__)
 
 _STATE_FILENAME = "imessage_state.json"
 
 
+def _migrate_state_file(old: Path, new: Path) -> None:
+    """Move a state file from old to new location if it exists."""
+    if old.is_file() and not new.is_file():
+        new.parent.mkdir(parents=True, exist_ok=True)
+        old.rename(new)
+        logger.info("Migrated state file %s -> %s", old, new)
+
+
 class IMessageState:
     """Tracks the last-seen message ROWID to avoid reprocessing."""
 
     def __init__(self, state_path: Path | None = None) -> None:
-        self._path = state_path or (resolve_obscura_home() / _STATE_FILENAME)
+        if state_path is None:
+            new_path = resolve_obscura_state_dir() / _STATE_FILENAME
+            old_path = resolve_obscura_home() / _STATE_FILENAME
+            _migrate_state_file(old_path, new_path)
+            state_path = new_path
+        self._path = state_path
         self._last_rowid: int = 0
         self._load()
 
