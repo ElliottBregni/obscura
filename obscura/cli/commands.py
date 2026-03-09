@@ -2565,6 +2565,442 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
+    """Manage Obscura packs — curated bundles of plugins, templates, and policies.
+
+    Usage:
+      /pack list           — List all available packs
+      /pack info <name>    — Show pack details
+      /pack create <name>  — Scaffold a new pack YAML
+    """
+    try:
+        tokens = shlex.split(args) if args and args.strip() else []
+    except ValueError:
+        tokens = args.split()
+
+    if not tokens:
+        print_info("Usage: /pack [list|info|create]")
+        return None
+
+    sub = tokens[0]
+
+    if sub == "list":
+        try:
+            from obscura.core.compiler.loader import load_specs_dirs
+            from obscura.core.paths import resolve_all_specs_dirs
+
+            dirs = resolve_all_specs_dirs()
+            if not dirs:
+                print_info("No specs directories found.")
+                return None
+            registry = load_specs_dirs(dirs)
+        except Exception:
+            print_error("Could not load specs.")
+            return None
+
+        if not registry.packs:
+            print_info("No packs found.")
+            return None
+        for name, pack in sorted(registry.packs.items()):
+            plugins = ", ".join(pack.spec.plugins) if pack.spec.plugins else "none"
+            policies = ", ".join(pack.spec.policies) if pack.spec.policies else "none"
+            console.print(
+                f"  • [cyan]{name}[/] — {pack.metadata.description[:60]}"
+            )
+            console.print(
+                f"    plugins: [dim]{plugins}[/]  policies: [dim]{policies}[/]"
+            )
+        return None
+
+    if sub == "info":
+        if len(tokens) < 2:
+            print_error("Usage: /pack info <name>")
+            return None
+        pack_name = tokens[1]
+        try:
+            from obscura.core.compiler.loader import load_specs_dirs
+            from obscura.core.paths import resolve_all_specs_dirs
+
+            dirs = resolve_all_specs_dirs()
+            registry = load_specs_dirs(dirs) if dirs else None
+        except Exception:
+            registry = None
+
+        if registry is None:
+            print_error("Could not load specs.")
+            return None
+
+        pack = registry.get_pack(pack_name)
+        if pack is None:
+            print_error(f"Pack '{pack_name}' not found.")
+            return None
+
+        console.print(f"[bold cyan]{pack_name}[/]")
+        console.print(f"  {pack.metadata.description}")
+        if pack.metadata.tags:
+            console.print(f"  Tags: {', '.join(pack.metadata.tags)}")
+        if pack.spec.plugins:
+            console.print(f"  Plugins: {', '.join(pack.spec.plugins)}")
+        if pack.spec.templates:
+            console.print(f"  Templates: {', '.join(pack.spec.templates)}")
+        if pack.spec.policies:
+            console.print(f"  Policies: {', '.join(pack.spec.policies)}")
+        if pack.spec.capabilities.grant:
+            console.print(f"  Capabilities (grant): {', '.join(pack.spec.capabilities.grant)}")
+        if pack.spec.capabilities.deny:
+            console.print(f"  Capabilities (deny): {', '.join(pack.spec.capabilities.deny)}")
+        if pack.spec.config:
+            console.print(f"  Config: {pack.spec.config}")
+        if pack.spec.instructions.strip():
+            console.print(f"  Instructions: {pack.spec.instructions.strip()[:80]}...")
+        return None
+
+    if sub == "create":
+        if len(tokens) < 2:
+            print_error("Usage: /pack create <name>")
+            return None
+        pack_name = tokens[1]
+        import textwrap
+        from pathlib import Path
+
+        # Try local .obscura/specs/packs first, then global
+        local_dir = Path.cwd() / ".obscura" / "specs" / "packs"
+        global_dir = Path.home() / ".obscura" / "specs" / "packs"
+        target_dir = local_dir if local_dir.exists() else global_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{pack_name}.yml"
+
+        if target.exists():
+            print_error(f"Pack file already exists: {target}")
+            return None
+
+        content = textwrap.dedent(f"""\
+            apiVersion: obscura/v1
+            kind: Pack
+            metadata:
+              name: {pack_name}
+              description: TODO — describe this pack
+              tags: []
+            spec:
+              plugins: []
+              templates: []
+              policies: []
+              capabilities:
+                grant: []
+                deny: []
+              config: {{}}
+              instructions: ""
+        """)
+        target.write_text(content, encoding="utf-8")
+        print_ok(f"Created pack scaffold: {target}")
+        return None
+
+    print_info("Unknown subcommand. Usage: /pack [list|info|create]")
+    return None
+
+
+async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
+    """Inspect compiled/resolved state of Obscura resources.
+
+    Usage:
+      /inspect workspace <name>    — Show compiled workspace state
+      /inspect agent <name>        — Show compiled agent (in default workspace)
+      /inspect capability <cap-id> — Show capability with tools and owner
+      /inspect pack <name>         — Show pack with full contents
+    """
+    try:
+        tokens = shlex.split(args) if args and args.strip() else []
+    except ValueError:
+        tokens = args.split()
+
+    if not tokens:
+        print_info(
+            "Usage: /inspect [workspace|agent|capability|pack] <name>"
+        )
+        return None
+
+    resource_type = tokens[0]
+    resource_name = tokens[1] if len(tokens) > 1 else None
+
+    if resource_type == "workspace":
+        if not resource_name:
+            print_error("Usage: /inspect workspace <name>")
+            return None
+        try:
+            from obscura.core.compiler import compile_workspace
+
+            ws = compile_workspace(resource_name, strict=False)
+        except Exception as exc:
+            print_error(f"Cannot compile workspace '{resource_name}': {exc}")
+            return None
+
+        from rich.table import Table
+
+        console.print(f"\n[bold cyan]Workspace: {ws.name}[/]")
+
+        if ws.packs:
+            console.print(f"  Packs: {', '.join(ws.packs)}")
+        if ws.plugin_include:
+            console.print(f"  Plugins (include): {', '.join(sorted(ws.plugin_include))}")
+        if ws.plugin_exclude:
+            console.print(f"  Plugins (exclude): {', '.join(sorted(ws.plugin_exclude))}")
+        console.print(f"  Preload plugins: {ws.preload_plugins}")
+        if ws.startup_agents:
+            console.print(f"  Startup agents: {', '.join(ws.startup_agents)}")
+
+        # Policies
+        if ws.policies:
+            console.print("\n  [bold]Policies:[/]")
+            for p in ws.policies:
+                restrictions = []
+                if p.tool_denylist:
+                    restrictions.append(f"deny {len(p.tool_denylist)} tools")
+                if p.require_confirmation:
+                    restrictions.append(f"confirm {len(p.require_confirmation)} tools")
+                if p.max_turns != 25:
+                    restrictions.append(f"max_turns={p.max_turns}")
+                info = f" ({', '.join(restrictions)})" if restrictions else ""
+                console.print(f"    • [yellow]{p.name}[/]{info}")
+
+        # Memory
+        if ws.memory:
+            console.print(
+                f"\n  [bold]Memory:[/] namespace={ws.memory.namespace} "
+                f"scope={ws.memory.shared_scope} "
+                f"retention={ws.memory.retention_days}d"
+            )
+
+        # Config (skip internal _pack_* keys)
+        visible_config = {
+            k: v for k, v in ws.config.items() if not k.startswith("_pack_")
+        }
+        if visible_config:
+            console.print(f"\n  [bold]Config:[/] {visible_config}")
+
+        # Agents table
+        if ws.agents:
+            table = Table(title="Agents", show_header=True, padding=(0, 1))
+            table.add_column("Name", style="cyan", no_wrap=True)
+            table.add_column("Template", style="dim")
+            table.add_column("Mode", style="green")
+            table.add_column("Provider")
+            table.add_column("Plugins", justify="right")
+            table.add_column("Capabilities", justify="right")
+            for a in ws.agents:
+                table.add_row(
+                    a.name,
+                    a.template_name,
+                    a.mode,
+                    a.provider,
+                    str(len(a.plugins)),
+                    str(len(a.capabilities)),
+                )
+            console.print()
+            console.print(table)
+
+        return None
+
+    if resource_type == "agent":
+        if not resource_name:
+            print_error("Usage: /inspect agent <name>")
+            return None
+
+        # Try compiled workspace first
+        agent = None
+        try:
+            from obscura.core.compiler import compile_workspace
+
+            ws = compile_workspace("default", strict=False)
+            agent = next((a for a in ws.agents if a.name == resource_name), None)
+        except Exception:
+            pass
+
+        if agent is not None:
+            console.print(f"\n[bold cyan]Agent: {agent.name}[/]")
+            console.print(f"  Template: {agent.template_name}")
+            console.print(f"  Mode: {agent.mode}  Type: {agent.agent_type}")
+            console.print(f"  Provider: {agent.provider}  Model: {agent.model_id or 'default'}")
+            console.print(f"  Max iterations: {agent.max_iterations}")
+
+            if agent.plugins:
+                console.print(f"\n  [bold]Plugins ({len(agent.plugins)}):[/]")
+                for p in agent.plugins:
+                    console.print(f"    • {p}")
+
+            if agent.capabilities:
+                console.print(f"\n  [bold]Capabilities ({len(agent.capabilities)}):[/]")
+                for c in agent.capabilities:
+                    console.print(f"    • {c}")
+
+            if agent.tool_allowlist is not None:
+                console.print(f"\n  [bold]Tool allowlist ({len(agent.tool_allowlist)}):[/]")
+                for t in sorted(agent.tool_allowlist):
+                    console.print(f"    • {t}")
+            if agent.tool_denylist:
+                console.print(f"\n  [bold]Tool denylist ({len(agent.tool_denylist)}):[/]")
+                for t in sorted(agent.tool_denylist):
+                    console.print(f"    • {t}")
+
+            if agent.mcp_servers:
+                console.print(f"\n  [bold]MCP Servers ({len(agent.mcp_servers)}):[/]")
+                for s in agent.mcp_servers:
+                    cmd = f"{s.command} {' '.join(s.args)}" if s.command else "n/a"
+                    console.print(f"    • {s.name} ({s.transport}) → {cmd}")
+
+            if agent.env:
+                console.print(f"\n  [bold]Environment:[/]")
+                console.print(f"    Python: {agent.env.python_version}")
+                if agent.env.binaries:
+                    console.print(f"    Binaries: {', '.join(agent.env.binaries)}")
+                console.print(f"    Network: {agent.env.network_mode}")
+
+            if agent.config:
+                console.print(f"\n  [bold]Config:[/] {agent.config}")
+
+            if agent.instructions:
+                preview = agent.instructions.strip()[:200]
+                if len(agent.instructions.strip()) > 200:
+                    preview += "..."
+                console.print(f"\n  [bold]Instructions:[/]\n    {preview}")
+
+            return None
+
+        # Fallback: check agents.yaml
+        try:
+            from obscura.tools.swarm import load_agent_configs
+
+            configs = load_agent_configs(include_disabled=True)
+            cfg = configs.get(resource_name)
+        except Exception:
+            cfg = None
+
+        if cfg:
+            console.print(f"\n[bold cyan]Agent: {resource_name}[/] [dim](from agents.yaml)[/]")
+            console.print(f"  Type: {cfg.get('type', '?')}")
+            console.print(f"  Provider: {cfg.get('provider', cfg.get('model', '?'))}")
+            console.print(f"  Enabled: {cfg.get('enabled', True)}")
+            console.print(f"  Max turns: {cfg.get('max_turns', '?')}")
+            if cfg.get("tags"):
+                console.print(f"  Tags: {', '.join(cfg['tags'])}")
+            caps = cfg.get("capabilities", {})
+            if caps.get("grant"):
+                console.print(f"  Capabilities (grant): {', '.join(caps['grant'])}")
+            if caps.get("deny"):
+                console.print(f"  Capabilities (deny): {', '.join(caps['deny'])}")
+            plugins = cfg.get("plugins", {})
+            if plugins.get("require"):
+                console.print(f"  Plugins (require): {', '.join(plugins['require'])}")
+            if plugins.get("optional"):
+                console.print(f"  Plugins (optional): {', '.join(plugins['optional'])}")
+            prompt = cfg.get("system_prompt", "")
+            if prompt:
+                preview = prompt.strip()[:200]
+                if len(prompt.strip()) > 200:
+                    preview += "..."
+                console.print(f"\n  [bold]System prompt:[/]\n    {preview}")
+            return None
+
+        print_error(f"Agent '{resource_name}' not found in compiled workspace or agents.yaml.")
+        return None
+
+    if resource_type == "capability":
+        if not resource_name:
+            print_error("Usage: /inspect capability <cap-id>")
+            return None
+        try:
+            from obscura.plugins.loader import PluginLoader
+            from obscura.plugins.registries.capability_index import CapabilityIndex
+
+            loader = PluginLoader()
+            ci = CapabilityIndex()
+            for spec in loader.discover_builtins():
+                for cap in spec.capabilities:
+                    ci.register(cap, spec.id)
+        except Exception as exc:
+            print_error(f"Cannot load capabilities: {exc}")
+            return None
+
+        cap = ci.get(resource_name)
+        if cap is None:
+            print_error(f"Capability '{resource_name}' not found.")
+            return None
+
+        owner = ci.get_owner(resource_name)
+        console.print(f"\n[bold cyan]Capability: {cap.id}[/]")
+        console.print(f"  Description: {cap.description}")
+        console.print(f"  Owner plugin: {owner or 'unknown'}")
+        console.print(f"  Requires approval: {'yes' if cap.requires_approval else 'no'}")
+        console.print(f"  Default grant: {'yes' if cap.default_grant else 'no'}")
+        if cap.tools:
+            console.print(f"\n  [bold]Tools ({len(cap.tools)}):[/]")
+            for t in cap.tools:
+                console.print(f"    • {t}")
+        return None
+
+    if resource_type == "pack":
+        if not resource_name:
+            print_error("Usage: /inspect pack <name>")
+            return None
+        try:
+            from obscura.core.compiler.loader import load_specs_dirs
+            from obscura.core.paths import resolve_all_specs_dirs
+
+            dirs = resolve_all_specs_dirs()
+            registry = load_specs_dirs(dirs) if dirs else None
+        except Exception:
+            registry = None
+
+        if registry is None:
+            print_error("Could not load specs.")
+            return None
+
+        pack = registry.get_pack(resource_name)
+        if pack is None:
+            print_error(f"Pack '{resource_name}' not found.")
+            return None
+
+        console.print(f"\n[bold cyan]Pack: {pack.metadata.name}[/]")
+        console.print(f"  {pack.metadata.description}")
+        if pack.metadata.tags:
+            console.print(f"  Tags: {', '.join(pack.metadata.tags)}")
+
+        if pack.spec.plugins:
+            console.print(f"\n  [bold]Plugins ({len(pack.spec.plugins)}):[/]")
+            for p in pack.spec.plugins:
+                console.print(f"    • {p}")
+        if pack.spec.templates:
+            console.print(f"\n  [bold]Templates ({len(pack.spec.templates)}):[/]")
+            for t in pack.spec.templates:
+                console.print(f"    • {t}")
+        if pack.spec.policies:
+            console.print(f"\n  [bold]Policies ({len(pack.spec.policies)}):[/]")
+            for p in pack.spec.policies:
+                console.print(f"    • {p}")
+        if pack.spec.capabilities.grant:
+            console.print(f"\n  [bold]Capabilities (grant):[/]")
+            for c in pack.spec.capabilities.grant:
+                console.print(f"    • [green]{c}[/]")
+        if pack.spec.capabilities.deny:
+            console.print(f"\n  [bold]Capabilities (deny):[/]")
+            for c in pack.spec.capabilities.deny:
+                console.print(f"    • [red]{c}[/]")
+        if pack.spec.config:
+            console.print(f"\n  [bold]Config defaults:[/]")
+            for k, v in pack.spec.config.items():
+                console.print(f"    {k}: {v}")
+        if pack.spec.instructions.strip():
+            console.print(f"\n  [bold]Instructions:[/]")
+            for line in pack.spec.instructions.strip().splitlines():
+                console.print(f"    {line}")
+
+        return None
+
+    print_info(
+        "Unknown resource type. Usage: /inspect [workspace|agent|capability|pack] <name>"
+    )
+    return None
+
+
 async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
     """Manage plugin capabilities.
 
@@ -3381,6 +3817,8 @@ COMMANDS: dict[str, CommandHandler] = {
     "discover": cmd_discover,
     "mcp": cmd_mcp,
     "plugin": cmd_plugin,
+    "inspect": cmd_inspect,
+    "pack": cmd_pack,
     "capability": cmd_capability,
     "a2a": cmd_a2a,
     # Memory
@@ -3425,6 +3863,8 @@ COMPLETIONS: dict[str, list[str]] = {
     "session": ["list", "new", "switch"],
     "discover": ["web", "filesystem", "git", "database", "ai", "cloud", "search"],
     "mcp": ["discover", "list", "select", "env", "install"],
+    "pack": ["list", "info", "create"],
+    "inspect": ["workspace", "agent", "capability", "pack"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "tail-trace": [],
     "init": ["--force"],

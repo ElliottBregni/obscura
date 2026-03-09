@@ -198,16 +198,29 @@ class HookRegistry:
         registry = cls()
 
         event_map: dict[str, AgentEventKind] = {
+            # Core tool events
             "preToolUse": AgentEventKind.TOOL_CALL,
             "postToolUse": AgentEventKind.TOOL_RESULT,
+            "postToolUseFailure": AgentEventKind.TOOL_CALL_FAILURE,
+            # Session lifecycle
             "sessionStart": AgentEventKind.TURN_START,
+            "onSessionStart": AgentEventKind.TURN_START,
             "sessionEnd": AgentEventKind.AGENT_DONE,
+            "onStop": AgentEventKind.AGENT_DONE,
+            # Agent lifecycle
+            "agentStart": AgentEventKind.AGENT_START,
+            "agentStop": AgentEventKind.AGENT_STOP,
+            "subagentStart": AgentEventKind.SUBAGENT_START,
+            "onSubagentStart": AgentEventKind.SUBAGENT_START,
+            # Task / context events
+            "taskCompleted": AgentEventKind.TASK_COMPLETED,
+            "onTaskCompleted": AgentEventKind.TASK_COMPLETED,
+            "preCompact": AgentEventKind.CONTEXT_COMPACT,
+            "onPreCompact": AgentEventKind.CONTEXT_COMPACT,
+            # User / error events
+            "userPromptSubmitted": AgentEventKind.USER_INPUT,
+            "errorOccurred": AgentEventKind.ERROR,
         }
-        # USER_INPUT may not exist on all builds; add if present
-        if hasattr(AgentEventKind, "USER_INPUT"):
-            event_map["userPromptSubmitted"] = AgentEventKind.USER_INPUT
-        if hasattr(AgentEventKind, "ERROR"):
-            event_map["errorOccurred"] = AgentEventKind.ERROR
 
         for defn in definitions:
             kind = event_map.get(defn.event)

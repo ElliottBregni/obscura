@@ -10,6 +10,7 @@ import logging
 
 from obscura.core.compiler.compiled import CompiledAgent, CompiledWorkspace
 from obscura.core.compiler.errors import SpecValidationError
+from obscura.core.compiler.loader import SpecRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -117,5 +118,63 @@ def _validate_agent(
                 f"denylist: {sorted(overlap)}",
                 source=agent.name,
             ))
+
+    return errors
+
+
+def validate_pack_references(
+    pack_names: tuple[str, ...],
+    workspace_name: str,
+    registry: SpecRegistry,
+    *,
+    available_plugins: frozenset[str] | None = None,
+) -> list[SpecValidationError]:
+    """Validate that all pack references and their contents are satisfiable.
+
+    Checks:
+    - Each pack name resolves to a PackSpec in the registry
+    - Each pack's plugins exist in available_plugins (if provided)
+    - Each pack's policies exist in the registry
+    - Each pack's templates exist in the registry
+    """
+    errors: list[SpecValidationError] = []
+
+    for pack_name in pack_names:
+        pack = registry.get_pack(pack_name)
+        if pack is None:
+            errors.append(SpecValidationError(
+                f"Workspace '{workspace_name}' references pack "
+                f"'{pack_name}' which was not found",
+                source=workspace_name,
+            ))
+            continue
+
+        # Check pack plugins
+        if available_plugins is not None:
+            for plugin in pack.spec.plugins:
+                if plugin not in available_plugins:
+                    errors.append(SpecValidationError(
+                        f"Pack '{pack_name}' requires plugin '{plugin}' "
+                        f"which is not available",
+                        source=pack_name,
+                    ))
+
+        # Check pack policies
+        for policy_name in pack.spec.policies:
+            if registry.get_policy(policy_name) is None:
+                errors.append(SpecValidationError(
+                    f"Pack '{pack_name}' references policy "
+                    f"'{policy_name}' which was not found",
+                    source=pack_name,
+                ))
+
+        # Check pack templates
+        for template_name in pack.spec.templates:
+            if registry.get_template(template_name) is None:
+                errors.append(SpecValidationError(
+                    f"Pack '{pack_name}' references template "
+                    f"'{template_name}' which was not found",
+                    source=pack_name,
+                ))
 
     return errors

@@ -170,6 +170,55 @@ class PolicySpec(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Pack
+# ---------------------------------------------------------------------------
+
+
+class CapabilityGrantSpec(BaseModel):
+    """Capability grant/deny defaults for a pack."""
+
+    grant: list[str] = Field(default_factory=_empty_str_list)
+    deny: list[str] = Field(default_factory=_empty_str_list)
+
+    model_config = {"extra": "forbid"}
+
+
+class PackSpecBody(BaseModel):
+    """The ``spec`` block of a Pack."""
+
+    # Plugins this pack brings in
+    plugins: list[str] = Field(default_factory=_empty_str_list)
+
+    # Templates this pack recommends
+    templates: list[str] = Field(default_factory=_empty_str_list)
+
+    # Policies to apply when this pack is active
+    policies: list[str] = Field(default_factory=_empty_str_list)
+
+    # Capability grant/deny defaults
+    capabilities: CapabilityGrantSpec = Field(default_factory=CapabilityGrantSpec)
+
+    # Config defaults merged into workspace config
+    config: dict[str, Any] = Field(default_factory=_empty_dict)
+
+    # System prompt overlay
+    instructions: str = ""
+
+    model_config = {"extra": "forbid"}
+
+
+class PackSpec(BaseModel):
+    """A curated bundle of plugins, templates, policies, and config."""
+
+    api_version: str = Field("obscura/v1", alias="apiVersion")
+    kind: Literal["Pack"] = "Pack"
+    metadata: SpecMetadata
+    spec: PackSpecBody
+
+    model_config = {"populate_by_name": True, "extra": "forbid"}
+
+
+# ---------------------------------------------------------------------------
 # Workspace
 # ---------------------------------------------------------------------------
 
@@ -218,6 +267,9 @@ class WorkspaceAgentRef(BaseModel):
 class WorkspaceSpecBody(BaseModel):
     """The ``spec`` block of a Workspace."""
 
+    # Pack references (by name)
+    packs: list[str] = Field(default_factory=_empty_str_list)
+
     # Runtime config overrides
     config: dict[str, Any] = Field(default_factory=_empty_dict)
 
@@ -254,11 +306,12 @@ class WorkspaceSpec(BaseModel):
 # Union type for spec dispatch
 # ---------------------------------------------------------------------------
 
-AnySpec = TemplateSpec | AgentInstanceSpec | PolicySpec | WorkspaceSpec
+AnySpec = TemplateSpec | AgentInstanceSpec | PolicySpec | PackSpec | WorkspaceSpec
 
 SPEC_KIND_MAP: dict[str, type[AnySpec]] = {
     "Template": TemplateSpec,
     "Agent": AgentInstanceSpec,
     "Policy": PolicySpec,
+    "Pack": PackSpec,
     "Workspace": WorkspaceSpec,
 }

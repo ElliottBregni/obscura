@@ -32,6 +32,7 @@ from obscura.core.compiler.merger import (
     merge_template_chain,
 )
 from obscura.core.compiler.resolver import (
+    expand_workspace_packs,
     resolve_template_chain,
     resolve_workspace_agent_template,
     resolve_workspace_policies,
@@ -108,6 +109,10 @@ def compile_workspace_from_registry(
     for the full load-from-disk pipeline.
     """
     ws_name = workspace_spec.metadata.name
+    pack_names = tuple(workspace_spec.spec.packs)
+
+    # Phase 1.5: Expand packs
+    workspace_spec = expand_workspace_packs(workspace_spec, registry)
 
     # Phase 2: Resolve references
     resolved_policies = resolve_workspace_policies(workspace_spec, registry)
@@ -156,6 +161,7 @@ def compile_workspace_from_registry(
         config=config,
         startup_agents=tuple(workspace_spec.spec.startup.start_agents),
         preload_plugins=workspace_spec.spec.startup.preload_plugins,
+        packs=pack_names,
     )
 
     # Phase 4: Validate

@@ -39,13 +39,16 @@ from obscura.core.compiler.errors import (
     SpecValidationError,
 )
 from obscura.core.compiler.loader import SpecRegistry, load_spec_file, load_specs_dir, load_specs_dirs
-from obscura.core.compiler.validator import VALID_AGENT_TYPES
+from obscura.core.compiler.validator import VALID_AGENT_TYPES, validate_pack_references
 from obscura.core.compiler.migrate import MigrationResult, migrate_agents_yaml
 from obscura.core.compiler.specs import (
     AgentInstanceSpec,
     AnySpec,
+    CapabilityGrantSpec,
     MCPServerSpec,
     MemoryBindingSpec,
+    PackSpec,
+    PackSpecBody,
     PluginFilterSpec,
     PolicySpec,
     SpecMetadata,
@@ -81,14 +84,18 @@ __all__ = [
     "load_specs_dirs",
     # Validator
     "VALID_AGENT_TYPES",
+    "validate_pack_references",
     # Migration
     "MigrationResult",
     "migrate_agents_yaml",
     # Specs
     "AgentInstanceSpec",
     "AnySpec",
+    "CapabilityGrantSpec",
     "MCPServerSpec",
     "MemoryBindingSpec",
+    "PackSpec",
+    "PackSpecBody",
     "PluginFilterSpec",
     "PolicySpec",
     "SpecMetadata",

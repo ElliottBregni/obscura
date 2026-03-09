@@ -74,11 +74,27 @@ class BootstrapResult:
 
 
 def _is_pip_installed(package: str) -> bool:
-    """Check if a pip package is installed in the obscura venv."""
+    """Check if a pip package is installed in the obscura venv.
+
+    Prefers ``uv pip show`` (works without pip in the venv), falls back
+    to ``python -m pip show`` for environments without uv.
+    """
     name = package.split("[")[0].split(">=")[0].split("==")[0].split("<")[0].strip()
+    venv_python = _obscura_venv_python()
+    # Prefer uv — it doesn't need pip inside the venv
+    if shutil.which("uv") is not None:
+        try:
+            result = subprocess.run(
+                ["uv", "pip", "show", name, "--python", venv_python],
+                capture_output=True, text=True, timeout=15,
+            )
+            return result.returncode == 0
+        except Exception:
+            pass
+    # Fallback to pip
     try:
         result = subprocess.run(
-            [_obscura_venv_python(), "-m", "pip", "show", name],
+            [venv_python, "-m", "pip", "show", name],
             capture_output=True, text=True, timeout=15,
         )
         return result.returncode == 0
@@ -119,11 +135,30 @@ def _is_npm_installed(package: str) -> bool:
 
 
 def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
-    """Install a pip package into the obscura venv."""
+    """Install a pip package into the obscura venv.
+
+    Prefers ``uv pip install`` (works without pip in the venv), falls
+    back to ``python -m pip install`` for environments without uv.
+    """
     pkg = dep.package + dep.version if dep.version else dep.package
+    venv_python = _obscura_venv_python()
+    # Prefer uv — it doesn't need pip inside the venv
+    if shutil.which("uv") is not None:
+        try:
+            result = subprocess.run(
+                ["uv", "pip", "install", pkg, "--python", venv_python],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                return True, ""
+            # Don't fall through — uv gave a real answer
+            return False, result.stderr.strip()
+        except Exception:
+            pass  # fall through to pip
+    # Fallback to pip
     try:
         result = subprocess.run(
-            [_obscura_venv_python(), "-m", "pip", "install", "--quiet", pkg],
+            [venv_python, "-m", "pip", "install", "--quiet", pkg],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
@@ -240,6 +275,16 @@ def _install_pipx(dep: BootstrapDep) -> tuple[bool, str]:
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+def _brew_binary_name(package: str) -> str:
+    """Extract the binary name from a brew package spec.
+
+    Tap formulas like ``nats-io/nats-tools/nats`` install a binary
+    named ``nats`` (the last path component).  Plain names like ``fd``
+    are returned as-is.
+    """
+    return package.rsplit("/", 1)[-1]
+
+
 _INSTALLERS = {
     "pip": (_is_pip_installed, _install_pip),
     "uv": (_is_pip_installed, _install_uv),
@@ -247,7 +292,7 @@ _INSTALLERS = {
     "npm": (_is_npm_installed, _install_npm),
     "cargo": (_is_binary_available, _install_cargo),
     "binary": (_is_binary_available, _check_binary),
-    "brew": (_is_binary_available, _install_brew),
+    "brew": (lambda p: _is_binary_available(_brew_binary_name(p)), _install_brew),
     "pipx": (lambda p: _is_binary_available(p), _install_pipx),
 }
 

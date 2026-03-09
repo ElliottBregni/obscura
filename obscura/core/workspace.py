@@ -81,7 +81,7 @@ def init_workspace(
         logger.info("Created %s/", ws / subdir)
 
     # -- specs/ scaffold -----------------------------------------------------
-    for specs_subdir in ("specs/templates", "specs/policies", "specs/workspaces"):
+    for specs_subdir in ("specs/templates", "specs/policies", "specs/workspaces", "specs/packs"):
         (ws / specs_subdir).mkdir(parents=True, exist_ok=True)
         logger.info("Created %s/", ws / specs_subdir)
 

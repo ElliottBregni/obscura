@@ -72,6 +72,7 @@ providers = [
     # X (Twitter) API — activate with X_BEARER_TOKEN / X_ACCESS_TOKEN env vars
     # Docs: https://developer.x.com/en/portal/dashboard
     "xdk>=0.4.5",
+    "msal>=1.27.0",
     "pycoingecko>=3.0.0",
     "notion-client>=2.0.0",
 ]
@@ -104,6 +105,7 @@ packages = [
     "obscura.tools.policy",
     "obscura.tools.providers",
     "obscura.integrations",
+    "obscura.integrations.msgraph",
     "obscura.integrations.mcp",
     "obscura.integrations.a2a",
     "obscura.integrations.a2a.transports",

@@ -20,6 +20,6 @@ tools:
     handler: obscura.tools.providers.agent_primitives:fd_find
 bootstrap:
   deps:
-    - type: binary
+    - type: brew
       package: fd
       optional: true

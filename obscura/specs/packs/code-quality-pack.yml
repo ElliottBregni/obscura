@@ -1,0 +1,26 @@
+apiVersion: obscura/v1
+kind: Pack
+metadata:
+  name: code-quality-pack
+  description: Development quality tools for linting, scanning, and testing.
+  tags: [dev, quality, security]
+spec:
+  plugins:
+    - system-tools
+    - gitleaks
+    - websearch
+  templates: []
+  policies:
+    - safe-dev
+  capabilities:
+    grant:
+      - shell.exec
+      - file.read
+      - file.write
+      - git.ops
+      - security.scan
+    deny: []
+  config: {}
+  instructions: |
+    Always run gitleaks before committing code.
+    Use pyright for type checking Python files.

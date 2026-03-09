@@ -20,6 +20,6 @@ tools:
     handler: obscura.tools.providers.agent_primitives:fzf_filter
 bootstrap:
   deps:
-    - type: binary
+    - type: brew
       package: fzf
       optional: true

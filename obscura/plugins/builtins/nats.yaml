@@ -20,6 +20,6 @@ tools:
     handler: obscura.tools.providers.agent_primitives:nats_publish
 bootstrap:
   deps:
-    - type: binary
-      package: nats
+    - type: brew
+      package: nats-io/nats-tools/nats
       optional: true

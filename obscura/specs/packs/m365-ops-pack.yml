@@ -1,0 +1,28 @@
+apiVersion: obscura/v1
+kind: Pack
+metadata:
+  name: m365-ops-pack
+  description: Microsoft 365 productivity tools for enterprise workflows.
+  tags: [enterprise, m365, productivity]
+spec:
+  plugins:
+    - m365
+    - gws
+  templates:
+    - inbox-agent
+    - meeting-agent
+  policies:
+    - office-safe-policy
+  capabilities:
+    grant:
+      - m365.sharepoint
+      - m365.identity
+      - gws.drive
+      - gws.calendar
+    deny:
+      - m365.core
+  config:
+    communication_mode: professional
+  instructions: |
+    When working with M365 tools, prefer structured API calls
+    over raw CLI commands. Always confirm before sending messages.

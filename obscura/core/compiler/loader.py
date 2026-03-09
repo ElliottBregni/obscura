@@ -16,6 +16,7 @@ from obscura.core.compiler.specs import (
     SPEC_KIND_MAP,
     AgentInstanceSpec,
     AnySpec,
+    PackSpec,
     PolicySpec,
     TemplateSpec,
     WorkspaceSpec,
@@ -130,6 +131,7 @@ class SpecRegistry:
         self.templates: dict[str, TemplateSpec] = {}
         self.agents: dict[str, AgentInstanceSpec] = {}
         self.policies: dict[str, PolicySpec] = {}
+        self.packs: dict[str, PackSpec] = {}
         self.workspaces: dict[str, WorkspaceSpec] = {}
 
     def add(self, spec: AnySpec) -> None:
@@ -140,6 +142,8 @@ class SpecRegistry:
             self.agents[name] = spec
         elif isinstance(spec, PolicySpec):
             self.policies[name] = spec
+        elif isinstance(spec, PackSpec):
+            self.packs[name] = spec
         else:
             self.workspaces[name] = spec
 
@@ -148,6 +152,9 @@ class SpecRegistry:
 
     def get_policy(self, name: str) -> PolicySpec | None:
         return self.policies.get(name)
+
+    def get_pack(self, name: str) -> PackSpec | None:
+        return self.packs.get(name)
 
     def get_workspace(self, name: str) -> WorkspaceSpec | None:
         return self.workspaces.get(name)

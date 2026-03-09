@@ -1,0 +1,72 @@
+id: msgraph
+name: Microsoft Graph
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: native
+trust_level: builtin
+description: >
+  Native Microsoft Graph tools using OAuth (MSAL) — mail and calendar.
+
+config:
+  OBSCURA_MSGRAPH_CLIENT_ID:
+    type: string
+    required: true
+    description: Azure AD app (public client) Application (client) ID
+  OBSCURA_MSGRAPH_TENANT_ID:
+    type: string
+    required: false
+    description: Tenant ID or 'common' (default)
+
+capabilities:
+  - id: msgraph.mail.read
+    description: Read messages from your mailbox
+    tools: [msgraph.mail.list]
+    requires_approval: false
+    default_grant: true
+  - id: msgraph.mail.send
+    description: Send messages from your mailbox
+    tools: [msgraph.mail.send]
+    requires_approval: true
+    default_grant: false
+  - id: msgraph.calendar
+    description: List and create calendar events
+    tools: [msgraph.calendar.events.list, msgraph.calendar.events.create]
+    requires_approval: false
+    default_grant: true
+  - id: msgraph.core
+    description: Raw Microsoft Graph request escape hatch
+    tools: [msgraph.request]
+    requires_approval: true
+    default_grant: false
+
+tools:
+  - name: msgraph.mail.list
+    description: List messages in a folder (default inbox)
+    handler: "obscura.tools.providers.msgraph:MSGraphProvider"
+    capability: msgraph.mail.read
+    side_effects: read
+
+  - name: msgraph.mail.send
+    description: Send an email message via Microsoft Graph
+    handler: "obscura.tools.providers.msgraph:MSGraphProvider"
+    capability: msgraph.mail.send
+    side_effects: write
+
+  - name: msgraph.calendar.events.list
+    description: List calendar events or a calendar view
+    handler: "obscura.tools.providers.msgraph:MSGraphProvider"
+    capability: msgraph.calendar
+    side_effects: read
+
+  - name: msgraph.calendar.events.create
+    description: Create a calendar event
+    handler: "obscura.tools.providers.msgraph:MSGraphProvider"
+    capability: msgraph.calendar
+    side_effects: write
+
+  - name: msgraph.request
+    description: Raw Microsoft Graph request
+    handler: "obscura.tools.providers.msgraph:MSGraphProvider"
+    capability: msgraph.core
+    side_effects: write

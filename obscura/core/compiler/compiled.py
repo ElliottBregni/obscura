@@ -23,6 +23,10 @@ def _empty_dict_str_any() -> dict[str, Any]:
     return {}
 
 
+def _empty_tuple_pair() -> tuple[tuple[str, str], ...]:
+    return ()
+
+
 # ---------------------------------------------------------------------------
 # Compiled MCP server
 # ---------------------------------------------------------------------------
@@ -76,6 +80,34 @@ class CompiledMemory:
 
 
 # ---------------------------------------------------------------------------
+# Environment manifest
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EnvironmentManifest:
+    """Environment constraints and requirements for an agent.
+
+    Declares the runtime environment the agent expects: Python version,
+    packages, CLI tools, filesystem access, network mode, and resource
+    limits.  Used by the preflight validator to verify readiness before
+    agent startup.
+    """
+
+    python_version: str = "3.13"
+    packages: tuple[str, ...] = field(default_factory=_empty_tuple_str)
+    env_vars: tuple[tuple[str, str], ...] = field(default_factory=_empty_tuple_pair)
+    binaries: tuple[str, ...] = field(default_factory=_empty_tuple_str)
+    working_dir: str = ""
+    network_mode: str = "unrestricted"  # unrestricted | restricted | offline
+    network_allow: tuple[str, ...] = field(default_factory=_empty_tuple_str)
+    read_paths: tuple[str, ...] = field(default_factory=_empty_tuple_str)
+    write_paths: tuple[str, ...] = field(default_factory=_empty_tuple_str)
+    timeout_seconds: float = 600.0
+    max_iterations: int = 25
+
+
+# ---------------------------------------------------------------------------
 # Compiled agent
 # ---------------------------------------------------------------------------
 
@@ -99,6 +131,7 @@ class CompiledAgent:
     mcp_servers: tuple[CompiledMCPServer, ...] = field(default_factory=tuple)
     config: dict[str, Any] = field(default_factory=_empty_dict_str_any)
     input_vars: dict[str, Any] = field(default_factory=_empty_dict_str_any)
+    env: EnvironmentManifest | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -119,3 +152,4 @@ class CompiledWorkspace:
     config: dict[str, Any] = field(default_factory=_empty_dict_str_any)
     startup_agents: tuple[str, ...] = field(default_factory=_empty_tuple_str)
     preload_plugins: bool = True
+    packs: tuple[str, ...] = field(default_factory=tuple)

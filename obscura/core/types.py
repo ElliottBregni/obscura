@@ -433,6 +433,13 @@ class AgentEventKind(enum.Enum):
     SESSION_PAUSED = "session_paused"
     USER_INPUT = "user_input"
     CONTEXT_COMPACT = "context_compact"
+    AGENT_START = "agent_start"
+    AGENT_STOP = "agent_stop"
+    PREFLIGHT_PASS = "preflight_pass"
+    PREFLIGHT_FAIL = "preflight_fail"
+    TOOL_CALL_FAILURE = "tool_call_failure"
+    SUBAGENT_START = "subagent_start"
+    TASK_COMPLETED = "task_completed"
 
 
 @dataclass
