@@ -68,6 +68,6 @@ docker-compose.prod.yml
 docker-compose.staging.yml
 partity_matrix
 
-
+firebase-debug.log
 .sh 
 docs/*

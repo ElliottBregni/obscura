@@ -212,15 +212,21 @@ class ToolRegistry:
             "write_todos": "todo_write",
         }
 
+    @staticmethod
+    def _sanitize_tool_name(name: str) -> str:
+        """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
+        import re
+        return re.sub(r'[^a-zA-Z0-9_-]', '_', name)[:128]
+
     def register(self, spec: ToolSpec) -> None:
+        # Always register with the original name for backward compat
         self._tools[spec.name] = spec
         # MCP tools are registered with dotted names (e.g. "fetch.fetch")
-        # but the Claude SDK sanitizes dots to underscores in tool names.
-        # Register the underscored variant so both forms resolve.
-        if "." in spec.name:
-            underscored = spec.name.replace(".", "_")
-            if underscored not in self._tools:
-                self._tools[underscored] = spec
+        # but the model API requires names matching ^[a-zA-Z0-9_-]{1,128}$.
+        # Register the sanitized variant so both forms resolve.
+        sanitized = self._sanitize_tool_name(spec.name)
+        if sanitized != spec.name and sanitized not in self._tools:
+            self._tools[sanitized] = spec
 
     def register_alias(self, alias: str, canonical: str) -> None:
         """Map *alias* to an already-registered *canonical* tool name.
