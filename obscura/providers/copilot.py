@@ -171,37 +171,6 @@ class CopilotBackend:
         # Create default session
         session_config = self.build_session_config()
 
-        # --- DEBUG: dump session config for diagnosis ---
-        import json, logging as _dbg_log
-        _dbg = _dbg_log.getLogger(__name__)
-        _tool_list = session_config.get("tools", [])
-        _tool_names = []
-        for _t in _tool_list:
-            _n = getattr(_t, "name", None) or (isinstance(_t, dict) and _t.get("name"))
-            _tool_names.append(_n)
-        _dbg.warning(
-            "SESSION_DEBUG: %d tools, system_message %d chars, model=%s",
-            len(_tool_list),
-            len((session_config.get("system_message") or {}).get("content", "")),
-            session_config.get("model", "default"),
-        )
-        # Dump tool names to /tmp for inspection
-        try:
-            with open("/tmp/obscura_session_debug.json", "w") as _df:
-                json.dump({
-                    "tool_count": len(_tool_list),
-                    "tool_names": _tool_names,
-                    "system_message_length": len((session_config.get("system_message") or {}).get("content", "")),
-                    "model": session_config.get("model"),
-                    "has_mcp_servers": bool(session_config.get("mcp_servers")),
-                    "has_hooks": bool(session_config.get("hooks")),
-                    "has_allowed_tools": bool(session_config.get("allowed_tools")),
-                    "keys": list(session_config.keys()),
-                }, _df, indent=2, default=str)
-        except Exception:
-            pass
-        # --- END DEBUG ---
-
         self._session = await self._client.create_session(session_config)
 
     async def reset_session(self) -> None:
@@ -415,7 +384,7 @@ class CopilotBackend:
             "Use these EXACT names when calling tools:"
         )
         lines.append("")
-        for spec in self._tools[: self._MAX_TOOLS]:
+        for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
             lines.append(f"- `{self._sanitize_tool_name(spec.name)}`: {desc}")
         lines.append("")
@@ -520,36 +489,37 @@ class CopilotBackend:
         ``^[a-zA-Z0-9_-]{1,128}$`` (dots and other special chars replaced
         with underscores).
         """
-        from copilot.types import Tool, ToolInvocation, ToolResult  # type: ignore[import-untyped]
+        from copilot.types import Tool  # type: ignore[import-untyped]
 
         converted: list[Any] = []
         for spec in tools:
             _handler = spec.handler
 
             def _wrapper_factory(handler: Callable[..., Any]) -> Callable[..., Any]:
-                async def wrapped(invocation: Any) -> dict[str, Any]:
+                async def wrapped(invocation: Any) -> Any:
                     import inspect as _inspect
+                    from copilot.types import ToolResult as CopilotToolResult
 
                     try:
-                        raw_args: Any = invocation.get("arguments")
+                        raw_args = invocation.arguments
                         args = cast(dict[str, Any], raw_args) if raw_args else {}
                         result: Any = handler(**args)
                         if _inspect.isawaitable(result):
                             result = await result
-                        # Normalize to ToolResult
-                        if isinstance(result, dict) and "resultType" in result:
-                            return cast(dict[str, Any], result)
-                        text = str(result) if result is not None else ""  # pyright: ignore[reportUnknownArgumentType]
-                        return {
-                            "textResultForLlm": text,
-                            "resultType": "success",
-                        }
+                        # Normalize to SDK ToolResult dataclass
+                        if isinstance(result, CopilotToolResult):
+                            return result
+                        text = str(result) if result is not None else ""
+                        return CopilotToolResult(
+                            text_result_for_llm=text,
+                            result_type="success",
+                        )
                     except Exception as exc:
-                        return {
-                            "textResultForLlm": f"Tool error: {exc}",
-                            "resultType": "failure",
-                            "error": str(exc),
-                        }
+                        return CopilotToolResult(
+                            text_result_for_llm=f"Tool error: {exc}",
+                            result_type="failure",
+                            error=str(exc),
+                        )
 
                 return wrapped
 
@@ -559,13 +529,10 @@ class CopilotBackend:
                     description=spec.description,
                     handler=_wrapper_factory(_handler),
                     parameters=spec.parameters if spec.parameters else None,
+                    overrides_built_in_tool=True,
                 )
             )
         return converted
-
-    # Maximum number of custom tools the model API accepts per request.
-    # NOTE: Temporarily set to 0 for debugging 400 Bad Request.
-    _MAX_TOOLS: int = 0
 
     def build_session_config(self, **overrides: Any) -> dict[str, Any]:
         """Build a SessionConfig dict for the Copilot SDK."""
@@ -574,23 +541,19 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
+        from copilot.types import PermissionHandler
+        config["on_permission_request"] = PermissionHandler.approve_all
+
         if self._model:
             config["model"] = self._model
-        # --- DEBUG: minimal system message for 400 diagnosis ---
-        prompt = "You are a helpful assistant."
-        config["system_message"] = {
-            "mode": "append",
-            "content": prompt,
-        }
-        # --- END DEBUG (original below) ---
-        # prompt = self._system_prompt or ""
-        # if self._tools:
-        #     prompt = f"{prompt}\n\n{self._build_tool_listing()}" if prompt else self._build_tool_listing()
-        # if prompt:
-        #     config["system_message"] = {
-        #         "mode": "append",
-        #         "content": prompt,
-        #     }
+        prompt = self._system_prompt or ""
+        if self._tools:
+            prompt = f"{prompt}\n\n{self._build_tool_listing()}" if prompt else self._build_tool_listing()
+        if prompt:
+            config["system_message"] = {
+                "mode": "append",
+                "content": prompt,
+            }
         if self._streaming:
             config["streaming"] = True
         if self._mcp_servers:
@@ -598,15 +561,6 @@ class CopilotBackend:
         if self._tools:
             # Filter tools first via policy
             filtered = self._tool_policy.filter_tools(self._tools)
-            # Cap tool count to stay within API limits
-            if len(filtered) > self._MAX_TOOLS:
-                _log.warning(
-                    "Tool count %d exceeds API limit %d — truncating to first %d tools",
-                    len(filtered),
-                    self._MAX_TOOLS,
-                    self._MAX_TOOLS,
-                )
-                filtered = filtered[: self._MAX_TOOLS]
             _log.debug(
                 "Building session with %d tools (system prompt %d chars)",
                 len(filtered),
@@ -614,10 +568,9 @@ class CopilotBackend:
             )
             # Convert to Copilot SDK Tool format
             config["tools"] = self._convert_tools_to_copilot(filtered)
-            # NOTE: allowed_tools temporarily disabled for debugging 400
-            # When native tools are blocked, set an explicit allowlist
-            # if not self._tool_policy.allow_native:
-            #     config["allowed_tools"] = [self._sanitize_tool_name(t.name) for t in filtered]
+            # Use correct SessionConfig field name: available_tools (not allowed_tools)
+            if not self._tool_policy.allow_native:
+                config["available_tools"] = [self._sanitize_tool_name(t.name) for t in filtered]
 
         # Apply hook mappings
         hooks = self.build_hooks_config()
