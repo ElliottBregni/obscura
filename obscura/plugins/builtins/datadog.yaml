@@ -1,0 +1,243 @@
+id: datadog
+name: Datadog
+version: "1.0.0"
+author: obscura-team
+source_type: builtin
+runtime_type: service
+trust_level: builtin
+description: >
+  Datadog observability integration — query logs, metrics, traces, monitors,
+  incidents, hosts, and dashboards via the Datadog REST API.
+config:
+  DATADOG_API_KEY:
+    type: secret
+    required: true
+    description: Datadog API key.
+  DATADOG_APP_KEY:
+    type: secret
+    required: true
+    description: Datadog application key.
+  DATADOG_SITE:
+    type: string
+    required: false
+    default: datadoghq.com
+    description: Datadog site (e.g. datadoghq.com, datadoghq.eu, us5.datadoghq.com).
+capabilities:
+  - id: observability.datadog.read
+    description: Read-only access to Datadog resources (logs, metrics, traces, monitors, dashboards, incidents, hosts).
+    tools:
+      - datadog_list_logs
+      - datadog_query_metrics
+      - datadog_list_traces
+      - datadog_get_monitors
+      - datadog_list_dashboards
+      - datadog_list_incidents
+      - datadog_get_incident
+      - datadog_list_hosts
+    requires_approval: false
+    default_grant: true
+  - id: observability.datadog.write
+    description: Mutating operations (mute/unmute hosts, schedule downtimes).
+    tools:
+      - datadog_mute_host
+      - datadog_unmute_host
+      - datadog_schedule_downtime
+    requires_approval: true
+    default_grant: false
+tools:
+  # -- read tools --
+  - name: datadog_list_logs
+    description: Search Datadog logs using a query string and time range.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_list_logs
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Datadog log search query (e.g. 'service:web status:error')."
+        from_ts:
+          type: string
+          description: "ISO-8601 start time (default: last 15 minutes)."
+        to_ts:
+          type: string
+          description: "ISO-8601 end time (default: now)."
+        limit:
+          type: integer
+          description: "Max log entries to return (default 50, max 1000)."
+      required: [query]
+    timeout_seconds: 30
+
+  - name: datadog_query_metrics
+    description: Query Datadog timeseries metrics using a metric query expression.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_query_metrics
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Metric query (e.g. 'avg:system.cpu.user{*}')."
+        from_ts:
+          type: integer
+          description: "POSIX start timestamp (seconds)."
+        to_ts:
+          type: integer
+          description: "POSIX end timestamp (seconds)."
+      required: [query]
+    timeout_seconds: 30
+
+  - name: datadog_list_traces
+    description: Search APM traces/spans via Datadog.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_list_traces
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Trace search query (e.g. 'service:api env:prod')."
+        from_ts:
+          type: string
+          description: "ISO-8601 start time."
+        to_ts:
+          type: string
+          description: "ISO-8601 end time."
+        limit:
+          type: integer
+          description: "Max spans to return (default 50)."
+      required: [query]
+    timeout_seconds: 30
+
+  - name: datadog_get_monitors
+    description: List Datadog monitors with optional query filter.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_get_monitors
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Monitor search query (optional)."
+      required: []
+    timeout_seconds: 30
+
+  - name: datadog_list_dashboards
+    description: List Datadog dashboards with optional name filter.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_list_dashboards
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Dashboard title search string (optional)."
+      required: []
+    timeout_seconds: 30
+
+  - name: datadog_list_incidents
+    description: List active Datadog incidents.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_list_incidents
+    parameters:
+      type: object
+      properties: {}
+      required: []
+    timeout_seconds: 30
+
+  - name: datadog_get_incident
+    description: Get details for a specific Datadog incident by ID.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_get_incident
+    parameters:
+      type: object
+      properties:
+        incident_id:
+          type: string
+          description: "Incident ID."
+      required: [incident_id]
+    timeout_seconds: 30
+
+  - name: datadog_list_hosts
+    description: List Datadog infrastructure hosts with optional filters.
+    capability: observability.datadog.read
+    side_effects: read
+    handler: obscura.tools.providers.agent_primitives:datadog_list_hosts
+    parameters:
+      type: object
+      properties:
+        filter:
+          type: string
+          description: "Host filter string (optional)."
+      required: []
+    timeout_seconds: 30
+
+  # -- write tools --
+  - name: datadog_mute_host
+    description: Mute a Datadog host (suppress alerts).
+    capability: observability.datadog.write
+    side_effects: write
+    handler: obscura.tools.providers.agent_primitives:datadog_mute_host
+    parameters:
+      type: object
+      properties:
+        hostname:
+          type: string
+          description: "Host to mute."
+        end:
+          type: integer
+          description: "POSIX timestamp when the mute should end (optional, omit for indefinite)."
+        message:
+          type: string
+          description: "Reason for muting."
+      required: [hostname]
+    timeout_seconds: 30
+
+  - name: datadog_unmute_host
+    description: Unmute a previously muted Datadog host.
+    capability: observability.datadog.write
+    side_effects: write
+    handler: obscura.tools.providers.agent_primitives:datadog_unmute_host
+    parameters:
+      type: object
+      properties:
+        hostname:
+          type: string
+          description: "Host to unmute."
+      required: [hostname]
+    timeout_seconds: 30
+
+  - name: datadog_schedule_downtime
+    description: Schedule a Datadog downtime for a scope.
+    capability: observability.datadog.write
+    side_effects: write
+    handler: obscura.tools.providers.agent_primitives:datadog_schedule_downtime
+    parameters:
+      type: object
+      properties:
+        scope:
+          type: string
+          description: "Downtime scope (e.g. 'host:myhost')."
+        start:
+          type: integer
+          description: "POSIX start timestamp."
+        end:
+          type: integer
+          description: "POSIX end timestamp."
+        message:
+          type: string
+          description: "Downtime reason."
+      required: [scope]
+    timeout_seconds: 30
+
+healthcheck:
+  type: callable
+  target: obscura.tools.providers.agent_primitives:datadog_healthcheck
+  interval_seconds: 600
