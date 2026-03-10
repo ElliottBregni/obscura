@@ -28,6 +28,7 @@ def _get_logger() -> logging.Logger:
 
     logger = logging.getLogger("obscura.trace")
     logger.setLevel(logging.INFO)
+    logger.propagate = False
     # Avoid duplicate handlers during reload
     if not any(isinstance(h, RotatingFileHandler) and Path(h.baseFilename).resolve() == log_path.resolve() for h in logger.handlers):
         handler = RotatingFileHandler(str(log_path), maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
