@@ -63,10 +63,16 @@ def mcp_tool_to_obscura(
     Returns:
         Obscura ToolSpec
     """
+    # Normalise the MCP input schema so it always has "type": "object"
+    # — some MCP servers omit it, which breaks OpenAI-compatible backends.
+    schema = dict(tool.inputSchema) if tool.inputSchema else {}
+    if schema.get("type") != "object":
+        schema["type"] = "object"
+        schema.setdefault("properties", {})
     return ToolSpec(
         name=tool.name,
         description=tool.description,
-        parameters=tool.inputSchema,
+        parameters=schema,
         handler=execute_fn,
     )
 

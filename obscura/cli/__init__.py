@@ -1195,7 +1195,7 @@ async def _repl(
     "-b",
     "--backend",
     default="copilot",
-    type=click.Choice(["copilot", "claude", "codex"]),
+    type=click.Choice([b.value for b in Backend]),
     help="Backend to use.",
 )
 @click.option("-m", "--model", default=None, help="Model ID override.")
@@ -1234,6 +1234,13 @@ async def _repl(
     default=None,
     help="Load a workspace from .obscura/specs/ (e.g. 'code-mode').",
 )
+@click.option(
+    "--log-level",
+    "log_level",
+    default="WARNING",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Console log level.",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -1249,11 +1256,21 @@ def main(
     confirm: bool,
     no_default_prompt: bool,
     workspace_name: str | None,
+    log_level: str,
 ) -> None:
     """Obscura — AI agent REPL."""
     # If a subcommand was invoked, let Click handle it
     if ctx.invoked_subcommand is not None:
         return
+
+    import logging as _logging
+    from obscura.cli.logger import configure_logger
+    cli_logger = _logging.getLogger("obscura")
+    # Set the InfoHandler threshold to the user's chosen level
+    level = getattr(_logging, log_level.upper(), _logging.WARNING)
+    for h in cli_logger.handlers:
+        if h.__class__.__name__ == "InfoHandler":
+            h.setLevel(level)
 
     # Compile workspace if specified
     if workspace_name is not None:

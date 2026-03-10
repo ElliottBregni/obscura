@@ -149,11 +149,17 @@ class ToolCallDefinition:
     parameters: Mapping[str, Any]
 
     def to_openai_function(self) -> dict[str, Any]:
+        params = dict(self.parameters)
+        # OpenAI requires parameters.type == "object".  Normalise schemas
+        # that arrive without it (common with MCP tool definitions).
+        if params.get("type") != "object":
+            params["type"] = "object"
+            params.setdefault("properties", {})
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": dict(self.parameters),
+                "parameters": params,
             },
         }

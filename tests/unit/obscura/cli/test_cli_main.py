@@ -102,9 +102,8 @@ class TestClickEntryPoint:
     def test_backend_choices(self) -> None:
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
-        assert "copilot" in result.output
-        assert "claude" in result.output
-        assert "codex" in result.output
+        for name in ("copilot", "claude", "codex", "openai", "localllm", "moonshot"):
+            assert name in result.output
 
     def test_invalid_backend_rejected(self) -> None:
         runner = CliRunner()
