@@ -99,9 +99,10 @@ class MemoryRouter:
                 reranker=route.reranker,
             )
 
-            # Apply route weight to final scores
+            # Apply route weight to final scores (fall back to score if final_score unset)
             for entry in results:
-                entry.final_score *= route.weight
+                base = entry.final_score if getattr(entry, "final_score", 0) else entry.score
+                entry.final_score = base * route.weight
 
             all_results.extend(results)
             sources[route.memory_type] = len(results)
@@ -119,9 +120,20 @@ class MemoryRouter:
         for entry in results:
             composite_key = (entry.key.namespace, entry.key.key)
             existing = seen.get(composite_key)
-            if existing is None or entry.final_score > existing.final_score:
+
+            entry_score = entry.final_score if getattr(entry, "final_score", 0) else entry.score
+            if existing is None:
                 seen[composite_key] = entry
+            else:
+                existing_score = existing.final_score if getattr(existing, "final_score", 0) else existing.score
+                if entry_score > existing_score:
+                    seen[composite_key] = entry
 
         merged = list(seen.values())
-        merged.sort(key=lambda x: x.final_score, reverse=True)
+        # Ensure final_score is populated (fallback to raw score) for downstream consumers
+        for e in merged:
+            if not getattr(e, "final_score", 0):
+                e.final_score = e.score
+
+        merged.sort(key=lambda x: (x.final_score if getattr(x, "final_score", 0) else x.score), reverse=True)
         return merged

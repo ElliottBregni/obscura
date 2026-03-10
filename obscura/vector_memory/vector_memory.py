@@ -131,6 +131,9 @@ class VectorMemoryStore:
     def _create_default_backend(self) -> VectorBackend:
         """Create the default backend based on environment configuration."""
         import hashlib
+        import logging
+
+        logger = logging.getLogger(__name__)
         backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "qdrant").lower()
 
         config = BackendConfig(
@@ -146,15 +149,21 @@ class VectorMemoryStore:
                 path = os.environ.get("OBSCURA_QDRANT_PATH")
                 url = os.environ.get("OBSCURA_QDRANT_URL")
                 api_key = os.environ.get("OBSCURA_QDRANT_API_KEY")
-                return QdrantBackend(
-                    config=config,
-                    mode=mode,
-                    path=path,
-                    url=url,
-                    api_key=api_key,
-                )
-            # Qdrant not available, fall back to SQLite
-            backend_type = "sqlite"
+                try:
+                    return QdrantBackend(
+                        config=config,
+                        mode=mode,
+                        path=path,
+                        url=url,
+                        api_key=api_key,
+                    )
+                except Exception as e:
+                    # If Qdrant client exists but remote is unreachable, fall back to sqlite
+                    logger.warning("Qdrant backend initialization failed, falling back to SQLite: %s", e)
+                    backend_type = "sqlite"
+            else:
+                # Qdrant not available, fall back to SQLite
+                backend_type = "sqlite"
 
         # SQLite backend (default fallback if Qdrant unavailable)
         base_dir = Path(
@@ -378,10 +387,10 @@ class VectorMemoryStore:
         backend_stats = self.backend.get_stats()
 
         return {
-            "total_memories": backend_stats.get("total_count", 0),
-            "embedding_dim": self.embedding_dim,
+            "total_memories": backend_stats.get("total_vectors", backend_stats.get("total_count", 0)),
+            "embedding_dim": backend_stats.get("embedding_dim", self.embedding_dim),
             "namespaces": backend_stats.get("namespaces", {}),
-            "backend": backend_stats.get("backend_type", "unknown"),
+            "backend": backend_stats.get("backend", backend_stats.get("backend_type", "unknown")),
         }
 
     def close(self) -> None:
