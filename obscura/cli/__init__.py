@@ -1317,6 +1317,11 @@ async def _repl(
     default=True,
     help="Launch the agent fleet from agents.yaml (default: on).",
 )
+@click.option(
+    "--supervise/--no-supervise",
+    default=True,
+    help="Launch the agent fleet from agents.yaml (default: on).",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
