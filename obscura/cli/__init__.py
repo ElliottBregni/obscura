@@ -22,6 +22,7 @@ import asyncio
 import time
 import uuid
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -86,11 +87,30 @@ def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
     return [], []
 
 
+@dataclass
+class AgentInfo:
+    """Lightweight descriptor for a configured agent."""
+
+    name: str
+    type: str = "loop"
+    model: str = "default"
+    status: str = "configured"  # configured | running | stopped
+
+
 def _discover_agents() -> list[str]:
     """Read agent names from ~/.obscura/agents.yaml without instantiating AgentRuntime.
 
     Fully lazy — just parses YAML names, deduplicates, returns list.
     Returns empty list on any error.
+    """
+    return [a.name for a in _discover_agent_infos()]
+
+
+def _discover_agent_infos() -> list[AgentInfo]:
+    """Read agent metadata from ~/.obscura/agents.yaml.
+
+    Returns a list of :class:`AgentInfo` with name/type/model for each
+    configured agent.  Fully lazy — no runtime instantiated.
     """
     try:
         import yaml  # type: ignore[import-untyped]
@@ -101,13 +121,17 @@ def _discover_agents() -> list[str]:
         with open(agents_yaml) as f:
             config = yaml.safe_load(f) or {}
         seen: set[str] = set()
-        names: list[str] = []
+        infos: list[AgentInfo] = []
         for agent in config.get("agents", []):
             name = agent.get("name", "")
             if name and name not in seen:
                 seen.add(name)
-                names.append(name)
-        return names
+                infos.append(AgentInfo(
+                    name=name,
+                    type=agent.get("type", "loop"),
+                    model=agent.get("model", "default"),
+                ))
+        return infos
     except Exception:
         return []
 
@@ -703,6 +727,8 @@ async def _repl(
     prompt: str | None,
     confirm: bool,
     no_default_prompt: bool = False,
+    *,
+    supervise: bool = True,
 ) -> None:
     """Core async loop — runs the interactive REPL or single-shot."""
     # Event store
@@ -1000,8 +1026,9 @@ async def _repl(
         mm = ctx.get_mode_manager()
         ss = StreamingStatus()
 
-        # Lazy agent discovery — reads agents.yaml names only, no runtime created
-        available_agents = _discover_agents() or None
+        # Lazy agent discovery — reads agents.yaml metadata, no runtime created
+        agent_infos = _discover_agent_infos()
+        available_agents = [a.name for a in agent_infos] or None
 
         print_banner(
             backend,
@@ -1011,7 +1038,38 @@ async def _repl(
             mcp_servers=mcp_names or None,
             mode=mm.current.value,
             available_agents=available_agents,
+            agent_infos=agent_infos or None,
         )
+
+        # Start supervisor if --supervise (default) and agents.yaml has agents
+        supervisor_task: asyncio.Task[None] | None = None
+        _supervisor: Any = None
+        if supervise and agent_infos:
+            try:
+                from obscura.agent.supervisor import AgentSupervisor
+                from obscura.auth.models import AuthenticatedUser
+                import os as _os
+
+                sup_user = AuthenticatedUser(
+                    user_id=_os.environ.get("USER", "local"),
+                    email="cli@obscura.local",
+                    roles=("operator",),
+                    org_id="local",
+                    token_type="user",
+                    raw_token="",
+                )
+                agents_yaml = resolve_obscura_home() / "agents.yaml"
+                _supervisor = AgentSupervisor(
+                    config_path=agents_yaml,
+                    user=sup_user,
+                )
+                supervisor_task = asyncio.create_task(
+                    _supervisor.run_forever(),
+                    name="supervisor",
+                )
+                print_ok(f"Supervisor started — {len(agent_infos)} agent(s) launching")
+            except Exception as exc:
+                print_warning(f"Supervisor failed to start: {exc}")
 
         # Start iMessage daemon if configured
         daemon_task: asyncio.Task[None] | None = None
@@ -1158,6 +1216,19 @@ async def _repl(
 
         finally:
             spinner_task.cancel()
+            # Stop supervisor fleet
+            if supervisor_task is not None:
+                if _supervisor is not None:
+                    try:
+                        await _supervisor.stop()
+                    except Exception:
+                        pass
+                if not supervisor_task.done():
+                    supervisor_task.cancel()
+                    try:
+                        await supervisor_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
             if daemon_task is not None:
                 if not daemon_task.done():
                     daemon_task.cancel()
@@ -1241,6 +1312,11 @@ async def _repl(
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
     help="Console log level.",
 )
+@click.option(
+    "--supervise/--no-supervise",
+    default=True,
+    help="Launch the agent fleet from agents.yaml (default: on).",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -1257,6 +1333,7 @@ def main(
     no_default_prompt: bool,
     workspace_name: str | None,
     log_level: str,
+    supervise: bool,
 ) -> None:
     """Obscura — AI agent REPL."""
     # If a subcommand was invoked, let Click handle it
@@ -1307,7 +1384,7 @@ def main(
             pass
     try:
         asyncio.run(
-            _repl(backend, model, system, resolved_session, max_turns, tools, prompt, confirm, no_default_prompt)
+            _repl(backend, model, system, resolved_session, max_turns, tools, prompt, confirm, no_default_prompt, supervise=supervise)
         )
     except KeyboardInterrupt:
         pass  # graceful exit on Ctrl-C

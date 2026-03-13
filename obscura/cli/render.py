@@ -754,6 +754,7 @@ def print_banner(
     mcp_servers: list[str] | None = None,
     mode: str = "code",
     available_agents: list[str] | None = None,
+    agent_infos: list[Any] | None = None,
 ) -> None:
     """Print the REPL startup banner."""
     _obscura_ascii_banner()
@@ -774,7 +775,25 @@ def print_banner(
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
-    if available_agents:
+
+    if agent_infos:
+        console.print()
+        console.print(f"  [bold]Fleet agents ({len(agent_infos)}):[/]")
+        for ai in agent_infos:
+            type_color = {"loop": ACCENT, "daemon": "yellow", "aper": "magenta"}.get(
+                getattr(ai, "type", "loop"), ACCENT
+            )
+            status = getattr(ai, "status", "configured")
+            status_icon = {"running": "●", "configured": "○", "stopped": "◌"}.get(status, "○")
+            status_color = {"running": OK_COLOR, "configured": "dim", "stopped": ERROR_COLOR}.get(status, "dim")
+            console.print(
+                f"    [{status_color}]{status_icon}[/] "
+                f"[bold]{ai.name}[/]  "
+                f"[{type_color}]{ai.type}[/]  "
+                f"[dim]{ai.model}[/]"
+            )
+        console.print(f"  [dim]@name <prompt> to invoke, /agent spawn <name> to start[/]")
+    elif available_agents:
         console.print(
             f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   "
             "[dim]/agent spawn <name> or @name <prompt>[/]"
