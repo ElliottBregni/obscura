@@ -1071,13 +1071,17 @@ async def _repl(
             except Exception as exc:
                 print_warning(f"Supervisor failed to start: {exc}")
 
-        # Start iMessage daemon if configured
+        # Start iMessage daemon only when the supervisor is NOT running —
+        # the supervisor already manages all agents from agents.yaml,
+        # including imessage-assistant.  Starting it twice causes a lock
+        # contention loop ("another daemon instance owns lock").
         daemon_task: asyncio.Task[None] | None = None
         _daemon_client: Any = None
-        try:
-            daemon_task = await _start_imessage_daemon(ctx.client)
-        except Exception as exc:
-            print_warning(f"iMessage daemon failed to start: {exc}")
+        if supervisor_task is None:
+            try:
+                daemon_task = await _start_imessage_daemon(ctx.client)
+            except Exception as exc:
+                print_warning(f"iMessage daemon failed to start: {exc}")
         daemon_restart_count = 0
         daemon_last_restart_at = 0.0
 

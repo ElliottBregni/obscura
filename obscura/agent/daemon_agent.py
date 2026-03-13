@@ -319,6 +319,12 @@ class DaemonAgent:
                             "scheduler_restarted",
                             details={"reason": "stopped"},
                         )
+                    # Back off before restarting to avoid tight spin loops.
+                    _sched_restart_count = getattr(self, "_sched_restart_count", 0) + 1
+                    self._sched_restart_count = _sched_restart_count  # type: ignore[attr-defined]
+                    _backoff = min(2.0 ** min(_sched_restart_count, 6), 60.0)
+                    logger.info("[%s] scheduler restart backoff: %.1fs", self._name, _backoff)
+                    await asyncio.sleep(_backoff)
                     self._scheduler_task = asyncio.create_task(self._run_schedulers())
 
                 trigger = await self._get_next_trigger()
@@ -826,6 +832,12 @@ class DaemonAgent:
             tasks.append(asyncio.create_task(self._poll_messages(message_triggers)))
 
         if not tasks:
+            # No triggers configured — block until cancelled rather than
+            # returning immediately (which causes the watchdog to spin).
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                pass
             return
 
         try:
