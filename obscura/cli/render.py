@@ -588,18 +588,23 @@ def render_agent_output(output_ev: Any) -> None:
 
 
 def _banner_overhaul_block(solid_color: str | None = None) -> None:
-    """Print OVERHAUL block letters.
+    """Print OVERHAUL block letters with a detailed black cat.
 
-    Oscillates green <-> blue by default (Overhaul site palette).
+    Oscillates Irish green <-> dark blue by default.
     Pass solid_color (raw ANSI escape str) to use a single colour instead.
     """
     import sys
 
     RESET = "\033[0m"
     BOLD  = "\033[1m"
-    GREEN = "\033[38;5;35m"
-    BLUE  = "\033[38;5;39m"
+    GREEN = "\033[38;5;28m"   # Irish green
+    BLUE  = "\033[38;5;17m"   # deep dark navy blue
     GRAY  = "\033[38;5;240m"
+    CAT_BLK  = "\033[38;5;232m"   # near-black for cat body
+    CAT_GRY  = "\033[38;5;236m"   # dark gray shading
+    CAT_NOSE = "\033[38;5;175m"   # pink nose
+    CAT_WHSK = "\033[38;5;250m"   # light gray whiskers
+    CAT_EYE  = "\033[38;5;46m"    # bright green eyes
 
     lines = [
         "  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557  \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2557",
@@ -609,7 +614,33 @@ def _banner_overhaul_block(solid_color: str | None = None) -> None:
         " \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d \u255a\u2588\u2588\u2588\u2588\u2554\u255d \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557",
         "  \u255a\u2550\u2550\u2550\u2550\u2550\u255d   \u255a\u2550\u2550\u2550\u255d  \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d",
     ]
+    # ── Two cats peeking over the OVERHAUL text ──────────────────
+    B = CAT_BLK
+    G = CAT_GRY
+    E = CAT_EYE
+    N = CAT_NOSE
+    W = CAT_WHSK
+    R = RESET
+
+    g = " " * 36          # gap between the two cats
+    g2 = " " * 34
+    g3 = " " * 32
+    g4 = " " * 30
+
+    cat_above = [
+        f"  {B}       /\\     /\\{g}/\\     /\\{R}",
+        f"  {B}      /  \\   /  \\{g2}/  \\   /  \\{R}",
+        f"  {B}     /    \\_/    \\{g3}/    \\_/    \\{R}",
+        f"  {B}    |  {E}o{B}       {E}o{B}  |{g4}|  {E}o{B}       {E}o{B}  |{R}",
+        f"  {W}  ~~{B}|{W}    {N}/^\\{W}    {B}|{W}~~{'~' * 30}~~{B}|{W}    {N}/^\\{W}    {B}|{W}~~{R}",
+        f"  {W}    {B}|{G}   ( Y )   {B}|{R}{' ' * 30}  {B}|{G}   ( Y )   {B}|{R}",
+        f"  {G}____|{B}/{G}  \\   /  {B}\\{G}|{'_' * 30}|{B}/{G}  \\   /  {B}\\{G}|____{R}",
+    ]
     sys.stdout.write("\n")
+    for cline in cat_above:
+        sys.stdout.write(f"  {cline}\n")
+
+    # OVERHAUL block text
     for i, line in enumerate(lines):
         c = solid_color if solid_color else (GREEN if i % 2 == 0 else BLUE)
         sys.stdout.write(f"  {BOLD}{c}{line}{RESET}\n")

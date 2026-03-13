@@ -319,3 +319,217 @@ async def overpass_query(query: str, **_: Any) -> dict[str, Any]:
 
 async def healthcheck(**_: Any) -> dict[str, Any]:
     return {"ok": True, "provider": "agent_primitives"}
+
+
+# ---------------------------------------------------------------------------
+# Datadog
+# ---------------------------------------------------------------------------
+
+def _dd_headers() -> dict[str, str]:
+    """Return Datadog auth headers using DATADOG_API_KEY and DATADOG_APP_KEY env vars."""
+    return {
+        "DD-API-KEY": _env("DATADOG_API_KEY"),
+        "DD-APPLICATION-KEY": _env("DATADOG_APP_KEY"),
+        "Content-Type": "application/json",
+    }
+
+
+def _dd_base() -> str:
+    site = os.environ.get("DATADOG_SITE", "datadoghq.com").strip() or "datadoghq.com"
+    return f"https://api.{site}"
+
+
+async def datadog_list_logs(
+    query: str,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    limit: int = 50,
+    **_: Any,
+) -> dict[str, Any]:
+    import datetime
+
+    now = datetime.datetime.utcnow()
+    default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    body: dict[str, Any] = {
+        "filter": {
+            "query": query,
+            "from": from_ts or default_from,
+            "to": to_ts or default_to,
+        },
+        "page": {"limit": min(limit, 1000)},
+    }
+    return await _http_json(
+        method="POST",
+        url=f"{_dd_base()}/api/v2/logs/events/search",
+        headers=_dd_headers(),
+        json_body=body,
+    )
+
+
+async def datadog_query_metrics(
+    query: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    import time
+
+    now = int(time.time())
+    params: dict[str, Any] = {
+        "query": query,
+        "from": from_ts if from_ts is not None else now - 3600,
+        "to": to_ts if to_ts is not None else now,
+    }
+    return await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v1/query",
+        headers=_dd_headers(),
+        params=params,
+    )
+
+
+async def datadog_list_traces(
+    query: str,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    limit: int = 50,
+    **_: Any,
+) -> dict[str, Any]:
+    import datetime
+
+    now = datetime.datetime.utcnow()
+    default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    body: dict[str, Any] = {
+        "filter": {
+            "query": query,
+            "from": from_ts or default_from,
+            "to": to_ts or default_to,
+        },
+        "page": {"limit": min(limit, 1000)},
+    }
+    return await _http_json(
+        method="POST",
+        url=f"{_dd_base()}/api/v2/spans/events/search",
+        headers=_dd_headers(),
+        json_body=body,
+    )
+
+
+async def datadog_get_monitors(query: str | None = None, **_: Any) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if query:
+        params["query"] = query
+    return await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v1/monitor",
+        headers=_dd_headers(),
+        params=params or None,
+    )
+
+
+async def datadog_list_dashboards(query: str | None = None, **_: Any) -> dict[str, Any]:
+    result = await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v1/dashboard",
+        headers=_dd_headers(),
+    )
+    # client-side filter by title substring if query given
+    if query and result.get("ok") and isinstance(result.get("data"), dict):
+        dashboards = result["data"].get("dashboards", [])
+        result["data"]["dashboards"] = [
+            d for d in dashboards if query.lower() in d.get("title", "").lower()
+        ]
+    return result
+
+
+async def datadog_list_incidents(**_: Any) -> dict[str, Any]:
+    return await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v2/incidents",
+        headers=_dd_headers(),
+        params={"include": "attachments"},
+    )
+
+
+async def datadog_get_incident(incident_id: str, **_: Any) -> dict[str, Any]:
+    return await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v2/incidents/{incident_id}",
+        headers=_dd_headers(),
+    )
+
+
+async def datadog_list_hosts(filter: str | None = None, **_: Any) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if filter:
+        params["filter"] = filter
+    return await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v1/hosts",
+        headers=_dd_headers(),
+        params=params or None,
+    )
+
+
+async def datadog_mute_host(
+    hostname: str,
+    end: int | None = None,
+    message: str | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if end is not None:
+        body["end"] = end
+    if message:
+        body["message"] = message
+    return await _http_json(
+        method="POST",
+        url=f"{_dd_base()}/api/v1/host/{hostname}/mute",
+        headers=_dd_headers(),
+        json_body=body,
+    )
+
+
+async def datadog_unmute_host(hostname: str, **_: Any) -> dict[str, Any]:
+    return await _http_json(
+        method="POST",
+        url=f"{_dd_base()}/api/v1/host/{hostname}/unmute",
+        headers=_dd_headers(),
+        json_body={},
+    )
+
+
+async def datadog_schedule_downtime(
+    scope: str,
+    start: int | None = None,
+    end: int | None = None,
+    message: str | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    import time
+
+    body: dict[str, Any] = {
+        "scope": scope,
+        "start": start if start is not None else int(time.time()),
+    }
+    if end is not None:
+        body["end"] = end
+    if message:
+        body["message"] = message
+    return await _http_json(
+        method="POST",
+        url=f"{_dd_base()}/api/v1/downtime",
+        headers=_dd_headers(),
+        json_body=body,
+    )
+
+
+async def datadog_healthcheck(**_: Any) -> dict[str, Any]:
+    """Validate Datadog credentials by hitting the validate endpoint."""
+    return await _http_json(
+        method="GET",
+        url=f"{_dd_base()}/api/v1/validate",
+        headers=_dd_headers(),
+    )

@@ -23,6 +23,18 @@ from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
 from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 
+def _point_id(namespace: str, key: str) -> int:
+    """Return a stable deterministic 63-bit point ID using SHA-256.
+
+    Python's built-in hash() is randomised per-process (PYTHONHASHSEED),
+    which would cause every restart to produce different IDs for the same
+    key, making upsert non-idempotent and get_vector always miss.
+    SHA-256 is stable across processes, machines, and Python versions.
+    """
+    digest = hashlib.sha256(f"{namespace}:{key}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
+
+
 class QdrantBackend:
     """Qdrant-based vector memory backend."""
 
@@ -91,7 +103,7 @@ class QdrantBackend:
         memory_type: str,
         expires_at: datetime | None,
     ) -> None:
-        point_id = abs(hash(f"{key.namespace}:{key.key}")) % (2**63)
+        point_id = _point_id(key.namespace, key.key)
         payload = {
             "namespace": key.namespace,
             "key": key.key,
@@ -108,7 +120,7 @@ class QdrantBackend:
         )
 
     def get_vector(self, key: MemoryKey) -> VectorEntry | None:
-        point_id = abs(hash(f"{key.namespace}:{key.key}")) % (2**63)
+        point_id = _point_id(key.namespace, key.key)
         try:
             points = self.client.retrieve(
                 self.collection_name,
@@ -180,7 +192,7 @@ class QdrantBackend:
         return entries
 
     def delete_vector(self, key: MemoryKey) -> bool:
-        point_id = abs(hash(f"{key.namespace}:{key.key}")) % (2**63)
+        point_id = _point_id(key.namespace, key.key)
         return (
             self.client.delete(self.collection_name, [point_id]).status == "completed"
         )

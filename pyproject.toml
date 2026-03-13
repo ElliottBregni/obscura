@@ -75,10 +75,15 @@ providers = [
     "msal>=1.27.0",
     "pycoingecko>=3.0.0",
     "notion-client>=2.0.0",
+    "datadog-api-client>=2.0.0",
+]
+mcp_server = [
+    "fastmcp>=3.1.0",
 ]
 
 [project.scripts]
 obscura = "obscura.cli:main"
+obscura-mcp = "obscura.mcp_server.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -124,6 +129,7 @@ packages = [
     "obscura.skills",
     "obscura.demo",
     "obscura.schemas",
+    "obscura.mcp_server",
 ]
 
 [tool.setuptools.package-data]

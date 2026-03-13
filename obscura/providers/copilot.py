@@ -9,6 +9,7 @@ via ``EventToIteratorBridge``.
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import Any, AsyncIterator, Callable, cast
 
 from obscura.core.auth import AuthConfig
@@ -73,6 +74,7 @@ class CopilotBackend:
 
         # Session tracking
         self._session_store = SessionStore()
+        self._log = logging.getLogger(__name__)
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -192,6 +194,20 @@ class CopilotBackend:
 
     # -- Send / Stream -------------------------------------------------------
 
+    @staticmethod
+    def _is_session_expired(exc: Exception) -> bool:
+        """Check if an exception indicates the server-side session expired."""
+        msg = str(exc).lower()
+        return "session not found" in msg or (
+            "json-rpc error" in msg and "session" in msg
+        )
+
+    async def _recover_session(self) -> None:
+        """Recreate the session after an expiry/idle timeout."""
+        self._log.warning("Session expired after idle — recreating session")
+        config = self.build_session_config()
+        self._session = await self._client.create_session(config)
+
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_session()
@@ -199,15 +215,35 @@ class CopilotBackend:
         with tracer.start_as_current_span("copilot.send") as span:
             _set_span_attr(span, "backend", "copilot")
             msg_options = self._build_message_options(prompt, kwargs)
-            response = await self._session.send_and_wait(msg_options)
+            try:
+                response = await self._session.send_and_wait(msg_options)
+            except Exception as exc:
+                if not self._is_session_expired(exc):
+                    raise
+                await self._recover_session()
+                msg_options = self._build_message_options(prompt, kwargs)
+                response = await self._session.send_and_wait(msg_options)
             return self._to_message(response)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        """Send a prompt and yield streaming chunks."""
-        self._ensure_session()
-        bridge = EventToIteratorBridge()
+        """Send a prompt and yield streaming chunks.
 
-        # Register event handlers
+        Automatically recovers from expired sessions (idle timeout).
+        """
+        self._ensure_session()
+        try:
+            async for chunk in self._do_stream(prompt, **kwargs):
+                yield chunk
+        except Exception as exc:
+            if not self._is_session_expired(exc):
+                raise
+            await self._recover_session()
+            async for chunk in self._do_stream(prompt, **kwargs):
+                yield chunk
+
+    async def _do_stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+        """Core streaming implementation."""
+        bridge = EventToIteratorBridge()
         unsub_fns: list[Callable[..., Any]] = []
 
         _got_deltas = False
