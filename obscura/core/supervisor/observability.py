@@ -16,14 +16,12 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+# NOTE: datetime import removed — unused in this module.
 from typing import Any
 
 from obscura.core.supervisor.types import (
-    RunContext,
     SupervisorEvent,
     SupervisorEventKind,
-    SupervisorState,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,7 +163,10 @@ class RunObserver:
         """Observe a supervisor event and update metrics."""
         kind = event.kind
 
-        if kind == SupervisorEventKind.MODEL_TURN_START:
+        # FIX: Count on MODEL_TURN_END (completed turns), not MODEL_TURN_START.
+        # Bug F fix in supervisor.py now emits MODEL_TURN_END — if we still listen
+        # on MODEL_TURN_START here, turn_count stays 0 forever.
+        if kind == SupervisorEventKind.MODEL_TURN_END:
             self._metrics.turn_count += 1
 
         elif kind == SupervisorEventKind.TOOL_EXECUTION_END:

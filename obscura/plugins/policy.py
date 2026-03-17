@@ -141,16 +141,21 @@ class PluginPolicyEngine:
 
         ruleset = PolicyRuleSet()
         if policies_dir.is_dir():
-            try:
-                import yaml  # type: ignore[import-untyped]
-            except ImportError:
-                logger.warning("PyYAML not installed — skipping policy files")
-                return cls(ruleset)
+            from obscura.core.config_io import load_config  # noqa: PLC0415
 
-            for f in sorted(policies_dir.glob("*.yaml")):
+            # Discover .toml first, then .yaml for backward compat
+            policy_files = sorted(policies_dir.glob("*.toml")) + sorted(policies_dir.glob("*.yaml"))
+            for f in policy_files:
                 try:
-                    data = yaml.safe_load(f.read_text()) or {}
-                    for i, rd in enumerate(data.get("rules", [])):
+                    data = load_config(f) or {}
+                    # Support both list-form [[rules]] and dict-form [rules.<id>]
+                    raw_rules = data.get("rules", [])
+                    if isinstance(raw_rules, dict):
+                        raw_rules = [
+                            {**spec, "id": rule_id} if isinstance(spec, dict) else {"id": rule_id}
+                            for rule_id, spec in raw_rules.items()
+                        ]
+                    for i, rd in enumerate(raw_rules):
                         rule = PolicyRule(
                             id=rd.get("id", f"{f.stem}-{i}"),
                             plugin=rd.get("plugin"),

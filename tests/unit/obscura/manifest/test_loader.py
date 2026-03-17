@@ -39,6 +39,21 @@ class TestLoadAgentManifest:
         m = ManifestLoader(base_dir=tmp_path).load_agent_manifest(f)
         assert m.source_path == f
 
+    def test_toml_frontmatter_agent_md(self, tmp_path: Path) -> None:
+        f = tmp_path / "dev.agent.md"
+        f.write_text(
+            '+++\nname = "dev"\nmodel = "claude"\ntools = ["Read", "Bash"]\n+++\n'
+            "You are a developer agent.",
+            encoding="utf-8",
+        )
+        loader = ManifestLoader(base_dir=tmp_path)
+        m = loader.load_agent_manifest(f)
+        assert m.name == "dev"
+        assert m.model == "claude"
+        assert m.tools == ["Read", "Bash"]
+        assert m.system_prompt == "You are a developer agent."
+        assert m.source_path == f
+
 
 class TestLoadAgentManifests:
     def test_scans_directory(self, tmp_path: Path) -> None:

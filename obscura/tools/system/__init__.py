@@ -24,6 +24,11 @@ from urllib import request as url_request
 
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
+from obscura.tools.system.intelligence import (
+    causal_trace,
+    context_snapshot,
+    policy_probe,
+)
 
 def _strip_html(raw: str) -> str:
     """Strip HTML tags and decode entities, returning plain text."""
@@ -2948,6 +2953,10 @@ def get_system_tool_specs() -> list[ToolSpec]:
         # User interaction
         cast(ToolSpec, getattr(cast(Any, ask_user), "spec")),
         cast(ToolSpec, getattr(cast(Any, user_interact), "spec")),
+        # Intelligence tools (context_snapshot, causal_trace, policy_probe)
+        cast(ToolSpec, getattr(cast(Any, context_snapshot), "spec")),
+        cast(ToolSpec, getattr(cast(Any, causal_trace), "spec")),
+        cast(ToolSpec, getattr(cast(Any, policy_probe), "spec")),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():

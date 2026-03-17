@@ -93,6 +93,14 @@ def init_workspace(
         force=force,
     )
 
+    # -- agents-available.yaml ------------------------------------------------
+    _copy_or_create(
+        src=global_home / "agents-available.yaml",
+        dst=ws / "agents-available.yaml",
+        default_content=_DEFAULT_AGENTS_AVAILABLE_YAML,
+        force=force,
+    )
+
     # -- mcp/mcp.json --------------------------------------------------------
     _write_if_missing(
         dst=ws / "mcp" / "mcp.json",
@@ -116,27 +124,62 @@ def init_workspace(
     )
     _make_executable(ws / "hooks" / "session-init.py")
 
-    # -- config.yaml --------------------------------------------------------
+    # -- config.toml --------------------------------------------------------
     _write_if_missing(
-        dst=ws / "config.yaml",
-        content=_DEFAULT_CONFIG_YAML,
+        dst=ws / "config.toml",
+        content=_DEFAULT_CONFIG_TOML,
         force=force,
     )
 
     # -- seed specs ----------------------------------------------------------
     _write_if_missing(
-        dst=ws / "specs" / "templates" / "base-agent.yml",
+        dst=ws / "specs" / "templates" / "base-agent.toml",
         content=_build_default_base_agent_template(),
         force=force,
     )
     _write_if_missing(
-        dst=ws / "specs" / "policies" / "safe-dev.yml",
+        dst=ws / "specs" / "policies" / "safe-dev.toml",
         content=_DEFAULT_SAFE_DEV_POLICY,
         force=force,
     )
     _write_if_missing(
-        dst=ws / "specs" / "workspaces" / "default.yml",
+        dst=ws / "specs" / "workspaces" / "default.toml",
         content=_DEFAULT_WORKSPACE,
+        force=force,
+    )
+
+    # -- docs ----------------------------------------------------------------
+    (ws / "docs").mkdir(parents=True, exist_ok=True)
+    from obscura.core._default_docs import (  # noqa: PLC0415
+        CAPABILITY_GUIDE,
+        CONFIG_REFERENCE,
+        PLUGIN_GUIDE,
+        POLICY_GUIDE,
+        SPEC_GUIDE,
+    )
+    _write_if_missing(
+        dst=ws / "docs" / "PLUGIN_GUIDE.md",
+        content=PLUGIN_GUIDE,
+        force=force,
+    )
+    _write_if_missing(
+        dst=ws / "docs" / "CONFIG_REFERENCE.md",
+        content=CONFIG_REFERENCE,
+        force=force,
+    )
+    _write_if_missing(
+        dst=ws / "docs" / "SPEC_GUIDE.md",
+        content=SPEC_GUIDE,
+        force=force,
+    )
+    _write_if_missing(
+        dst=ws / "docs" / "POLICY_GUIDE.md",
+        content=POLICY_GUIDE,
+        force=force,
+    )
+    _write_if_missing(
+        dst=ws / "docs" / "CAPABILITY_GUIDE.md",
+        content=CAPABILITY_GUIDE,
         force=force,
     )
 
@@ -145,33 +188,29 @@ def init_workspace(
 
 
 def load_workspace_config(cwd: Path | None = None) -> dict[str, Any]:
-    """Load and merge workspace config from .obscura/config.yaml.
+    """Load and merge workspace config from .obscura/config.toml.
 
-    Searches local ``.obscura/config.yaml`` first, then falls back to
-    ``~/.obscura/config.yaml``.  Returns the parsed YAML as a dict.
+    Searches local ``.obscura/config.toml`` first, then falls back to
+    ``~/.obscura/config.toml``.  Also supports deprecated ``.yaml`` files.
+    Returns the parsed config as a dict.
     """
-    try:
-        import yaml  # noqa: PLC0415
-    except ImportError:
-        logger.debug("PyYAML not available — returning default config")
-        return _DEFAULT_CONFIG_DICT.copy()
+    from obscura.core.config_io import try_load_config  # noqa: PLC0415
 
     resolved_cwd = (cwd or Path.cwd()).resolve()
-    candidates = [
-        resolved_cwd / _WORKSPACE_DIR / "config.yaml",
-        _resolve_global_home() / "config.yaml",
+    search_dirs = [
+        _resolve_global_home(),
+        resolved_cwd / _WORKSPACE_DIR,
     ]
 
     merged: dict[str, Any] = _DEFAULT_CONFIG_DICT.copy()
-    for path in reversed(candidates):  # global first, then local overrides
-        if path.is_file():
-            try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    _deep_merge(merged, data)
-                    logger.debug("Loaded config from %s", path)
-            except Exception as exc:
-                logger.warning("Failed to parse %s: %s", path, exc)
+    for base in search_dirs:  # global first, then local overrides
+        data = try_load_config(
+            base / "config.toml",
+            base / "config.yaml",
+        )
+        if data is not None:
+            _deep_merge(merged, data)
+            logger.debug("Loaded config from %s", base)
 
     return merged
 
@@ -346,29 +385,44 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _DEFAULT_AGENTS_YAML = textwrap.dedent("""\
+    # Active agents — move agents from agents-available.yaml to enable them.
+    # Agent fields override defaults; nested dicts merge, lists replace.
+
+    defaults:
+      provider: copilot
+      max_turns: 25
+      mcp_servers: auto
+      can_delegate: true
+      skills:
+        lazy_load: true
+      capabilities:
+        grant: [shell.exec, file.read, file.write, git.ops, search.web]
+
     agents:
       - name: assistant
-        type: loop
-        model: copilot
-        system_prompt: >-
-          Analyze requests carefully and invoke relevant skills when needed.
-        max_turns: 25
-        mcp_servers: auto
-        skills:
-          lazy_load: true
-          filter: null
+        system_prompt: >
+          Analyze requests carefully and invoke relevant tools when needed.
 
       - name: code-architect
-        type: loop
-        model: copilot
-        system_prompt: |
-          You are an expert software architect and full-stack developer.
-          Workflow: Understand → Design → Test → Implement → Review → Document
         max_turns: 50
-        mcp_servers: auto
-        skills:
-          lazy_load: true
-          filter: null
+        tags: [architecture, design, code-review]
+        system_prompt: >
+          You are an expert software architect and full-stack developer.
+          Workflow: Understand -> Design -> Test -> Implement -> Review -> Document
+""")
+
+_DEFAULT_AGENTS_AVAILABLE_YAML = textwrap.dedent("""\
+    # Agent catalog — disabled by default.
+    # Move agents to agents.yaml to enable them.
+
+    defaults:
+      mcp_servers: auto
+      skills:
+        lazy_load: true
+      capabilities:
+        grant: [shell.exec, file.read, file.write, git.ops]
+
+    agents: []
 """)
 
 _DEFAULT_MCP_JSON = json.dumps({"mcpServers": {}}, indent=2) + "\n"
@@ -415,108 +469,103 @@ _DEFAULT_SESSION_INIT_PY = textwrap.dedent("""\
     sys.exit(0)
 """)
 
-_DEFAULT_CONFIG_YAML = textwrap.dedent("""\
-    # .obscura/config.yaml — Project-level Obscura configuration
-    # Inherits from ~/.obscura/config.yaml, can override settings.
+_DEFAULT_CONFIG_TOML = textwrap.dedent("""\
+    # .obscura/config.toml — Project-level Obscura configuration
+    # Inherits from ~/.obscura/config.toml, can override settings.
 
-    # ── Plugin Loading ─────────────────────────────────────────────────────
-    plugins:
-      load_builtins: true
+    # mode = "code" loads all registered tools (unrestricted)
+    # mode = "ask"  disables tools (conversational only)
+    # mode = "plan" enables read-only tools (research + planning)
+    # mode = "diff" enables read + git inspection tools
+    mode = "code"
 
-      bootstrap:
-        auto_install: true
-        lenient_builtins: true
+    [plugins]
+    load_builtins = true
 
-    # ── Default Mode ──────────────────────────────────────────────────────
-    # mode=code loads all registered tools (unrestricted)
-    # mode=ask  disables tools (conversational only)
-    # mode=plan enables read-only tools (research + planning)
-    # mode=diff enables read + git inspection tools
-    mode: code
+    [plugins.bootstrap]
+    auto_install = true
+    lenient_builtins = true
 
-    # ── Default Capabilities ──────────────────────────────────────────────
-    defaults:
-      capabilities:
-        grant:
-          - shell.exec
-          - file.read
-          - file.write
-          - git.ops
-          - web.browse
-          - search.web
-          - security.scan
-        deny: []
+    [defaults.capabilities]
+    grant = [
+        "shell.exec",
+        "file.read",
+        "file.write",
+        "git.ops",
+        "web.browse",
+        "search.web",
+        "security.scan",
+    ]
+    deny = []
 
-    # ── MCP Servers ───────────────────────────────────────────────────────
-    mcp:
-      auto_discover: true
+    [mcp]
+    auto_discover = true
 """)
 
 def _build_default_base_agent_template() -> str:
     """Build base-agent template dynamically with all builtin plugin IDs."""
+    from obscura.core.config_io import dumps_toml  # noqa: PLC0415
+
     try:
-        from obscura.plugins.builtins import list_builtin_plugin_ids
-        from obscura.plugins.capabilities import list_builtin_capabilities
+        from obscura.plugins.builtins import list_builtin_plugin_ids  # noqa: PLC0415
+
         plugin_ids = list_builtin_plugin_ids()
-        capability_ids = ["shell.exec", "file.read", "file.write", "git.ops", "web.browse", "search.web", "security.scan"]
     except Exception:  # noqa: BLE001
         plugin_ids = ["system-tools", "websearch", "gitleaks"]
-        capability_ids = ["shell.exec", "file.read", "file.write", "git.ops", "web.browse", "search.web", "security.scan"]
 
-    plugins_yaml = "\n".join(f"        - {pid}" for pid in plugin_ids)
-    capabilities = "\n".join(f"            - {cid}" for cid in capability_ids)
-    return textwrap.dedent("""\
-        apiVersion: obscura/v1
-        kind: Template
-        metadata:
-          name: base-agent
-          description: Common defaults inherited by all agent templates.
-        spec:
-          provider: copilot
-          agent_type: loop
-          max_iterations: 25
-          plugins:
-    {plugins}
-          capabilities:
-            - shell.exec
-            - file.read
-            - file.write
-            - git.ops
-            - web.browse
-            - search.web
-            - security.scan
-          instructions: |
-            You are a helpful AI assistant. Analyse requests carefully
-            and invoke relevant tools when needed.
-    """).replace("{plugins}", plugins_yaml).replace("{capabilities}", capabilities)
+    capability_ids = [
+        "shell.exec", "file.read", "file.write", "git.ops",
+        "web.browse", "search.web", "security.scan",
+    ]
+
+    doc = {
+        "apiVersion": "obscura/v1",
+        "kind": "Template",
+        "metadata": {
+            "name": "base-agent",
+            "description": "Common defaults inherited by all agent templates.",
+        },
+        "spec": {
+            "provider": "copilot",
+            "agent_type": "loop",
+            "max_iterations": 25,
+            "plugins": plugin_ids,
+            "capabilities": capability_ids,
+            "instructions": (
+                "You are a helpful AI assistant. Analyse requests carefully\n"
+                "and invoke relevant tools when needed.\n"
+            ),
+        },
+    }
+    return dumps_toml(doc)
 
 _DEFAULT_SAFE_DEV_POLICY = textwrap.dedent("""\
-    apiVersion: obscura/v1
-    kind: Policy
-    metadata:
-      name: safe-dev
-      description: Conservative policy for development workflows.
-    spec:
-      tool_denylist:
-        - dangerous_tool
-      require_confirmation:
-        - bash
-        - write_file
-        - delete_file
-      max_turns: 15
+    apiVersion = "obscura/v1"
+    kind = "Policy"
+
+    [metadata]
+    name = "safe-dev"
+    description = "Conservative policy for development workflows."
+
+    [spec]
+    tool_denylist = ["dangerous_tool"]
+    require_confirmation = ["bash", "write_file", "delete_file"]
+    max_turns = 15
 """)
 
 _DEFAULT_WORKSPACE = textwrap.dedent("""\
-    apiVersion: obscura/v1
-    kind: Workspace
-    metadata:
-      name: default
-      description: Default workspace — all plugins, no restrictions.
-    spec:
-      agents:
-        - name: assistant
-          template: base-agent
-          mode: task
-      startup:
-        preload_plugins: true
+    apiVersion = "obscura/v1"
+    kind = "Workspace"
+
+    [metadata]
+    name = "default"
+    description = "Default workspace — all plugins, no restrictions."
+
+    [[spec.agents]]
+    name = "assistant"
+    template = "base-agent"
+    mode = "task"
+
+    [spec.startup]
+    preload_plugins = true
 """)

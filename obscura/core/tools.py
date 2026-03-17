@@ -296,8 +296,9 @@ class ToolRegistry:
         ``"privileged"`` gets all tools; ``"public"`` gets only those
         with ``required_tier == "public"``.
         """
-        # TODO: restrict public tier once tier differentiation is enabled
-        return self.all()
+        if tier_value == "privileged":
+            return self.all()
+        return [t for t in self._tools.values() if getattr(t, "required_tier", None) in (None, "public")]
 
     def names_for_tier(self, tier_value: str) -> list[str]:
         """Return tool names accessible at *tier_value*."""

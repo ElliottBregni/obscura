@@ -43,6 +43,13 @@ RUN find /app/.venv/lib -path "*/site-packages/copilot/bin/copilot" -type f -exe
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
+# Pin OBSCURA_HOME so paths.py resolves the .obscura directory correctly
+# inside containers. The docker-compose volume bind maps
+# ${HOME}/.obscura -> /home/obscura/.obscura, matching this path exactly.
+# Without this, paths.py falls back to the obscura user's $HOME which
+# resolves correctly at runtime but is fragile if the image is used with
+# a different UID or non-standard home directory.
+ENV OBSCURA_HOME=/home/obscura/.obscura
 
 USER obscura
 EXPOSE 8080

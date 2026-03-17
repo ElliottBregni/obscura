@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -358,7 +359,7 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
     if result.ok and bootstrap.post_install:
         try:
             proc = subprocess.run(
-                bootstrap.post_install, shell=True,
+                shlex.split(bootstrap.post_install),
                 capture_output=True, text=True, timeout=120,
             )
             if proc.returncode != 0:
@@ -370,7 +371,7 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
     if result.ok and bootstrap.check_command:
         try:
             proc = subprocess.run(
-                bootstrap.check_command, shell=True,
+                shlex.split(bootstrap.check_command),
                 capture_output=True, text=True, timeout=30,
             )
             if proc.returncode != 0:

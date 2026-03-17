@@ -44,15 +44,16 @@ def evaluate_policy(
         Whether the invocation is allowed and why.
     """
     if policy.full_access:
-        return PolicyResult(allowed=True, reason="full_access granted")
+        return PolicyResult(allowed=True, reason="full_access granted", matched_rule="full_access")
 
     if tool_name in policy.deny_list:
-        return PolicyResult(allowed=False, reason=f"tool '{tool_name}' is in deny_list")
+        return PolicyResult(allowed=False, reason=f"tool '{tool_name}' is in deny_list", matched_rule="deny_list")
 
     if policy.allow_list and tool_name not in policy.allow_list:
         return PolicyResult(
             allowed=False,
             reason=f"tool '{tool_name}' is not in allow_list",
+            matched_rule="allow_list",
         )
 
     if policy.base_dir is not None and tool_name in _FS_TOOLS:
@@ -60,7 +61,7 @@ def evaluate_policy(
         if not result.allowed:
             return result
 
-    return PolicyResult(allowed=True, reason="policy permits invocation")
+    return PolicyResult(allowed=True, reason="policy permits invocation", matched_rule="")
 
 
 def _check_base_dir(base_dir: Path, args: dict[str, Any]) -> PolicyResult:
@@ -76,5 +77,6 @@ def _check_base_dir(base_dir: Path, args: dict[str, Any]) -> PolicyResult:
             return PolicyResult(
                 allowed=False,
                 reason=f"path '{target}' escapes base_dir '{base_dir}'",
+                matched_rule="base_dir",
             )
-    return PolicyResult(allowed=True, reason="path within base_dir")
+    return PolicyResult(allowed=True, reason="path within base_dir", matched_rule="base_dir")

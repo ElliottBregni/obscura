@@ -1,14 +1,16 @@
-"""obscura.core.compiler.loader — Parse YAML spec files into Pydantic models.
+"""obscura.core.compiler.loader — Parse spec files into Pydantic models.
 
 Phase 1 of the compile pipeline: raw file I/O → typed spec objects.
+Supports TOML (preferred) and YAML (deprecated) formats.
 """
 
 from __future__ import annotations
 
 import logging
+import tomllib
+import warnings
 from pathlib import Path
 
-import yaml
 from pydantic import ValidationError
 
 from obscura.core.compiler.errors import SpecLoadError
@@ -24,10 +26,13 @@ from obscura.core.compiler.specs import (
 
 logger = logging.getLogger(__name__)
 
+_SPEC_PATTERNS = ("**/*.toml", "**/*.yml", "**/*.yaml")
+
 
 def load_spec_file(path: Path) -> AnySpec:
-    """Load a single YAML spec file and return the appropriate typed model.
+    """Load a single spec file and return the appropriate typed model.
 
+    Supports ``.toml`` (preferred) and ``.yaml``/``.yml`` (deprecated).
     Dispatches on the ``kind`` field to select the correct Pydantic model.
 
     Raises
@@ -38,19 +43,38 @@ def load_spec_file(path: Path) -> AnySpec:
     if not path.is_file():
         raise SpecLoadError(f"Spec file not found: {path}", source=str(path))
 
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise SpecLoadError(f"Cannot read {path}: {exc}", source=str(path)) from exc
+    suffix = path.suffix.lower()
 
-    try:
-        raw = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise SpecLoadError(f"Invalid YAML in {path}: {exc}", source=str(path)) from exc
+    if suffix == ".toml":
+        try:
+            with open(path, "rb") as f:
+                raw = tomllib.load(f)
+        except Exception as exc:
+            raise SpecLoadError(f"Invalid TOML in {path}: {exc}", source=str(path)) from exc
+    elif suffix in (".yaml", ".yml"):
+        warnings.warn(
+            f"YAML spec files are deprecated; migrate {path.name} to TOML.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            import yaml  # type: ignore[import-untyped]
+
+            text = path.read_text(encoding="utf-8")
+            raw = yaml.safe_load(text)
+        except ImportError as exc:
+            raise SpecLoadError(
+                f"PyYAML required to read {path}; install it or convert to TOML.",
+                source=str(path),
+            ) from exc
+        except Exception as exc:
+            raise SpecLoadError(f"Invalid YAML in {path}: {exc}", source=str(path)) from exc
+    else:
+        raise SpecLoadError(f"Unsupported spec file extension: {suffix}", source=str(path))
 
     if not isinstance(raw, dict):
         raise SpecLoadError(
-            f"Expected a YAML mapping in {path}, got {type(raw).__name__}",
+            f"Expected a mapping in {path}, got {type(raw).__name__}",
             source=str(path),
         )
 
@@ -76,8 +100,9 @@ def load_spec_file(path: Path) -> AnySpec:
 
 
 def load_specs_dir(directory: Path) -> SpecRegistry:
-    """Load all ``*.yml`` and ``*.yaml`` spec files from a directory tree.
+    """Load all spec files from a directory tree.
 
+    Discovers ``*.toml`` (preferred), ``*.yml``, and ``*.yaml`` files.
     Returns a :class:`SpecRegistry` grouping specs by kind.
     """
     registry = SpecRegistry()
@@ -86,7 +111,7 @@ def load_specs_dir(directory: Path) -> SpecRegistry:
         logger.warning("Specs directory does not exist: %s", directory)
         return registry
 
-    for pattern in ("**/*.yml", "**/*.yaml"):
+    for pattern in _SPEC_PATTERNS:
         for path in sorted(directory.glob(pattern)):
             if not path.is_file():
                 continue
@@ -105,13 +130,13 @@ def load_specs_dirs(directories: list[Path]) -> SpecRegistry:
 
     Directories are processed in order: global first, then local.
     When specs share the same kind + name, later entries (local) override
-    earlier ones (global), matching the ``config.yaml`` merge precedent.
+    earlier ones (global), matching the ``config.toml`` merge precedent.
     """
     registry = SpecRegistry()
     for directory in directories:
         if not directory.is_dir():
             continue
-        for pattern in ("**/*.yml", "**/*.yaml"):
+        for pattern in _SPEC_PATTERNS:
             for path in sorted(directory.glob(pattern)):
                 if not path.is_file():
                     continue

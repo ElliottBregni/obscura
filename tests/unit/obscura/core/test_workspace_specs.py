@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
+import tomllib
 
 from obscura.core.workspace import init_workspace
 
@@ -22,29 +22,29 @@ class TestWorkspaceSpecsScaffold:
 
     def test_init_writes_base_agent_template(self, tmp_path: Path) -> None:
         ws = init_workspace(tmp_path)
-        tmpl_file = ws / "specs" / "templates" / "base-agent.yml"
+        tmpl_file = ws / "specs" / "templates" / "base-agent.toml"
         assert tmpl_file.is_file()
 
-        doc = yaml.safe_load(tmpl_file.read_text())
+        doc = tomllib.loads(tmpl_file.read_text())
         assert doc["kind"] == "Template"
         assert doc["metadata"]["name"] == "base-agent"
         assert doc["spec"]["provider"] == "copilot"
 
     def test_init_writes_safe_dev_policy(self, tmp_path: Path) -> None:
         ws = init_workspace(tmp_path)
-        policy_file = ws / "specs" / "policies" / "safe-dev.yml"
+        policy_file = ws / "specs" / "policies" / "safe-dev.toml"
         assert policy_file.is_file()
 
-        doc = yaml.safe_load(policy_file.read_text())
+        doc = tomllib.loads(policy_file.read_text())
         assert doc["kind"] == "Policy"
         assert doc["metadata"]["name"] == "safe-dev"
 
     def test_init_writes_default_workspace(self, tmp_path: Path) -> None:
         ws = init_workspace(tmp_path)
-        ws_file = ws / "specs" / "workspaces" / "default.yml"
+        ws_file = ws / "specs" / "workspaces" / "default.toml"
         assert ws_file.is_file()
 
-        doc = yaml.safe_load(ws_file.read_text())
+        doc = tomllib.loads(ws_file.read_text())
         assert doc["kind"] == "Workspace"
         assert doc["metadata"]["name"] == "default"
 
@@ -66,7 +66,7 @@ class TestWorkspaceSpecsScaffold:
 
     def test_no_overwrite_without_force(self, tmp_path: Path) -> None:
         ws = init_workspace(tmp_path)
-        tmpl_file = ws / "specs" / "templates" / "base-agent.yml"
+        tmpl_file = ws / "specs" / "templates" / "base-agent.toml"
 
         # Modify the file
         tmpl_file.write_text("# custom content", encoding="utf-8")
@@ -78,5 +78,5 @@ class TestWorkspaceSpecsScaffold:
         # existing ones are preserved by _write_if_missing)
         # Actually _write_if_missing with force=True DOES overwrite
         # So let's check that it does overwrite
-        doc = yaml.safe_load(tmpl_file.read_text())
+        doc = tomllib.loads(tmpl_file.read_text())
         assert doc["kind"] == "Template"

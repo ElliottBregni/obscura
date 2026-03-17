@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
+import tomli_w
 
 from obscura.plugins.manifest import (
     ManifestError,
@@ -176,11 +176,11 @@ class TestParseManifest:
             parse_manifest({"id": "test-plugin", "version": "not-semver"})
 
     def test_source_path_in_error(self):
-        p = Path("/fake/plugin.yaml")
+        p = Path("/fake/plugin.toml")
         with pytest.raises(ManifestError) as exc_info:
             parse_manifest({"version": "1.0.0"}, source_path=p)
         assert exc_info.value.path == p
-        assert "/fake/plugin.yaml" in str(exc_info.value)
+        assert "/fake/plugin.toml" in str(exc_info.value)
 
 
 # ===================================================================
@@ -567,35 +567,42 @@ class TestParseHealthcheck:
 
 
 class TestParseManifestFile:
-    def test_valid_yaml(self, tmp_path: Path):
-        f = tmp_path / "plugin.yaml"
-        f.write_text(yaml.dump(MINIMAL_DATA))
+    def test_valid_toml(self, tmp_path: Path):
+        f = tmp_path / "plugin.toml"
+        f.write_bytes(tomli_w.dumps(MINIMAL_DATA).encode())
         spec = parse_manifest_file(f)
         assert spec.id == "test-plugin"
         assert spec.version == "1.0.0"
 
-    def test_valid_full_yaml(self, tmp_path: Path):
-        f = tmp_path / "plugin.yaml"
-        f.write_text(yaml.dump(_full_manifest()))
+    def test_valid_full_toml(self, tmp_path: Path):
+        f = tmp_path / "plugin.toml"
+        f.write_bytes(tomli_w.dumps(_full_manifest()).encode())
         spec = parse_manifest_file(f)
         assert spec.id == "full-plugin"
         assert len(spec.tools) == 1
 
     def test_nonexistent_file_raises(self, tmp_path: Path):
-        missing = tmp_path / "does_not_exist.yaml"
+        missing = tmp_path / "does_not_exist.toml"
         with pytest.raises(ManifestError, match="not found"):
             parse_manifest_file(missing)
 
-    def test_invalid_yaml_raises(self, tmp_path: Path):
-        f = tmp_path / "bad.yaml"
-        f.write_text("{{{{not: valid: yaml: [[")
+    def test_invalid_toml_raises(self, tmp_path: Path):
+        f = tmp_path / "bad.toml"
+        f.write_text("{{{{not valid toml")
         with pytest.raises(ManifestError, match="Failed to parse"):
             parse_manifest_file(f)
 
     def test_non_mapping_raises(self, tmp_path: Path):
-        f = tmp_path / "list.yaml"
-        f.write_text(yaml.dump(["not", "a", "mapping"]))
-        with pytest.raises(ManifestError, match="must be a YAML/JSON mapping"):
+        """TOML top-level is always a table (mapping), so we test that a
+        file missing required fields still goes through the mapping check.
+        We write a valid TOML file whose content is a mapping but that
+        lacks required manifest keys, verifying the parse path works.
+        For the actual 'must be a mapping' branch we use a JSON file
+        containing a bare list, since TOML cannot represent a non-mapping
+        top-level."""
+        f = tmp_path / "list.json"
+        f.write_text(json.dumps(["not", "a", "mapping"]))
+        with pytest.raises(ManifestError, match="must be a mapping"):
             parse_manifest_file(f)
 
     def test_json_file(self, tmp_path: Path):

@@ -1,4 +1,4 @@
-"""Tests for YAML frontmatter parsing."""
+"""Tests for YAML and TOML frontmatter parsing."""
 
 from __future__ import annotations
 
@@ -79,6 +79,25 @@ class TestParseFrontmatter:
         assert result.metadata == {"name": "x"}
         assert "---" in result.body
         assert "More text." in result.body
+
+    def test_toml_frontmatter(self) -> None:
+        text = '+++\nname = "dev"\nmodel = "claude"\n+++\nYou are a developer agent.'
+        result = parse_frontmatter(text)
+        assert result.metadata == {"name": "dev", "model": "claude"}
+        assert result.body == "You are a developer agent."
+
+    def test_toml_frontmatter_with_list(self) -> None:
+        text = '+++\nname = "dev"\ntools = ["Read", "Bash"]\n+++\nPrompt.'
+        result = parse_frontmatter(text)
+        assert result.metadata["name"] == "dev"
+        assert result.metadata["tools"] == ["Read", "Bash"]
+        assert result.body == "Prompt."
+
+    def test_malformed_toml(self) -> None:
+        text = "+++\nname = [invalid toml\n+++\nBody."
+        result = parse_frontmatter(text)
+        assert result.metadata == {}
+        assert result.body == "Body."
 
 
 class TestParseFrontmatterFile:

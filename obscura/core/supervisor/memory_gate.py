@@ -242,6 +242,17 @@ class MemoryCommitGate:
             errors=errors,
         )
 
+        # Warn explicitly when all candidates were below the importance threshold.
+        # Silent zero-commit is hard to diagnose without this signal.
+        if committed == 0 and gated > 0 and len(self._queue) > 0:
+            logger.warning(
+                "MemoryCommitGate: all %d candidate(s) were below importance "
+                "threshold %.2f — nothing committed to session %s",
+                gated,
+                self._min_importance,
+                self._session_id,
+            )
+
         logger.debug(
             "Memory commit: %d committed, %d deduped, %d gated, %d errors",
             committed,

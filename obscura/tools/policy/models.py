@@ -82,3 +82,5 @@ class PolicyResult:
 
     allowed: bool
     reason: str
+    matched_rule: str = ""
+    matched_rule: str = ""

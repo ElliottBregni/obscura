@@ -814,21 +814,32 @@ class AgentLoop:
                         )
                         continue
 
-                    # TODO: enforce tier restriction once tier differentiation is enabled
-                    # token_tier = self._capability_token.tier.value
-                    # if (
-                    #     spec.required_tier == "privileged"
-                    #     and token_tier != "privileged"
-                    # ):
-                    #     _audit_tool_denied(tc.name, "insufficient_tier")
-                    #     results.append(
-                    #         (
-                    #             tc,
-                    #             f"Tool '{tc.name}' requires privileged tier.",
-                    #             True,
-                    #         )
-                    #     )
-                    #     continue
+                    token_tier = self._capability_token.tier.value
+                    if (
+                        spec.required_tier == "privileged"
+                        and token_tier != "privileged"
+                    ):
+                        _audit_tool_denied(tc.name, "insufficient_tier")
+                        # FIX: Was appending a raw tuple (tc, message, bool) instead
+                        # of a ToolResultEnvelope. This caused an AttributeError crash
+                        # in _render_tool_result_text() which expects .status/.error.
+                        err = ToolExecutionError(
+                            type=ToolErrorType.UNAUTHORIZED,
+                            message=f"Tool '{tc.name}' requires privileged tier.",
+                            safe_to_retry=False,
+                        )
+                        results.append(
+                            ToolResultEnvelope(
+                                call_id=call.call_id,
+                                tool=call.tool,
+                                status="error",
+                                error=err,
+                                latency_ms=int((time.monotonic() - started) * 1000),
+                                tool_use_id=tc.tool_use_id,
+                                raw=tc.raw,
+                            )
+                        )
+                        continue
                 except Exception:
                     pass  # Degrade gracefully if capability module unavailable
 

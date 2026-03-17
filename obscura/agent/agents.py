@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from obscura.manifest.models import AgentManifest
     from obscura.providers.mcp_backend import MCPBackend
     from obscura.heartbeat.client import AgentHeartbeatClient
-    from obscura.tools.providers import ToolProviderRegistry
+    from obscura.tools.providers import BrokerContext
 
 
 def _default_mcp_servers() -> list[dict[str, Any]]:
@@ -287,7 +287,8 @@ class Agent:
         self.iteration_count = 0
         self._client: ObscuraClient | None = None
         self._mcp_backend: MCPBackend | None = None
-        self._tool_provider_registry: ToolProviderRegistry | None = None
+        self._providers: list[Any] = []
+        self._broker_context: BrokerContext | None = None
         self._message_queue: asyncio.Queue[AgentMessage] = asyncio.Queue()
         self._task: asyncio.Task[Any] | None = None
         self._heartbeat_client: AgentHeartbeatClient | None = None
@@ -392,11 +393,10 @@ class Agent:
         """Initialize the agent and connect to backend."""
         from obscura.tools.providers import (
             A2ARemoteToolProvider,
+            BrokerContext,
             MCPToolProvider,
             MemoryToolProvider,
             SystemToolProvider,
-            ToolProviderContext,
-            ToolProviderRegistry,
         )
 
         await self.runtime.emit_lifecycle_event(
@@ -469,8 +469,23 @@ class Agent:
             )
             raise
 
-        provider_registry = ToolProviderRegistry()
+        # Create ToolBroker as the authoritative tool registry
+        from obscura.plugins.broker import ToolBroker
+        from obscura.plugins.policy import PluginPolicyEngine
 
+        policy_engine = PluginPolicyEngine()
+        broker = ToolBroker(
+            policy_engine=policy_engine,
+            capability_resolver=self._capability_resolver,
+            default_timeout=30.0,
+        )
+
+        ctx = BrokerContext(
+            broker=broker, agent=self, allowed_tool_names=allowed_tools,
+        )
+        providers: list[Any] = []
+
+        # MCP tools
         server_configs: list[dict[str, Any]] = list(self.config.mcp.servers)
         if (
             self.config.mcp.enabled
@@ -513,26 +528,34 @@ class Agent:
                 )
                 mcp_configs.append(config)
 
-            provider_registry.add(MCPToolProvider(mcp_configs))
+            mcp_provider = MCPToolProvider(mcp_configs)
+            await mcp_provider.install(ctx)
+            providers.append(mcp_provider)
 
+        # System tools
         if self.config.enable_system_tools:
-            provider_registry.add(SystemToolProvider())
+            sys_provider = SystemToolProvider()
+            await sys_provider.install(ctx)
+            providers.append(sys_provider)
 
-        # Always enable memory tools for authenticated users
-        provider_registry.add(MemoryToolProvider())
+        # Memory tools
+        mem_provider = MemoryToolProvider()
+        await mem_provider.install(ctx)
+        providers.append(mem_provider)
 
-        # Load plugins into provider_registry (uses already-created loader)
+        # Plugin tools (registered directly on broker)
         if plugin_loader is not None:
             try:
                 required = self.config.plugins.get("require", [])
                 optional = self.config.plugins.get("optional", [])
                 if required or optional:
-                    plugin_loader.load_scoped(provider_registry, required, optional)
+                    plugin_loader.load_scoped(broker, required, optional)
                 else:
-                    plugin_loader.load_all_enabled(provider_registry)
+                    plugin_loader.load_all_enabled(broker)
             except Exception:
                 pass
 
+        # A2A remote tools
         a2a_remote_config = self.config.a2a_remote_tools
         if bool(a2a_remote_config.get("enabled", False)):
             raw_urls = a2a_remote_config.get("urls", [])
@@ -542,24 +565,19 @@ class Agent:
                 else []
             )
             if urls:
-                provider_registry.add(
-                    A2ARemoteToolProvider(
-                        urls=urls,
-                        auth_token=(
-                            str(a2a_remote_config["auth_token"])
-                            if "auth_token" in a2a_remote_config
-                            and a2a_remote_config["auth_token"] is not None
-                            else None
-                        ),
-                    )
+                a2a_provider = A2ARemoteToolProvider(
+                    urls=urls,
+                    auth_token=(
+                        str(a2a_remote_config["auth_token"])
+                        if "auth_token" in a2a_remote_config
+                        and a2a_remote_config["auth_token"] is not None
+                        else None
+                    ),
                 )
+                await a2a_provider.install(ctx)
+                providers.append(a2a_provider)
 
-        await provider_registry.install_all(
-            ToolProviderContext(agent=self, allowed_tool_names=allowed_tools),
-        )
-        self._tool_provider_registry = provider_registry
-
-        # Register spawn_subagent tool so agents can create sub-agents
+        # Swarm tool
         try:
             from obscura.tools.swarm import (
                 SwarmToolContext,
@@ -574,30 +592,17 @@ class Agent:
                 backend=self.config.provider,
             )
             swarm_tool = make_spawn_subagent_tool(swarm_ctx)
-            self._client.register_tool(swarm_tool)
+            broker.register_tool_spec(swarm_tool)
         except Exception as exc:
             logger.debug("Could not register spawn_subagent tool: %s", exc)
 
-        # Create agent-scoped ToolBroker
-        try:
-            from obscura.plugins.broker import ToolBroker
-            from obscura.plugins.policy import PluginPolicyEngine
+        self._broker = broker
+        self._providers = providers
+        self._broker_context = ctx
 
-            policy_engine = PluginPolicyEngine()
-            broker = ToolBroker(
-                policy_engine=policy_engine,
-                capability_resolver=self._capability_resolver,
-                default_timeout=30.0,
-            )
-            # Register all installed tool handlers with the broker
-            for tool in self._client.list_tools():
-                handler = getattr(tool, "handler", None)
-                params = getattr(tool, "parameters", None)
-                if handler is not None:
-                    broker.register_tool(tool.name, handler, parameters=params)
-            self._broker = broker
-        except Exception as exc:
-            logger.debug("ToolBroker not available: %s", exc)
+        # Sync broker → client (for LLM function calling schemas)
+        for tool_spec in broker.all_specs():
+            self._client.register_tool(tool_spec)
 
         # Merge manifest hooks into the agent's client hook registry
         if self.manifest_proxy is not None:
@@ -1095,13 +1100,14 @@ class Agent:
                 # Ignore cancel scope errors from underlying SDK
                 if "cancel scope" not in str(e):
                     raise
-        if self._tool_provider_registry:
-            from obscura.tools.providers import ToolProviderContext
-
-            await self._tool_provider_registry.uninstall_all(
-                ToolProviderContext(agent=self)
-            )
-            self._tool_provider_registry = None
+        if self._providers:
+            for provider in reversed(self._providers):
+                try:
+                    await provider.uninstall(self._broker_context)
+                except Exception as exc:
+                    logger.warning("Provider uninstall failed: %s", exc)
+            self._providers = []
+            self._broker_context = None
         elif self._mcp_backend:
             await self._mcp_backend.stop()
             self._mcp_backend = None

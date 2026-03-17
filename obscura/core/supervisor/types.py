@@ -47,7 +47,7 @@ VALID_SUPERVISOR_TRANSITIONS: dict[SupervisorState, frozenset[SupervisorState]] 
         }
     ),
     SupervisorState.RUNNING_TOOLS: frozenset(
-        {SupervisorState.RUNNING_MODEL, SupervisorState.FAILED}
+        {SupervisorState.RUNNING_MODEL, SupervisorState.COMMITTING_MEMORY, SupervisorState.FAILED}
     ),
     SupervisorState.COMMITTING_MEMORY: frozenset(
         {SupervisorState.FINALIZING, SupervisorState.FAILED}

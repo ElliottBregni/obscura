@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
@@ -35,7 +34,7 @@ from obscura.core.types import (
     ToolErrorType,
 )
 from obscura.plugins.capabilities import CapabilityResolver
-from obscura.plugins.policy import PluginPolicyEngine, PolicyAction
+from obscura.plugins.policy import PluginPolicyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +107,7 @@ class ToolBroker:
         self._handlers: dict[str, Callable[..., Any]] = {}
         self._schemas: dict[str, dict[str, Any]] = {}
         self._audit_log: list[BrokerAuditEntry] = []
+        self._specs: dict[str, Any] = {}
 
     # -- Handler registration ----------------------------------------------
 
@@ -125,6 +125,16 @@ class ToolBroker:
         self._handlers[name] = handler
         if parameters is not None:
             self._schemas[name] = parameters
+
+    def register_tool_spec(self, spec: Any) -> None:
+        """Register a tool from its full ToolSpec."""
+        self._handlers[spec.name] = spec.handler
+        self._schemas[spec.name] = spec.parameters
+        self._specs[spec.name] = spec
+
+    def all_specs(self) -> list[Any]:
+        """Return all registered ToolSpec objects."""
+        return list(self._specs.values())
 
     # -- Introspection -----------------------------------------------------
 
@@ -249,7 +259,8 @@ class ToolBroker:
 
     def _check_capabilities(self, envelope: ToolCallEnvelope) -> bool:
         """Check if the agent has capability for the tool."""
-        assert self._resolver is not None
+        if self._resolver is None:
+            return False
         visible = self._resolver.resolve_tool_names(envelope.agent_id)
         return envelope.tool in visible
 

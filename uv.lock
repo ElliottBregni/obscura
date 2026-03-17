@@ -37,6 +37,25 @@ wheels = [
 ]
 
 [[package]]
+name = "anthropic"
+version = "0.84.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "docstring-parser" },
+    { name = "httpx" },
+    { name = "jiter" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/ea/0869d6df9ef83dcf393aeefc12dd81677d091c6ffc86f783e51cf44062f2/anthropic-0.84.0.tar.gz", hash = "sha256:72f5f90e5aebe62dca316cb013629cfa24996b0f5a4593b8c3d712bc03c43c37", size = 539457, upload-time = "2026-02-25T05:22:38.54Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/ca/218fa25002a332c0aa149ba18ffc0543175998b1f65de63f6d106689a345/anthropic-0.84.0-py3-none-any.whl", hash = "sha256:861c4c50f91ca45f942e091d83b60530ad6d4f98733bfe648065364da05d29e7", size = 455156, upload-time = "2026-02-25T05:22:40.468Z" },
+]
+
+[[package]]
 name = "anyio"
 version = "4.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1107,15 +1126,12 @@ source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "click" },
+    { name = "fastmcp" },
     { name = "github-copilot-sdk" },
     { name = "httpx" },
     { name = "numpy" },
     { name = "openai" },
     { name = "openai-codex-sdk" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-grpc" },
-    { name = "opentelemetry-instrumentation-fastapi" },
-    { name = "opentelemetry-sdk" },
     { name = "prompt-toolkit" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
@@ -1123,6 +1139,7 @@ dependencies = [
     { name = "qdrant-client" },
     { name = "rich" },
     { name = "structlog" },
+    { name = "tomli-w" },
     { name = "toons" },
 ]
 
@@ -1145,13 +1162,11 @@ dev = [
     { name = "sse-starlette" },
     { name = "uvicorn" },
 ]
-mcp-server = [
-    { name = "fastmcp" },
-]
 metrics = [
     { name = "psutil" },
 ]
 providers = [
+    { name = "anthropic" },
     { name = "datadog-api-client" },
     { name = "msal" },
     { name = "notion-client" },
@@ -1170,6 +1185,9 @@ telemetry = [
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-sdk" },
     { name = "structlog" },
+]
+toml = [
+    { name = "tomli-w" },
 ]
 yaml = [
     { name = "pyyaml" },
@@ -1190,13 +1208,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", marker = "extra == 'providers'", specifier = ">=0.40.0" },
     { name = "claude-agent-sdk", specifier = ">=0.1.0" },
     { name = "click", specifier = ">=8.3.1" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42.0" },
     { name = "datadog-api-client", marker = "extra == 'providers'", specifier = ">=2.0.0" },
     { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.128.4" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
-    { name = "fastmcp", marker = "extra == 'mcp-server'", specifier = ">=3.1.0" },
+    { name = "fastmcp", specifier = ">=3.1.0" },
     { name = "github-copilot-sdk" },
     { name = "grpcio", marker = "extra == 'a2a'", specifier = ">=1.60.0" },
     { name = "grpcio-reflection", marker = "extra == 'a2a'", specifier = ">=1.60.0" },
@@ -1208,13 +1227,9 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.1.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "openai-codex-sdk" },
-    { name = "opentelemetry-api", specifier = ">=1.20.0" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
-    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
-    { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'telemetry'", specifier = ">=0.41b0" },
-    { name = "opentelemetry-sdk", specifier = ">=1.20.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.50" },
     { name = "protobuf", marker = "extra == 'a2a'", specifier = ">=4.25.0" },
@@ -1236,12 +1251,14 @@ requires-dist = [
     { name = "sse-starlette", marker = "extra == 'server'", specifier = ">=2.1.0" },
     { name = "structlog", specifier = ">=23.0.0" },
     { name = "structlog", marker = "extra == 'telemetry'", specifier = ">=23.0.0" },
+    { name = "tomli-w", specifier = "==1.2.0" },
+    { name = "tomli-w", marker = "extra == 'toml'", specifier = ">=1.0" },
     { name = "toons", specifier = ">=0.5.0" },
     { name = "uvicorn", marker = "extra == 'dev'", specifier = ">=0.40.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32.0" },
     { name = "xdk", marker = "extra == 'providers'", specifier = ">=0.4.5" },
 ]
-provides-extras = ["dev", "server", "telemetry", "a2a", "metrics", "yaml", "providers", "mcp-server"]
+provides-extras = ["dev", "server", "telemetry", "a2a", "metrics", "yaml", "toml", "providers"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2141,6 +2158,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3ddfeaa78ac3af750292662284b3661e91ad5494f21dbc/structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98", size = 1460830, upload-time = "2025-10-27T08:28:23.028Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510, upload-time = "2025-10-27T08:28:21.535Z" },
+]
+
+[[package]]
+name = "tomli-w"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
 ]
 
 [[package]]

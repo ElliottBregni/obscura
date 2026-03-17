@@ -93,12 +93,18 @@ def _parse_config_requirements(
 
 
 def _parse_capabilities(
-    raw: list[dict[str, Any]] | None,
+    raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[CapabilitySpec, ...]:
     if not raw:
         return ()
     items: list[CapabilitySpec] = []
-    for entry in raw:
+    # Support dict-form {id: {fields}} and list-form [{id: ..., fields}]
+    entries: list[dict[str, Any]]
+    if isinstance(raw, dict):
+        entries = [{**spec, "id": cap_id} if isinstance(spec, dict) else {"id": cap_id} for cap_id, spec in raw.items()]
+    else:
+        entries = raw
+    for entry in entries:
         tools_raw = entry.get("tools", [])
         if isinstance(tools_raw, str):
             tools_raw = [tools_raw]
@@ -114,12 +120,18 @@ def _parse_capabilities(
 
 
 def _parse_tools(
-    raw: list[dict[str, Any]] | None,
+    raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[ToolContribution, ...]:
     if not raw:
         return ()
     items: list[ToolContribution] = []
-    for entry in raw:
+    # Support dict-form {name: {fields}} and list-form [{name: ..., fields}]
+    entries: list[dict[str, Any]]
+    if isinstance(raw, dict):
+        entries = [{**spec, "name": tool_name} if isinstance(spec, dict) else {"name": tool_name} for tool_name, spec in raw.items()]
+    else:
+        entries = raw
+    for entry in entries:
         items.append(ToolContribution(
             name=entry["name"],
             description=entry.get("description", ""),
@@ -135,12 +147,18 @@ def _parse_tools(
 
 
 def _parse_workflows(
-    raw: list[dict[str, Any]] | None,
+    raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[WorkflowSpec, ...]:
     if not raw:
         return ()
     items: list[WorkflowSpec] = []
-    for entry in raw:
+    # Support dict-form {id: {fields}} and list-form [{id: ..., fields}]
+    entries: list[dict[str, Any]]
+    if isinstance(raw, dict):
+        entries = [{**spec, "id": wf_id} if isinstance(spec, dict) else {"id": wf_id} for wf_id, spec in raw.items()]
+    else:
+        entries = raw
+    for entry in entries:
         caps = entry.get("required_capabilities", [])
         if isinstance(caps, str):
             caps = [caps]
@@ -157,12 +175,18 @@ def _parse_workflows(
 
 
 def _parse_instructions(
-    raw: list[dict[str, Any]] | None,
+    raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[InstructionSpec, ...]:
     if not raw:
         return ()
     items: list[InstructionSpec] = []
-    for entry in raw:
+    # Support dict-form {id: {fields}} and list-form [{id: ..., fields}]
+    entries: list[dict[str, Any]]
+    if isinstance(raw, dict):
+        entries = [{**spec, "id": instr_id} if isinstance(spec, dict) else {"id": instr_id} for instr_id, spec in raw.items()]
+    else:
+        entries = raw
+    for entry in entries:
         items.append(InstructionSpec(
             id=entry["id"],
             version=entry.get("version", "1.0.0"),
@@ -174,12 +198,18 @@ def _parse_instructions(
 
 
 def _parse_policy_hints(
-    raw: list[dict[str, Any]] | None,
+    raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[PolicyHintSpec, ...]:
     if not raw:
         return ()
     items: list[PolicyHintSpec] = []
-    for entry in raw:
+    # Support dict-form {capability_id: {fields}} and list-form [{capability_id: ..., fields}]
+    entries: list[dict[str, Any]]
+    if isinstance(raw, dict):
+        entries = [{**spec, "capability_id": cap_id} if isinstance(spec, dict) else {"capability_id": cap_id} for cap_id, spec in raw.items()]
+    else:
+        entries = raw
+    for entry in entries:
         items.append(PolicyHintSpec(
             capability_id=entry["capability_id"],
             recommended_action=entry.get("recommended_action", "allow"),
@@ -278,7 +308,7 @@ def parse_manifest(
 
 
 def parse_manifest_file(path: Path) -> PluginSpec:
-    """Load and parse a ``plugin.yaml`` file.
+    """Load and parse a plugin manifest file (TOML, YAML, or JSON).
 
     Raises ``ManifestError`` if the file is missing or invalid.
     """
@@ -286,23 +316,49 @@ def parse_manifest_file(path: Path) -> PluginSpec:
     if not path.exists():
         raise ManifestError(f"Manifest file not found: {path}", path)
 
-    try:
-        import yaml  # type: ignore[import-untyped]
-    except ImportError:
-        # Fallback: try json if yaml not available
+    suffix = path.suffix.lower()
+
+    if suffix == ".toml":
+        import tomllib
+
+        try:
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+        except Exception as exc:
+            raise ManifestError(f"Failed to parse TOML: {exc}", path) from exc
+    elif suffix in (".yaml", ".yml"):
+        import warnings
+
+        warnings.warn(
+            f"YAML plugin manifests are deprecated; migrate {path.name} to TOML.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            import yaml  # type: ignore[import-untyped]
+        except ImportError:
+            import json
+
+            try:
+                data = json.loads(path.read_text())
+            except Exception as exc:
+                raise ManifestError(f"Failed to parse manifest: {exc}", path) from exc
+        else:
+            try:
+                data = yaml.safe_load(path.read_text())
+            except Exception as exc:
+                raise ManifestError(f"Failed to parse YAML: {exc}", path) from exc
+    else:
+        # JSON fallback
         import json
+
         try:
             data = json.loads(path.read_text())
         except Exception as exc:
             raise ManifestError(f"Failed to parse manifest: {exc}", path) from exc
-    else:
-        try:
-            data = yaml.safe_load(path.read_text())
-        except Exception as exc:
-            raise ManifestError(f"Failed to parse YAML: {exc}", path) from exc
 
     if not isinstance(data, dict):
-        raise ManifestError("Manifest must be a YAML/JSON mapping", path)
+        raise ManifestError("Manifest must be a mapping", path)
 
     return parse_manifest(data, source_path=path)
 

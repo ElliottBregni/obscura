@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -10,6 +11,7 @@ from obscura.core.compiler.migrate import MigrationResult, migrate_agents_yaml
 
 
 def _write_agents_yaml(path: Path, agents: list[dict]) -> None:
+    """Write a legacy agents.yaml input file (YAML format)."""
     path.write_text(
         yaml.dump({"agents": agents}, default_flow_style=False),
         encoding="utf-8",
@@ -38,10 +40,10 @@ class TestMigrateAgentsYaml:
         assert "dev" in result.templates_written
         assert not result.errors
 
-        generated = output_dir / "dev.yml"
+        generated = output_dir / "dev.toml"
         assert generated.is_file()
 
-        doc = yaml.safe_load(generated.read_text())
+        doc = tomllib.loads(generated.read_text())
         assert doc["kind"] == "Template"
         assert doc["metadata"]["name"] == "dev"
         assert doc["spec"]["provider"] == "claude"
@@ -78,13 +80,13 @@ class TestMigrateAgentsYaml:
             {"name": "existing", "type": "loop", "provider": "copilot"},
         ])
 
-        # Create pre-existing file
-        (output_dir / "existing.yml").write_text("# existing", encoding="utf-8")
+        # Create pre-existing file with the .toml extension
+        (output_dir / "existing.toml").write_text("# existing", encoding="utf-8")
 
         result = migrate_agents_yaml(agents_yaml, output_dir)
         assert any("existing" in s for s in result.skipped)
         # File should NOT be overwritten
-        assert (output_dir / "existing.yml").read_text() == "# existing"
+        assert (output_dir / "existing.toml").read_text() == "# existing"
 
     def test_overwrite_flag(self, tmp_path: Path) -> None:
         agents_yaml = tmp_path / "agents.yaml"
@@ -95,12 +97,12 @@ class TestMigrateAgentsYaml:
             {"name": "overme", "type": "loop", "provider": "copilot"},
         ])
 
-        (output_dir / "overme.yml").write_text("# old", encoding="utf-8")
+        (output_dir / "overme.toml").write_text("# old", encoding="utf-8")
 
         result = migrate_agents_yaml(agents_yaml, output_dir, overwrite=True)
         assert "overme" in result.templates_written
 
-        doc = yaml.safe_load((output_dir / "overme.yml").read_text())
+        doc = tomllib.loads((output_dir / "overme.toml").read_text())
         assert doc["kind"] == "Template"
 
     def test_tags_preserved(self, tmp_path: Path) -> None:
@@ -112,7 +114,7 @@ class TestMigrateAgentsYaml:
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert "tagged" in result.templates_written
 
-        doc = yaml.safe_load((tmp_path / "out" / "tagged.yml").read_text())
+        doc = tomllib.loads((tmp_path / "out" / "tagged.toml").read_text())
         assert doc["metadata"]["tags"] == ["dev", "qa"]
 
     def test_config_fields_mapped(self, tmp_path: Path) -> None:
@@ -134,7 +136,7 @@ class TestMigrateAgentsYaml:
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert "full" in result.templates_written
 
-        doc = yaml.safe_load((tmp_path / "out" / "full.yml").read_text())
+        doc = tomllib.loads((tmp_path / "out" / "full.toml").read_text())
         assert doc["spec"]["model_id"] == "sonnet-4"
         assert doc["spec"]["config"]["timeout_seconds"] == 300
         assert doc["spec"]["config"]["memory_namespace"] == "test"
@@ -155,7 +157,7 @@ class TestMigrateAgentsYaml:
         ])
 
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
-        doc = yaml.safe_load((tmp_path / "out" / "perms.yml").read_text())
+        doc = tomllib.loads((tmp_path / "out" / "perms.toml").read_text())
         assert doc["spec"]["tool_allowlist"] == ["read_file", "write_file"]
         assert doc["spec"]["tool_denylist"] == ["delete_file"]
 
@@ -184,6 +186,6 @@ class TestMigrateAgentsYaml:
 
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert len(result.templates_written) == 3
-        assert (tmp_path / "out" / "a1.yml").is_file()
-        assert (tmp_path / "out" / "a2.yml").is_file()
-        assert (tmp_path / "out" / "a3.yml").is_file()
+        assert (tmp_path / "out" / "a1.toml").is_file()
+        assert (tmp_path / "out" / "a2.toml").is_file()
+        assert (tmp_path / "out" / "a3.toml").is_file()

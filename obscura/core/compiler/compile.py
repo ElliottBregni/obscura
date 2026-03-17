@@ -43,7 +43,7 @@ from obscura.core.compiler.specs import (
     WorkspaceSpec,
     WorkspaceSpecBody,
 )
-from obscura.core.compiler.validator import validate_workspace
+from obscura.core.compiler.validator import validate_pack_references, validate_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,22 @@ def compile_workspace_from_registry(
 
     # Phase 1.5: Expand packs
     workspace_spec = expand_workspace_packs(workspace_spec, registry)
+
+    # Phase 1.6: Validate pack references early (before resolution proceeds)
+    if pack_names:
+        pack_errors = validate_pack_references(
+            pack_names, ws_name, registry, available_plugins=available_plugins,
+        )
+        if pack_errors:
+            if strict:
+                messages = [str(e) for e in pack_errors]
+                raise SpecValidationError(
+                    f"Workspace '{ws_name}' has {len(pack_errors)} pack reference error(s):\n"
+                    + "\n".join(f"  - {m}" for m in messages),
+                    source=ws_name,
+                )
+            for err in pack_errors:
+                logger.warning("Pack validation warning: %s", err)
 
     # Phase 2: Resolve references
     resolved_policies = resolve_workspace_policies(workspace_spec, registry)

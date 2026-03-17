@@ -1,9 +1,8 @@
 """
-obscura.core.frontmatter — Parse YAML frontmatter from markdown files.
+obscura.core.frontmatter — Parse frontmatter from markdown files.
 
-Extracts ``---`` delimited YAML metadata from the top of a markdown
-file, returning both the structured metadata dict and the remaining
-markdown body.
+Supports TOML frontmatter (``+++`` delimited, preferred) and YAML
+frontmatter (``---`` delimited, deprecated).
 
 Usage::
 
@@ -18,6 +17,8 @@ from __future__ import annotations
 
 import logging
 import re
+import tomllib
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -30,7 +31,13 @@ def _coerce_yaml_dict(raw: Any) -> dict[str, Any]:
     src = cast("dict[str, Any]", raw)
     return dict(src)
 
-_FRONTMATTER_RE = re.compile(
+
+_TOML_FRONTMATTER_RE = re.compile(
+    r"\A\+\+\+[ \t]*\n(.*?)\+\+\+[ \t]*\n(.*)\Z",
+    re.DOTALL,
+)
+
+_YAML_FRONTMATTER_RE = re.compile(
     r"\A---[ \t]*\n(.*?)---[ \t]*\n(.*)\Z",
     re.DOTALL,
 )
@@ -54,33 +61,56 @@ def parse_frontmatter(
     *,
     source_path: Path | None = None,
 ) -> FrontmatterResult:
-    """Parse YAML frontmatter from markdown text.
+    """Parse frontmatter from markdown text.
 
-    Expects optional ``---`` delimited YAML at the very start of the text.
+    Tries TOML frontmatter (``+++`` delimiters) first, then falls back to
+    YAML frontmatter (``---`` delimiters, deprecated).
     Returns empty metadata if no frontmatter markers are found.
-
-    .. note::
-
-        This parser does not handle ``---`` inside fenced code blocks.
-        If your markdown body contains ``---`` on its own line before any
-        frontmatter, the parse may be incorrect.  Place frontmatter at
-        the very top of the file.
     """
     if not text.strip():
         return FrontmatterResult(source_path=source_path)
 
-    match = _FRONTMATTER_RE.match(text)
+    # Try TOML frontmatter first (preferred)
+    match = _TOML_FRONTMATTER_RE.match(text)
+    if match is not None:
+        toml_text = match.group(1)
+        body = match.group(2)
+        metadata: dict[str, Any] = {}
+        if toml_text.strip():
+            try:
+                metadata = tomllib.loads(toml_text)
+            except Exception:
+                logger.warning(
+                    "Malformed TOML frontmatter in %s, treating as empty",
+                    source_path or "<string>",
+                    exc_info=True,
+                )
+        return FrontmatterResult(
+            metadata=metadata,
+            body=body,
+            source_path=source_path,
+        )
+
+    # Fall back to YAML frontmatter (deprecated)
+    match = _YAML_FRONTMATTER_RE.match(text)
     if match is None:
         # No frontmatter — entire text is the body
         return FrontmatterResult(body=text, source_path=source_path)
 
+    warnings.warn(
+        f"YAML frontmatter (---) is deprecated; use TOML frontmatter (+++) instead. "
+        f"Source: {source_path or '<string>'}",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     yaml_text = match.group(1)
     body = match.group(2)
 
-    metadata: dict[str, Any] = {}
+    metadata = {}
     if yaml_text.strip():
         try:
-            import yaml
+            import yaml  # type: ignore[import-untyped]
 
             parsed: Any = yaml.safe_load(yaml_text)
             if isinstance(parsed, dict):

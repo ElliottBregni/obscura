@@ -175,7 +175,6 @@ class ToolPolicy:
             policy = ToolPolicy.subagent_only()
             # allow_native=False, allowed_tools=["run_shell"]
         """
-        ## TODO implement subagent-only policy:allow tools
         return cls(allow_native=False, allowed_tools=["run_shell"])
     
 

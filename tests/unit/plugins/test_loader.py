@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from obscura.plugins.loader import (
-    ManifestToolProvider,
     PluginLoader,
     _check_config,
     _resolve_handler,
@@ -59,14 +57,14 @@ def _make_spec(
     return PluginSpec(**defaults)
 
 
-class _FakeProviderRegistry:
-    """Minimal stand-in for ToolProviderRegistry with an add() method."""
+class _FakeBroker:
+    """Minimal stand-in for ToolBroker with a register_tool_spec() method."""
 
     def __init__(self) -> None:
-        self.providers: list[Any] = []
+        self.registered: list[Any] = []
 
-    def add(self, provider: Any) -> None:
-        self.providers.append(provider)
+    def register_tool_spec(self, spec: Any) -> None:
+        self.registered.append(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -192,94 +190,6 @@ class TestResolveHandler:
 
 
 # ---------------------------------------------------------------------------
-# ManifestToolProvider
-# ---------------------------------------------------------------------------
-
-
-class TestManifestToolProvider:
-    """Tests for ManifestToolProvider."""
-
-    def test_creation_from_spec(self) -> None:
-        spec = _make_spec(tools=(
-            ToolContribution(
-                name="my_tool",
-                description="A tool",
-                handler_ref="json:dumps",
-                parameters={"type": "object"},
-            ),
-        ))
-        provider = ManifestToolProvider(spec)
-        assert provider.spec is spec
-        assert provider._installed is False
-
-    def test_install_registers_tools(self) -> None:
-        spec = _make_spec(tools=(
-            ToolContribution(
-                name="my_tool",
-                description="A tool",
-                handler_ref="json:dumps",
-                parameters={"type": "object"},
-            ),
-        ))
-        provider = ManifestToolProvider(spec)
-
-        mock_context = MagicMock()
-        mock_context.agent.client.register_tool = MagicMock(return_value=None)
-
-        asyncio.get_event_loop().run_until_complete(provider.install(mock_context))
-
-        mock_context.agent.client.register_tool.assert_called_once()
-        tool_spec = mock_context.agent.client.register_tool.call_args[0][0]
-        assert tool_spec.name == "my_tool"
-        assert tool_spec.description == "A tool"
-        assert provider._installed is True
-
-    def test_install_skips_unresolvable_handler(self) -> None:
-        spec = _make_spec(tools=(
-            ToolContribution(
-                name="bad_tool",
-                description="Bad handler",
-                handler_ref="nonexistent.module:func",
-                parameters={},
-            ),
-        ))
-        provider = ManifestToolProvider(spec)
-        mock_context = MagicMock()
-        mock_context.agent.client.register_tool = MagicMock(return_value=None)
-
-        asyncio.get_event_loop().run_until_complete(provider.install(mock_context))
-
-        mock_context.agent.client.register_tool.assert_not_called()
-        assert provider._installed is True
-
-    def test_install_handles_async_register(self) -> None:
-        spec = _make_spec(tools=(
-            ToolContribution(
-                name="async_tool",
-                description="Async tool",
-                handler_ref="json:loads",
-                parameters={"type": "object"},
-            ),
-        ))
-        provider = ManifestToolProvider(spec)
-
-        mock_context = MagicMock()
-        mock_context.agent.client.register_tool = AsyncMock(return_value=None)
-
-        asyncio.get_event_loop().run_until_complete(provider.install(mock_context))
-
-        mock_context.agent.client.register_tool.assert_called_once()
-        assert provider._installed is True
-
-    def test_uninstall(self) -> None:
-        spec = _make_spec()
-        provider = ManifestToolProvider(spec)
-        provider._installed = True
-        asyncio.get_event_loop().run_until_complete(provider.uninstall(MagicMock()))
-        assert provider._installed is False
-
-
-# ---------------------------------------------------------------------------
 # PluginLoader.discover_builtins
 # ---------------------------------------------------------------------------
 
@@ -378,12 +288,26 @@ class TestLoadSpec:
     def test_valid_spec_becomes_enabled(self, tmp_path: Path) -> None:
         spec = _make_spec()
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        status = loader._load_spec(spec, registry)
+        broker = _FakeBroker()
+        status = loader._load_spec(spec, broker)
         assert status.state == "enabled"
         assert status.enabled is True
-        assert len(registry.providers) == 1
-        assert isinstance(registry.providers[0], ManifestToolProvider)
+
+    def test_valid_spec_with_tools_registers_on_broker(self, tmp_path: Path) -> None:
+        spec = _make_spec(tools=(
+            ToolContribution(
+                name="my_tool",
+                description="A tool",
+                handler_ref="json:dumps",
+                parameters={"type": "object"},
+            ),
+        ))
+        loader = PluginLoader(plugin_dir=tmp_path)
+        broker = _FakeBroker()
+        status = loader._load_spec(spec, broker)
+        assert status.state == "enabled"
+        assert len(broker.registered) == 1
+        assert broker.registered[0].name == "my_tool"
 
     def test_invalid_spec_becomes_failed(self, tmp_path: Path) -> None:
         # Duplicate tool names produce a hard validation error
@@ -392,8 +316,8 @@ class TestLoadSpec:
             ToolContribution(name="dup", description="b", handler_ref="os:getcwd", parameters={}),
         ))
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        status = loader._load_spec(spec, registry)
+        broker = _FakeBroker()
+        status = loader._load_spec(spec, broker)
         assert status.state == "failed"
         assert status.error is not None
 
@@ -409,11 +333,11 @@ class TestLoadSpec:
             ),
         )
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        status = loader._load_spec(spec, registry)
+        broker = _FakeBroker()
+        status = loader._load_spec(spec, broker)
         assert status.state == "disabled"
         assert "REQUIRED_SECRET" in (status.error or "")
-        assert len(registry.providers) == 0
+        assert len(broker.registered) == 0
 
     def test_bootstrap_failure_becomes_failed(self, tmp_path: Path) -> None:
         spec = _make_spec(
@@ -424,7 +348,7 @@ class TestLoadSpec:
             ),
         )
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
+        broker = _FakeBroker()
 
         @dataclass
         class _BootstrapResult:
@@ -439,7 +363,7 @@ class TestLoadSpec:
             "sys.modules",
             {"obscura.plugins.bootstrapper": mock_bootstrapper},
         ):
-            status = loader._load_spec(spec, registry)
+            status = loader._load_spec(spec, broker)
 
         assert status.state == "failed"
         assert "Bootstrap" in (status.error or "")
@@ -453,7 +377,7 @@ class TestLoadSpec:
             ),
         )
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
+        broker = _FakeBroker()
 
         mock_bootstrapper = MagicMock()
         mock_bootstrapper.run_bootstrap.side_effect = RuntimeError("boom")
@@ -462,7 +386,7 @@ class TestLoadSpec:
             "sys.modules",
             {"obscura.plugins.bootstrapper": mock_bootstrapper},
         ):
-            status = loader._load_spec(spec, registry)
+            status = loader._load_spec(spec, broker)
 
         assert status.state == "failed"
         assert "Bootstrap" in (status.error or "") or "boom" in (status.error or "")
@@ -478,8 +402,8 @@ class TestLoadBuiltins:
 
     def test_loads_all_builtins(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        results = loader.load_builtins(registry)
+        broker = _FakeBroker()
+        results = loader.load_builtins(broker)
         assert len(results) > 0
         # All builtins should be either enabled or disabled (not crashed)
         for plugin_id, status in results.items():
@@ -489,8 +413,8 @@ class TestLoadBuiltins:
 
     def test_returns_dict_of_plugin_status(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        results = loader.load_builtins(registry)
+        broker = _FakeBroker()
+        results = loader.load_builtins(broker)
         for pid, st in results.items():
             assert isinstance(pid, str)
             assert isinstance(st, PluginStatus)
@@ -506,23 +430,16 @@ class TestLoadAll:
 
     def test_returns_summary_keys(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        result = loader.load_all(registry)
+        broker = _FakeBroker()
+        result = loader.load_all(broker)
         assert "builtins" in result
         assert "local_manifest" in result
         assert "user_plugins" in result
 
-    def test_providers_added_to_registry(self, tmp_path: Path) -> None:
-        loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        loader.load_all(registry)
-        # At minimum, builtins should have added providers
-        assert len(registry.providers) > 0
-
     def test_load_all_enabled_is_alias(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        result = loader.load_all_enabled(registry)
+        broker = _FakeBroker()
+        result = loader.load_all_enabled(broker)
         assert "builtins" in result
 
 
@@ -537,8 +454,8 @@ class TestStatusQueries:
     def test_get_status_after_load(self, tmp_path: Path) -> None:
         spec = _make_spec(plugin_id="status-test")
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        loader._load_spec(spec, registry)
+        broker = _FakeBroker()
+        loader._load_spec(spec, broker)
         loader._loaded["status-test"] = PluginStatus(plugin_id="status-test", state="enabled")
         status = loader.get_status("status-test")
         assert status is not None
@@ -550,8 +467,8 @@ class TestStatusQueries:
 
     def test_list_loaded(self, tmp_path: Path) -> None:
         loader = PluginLoader(plugin_dir=tmp_path)
-        registry = _FakeProviderRegistry()
-        loader.load_builtins(registry)
+        broker = _FakeBroker()
+        loader.load_builtins(broker)
         loaded = loader.list_loaded()
         assert isinstance(loaded, dict)
         assert len(loaded) > 0

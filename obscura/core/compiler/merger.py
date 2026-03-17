@@ -72,7 +72,7 @@ def merge_template_chain(chain: list[TemplateSpec]) -> TemplateSpec:
         agent_type=child.spec.agent_type,
         max_iterations=child.spec.max_iterations,
         provider=child.spec.provider,
-        model_id=child.spec.model_id if child.spec.model_id else base.spec.model_id,
+        model_id=child.spec.model_id if child.spec.model_id is not None else base.spec.model_id,
         instructions=_merge_instructions(
             base.spec.instructions, child.spec.instructions,
         ),

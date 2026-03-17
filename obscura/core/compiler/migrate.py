@@ -1,6 +1,6 @@
-"""obscura.core.compiler.migrate — Legacy agents.yaml to spec converter.
+"""obscura.core.compiler.migrate — Legacy agents config to spec converter.
 
-Reads the flat agents.yaml format and generates Template spec YAML files
+Reads the flat agents.yaml/toml format and generates Template spec TOML files
 that can be loaded by the compiler pipeline.
 """
 
@@ -10,8 +10,6 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +29,14 @@ def migrate_agents_yaml(
     *,
     overwrite: bool = False,
 ) -> MigrationResult:
-    """Convert flat agents.yaml entries into Template spec YAML files.
+    """Convert flat agents config entries into Template spec TOML files.
 
     Parameters
     ----------
     agents_yaml:
-        Path to the legacy agents.yaml file.
+        Path to the legacy agents config file (.toml or .yaml).
     output_dir:
-        Directory to write generated template YAMLs (typically specs/templates/).
+        Directory to write generated template TOMLs (typically specs/templates/).
     overwrite:
         If True, overwrite existing template files.
 
@@ -47,20 +45,26 @@ def migrate_agents_yaml(
     MigrationResult
         Summary of what was migrated.
     """
+    from obscura.core.config_io import load_config  # noqa: PLC0415
+
     result = MigrationResult()
 
     if not agents_yaml.is_file():
-        result.errors.append(f"agents.yaml not found: {agents_yaml}")
+        result.errors.append(f"Agents config not found: {agents_yaml}")
         return result
 
     try:
-        raw = yaml.safe_load(agents_yaml.read_text(encoding="utf-8"))
+        raw = load_config(agents_yaml, warn_yaml=False)
     except Exception as exc:
         result.errors.append(f"Failed to parse {agents_yaml}: {exc}")
         return result
 
+    from obscura.core.config_io import apply_agent_defaults  # noqa: PLC0415
+
+    raw = apply_agent_defaults(raw)
+
     if not isinstance(raw, dict) or "agents" not in raw:
-        result.errors.append("Invalid agents.yaml: expected top-level 'agents' key")
+        result.errors.append("Invalid agents config: expected top-level 'agents' key")
         return result
 
     agents: list[dict[str, Any]] = raw["agents"]
@@ -80,14 +84,14 @@ def migrate_agents_yaml(
             result.skipped.append(f"{name} (disabled)")
             continue
 
-        dest = output_dir / f"{name}.yml"
+        dest = output_dir / f"{name}.toml"
         if dest.exists() and not overwrite:
             result.skipped.append(f"{name} (exists)")
             continue
 
         try:
-            template_yaml = _agent_to_template_yaml(agent)
-            dest.write_text(template_yaml, encoding="utf-8")
+            template_toml = _agent_to_template_toml(agent)
+            dest.write_text(template_toml, encoding="utf-8")
             result.templates_written.append(name)
         except Exception as exc:
             result.errors.append(f"{name}: {exc}")
@@ -95,8 +99,8 @@ def migrate_agents_yaml(
     return result
 
 
-def _agent_to_template_yaml(agent: dict[str, Any]) -> str:
-    """Convert a single flat agent dict to a Template spec YAML string."""
+def _agent_to_template_toml(agent: dict[str, Any]) -> str:
+    """Convert a single flat agent dict to a Template spec TOML string."""
     name: str = agent["name"]
     tags: list[str] = agent.get("tags", [])
 
@@ -183,6 +187,6 @@ def _agent_to_template_yaml(agent: dict[str, Any]) -> str:
     if tags:
         doc["metadata"]["tags"] = tags
 
-    return yaml.dump(
-        doc, default_flow_style=False, sort_keys=False, allow_unicode=True
-    )
+    from obscura.core.config_io import dumps_toml  # noqa: PLC0415
+
+    return dumps_toml(doc)

@@ -755,6 +755,7 @@ def print_banner(
     mode: str = "code",
     available_agents: list[str] | None = None,
     agent_infos: list[Any] | None = None,
+    health_checks: list[Any] | None = None,
 ) -> None:
     """Print the REPL startup banner."""
     _obscura_ascii_banner()
@@ -775,6 +776,16 @@ def print_banner(
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
+
+    # Show health warnings for degraded/unavailable optional dependencies
+    if health_checks:
+        console.print()
+        for hc in health_checks:
+            status = getattr(hc, "status", "degraded")
+            if status == "unavailable":
+                console.print(f"  [{ERROR_COLOR}]x {markup_escape(hc.message)}[/]")
+            else:
+                console.print(f"  [{WARN_COLOR}]! {markup_escape(hc.message)}[/]")
 
     if agent_infos:
         console.print()

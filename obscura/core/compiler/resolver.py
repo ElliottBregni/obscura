@@ -124,7 +124,7 @@ def expand_workspace_packs(
 
     Merge rules:
     - plugins: pack plugins are unioned into workspace plugins.include
-    - policies: pack policies are appended (before workspace's own)
+    - policies: pack policies are prepended before workspace's own (pack goes first)
     - config: deep-merged, later packs override earlier, workspace wins
     - instructions: concatenated, stored in config["_pack_instructions"]
     - capabilities: accumulated in config["_pack_capabilities"]
@@ -186,11 +186,16 @@ def expand_workspace_packs(
         if p not in ws_include:
             ws_include.append(p)
 
-    # Prepend pack policies before workspace policies (workspace wins on conflict)
+    # Prepend pack policies before workspace policies (workspace wins on conflict).
+    # FIX: Capture the stable insert position once before iterating — ws_policies
+    # grows as we insert, so recomputing the index inside the loop would shift it
+    # incorrectly, causing pack policies to land in wrong positions.
     ws_policies = list(workspace.spec.policies)
+    insert_at = 0  # pack policies go at the front, preserving their relative order
     for p in all_policies:
         if p not in ws_policies:
-            ws_policies.insert(len(ws_policies) - len(workspace.spec.policies), p)
+            ws_policies.insert(insert_at, p)
+            insert_at += 1
 
     # Build new workspace spec with expanded values
     new_plugins = PluginFilterSpec(

@@ -264,28 +264,22 @@ class DaemonAgent:
         logger.info("[%s] daemon agent started (id=%s)", self._name, self._agent_id)
         self._stopped = False
 
-        while not self._stopped:
-            if self._lock_store.try_acquire(
-                lock_name=self._lock_name,
-                owner_id=self._lock_owner,
-                stale_after_s=self._lock_stale_after_s,
-            ):
-                break
-            logger.warning(
-                "[%s] another daemon instance owns lock '%s'; waiting %.1fs",
+        if not self._lock_store.try_acquire(
+            lock_name=self._lock_name,
+            owner_id=self._lock_owner,
+            stale_after_s=self._lock_stale_after_s,
+        ):
+            logger.info(
+                "[%s] skipping: another daemon instance already owns lock '%s'",
                 self._name,
                 self._lock_name,
-                self._lock_retry_interval_s,
             )
             self._record_runtime_event(
-                "daemon_lock_wait",
+                "daemon_lock_skipped",
                 details={"lock_name": self._lock_name},
             )
-            try:
-                await asyncio.sleep(self._lock_retry_interval_s)
-            except asyncio.CancelledError:
-                self._stopped = True
-                break
+            self._stopped = True
+            return
 
         if self._stopped:
             return

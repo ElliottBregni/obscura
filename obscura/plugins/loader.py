@@ -8,16 +8,15 @@ Structured pipeline that replaces the earlier ``plugin_loader.py``:
 Lifecycle states: discovered → installed → enabled → active → unhealthy → disabled → failed
 
 The loader works with the ``PluginRegistryService`` for persistence and
-the ``ToolProviderRegistry`` (or future separated registries) for runtime
-registration.
+the ``ToolBroker`` for runtime tool registration.
 
 Usage::
 
     from obscura.plugins.loader import PluginLoader
 
     loader = PluginLoader()
-    loader.load_all_enabled(provider_registry)
-    loader.load_builtins(provider_registry)
+    loader.load_all_enabled(broker)
+    loader.load_builtins(broker)
 """
 
 from __future__ import annotations
@@ -38,6 +37,28 @@ from obscura.plugins.registry import PluginRegistryService
 from obscura.plugins.validator import validate_plugin_spec
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Workspace config helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_plugin_config_flag(key: str, default: bool = True) -> bool:
+    """Read a boolean flag from workspace config ``plugins`` section.
+
+    Supports dotted *key* like ``"load_builtins"`` or ``"bootstrap.lenient_builtins"``.
+    Returns *default* on any failure.
+    """
+    try:
+        from obscura.core.workspace import load_workspace_config
+        config = load_workspace_config()
+        section = config.get("plugins", {})
+        for part in key.split("."):
+            section = section.get(part, {})  # type: ignore[union-attr]
+        return section if isinstance(section, bool) else default
+    except Exception:
+        return default
 
 
 # ---------------------------------------------------------------------------
@@ -95,73 +116,6 @@ def _resolve_handler(ref: str) -> Any | None:
 
 
 # ---------------------------------------------------------------------------
-# Provider instantiation from PluginSpec
-# ---------------------------------------------------------------------------
-
-
-class ManifestToolProvider:
-    """A ToolProvider created from a PluginSpec manifest.
-
-    Wraps the manifest's tools into ToolSpec instances and registers them
-    during install().
-    """
-
-    def __init__(self, spec: PluginSpec) -> None:
-        self.spec = spec
-        self._installed = False
-
-    async def install(self, context: Any) -> None:
-        """Register all tools from the manifest."""
-        import inspect
-        from obscura.core.types import ToolSpec
-
-        raw_allowed: Any = getattr(context, "allowed_tool_names", None)
-        allowed: set[str] | None = raw_allowed if isinstance(raw_allowed, set) else None
-
-        for tool_contrib in self.spec.tools:
-            if allowed is not None and tool_contrib.name not in allowed:
-                continue
-
-            handler = _resolve_handler(tool_contrib.handler_ref)
-            if handler is None:
-                logger.warning(
-                    "Plugin %s: could not resolve handler for tool %s (%s)",
-                    self.spec.id, tool_contrib.name, tool_contrib.handler_ref,
-                )
-                continue
-
-            tool_spec = ToolSpec(
-                name=tool_contrib.name,
-                description=tool_contrib.description,
-                parameters=tool_contrib.parameters,
-                handler=handler,
-                side_effects=tool_contrib.side_effects,
-                required_tier=tool_contrib.required_tier,
-                timeout_seconds=tool_contrib.timeout_seconds,
-                retries=tool_contrib.retries,
-            )
-
-            try:
-                result = context.agent.client.register_tool(tool_spec)
-                if inspect.isawaitable(result):
-                    await result
-            except Exception as exc:
-                logger.warning(
-                    "Plugin %s: failed to register tool %s: %s",
-                    self.spec.id, tool_contrib.name, exc,
-                )
-
-        self._installed = True
-        logger.info(
-            "Plugin %s loaded: %d tools registered",
-            self.spec.id, len(self.spec.tools),
-        )
-
-    async def uninstall(self, context: Any) -> None:
-        self._installed = False
-
-
-# ---------------------------------------------------------------------------
 # Plugin Loader
 # ---------------------------------------------------------------------------
 
@@ -179,18 +133,7 @@ class PluginLoader:
         self._loaded: dict[str, PluginStatus] = {}
         self._specs: list[PluginSpec] = []
 
-        # Read lenient_builtins from workspace config
-        self._lenient_builtins = True
-        try:
-            from obscura.core.workspace import load_workspace_config
-            config = load_workspace_config()
-            self._lenient_builtins = (
-                config.get("plugins", {})
-                .get("bootstrap", {})
-                .get("lenient_builtins", True)
-            )
-        except Exception:
-            pass  # default to lenient
+        self._lenient_builtins = _load_plugin_config_flag("bootstrap.lenient_builtins")
 
     # -- Discovery ---------------------------------------------------------
 
@@ -232,9 +175,10 @@ class PluginLoader:
         """Discover plugin manifests from a directory.
 
         Supports two layouts:
-        - **Flat YAML**: ``directory/*.yaml`` (like builtins)
-        - **Subdirectory**: ``directory/<name>/plugin.yaml`` or ``plugin.json``
+        - **Flat**: ``directory/*.toml`` or ``directory/*.yaml``
+        - **Subdirectory**: ``directory/<name>/plugin.toml``, ``plugin.yaml``, or ``plugin.json``
 
+        TOML is preferred over YAML when both exist.
         Skips ``registry.json`` and non-manifest files.
         """
         specs: list[PluginSpec] = []
@@ -242,23 +186,26 @@ class PluginLoader:
             return specs
         for entry in sorted(directory.iterdir()):
             if entry.is_dir():
-                # Subdirectory layout: <name>/plugin.yaml
-                manifest = entry / "plugin.yaml"
-                if not manifest.exists():
-                    manifest = entry / "plugin.json"
-                if manifest.exists():
+                # Subdirectory layout: <name>/plugin.toml or plugin.yaml
+                manifest: Path | None = None
+                for fname in ("plugin.toml", "plugin.yaml", "plugin.json"):
+                    candidate = entry / fname
+                    if candidate.exists():
+                        manifest = candidate
+                        break
+                if manifest is not None:
                     try:
                         spec = parse_manifest_file(manifest)
                         specs.append(spec)
                     except ManifestError as exc:
                         logger.warning("Skipping invalid manifest %s: %s", manifest, exc)
-            elif entry.suffix == ".yaml" and entry.name != "registry.json":
-                # Flat YAML layout (like builtins): *.yaml
+            elif entry.suffix in (".toml", ".yaml") and entry.name != "registry.json":
+                # Flat layout: *.toml or *.yaml
                 try:
                     spec = parse_manifest_file(entry)
                     specs.append(spec)
                 except ManifestError as exc:
-                    logger.debug("Skipping non-manifest YAML %s: %s", entry, exc)
+                    logger.debug("Skipping non-manifest file %s: %s", entry, exc)
         return specs
 
     # -- Loading pipeline --------------------------------------------------
@@ -266,13 +213,13 @@ class PluginLoader:
     def _load_spec(
         self,
         spec: PluginSpec,
-        provider_registry: Any,
+        broker: Any,
     ) -> PluginStatus:
         """Run the full loading pipeline for a single PluginSpec.
 
         Pipeline: validate → check_config → bootstrap → create_provider → register
 
-        Respects ``plugins.bootstrap.lenient_builtins`` from workspace config.yaml.
+        Respects ``plugins.bootstrap.lenient_builtins`` from workspace config.toml.
         When lenient (default), builtin plugins whose config or bootstrap fails
         still get their tools registered.
         """
@@ -335,56 +282,82 @@ class PluginLoader:
                     logger.exception("Plugin %s bootstrap error: %s", spec.id, exc)
                     return status
 
-        # 4. Create provider
+        # 4. Register tools directly on broker
         try:
-            provider = ManifestToolProvider(spec)
-            provider_registry.add(provider)
+            from obscura.core.types import ToolSpec
+
+            registered_count = 0
+            for tool_contrib in spec.tools:
+                handler = _resolve_handler(tool_contrib.handler_ref)
+                if handler is None:
+                    logger.warning(
+                        "Plugin %s: could not resolve handler for tool %s (%s)",
+                        spec.id, tool_contrib.name, tool_contrib.handler_ref,
+                    )
+                    continue
+                tool_spec = ToolSpec(
+                    name=tool_contrib.name,
+                    description=tool_contrib.description,
+                    parameters=tool_contrib.parameters,
+                    handler=handler,
+                    side_effects=tool_contrib.side_effects,
+                    required_tier=tool_contrib.required_tier,
+                    timeout_seconds=tool_contrib.timeout_seconds,
+                    retries=tool_contrib.retries,
+                )
+                broker.register_tool_spec(tool_spec)
+                registered_count += 1
+
             status.state = "enabled"
             status.enabled = True
             self._specs.append(spec)
+            logger.info(
+                "Plugin %s loaded: %d tools registered",
+                spec.id, registered_count,
+            )
         except Exception as exc:
             status.state = "failed"
             status.error = str(exc)
-            logger.exception("Plugin %s failed to create provider: %s", spec.id, exc)
+            logger.exception("Plugin %s failed to register tools: %s", spec.id, exc)
 
         return status
 
-    def load_builtins(self, provider_registry: Any) -> dict[str, PluginStatus]:
+    def load_builtins(self, broker: Any) -> dict[str, PluginStatus]:
         """Load all built-in plugins."""
         results: dict[str, PluginStatus] = {}
         for spec in self.discover_builtins():
-            status = self._load_spec(spec, provider_registry)
+            status = self._load_spec(spec, broker)
             self._loaded[spec.id] = status
             results[spec.id] = status
         return results
 
-    def load_local(self, provider_registry: Any) -> dict[str, PluginStatus]:
+    def load_local(self, broker: Any) -> dict[str, PluginStatus]:
         """Load manifest-based plugins from the local plugins directory."""
         results: dict[str, PluginStatus] = {}
         for spec in self.discover_local():
-            status = self._load_spec(spec, provider_registry)
+            status = self._load_spec(spec, broker)
             self._loaded[spec.id] = status
             results[spec.id] = status
         return results
 
-    def load_user(self, provider_registry: Any) -> dict[str, PluginStatus]:
+    def load_user(self, broker: Any) -> dict[str, PluginStatus]:
         """Load user-authored plugins from global ``~/.obscura/plugins/``."""
         results: dict[str, PluginStatus] = {}
         for spec in self.discover_user():
             if spec.id in self._loaded:
                 logger.debug("Skipping user plugin %s (already loaded)", spec.id)
                 continue
-            status = self._load_spec(spec, provider_registry)
+            status = self._load_spec(spec, broker)
             self._loaded[spec.id] = status
             results[spec.id] = status
         return results
 
     # -- Main entry point --------------------------------------------------
 
-    def load_all(self, provider_registry: Any) -> dict[str, Any]:
+    def load_all(self, broker: Any) -> dict[str, Any]:
         """Load all plugins from all sources.
 
-        Respects ``plugins.load_builtins`` from workspace config.yaml.
+        Respects ``plugins.load_builtins`` from workspace config.toml.
         Returns a summary dict with counts and statuses.
         """
         results: dict[str, Any] = {
@@ -393,26 +366,19 @@ class PluginLoader:
             "user_plugins": {},
         }
 
-        # Check config for load_builtins setting
-        load_builtins = True
-        try:
-            from obscura.core.workspace import load_workspace_config
-            config = load_workspace_config()
-            load_builtins = config.get("plugins", {}).get("load_builtins", True)
-        except Exception:
-            pass
+        load_builtins = _load_plugin_config_flag("load_builtins")
 
         # 1. Builtins (manifest-based)
         if load_builtins:
-            results["builtins"] = self.load_builtins(provider_registry)
+            results["builtins"] = self.load_builtins(broker)
         else:
-            logger.info("Builtin plugins disabled in config.yaml")
+            logger.info("Builtin plugins disabled in config.toml")
 
         # 2. Local manifest-based plugins (project .obscura/plugins/)
-        results["local_manifest"] = self.load_local(provider_registry)
+        results["local_manifest"] = self.load_local(broker)
 
         # 3. User plugins from global ~/.obscura/plugins/ (flat YAML + subdirs)
-        results["user_plugins"] = self.load_user(provider_registry)
+        results["user_plugins"] = self.load_user(broker)
 
         enabled = sum(1 for s in self._loaded.values() if s.enabled)
         total = len(self._loaded)
@@ -420,13 +386,13 @@ class PluginLoader:
 
         return results
 
-    def load_all_enabled(self, provider_registry: Any) -> dict[str, Any]:
+    def load_all_enabled(self, broker: Any) -> dict[str, Any]:
         """Convenience alias for ``load_all``."""
-        return self.load_all(provider_registry)
+        return self.load_all(broker)
 
     def load_scoped(
         self,
-        provider_registry: Any,
+        broker: Any,
         required_ids: list[str],
         optional_ids: list[str],
     ) -> dict[str, PluginStatus]:
@@ -456,7 +422,7 @@ class PluginLoader:
                 results[pid] = status
                 self._loaded[pid] = status
                 continue
-            status = self._load_spec(spec, provider_registry)
+            status = self._load_spec(spec, broker)
             results[pid] = status
             self._loaded[pid] = status
 
@@ -465,7 +431,7 @@ class PluginLoader:
             if spec is None:
                 logger.warning("Optional plugin %s not found — skipping", pid)
                 continue
-            status = self._load_spec(spec, provider_registry)
+            status = self._load_spec(spec, broker)
             results[pid] = status
             self._loaded[pid] = status
             if status.state != "enabled":
@@ -506,20 +472,13 @@ def get_all_builtin_tool_specs() -> list[Any]:
 
     Convenience function for the CLI and other non-Agent code paths that need
     plugin tools without the full provider/context pipeline.  Respects the
-    ``plugins.load_builtins`` setting from workspace config.yaml.  Returns a
+    ``plugins.load_builtins`` setting from workspace config.toml.  Returns a
     list of ``ToolSpec`` instances with resolved handlers.  Tools whose handler
     cannot be resolved are silently skipped.
     """
     from obscura.core.types import ToolSpec
 
-    # Respect config.yaml plugins.load_builtins setting
-    load_builtins = True
-    try:
-        from obscura.core.workspace import load_workspace_config
-        config = load_workspace_config()
-        load_builtins = config.get("plugins", {}).get("load_builtins", True)
-    except Exception:
-        pass  # fallback: load builtins anyway
+    load_builtins = _load_plugin_config_flag("load_builtins")
 
     loader = PluginLoader()
     all_plugin_specs: list[PluginSpec] = []
@@ -551,8 +510,51 @@ def get_all_builtin_tool_specs() -> list[Any]:
     return specs
 
 
+def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str, str]]]:
+    """Resolve builtin/user plugin tools, reporting skipped tools.
+
+    Returns ``(resolved_specs, skipped_tools)`` where *skipped_tools* is a
+    list of ``(tool_name, handler_ref)`` tuples for tools whose handler
+    could not be resolved.
+    """
+    from obscura.core.types import ToolSpec
+
+    load_builtins = _load_plugin_config_flag("load_builtins")
+
+    loader = PluginLoader()
+    all_plugin_specs: list[PluginSpec] = []
+    if load_builtins:
+        all_plugin_specs.extend(loader.discover_builtins())
+    all_plugin_specs.extend(loader.discover_local())
+    all_plugin_specs.extend(loader.discover_user())
+
+    specs: list[Any] = []
+    skipped: list[tuple[str, str]] = []
+    for plugin_spec in all_plugin_specs:
+        for tool in plugin_spec.tools:
+            handler = _resolve_handler(tool.handler_ref)
+            if handler is None:
+                logger.debug(
+                    "Skipping unresolvable tool %s (%s)",
+                    tool.name, tool.handler_ref,
+                )
+                skipped.append((tool.name, tool.handler_ref))
+                continue
+            specs.append(ToolSpec(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.parameters,
+                handler=handler,
+                side_effects=tool.side_effects,
+                required_tier=tool.required_tier,
+                timeout_seconds=tool.timeout_seconds,
+                retries=tool.retries,
+            ))
+    return specs, skipped
+
+
 __all__ = [
     "PluginLoader",
-    "ManifestToolProvider",
     "get_all_builtin_tool_specs",
+    "get_all_builtin_tool_specs_with_report",
 ]

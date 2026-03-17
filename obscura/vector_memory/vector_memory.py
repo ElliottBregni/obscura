@@ -49,30 +49,48 @@ except ImportError:
 from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 
-# Simple embedding function (in production, use OpenAI, sentence-transformers, etc.)
 def simple_embedding(text: str, dim: int = 384) -> list[float]:
-    """Create a simple hash-based embedding for demo purposes.
+    """Deterministic hash-based embedding — used as fallback only.
 
-    In production, replace with:
-    - OpenAI text-embedding-3-small
-    - sentence-transformers/all-MiniLM-L6-v2
-    - Custom embedding model
+    Not semantically meaningful. For real semantic search, set an
+    embedding_fn when constructing VectorMemoryStore, or ensure
+    sentence-transformers is installed (auto-detected below).
     """
-    # Hash the text to get deterministic "embedding"
     hash_bytes = hashlib.sha256(text.encode()).digest()
-
-    # Convert to float array
     floats: list[float] = []
     for i in range(0, len(hash_bytes), 4):
         chunk = hash_bytes[i : i + 4]
         val = int.from_bytes(chunk, "little", signed=True)
-        floats.append(val / 2**31)  # Normalize to [-1, 1]
-
-    # Pad or truncate to desired dimension
+        floats.append(val / 2**31)
     if len(floats) < dim:
         floats = floats * (dim // len(floats) + 1)
-
     return floats[:dim]
+
+
+def _make_default_embedding_fn(dim: int = 384):
+    """Return the best available embedding function.
+
+    Priority:
+    1. sentence-transformers all-MiniLM-L6-v2 (local, no API key, real semantics)
+    2. simple_embedding (hash-based fallback, deterministic but not semantic)
+    """
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore[import]
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        _log.info("vector_memory: using sentence-transformers/all-MiniLM-L6-v2 for embeddings")
+        def _st_embed(text: str) -> list[float]:
+            return _model.encode(text, normalize_embeddings=True).tolist()
+        return _st_embed
+    except ImportError:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "vector_memory: sentence-transformers not installed, "
+            "falling back to hash-based embedding (not semantic). "
+            "Install with: pip install sentence-transformers"
+        )
+        return simple_embedding
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -119,7 +137,7 @@ class VectorMemoryStore:
         self.user = user
         self.user_id = user.user_id
 
-        self.embedding_fn = embedding_fn or simple_embedding
+        self.embedding_fn = embedding_fn or _make_default_embedding_fn()
         self.embedding_dim = len(self.embedding_fn("test"))
 
         # Initialize backend

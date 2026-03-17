@@ -25,10 +25,17 @@ _TOOL_TO_SUBCOMMAND: dict[str, str] = {
     "gws.sheets.spreadsheets.values.get": "sheets spreadsheets values get",
     "gws.gmail.users.messages.send": "gmail users messages send",
     "gws.gmail.users.messages.send_with_attachments": "gmail users messages send",
+    "gws.gmail.users.messages.list": "gmail list",
+    "gws.gmail.users.messages.search": "gmail search",
     "gws.chat.spaces.messages.create": "chat spaces messages create",
     "gws.calendar.events.insert": "calendar events insert",
     "gws.calendar.events.list": "calendar events list",
     "gws.calendar.events.delete": "calendar events delete",
+}
+
+# Tools where the primary string argument is positional (not a --flag)
+_POSITIONAL_ARG_TOOLS: dict[str, str] = {
+    "gws.gmail.users.messages.search": "query",
 }
 
 _RESERVED_KEYS = frozenset({"command", "args", "_tool_name"})
@@ -63,9 +70,16 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
     elif command:
         cmd.extend(command.split())
 
+    # For tools with positional arguments, extract and append them before flags
+    positional_key = _POSITIONAL_ARG_TOOLS.get(tool_name)
+    positional_val = kwargs.get(positional_key) if positional_key else None
+
     # Convert remaining kwargs to CLI flags
     for key, val in kwargs.items():
         if key.startswith("_") or key in _RESERVED_KEYS:
+            continue
+        # Skip positional key — will be appended after flags
+        if key == positional_key:
             continue
         flag = f"--{key.replace('_', '-')}"
         if isinstance(val, bool):
@@ -76,6 +90,10 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
                 cmd.extend([flag, str(item)])
         else:
             cmd.extend([flag, str(val)])
+
+    # Append positional argument last (after any option flags)
+    if positional_val is not None:
+        cmd.append(str(positional_val))
 
     # Always request JSON output unless already specified
     if "--output" not in " ".join(cmd):

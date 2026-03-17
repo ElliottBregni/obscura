@@ -26,49 +26,47 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from obscura.core.types import ToolSpec
 
 logger = logging.getLogger(__name__)
 
 
 def load_agent_configs(include_disabled: bool = False) -> dict[str, dict[str, Any]]:
-    """Load agent definitions from global and local ``agents.yaml``.
+    """Load agent definitions from global and local agents config.
 
     Merges ``~/.obscura/agents.yaml`` (global) with ``.obscura/agents.yaml``
-    (local).  Local definitions override global ones by name.
+    (local).  Global agents take precedence; local configs can only **add**
+    new agents, not override global ones.  Also supports ``.toml`` files as
+    fallback.  Applies top-level ``defaults`` from each config file to its
+    agent entries.
 
-    Returns a mapping of agent name → raw config dict.
+    Returns a mapping of agent name -> raw config dict.
     Agents with ``enabled: false`` are excluded unless *include_disabled* is True.
     """
-    from obscura.core.paths import resolve_all_obscura_homes
+    from obscura.core.config_io import load_merged_agents  # noqa: PLC0415
+    from obscura.core.paths import resolve_all_obscura_homes  # noqa: PLC0415
 
     local_home, global_home = resolve_all_obscura_homes()
-    candidates: list[Path] = []
-    global_yaml = global_home / "agents.yaml"
-    local_yaml = local_home / "agents.yaml"
-    if global_yaml.is_file() and global_yaml != local_yaml:
-        candidates.append(global_yaml)
-    if local_yaml.is_file():
-        candidates.append(local_yaml)
-    if not candidates:
-        return {}
 
+    # Global agents first (authoritative)
     configs: dict[str, dict[str, Any]] = {}
-    for agents_yaml in candidates:
+    try:
+        configs.update(
+            load_merged_agents(global_home, include_disabled=include_disabled)
+        )
+    except Exception:
+        logger.warning("Failed to load agents from %s", global_home, exc_info=True)
+
+    # Local agents only ADD new names — never override global
+    if local_home.resolve() != global_home.resolve():
         try:
-            with open(agents_yaml) as f:
-                data = yaml.safe_load(f)
-            for agent_cfg in data.get("agents", []):
-                name = agent_cfg.get("name")
-                if not name:
-                    continue
-                if not include_disabled and not agent_cfg.get("enabled", True):
-                    continue
-                configs[name] = agent_cfg
+            local = load_merged_agents(local_home, include_disabled=include_disabled)
+            for name, cfg in local.items():
+                if name not in configs:
+                    configs[name] = cfg
         except Exception:
-            logger.warning("Failed to load %s", agents_yaml, exc_info=True)
+            logger.warning("Failed to load agents from %s", local_home, exc_info=True)
+
     return configs
 
 

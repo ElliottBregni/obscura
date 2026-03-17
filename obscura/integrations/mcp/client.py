@@ -239,7 +239,10 @@ class MCPClient:
         if req_id in self._pending_requests:
             future = self._pending_requests[req_id]
             if not future.done():
-                future.set_result(response)
+                try:
+                    future.set_result(response)
+                except asyncio.InvalidStateError:
+                    pass  # Future was resolved/cancelled between check and set
 
     # -----------------------------------------------------------------------
     # MCP Protocol Methods

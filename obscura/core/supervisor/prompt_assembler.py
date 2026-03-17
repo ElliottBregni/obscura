@@ -71,7 +71,10 @@ class PromptAssembler:
         self._token_budget = token_budget
         self._reserved_output = reserved_output_tokens
         self._chars_per_token = chars_per_token
-        self._store_full_prompt = store_full_prompt
+        # NOTE Bug D: store_full_prompt param accepted for API compatibility
+        # but not yet implemented — the full prompt is always stored via
+        # _store_prompt_snapshot_sync in supervisor.py regardless of this flag.
+        # TODO: wire up to optionally skip DB storage for ephemeral runs.
         self._frozen: PromptSnapshot | None = None
 
     # -- section management --------------------------------------------------
@@ -197,25 +200,35 @@ class PromptAssembler:
     def _apply_budget(
         self, sections: list[PromptSection]
     ) -> list[PromptSection]:
-        """Trim session_history to fit within token budget.
+        """Trim variable sections to fit within token budget.
 
-        Budget allocation:
-        1. Fixed sections (system, context, agent, tools, memory, hooks, user) are untouched
-        2. session_history is trimmed from oldest messages to fit
+        Budget allocation order (lowest to highest priority):
+        1. session_history trimmed first (oldest messages dropped)
+        2. memory_snippets trimmed second if still over budget (least-recent snippets dropped)
+        3. Fixed sections (system, context, agent, tools, hooks, user) are never trimmed
+
+        FIX Bug E: original code only trimmed session_history, leaving memory_snippets
+        untouched even when they alone exceeded the budget.
         """
         budget = self._token_budget - self._reserved_output
         if budget <= 0:
             return sections
 
-        # Sum non-history tokens
+        # Sum non-variable tokens (everything except session_history and memory_snippets)
+        VARIABLE_SECTIONS = {"session_history", "memory_snippets"}
         fixed_tokens = sum(
-            s.token_estimate for s in sections if s.name != "session_history"
+            s.token_estimate for s in sections if s.name not in VARIABLE_SECTIONS
         )
-        available_for_history = budget - fixed_tokens
+        available_for_variables = budget - fixed_tokens
 
-        if available_for_history <= 0:
-            # No room for history at all — remove it
-            return [s for s in sections if s.name != "session_history"]
+        if available_for_variables <= 0:
+            # No room for any variable sections — remove both
+            return [s for s in sections if s.name not in VARIABLE_SECTIONS]
+
+        # First pass: try to fit session_history within the variable budget
+        available_for_history = available_for_variables - sum(
+            s.token_estimate for s in sections if s.name == "memory_snippets"
+        )
 
         # Find and potentially trim the history section
         result = []

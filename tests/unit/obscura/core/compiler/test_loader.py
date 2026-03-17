@@ -1,10 +1,11 @@
-"""Tests for obscura.core.compiler.loader — YAML spec loading."""
+"""Tests for obscura.core.compiler.loader — spec loading (TOML + YAML)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from obscura.core.compiler.errors import SpecLoadError
 from obscura.core.compiler.loader import SpecRegistry, load_spec_file, load_specs_dir
@@ -45,6 +46,21 @@ spec:
     - shell
 """,
         )
+        spec = load_spec_file(path)
+        assert isinstance(spec, TemplateSpec)
+        assert spec.metadata.name == "code-agent"
+        assert spec.spec.provider == "claude"
+        assert spec.spec.plugins == ["git", "shell"]
+
+    def test_load_template_toml(self, specs_dir: Path) -> None:
+        data = {
+            "apiVersion": "obscura/v1",
+            "kind": "Template",
+            "metadata": {"name": "code-agent", "tags": ["dev"]},
+            "spec": {"provider": "claude", "plugins": ["git", "shell"]},
+        }
+        path = specs_dir / "code-agent.toml"
+        path.write_bytes(tomli_w.dumps(data).encode())
         spec = load_spec_file(path)
         assert isinstance(spec, TemplateSpec)
         assert spec.metadata.name == "code-agent"
@@ -132,7 +148,7 @@ spec:
 
     def test_not_a_mapping(self, specs_dir: Path) -> None:
         path = _write_yaml(specs_dir / "list.yml", "- item1\n- item2\n")
-        with pytest.raises(SpecLoadError, match="Expected a YAML mapping"):
+        with pytest.raises(SpecLoadError, match="Expected a mapping"):
             load_spec_file(path)
 
 

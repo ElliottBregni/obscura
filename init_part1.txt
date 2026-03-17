@@ -1,0 +1,31 @@
+"""System command tools exposed to agent loops."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import difflib
+import fnmatch
+import html as _html
+import json
+import os
+import platform
+import re
+import shutil
+import stat as stat_module
+import subprocess
+import sys
+import time as _time
+from pathlib import Path
+from typing import Any, Literal, cast
+from urllib import error as url_error
+from urllib import parse as url_parse
+from urllib import request as url_request
+
+from obscura.core.tools import tool
+from obscura.core.types import ToolSpec
+from obscura.tools.system.intelligence import (
+    causal_trace,
+    context_snapshot,
+    policy_probe,
+)

@@ -1,0 +1,147 @@
+id = "public-apis"
+name = "Public APIs"
+version = "1.0.0"
+author = "obscura-team"
+source_type = "builtin"
+runtime_type = "native"
+trust_level = "builtin"
+description = "Public APIs discovery and dynamic tool creation — discover free APIs, generate HTTP wrapper tools on-the-fly, and persist them across sessions.\n"
+
+[[capabilities]]
+id = "public.apis.discover"
+description = "Discover and browse public APIs by category or description"
+tools = [
+    "public_apis.discover",
+    "public_apis.get",
+]
+requires_approval = false
+default_grant = true
+
+[[capabilities]]
+id = "public.apis.create"
+description = "Create, persist, and manage dynamic API wrapper tools"
+tools = [
+    "public_apis.create_tool",
+    "public_apis.list_persisted",
+    "public_apis.remove_persisted",
+]
+requires_approval = true
+default_grant = false
+
+[[tools]]
+name = "public_apis.discover"
+description = "Discover public APIs by category, HTTPS, auth, or description substring"
+handler = "obscura.tools.providers.public_apis:PublicAPIsProvider"
+capability = "public.apis.discover"
+side_effects = "read"
+
+[tools.parameters]
+type = "object"
+required = []
+
+[tools.parameters.properties.category]
+type = "string"
+description = "Filter by API category"
+
+[tools.parameters.properties.https]
+type = "boolean"
+description = "Filter to HTTPS-only APIs"
+
+[tools.parameters.properties.auth]
+type = "string"
+description = "Filter by auth type"
+
+[tools.parameters.properties.description_contains]
+type = "string"
+description = "Substring search in description"
+
+[tools.parameters.properties.limit]
+type = "integer"
+description = "Max results"
+
+[[tools]]
+name = "public_apis.get"
+description = "Get metadata for a public API entry by name or link"
+handler = "obscura.tools.providers.public_apis:PublicAPIsProvider"
+capability = "public.apis.discover"
+side_effects = "read"
+
+[tools.parameters]
+type = "object"
+required = [
+    "name_or_link",
+]
+
+[tools.parameters.properties.name_or_link]
+type = "string"
+description = "API name or link to look up"
+
+[[tools]]
+name = "public_apis.create_tool"
+description = "Create and register a dynamic ToolSpec for a public API entry"
+handler = "obscura.tools.providers.public_apis:PublicAPIsProvider"
+capability = "public.apis.create"
+side_effects = "write"
+
+[tools.parameters]
+type = "object"
+required = [
+    "api_name",
+]
+
+[tools.parameters.properties.api_name]
+type = "string"
+description = "Name of the API from discover results"
+
+[tools.parameters.properties.tool_name]
+type = "string"
+description = "Custom tool name (optional)"
+
+[tools.parameters.properties.method]
+type = "string"
+description = "HTTP method (GET, POST, etc.)"
+
+[tools.parameters.properties.path]
+type = "string"
+description = "API endpoint path"
+
+[tools.parameters.properties.headers]
+type = "object"
+description = "Custom headers"
+
+[tools.parameters.properties.query_params]
+type = "object"
+description = "Default query parameters"
+
+[tools.parameters.properties.persist]
+type = "boolean"
+description = "Whether to save tool across sessions"
+
+[[tools]]
+name = "public_apis.list_persisted"
+description = "List persisted dynamic public_apis tools"
+handler = "obscura.tools.providers.public_apis:PublicAPIsProvider"
+capability = "public.apis.create"
+side_effects = "read"
+
+[[tools]]
+name = "public_apis.remove_persisted"
+description = "Remove a persisted dynamic tool by name"
+handler = "obscura.tools.providers.public_apis:PublicAPIsProvider"
+capability = "public.apis.create"
+side_effects = "write"
+
+[tools.parameters]
+type = "object"
+required = [
+    "tool_name",
+]
+
+[tools.parameters.properties.tool_name]
+type = "string"
+description = "Name of the tool to remove"
+
+[healthcheck]
+type = "callable"
+target = "obscura.tools.providers.public_apis:PublicAPIsProvider"
+interval_seconds = 600

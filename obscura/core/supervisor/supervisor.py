@@ -202,12 +202,43 @@ class Supervisor:
                 },
             )
 
-            # Start heartbeat (refreshes lock TTL)
-            heartbeat.on_tick(
-                lambda hb: self._lock.heartbeat(
+            # Start heartbeat (refreshes lock TTL).
+            # FIX: Use a named async callback instead of a bare lambda so that
+            # a lost/expired lock is detected and surfaced — not silently swallowed.
+            # _heartbeat_sync returns False when the lock row is gone (stolen or
+            # expired), which the raw lambda never checked.  The named callback
+            # raises LockExpiredError on False so _tick() logs it and the run
+            # task is cancelled cleanly rather than continuing with a dead lock.
+            _run_task: asyncio.Task | None = None
+
+            async def _heartbeat_tick(hb: Any) -> None:
+                refreshed = await self._lock.heartbeat(
                     session_id, holder_id, ttl=config.lock_ttl
                 )
-            )
+                if not refreshed:
+                    logger.critical(
+                        "Heartbeat lost lock for session %s run %s (seq=%d) "
+                        "— lock was stolen or expired; cancelling run task",
+                        session_id,
+                        run_id,
+                        hb.seq,
+                    )
+                    if _run_task is not None and not _run_task.done():
+                        _run_task.cancel()
+                    raise LockExpiredError(
+                        f"Session lock for {session_id!r} expired or was stolen "
+                        f"during run {run_id!r} (heartbeat seq={hb.seq})"
+                    )
+
+            heartbeat.on_tick(_heartbeat_tick)
+            # FIX: Capture current task BEFORE starting the heartbeat so the
+
+            # _heartbeat_tick closure always has a valid reference even if the
+
+            # first tick fires immediately during await heartbeat.start().
+
+            _run_task = asyncio.current_task()
+
             await heartbeat.start()
 
             # Create run record
@@ -379,15 +410,18 @@ class Supervisor:
             # For now, we yield the model turn events for the caller
             # to integrate with their existing AgentLoop.
 
-            yield SupervisorEvent(
+            # FIX: observe MODEL_TURN_END BEFORE yielding it, and use the
+            # correct event kind (was MODEL_TURN_START — wrong kind, wrong time).
+            # observer.observe() must be called before yield so the metrics are
+            # recorded in the observer before the caller receives the event.
+            _turn_end_event = SupervisorEvent(
                 kind=SupervisorEventKind.MODEL_TURN_END,
                 run_id=run_id,
                 session_id=session_id,
                 payload={"turn": 1},
             )
-            observer.observe(
-                SupervisorEvent(kind=SupervisorEventKind.MODEL_TURN_START)
-            )
+            observer.observe(_turn_end_event)
+            yield _turn_end_event
 
             # ==============================================================
             # 4. COMMIT MEMORY

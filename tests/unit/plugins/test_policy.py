@@ -377,29 +377,31 @@ class TestRequiresApproval:
 
 class TestYAMLLoading:
     def test_load_from_yaml(self, tmp_path):
-        yaml_content = """\
-rules:
-  - id: yaml-deny-exec
-    tool: shell_exec
-    action: deny
-    reason: no shell from yaml
-    priority: 50
-  - id: yaml-allow-git
-    tool: git_*
-    action: allow
-    reason: git tools ok
-    priority: 40
+        toml_content = """\
+[[rules]]
+id = "deny-exec"
+tool = "shell_exec"
+action = "deny"
+reason = "no shell from toml"
+priority = 50
+
+[[rules]]
+id = "allow-git"
+tool = "git_*"
+action = "allow"
+reason = "git tools ok"
+priority = 40
 """
-        (tmp_path / "test.yaml").write_text(yaml_content)
+        (tmp_path / "test.toml").write_text(toml_content)
         engine = PluginPolicyEngine.load(policies_dir=tmp_path)
 
         d = engine.can_execute_tool("shell_exec")
         assert d.allowed is False
-        assert d.matched_rule == "yaml-deny-exec"
+        assert d.matched_rule == "deny-exec"
 
         d = engine.can_execute_tool("git_clone")
         assert d.allowed is True
-        assert d.matched_rule == "yaml-allow-git"
+        assert d.matched_rule == "allow-git"
 
     def test_load_empty_dir(self, tmp_path):
         engine = PluginPolicyEngine.load(policies_dir=tmp_path)
@@ -411,7 +413,7 @@ rules:
         assert len(engine.list_rules()) == len(PluginPolicyEngine._DEFAULT_RULES)
 
     def test_load_malformed_yaml(self, tmp_path):
-        (tmp_path / "bad.yaml").write_text("not: [valid: yaml: {{{")
+        (tmp_path / "bad.toml").write_text("not valid toml [[[{{{")
         engine = PluginPolicyEngine.load(policies_dir=tmp_path)
         # Should gracefully skip bad file and still have defaults
         assert len(engine.list_rules()) >= len(PluginPolicyEngine._DEFAULT_RULES)

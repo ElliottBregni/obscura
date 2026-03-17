@@ -77,6 +77,13 @@
       "tools": [],
       "description": "Jira project management and issue tracking"
     },
+    "obscura": {
+      "command": "/Users/elliottbregni/dev/obscura-main/.venv/bin/python",
+      "args": ["-m", "obscura.mcp_server", "--transport", "stdio"],
+      "env": {},
+      "tools": [],
+      "description": "Obscura multi-agent runtime — prompts, agents, sessions, memory"
+    },
     "auth0": {
       "command": "npx",
       "args": [

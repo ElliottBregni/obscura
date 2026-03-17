@@ -133,6 +133,12 @@ class SessionStateMachine:
 
         FAILED is reachable from every state except IDLE.
         """
+        # FIX: Idempotent — calling fail() on an already-failed machine is a
+        # no-op. Without this, a double-call silently does FAILED→FAILED,
+        # incrementing _transition_count and appending a spurious history event.
+        if self._state == SupervisorState.FAILED:
+            return self._history[-1]  # return the original FAILED event
+
         if self._state == SupervisorState.IDLE:
             raise StateTransitionError(self._state.value, SupervisorState.FAILED.value)
 

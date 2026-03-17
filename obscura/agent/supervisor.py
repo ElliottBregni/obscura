@@ -83,6 +83,7 @@ class AgentDefinition:
 
     name: str = "agent"
     type: str = "loop"  # "loop" | "daemon" | "aper"
+    enabled: bool = True
     model: str = "copilot"
     system_prompt: str = ""
     max_turns: int = 25
@@ -156,38 +157,72 @@ class SupervisorConfig:
 
     @classmethod
     def from_yaml(cls, path: Path) -> SupervisorConfig:
-        """Load config from a YAML file.
+        """Load config from a TOML or YAML file.
 
-        Falls back gracefully if PyYAML isn't installed or file is missing.
+        Tries ``.toml`` first, then ``.yaml``.  Falls back gracefully if
+        neither is found.  Also loads the catalog file
+        (``agents-available.yaml`` / ``.toml``) from the same directory;
+        catalog agents are merged first, then primary agents override by
+        name.  Top-level ``defaults`` are applied to both files.
         """
-        try:
-            import yaml
-        except ImportError:
-            logger.warning("PyYAML not installed — cannot load %s", path)
-            return cls()
-
         resolved = path.expanduser()
-        if not resolved.exists():
+
+        # Try .toml variant first
+        toml_path = resolved.with_suffix(".toml")
+        yaml_path = resolved if resolved.suffix in (".yaml", ".yml") else resolved.with_suffix(".yaml")
+
+        from obscura.core.config_io import apply_agent_defaults, try_load_config  # noqa: PLC0415
+
+        raw = try_load_config(toml_path, yaml_path)
+        if raw is None:
             logger.warning("Supervisor config not found: %s", resolved)
             return cls()
 
-        with resolved.open() as f:
-            raw: dict[str, Any] = yaml.safe_load(f) or {}
+        # Apply top-level defaults to primary config
+        raw = apply_agent_defaults(raw)
+
+        # Load catalog file from the same directory
+        config_dir = resolved.parent
+        catalog_raw = try_load_config(
+            config_dir / "agents-available.toml",
+            config_dir / "agents-available.yaml",
+        )
+        if catalog_raw is not None:
+            catalog_raw = apply_agent_defaults(catalog_raw)
+
+        # Build a merged name -> entry mapping: catalog first, primary overrides
+        merged_by_name: dict[str, dict[str, Any]] = {}
+        if catalog_raw is not None:
+            for entry in catalog_raw.get("agents", []):
+                name = entry.get("name")
+                if name:
+                    merged_by_name[name] = entry
+
+        for entry in raw.get("agents", []):
+            name = entry.get("name")
+            if name:
+                merged_by_name[name] = entry
 
         # Known fields for AgentDefinition / TriggerDefinition
-        import dataclasses as _dc
+        import dataclasses as _dc  # noqa: PLC0415
+
         _agent_fields = {f.name for f in _dc.fields(AgentDefinition)}
         _trigger_fields = {f.name for f in _dc.fields(TriggerDefinition)}
 
         agents: list[AgentDefinition] = []
-        raw_agents: list[dict[str, Any]] = raw.get("agents", [])
-        for entry in raw_agents:
-            raw_triggers: list[dict[str, Any]] = entry.pop("triggers", [])
+        for entry in merged_by_name.values():
+            # Skip agents explicitly disabled
+            if not entry.get("enabled", True):
+                continue
+            raw_triggers: list[dict[str, Any]] = entry.get("triggers", [])
             triggers = [
                 TriggerDefinition(**{k: v for k, v in t.items() if k in _trigger_fields})
                 for t in raw_triggers
             ]
-            filtered = {k: v for k, v in entry.items() if k in _agent_fields}
+            filtered = {
+                k: v for k, v in entry.items()
+                if k in _agent_fields and k != "triggers"
+            }
             agents.append(AgentDefinition(**filtered, triggers=triggers))
 
         return cls(agents=agents)
@@ -272,13 +307,19 @@ class AgentSupervisor:
 
         self._bus.on_attention(_on_attention)
 
+        # Only auto-start daemon agents at boot.  Loop/aper agents are
+        # conversational and spawned on-demand via the swarm tool — launching
+        # all of them at once exhausts file descriptors and memory.
+        daemon_agents = [a for a in config.agents if a.type == "daemon"]
+
         logger.info(
-            "Supervisor starting %d agent(s) from %s",
-            len(config.agents),
+            "Supervisor starting %d daemon(s) from %s (%d total agents registered)",
+            len(daemon_agents),
             self._config_path,
+            len(config.agents),
         )
 
-        for agent_def in config.agents:
+        for agent_def in daemon_agents:
             task = asyncio.create_task(
                 self._supervise(runtime, agent_def),
                 name=f"supervisor:{agent_def.name}",

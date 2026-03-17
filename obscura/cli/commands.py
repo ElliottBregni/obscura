@@ -211,6 +211,10 @@ class REPLContext:
     # Background swarm tasks: {swarm_id: {task, assignments, results, ...}}
     _swarm_runs: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
 
+    # Supervisor reference (set when --supervise is active)
+    _supervisor: Any = field(default=None, repr=False)
+    _supervisor_task: Any = field(default=None, repr=False)
+
     # Slash-skill state (metadata lazy-loaded, bodies loaded on activation)
     _lazy_skill_loader: LazySkillLoader | None = field(default=None, repr=False)
     active_skills: list[str] = field(default_factory=list)
@@ -423,6 +427,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  [cyan]/agent[/] [cmd]         spawn | list | stop | run",
         "  [cyan]/skill[/] [cmd]         list | load | unload | active | clear",
         "  [cyan]/fleet[/] [cmd]         spawn | status | run | delegate | stop",
+        "  [cyan]/kill[/]                Stop all agents, daemons, swarms, and supervisor",
         "  [cyan]/attention[/] [cmd]     List or respond to agent attention requests",
         "  [cyan]/tail-trace[/] [n]    Tail recent trace entries",
         "",
@@ -887,6 +892,26 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_jitter(args: str, _ctx: REPLContext) -> str | None:
+    """Show or set the reasoning jitter delay (OBSCURA_REASONING_JITTER_MS)."""
+    import os as _os
+    val = args.strip()
+    if not val:
+        current = _os.environ.get("OBSCURA_REASONING_JITTER_MS", "0")
+        print_info(f"Reasoning jitter: {current}ms  (set with /jitter <ms> or /jitter off)")
+        return None
+    if val == "off":
+        _os.environ["OBSCURA_REASONING_JITTER_MS"] = "0"
+        print_ok("Reasoning jitter disabled (0ms).")
+        return None
+    if val.isdigit():
+        _os.environ["OBSCURA_REASONING_JITTER_MS"] = val
+        print_ok(f"Reasoning jitter set to {val}ms.")
+        return None
+    print_error("Usage: /jitter [<ms> | off]")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Handlers — session
 # ---------------------------------------------------------------------------
@@ -1210,62 +1235,57 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
 
     runtime = await ctx.get_runtime()
 
-    # SECURITY FIX: Load manifest from ~/.obscura/agents.yaml
-    import yaml
-    from obscura.core.paths import resolve_obscura_home
-    from obscura.manifest.models import AgentManifest
+    # Load manifest from merged agents config (global-wins, local adds)
+    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
+    from obscura.manifest.models import AgentManifest  # noqa: PLC0415
 
-    agents_yaml = resolve_obscura_home() / "agents.yaml"
     manifest_loaded = False
 
-    if agents_yaml.exists():
+    agent_configs = load_agent_configs(include_disabled=True)
+    if agent_configs:
         try:
-            with open(agents_yaml) as f:
-                config = yaml.safe_load(f)
-                agent_configs = {a["name"]: a for a in config.get("agents", [])}
+            if name in agent_configs:
+                cfg = agent_configs[name]
 
-                if name in agent_configs:
-                    cfg = agent_configs[name]
-
-                    # Daemon agents are auto-started, not manually spawned
-                    if cfg.get("type") == "daemon":
-                        print_warning(
-                            f"'{name}' is a daemon agent (auto-started at session start). "
-                            "Use /agent list to see running daemons."
-                        )
-                        return None
-
-                    # Build AgentManifest from YAML config
-                    # Extract skills config dict if present
-                    skills_cfg = cfg.get("skills", {})
-                    if not isinstance(skills_cfg, dict):
-                        skills_cfg = {}
-
-                    manifest = AgentManifest(
-                        name=cfg["name"],
-                        provider=model_override
-                        or cfg.get("provider")
-                        or cfg.get("model", ctx.backend),
-                        system_prompt=system_prompt_override or cfg.get("system_prompt", ""),
-                        max_turns=cfg.get("max_turns", 10),
-                        tools=cfg.get("tools", []),
-                        tags=cfg.get("tags", []),
-                        mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
-                        skills_config=skills_cfg,
+                # Daemon agents are auto-started, not manually spawned
+                if cfg.get("type") == "daemon":
+                    print_warning(
+                        f"'{name}' is a daemon agent (auto-started at session start). "
+                        "Use /agent list to see running daemons."
                     )
-
-                    # Spawn from manifest (SECURE) — pass explicit model override if given
-                    agent = runtime.spawn_from_manifest(
-                        manifest,
-                        provider_override=model_override,
-                    )
-                    await agent.start()
-                    print_ok(
-                        f"✓ Spawned {name} from manifest (id: {agent.id[:12]}, "
-                        f"max_turns: {cfg.get('max_turns', 10)})"
-                    )
-                    manifest_loaded = True
                     return None
+
+                # Build AgentManifest from config
+                # Extract skills config dict if present
+                skills_cfg = cfg.get("skills", {})
+                if not isinstance(skills_cfg, dict):
+                    skills_cfg = {}
+
+                manifest = AgentManifest(
+                    name=cfg["name"],
+                    provider=model_override
+                    or cfg.get("provider")
+                    or cfg.get("model", ctx.backend),
+                    system_prompt=system_prompt_override or cfg.get("system_prompt", ""),
+                    max_turns=cfg.get("max_turns", 10),
+                    tools=cfg.get("tools", []),
+                    tags=cfg.get("tags", []),
+                    mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
+                    skills_config=skills_cfg,
+                )
+
+                # Spawn from manifest (SECURE) — pass explicit model override if given
+                agent = runtime.spawn_from_manifest(
+                    manifest,
+                    provider_override=model_override,
+                )
+                await agent.start()
+                print_ok(
+                    f"Spawned {name} from manifest (id: {agent.id[:12]}, "
+                    f"max_turns: {cfg.get('max_turns', 10)})"
+                )
+                manifest_loaded = True
+                return None
 
         except Exception as e:
             print_warning(f"Failed to load manifest for '{name}': {e}")
@@ -1273,7 +1293,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     # Fallback: spawn with SDK defaults (with warning)
     if not manifest_loaded:
         print_warning(
-            f"⚠ No manifest found for '{name}' in {agents_yaml}. "
+            f"No manifest found for '{name}' in {agents_file}. "
             "Using SDK defaults (no skill filters, tool restrictions, or limits)."
         )
         agent = runtime.spawn(
@@ -1633,41 +1653,37 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
         return None
 
     runtime = await ctx.get_runtime()
-    for name in names:
-        # SECURITY FIX: Try to load from manifest first
-        from pathlib import Path as P
-        import yaml
-        from obscura.manifest.models import AgentManifest
 
-        agents_yaml = P.home() / ".obscura" / "agents.yaml"
+    # Load merged agent configs once outside the loop (global-wins, local adds)
+    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
+    from obscura.manifest.models import AgentManifest  # noqa: PLC0415
+
+    all_agent_configs = load_agent_configs(include_disabled=True)
+
+    for name in names:
         manifest_loaded = False
 
-        if agents_yaml.exists():
+        if name in all_agent_configs and all_agent_configs[name].get("enabled", True):
             try:
-                with open(agents_yaml) as f:
-                    config = yaml.safe_load(f)
-                    agent_configs = {a["name"]: a for a in config.get("agents", [])}
-
-                    if name in agent_configs and agent_configs[name].get("enabled", True):
-                        cfg = agent_configs[name]
-                        s_cfg = cfg.get("skills", {})
-                        if not isinstance(s_cfg, dict):
-                            s_cfg = {}
-                        manifest = AgentManifest(
-                            name=cfg["name"],
-                            provider=model or cfg.get("provider") or cfg.get("model", ctx.backend),
-                            system_prompt=cfg.get("system_prompt", ""),
-                            max_turns=cfg.get("max_turns", 10),
-                            tools=cfg.get("tools", []),
-                            tags=cfg.get("tags", []),
-                            mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
-                            skills_config=s_cfg,
-                        )
-                        agent = runtime.spawn_from_manifest(
-                            manifest,
-                            provider_override=model if model != ctx.backend else None,
-                        )
-                        manifest_loaded = True
+                cfg = all_agent_configs[name]
+                s_cfg = cfg.get("skills", {})
+                if not isinstance(s_cfg, dict):
+                    s_cfg = {}
+                manifest = AgentManifest(
+                    name=cfg.get("name", name),
+                    provider=model or cfg.get("provider") or cfg.get("model", ctx.backend),
+                    system_prompt=cfg.get("system_prompt", ""),
+                    max_turns=cfg.get("max_turns", 10),
+                    tools=cfg.get("tools", []),
+                    tags=cfg.get("tags", []),
+                    mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
+                    skills_config=s_cfg,
+                )
+                agent = runtime.spawn_from_manifest(
+                    manifest,
+                    provider_override=model if model != ctx.backend else None,
+                )
+                manifest_loaded = True
             except Exception:
                 pass
 
@@ -2471,7 +2487,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     sub = tokens[0]
 
     try:
-        from obscura.plugins.registry import PluginRegistryService
+        from obscura.plugins.registry import PluginRegistryService, PluginEntry
         registry = PluginRegistryService()
     except Exception:
         print_error("Plugin management not available.")
@@ -2479,18 +2495,32 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
 
     if sub == "list":
         plugins = registry.list_plugins()
+
+        # Include discovered builtins that aren't in the registry
+        try:
+            from obscura.plugins.loader import PluginLoader
+            loader = PluginLoader()
+            registered_ids = {p.id for p in plugins}
+            for spec in loader.discover_builtins():
+                if spec.id not in registered_ids:
+                    plugins.append(PluginEntry.from_spec(spec, source="builtin"))
+                    plugins[-1].enabled = True
+                    plugins[-1].state = "enabled"
+        except Exception:
+            pass
+
         if not plugins:
             print_info("No plugins registered.")
             return None
         for p in plugins:
             status_color = {"enabled": "green", "disabled": "dim", "failed": "red"}.get(
-                p.get("status", ""), "yellow"
+                p.state, "yellow"
             )
             console.print(
-                f"  • [cyan]{p.get('id', p.get('name', '?'))}[/] "
-                f"v{p.get('version', '?')} "
-                f"[{status_color}]{p.get('status', '?')}[/] "
-                f"— {p.get('description', '')[:60]}"
+                f"  • [cyan]{p.id}[/] "
+                f"v{p.version} "
+                f"[{status_color}]{p.state}[/] "
+                f"— {p.description[:60]}"
             )
         return None
 
@@ -2571,7 +2601,7 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
     Usage:
       /pack list           — List all available packs
       /pack info <name>    — Show pack details
-      /pack create <name>  — Scaffold a new pack YAML
+      /pack create <name>  — Scaffold a new pack TOML
     """
     try:
         tokens = shlex.split(args) if args and args.strip() else []
@@ -2668,28 +2698,32 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
         global_dir = Path.home() / ".obscura" / "specs" / "packs"
         target_dir = local_dir if local_dir.exists() else global_dir
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / f"{pack_name}.yml"
+        target = target_dir / f"{pack_name}.toml"
 
         if target.exists():
             print_error(f"Pack file already exists: {target}")
             return None
 
         content = textwrap.dedent(f"""\
-            apiVersion: obscura/v1
-            kind: Pack
-            metadata:
-              name: {pack_name}
-              description: TODO — describe this pack
-              tags: []
-            spec:
-              plugins: []
-              templates: []
-              policies: []
-              capabilities:
-                grant: []
-                deny: []
-              config: {{}}
-              instructions: ""
+            apiVersion = "obscura/v1"
+            kind = "Pack"
+
+            [metadata]
+            name = "{pack_name}"
+            description = "TODO — describe this pack"
+            tags = []
+
+            [spec]
+            plugins = []
+            templates = []
+            policies = []
+            instructions = ""
+
+            [spec.capabilities]
+            grant = []
+            deny = []
+
+            [spec.config]
         """)
         target.write_text(content, encoding="utf-8")
         print_ok(f"Created pack scaffold: {target}")
@@ -3555,6 +3589,48 @@ async def _running_detail(
     console.print(panel)
 
 
+async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
+    """Kill all running agents, daemons, swarms, and supervisor."""
+    import asyncio as _asyncio
+
+    stopped = 0
+
+    # 1. Stop all agents in the runtime
+    if ctx._runtime is not None:
+        for agent in ctx._runtime.list_agents():
+            try:
+                await agent.stop()
+                stopped += 1
+            except Exception:
+                pass
+
+    # 2. Cancel all swarm tasks
+    for sid, run in list(ctx._swarm_runs.items()):
+        task_obj = run.get("_task")
+        if task_obj and not task_obj.done():
+            task_obj.cancel()
+            stopped += 1
+            run["status"] = "cancelled"
+    ctx._swarm_runs.clear()
+
+    # 3. Stop supervisor (kills all managed daemons)
+    if ctx._supervisor_task is not None and not ctx._supervisor_task.done():
+        ctx._supervisor_task.cancel()
+        try:
+            await ctx._supervisor_task
+        except (_asyncio.CancelledError, Exception):
+            pass
+        stopped += 1
+        ctx._supervisor = None
+        ctx._supervisor_task = None
+
+    if stopped:
+        print_ok(f"Killed {stopped} task(s).")
+    else:
+        print_info("Nothing running.")
+    return None
+
+
 async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     """Show running agents, daemons, and session activity."""
     from rich.console import Group
@@ -3832,6 +3908,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "policies": cmd_policies,
     "replay": cmd_replay,
     "running": cmd_running,
+    "kill": cmd_kill,
 }
 
 # Subcommand completions for readline tab-complete
@@ -3866,6 +3943,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "pack": ["list", "info", "create"],
     "inspect": ["workspace", "agent", "capability", "pack"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
+    "kill": [],
     "tail-trace": [],
     "init": ["--force"],
     "memory": ["stats", "search", "clear"],

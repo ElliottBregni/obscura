@@ -228,6 +228,19 @@ class SessionHookManager:
         ctx = dict(context or {})
         entries = self._get_hooks(hook_point, "before")
 
+        # Warn about hooks that were loaded from DB but never had their handler
+        # re-bound via bind_handler(). These are silently skipped below, so
+        # the warning makes the gap visible during development/debugging.
+        unbound = [e for e in entries if not e.handler]
+        if unbound:
+            logger.warning(
+                "SessionHookManager: %d hook(s) at %s/before have no bound handler "
+                "(loaded from DB — call bind_handler('%s', fn) on resume) — skipping",
+                len(unbound),
+                hook_point.value,
+                unbound[0].handler_ref if len(unbound) == 1 else "<multiple>",
+            )
+
         for entry in entries:
             if not entry.handler:
                 continue

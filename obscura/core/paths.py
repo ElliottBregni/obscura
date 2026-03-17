@@ -73,6 +73,11 @@ def resolve_obscura_state_dir(cwd: Path | None = None) -> Path:
     return resolve_obscura_home(cwd) / "state"
 
 
+def resolve_obscura_evals_dir(cwd: Path | None = None) -> Path:
+    """Resolve ``.obscura/evals/`` directory for eval suite files."""
+    return resolve_obscura_home(cwd) / "evals"
+
+
 # ---------------------------------------------------------------------------
 # Multi-home helpers (global + local merging)
 # ---------------------------------------------------------------------------
@@ -127,3 +132,9 @@ def resolve_all_hooks_dirs(cwd: Path | None = None) -> list[Path]:
     """Return hooks directories in merge order."""
     local, global_ = resolve_all_obscura_homes(cwd)
     return _merge_order_dirs(local, global_, "hooks")
+
+
+def resolve_all_evals_dirs(cwd: Path | None = None) -> list[Path]:
+    """Return evals directories in merge order (global first, local last)."""
+    local, global_ = resolve_all_obscura_homes(cwd)
+    return _merge_order_dirs(local, global_, "evals")
