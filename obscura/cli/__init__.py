@@ -781,6 +781,13 @@ async def _repl(
     memory_context = load_obscura_memory(sid, db_path)
     custom_sections: list[str] = [memory_context] if memory_context else []
 
+    # Inject user identity & preferences from preferences.md
+    prefs_path = resolve_obscura_home() / "memory" / "preferences.md"
+    if prefs_path.exists():
+        prefs_text = prefs_path.read_text().strip()
+        if prefs_text:
+            custom_sections.append(f"# User Identity & Preferences\n\n{prefs_text}")
+
     # Inject vector memory context at session start
     if vector_store is not None:
         vm_startup = load_startup_memories(vector_store, sid, top_k=3)

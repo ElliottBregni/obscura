@@ -716,7 +716,29 @@ class AgentLoop:
         del turn
         results: list[ToolResultEnvelope] = []
 
+        # Deduplicate: skip tool calls with identical name+input in the same
+        # turn.  LLMs sometimes emit the same call twice.  Reuse the first
+        # result so the model sees a consistent response for both call IDs.
+        seen_calls: dict[str, ToolResultEnvelope] = {}  # "name|input_json" → result
+
         for tc in tool_calls:
+            dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
+            if dedup_key in seen_calls:
+                prev = seen_calls[dedup_key]
+                results.append(
+                    ToolResultEnvelope(
+                        call_id=tc.tool_use_id,
+                        tool=prev.tool,
+                        status=prev.status,
+                        result=prev.result,
+                        error=prev.error,
+                        latency_ms=0,
+                        tool_use_id=tc.tool_use_id,
+                        raw=prev.raw,
+                    )
+                )
+                logger.debug("Dedup: skipped duplicate tool call %s", tc.name)
+                continue
             call = ToolCallEnvelope(
                 call_id=tc.tool_use_id,
                 agent_id="agent_loop",
@@ -853,31 +875,31 @@ class AgentLoop:
 
             try:
                 result = await self._call_handler(spec, tc.input)
-                results.append(
-                    ToolResultEnvelope(
-                        call_id=call.call_id,
-                        tool=call.tool,
-                        status="ok",
-                        result=result,
-                        latency_ms=int((time.monotonic() - started) * 1000),
-                        tool_use_id=tc.tool_use_id,
-                        raw=tc.raw,
-                    )
+                envelope = ToolResultEnvelope(
+                    call_id=call.call_id,
+                    tool=call.tool,
+                    status="ok",
+                    result=result,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    tool_use_id=tc.tool_use_id,
+                    raw=tc.raw,
                 )
+                results.append(envelope)
+                seen_calls[dedup_key] = envelope
             except Exception as exc:
                 logger.warning("Tool %s failed: %s", tc.name, exc)
                 err = self._normalize_tool_error(exc)
-                results.append(
-                    ToolResultEnvelope(
-                        call_id=call.call_id,
-                        tool=call.tool,
-                        status="error",
-                        error=err,
-                        latency_ms=int((time.monotonic() - started) * 1000),
-                        tool_use_id=tc.tool_use_id,
-                        raw=tc.raw,
-                    )
+                envelope = ToolResultEnvelope(
+                    call_id=call.call_id,
+                    tool=call.tool,
+                    status="error",
+                    error=err,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    tool_use_id=tc.tool_use_id,
+                    raw=tc.raw,
                 )
+                results.append(envelope)
+                seen_calls[dedup_key] = envelope
 
         return results
 
@@ -1311,15 +1333,23 @@ class AgentLoop:
 
     @staticmethod
     def _format_tool_results_envelopes(results: list[ToolResultEnvelope]) -> str:
-        """Format canonical tool result envelopes as prompt text."""
-        parts: list[str] = []
+        """Format canonical tool result envelopes as prompt text.
+
+        Uses explicit ``<tool_result>`` XML tags so the LLM clearly
+        distinguishes these from user-authored messages.
+        """
+        parts: list[str] = [
+            "<system>The following are results from the tool calls you just made. "
+            "Do NOT repeat or echo these results back to the user.</system>",
+        ]
         for result in results:
-            status = "ERROR" if result.status == "error" else "OK"
+            status = "error" if result.status == "error" else "success"
             result_text = AgentLoop._render_tool_result_text(result)
             parts.append(
-                f"[Tool Result: {result.tool} (id={result.tool_use_id}) status={status}]\n"
+                f'<tool_result tool="{result.tool}" '
+                f'id="{result.tool_use_id}" status="{status}">\n'
                 f"{result_text}\n"
-                f"[/Tool Result]"
+                f"</tool_result>"
             )
         return "\n\n".join(parts)
 

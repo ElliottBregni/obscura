@@ -424,9 +424,24 @@ class ClaudeBackend:
         await self._client.query(prompt)
 
     def _build_query_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Convert unified kwargs into Claude query kwargs."""
+        """Convert unified kwargs into Claude query kwargs.
+
+        Forwards ``tool_choice`` and ``messages`` (structured tool results)
+        so the SDK can pass proper tool_result content blocks to the API
+        instead of relying on plain-text prompt formatting.
+        """
+        result: dict[str, Any] = {}
+
         tool_choice = kwargs.get("tool_choice")
-        return self._convert_tool_choice(tool_choice)
+        result.update(self._convert_tool_choice(tool_choice))
+
+        # Forward structured messages (tool call/result history) to the SDK.
+        # This prevents the LLM from seeing tool results as user-pasted text.
+        messages = kwargs.get("messages")
+        if messages:
+            result["messages"] = messages
+
+        return result
 
     def _convert_tool_choice(self, choice: Any) -> dict[str, Any]:
         """Map ToolChoice to Claude query kwargs."""
