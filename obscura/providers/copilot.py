@@ -55,7 +55,7 @@ class CopilotBackend:
     tool_policy: ToolPolicy | None = None,
     ) -> None:
         self._auth = auth
-        self._model = model
+        self._model = model or "gpt-5-mini"
         self._system_prompt = system_prompt
         self._mcp_servers = mcp_servers or []
         self._streaming = streaming
@@ -478,7 +478,7 @@ class CopilotBackend:
 
     def get_default_model(self) -> str:
         """Return the default model for this provider."""
-        return "auto"  # Copilot chooses best model
+        return "gpt-5-mini"
 
     def validate_model(self, model_id: str) -> bool:
         """Check if a model ID is valid for Copilot."""
@@ -488,8 +488,8 @@ class CopilotBackend:
         """Fallback list when copilot_models package unavailable."""
         return [
             RegistryModelInfo(
-                id="auto",
-                name="gpt-5-mini",  # Default low-cost model
+                id="gpt-5-mini",
+                name="gpt-5-mini",
                 provider="copilot",
                 supports_tools=True,
                 supports_vision=True,

@@ -210,6 +210,21 @@ class ToolRegistry:
             "todo": "todo_write",
             "update_todos": "todo_write",
             "write_todos": "todo_write",
+            # Claude Code native tool names (PascalCase → Obscura canonical)
+            "bash": "run_shell",
+            "read": "read_text_file",
+            "edit": "edit_text_file",
+            "write": "write_text_file",
+            "glob": "find_files",
+            "grep": "grep_files",
+            "websearch": "web_search",
+            "webfetch": "web_fetch",
+            "notebookedit": "edit_text_file",
+            "askuserquestion": "ask_user",
+            "agent": "task",
+            "skill": "task",
+            "enterplanmode": "task",
+            "exitplanmode": "task",
         }
 
     @staticmethod
@@ -242,6 +257,12 @@ class ToolRegistry:
         direct = self._tools.get(name)
         if direct is not None:
             return direct
+        # Case-insensitive fallback (handles PascalCase like Bash, Read, Edit)
+        lower = name.lower()
+        if lower != name:
+            direct = self._tools.get(lower)
+            if direct is not None:
+                return direct
         # Strip Claude SDK MCP prefix: mcp__<server>__<tool> → <tool>
         stripped = name
         if name.startswith("mcp__") and name.count("__") >= 2:
@@ -250,19 +271,27 @@ class ToolRegistry:
             if direct is not None:
                 return direct
         # Try dot ↔ underscore variants (Claude SDK sanitizes dots to underscores)
+        underscore_variant = ""
         if "." in stripped:
-            direct = self._tools.get(stripped.replace(".", "_"))
+            underscore_variant = stripped.replace(".", "_")
+            direct = self._tools.get(underscore_variant)
             if direct is not None:
                 return direct
         elif "_" in stripped:
             direct = self._tools.get(stripped.replace("_", ".", 1))
             if direct is not None:
                 return direct
-        # Strip common MCP server name prefixes (filesystem_, git_, memory_, fetch_)
+        # Strip common MCP server name prefixes
         # LLMs often prepend the MCP server name to tool names
-        for prefix in ("filesystem_", "git_", "memory_", "fetch_", "sequentialthinking_"):
-            if stripped.startswith(prefix):
-                without_prefix = stripped[len(prefix):]
+        # Check both the original stripped name and the underscore variant
+        candidates = [stripped]
+        if underscore_variant:
+            candidates.append(underscore_variant)
+        for prefix in ("filesystem_", "git_", "memory_", "fetch_", "sequentialthinking_", "functions_", "multi_tool_use_"):
+            for candidate in candidates:
+                if not candidate.startswith(prefix):
+                    continue
+                without_prefix = candidate[len(prefix):]
                 direct = self._tools.get(without_prefix)
                 if direct is not None:
                     return direct

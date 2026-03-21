@@ -37,6 +37,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import difflib
 import inspect
 import json
 import logging
@@ -771,9 +772,16 @@ class AgentLoop:
 
             spec = self._tools.get(tc.name)
             if spec is None:
+                available = self._tools.names()
+                matches = difflib.get_close_matches(tc.name, available, n=3, cutoff=0.4)
+                if matches:
+                    suggestions = ", ".join(f"`{m}`" for m in matches)
+                    msg = f"Unknown tool: {tc.name}. Did you mean: {suggestions}?"
+                else:
+                    msg = f"Unknown tool: {tc.name}. Use one of: {', '.join(available[:15])}"
                 err = ToolExecutionError(
                     type=ToolErrorType.NOT_FOUND,
-                    message=f"Unknown tool: {tc.name}. Available: {', '.join(self._tools.names())}",
+                    message=msg,
                     safe_to_retry=False,
                 )
                 results.append(

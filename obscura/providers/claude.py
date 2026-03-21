@@ -537,8 +537,10 @@ class ClaudeBackend:
         # Apply tool policy to filter tools
         if self._tools and self._tool_policy:
             filtered = self._tool_policy.filter_tools(self._tools)
-            if len(filtered) < len(self._tools):
-                # Only allow filtered tool names via Claude's allowed_tools
+            if not self._tool_policy.allow_native or len(filtered) < len(self._tools):
+                # When native tools are blocked (default) OR the filter reduced
+                # the set, set an explicit allowlist so the LLM can only call
+                # registered Obscura tool names — prevents hallucinated names.
                 allowed = [f"mcp__obscura_tools__{t.name}" for t in filtered]
                 opts["allowed_tools"] = allowed
 
@@ -554,7 +556,12 @@ class ClaudeBackend:
             desc = (spec.description or "").split("\n")[0][:120]
             lines.append(f"- `{spec.name}`: {desc}")
         lines.append("")
-        lines.append("Do NOT invent tool names. If none of these tools fit, tell the user.")
+        lines.append(
+            "IMPORTANT: Do NOT use tool names from other systems. "
+            "Names like Bash, Read, Edit, Write, Glob, Grep, WebSearch, "
+            "WebFetch, Agent, TodoWrite, NotebookEdit are NOT valid here. "
+            "Use ONLY the exact names listed above."
+        )
         return "\n".join(lines)
 
     def _build_mcp_tools(self) -> dict[str, Any]:
