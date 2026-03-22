@@ -8,8 +8,8 @@ initial context window bloat.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
-from typing import Any
 
 from obscura.core.frontmatter import parse_frontmatter
 
@@ -160,8 +160,136 @@ class LazySkillLoader:
         stubs = [skill.to_stub() for skill in skills_to_include]
         return "\n\n".join(stubs)
     
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Clear all caches."""
         self._metadata_cache.clear()
         self._body_cache.clear()
         logger.debug("Skill caches cleared")
+
+
+# ---------------------------------------------------------------------------
+# @command loader
+# ---------------------------------------------------------------------------
+
+
+class CommandMetadata:
+    """Metadata for a markdown @command file."""
+
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        path: Path,
+        argument_hint: str = "",
+        allowed_tools: list[str] | None = None,
+        model: str | None = None,
+    ):
+        self.name = name
+        self.description = description
+        self.path = path
+        self.argument_hint = argument_hint
+        self.allowed_tools = allowed_tools or []
+        self.model = model
+
+
+class ResolvedCommand:
+    """A command resolved with arguments substituted into its body."""
+
+    def __init__(self, meta: CommandMetadata, body: str):
+        self.meta = meta
+        self.name = meta.name
+        self.description = meta.description
+        self.body = body
+
+
+class LazyCommandLoader:
+    """Discover and load @command markdown files from multiple directories.
+
+    Discovery order: directories are searched in the order provided.
+    First match by name wins (earlier directories take precedence).
+    """
+
+    def __init__(self, command_dirs: list[Path]):
+        self._command_dirs = command_dirs
+        self._metadata_cache: dict[str, CommandMetadata] = {}
+        self._discovered = False
+
+    def discover_commands(self) -> list[CommandMetadata]:
+        """Scan all command directories and return metadata."""
+        if self._discovered:
+            return list(self._metadata_cache.values())
+
+        for cmd_dir in self._command_dirs:
+            if not cmd_dir.is_dir():
+                continue
+            for cmd_file in sorted(cmd_dir.glob("*.md")):
+                if not cmd_file.is_file():
+                    continue
+                name = cmd_file.stem
+                if name in self._metadata_cache:
+                    continue  # earlier directory wins
+
+                try:
+                    raw = cmd_file.read_text(encoding="utf-8").strip()
+                    if not raw:
+                        continue
+                    result = parse_frontmatter(raw, source_path=cmd_file)
+                    meta = result.metadata
+
+                    cmd_meta = CommandMetadata(
+                        name=name,
+                        description=str(meta.get("description", "")),
+                        path=cmd_file,
+                        argument_hint=str(meta.get("argument-hint", meta.get("argument_hint", ""))),
+                        allowed_tools=meta.get("allowed-tools", meta.get("allowed_tools", [])),
+                        model=meta.get("model"),
+                    )
+                    self._metadata_cache[name] = cmd_meta
+                    logger.debug("Discovered command: %s at %s", name, cmd_file)
+                except Exception as e:
+                    logger.warning("Failed to load command metadata from %s: %s", cmd_file, e)
+
+        self._discovered = True
+        return list(self._metadata_cache.values())
+
+    def resolve_command(self, name: str, arguments: str = "") -> ResolvedCommand | None:
+        """Look up a command by name, substitute $ARGUMENTS, and return resolved body."""
+        self.discover_commands()
+
+        # Exact match
+        cmd = self._metadata_cache.get(name)
+        # Case-insensitive fallback
+        if cmd is None:
+            lowered = name.lower()
+            for key, val in self._metadata_cache.items():
+                if key.lower() == lowered:
+                    cmd = val
+                    break
+        if cmd is None:
+            return None
+
+        try:
+            raw = cmd.path.read_text(encoding="utf-8").strip()
+            result = parse_frontmatter(raw, source_path=cmd.path)
+            body = result.body
+
+            # Substitute $ARGUMENTS (whole arg string)
+            body = body.replace("$ARGUMENTS", arguments)
+
+            # Substitute positional $1, $2, ... from space-split args
+            parts = arguments.split() if arguments else []
+            for i, part in enumerate(parts, start=1):
+                body = body.replace(f"${i}", part)
+
+            # Clean up any remaining positional placeholders
+            body = re.sub(r"\$\d+", "", body)
+
+            return ResolvedCommand(meta=cmd, body=body)
+        except Exception as e:
+            logger.error("Failed to resolve command '%s': %s", name, e)
+            return None
+
+    def command_names(self) -> list[str]:
+        """Return sorted list of discovered command names (for tab completion)."""
+        self.discover_commands()
+        return sorted(self._metadata_cache.keys())

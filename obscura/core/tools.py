@@ -26,6 +26,7 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        self._disabled: set[str] = set()
         self._alias_targets: dict[str, str] = {
             # shell
             "bash": "run_shell",
@@ -35,6 +36,12 @@ class ToolRegistry:
             "run_bash": "run_shell",
             "execute_shell": "run_shell",
             "run_script": "run_shell",
+            "shell_command": "run_shell",
+            "shellcommand": "run_shell",
+            "execute_command": "run_command",
+            "exec": "run_command",
+            "cmd": "run_command",
+            "command": "run_command",
             # python — multiple naming conventions used by different LLMs
             "python": "run_python3",
             "run_python": "run_python3",
@@ -91,6 +98,12 @@ class ToolRegistry:
             "search_code": "grep_files",
             "searchfiles": "grep_files",
             "filesystem_search": "grep_files",
+            # GPT hallucinated grep names
+            "rg_search": "grep_files",
+            "rgsearch": "grep_files",
+            "ripgrep_search": "grep_files",
+            "grep_search": "grep_files",
+            "code_search": "grep_files",
             # find files
             "find": "find_files",
             "glob": "find_files",
@@ -98,6 +111,10 @@ class ToolRegistry:
             "find_file": "find_files",
             "filesystem_find": "find_files",
             "filesystem_glob": "find_files",
+            # GPT hallucinated CLI names → canonical
+            "fd": "find_files",
+            "fd_find": "find_files",
+            "fdfind": "find_files",
             # copy / move
             "cp": "copy_path",
             "copy": "copy_path",
@@ -146,6 +163,10 @@ class ToolRegistry:
             "browse": "web_fetch",
             "open_url": "web_fetch",
             "curl": "web_fetch",
+            "fetch_url": "web_fetch",
+            "fetch_page": "web_fetch",
+            "read_url": "web_fetch",
+            "http_get": "web_fetch",
             # http
             "http": "http_request",
             "api_request": "http_request",
@@ -186,8 +207,21 @@ class ToolRegistry:
             "make_tool": "create_tool",
             "define_tool": "create_tool",
             "new_tool": "create_tool",
-            # task delegation
+            # task delegation (subprocess)
             "delegatetask": "task",
+            # agent delegation (in-process / transport-routed)
+            "delegate": "delegate_to_agent",
+            "ask_agent": "delegate_to_agent",
+            "spawn_agent": "delegate_to_agent",
+            "invoke_agent": "delegate_to_agent",
+            "delegate_task": "delegate_to_agent",
+            "call_agent": "delegate_to_agent",
+            # GPT hallucinated meta-tools → no-op or nearest match
+            "report_intent": "todo_write",
+            "reportintent": "todo_write",
+            "plan": "todo_write",
+            "think": "todo_write",
+            "reasoning": "todo_write",
             # copilot
             "copilot": "copilot_query",
             "gpt5": "copilot_query",
@@ -308,10 +342,14 @@ class ToolRegistry:
         return self._tools.get(canonical)
 
     def all(self) -> list[ToolSpec]:
+        return [t for t in self._tools.values() if t.name not in self._disabled]
+
+    def all_including_disabled(self) -> list[ToolSpec]:
+        """Return every registered tool, including disabled ones."""
         return list(self._tools.values())
 
     def names(self) -> list[str]:
-        return list(self._tools.keys())
+        return [n for n in self._tools.keys() if n not in self._disabled]
 
     def __len__(self) -> int:
         return len(self._tools)
@@ -323,15 +361,44 @@ class ToolRegistry:
         """Return tools accessible at *tier_value*.
 
         ``"privileged"`` gets all tools; ``"public"`` gets only those
-        with ``required_tier == "public"``.
+        with ``required_tier == "public"``.  Disabled tools are excluded.
         """
         if tier_value == "privileged":
             return self.all()
-        return [t for t in self._tools.values() if getattr(t, "required_tier", None) in (None, "public")]
+        return [
+            t for t in self._tools.values()
+            if t.name not in self._disabled
+            and getattr(t, "required_tier", None) in (None, "public")
+        ]
 
     def names_for_tier(self, tier_value: str) -> list[str]:
         """Return tool names accessible at *tier_value*."""
         return [t.name for t in self.for_tier(tier_value)]
+
+    # -- Per-tool enable / disable ------------------------------------------
+
+    def disable(self, name: str) -> bool:
+        """Disable a tool by name. Returns True if the tool was found."""
+        spec = self.get(name)
+        if spec is None:
+            return False
+        self._disabled.add(spec.name)
+        return True
+
+    def enable(self, name: str) -> bool:
+        """Re-enable a previously disabled tool. Returns True if it was disabled."""
+        spec = self.get(name)
+        canonical = spec.name if spec else name
+        if canonical in self._disabled:
+            self._disabled.discard(canonical)
+            return True
+        return False
+
+    def is_disabled(self, name: str) -> bool:
+        """Check if a tool is disabled."""
+        spec = self.get(name)
+        canonical = spec.name if spec else name
+        return canonical in self._disabled
 
 
 # ---------------------------------------------------------------------------

@@ -78,6 +78,16 @@ def resolve_obscura_evals_dir(cwd: Path | None = None) -> Path:
     return resolve_obscura_home(cwd) / "evals"
 
 
+def resolve_obscura_output_dir(cwd: Path | None = None) -> Path:
+    """Resolve ``.obscura/output/`` directory for agent-generated files.
+
+    This is the default destination for files written by tools when the
+    LLM provides a relative path.  Keeps generated content (reports,
+    exports, etc.) out of the project working directory.
+    """
+    return resolve_obscura_home(cwd) / "output"
+
+
 # ---------------------------------------------------------------------------
 # Multi-home helpers (global + local merging)
 # ---------------------------------------------------------------------------
@@ -138,3 +148,34 @@ def resolve_all_evals_dirs(cwd: Path | None = None) -> list[Path]:
     """Return evals directories in merge order (global first, local last)."""
     local, global_ = resolve_all_obscura_homes(cwd)
     return _merge_order_dirs(local, global_, "evals")
+
+
+def resolve_obscura_commands_dir(cwd: Path | None = None) -> Path:
+    """Resolve directory containing markdown command documents."""
+    return resolve_obscura_home(cwd) / "commands"
+
+
+def resolve_all_commands_dirs(cwd: Path | None = None) -> list[Path]:
+    """Return command directories: ~/.obscura/commands/ then ~/.claude/commands/.
+
+    Deduplicates and only returns directories that exist on disk.
+    """
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+
+    # Primary: obscura commands (global + local merge)
+    local, global_ = resolve_all_obscura_homes(cwd)
+    for parent in (global_, local):
+        cmd_dir = parent / "commands"
+        resolved = cmd_dir.resolve()
+        if cmd_dir.is_dir() and resolved not in seen:
+            dirs.append(cmd_dir)
+            seen.add(resolved)
+
+    # Fallback: ~/.claude/commands/
+    claude_cmds = Path.home() / ".claude" / "commands"
+    if claude_cmds.is_dir() and claude_cmds.resolve() not in seen:
+        dirs.append(claude_cmds)
+        seen.add(claude_cmds.resolve())
+
+    return dirs

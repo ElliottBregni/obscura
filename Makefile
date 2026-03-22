@@ -7,7 +7,8 @@ COMPOSE := ./scripts/compose-env.sh
 .PHONY: help up down restart ps logs watch build pull check auth-fix clean \
 	dev-up dev-down dev-restart dev-logs dev-watch dev-check dev-auth-fix \
 	staging-up staging-down staging-restart staging-logs staging-check \
-	prod-up prod-down prod-restart prod-logs prod-check
+	prod-up prod-down prod-restart prod-logs prod-check \
+	dist brew-formula brew-install lint test
 
 help:
 	@echo "Obscura SDLC Commands"
@@ -102,3 +103,47 @@ prod-logs:
 
 prod-check:
 	$(MAKE) check ENV=prod
+
+# =============================================================================
+# Packaging & Release
+# =============================================================================
+
+VERSION := $(shell python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+
+# Build sdist + wheel
+dist:
+	@echo "Building obscura $(VERSION)..."
+	rm -rf dist/
+	uv build
+	@echo "Artifacts in dist/"
+
+# Create a tarball for Homebrew
+brew-tarball: dist
+	@echo "Creating brew tarball..."
+	git archive --format=tar.gz --prefix=obscura-$(VERSION)/ -o dist/obscura-$(VERSION).tar.gz HEAD
+	@echo "Tarball: dist/obscura-$(VERSION).tar.gz"
+	@echo "SHA256: $$(shasum -a 256 dist/obscura-$(VERSION).tar.gz | cut -d' ' -f1)"
+
+# Install from local formula (for testing)
+brew-install: brew-tarball
+	cp dist/obscura-$(VERSION).tar.gz "$$(brew --cache)/obscura-$(VERSION).tar.gz"
+	brew install --formula Formula/obscura.rb
+
+# Uninstall brew formula
+brew-uninstall:
+	brew uninstall obscura || true
+
+# Install locally with uv (dev)
+install-local:
+	uv tool install -e .
+
+# Quick checks
+lint:
+	ruff check .
+	ruff format --check .
+
+typecheck:
+	pyright
+
+test:
+	pytest tests/ -v -m "not e2e"

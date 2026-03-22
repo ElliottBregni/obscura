@@ -155,6 +155,9 @@ class AgentLoop:
         self._context_budget = context_budget  # 0 = unlimited (chars)
         self._accumulated_chars = 0
 
+        # Track repeated NOT_FOUND failures across turns to break retry loops
+        self._not_found_counts: dict[str, int] = {}
+
         # Pause / mid-run input state
         self._should_pause = False
         self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -794,9 +797,21 @@ class AgentLoop:
 
             spec = self._tools.get(tc.name)
             if spec is None:
+                # Track repeated NOT_FOUND to break infinite retry loops
+                self._not_found_counts[tc.name] = self._not_found_counts.get(tc.name, 0) + 1
+                count = self._not_found_counts[tc.name]
+
                 available = self._tools.names()
                 matches = difflib.get_close_matches(tc.name, available, n=3, cutoff=0.4)
-                if matches:
+
+                if count >= 3:
+                    # After 3 failures, give a hard stop message
+                    msg = (
+                        f"STOP: `{tc.name}` does not exist and has failed {count} times. "
+                        f"Do NOT call it again. "
+                        f"Available tools: {', '.join(available[:20])}"
+                    )
+                elif matches:
                     suggestions = ", ".join(f"`{m}`" for m in matches)
                     msg = f"Unknown tool: {tc.name}. Did you mean: {suggestions}?"
                 else:
@@ -804,7 +819,9 @@ class AgentLoop:
                 err = ToolExecutionError(
                     type=ToolErrorType.NOT_FOUND,
                     message=msg,
-                    safe_to_retry=False,
+                    # Retryable if we have suggestions — let the model self-correct.
+                    # After 3+ failures, stop retrying (the hard-stop message above).
+                    safe_to_retry=bool(matches) and count < 3,
                 )
                 results.append(
                     ToolResultEnvelope(
@@ -889,6 +906,20 @@ class AgentLoop:
             except Exception as exc:
                 logger.warning("Tool %s failed: %s", tc.name, exc)
                 err = self._normalize_tool_error(exc)
+                # Enrich INVALID_ARGS errors with the tool's required params
+                if err.type == ToolErrorType.INVALID_ARGS and spec is not None:
+                    required = spec.parameters.get("required", [])
+                    props = spec.parameters.get("properties", {})
+                    if required:
+                        param_hints = ", ".join(
+                            f"`{p}` ({props.get(p, {}).get('type', '?')})"
+                            for p in required
+                        )
+                        err = ToolExecutionError(
+                            type=err.type,
+                            message=f"{err.message}. Required params: {param_hints}",
+                            safe_to_retry=True,
+                        )
                 envelope = ToolResultEnvelope(
                     call_id=call.call_id,
                     tool=call.tool,
@@ -977,7 +1008,7 @@ class AgentLoop:
                 return ToolExecutionError(
                     type=ToolErrorType.INVALID_ARGS,
                     message=msg,
-                    safe_to_retry=False,
+                    safe_to_retry=True,
                 )
         if isinstance(exc, PermissionError):
             return ToolExecutionError(

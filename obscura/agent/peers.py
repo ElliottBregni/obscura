@@ -37,6 +37,17 @@ class RemoteAgentRef(BaseModel):
     description: str = ""
 
 
+class UnixSocketAgentRef(BaseModel):
+    """Reference to an agent reachable via Unix domain socket."""
+
+    kind: Literal["unix_socket"] = "unix_socket"
+    socket_path: str
+    name: str = ""
+    status: str = "configured"
+    capabilities: tuple[str, ...] = ()
+    description: str = ""
+
+
 def _default_local_refs() -> list[AgentRef]:
     return []
 
@@ -45,11 +56,18 @@ def _default_remote_refs() -> list[RemoteAgentRef]:
     return []
 
 
+def _default_unix_socket_refs() -> list[UnixSocketAgentRef]:
+    return []
+
+
 class PeerCatalog(BaseModel):
-    """Unified catalog containing local and remote peers."""
+    """Unified catalog containing local, remote, and Unix socket peers."""
 
     local: list[AgentRef] = Field(default_factory=_default_local_refs)
     remote: list[RemoteAgentRef] = Field(default_factory=_default_remote_refs)
+    unix_socket: list[UnixSocketAgentRef] = Field(
+        default_factory=_default_unix_socket_refs
+    )
 
 
 class PeerInvocationEnvelope(BaseModel):
@@ -88,6 +106,25 @@ class PeerRegistry:
         """Resolve a target AgentRef or agent_id string to a local Agent."""
         target_id = target.agent_id if isinstance(target, AgentRef) else str(target)
         return self._runtime.get_agent(target_id)
+
+    async def discover_unix_socket(
+        self,
+        paths: list[str],
+    ) -> list[UnixSocketAgentRef]:
+        """Return Unix socket peer refs, checking that each socket exists."""
+        import os
+
+        refs: list[UnixSocketAgentRef] = []
+        for path in paths:
+            status = "available" if os.path.exists(path) else "unavailable"
+            refs.append(
+                UnixSocketAgentRef(
+                    socket_path=path,
+                    name=os.path.basename(path).removesuffix(".sock"),
+                    status=status,
+                )
+            )
+        return refs
 
     async def discover_remote(
         self,

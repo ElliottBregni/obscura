@@ -24,6 +24,10 @@ from urllib import request as url_request
 
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
+from obscura.tools.system.delegation import (
+    build_agent_cards_section,
+    build_delegate_tool_spec,
+)
 from obscura.tools.system.intelligence import (
     causal_trace,
     context_snapshot,
@@ -114,9 +118,26 @@ def _is_cwd_allowed(cwd: str) -> bool:
 
 
 def _resolve_path(path: str) -> Path:
+    """Resolve a tool-provided file path.
+
+    Absolute paths and ``~/`` paths are used as-is.  Relative paths are
+    resolved against ``~/.obscura/output/`` (NOT the working directory)
+    so that agent-generated files land in the Obscura data directory
+    instead of polluting the project tree.
+
+    Set ``OBSCURA_TOOLS_RELATIVE_TO_CWD=1`` to restore the old cwd
+    behaviour when explicitly desired.
+    """
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
+        import os
+        if os.environ.get("OBSCURA_TOOLS_RELATIVE_TO_CWD", "").lower() in (
+            "1", "true", "yes",
+        ):
+            candidate = Path.cwd() / candidate
+        else:
+            from obscura.core.paths import resolve_obscura_output_dir
+            candidate = resolve_obscura_output_dir() / candidate
     return candidate.resolve()
 
 

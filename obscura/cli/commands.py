@@ -27,7 +27,12 @@ from obscura.core.context_window import estimate_tokens as _cw_estimate_tokens
 from obscura.core.client import ObscuraClient
 from obscura.cli import trace as trace_mod
 from obscura.cli.control_commands import cmd_heartbeat, cmd_policies, cmd_replay, cmd_status
-from obscura.core.context_lazy import LazySkillLoader, SkillMetadata
+from obscura.core.context_lazy import (
+    LazyCommandLoader,
+    LazySkillLoader,
+    ResolvedCommand,
+    SkillMetadata,
+)
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
 from obscura.core.paths import resolve_obscura_skills_dir
 from obscura.core.types import AgentEventKind, Backend, SessionRef
@@ -219,6 +224,9 @@ class REPLContext:
     _lazy_skill_loader: LazySkillLoader | None = field(default=None, repr=False)
     active_skills: list[str] = field(default_factory=list)
 
+    # @command state (lazy-loaded from ~/.obscura/commands/ + ~/.claude/commands/)
+    _lazy_command_loader: LazyCommandLoader | None = field(default=None, repr=False)
+
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self._mode_manager is None:
@@ -384,6 +392,24 @@ class REPLContext:
             return ""
         return "## Active Slash Skills\n\n" + "\n\n".join(blocks)
 
+    # ── @command helpers ──────────────────────────────────────────────────
+
+    def _get_command_loader(self) -> LazyCommandLoader:
+        """Get or create the lazy @command loader."""
+        if self._lazy_command_loader is None:
+            from obscura.core.paths import resolve_all_commands_dirs
+
+            self._lazy_command_loader = LazyCommandLoader(resolve_all_commands_dirs())
+        return self._lazy_command_loader
+
+    def discover_at_commands(self) -> list[str]:
+        """Return sorted list of available @command names."""
+        return self._get_command_loader().command_names()
+
+    def resolve_at_command(self, name: str, arguments: str = "") -> ResolvedCommand | None:
+        """Resolve an @command by name with argument substitution."""
+        return self._get_command_loader().resolve_command(name, arguments)
+
 
 # ---------------------------------------------------------------------------
 # Command type
@@ -409,7 +435,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  [cyan]/backend[/] [name]      Show or switch backend (copilot, claude, codex)",
         "  [cyan]/model[/] [name]        Show or switch model",
         "  [cyan]/system[/] <prompt>     Set system prompt",
-        "  [cyan]/tools[/] [on|off|list] Show, toggle, or list tools",
+        "  [cyan]/tools[/] [cmd]         on | off | list | enable | disable",
         "  [cyan]/confirm[/] [on|off]    Tool approval gates",
         "",
         " [bold]Modes[/]",
@@ -441,9 +467,12 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         " [bold]Control[/]",
         "  [cyan]/heartbeat[/]           Session health check (no LLM)",
         "  [cyan]/status[/]              Alias for /heartbeat",
-        "  [cyan]/tools[/] [on|off|list] Show, toggle, or list tools",
+        "  [cyan]/tools[/] [cmd]         on | off | list | enable | disable",
         "  [cyan]/policies[/]            List policy versions",
         "  [cyan]/replay[/] <run_id>     Replay supervisor run events",
+        "",
+        " [bold]Utility[/]",
+        "  [cyan]/cat[/] <path>          Display file contents",
     ]
     console.print("\n".join(lines))
     return None
@@ -457,6 +486,55 @@ async def cmd_quit(_args: str, _ctx: REPLContext) -> str | None:
 async def cmd_clear(_args: str, _ctx: REPLContext) -> str | None:
     """Clear the terminal."""
     console.clear()
+    return None
+
+
+async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
+    """Display file contents with syntax highlighting. Usage: /cat <path>"""
+    filepath = args.strip()
+    if not filepath:
+        print_error("Usage: /cat <path>")
+        return None
+
+    target = Path(filepath).expanduser().resolve()
+    if not target.exists():
+        print_error(f"File not found: {target}")
+        return None
+    if not target.is_file():
+        print_error(f"Not a file: {target}")
+        return None
+
+    try:
+        data = target.read_bytes()
+    except PermissionError:
+        print_error(f"Permission denied: {target}")
+        return None
+
+    # Detect binary files
+    if b"\x00" in data[:8192]:
+        print_error(f"Binary file: {target}")
+        return None
+
+    text = data.decode("utf-8", errors="replace")
+
+    # Use Rich Syntax for highlighting based on file extension
+    from rich.syntax import Syntax
+
+    suffix = target.suffix.lstrip(".")
+    lexer = suffix if suffix else "text"
+    try:
+        syntax = Syntax(
+            text,
+            lexer,
+            theme="monokai",
+            line_numbers=True,
+            word_wrap=False,
+        )
+        console.print(syntax)
+    except Exception:
+        # Fallback to plain text if lexer not found
+        console.print(text)
+
     return None
 
 
@@ -530,38 +608,64 @@ async def cmd_system(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
-    """Show or toggle tool calling."""
-    val = args.strip().lower()
-    if not val:
+    """Show, toggle, enable, or disable tools."""
+    val = args.strip()
+    parts = val.split(None, 1)
+    sub = parts[0].lower() if parts else ""
+    sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if not sub:
         print_info(f"Tools: {'on' if ctx.tools_enabled else 'off'}")
         return None
-    if val == "on":
+
+    if sub == "on":
         ctx.tools_enabled = True
         print_ok("Tools enabled.")
-    elif val == "off":
+    elif sub == "off":
         ctx.tools_enabled = False
         print_ok("Tools disabled.")
-    elif val == "list":
+    elif sub == "list":
         try:
-            tools = ctx.client.list_tools()
+            registry = ctx.client._tool_registry  # noqa: SLF001
+            tools = registry.all_including_disabled()
             if not tools:
                 print_info("No tools registered.")
                 return None
             from obscura.cli.render import TOOL_COLOR
             table = Table(title="Registered Tools", expand=False)
             table.add_column("#", justify="right", style="dim", width=4)
+            table.add_column("status", width=3, justify="center")
             table.add_column("name", style=TOOL_COLOR, no_wrap=True)
-            table.add_column("description", max_width=60)
+            table.add_column("description", max_width=55)
             for i, t in enumerate(tools, 1):
                 desc = getattr(t, "description", "") or ""
-                if len(desc) > 60:
-                    desc = desc[:57] + "..."
-                table.add_row(str(i), t.name, desc)
+                if len(desc) > 55:
+                    desc = desc[:52] + "..."
+                status = "[red]off[/]" if registry.is_disabled(t.name) else "[green]on[/]"
+                table.add_row(str(i), status, t.name, desc)
             console.print(table)
         except Exception as exc:
             print_error(f"Failed to list tools: {exc}")
+    elif sub == "enable":
+        if not sub_arg:
+            print_error("Usage: /tools enable <name>")
+            return None
+        registry = ctx.client._tool_registry  # noqa: SLF001
+        if registry.enable(sub_arg):
+            print_ok(f"Tool enabled: {sub_arg}")
+        else:
+            print_error(f"Tool not found or already enabled: {sub_arg}")
+    elif sub == "disable":
+        if not sub_arg:
+            print_error("Usage: /tools disable <name>")
+            return None
+        registry = ctx.client._tool_registry  # noqa: SLF001
+        if registry.disable(sub_arg):
+            print_ok(f"Tool disabled: {sub_arg}")
+        else:
+            print_error(f"Tool not found: {sub_arg}")
     else:
-        print_error("Usage: /tools [on|off|list]")
+        print_error("Usage: /tools [on|off|list|enable <name>|disable <name>]")
     return None
 
 
@@ -3909,6 +4013,8 @@ COMMANDS: dict[str, CommandHandler] = {
     "replay": cmd_replay,
     "running": cmd_running,
     "kill": cmd_kill,
+    # Utility
+    "cat": cmd_cat,
 }
 
 # Subcommand completions for readline tab-complete
@@ -3921,7 +4027,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "backend": ["copilot", "claude", "codex"],
     "model": [],
     "system": [],
-    "tools": ["on", "off", "list"],
+    "tools": ["on", "off", "list", "enable", "disable"],
     "confirm": ["on", "off"],
     "mode": ["ask", "plan", "code"],
     "plan": [],
@@ -3953,6 +4059,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "policies": [],
     "replay": [],
     "running": [],
+    "cat": [],
 }
 
 

@@ -39,9 +39,14 @@ You must not:
 All persistent state for this system lives under ~/.obscura/.
 
 When storing or retrieving persistent data:
-- Prefer ~/.obscura locations.
+- Prefer ~/.obscura/ locations.
 - Do not create alternate control-plane directories.
 - Do not rely on provider-specific directories (e.g., ~/.claude).
+
+When writing files (reports, exports, generated content):
+- Use absolute paths under ~/.obscura/output/ for generated files.
+- NEVER write to the current working directory unless the user explicitly asks.
+- Relative paths automatically resolve to ~/.obscura/output/, not cwd.
 
 ## Behavior
 

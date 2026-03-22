@@ -10,10 +10,15 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --extra server --extra telemetry
 
+# Install only third-party dependencies (not the project itself).
+# This layer is cached as long as pyproject.toml and uv.lock are unchanged.
+RUN uv sync --frozen --no-dev --no-install-project --extra server --extra telemetry
+
+# Now copy source and install the project (fast — deps already cached).
 COPY obscura/ obscura/
 COPY scripts/ scripts/
+RUN uv sync --frozen --no-dev --extra server --extra telemetry
 
 # Stage 2: Runtime — minimal image with only the venv + app code
 FROM python:3.13.5-slim AS runtime

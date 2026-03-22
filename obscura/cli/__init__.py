@@ -1148,6 +1148,7 @@ async def _repl(
             COMPLETIONS,
             streaming_status=ss,
             prompt_status=prompt_status,
+            at_command_names=ctx.discover_at_commands,
         )
 
         # Background spinner animation for the toolbar
@@ -1204,6 +1205,26 @@ async def _repl(
                     if result == "quit":
                         break
                     continue
+
+                # @command — resolve markdown command and send to LLM
+                if user_input.startswith("@"):
+                    stripped = user_input.lstrip("@").strip()
+                    parts = stripped.split(None, 1)
+                    cmd_name = parts[0] if parts else ""
+                    cmd_args = parts[1] if len(parts) > 1 else ""
+
+                    resolved = ctx.resolve_at_command(cmd_name, cmd_args)
+                    if resolved is None:
+                        from obscura.cli.render import print_error as _pe
+
+                        _pe(f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}")
+                        continue
+
+                    from obscura.cli.render import print_info as _pi
+
+                    _pi(f"@{resolved.name}: {resolved.description}")
+                    # Fall through to send_message with resolved body as user_input
+                    user_input = resolved.body
 
                 # Rebuild loop_kwargs in case tools were toggled
                 if not ctx.tools_enabled:

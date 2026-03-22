@@ -751,7 +751,7 @@ class TestToolErrorNormalization:
             TypeError("run_python3() missing 1 required positional argument: 'code'")
         )
         assert err.type == ToolErrorType.INVALID_ARGS
-        assert err.safe_to_retry is False
+        assert err.safe_to_retry is True
 
     def test_timeout_maps_to_timeout_retryable(self) -> None:
         err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]

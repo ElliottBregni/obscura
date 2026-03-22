@@ -596,6 +596,21 @@ class Agent:
         except Exception as exc:
             logger.debug("Could not register spawn_subagent tool: %s", exc)
 
+        # Delegation tool — enum-constrained agent invocation
+        if self.config.can_delegate:
+            try:
+                from obscura.tools.system.delegation import (
+                    build_delegate_tool_spec,
+                )
+
+                delegate_spec = build_delegate_tool_spec(
+                    runtime=self.runtime,
+                    peer_registry=self.runtime.peer_registry,
+                )
+                broker.register_tool_spec(delegate_spec)
+            except Exception as exc:
+                logger.debug("Could not register delegate_to_agent tool: %s", exc)
+
         self._broker = broker
         self._providers = providers
         self._broker_context = ctx
@@ -1217,6 +1232,30 @@ class AgentRuntime:
     def peer_registry(self) -> PeerRegistry:
         """Registry for local peer discovery and resolution."""
         return self._peer_registry
+
+    def refresh_delegation_tool(self, agent_id: str) -> None:
+        """Rebuild the delegate_to_agent tool spec with fresh peer data.
+
+        Call this when agents start or stop so the enum stays current.
+        """
+        agent = self.get_agent(agent_id)
+        if agent is None or not agent.config.can_delegate:
+            return
+        broker = getattr(agent, "_broker", None)
+        client = getattr(agent, "_client", None)
+        if broker is None or client is None:
+            return
+        try:
+            from obscura.tools.system.delegation import build_delegate_tool_spec
+
+            new_spec = build_delegate_tool_spec(
+                runtime=self,
+                peer_registry=self._peer_registry,
+            )
+            broker.register_tool_spec(new_spec)
+            client.register_tool(new_spec)
+        except Exception as exc:
+            logger.debug("Could not refresh delegate_to_agent tool: %s", exc)
 
     def set_lifecycle_hook(self, hook: RuntimeLifecycleHook | None) -> None:
         """Set or clear lifecycle hook used for runtime and agent events."""

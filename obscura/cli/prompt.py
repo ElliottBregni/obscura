@@ -14,6 +14,7 @@ import shutil
 import os
 import subprocess
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import override
 
 from prompt_toolkit import PromptSession
@@ -196,16 +197,34 @@ def print_status_banner(status: PromptStatus) -> None:
 
 
 class SlashCommandCompleter(Completer):
-    """Tab-complete /commands and their subcommands from COMPLETIONS dict."""
+    """Tab-complete /commands, their subcommands, and @commands."""
 
-    def __init__(self, completions: dict[str, list[str]]) -> None:
+    def __init__(
+        self,
+        completions: dict[str, list[str]],
+        at_command_names: Callable[[], list[str]] | None = None,
+    ) -> None:
         self._completions = completions
+        self._at_command_names = at_command_names
 
     @override
     def get_completions(
         self, document: Document, complete_event: CompleteEvent
     ) -> list[Completion]:
         text = document.text_before_cursor.lstrip()
+
+        # @command completion
+        if text.startswith("@") and self._at_command_names is not None:
+            prefix = text[1:]  # strip leading "@"
+            for name in self._at_command_names():
+                if name.startswith(prefix):
+                    yield Completion(
+                        "@" + name,
+                        start_position=-len(text),
+                        display="@" + name,
+                    )
+            return
+
         if not text.startswith("/"):
             return []
 
@@ -416,6 +435,7 @@ def create_prompt_session(
     toolbar_text: str = "",
     streaming_status: StreamingStatus | None = None,
     prompt_status: PromptStatus | None = None,
+    at_command_names: Callable[[], list[str]] | None = None,
 ) -> PromptSession[str]:
     """Create a configured PromptSession for the Obscura REPL."""
     # Ensure the Obscura home directory exists so FileHistory can write.
@@ -467,7 +487,7 @@ def create_prompt_session(
         style=PROMPT_STYLE,
         history=FileHistory(str(history_path)),
         auto_suggest=AutoSuggestFromHistory(),
-        completer=SlashCommandCompleter(completions),
+        completer=SlashCommandCompleter(completions, at_command_names=at_command_names),
         complete_while_typing=False,
         key_bindings=_make_key_bindings(os.environ.get("OBSCURA_EXPAND_PREVIEW_KEY", "c-p")),
         enable_history_search=True,

@@ -7,6 +7,7 @@ Used by the main ``create_app()`` to register A2A endpoints.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -33,6 +34,9 @@ class ObscuraA2AServer:
         Default model for spawned agents.
     agent_system_prompt:
         Default system prompt for spawned agents.
+    unix_socket_path:
+        Optional path for a Unix domain socket transport. If set, a socket
+        server is started alongside HTTP transports.
     """
 
     def __init__(
@@ -46,6 +50,7 @@ class ObscuraA2AServer:
         name: str = "Obscura Agent",
         url: str = "http://localhost:8080",
         description: str = "",
+        unix_socket_path: str | None = None,
     ) -> None:
         self._store: TaskStore = store or InMemoryTaskStore()
         self._agent_card = (
@@ -68,6 +73,9 @@ class ObscuraA2AServer:
             agent_system_prompt=agent_system_prompt,
         )
 
+        self._unix_socket_path = unix_socket_path
+        self._unix_socket_server: asyncio.Server | None = None
+
     @property
     def service(self) -> A2AService:
         return self._service
@@ -81,17 +89,65 @@ class ObscuraA2AServer:
         return self._agent_card
 
     async def startup(self) -> None:
-        """Connect resources (e.g., Redis)."""
+        """Connect resources (e.g., Redis, Unix socket)."""
         from obscura.integrations.a2a.store import RedisTaskStore
 
         if isinstance(self._store, RedisTaskStore):
             await self._store.connect()
+
+        if self._unix_socket_path:
+            await self.start_unix_socket()
+
         logger.info("A2A server started")
 
     async def shutdown(self) -> None:
         """Disconnect resources."""
         from obscura.integrations.a2a.store import RedisTaskStore
 
+        if self._unix_socket_server is not None:
+            await self.stop_unix_socket()
+
         if isinstance(self._store, RedisTaskStore):
             await self._store.disconnect()
         logger.info("A2A server stopped")
+
+    async def start_unix_socket(
+        self,
+        socket_path: str | None = None,
+    ) -> asyncio.Server:
+        """Start a Unix domain socket transport for the A2A service.
+
+        Parameters
+        ----------
+        socket_path:
+            Override the socket path set in ``__init__``.
+
+        Returns
+        -------
+        asyncio.Server
+            The running Unix socket server.
+        """
+        from obscura.integrations.a2a.transports.unix_socket import (
+            start_unix_socket_server,
+        )
+
+        path = socket_path or self._unix_socket_path or "/tmp/obscura-a2a.sock"
+        self._unix_socket_path = path
+        self._unix_socket_server = await start_unix_socket_server(
+            self._service, path
+        )
+        return self._unix_socket_server
+
+    async def stop_unix_socket(self) -> None:
+        """Stop the Unix domain socket transport."""
+        if self._unix_socket_server is None:
+            return
+        from obscura.integrations.a2a.transports.unix_socket import (
+            stop_unix_socket_server,
+        )
+
+        await stop_unix_socket_server(
+            self._unix_socket_server,
+            self._unix_socket_path or "/tmp/obscura-a2a.sock",
+        )
+        self._unix_socket_server = None
