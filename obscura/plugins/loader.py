@@ -115,6 +115,80 @@ def _resolve_handler(ref: str) -> Any | None:
         return None
 
 
+# Runtime types whose tools are served externally (not via Python handlers).
+_EXTERNAL_RUNTIME_TYPES = frozenset({"mcp", "grpc", "docker", "service"})
+
+
+def _resolve_handler_from_plugin_module(
+    tool_name: str,
+    plugin_spec: Any,
+) -> Any | None:
+    """Resolve a tool handler from a plugin's ``bootstrap.tools_module``.
+
+    When a plugin declares ``tools_module`` (e.g. ``"tools.tools"``) and
+    ``tools_list`` (e.g. ``"TOOL_SPECS"``), we import that module relative
+    to the plugin's source directory and look up the tool by name.
+
+    Returns the callable handler or ``None`` on failure.
+    """
+    import sys
+
+    bootstrap = getattr(plugin_spec, "bootstrap", None)
+    if not bootstrap:
+        return None
+    tools_module = getattr(bootstrap, "tools_module", "")
+    if not tools_module:
+        return None
+    source_dir = getattr(plugin_spec, "source_dir", None)
+    if not source_dir:
+        return None
+
+    source_str = str(source_dir)
+    added = source_str not in sys.path
+    if added:
+        sys.path.insert(0, source_str)
+
+    # Evict cached modules so each plugin gets a fresh import.
+    # Multiple plugins may use the same relative module name (e.g. "tools.tools").
+    parts = tools_module.split(".")
+    evicted: dict[str, Any] = {}
+    for i in range(len(parts)):
+        key = ".".join(parts[: i + 1])
+        if key in sys.modules:
+            evicted[key] = sys.modules.pop(key)
+
+    try:
+        mod = importlib.import_module(tools_module)
+        # First try: tool_name is a module-level function
+        handler = getattr(mod, tool_name, None)
+        if handler is not None:
+            return handler
+        # Second try: tools_list is a dict mapping name → handler
+        tools_list_attr = getattr(bootstrap, "tools_list", "")
+        if tools_list_attr:
+            spec_map = getattr(mod, tools_list_attr, None)
+            if isinstance(spec_map, dict) and tool_name in spec_map:
+                return spec_map[tool_name]
+        return None
+    except Exception as exc:
+        logger.debug(
+            "Failed to resolve tool %s from plugin module %s: %s",
+            tool_name, tools_module, exc,
+        )
+        return None
+    finally:
+        # Remove freshly imported modules and restore previous state
+        for i in range(len(parts)):
+            key = ".".join(parts[: i + 1])
+            sys.modules.pop(key, None)
+        sys.modules.update(evicted)
+        if added:
+            try:
+                sys.path.remove(source_str)
+            except ValueError:
+                pass
+
+
 # ---------------------------------------------------------------------------
 # Plugin Loader
 # ---------------------------------------------------------------------------
@@ -283,12 +357,25 @@ class PluginLoader:
                     return status
 
         # 4. Register tools directly on broker
+        #    MCP/service/docker/grpc plugins serve tools externally — skip.
+        if spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
+            status.state = "enabled"
+            status.enabled = True
+            self._specs.append(spec)
+            logger.info(
+                "Plugin %s (%s) loaded: %d tools declared (served externally)",
+                spec.id, spec.runtime_type, len(spec.tools),
+            )
+            return status
+
         try:
             from obscura.core.types import ToolSpec
 
             registered_count = 0
             for tool_contrib in spec.tools:
                 handler = _resolve_handler(tool_contrib.handler_ref)
+                if handler is None:
+                    handler = _resolve_handler_from_plugin_module(tool_contrib.name, spec)
                 if handler is None:
                     logger.warning(
                         "Plugin %s: could not resolve handler for tool %s (%s)",
@@ -489,8 +576,12 @@ def get_all_builtin_tool_specs() -> list[Any]:
 
     specs: list[Any] = []
     for plugin_spec in all_plugin_specs:
+        if plugin_spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
+            continue
         for tool in plugin_spec.tools:
             handler = _resolve_handler(tool.handler_ref)
+            if handler is None:
+                handler = _resolve_handler_from_plugin_module(tool.name, plugin_spec)
             if handler is None:
                 logger.debug(
                     "Skipping unresolvable tool %s (%s)",
@@ -531,8 +622,12 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
     specs: list[Any] = []
     skipped: list[tuple[str, str]] = []
     for plugin_spec in all_plugin_specs:
+        if plugin_spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
+            continue
         for tool in plugin_spec.tools:
             handler = _resolve_handler(tool.handler_ref)
+            if handler is None:
+                handler = _resolve_handler_from_plugin_module(tool.name, plugin_spec)
             if handler is None:
                 logger.debug(
                     "Skipping unresolvable tool %s (%s)",

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -97,6 +98,8 @@ class BootstrapSpec:
     deps: tuple[BootstrapDep, ...] = field(default_factory=tuple)
     post_install: str = ""     # optional shell command to run after deps installed
     check_command: str = ""    # command to verify bootstrap succeeded (e.g. "gws --version")
+    tools_module: str = ""     # relative module path with tool handlers (e.g. "tools.tools")
+    tools_list: str = ""       # attribute in tools_module exporting specs (e.g. "TOOL_SPECS")
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +289,7 @@ class PluginSpec:
     trust_level: str = "community"                          # TRUST_LEVELS
     author: str = ""
     description: str = ""
+    source_dir: Path | None = None                          # directory containing the manifest
 
     # Config
     config_requirements: tuple[ConfigRequirement, ...] = field(default_factory=tuple)

@@ -342,11 +342,23 @@ class ToolRegistry:
         return self._tools.get(canonical)
 
     def all(self) -> list[ToolSpec]:
-        return [t for t in self._tools.values() if t.name not in self._disabled]
+        seen: set[str] = set()
+        result: list[ToolSpec] = []
+        for t in self._tools.values():
+            if t.name not in self._disabled and t.name not in seen:
+                seen.add(t.name)
+                result.append(t)
+        return result
 
     def all_including_disabled(self) -> list[ToolSpec]:
         """Return every registered tool, including disabled ones."""
-        return list(self._tools.values())
+        seen: set[str] = set()
+        result: list[ToolSpec] = []
+        for t in self._tools.values():
+            if t.name not in seen:
+                seen.add(t.name)
+                result.append(t)
+        return result
 
     def names(self) -> list[str]:
         return [n for n in self._tools.keys() if n not in self._disabled]
@@ -365,11 +377,17 @@ class ToolRegistry:
         """
         if tier_value == "privileged":
             return self.all()
-        return [
-            t for t in self._tools.values()
-            if t.name not in self._disabled
-            and getattr(t, "required_tier", None) in (None, "public")
-        ]
+        seen: set[str] = set()
+        result: list[ToolSpec] = []
+        for t in self._tools.values():
+            if (
+                t.name not in self._disabled
+                and t.name not in seen
+                and getattr(t, "required_tier", None) in (None, "public")
+            ):
+                seen.add(t.name)
+                result.append(t)
+        return result
 
     def names_for_tier(self, tier_value: str) -> list[str]:
         """Return tool names accessible at *tier_value*."""

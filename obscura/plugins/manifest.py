@@ -259,6 +259,8 @@ def _parse_bootstrap(
         deps=tuple(deps),
         post_install=raw.get("post_install", ""),
         check_command=raw.get("check_command", ""),
+        tools_module=raw.get("tools_module", ""),
+        tools_list=raw.get("tools_list", ""),
     )
 
 
@@ -290,6 +292,7 @@ def parse_manifest(
             trust_level=data.get("trust_level", "community"),
             author=data.get("author", ""),
             description=data.get("description", ""),
+            source_dir=source_path.parent if source_path else None,
             config_requirements=_parse_config_requirements(data.get("config")),
             capabilities=_parse_capabilities(data.get("capabilities")),
             tools=_parse_tools(data.get("tools")),

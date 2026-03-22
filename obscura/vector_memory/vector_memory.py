@@ -77,8 +77,26 @@ def _make_default_embedding_fn(dim: int = 384):
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore[import]
         import logging as _logging
+        import os as _os
         _log = _logging.getLogger(__name__)
+        # Suppress noisy model loading output (position_ids warning, progress bars, HF auth)
+        _env_overrides = {
+            "TRANSFORMERS_VERBOSITY": "error",
+            "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+            "HF_HUB_VERBOSITY": "error",
+        }
+        _prev_env = {k: _os.environ.get(k) for k in _env_overrides}
+        _os.environ.update(_env_overrides)
+        for _logger_name in ("transformers", "sentence_transformers", "huggingface_hub"):
+            _logging.getLogger(_logger_name).setLevel(_logging.ERROR)
         _model = SentenceTransformer("all-MiniLM-L6-v2")
+        for _logger_name in ("transformers", "sentence_transformers", "huggingface_hub"):
+            _logging.getLogger(_logger_name).setLevel(_logging.WARNING)
+        for k, v in _prev_env.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
         _log.info("vector_memory: using sentence-transformers/all-MiniLM-L6-v2 for embeddings")
         def _st_embed(text: str) -> list[float]:
             return _model.encode(text, normalize_embeddings=True).tolist()

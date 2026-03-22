@@ -542,30 +542,35 @@ class CopilotBackend:
                         result: Any = handler(**args)
                         if _inspect.isawaitable(result):
                             result = await result
-                        # Normalize to SDK ToolResult dataclass
+                        # Normalize to SDK ToolResult (camelCase fields)
                         if isinstance(result, CopilotToolResult):
                             return result
                         text = str(result) if result is not None else ""
                         return CopilotToolResult(
-                            text_result_for_llm=text,
-                            result_type="success",
+                            textResultForLlm=text,
+                            resultType="success",
                         )
                     except Exception as exc:
                         return CopilotToolResult(
-                            text_result_for_llm=f"Tool error: {exc}",
-                            result_type="failure",
+                            textResultForLlm=f"Tool error: {exc}",
+                            resultType="failure",
                             error=str(exc),
                         )
 
                 return wrapped
 
+            # Ensure parameters is always a valid JSON Schema object —
+            # the Copilot SDK crashes with .map() on undefined if None.
+            params = spec.parameters if spec.parameters else {
+                "type": "object",
+                "properties": {},
+            }
             converted.append(
                 Tool(
                     name=self._sanitize_tool_name(spec.name),
                     description=spec.description,
                     handler=_wrapper_factory(_handler),
-                    parameters=spec.parameters if spec.parameters else None,
-                    overrides_built_in_tool=True,
+                    parameters=params,
                 )
             )
         return converted
@@ -577,8 +582,12 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
-        from copilot.types import PermissionHandler
-        config["on_permission_request"] = PermissionHandler.approve_all
+        from copilot.types import PermissionRequest, PermissionRequestResult
+
+        def _approve_all(request: PermissionRequest, _context: dict[str, str]) -> PermissionRequestResult:
+            return PermissionRequestResult(kind="approved", rules=[])
+
+        config["on_permission_request"] = _approve_all
 
         if self._model:
             config["model"] = self._model

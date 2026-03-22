@@ -48,6 +48,7 @@ from obscura.cli.render import (
     console,
     print_error,
     print_banner,
+    print_ok,
     print_warning,
     render_plan,
 )
