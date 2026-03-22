@@ -150,6 +150,30 @@ def resolve_all_evals_dirs(cwd: Path | None = None) -> list[Path]:
     return _merge_order_dirs(local, global_, "evals")
 
 
+def resolve_all_skills_dirs(cwd: Path | None = None) -> list[Path]:
+    """Return skill directories: obscura (global + local) then ~/.claude/skills/.
+
+    Deduplicates and only returns directories that exist on disk.
+    """
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+
+    local, global_ = resolve_all_obscura_homes(cwd)
+    for parent in (global_, local):
+        skill_dir = parent / "skills"
+        resolved = skill_dir.resolve()
+        if skill_dir.is_dir() and resolved not in seen:
+            dirs.append(skill_dir)
+            seen.add(resolved)
+
+    claude_skills = Path.home() / ".claude" / "skills"
+    if claude_skills.is_dir() and claude_skills.resolve() not in seen:
+        dirs.append(claude_skills)
+        seen.add(claude_skills.resolve())
+
+    return dirs
+
+
 def resolve_obscura_commands_dir(cwd: Path | None = None) -> Path:
     """Resolve directory containing markdown command documents."""
     return resolve_obscura_home(cwd) / "commands"

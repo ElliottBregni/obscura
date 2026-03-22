@@ -33,6 +33,7 @@ from obscura.tools.system.intelligence import (
     context_snapshot,
     policy_probe,
 )
+from obscura.tools.system.team_prompt import read_team_prompt
 
 def _strip_html(raw: str) -> str:
     """Strip HTML tags and decode entities, returning plain text."""
@@ -2978,6 +2979,8 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast(ToolSpec, getattr(cast(Any, context_snapshot), "spec")),
         cast(ToolSpec, getattr(cast(Any, causal_trace), "spec")),
         cast(ToolSpec, getattr(cast(Any, policy_probe), "spec")),
+        # Team prompt
+        cast(ToolSpec, getattr(cast(Any, read_team_prompt), "spec")),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():

@@ -179,10 +179,12 @@ class CommandMetadata:
         self,
         name: str,
         description: str,
-        path: Path,
+        path: Path | None = None,
         argument_hint: str = "",
         allowed_tools: list[str] | None = None,
         model: str | None = None,
+        *,
+        builtin_content: str | None = None,
     ):
         self.name = name
         self.description = description
@@ -190,6 +192,7 @@ class CommandMetadata:
         self.argument_hint = argument_hint
         self.allowed_tools = allowed_tools or []
         self.model = model
+        self.builtin_content = builtin_content
 
 
 class ResolvedCommand:
@@ -215,10 +218,11 @@ class LazyCommandLoader:
         self._discovered = False
 
     def discover_commands(self) -> list[CommandMetadata]:
-        """Scan all command directories and return metadata."""
+        """Scan all command directories and built-in defaults, return metadata."""
         if self._discovered:
             return list(self._metadata_cache.values())
 
+        # 1. On-disk commands (user directories take precedence)
         for cmd_dir in self._command_dirs:
             if not cmd_dir.is_dir():
                 continue
@@ -226,8 +230,8 @@ class LazyCommandLoader:
                 if not cmd_file.is_file():
                     continue
                 name = cmd_file.stem
-                if name in self._metadata_cache:
-                    continue  # earlier directory wins
+                if name.upper() == "README" or name in self._metadata_cache:
+                    continue
 
                 try:
                     raw = cmd_file.read_text(encoding="utf-8").strip()
@@ -249,6 +253,33 @@ class LazyCommandLoader:
                 except Exception as e:
                     logger.warning("Failed to load command metadata from %s: %s", cmd_file, e)
 
+        # 2. Built-in defaults (only if not already overridden by on-disk)
+        try:
+            from obscura.core._default_commands import DEFAULT_COMMANDS
+        except ImportError:
+            DEFAULT_COMMANDS = {}
+
+        for filename, content in DEFAULT_COMMANDS.items():
+            name = filename.removesuffix(".md")
+            if name in self._metadata_cache:
+                continue  # on-disk version takes precedence
+
+            try:
+                result = parse_frontmatter(content.strip())
+                meta = result.metadata
+                cmd_meta = CommandMetadata(
+                    name=name,
+                    description=str(meta.get("description", "")),
+                    argument_hint=str(meta.get("argument-hint", meta.get("argument_hint", ""))),
+                    allowed_tools=meta.get("allowed-tools", meta.get("allowed_tools", [])),
+                    model=meta.get("model"),
+                    builtin_content=content.strip(),
+                )
+                self._metadata_cache[name] = cmd_meta
+                logger.debug("Loaded built-in command: %s", name)
+            except Exception as e:
+                logger.warning("Failed to load built-in command '%s': %s", name, e)
+
         self._discovered = True
         return list(self._metadata_cache.values())
 
@@ -269,7 +300,12 @@ class LazyCommandLoader:
             return None
 
         try:
-            raw = cmd.path.read_text(encoding="utf-8").strip()
+            if cmd.builtin_content is not None:
+                raw = cmd.builtin_content
+            elif cmd.path is not None:
+                raw = cmd.path.read_text(encoding="utf-8").strip()
+            else:
+                return None
             result = parse_frontmatter(raw, source_path=cmd.path)
             body = result.body
 
@@ -293,3 +329,192 @@ class LazyCommandLoader:
         """Return sorted list of discovered command names (for tab completion)."""
         self.discover_commands()
         return sorted(self._metadata_cache.keys())
+
+
+# ---------------------------------------------------------------------------
+# Eval loader
+# ---------------------------------------------------------------------------
+
+
+class EvalCase:
+    """A single test case for evaluating a command or skill."""
+
+    def __init__(
+        self,
+        name: str,
+        input_args: str,
+        criteria: list[str],
+        skills: list[str] | None = None,
+    ):
+        self.name = name
+        self.input_args = input_args
+        self.criteria = criteria
+        self.skills = skills or []
+
+
+class EvalSuite:
+    """A collection of eval cases for a command."""
+
+    def __init__(
+        self,
+        command_name: str,
+        cases: list[EvalCase],
+        runs_per_case: int = 1,
+    ):
+        self.command_name = command_name
+        self.cases = cases
+        self.runs_per_case = runs_per_case
+
+
+def parse_eval_file(content: str) -> list[EvalCase]:
+    """Parse an .eval.md file into eval cases.
+
+    Format::
+
+        ---
+        runs: 3
+        ---
+
+        ## Test: descriptive name
+        input: some arguments here
+        skills: python, security
+        criteria:
+          - First criterion
+          - Second criterion
+
+        ## Test: another test
+        input: different args
+        criteria:
+          - Must do X
+          - Must not do Y
+    """
+    result = parse_frontmatter(content.strip())
+    body = result.body
+
+    cases: list[EvalCase] = []
+    current_name = ""
+    current_input = ""
+    current_criteria: list[str] = []
+    current_skills: list[str] = []
+    in_criteria = False
+
+    def _flush() -> None:
+        if current_name and current_criteria:
+            cases.append(EvalCase(
+                name=current_name,
+                input_args=current_input,
+                criteria=list(current_criteria),
+                skills=list(current_skills),
+            ))
+
+    for line in body.splitlines():
+        stripped = line.strip()
+
+        if stripped.startswith("## Test:"):
+            _flush()
+            current_name = stripped.removeprefix("## Test:").strip()
+            current_input = ""
+            current_criteria = []
+            current_skills = []
+            in_criteria = False
+
+        elif stripped.startswith("input:"):
+            current_input = stripped.removeprefix("input:").strip()
+            in_criteria = False
+
+        elif stripped.startswith("skills:"):
+            raw = stripped.removeprefix("skills:").strip()
+            current_skills = [s.strip() for s in raw.split(",") if s.strip()]
+            in_criteria = False
+
+        elif stripped == "criteria:":
+            in_criteria = True
+
+        elif in_criteria and stripped.startswith("- "):
+            current_criteria.append(stripped.removeprefix("- ").strip())
+
+        elif in_criteria and stripped.startswith("* "):
+            current_criteria.append(stripped.removeprefix("* ").strip())
+
+    _flush()
+    return cases
+
+
+def _try_parse_eval(raw: str, cmd_name: str, source: str = "") -> EvalSuite | None:
+    """Parse raw eval content into an EvalSuite, or None on failure."""
+    try:
+        result = parse_frontmatter(raw.strip())
+        runs = int(result.metadata.get("runs", 1))
+        cases = parse_eval_file(raw)
+        if cases:
+            return EvalSuite(cmd_name, cases, runs_per_case=runs)
+    except Exception as e:
+        logger.warning("Failed to parse eval %s: %s", source, e)
+    return None
+
+
+def load_eval_for_command(cmd: CommandMetadata) -> EvalSuite | None:
+    """Load an .eval.md file for a command.
+
+    Search order:
+    1. Sibling file: ``review.eval.md`` next to ``review.md``
+    2. Evals directory: ``.obscura/evals/review.eval.md``
+    3. Built-in eval defaults
+    """
+    # 1. On-disk sibling
+    if cmd.path is not None:
+        eval_path = cmd.path.with_suffix(".eval.md")
+        if eval_path.is_file():
+            raw = eval_path.read_text(encoding="utf-8")
+            suite = _try_parse_eval(raw, cmd.name, str(eval_path))
+            if suite:
+                return suite
+
+    # 2. Evals directories (.obscura/evals/)
+    from obscura.core.paths import resolve_all_evals_dirs
+
+    for evals_dir in resolve_all_evals_dirs():
+        eval_path = evals_dir / f"{cmd.name}.eval.md"
+        if eval_path.is_file():
+            raw = eval_path.read_text(encoding="utf-8")
+            suite = _try_parse_eval(raw, cmd.name, str(eval_path))
+            if suite:
+                return suite
+
+    # 3. Built-in eval defaults
+    try:
+        from obscura.core._default_evals import DEFAULT_EVALS
+
+        if cmd.name in DEFAULT_EVALS:
+            return _try_parse_eval(DEFAULT_EVALS[cmd.name], cmd.name, "built-in")
+    except ImportError:
+        pass
+
+    return None
+
+
+EVAL_GRADING_PROMPT = """\
+You are an eval grader. You will be given:
+1. The original command and input
+2. The LLM's response
+3. A list of criteria to evaluate against
+
+For each criterion, respond with PASS or FAIL and a brief (one sentence) reason.
+Then give an overall score as a fraction (e.g., 3/5).
+
+## Command
+@{command} {input}
+
+## Response
+{response}
+
+## Criteria
+{criteria}
+
+## Output format
+| # | Criterion | Result | Reason |
+|---|-----------|--------|--------|
+| 1 | ... | PASS/FAIL | ... |
+
+**Score: X/{total}**
+"""

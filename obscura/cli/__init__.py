@@ -1149,6 +1149,7 @@ async def _repl(
             streaming_status=ss,
             prompt_status=prompt_status,
             at_command_names=ctx.discover_at_commands,
+            dollar_skill_names=ctx.discover_dollar_skills,
         )
 
         # Background spinner animation for the toolbar
@@ -1206,30 +1207,181 @@ async def _repl(
                         break
                     continue
 
-                # @command — resolve markdown command and send to LLM
-                if user_input.startswith("@"):
-                    stripped = user_input.lstrip("@").strip()
-                    parts = stripped.split(None, 1)
-                    cmd_name = parts[0] if parts else ""
-                    cmd_args = parts[1] if len(parts) > 1 else ""
-
-                    resolved = ctx.resolve_at_command(cmd_name, cmd_args)
-                    if resolved is None:
-                        from obscura.cli.render import print_error as _pe
-
-                        _pe(f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}")
-                        continue
-
+                # *eval — benchmark a command/skill chain
+                if user_input.startswith("*"):
+                    from obscura.cli.render import print_error as _pe
                     from obscura.cli.render import print_info as _pi
 
-                    _pi(f"@{resolved.name}: {resolved.description}")
-                    # Fall through to send_message with resolved body as user_input
-                    user_input = resolved.body
+                    inner = user_input[1:].strip()  # strip *
+                    if not inner:
+                        _pe("Usage: *@command [args] or *$skill @command [args]")
+                        continue
+
+                    skill_names, cmd_name, remaining = ctx.parse_chained_input(inner)
+
+                    if cmd_name is None:
+                        _pe("Eval requires an @command (e.g., *@review file.py)")
+                        continue
+
+                    # No args → run eval suite
+                    if not remaining and not skill_names:
+                        suite = ctx.get_eval_suite(cmd_name)
+                        if suite is None:
+                            _pe(f"No eval suite found for @{cmd_name}. Create {cmd_name}.eval.md next to the command.")
+                            continue
+
+                        _pi(f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)")
+                        total_pass = 0
+                        total_criteria = 0
+
+                        for case_idx, case in enumerate(suite.cases, 1):
+                            _pi(f"\n── Case {case_idx}/{len(suite.cases)}: {case.name}")
+
+                            # Build the chain input
+                            chain_blocks: list[str] = []
+                            for sname in case.skills:
+                                body = ctx.resolve_dollar_skill(sname)
+                                if body:
+                                    chain_blocks.append(body)
+
+                            resolved = ctx.resolve_at_command(cmd_name, case.input_args)
+                            if resolved is None:
+                                _pe(f"  Failed to resolve @{cmd_name}")
+                                continue
+                            chain_blocks.append(resolved.body)
+                            chain_input = "\n\n---\n\n".join(chain_blocks)
+
+                            # Enable tools if command declares allowed-tools
+                            eval_kwargs = dict(loop_kwargs)
+                            if resolved.meta.allowed_tools:
+                                eval_kwargs.pop("tool_choice", None)
+
+                            # Run the command
+                            for run in range(suite.runs_per_case):
+                                if suite.runs_per_case > 1:
+                                    _pi(f"  Run {run + 1}/{suite.runs_per_case}")
+                                response = await send_message(
+                                    ctx, chain_input, eval_kwargs, streaming_status=ss,
+                                )
+                                ss.reset()
+
+                                # Grade the response
+                                grading = ctx.build_grading_prompt(
+                                    cmd_name, case.input_args, response, case.criteria,
+                                )
+                                _pi("  Grading...")
+                                grade_response = await send_message(
+                                    ctx, grading, loop_kwargs, streaming_status=ss,
+                                )
+                                ss.reset()
+
+                                total_criteria += len(case.criteria)
+                                # Count PASSes in the grade response
+                                pass_count = grade_response.upper().count("| PASS")
+                                total_pass += pass_count
+
+                        _pi(f"\n── Eval complete: {total_pass}/{total_criteria} criteria passed")
+                        continue
+
+                    # Has args → single run + grade
+                    # Resolve the chain
+                    blocks: list[str] = []
+                    _abort = False
+                    for sname in skill_names:
+                        body = ctx.resolve_dollar_skill(sname)
+                        if body is None:
+                            _pe(f"Unknown skill: ${sname}")
+                            _abort = True
+                            break
+                        blocks.append(body)
+                    if _abort:
+                        continue
+
+                    resolved = ctx.resolve_at_command(cmd_name, remaining)
+                    if resolved is None:
+                        _pe(f"Unknown command: @{cmd_name}")
+                        continue
+                    blocks.append(resolved.body)
+                    chain_input = "\n\n---\n\n".join(blocks)
+
+                    # Enable tools if command declares allowed-tools
+                    eval_kwargs = dict(loop_kwargs)
+                    if resolved.meta.allowed_tools:
+                        eval_kwargs.pop("tool_choice", None)
+
+                    _pi(f"*@{cmd_name}: running + grading")
+
+                    # Run
+                    response = await send_message(
+                        ctx, chain_input, eval_kwargs, streaming_status=ss,
+                    )
+                    ss.reset()
+
+                    # Grade with generic criteria
+                    generic_criteria = [
+                        "Response is relevant to the command's purpose",
+                        "Response follows the command's output format",
+                        "Response is complete (not truncated or missing sections)",
+                        "Response is accurate (no hallucinated information)",
+                        "Response is actionable (provides specific, useful details)",
+                    ]
+                    grading = ctx.build_grading_prompt(
+                        cmd_name, remaining, response, generic_criteria,
+                    )
+                    _pi("Grading...")
+                    await send_message(
+                        ctx, grading, loop_kwargs, streaming_status=ss,
+                    )
+                    ss.reset()
+                    continue
+
+                # $skill / @command / chained input
+                if user_input.startswith(("$", "@")):
+                    from obscura.cli.render import print_error as _pe
+                    from obscura.cli.render import print_info as _pi
+
+                    skill_names, cmd_name, remaining = ctx.parse_chained_input(user_input)
+                    blocks: list[str] = []
+                    _abort = False
+
+                    # Resolve $skills as context
+                    for sname in skill_names:
+                        body = ctx.resolve_dollar_skill(sname)
+                        if body is None:
+                            _pe(f"Unknown skill: ${sname}. Available: {', '.join(ctx.discover_dollar_skills())}")
+                            _abort = True
+                            break
+                        _pi(f"${sname}")
+                        blocks.append(body)
+
+                    if _abort:
+                        continue
+
+                    # Resolve @command with args
+                    _cmd_allowed_tools: list[str] | None = None
+                    if cmd_name is not None:
+                        resolved = ctx.resolve_at_command(cmd_name, remaining)
+                        if resolved is None:
+                            _pe(f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}")
+                            continue
+                        _pi(f"@{resolved.name}: {resolved.description}")
+                        blocks.append(resolved.body)
+                        if resolved.meta.allowed_tools:
+                            _cmd_allowed_tools = resolved.meta.allowed_tools
+                    elif remaining:
+                        blocks.append(remaining)
+
+                    # Compose final input and fall through to send_message
+                    user_input = "\n\n---\n\n".join(blocks)
+
+                    # If command declares allowed-tools, ensure tools are enabled
+                    if _cmd_allowed_tools:
+                        loop_kwargs.pop("tool_choice", None)
 
                 # Rebuild loop_kwargs in case tools were toggled
-                if not ctx.tools_enabled:
+                if not ctx.tools_enabled and "tool_choice" not in loop_kwargs:
                     loop_kwargs["tool_choice"] = ToolChoice.none()
-                else:
+                elif ctx.tools_enabled:
                     loop_kwargs.pop("tool_choice", None)
 
                 # Chat message: run in background so prompt stays responsive.

@@ -197,15 +197,17 @@ def print_status_banner(status: PromptStatus) -> None:
 
 
 class SlashCommandCompleter(Completer):
-    """Tab-complete /commands, their subcommands, and @commands."""
+    """Tab-complete /commands, @commands, and $skills (including chains)."""
 
     def __init__(
         self,
         completions: dict[str, list[str]],
         at_command_names: Callable[[], list[str]] | None = None,
+        dollar_skill_names: Callable[[], list[str]] | None = None,
     ) -> None:
         self._completions = completions
         self._at_command_names = at_command_names
+        self._dollar_skill_names = dollar_skill_names
 
     @override
     def get_completions(
@@ -213,46 +215,48 @@ class SlashCommandCompleter(Completer):
     ) -> list[Completion]:
         text = document.text_before_cursor.lstrip()
 
-        # @command completion
-        if text.startswith("@") and self._at_command_names is not None:
-            prefix = text[1:]  # strip leading "@"
-            for name in self._at_command_names():
-                if name.startswith(prefix):
-                    yield Completion(
-                        "@" + name,
-                        start_position=-len(text),
-                        display="@" + name,
-                    )
+        # /slash commands — only at the very start
+        if text.startswith("/"):
+            parts = text.split()
+            if len(parts) <= 1:
+                prefix = text[1:]
+                for cmd in sorted(self._completions):
+                    if cmd.startswith(prefix):
+                        yield Completion("/" + cmd, start_position=-len(text), display="/" + cmd)
+                return
+            cmd = parts[0].lstrip("/")
+            subs = self._completions.get(cmd, [])
+            if not subs:
+                return
+            partial = parts[1] if len(parts) > 1 else ""
+            for sub in sorted(subs):
+                if sub.startswith(partial):
+                    yield Completion(sub, start_position=-len(partial))
             return
 
-        if not text.startswith("/"):
+        # $ and @ — complete the current (last) token in a chain
+        # e.g. "$python @rev" -> complete "@review"
+        # e.g. "$py" -> complete "$python"
+        # e.g. "$python $se" -> complete "$security"
+        word = document.get_word_before_cursor(WORD=True)
+        if not word:
             return []
 
-        parts = text.split()
-
-        # Completing the command name: "/he" -> "/help"
-        if len(parts) <= 1:
-            prefix = text[1:]  # strip leading "/"
-            for cmd in sorted(self._completions):
-                if cmd.startswith(prefix):
-                    yield Completion(
-                        "/" + cmd,
-                        start_position=-len(text),
-                        display="/" + cmd,
-                    )
+        if word.startswith("$") and self._dollar_skill_names is not None:
+            prefix = word[1:]
+            for name in self._dollar_skill_names():
+                if name.startswith(prefix):
+                    yield Completion("$" + name, start_position=-len(word), display="$" + name)
             return
 
-        # Completing subcommands: "/backend co" -> "copilot"
-        cmd = parts[0].lstrip("/")
-        subs = self._completions.get(cmd, [])
-        if not subs:
+        if word.startswith("@") and self._at_command_names is not None:
+            prefix = word[1:]
+            for name in self._at_command_names():
+                if name.startswith(prefix):
+                    yield Completion("@" + name, start_position=-len(word), display="@" + name)
             return
 
-        partial = parts[1] if len(parts) > 1 else ""
-        for sub in sorted(subs):
-            if sub.startswith(partial):
-                yield Completion(sub, start_position=-len(partial))
-        return
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +440,7 @@ def create_prompt_session(
     streaming_status: StreamingStatus | None = None,
     prompt_status: PromptStatus | None = None,
     at_command_names: Callable[[], list[str]] | None = None,
+    dollar_skill_names: Callable[[], list[str]] | None = None,
 ) -> PromptSession[str]:
     """Create a configured PromptSession for the Obscura REPL."""
     # Ensure the Obscura home directory exists so FileHistory can write.
@@ -487,7 +492,7 @@ def create_prompt_session(
         style=PROMPT_STYLE,
         history=FileHistory(str(history_path)),
         auto_suggest=AutoSuggestFromHistory(),
-        completer=SlashCommandCompleter(completions, at_command_names=at_command_names),
+        completer=SlashCommandCompleter(completions, at_command_names=at_command_names, dollar_skill_names=dollar_skill_names),
         complete_while_typing=False,
         key_bindings=_make_key_bindings(os.environ.get("OBSCURA_EXPAND_PREVIEW_KEY", "c-p")),
         enable_history_search=True,

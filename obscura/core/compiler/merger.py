@@ -234,6 +234,11 @@ def compile_agent(
         for s in spec.mcp_servers
     )
 
+    # Expand $skill and @command references in instructions
+    from obscura.core.compiler.prompt_expansion import expand_prompt_references
+
+    expanded_instructions = expand_prompt_references(spec.instructions)
+
     return CompiledAgent(
         name=agent_ref.name,
         template_name=template.metadata.name,
@@ -241,7 +246,7 @@ def compile_agent(
         agent_type=spec.agent_type,
         provider=spec.provider,
         model_id=spec.model_id,
-        instructions=spec.instructions,
+        instructions=expanded_instructions,
         max_iterations=spec.max_iterations,
         plugins=tuple(effective_plugins),
         capabilities=tuple(spec.capabilities),

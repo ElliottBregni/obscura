@@ -76,7 +76,7 @@ def init_workspace(
     global_home = _resolve_global_home()
 
     # -- directories ---------------------------------------------------------
-    for subdir in ("mcp", "hooks", "skills", "sessions", "memory", "state", "plugins"):
+    for subdir in ("mcp", "hooks", "skills", "sessions", "memory", "state", "plugins", "commands", "evals"):
         (ws / subdir).mkdir(parents=True, exist_ok=True)
         logger.info("Created %s/", ws / subdir)
 
@@ -182,6 +182,38 @@ def init_workspace(
         content=CAPABILITY_GUIDE,
         force=force,
     )
+
+    # -- default @commands ---------------------------------------------------
+    from obscura.core._default_commands import DEFAULT_COMMANDS  # noqa: PLC0415
+
+    for filename, content in DEFAULT_COMMANDS.items():
+        _write_if_missing(
+            dst=ws / "commands" / filename,
+            content=content,
+            force=force,
+        )
+
+    # -- default $skills -----------------------------------------------------
+    from obscura.core._default_skills import DEFAULT_SKILLS  # noqa: PLC0415
+
+    for skill_name, content in DEFAULT_SKILLS.items():
+        skill_dir = ws / "skills" / skill_name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        _write_if_missing(
+            dst=skill_dir / "SKILL.md",
+            content=content,
+            force=force,
+        )
+
+    # -- default *evals ------------------------------------------------------
+    from obscura.core._default_evals import DEFAULT_EVALS  # noqa: PLC0415
+
+    for cmd_name, content in DEFAULT_EVALS.items():
+        _write_if_missing(
+            dst=ws / "evals" / f"{cmd_name}.eval.md",
+            content=content,
+            force=force,
+        )
 
     logger.info("Workspace initialised at %s", ws)
     return ws

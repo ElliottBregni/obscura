@@ -28,10 +28,13 @@ from obscura.core.client import ObscuraClient
 from obscura.cli import trace as trace_mod
 from obscura.cli.control_commands import cmd_heartbeat, cmd_policies, cmd_replay, cmd_status
 from obscura.core.context_lazy import (
+    EVAL_GRADING_PROMPT,
+    EvalSuite,
     LazyCommandLoader,
     LazySkillLoader,
     ResolvedCommand,
     SkillMetadata,
+    load_eval_for_command,
 )
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
 from obscura.core.paths import resolve_obscura_skills_dir
@@ -392,6 +395,70 @@ class REPLContext:
             return ""
         return "## Active Slash Skills\n\n" + "\n\n".join(blocks)
 
+    # ── $skill helpers ───────────────────────────────────────────────────
+
+    _dollar_skill_loaders: list[LazySkillLoader] | None = field(default=None, repr=False)
+
+    def _get_all_skill_loaders(self) -> list[LazySkillLoader]:
+        """Get or create skill loaders for all skill directories."""
+        if self._dollar_skill_loaders is None:
+            from obscura.core.paths import resolve_all_skills_dirs
+
+            self._dollar_skill_loaders = [
+                LazySkillLoader(d) for d in resolve_all_skills_dirs()
+            ]
+        return self._dollar_skill_loaders
+
+    def _get_builtin_skills(self) -> dict[str, str]:
+        """Return built-in default skills as {name: content}."""
+        try:
+            from obscura.core._default_skills import DEFAULT_SKILLS
+            return DEFAULT_SKILLS
+        except ImportError:
+            return {}
+
+    def resolve_dollar_skill(self, name: str) -> str | None:
+        """Resolve a $skill by name across all skill directories + builtins."""
+        needle = name.strip()
+        if not needle:
+            return None
+        # On-disk skills first
+        for loader in self._get_all_skill_loaders():
+            skills = loader.discover_skills()
+            for s in skills:
+                if s.name == needle:
+                    return loader.load_skill_body(s.name)
+            lowered = needle.lower()
+            for s in skills:
+                if s.name.lower() == lowered:
+                    return loader.load_skill_body(s.name)
+        # Built-in fallback
+        builtins = self._get_builtin_skills()
+        if needle in builtins:
+            return builtins[needle]
+        lowered = needle.lower()
+        for k, v in builtins.items():
+            if k.lower() == lowered:
+                return v
+        return None
+
+    def discover_dollar_skills(self) -> list[str]:
+        """Return sorted list of available $skill names (for tab completion)."""
+        seen: set[str] = set()
+        names: list[str] = []
+        # On-disk skills
+        for loader in self._get_all_skill_loaders():
+            for s in loader.discover_skills():
+                if s.name not in seen:
+                    seen.add(s.name)
+                    names.append(s.name)
+        # Built-in skills
+        for k in self._get_builtin_skills():
+            if k not in seen:
+                seen.add(k)
+                names.append(k)
+        return sorted(names)
+
     # ── @command helpers ──────────────────────────────────────────────────
 
     def _get_command_loader(self) -> LazyCommandLoader:
@@ -409,6 +476,63 @@ class REPLContext:
     def resolve_at_command(self, name: str, arguments: str = "") -> ResolvedCommand | None:
         """Resolve an @command by name with argument substitution."""
         return self._get_command_loader().resolve_command(name, arguments)
+
+    # ── chained input parsing ─────────────────────────────────────────────
+
+    def parse_chained_input(self, user_input: str) -> tuple[list[str], str | None, str]:
+        """Parse input with $skills, @command, and plain args.
+
+        Returns (skill_names, command_name_or_none, remaining_args).
+
+        Examples::
+
+            "$python @review file.py"  -> (["python"], "review", "file.py")
+            "$security $api @test x"   -> (["security", "api"], "test", "x")
+            "$arch how does auth work"  -> (["arch"], None, "how does auth work")
+            "@debug some error"         -> ([], "debug", "some error")
+        """
+        skills: list[str] = []
+        command: str | None = None
+        tokens = user_input.split()
+        rest_start = 0
+
+        for i, tok in enumerate(tokens):
+            if tok.startswith("$") and len(tok) > 1:
+                skills.append(tok[1:])
+                rest_start = i + 1
+            elif tok.startswith("@") and len(tok) > 1 and command is None:
+                command = tok[1:]
+                rest_start = i + 1
+                break  # everything after @command is args
+            else:
+                break  # plain text starts
+
+        remaining = " ".join(tokens[rest_start:])
+        return skills, command, remaining
+
+    # ── * eval helpers ────────────────────────────────────────────────────
+
+    def get_eval_suite(self, command_name: str) -> EvalSuite | None:
+        """Load eval suite for a command (from .eval.md sibling or built-in)."""
+        loader = self._get_command_loader()
+        loader.discover_commands()
+        cmd = loader._metadata_cache.get(command_name)
+        if cmd is None:
+            return None
+        return load_eval_for_command(cmd)
+
+    def build_grading_prompt(
+        self, command_name: str, input_args: str, response: str, criteria: list[str],
+    ) -> str:
+        """Build a grading prompt for the eval system."""
+        criteria_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(criteria))
+        return EVAL_GRADING_PROMPT.format(
+            command=command_name,
+            input=input_args,
+            response=response,
+            criteria=criteria_text,
+            total=len(criteria),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +597,10 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "",
         " [bold]Utility[/]",
         "  [cyan]/cat[/] <path>          Display file contents",
+        "  [cyan]/search-tools[/] <q>    Search tools by keyword",
+        "  [cyan]/health[/]              Plugin health dashboard",
+        "  [cyan]/audit[/] [n|errors]    Broker audit log",
+        "  [cyan]/broker[/]              Broker execution stats",
     ]
     console.print("\n".join(lines))
     return None
@@ -3959,6 +4087,282 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Handlers — plugin utilities
+# ---------------------------------------------------------------------------
+
+
+async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
+    """Show the broker audit log — recent tool executions, denials, errors.
+
+    Usage:
+      /audit              — Show last 20 entries
+      /audit <n>          — Show last n entries
+      /audit errors       — Show only errors/denials
+    """
+    try:
+        from obscura.plugins.broker import ToolBroker
+    except ImportError:
+        print_error("Broker module not available.")
+        return None
+
+    tokens = args.strip().split()
+    show_errors_only = False
+    limit = 20
+
+    for tok in tokens:
+        if tok in ("errors", "denied", "failed"):
+            show_errors_only = True
+        else:
+            try:
+                limit = int(tok)
+            except ValueError:
+                pass
+
+    # The broker is constructed per-session; try to find an active one via
+    # the supervisor or fall back to a fresh read from the global singleton.
+    broker: ToolBroker | None = None
+    try:
+        # Supervisor keeps a broker reference
+        if _ctx._supervisor and hasattr(_ctx._supervisor, "_broker"):
+            broker = _ctx._supervisor._broker  # noqa: SLF001
+    except Exception:
+        pass
+
+    if broker is None:
+        print_info("No active broker in this session — no audit entries yet.")
+        return None
+
+    entries = broker.audit_log
+    if show_errors_only:
+        entries = [e for e in entries if e.action in ("denied", "approval_denied", "error", "timeout")]
+    entries = entries[-limit:]
+
+    if not entries:
+        print_info("No audit entries found.")
+        return None
+
+    from datetime import datetime, timezone
+
+    table = Table(title=f"Broker Audit (last {len(entries)})", expand=False)
+    table.add_column("time", style="dim", width=8)
+    table.add_column("tool", style="cyan", no_wrap=True)
+    table.add_column("action", width=10)
+    table.add_column("agent", style="dim", max_width=16)
+    table.add_column("ms", justify="right", width=6)
+    table.add_column("detail", max_width=30)
+
+    for e in entries:
+        ts = datetime.fromtimestamp(e.timestamp, tz=timezone.utc).strftime("%H:%M:%S")
+        action_color = {
+            "executed": "green",
+            "denied": "red",
+            "approval_denied": "yellow",
+            "error": "red",
+            "timeout": "yellow",
+        }.get(e.action, "white")
+        detail = e.error or e.matched_rule or ""
+        if len(detail) > 30:
+            detail = detail[:27] + "..."
+        table.add_row(
+            ts,
+            e.tool,
+            f"[{action_color}]{e.action}[/]",
+            e.agent_id or "",
+            str(e.latency_ms),
+            detail,
+        )
+    console.print(table)
+    return None
+
+
+async def cmd_health(_args: str, _ctx: REPLContext) -> str | None:
+    """Quick plugin health dashboard.
+
+    Usage: /health
+    """
+    try:
+        from obscura.plugins.registry import PluginRegistryService, PluginEntry
+        from obscura.plugins.loader import PluginLoader
+    except ImportError:
+        print_error("Plugin system not available.")
+        return None
+
+    registry = PluginRegistryService()
+    plugins = registry.list_plugins()
+
+    # Include builtins not yet in the registry
+    try:
+        loader = PluginLoader()
+        registered_ids = {p.id for p in plugins}
+        for spec in loader.discover_builtins():
+            if spec.id not in registered_ids:
+                entry = PluginEntry.from_spec(spec, source="builtin")
+                entry.enabled = True
+                entry.state = "enabled"
+                plugins.append(entry)
+    except Exception:
+        pass
+
+    if not plugins:
+        print_info("No plugins found.")
+        return None
+
+    # Group by state
+    by_state: dict[str, list[Any]] = {}
+    for p in plugins:
+        by_state.setdefault(p.state, []).append(p)
+
+    table = Table(title="Plugin Health", expand=False)
+    table.add_column("plugin", style="cyan", no_wrap=True)
+    table.add_column("version", style="dim", width=8)
+    table.add_column("state", width=10)
+    table.add_column("trust", style="dim", width=10)
+    table.add_column("tools", justify="right", width=5)
+
+    state_order = ["failed", "unhealthy", "disabled", "enabled", "installed", "discovered"]
+    for state in state_order:
+        for p in by_state.get(state, []):
+            color = {
+                "enabled": "green", "active": "green",
+                "disabled": "dim", "installed": "yellow",
+                "failed": "red", "unhealthy": "red",
+                "discovered": "dim",
+            }.get(p.state, "white")
+            n_tools = len(p.contributed_tools) if p.contributed_tools else 0
+            table.add_row(
+                p.id,
+                p.version,
+                f"[{color}]{p.state}[/]",
+                getattr(p, "trust_level", ""),
+                str(n_tools),
+            )
+
+    console.print(table)
+    total = len(plugins)
+    enabled = len(by_state.get("enabled", []) + by_state.get("active", []))
+    failed = len(by_state.get("failed", []))
+    console.print(f"[dim]  {total} total, {enabled} enabled, {failed} failed[/]")
+    return None
+
+
+async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
+    """Show broker stats — execution counts, error rates, slowest tools.
+
+    Usage: /broker
+    """
+    try:
+        from obscura.plugins.broker import ToolBroker
+    except ImportError:
+        print_error("Broker module not available.")
+        return None
+
+    broker: ToolBroker | None = None
+    try:
+        if _ctx._supervisor and hasattr(_ctx._supervisor, "_broker"):
+            broker = _ctx._supervisor._broker  # noqa: SLF001
+    except Exception:
+        pass
+
+    if broker is None:
+        print_info("No active broker in this session.")
+        return None
+
+    entries = broker.audit_log
+    if not entries:
+        print_info("No broker activity yet.")
+        return None
+
+    # Aggregate stats per tool
+    tool_stats: dict[str, dict[str, Any]] = {}
+    for e in entries:
+        s = tool_stats.setdefault(e.tool, {"ok": 0, "fail": 0, "total_ms": 0, "max_ms": 0})
+        if e.action == "executed":
+            s["ok"] += 1
+        else:
+            s["fail"] += 1
+        s["total_ms"] += e.latency_ms
+        s["max_ms"] = max(s["max_ms"], e.latency_ms)
+
+    table = Table(title="Broker Stats", expand=False)
+    table.add_column("tool", style="cyan", no_wrap=True)
+    table.add_column("ok", justify="right", style="green", width=5)
+    table.add_column("fail", justify="right", style="red", width=5)
+    table.add_column("avg ms", justify="right", width=7)
+    table.add_column("max ms", justify="right", width=7)
+
+    for tool_name in sorted(tool_stats, key=lambda t: tool_stats[t]["ok"] + tool_stats[t]["fail"], reverse=True):
+        s = tool_stats[tool_name]
+        total_calls = s["ok"] + s["fail"]
+        avg_ms = s["total_ms"] // total_calls if total_calls else 0
+        table.add_row(tool_name, str(s["ok"]), str(s["fail"]), str(avg_ms), str(s["max_ms"]))
+
+    console.print(table)
+    console.print(f"[dim]  {len(entries)} total calls across {len(tool_stats)} tools[/]")
+    return None
+
+
+async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
+    """Search registered tools by name or description keyword.
+
+    Usage: /search-tools <query>
+    """
+    query = args.strip().lower()
+    if not query:
+        print_error("Usage: /search-tools <query>")
+        return None
+
+    registry = ctx.client._tool_registry  # noqa: SLF001
+    tools = registry.all_including_disabled()
+    if not tools:
+        print_info("No tools registered.")
+        return None
+
+    # Score matches: name match weighted higher than description match
+    results: list[tuple[int, Any]] = []
+    for t in tools:
+        score = 0
+        name_lower = t.name.lower()
+        desc_lower = (getattr(t, "description", "") or "").lower()
+        if query == name_lower:
+            score = 100
+        elif query in name_lower:
+            score = 60
+        if query in desc_lower:
+            score += 30
+        # partial word matching
+        for word in query.split():
+            if word in name_lower:
+                score += 10
+            if word in desc_lower:
+                score += 5
+        if score > 0:
+            results.append((score, t))
+
+    results.sort(key=lambda r: r[0], reverse=True)
+
+    if not results:
+        print_info(f"No tools matching '{query}'.")
+        return None
+
+    from obscura.cli.render import TOOL_COLOR
+
+    table = Table(title=f"Tools matching '{query}' ({len(results)} found)", expand=False)
+    table.add_column("status", width=3, justify="center")
+    table.add_column("name", style=TOOL_COLOR, no_wrap=True)
+    table.add_column("description", max_width=55)
+
+    for _score, t in results[:25]:
+        desc = getattr(t, "description", "") or ""
+        if len(desc) > 55:
+            desc = desc[:52] + "..."
+        status = "[red]off[/]" if registry.is_disabled(t.name) else "[green]on[/]"
+        table.add_row(status, t.name, desc)
+
+    console.print(table)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -4015,6 +4419,11 @@ COMMANDS: dict[str, CommandHandler] = {
     "kill": cmd_kill,
     # Utility
     "cat": cmd_cat,
+    # Plugin utilities
+    "audit": cmd_audit,
+    "health": cmd_health,
+    "broker": cmd_broker,
+    "search-tools": cmd_search_tools,
 }
 
 # Subcommand completions for readline tab-complete
@@ -4060,6 +4469,10 @@ COMPLETIONS: dict[str, list[str]] = {
     "replay": [],
     "running": [],
     "cat": [],
+    "audit": ["errors"],
+    "health": [],
+    "broker": [],
+    "search-tools": [],
 }
 
 

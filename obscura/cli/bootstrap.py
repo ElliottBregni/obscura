@@ -533,6 +533,40 @@ async def _repl(
                     if result == "quit":
                         break
                     continue
+
+                # $skill / @command / chained input
+                if user_input.startswith(("$", "@")):
+                    from obscura.cli.render import print_error as _pe
+                    from obscura.cli.render import print_info as _pi
+
+                    skill_names, cmd_name, remaining = ctx.parse_chained_input(user_input)
+                    blocks: list[str] = []
+                    _abort = False
+
+                    for sname in skill_names:
+                        body = ctx.resolve_dollar_skill(sname)
+                        if body is None:
+                            _pe(f"Unknown skill: ${sname}. Available: {', '.join(ctx.discover_dollar_skills())}")
+                            _abort = True
+                            break
+                        _pi(f"${sname}")
+                        blocks.append(body)
+
+                    if _abort:
+                        continue
+
+                    if cmd_name is not None:
+                        resolved = ctx.resolve_at_command(cmd_name, remaining)
+                        if resolved is None:
+                            _pe(f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}")
+                            continue
+                        _pi(f"@{resolved.name}: {resolved.description}")
+                        blocks.append(resolved.body)
+                    elif remaining:
+                        blocks.append(remaining)
+
+                    user_input = "\n\n---\n\n".join(blocks)
+
                 if not ctx.tools_enabled:
                     loop_kwargs["tool_choice"] = ToolChoice.none()
                 else:
