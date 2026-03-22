@@ -1249,11 +1249,17 @@ async def _repl(
                                 _pe(f"  Failed to resolve @{cmd_name}")
                                 continue
                             chain_blocks.append(resolved.body)
+
+                            # Inject preferred-tools hint if specified
+                            if case.preferred_tools:
+                                tools_hint = "Preferred tools for this task: " + ", ".join(case.preferred_tools)
+                                chain_blocks.append(tools_hint)
+
                             chain_input = "\n\n---\n\n".join(chain_blocks)
 
-                            # Enable tools if command declares allowed-tools
+                            # Enable tools if command allows them
                             eval_kwargs = dict(loop_kwargs)
-                            if resolved.meta.allowed_tools:
+                            if resolved.meta.tools_enabled:
                                 eval_kwargs.pop("tool_choice", None)
 
                             # Run the command
@@ -1304,9 +1310,9 @@ async def _repl(
                     blocks.append(resolved.body)
                     chain_input = "\n\n---\n\n".join(blocks)
 
-                    # Enable tools if command declares allowed-tools
+                    # Enable tools if command allows them
                     eval_kwargs = dict(loop_kwargs)
-                    if resolved.meta.allowed_tools:
+                    if resolved.meta.tools_enabled:
                         eval_kwargs.pop("tool_choice", None)
 
                     _pi(f"*@{cmd_name}: running + grading")
@@ -1358,7 +1364,7 @@ async def _repl(
                         continue
 
                     # Resolve @command with args
-                    _cmd_allowed_tools: list[str] | None = None
+                    _cmd_allowed_tools = False
                     if cmd_name is not None:
                         resolved = ctx.resolve_at_command(cmd_name, remaining)
                         if resolved is None:
@@ -1366,15 +1372,15 @@ async def _repl(
                             continue
                         _pi(f"@{resolved.name}: {resolved.description}")
                         blocks.append(resolved.body)
-                        if resolved.meta.allowed_tools:
-                            _cmd_allowed_tools = resolved.meta.allowed_tools
+                        if resolved.meta.tools_enabled:
+                            _cmd_allowed_tools = True
                     elif remaining:
                         blocks.append(remaining)
 
                     # Compose final input and fall through to send_message
                     user_input = "\n\n---\n\n".join(blocks)
 
-                    # If command declares allowed-tools, ensure tools are enabled
+                    # If command allows tools, ensure they're enabled
                     if _cmd_allowed_tools:
                         loop_kwargs.pop("tool_choice", None)
 

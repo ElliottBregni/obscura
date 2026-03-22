@@ -172,6 +172,15 @@ class LazySkillLoader:
 # ---------------------------------------------------------------------------
 
 
+def _parse_tool_list(raw: str | list[str] | None) -> list[str]:
+    """Parse a tool list from frontmatter (string or list)."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(t).strip() for t in raw if str(t).strip()]
+    return [t.strip() for t in str(raw).split(",") if t.strip()]
+
+
 class CommandMetadata:
     """Metadata for a markdown @command file."""
 
@@ -181,7 +190,8 @@ class CommandMetadata:
         description: str,
         path: Path | None = None,
         argument_hint: str = "",
-        allowed_tools: list[str] | None = None,
+        allowed_tools: str = "*",
+        denied_tools: list[str] | None = None,
         model: str | None = None,
         *,
         builtin_content: str | None = None,
@@ -190,9 +200,15 @@ class CommandMetadata:
         self.description = description
         self.path = path
         self.argument_hint = argument_hint
-        self.allowed_tools = allowed_tools or []
+        self.allowed_tools = allowed_tools or "*"
+        self.denied_tools = denied_tools or []
         self.model = model
         self.builtin_content = builtin_content
+
+    @property
+    def tools_enabled(self) -> bool:
+        """Whether this command enables any tools (allowed-tools is not empty/none)."""
+        return self.allowed_tools != "none"
 
 
 class ResolvedCommand:
@@ -245,7 +261,8 @@ class LazyCommandLoader:
                         description=str(meta.get("description", "")),
                         path=cmd_file,
                         argument_hint=str(meta.get("argument-hint", meta.get("argument_hint", ""))),
-                        allowed_tools=meta.get("allowed-tools", meta.get("allowed_tools", [])),
+                        allowed_tools=str(meta.get("allowed-tools", meta.get("allowed_tools", "*"))),
+                        denied_tools=_parse_tool_list(meta.get("denied-tools", meta.get("denied_tools"))),
                         model=meta.get("model"),
                     )
                     self._metadata_cache[name] = cmd_meta
@@ -271,7 +288,8 @@ class LazyCommandLoader:
                     name=name,
                     description=str(meta.get("description", "")),
                     argument_hint=str(meta.get("argument-hint", meta.get("argument_hint", ""))),
-                    allowed_tools=meta.get("allowed-tools", meta.get("allowed_tools", [])),
+                    allowed_tools=str(meta.get("allowed-tools", meta.get("allowed_tools", "*"))),
+                    denied_tools=_parse_tool_list(meta.get("denied-tools", meta.get("denied_tools"))),
                     model=meta.get("model"),
                     builtin_content=content.strip(),
                 )
@@ -345,11 +363,13 @@ class EvalCase:
         input_args: str,
         criteria: list[str],
         skills: list[str] | None = None,
+        preferred_tools: list[str] | None = None,
     ):
         self.name = name
         self.input_args = input_args
         self.criteria = criteria
         self.skills = skills or []
+        self.preferred_tools = preferred_tools or []
 
 
 class EvalSuite:
@@ -396,6 +416,7 @@ def parse_eval_file(content: str) -> list[EvalCase]:
     current_input = ""
     current_criteria: list[str] = []
     current_skills: list[str] = []
+    current_preferred_tools: list[str] = []
     in_criteria = False
 
     def _flush() -> None:
@@ -405,6 +426,7 @@ def parse_eval_file(content: str) -> list[EvalCase]:
                 input_args=current_input,
                 criteria=list(current_criteria),
                 skills=list(current_skills),
+                preferred_tools=list(current_preferred_tools),
             ))
 
     for line in body.splitlines():
@@ -416,6 +438,7 @@ def parse_eval_file(content: str) -> list[EvalCase]:
             current_input = ""
             current_criteria = []
             current_skills = []
+            current_preferred_tools = []
             in_criteria = False
 
         elif stripped.startswith("input:"):
@@ -425,6 +448,11 @@ def parse_eval_file(content: str) -> list[EvalCase]:
         elif stripped.startswith("skills:"):
             raw = stripped.removeprefix("skills:").strip()
             current_skills = [s.strip() for s in raw.split(",") if s.strip()]
+            in_criteria = False
+
+        elif stripped.startswith("preferred-tools:"):
+            raw = stripped.removeprefix("preferred-tools:").strip()
+            current_preferred_tools = [t.strip() for t in raw.split(",") if t.strip()]
             in_criteria = False
 
         elif stripped == "criteria:":
