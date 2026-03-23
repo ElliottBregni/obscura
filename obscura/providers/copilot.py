@@ -596,6 +596,7 @@ class CopilotBackend:
                     description=spec.description,
                     handler=_wrapper_factory(_handler),
                     parameters=params,
+                    overrides_built_in_tool=True,
                 )
             )
         return converted
@@ -686,11 +687,31 @@ class CopilotBackend:
         config.update(overrides)
         return config
 
+    # Copilot API rejects request bodies that exceed its internal limit.
+    # Truncate prompts to stay safely under the wire.
+    _MAX_PROMPT_CHARS = 120_000
+
+    def _truncate_prompt(self, prompt: str) -> str:
+        """Truncate prompt to stay within Copilot API body-size limits."""
+        if len(prompt) <= self._MAX_PROMPT_CHARS:
+            return prompt
+        self._log.warning(
+            "Prompt truncated: %d chars → %d chars",
+            len(prompt),
+            self._MAX_PROMPT_CHARS,
+        )
+        truncated = prompt[: self._MAX_PROMPT_CHARS]
+        # Avoid cutting mid-word
+        last_space = truncated.rfind(" ", self._MAX_PROMPT_CHARS - 200)
+        if last_space > 0:
+            truncated = truncated[:last_space]
+        return truncated + "\n\n[… content truncated due to length]"
+
     def _build_message_options(
         self, prompt: str, kwargs: dict[str, Any]
     ) -> dict[str, Any]:
         """Build per-message options including normalized tool choice."""
-        msg_options: dict[str, Any] = {"prompt": prompt}
+        msg_options: dict[str, Any] = {"prompt": self._truncate_prompt(prompt)}
         options = kwargs.get("options")
         if isinstance(options, dict):
             msg_options.update(cast(dict[str, Any], options))

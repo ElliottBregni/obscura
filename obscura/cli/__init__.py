@@ -752,7 +752,11 @@ async def _repl(
     try:
         from dotenv import load_dotenv
 
-        load_dotenv()
+        # Load .env from ~/.obscura/ (or $OBSCURA_HOME), then CWD as fallback
+        home_env = resolve_obscura_home() / ".env"
+        if home_env.is_file():
+            load_dotenv(home_env)
+        load_dotenv()  # CWD .env (won't overwrite already-set vars)
     except Exception:
         pass
 
