@@ -2632,11 +2632,25 @@ async def list_system_tools() -> str:
 # back to returning an error asking the model to rephrase as a text question.
 _ask_user_callback: Any = None
 
+# Flag set when ask_user fires during a turn so the CLI can skip auto-detection.
+_ask_user_called: bool = False
+
 
 def set_ask_user_callback(cb: Any) -> None:
     """Register the CLI callback for the ``ask_user`` tool."""
     global _ask_user_callback
     _ask_user_callback = cb
+
+
+def was_ask_user_called() -> bool:
+    """Return whether ``ask_user`` was invoked since the last reset."""
+    return _ask_user_called
+
+
+def reset_ask_user_called() -> None:
+    """Reset the per-turn ``ask_user`` flag."""
+    global _ask_user_called
+    _ask_user_called = False
 
 
 @tool(
@@ -2672,6 +2686,9 @@ async def ask_user(
     allow_custom: bool = False,
 ) -> str:
     """Present choices to the user via the TUI widget and return the selection."""
+    global _ask_user_called
+    _ask_user_called = True
+
     if _ask_user_callback is None:
         return _json_error(
             "no_ui",

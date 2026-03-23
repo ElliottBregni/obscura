@@ -218,13 +218,20 @@ async def send_message(
 
     _maybe_parse_plan(response_text, ctx)
 
+    # Skip auto-detection if ask_user tool already presented a widget this turn.
     try:
-        from obscura.cli.widgets import detect_question_choices, present_detected_choices
-        detected = detect_question_choices(response_text)
-        if detected is not None:
-            selection = await present_detected_choices(detected)
-            if selection is not None:
-                return await send_message(ctx, selection, loop_kwargs, streaming_status)
+        from obscura.tools.system import was_ask_user_called, reset_ask_user_called
+
+        _tool_asked = was_ask_user_called()
+        reset_ask_user_called()
+
+        if not _tool_asked:
+            from obscura.cli.widgets import detect_question_choices, present_detected_choices
+            detected = detect_question_choices(response_text)
+            if detected is not None:
+                selection = await present_detected_choices(detected)
+                if selection is not None:
+                    return await send_message(ctx, selection, loop_kwargs, streaming_status)
     except Exception:
         pass
 
