@@ -168,21 +168,19 @@ class CopilotBackend:
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient
+        from copilot.types import SubprocessConfig  # pyright: ignore[reportAttributeAccessIssue,reportUnknownVariableType]
 
-        client_opts: dict[str, Any] = {}
+        client_config: Any = None
         if self._auth.github_token:
-            client_opts["github_token"] = self._auth.github_token
-        if self._auth.byok_provider:
-            client_opts["provider"] = self._auth.byok_provider
+            client_config = SubprocessConfig(github_token=self._auth.github_token)  # pyright: ignore[reportUnknownVariableType]
 
-        opts: Any = client_opts if client_opts else None
-        self._client = CopilotClient(opts)
+        self._client = CopilotClient(client_config)  # pyright: ignore[reportUnknownArgumentType]
         await self._client.start()
 
         # Create default session
         session_config = self.build_session_config()
 
-        self._session = await self._client.create_session(session_config)
+        self._session = await self._client.create_session(**session_config)
 
     async def reset_session(self) -> None:
         """Create a fresh session, discarding prior conversation state.
@@ -192,7 +190,7 @@ class CopilotBackend:
         """
         self._ensure_client()
         config = self.build_session_config()
-        self._session = await self._client.create_session(config)
+        self._session = await self._client.create_session(**config)
 
     async def stop(self) -> None:
         """Gracefully shut down the client."""
@@ -215,7 +213,7 @@ class CopilotBackend:
         """Recreate the session after an expiry/idle timeout."""
         self._log.warning("Session expired after idle — recreating session")
         config = self.build_session_config()
-        self._session = await self._client.create_session(config)
+        self._session = await self._client.create_session(**config)
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
@@ -224,14 +222,16 @@ class CopilotBackend:
         with tracer.start_as_current_span("copilot.send") as span:
             _set_span_attr(span, "backend", "copilot")
             msg_options = self._build_message_options(prompt, kwargs)
+            send_prompt = msg_options.pop("prompt")
             try:
-                response = await self._session.send_and_wait(msg_options)
+                response = await self._session.send_and_wait(send_prompt, **msg_options)
             except Exception as exc:
                 if not self._is_session_expired(exc):
                     raise
                 await self._recover_session()
                 msg_options = self._build_message_options(prompt, kwargs)
-                response = await self._session.send_and_wait(msg_options)
+                send_prompt = msg_options.pop("prompt")
+                response = await self._session.send_and_wait(send_prompt, **msg_options)
             return self._to_message(response)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
@@ -333,7 +333,8 @@ class CopilotBackend:
             yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
             msg_options = self._build_message_options(prompt, kwargs)
-            await self._session.send(msg_options)
+            send_prompt = msg_options.pop("prompt")
+            await self._session.send(send_prompt, **msg_options)
 
             # Yield chunks from the bridge
             try:
@@ -353,7 +354,7 @@ class CopilotBackend:
         """Create a new named session."""
         self._ensure_client()
         config = self.build_session_config(**kwargs)
-        session = await self._client.create_session(config)
+        session = await self._client.create_session(**config)
         ref = SessionRef(
             session_id=session.session_id,
             backend=Backend.COPILOT,
@@ -365,7 +366,9 @@ class CopilotBackend:
     async def resume_session(self, ref: SessionRef) -> None:
         """Resume a previously created session."""
         self._ensure_client()
-        self._session = await self._client.resume_session(ref.session_id)
+        config = self.build_session_config()
+        session_id = config.pop("session_id", None) or ref.session_id
+        self._session = await self._client.resume_session(session_id, **config)
 
     async def list_sessions(self) -> list[SessionRef]:
         """List all known sessions."""
@@ -373,8 +376,9 @@ class CopilotBackend:
         raw_sessions = await self._client.list_sessions()
         refs: list[SessionRef] = []
         for s in raw_sessions:
+            sid = getattr(s, "sessionId", None) or getattr(s, "session_id", str(s))
             ref = SessionRef(
-                session_id=s.session_id if hasattr(s, "session_id") else str(s),
+                session_id=str(sid),
                 backend=Backend.COPILOT,
                 raw=s,
             )
@@ -412,7 +416,7 @@ class CopilotBackend:
 
         # Logical fork fallback: create a fresh session that records parent lineage.
         config = self.build_session_config()
-        session = await self._client.create_session(config)
+        session = await self._client.create_session(**config)
         fork_ref = SessionRef(
             session_id=session.session_id,
             backend=Backend.COPILOT,
@@ -546,7 +550,7 @@ class CopilotBackend:
         ``^[a-zA-Z0-9_-]{1,128}$`` (dots and other special chars replaced
         with underscores).
         """
-        from copilot.types import Tool  # type: ignore[import-untyped]
+        from copilot.types import Tool
 
         converted: list[Any] = []
         for spec in tools:
@@ -563,18 +567,18 @@ class CopilotBackend:
                         result: Any = handler(**args)
                         if _inspect.isawaitable(result):
                             result = await result
-                        # Normalize to SDK ToolResult (camelCase fields)
+                        # Normalize to SDK ToolResult (snake_case fields in 0.2.0)
                         if isinstance(result, CopilotToolResult):
                             return result
                         text = str(result) if result is not None else ""
                         return CopilotToolResult(
-                            textResultForLlm=text,
-                            resultType="success",
+                            text_result_for_llm=text,
+                            result_type="success",
                         )
                     except Exception as exc:
                         return CopilotToolResult(
-                            textResultForLlm=f"Tool error: {exc}",
-                            resultType="failure",
+                            text_result_for_llm=f"Tool error: {exc}",
+                            result_type="failure",
                             error=str(exc),
                         )
 
@@ -582,7 +586,7 @@ class CopilotBackend:
 
             # Ensure parameters is always a valid JSON Schema object —
             # the Copilot SDK crashes with .map() on undefined if None.
-            params = (
+            params: dict[str, Any] = (
                 spec.parameters
                 if spec.parameters
                 else {
@@ -608,14 +612,19 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
-        from copilot.types import PermissionRequest, PermissionRequestResult
+        from copilot.generated.session_events import PermissionRequest
+        from copilot.types import PermissionRequestResult
 
         def _approve_all(
             request: PermissionRequest, _context: dict[str, str]
         ) -> PermissionRequestResult:
-            return PermissionRequestResult(kind="approved", rules=[])
+            return PermissionRequestResult(kind="approved")
 
         config["on_permission_request"] = _approve_all
+
+        # BYOK provider config (moved from client opts → session config in SDK 0.2.0)
+        if self._auth.byok_provider:
+            config["provider"] = self._auth.byok_provider
 
         if self._model:
             config["model"] = self._model
@@ -634,7 +643,12 @@ class CopilotBackend:
         if self._streaming:
             config["streaming"] = True
         if self._mcp_servers:
-            config["mcp_servers"] = self._mcp_servers
+            # SDK 0.2.0 changed mcp_servers from list[dict] to dict[str, MCPServerConfig]
+            mcp_dict: dict[str, Any] = {}
+            for srv in self._mcp_servers:
+                name = srv.get("name", f"mcp-{len(mcp_dict)}")
+                mcp_dict[name] = {k: v for k, v in srv.items() if k != "name"}
+            config["mcp_servers"] = mcp_dict
         if self._tools:
             # Filter tools first via policy
             filtered = self._tool_policy.filter_tools(self._tools)
@@ -707,20 +721,23 @@ class CopilotBackend:
             truncated = truncated[:last_space]
         return truncated + "\n\n[… content truncated due to length]"
 
+    # SDK 0.2.0 send/send_and_wait accept only these kwargs.
+    _SEND_ALLOWED_KEYS = {"prompt", "attachments", "mode"}
+    _SEND_AND_WAIT_ALLOWED_KEYS = {"prompt", "attachments", "mode", "timeout"}
+
     def _build_message_options(
         self, prompt: str, kwargs: dict[str, Any]
     ) -> dict[str, Any]:
-        """Build per-message options including normalized tool choice."""
+        """Build per-message keyword args for session.send / send_and_wait.
+
+        Returns a dict suitable for ``**``-unpacking into the SDK methods.
+        The ``prompt`` key is always present as a positional-ready value.
+        Keys not accepted by the SDK (e.g. ``tool_choice``) are dropped.
+        """
         msg_options: dict[str, Any] = {"prompt": self._truncate_prompt(prompt)}
         options = kwargs.get("options")
         if isinstance(options, dict):
             msg_options.update(cast(dict[str, Any], options))
-
-        tool_choice = kwargs.get("tool_choice")
-        if isinstance(tool_choice, ToolChoice):
-            msg_options["tool_choice"] = self._convert_tool_choice(tool_choice)
-        elif tool_choice is not None:
-            msg_options["tool_choice"] = tool_choice
         return msg_options
 
     @staticmethod
