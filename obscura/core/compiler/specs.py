@@ -56,6 +56,21 @@ class MCPServerSpec(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class ToolRoutingSpec(BaseModel):
+    """Tool routing configuration within a template spec."""
+
+    enabled: bool = True
+    max_tools: int = 50
+    pinned_tools: list[str] = Field(default_factory=_empty_str_list)
+    pin_default_capabilities: bool = True
+    use_quality_scores: bool = True
+    use_context_recall: bool = True
+    min_quality_score: float = 0.2
+    capability_match_threshold: float = 0.3
+
+    model_config = {"extra": "forbid"}
+
+
 class TemplateSpecBody(BaseModel):
     """The ``spec`` block of a Template."""
 
@@ -77,6 +92,9 @@ class TemplateSpecBody(BaseModel):
     # Tool access
     tool_allowlist: list[str] | None = None
     tool_denylist: list[str] = Field(default_factory=_empty_str_list)
+
+    # Tool routing
+    tool_routing: ToolRoutingSpec | None = None
 
     # MCP servers
     mcp_servers: list[MCPServerSpec] = Field(default_factory=list)

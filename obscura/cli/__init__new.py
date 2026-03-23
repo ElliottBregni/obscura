@@ -557,6 +557,7 @@ async def _repl(
     no_default_prompt: bool = False,
     *,
     supervise: bool = True,
+    compiled_ws: Any | None = None,
 ) -> None:
     """Core async loop — runs the interactive REPL or single-shot."""
     # Event store
@@ -660,12 +661,20 @@ async def _repl(
             except Exception:
                 pass
 
-        # Load all builtin plugin tools (alphavantage, websearch, gws, etc.)
+        # Load builtin plugin tools — filtered by workspace packs when available
         try:
-            from obscura.plugins.loader import get_all_builtin_tool_specs
-
             existing_names = {t.name for t in system_tools}
-            for tool in get_all_builtin_tool_specs():
+            _ws_include = getattr(compiled_ws, "plugin_include", None) if compiled_ws else None
+            _ws_exclude = getattr(compiled_ws, "plugin_exclude", None) if compiled_ws else None
+
+            if _ws_include or _ws_exclude:
+                from obscura.plugins.loader import get_filtered_builtin_tool_specs
+                plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
+            else:
+                from obscura.plugins.loader import get_all_builtin_tool_specs
+                plugin_tools = get_all_builtin_tool_specs()
+
+            for tool in plugin_tools:
                 if tool.name not in existing_names:
                     system_tools.append(tool)
                     existing_names.add(tool.name)
@@ -1182,6 +1191,7 @@ def main(
             h.setLevel(level)
 
     # Compile workspace if specified
+    compiled_ws = None
     if workspace_name is not None:
         try:
             from obscura.core.compiler.compile import compile_workspace
@@ -1216,7 +1226,7 @@ def main(
             pass
     try:
         asyncio.run(
-            _repl(backend, model, system, resolved_session, max_turns, tools, prompt, confirm, no_default_prompt, supervise=supervise)
+            _repl(backend, model, system, resolved_session, max_turns, tools, prompt, confirm, no_default_prompt, supervise=supervise, compiled_ws=compiled_ws)
         )
     except KeyboardInterrupt:
         pass  # graceful exit on Ctrl-C

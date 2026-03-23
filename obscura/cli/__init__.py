@@ -127,11 +127,13 @@ def _discover_agent_infos() -> list[AgentInfo]:
             name = agent.get("name", "")
             if name and name not in seen:
                 seen.add(name)
-                infos.append(AgentInfo(
-                    name=name,
-                    type=agent.get("type", "loop"),
-                    model=agent.get("model", "default"),
-                ))
+                infos.append(
+                    AgentInfo(
+                        name=name,
+                        type=agent.get("type", "loop"),
+                        model=agent.get("model", "default"),
+                    )
+                )
         return infos
     except Exception:
         return []
@@ -202,9 +204,7 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
 
                 manifest = AgentManifest(
                     name=str(cfg.get("name", agent_name)),
-                    provider=str(
-                        cfg.get("provider") or cfg.get("model", ctx.backend)
-                    ),
+                    provider=str(cfg.get("provider") or cfg.get("model", ctx.backend)),
                     system_prompt=str(cfg.get("system_prompt", "")),
                     max_turns=int(cfg.get("max_turns", ctx.max_turns)),
                     tools=list(cfg.get("tools", []))
@@ -269,7 +269,9 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
 # ---------------------------------------------------------------------------
 
 
-async def _cli_confirm(ctx: REPLContext, tool_name: str, tool_input: dict[str, Any]) -> bool:
+async def _cli_confirm(
+    ctx: REPLContext, tool_name: str, tool_input: dict[str, Any]
+) -> bool:
     """Prompt user to approve a tool call via TUI widget. Returns True to allow."""
     if tool_name in ctx.confirm_always:
         return True
@@ -302,7 +304,10 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 before = ""
             ctx._pending_file_reads[ev.tool_use_id] = (path, before)
 
-    elif ev.kind == AgentEventKind.TOOL_RESULT and ev.tool_use_id in ctx._pending_file_reads:
+    elif (
+        ev.kind == AgentEventKind.TOOL_RESULT
+        and ev.tool_use_id in ctx._pending_file_reads
+    ):
         path, before = ctx._pending_file_reads.pop(ev.tool_use_id)
         try:
             after = Path(path).read_text()
@@ -479,9 +484,7 @@ async def send_message(
                     elif getattr(event, "tool_input", None):
                         preview = str(event.tool_input)[:200]
                     tool_names = (
-                        [event.tool_name]
-                        if getattr(event, "tool_name", None)
-                        else []
+                        [event.tool_name] if getattr(event, "tool_name", None) else []
                     )
                     trace_mod.append_event(
                         event.kind.name,
@@ -607,7 +610,10 @@ async def send_message(
 
     # Auto-detect question choices and present interactive widget
     try:
-        from obscura.cli.widgets import detect_question_choices, present_detected_choices
+        from obscura.cli.widgets import (
+            detect_question_choices,
+            present_detected_choices,
+        )
 
         detected = detect_question_choices(response_text)
         if detected is not None:
@@ -650,6 +656,7 @@ async def _start_imessage_daemon(
             continue
 
         from obscura.agent.daemon_agent import IMessageTrigger as _IMT
+
         triggers: list[Any] = []
         for tdef in im_triggers:
             im_cfg = tdef.imessage or {}
@@ -658,13 +665,15 @@ async def _start_imessage_daemon(
                 for k, v in im_cfg.items()
                 if k not in {"contacts", "poll_interval"}
             }
-            triggers.append(_IMT(
-                contacts=tuple(im_cfg.get("contacts", [])),
-                poll_interval=im_cfg.get("poll_interval", 30),
-                notify_user=tdef.notify_user,
-                priority=tdef.priority,
-                data=im_data,
-            ))
+            triggers.append(
+                _IMT(
+                    contacts=tuple(im_cfg.get("contacts", [])),
+                    poll_interval=im_cfg.get("poll_interval", 30),
+                    notify_user=tdef.notify_user,
+                    priority=tdef.priority,
+                    data=im_data,
+                )
+            )
 
         bus = InteractionBus()
 
@@ -678,6 +687,7 @@ async def _start_imessage_daemon(
         # Suppress daemon startup logs — the bottom toolbar shows daemon
         # status, so raw StreamHandler output would corrupt the prompt UI.
         import logging as _logging
+
         _logging.getLogger("obscura.agent.daemon_agent").setLevel(_logging.WARNING)
 
         # Create a SEPARATE client for the daemon so it doesn't contend
@@ -730,6 +740,7 @@ async def _repl(
     no_default_prompt: bool = False,
     *,
     supervise: bool = True,
+    compiled_ws: Any | None = None,
 ) -> None:
     """Core async loop — runs the interactive REPL or single-shot."""
     # Event store
@@ -803,8 +814,13 @@ async def _repl(
         env_section = compose_environment_context(
             plugin_ids=list_builtin_plugin_ids(),
             capabilities=[
-                "shell.exec", "file.read", "file.write",
-                "git.ops", "web.browse", "search.web", "security.scan",
+                "shell.exec",
+                "file.read",
+                "file.write",
+                "git.ops",
+                "web.browse",
+                "search.web",
+                "security.scan",
             ],
             agent_types=list(AGENT_TYPE_REGISTRY.keys()),
         )
@@ -840,12 +856,26 @@ async def _repl(
             except Exception:
                 pass
 
-        # Load all builtin plugin tools (alphavantage, websearch, gws, etc.)
+        # Load builtin plugin tools — filtered by workspace packs when available
         try:
-            from obscura.plugins.loader import get_all_builtin_tool_specs
-
             existing_names = {t.name for t in system_tools}
-            for tool in get_all_builtin_tool_specs():
+            _ws_include = (
+                getattr(compiled_ws, "plugin_include", None) if compiled_ws else None
+            )
+            _ws_exclude = (
+                getattr(compiled_ws, "plugin_exclude", None) if compiled_ws else None
+            )
+
+            if _ws_include or _ws_exclude:
+                from obscura.plugins.loader import get_filtered_builtin_tool_specs
+
+                plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
+            else:
+                from obscura.plugins.loader import get_all_builtin_tool_specs
+
+                plugin_tools = get_all_builtin_tool_specs()
+
+            for tool in plugin_tools:
                 if tool.name not in existing_names:
                     system_tools.append(tool)
                     existing_names.add(tool.name)
@@ -905,6 +935,7 @@ async def _repl(
                         PermissionWidgetRequest,
                         confirm_permission,
                     )
+
                     result = await confirm_permission(
                         PermissionWidgetRequest(
                             action=kwargs.get("action", ""),
@@ -919,6 +950,7 @@ async def _repl(
                         NotifyWidgetRequest,
                         render_notification_banner,
                     )
+
                     render_notification_banner(
                         NotifyWidgetRequest(
                             title=kwargs.get("title", ""),
@@ -935,6 +967,7 @@ async def _repl(
                         confirm_attention,
                         AttentionWidgetRequest,
                     )
+
                     choices = kwargs.get("choices", [])
                     question = kwargs.get("question", "")
                     if choices:
@@ -978,7 +1011,6 @@ async def _repl(
         mcp_servers=mcp_configs or None,
         hooks=project_hooks,
     ) as client:
-
         # Session resume
         if session_id:
             try:
@@ -1110,6 +1142,7 @@ async def _repl(
             if ctx._runtime is not None:
                 try:
                     from obscura.agent.agents import AgentStatus as _AS
+
                     for agent in ctx._runtime.list_agents(status=_AS.RUNNING):
                         running.append(agent.config.name)
                 except Exception:
@@ -1117,7 +1150,11 @@ async def _repl(
             # Include daemon task if alive
             if daemon_task is not None and not daemon_task.done():
                 task_name = daemon_task.get_name()
-                label = task_name.removeprefix("daemon-") if task_name.startswith("daemon-") else task_name
+                label = (
+                    task_name.removeprefix("daemon-")
+                    if task_name.startswith("daemon-")
+                    else task_name
+                )
                 if label not in running:
                     running.append(label)
             prompt_status.running_agents = running
@@ -1126,10 +1163,10 @@ async def _repl(
             if ctx._runtime is not None:
                 try:
                     from obscura.agent.agents import AgentStatus as _AS2
+
                     _active = {_AS2.RUNNING, _AS2.WAITING, _AS2.PENDING}
                     task_count += sum(
-                        1 for a in ctx._runtime.list_agents()
-                        if a.status in _active
+                        1 for a in ctx._runtime.list_agents() if a.status in _active
                     )
                 except Exception:
                     pass
@@ -1186,7 +1223,9 @@ async def _repl(
                             try:
                                 daemon_task = await _start_imessage_daemon(ctx.client)
                             except Exception as restart_exc:
-                                print_warning(f"iMessage daemon restart failed: {restart_exc}")
+                                print_warning(
+                                    f"iMessage daemon restart failed: {restart_exc}"
+                                )
                                 daemon_task = None
                     _refresh_prompt_status()
                     user_input = await bordered_prompt(session)
@@ -1213,6 +1252,79 @@ async def _repl(
                     from obscura.cli.render import print_error as _pe
                     from obscura.cli.render import print_info as _pi
 
+                    import subprocess as _sp
+
+                    def _snapshot_git() -> str | None:
+                        """Capture current git diff so we can revert on eval failure."""
+                        try:
+                            r = _sp.run(
+                                ["git", "diff", "--name-only", "HEAD"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            # Also capture untracked files
+                            u = _sp.run(
+                                ["git", "ls-files", "--others", "--exclude-standard"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            files = (r.stdout.strip() + "\n" + u.stdout.strip()).strip()
+                            return files if files else None
+                        except Exception:
+                            return None
+
+                    def _revert_changes(before_files: str | None) -> list[str]:
+                        """Revert files changed since the snapshot.
+
+                        Returns list of reverted file paths.
+                        """
+                        try:
+                            r = _sp.run(
+                                ["git", "diff", "--name-only", "HEAD"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            u = _sp.run(
+                                ["git", "ls-files", "--others", "--exclude-standard"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            after = set(
+                                (r.stdout.strip() + "\n" + u.stdout.strip())
+                                .strip()
+                                .splitlines()
+                            )
+                            before = set(
+                                before_files.splitlines() if before_files else []
+                            )
+                            new_files = after - before
+                            reverted: list[str] = []
+                            for f in sorted(new_files):
+                                if not f:
+                                    continue
+                                # Try git checkout first (tracked modified files)
+                                cr = _sp.run(
+                                    ["git", "checkout", "HEAD", "--", f],
+                                    capture_output=True,
+                                    timeout=5,
+                                )
+                                if cr.returncode != 0:
+                                    # Untracked new file — remove it
+                                    import os as _os
+
+                                    try:
+                                        _os.remove(f)
+                                    except OSError:
+                                        continue
+                                reverted.append(f)
+                            return reverted
+                        except Exception:
+                            return []
+
                     inner = user_input[1:].strip()  # strip *
                     if not inner:
                         _pe("Usage: *@command [args] or *$skill @command [args]")
@@ -1228,15 +1340,22 @@ async def _repl(
                     if not remaining and not skill_names:
                         suite = ctx.get_eval_suite(cmd_name)
                         if suite is None:
-                            _pe(f"No eval suite found for @{cmd_name}. Create {cmd_name}.eval.md next to the command.")
+                            _pe(
+                                f"No eval suite found for @{cmd_name}. Create {cmd_name}.eval.md next to the command."
+                            )
                             continue
 
-                        _pi(f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)")
+                        _pi(
+                            f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)"
+                        )
                         total_pass = 0
                         total_criteria = 0
 
                         for case_idx, case in enumerate(suite.cases, 1):
                             _pi(f"\n── Case {case_idx}/{len(suite.cases)}: {case.name}")
+
+                            # Snapshot git state before the command runs
+                            _pre_files = _snapshot_git()
 
                             # Build the chain input
                             chain_blocks: list[str] = []
@@ -1253,7 +1372,10 @@ async def _repl(
 
                             # Inject preferred-tools hint if specified
                             if case.preferred_tools:
-                                tools_hint = "Preferred tools for this task: " + ", ".join(case.preferred_tools)
+                                tools_hint = (
+                                    "Preferred tools for this task: "
+                                    + ", ".join(case.preferred_tools)
+                                )
                                 chain_blocks.append(tools_hint)
 
                             chain_input = "\n\n---\n\n".join(chain_blocks)
@@ -1268,17 +1390,26 @@ async def _repl(
                                 if suite.runs_per_case > 1:
                                     _pi(f"  Run {run + 1}/{suite.runs_per_case}")
                                 response = await send_message(
-                                    ctx, chain_input, eval_kwargs, streaming_status=ss,
+                                    ctx,
+                                    chain_input,
+                                    eval_kwargs,
+                                    streaming_status=ss,
                                 )
                                 ss.reset()
 
                                 # Grade the response
                                 grading = ctx.build_grading_prompt(
-                                    cmd_name, case.input_args, response, case.criteria,
+                                    cmd_name,
+                                    case.input_args,
+                                    response,
+                                    case.criteria,
                                 )
                                 _pi("  Grading...")
                                 grade_response = await send_message(
-                                    ctx, grading, loop_kwargs, streaming_status=ss,
+                                    ctx,
+                                    grading,
+                                    loop_kwargs,
+                                    streaming_status=ss,
                                 )
                                 ss.reset()
 
@@ -1287,7 +1418,23 @@ async def _repl(
                                 pass_count = grade_response.upper().count("| PASS")
                                 total_pass += pass_count
 
-                        _pi(f"\n── Eval complete: {total_pass}/{total_criteria} criteria passed")
+                                # Revert file changes if eval did not pass all criteria
+                                if pass_count < len(case.criteria):
+                                    reverted = _revert_changes(_pre_files)
+                                    if reverted:
+                                        _pe(
+                                            f"  Eval failed ({pass_count}/{len(case.criteria)}) "
+                                            f"— reverted {len(reverted)} file(s): "
+                                            + ", ".join(reverted)
+                                        )
+                                    else:
+                                        _pe(
+                                            f"  Eval failed ({pass_count}/{len(case.criteria)}) — no file changes to revert"
+                                        )
+
+                        _pi(
+                            f"\n── Eval complete: {total_pass}/{total_criteria} criteria passed"
+                        )
                         continue
 
                     # Has args → single run + grade
@@ -1318,28 +1465,99 @@ async def _repl(
 
                     _pi(f"*@{cmd_name}: running + grading")
 
+                    # Snapshot git state before the command runs
+                    _pre_files = _snapshot_git()
+
                     # Run
                     response = await send_message(
-                        ctx, chain_input, eval_kwargs, streaming_status=ss,
+                        ctx,
+                        chain_input,
+                        eval_kwargs,
+                        streaming_status=ss,
                     )
                     ss.reset()
 
-                    # Grade with generic criteria
-                    generic_criteria = [
-                        "Response is relevant to the command's purpose",
-                        "Response follows the command's output format",
-                        "Response is complete (not truncated or missing sections)",
-                        "Response is accurate (no hallucinated information)",
-                        "Response is actionable (provides specific, useful details)",
-                    ]
+                    # Use command-specific eval criteria when declared in
+                    # frontmatter, falling back to generic 5-criteria grading.
+                    cmd_criteria = getattr(resolved.meta, "eval_criteria", None)
+                    criteria = (
+                        cmd_criteria
+                        if cmd_criteria
+                        else [
+                            "Response is relevant to the command's purpose",
+                            "Response follows the command's output format",
+                            "Response is complete (not truncated or missing sections)",
+                            "Response is accurate (no hallucinated information)",
+                            "Response is actionable (provides specific, useful details)",
+                        ]
+                    )
+                    pass_threshold = getattr(
+                        resolved.meta, "eval_pass_threshold", None
+                    ) or len(criteria)
                     grading = ctx.build_grading_prompt(
-                        cmd_name, remaining, response, generic_criteria,
+                        cmd_name,
+                        remaining,
+                        response,
+                        criteria,
                     )
                     _pi("Grading...")
-                    await send_message(
-                        ctx, grading, loop_kwargs, streaming_status=ss,
+                    grade_response = await send_message(
+                        ctx,
+                        grading,
+                        loop_kwargs,
+                        streaming_status=ss,
                     )
                     ss.reset()
+
+                    # Persist eval result to the eval store
+                    try:
+                        from obscura.eval.models import EvalRunSummary
+                        from obscura.eval.store import EvalResultStore
+                        import time as _time
+
+                        _pass_ct = grade_response.upper().count("| PASS")
+                        _fail_ct = len(criteria) - _pass_ct
+                        summary = EvalRunSummary(
+                            run_id=f"cmd-{cmd_name}-{int(_time.time())}",
+                            suite_id=f"command:{cmd_name}",
+                            backend=str(getattr(ctx, "backend_name", "unknown")),
+                            model=str(getattr(ctx, "model_name", "unknown")),
+                            total_cases=1,
+                            passed=1 if _pass_ct >= pass_threshold else 0,
+                            failed=0 if _pass_ct >= pass_threshold else 1,
+                            regressions=0,
+                            errors=0,
+                            avg_deterministic_score=_pass_ct / max(len(criteria), 1),
+                            avg_judge_score=None,
+                            avg_composite_score=_pass_ct / max(len(criteria), 1),
+                        )
+                        store = EvalResultStore()
+                        import asyncio as _aio
+
+                        _aio.create_task(store.save_run(summary))
+                    except Exception:
+                        pass  # eval store not available — non-fatal
+
+                    # Revert file changes if eval did not meet threshold
+                    pass_count = grade_response.upper().count("| PASS")
+                    total = len(criteria)
+                    _pi(
+                        f"Score: {pass_count}/{total} (threshold: {pass_threshold}/{total})"
+                    )
+                    if pass_count < pass_threshold:
+                        reverted = _revert_changes(_pre_files)
+                        if reverted:
+                            _pe(
+                                f"Eval failed ({pass_count}/{total}) "
+                                f"— reverted {len(reverted)} file(s): "
+                                + ", ".join(reverted)
+                            )
+                        else:
+                            _pe(
+                                f"Eval failed ({pass_count}/{total}) — no file changes to revert"
+                            )
+                    else:
+                        _pi(f"Eval passed ({pass_count}/{total}) — changes kept")
                     continue
 
                 # $skill / @command / chained input
@@ -1347,7 +1565,9 @@ async def _repl(
                     from obscura.cli.render import print_error as _pe
                     from obscura.cli.render import print_info as _pi
 
-                    skill_names, cmd_name, remaining = ctx.parse_chained_input(user_input)
+                    skill_names, cmd_name, remaining = ctx.parse_chained_input(
+                        user_input
+                    )
                     blocks: list[str] = []
                     _abort = False
 
@@ -1355,7 +1575,9 @@ async def _repl(
                     for sname in skill_names:
                         body = ctx.resolve_dollar_skill(sname)
                         if body is None:
-                            _pe(f"Unknown skill: ${sname}. Available: {', '.join(ctx.discover_dollar_skills())}")
+                            _pe(
+                                f"Unknown skill: ${sname}. Available: {', '.join(ctx.discover_dollar_skills())}"
+                            )
                             _abort = True
                             break
                         _pi(f"${sname}")
@@ -1369,7 +1591,9 @@ async def _repl(
                     if cmd_name is not None:
                         resolved = ctx.resolve_at_command(cmd_name, remaining)
                         if resolved is None:
-                            _pe(f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}")
+                            _pe(
+                                f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}"
+                            )
                             continue
                         _pi(f"@{resolved.name}: {resolved.description}")
                         blocks.append(resolved.body)
@@ -1470,7 +1694,9 @@ async def _repl(
     default=False,
     help="Resume the most recent session.",
 )
-@click.option("--resume", default=None, help="Resume session by ID (alias for --session).")
+@click.option(
+    "--resume", default=None, help="Resume session by ID (alias for --session)."
+)
 @click.option("--max-turns", default=10, type=int, help="Max agent loop turns.")
 @click.option(
     "--tools",
@@ -1533,6 +1759,7 @@ def main(
 
     import logging as _logging
     from obscura.cli.logger import configure_logger
+
     cli_logger = _logging.getLogger("obscura")
     # Set the InfoHandler threshold to the user's chosen level
     level = getattr(_logging, log_level.upper(), _logging.WARNING)
@@ -1541,6 +1768,7 @@ def main(
             h.setLevel(level)
 
     # Compile workspace if specified
+    compiled_ws = None
     if workspace_name is not None:
         try:
             from obscura.core.compiler.compile import compile_workspace
@@ -1563,6 +1791,7 @@ def main(
     if not resolved_session and resume_last:
         try:
             import sqlite3
+
             db_path = resolve_obscura_home() / "events.db"
             con = sqlite3.connect(str(db_path))
             row = con.execute(
@@ -1575,15 +1804,37 @@ def main(
             pass
     try:
         asyncio.run(
-            _repl(backend, model, system, resolved_session, max_turns, tools, prompt, confirm, no_default_prompt, supervise=supervise)
+            _repl(
+                backend,
+                model,
+                system,
+                resolved_session,
+                max_turns,
+                tools,
+                prompt,
+                confirm,
+                no_default_prompt,
+                supervise=supervise,
+                compiled_ws=compiled_ws,
+            )
         )
     except KeyboardInterrupt:
         pass  # graceful exit on Ctrl-C
 
 
 @main.command()
-@click.option("--force", is_flag=True, default=False, help="Reinitialise even if .obscura/ exists.")
-@click.option("--no-bootstrap", is_flag=True, default=False, help="Skip plugin dependency bootstrapping.")
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Reinitialise even if .obscura/ exists.",
+)
+@click.option(
+    "--no-bootstrap",
+    is_flag=True,
+    default=False,
+    help="Skip plugin dependency bootstrapping.",
+)
 def init(force: bool, no_bootstrap: bool) -> None:
     """Initialise a local .obscura/ workspace and bootstrap plugin deps."""
     from obscura.core.workspace import (
@@ -1684,7 +1935,9 @@ def workspace_inspect(name: str) -> None:
     if ws.plugin_exclude:
         click.echo(f"  Plugin exclude: {', '.join(sorted(ws.plugin_exclude))}")
     if ws.memory:
-        click.echo(f"  Memory: namespace={ws.memory.namespace} scope={ws.memory.shared_scope}")
+        click.echo(
+            f"  Memory: namespace={ws.memory.namespace} scope={ws.memory.shared_scope}"
+        )
 
     if ws.agents:
         click.echo(f"  Agents ({len(ws.agents)}):")

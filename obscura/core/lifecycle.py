@@ -182,10 +182,135 @@ def make_memory_inject_hook(
     return _hook
 
 
+# ---------------------------------------------------------------------------
+# Tool eval
+# ---------------------------------------------------------------------------
+
+
+def make_tool_eval_hook() -> BeforeHook:
+    """Create a before-hook that validates tool results after execution.
+
+    Runs deterministic checks on TOOL_RESULT events (e.g. ``ruff check``
+    on written Python files).  When a check finds issues, appends the
+    diagnostic text to ``event.tool_result`` so the model sees it and can
+    self-correct on the next turn.
+
+    Also stores failures in vector memory (Qdrant) and retrieves relevant
+    past failures to prepend as warnings.
+
+    Non-TOOL_RESULT events pass through unmodified.
+    """
+
+    def _hook(event: AgentEvent) -> AgentEvent | None:
+        if event.kind != AgentEventKind.TOOL_RESULT:
+            return event
+        try:
+            from obscura.core.eval_checks import run_tool_check
+
+            file_path = str(
+                event.tool_input.get("file_path")
+                or event.tool_input.get("path")
+                or ""
+            )
+
+            error = run_tool_check(
+                event.tool_name,
+                event.tool_input,
+                event.tool_result,
+            )
+            if error:
+                event.tool_result = (event.tool_result or "") + error
+                logger.info(
+                    "Tool eval check appended diagnostics for '%s'",
+                    event.tool_name,
+                )
+                # Record failure in eval memory for future recall
+                try:
+                    from obscura.eval.memory import EvalMemory
+                    em = EvalMemory.get_instance()
+                    em.record_tool_failure(
+                        tool_name=event.tool_name,
+                        error=error.strip(),
+                        file_path=file_path,
+                    )
+                except Exception:
+                    pass
+            else:
+                # No errors — record success to resolve past failures (#3)
+                if file_path and event.tool_name:
+                    try:
+                        from obscura.eval.memory import EvalMemory
+                        em = EvalMemory.get_instance()
+                        em.record_tool_success(
+                            tool_name=event.tool_name,
+                            file_path=file_path,
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            logger.debug("Tool eval hook error", exc_info=True)
+        return event
+
+    return _hook
+
+
+def make_eval_memory_inject_hook() -> BeforeHook:
+    """Create a before-hook that injects past eval failures into TURN_START.
+
+    Context-aware: extracts tool names and file paths from the turn's
+    prompt text and only retrieves failures relevant to those tools/files.
+    Does NOT inject random recent failures.
+    """
+
+    def _extract_context(text: str) -> tuple[list[str], list[str]]:
+        """Extract likely tool names and file paths from prompt text."""
+        import re
+        # File paths — anything that looks like a/b/c.py or /abs/path.toml
+        file_paths = re.findall(r'[\w/.-]+\.(?:py|toml|yaml|yml|json|md|ts|js)', text)
+        # Tool names — common tool names that might appear in prompts
+        tool_names: list[str] = []
+        for name in ("Write", "Edit", "Bash", "Read", "Grep", "Glob",
+                      "write_file", "edit_file", "create_file", "bash"):
+            if name.lower() in text.lower():
+                tool_names.append(name)
+        return tool_names, file_paths
+
+    def _hook(event: AgentEvent) -> AgentEvent | None:
+        if event.kind != AgentEventKind.TURN_START:
+            return event
+        try:
+            from obscura.eval.memory import EvalMemory
+
+            em = EvalMemory.get_instance()
+            if not em.available:
+                return event
+
+            # Extract context from prompt text
+            tool_names, file_paths = _extract_context(event.text or "")
+            if not tool_names and not file_paths:
+                return event  # nothing to recall against — skip injection
+
+            warnings = em.recall_for_context(
+                tool_names=tool_names,
+                file_paths=file_paths,
+                top_k=3,
+            )
+            context = em.format_warnings(warnings)
+            if context:
+                event.text = context + "\n" + event.text if event.text else context
+        except Exception:
+            pass
+        return event
+
+    return _hook
+
+
 __all__ = [
     "make_policy_gate_hook",
     "make_audit_hook",
     "make_redact_hook",
     "make_preflight_hook",
     "make_memory_inject_hook",
+    "make_tool_eval_hook",
+    "make_eval_memory_inject_hook",
 ]

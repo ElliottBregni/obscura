@@ -21,6 +21,7 @@ from obscura.core.compiler.compiled import (
     CompiledMCPServer,
     CompiledMemory,
     CompiledPolicy,
+    ToolRoutingConfig,
 )
 from obscura.core.compiler.specs import (
     MCPServerSpec,
@@ -239,6 +240,21 @@ def compile_agent(
 
     expanded_instructions = expand_prompt_references(spec.instructions)
 
+    # Compile tool routing config if present in the spec.
+    tool_routing: ToolRoutingConfig | None = None
+    if spec.tool_routing is not None:
+        tr = spec.tool_routing
+        tool_routing = ToolRoutingConfig(
+            enabled=tr.enabled,
+            max_tools=tr.max_tools,
+            pinned_tools=tuple(tr.pinned_tools),
+            pin_default_capabilities=tr.pin_default_capabilities,
+            use_quality_scores=tr.use_quality_scores,
+            use_context_recall=tr.use_context_recall,
+            min_quality_score=tr.min_quality_score,
+            capability_match_threshold=tr.capability_match_threshold,
+        )
+
     return CompiledAgent(
         name=agent_ref.name,
         template_name=template.metadata.name,
@@ -255,6 +271,7 @@ def compile_agent(
         mcp_servers=mcp_servers,
         config=dict(spec.config),
         input_vars=dict(agent_ref.input),
+        tool_routing=tool_routing,
     )
 
 

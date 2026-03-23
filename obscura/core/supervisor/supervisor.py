@@ -166,6 +166,21 @@ class Supervisor:
         )
         hooks.load_from_db()
 
+        # Register eval hooks (turn-level + session gate)
+        try:
+            from obscura.core.supervisor.eval_hooks import (
+                make_session_eval_gate,
+                make_turn_eval_hook,
+            )
+
+            point, ref, handler = make_turn_eval_hook()
+            hooks.register(point, "after", ref, handler, persist=False)
+            point, ref, handler = make_session_eval_gate()
+            hooks.register(point, "before", ref, handler, persist=False)
+            logger.debug("Eval hooks registered (turn + session gate)")
+        except Exception as exc:
+            logger.debug("Could not register eval hooks: %s", exc)
+
         # Memory gate
         memory_gate = MemoryCommitGate(
             db_path=self._db_path,
@@ -289,6 +304,37 @@ class Supervisor:
                         "hash": tool_snapshot.hash[:12],
                     },
                 )
+
+            # Construct and attach tool router if backend supports it.
+            # The Agent.start() path (agents.py) is the primary wiring point
+            # since it has access to the CapabilityIndex.  This path serves
+            # as a fallback for supervisor-only runs (no Agent wrapper).
+            if (
+                tool_snapshot is not None
+                and backend is not None
+                and hasattr(backend, "set_tool_router")
+                and getattr(backend, "_tool_router", None) is None
+            ):
+                try:
+                    from obscura.core.compiler.compiled import ToolRoutingConfig
+                    from obscura.core.tool_router import ToolRouter
+                    from obscura.core.tool_score_index import ToolScoreIndex
+
+                    routing_config = ToolRoutingConfig()
+                    score_index = ToolScoreIndex()
+                    router = ToolRouter(
+                        config=routing_config,
+                        score_index=score_index,
+                        backend=getattr(backend, "_backend_type", "copilot")
+                        if hasattr(backend, "_backend_type")
+                        else "copilot",
+                    )
+                    backend.set_tool_router(router)
+                except Exception:
+                    logger.debug(
+                        "Could not attach tool router to backend",
+                        exc_info=True,
+                    )
 
             # Queue memory items for commit gating
             if memory_items:

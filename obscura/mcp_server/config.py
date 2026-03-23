@@ -27,9 +27,23 @@ class ObscuraMCPServerConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> ObscuraMCPServerConfig:
-        """Load configuration from environment variables."""
+        """Load configuration from environment variables.
+
+        Reads ``OBSCURA_API_KEY`` first.  When that is absent, falls back to
+        extracting the first token from the server-side
+        ``OBSCURA_API_KEYS`` variable so that in-process MCP tools can
+        authenticate against the co-located FastAPI server without
+        requiring a separate client key.
+        """
+        api_key = os.environ.get("OBSCURA_API_KEY")
+        if not api_key:
+            # OBSCURA_API_KEYS format: "token:user:role1,role2;token2:..."
+            keys_env = os.environ.get("OBSCURA_API_KEYS", "")
+            if keys_env:
+                first_entry = keys_env.split(";")[0]
+                api_key = first_entry.split(":")[0] if first_entry else None
         return cls(
             base_url=os.environ.get("OBSCURA_BASE_URL", "http://localhost:8080"),
-            api_key=os.environ.get("OBSCURA_API_KEY"),
+            api_key=api_key,
             timeout=float(os.environ.get("OBSCURA_MCP_TIMEOUT", "60")),
         )

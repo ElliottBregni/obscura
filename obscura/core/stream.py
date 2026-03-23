@@ -182,7 +182,9 @@ class EventToIteratorBridge:
         )
         self._queue.put_nowait(None)
 
-    def error(self, err: Exception | Any) -> None:
+    def error(
+        self, err: Exception | Any, *, metadata: StreamMetadata | None = None
+    ) -> None:
         """Signal error and end stream."""
         self.push(
             StreamChunk(
@@ -190,6 +192,7 @@ class EventToIteratorBridge:
                 text=str(err),
                 raw=err,
                 native_event=err,
+                metadata=metadata,
             )
         )
         self._queue.put_nowait(None)

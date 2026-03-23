@@ -108,6 +108,30 @@ class EnvironmentManifest:
 
 
 # ---------------------------------------------------------------------------
+# Tool routing config
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ToolRoutingConfig:
+    """Per-agent tool routing configuration.
+
+    Controls how the :class:`ToolRouter` selects a relevant subset of tools
+    for each model turn, keeping the tool-definition payload within backend
+    limits and improving model selection accuracy.
+    """
+
+    enabled: bool = True
+    max_tools: int = 50
+    pinned_tools: tuple[str, ...] = field(default_factory=_empty_tuple_str)
+    pin_default_capabilities: bool = True
+    use_quality_scores: bool = True
+    use_context_recall: bool = True
+    min_quality_score: float = 0.2
+    capability_match_threshold: float = 0.3
+
+
+# ---------------------------------------------------------------------------
 # Compiled agent
 # ---------------------------------------------------------------------------
 
@@ -132,6 +156,7 @@ class CompiledAgent:
     config: dict[str, Any] = field(default_factory=_empty_dict_str_any)
     input_vars: dict[str, Any] = field(default_factory=_empty_dict_str_any)
     env: EnvironmentManifest | None = None
+    tool_routing: ToolRoutingConfig | None = None
 
 
 # ---------------------------------------------------------------------------

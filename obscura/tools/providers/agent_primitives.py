@@ -171,6 +171,16 @@ def playwright_version(**_: Any) -> dict[str, Any]:
     return _run_cli(["npx", "playwright", "--version"])
 
 
+def lightpanda_fetch(url: str, timeout: int = 30, **_: Any) -> dict[str, Any]:
+    """Fetch a URL with Lightpanda (JS-rendered HTML to stdout)."""
+    return _run_cli(["lightpanda", "fetch", url])
+
+
+def lightpanda_version(**_: Any) -> dict[str, Any]:
+    """Check Lightpanda binary availability and version."""
+    return _run_cli(["lightpanda", "--version"])
+
+
 def rg_search(pattern: str, path: str = ".", **_: Any) -> dict[str, Any]:
     return _run_cli(["rg", "-n", pattern, path])
 

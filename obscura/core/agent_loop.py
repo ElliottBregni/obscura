@@ -377,6 +377,7 @@ class AgentLoop:
             _current_tool_input_json: str = ""
             _current_tool_raw: Any = None
             _seen_tool_use: bool = False
+            _emitted_tool_keys: set[str] = set()  # dedup event emissions
 
             try:
                 async for chunk in self._call_stream(current_prompt, kwargs):
@@ -412,22 +413,25 @@ class AgentLoop:
                                 _current_tool_input_json,
                                 _current_tool_raw,
                             )
-                            tool_calls.append(tc)
-                            # Emit TOOL_CALL with full input
-                            tc_ev = AgentEvent(
-                                kind=AgentEventKind.TOOL_CALL,
-                                tool_name=tc.name,
-                                tool_input=tc.input,
-                                turn=turn,
-                                raw=tc.raw,
-                            )
-                            if _prev_event is not None:
-                                await self._post_emit(_prev_event)
-                                _prev_event = None
-                            emitted = await self._emit(tc_ev, session_id)
-                            if emitted is not None:
-                                yield emitted
-                                _prev_event = emitted
+                            _dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
+                            if _dedup_key not in _emitted_tool_keys:
+                                _emitted_tool_keys.add(_dedup_key)
+                                tool_calls.append(tc)
+                                # Emit TOOL_CALL with full input
+                                tc_ev = AgentEvent(
+                                    kind=AgentEventKind.TOOL_CALL,
+                                    tool_name=tc.name,
+                                    tool_input=tc.input,
+                                    turn=turn,
+                                    raw=tc.raw,
+                                )
+                                if _prev_event is not None:
+                                    await self._post_emit(_prev_event)
+                                    _prev_event = None
+                                emitted = await self._emit(tc_ev, session_id)
+                                if emitted is not None:
+                                    yield emitted
+                                    _prev_event = emitted
                         _current_tool_name = chunk.tool_name
                         _current_tool_input_json = ""
                         _current_tool_raw = chunk.raw
@@ -443,22 +447,25 @@ class AgentLoop:
                                 _current_tool_input_json,
                                 _current_tool_raw,
                             )
-                            tool_calls.append(tc)
-                            # Emit TOOL_CALL with full input
-                            tc_ev = AgentEvent(
-                                kind=AgentEventKind.TOOL_CALL,
-                                tool_name=tc.name,
-                                tool_input=tc.input,
-                                turn=turn,
-                                raw=tc.raw,
-                            )
-                            if _prev_event is not None:
-                                await self._post_emit(_prev_event)
-                                _prev_event = None
-                            emitted = await self._emit(tc_ev, session_id)
-                            if emitted is not None:
-                                yield emitted
-                                _prev_event = emitted
+                            _dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
+                            if _dedup_key not in _emitted_tool_keys:
+                                _emitted_tool_keys.add(_dedup_key)
+                                tool_calls.append(tc)
+                                # Emit TOOL_CALL with full input
+                                tc_ev = AgentEvent(
+                                    kind=AgentEventKind.TOOL_CALL,
+                                    tool_name=tc.name,
+                                    tool_input=tc.input,
+                                    turn=turn,
+                                    raw=tc.raw,
+                                )
+                                if _prev_event is not None:
+                                    await self._post_emit(_prev_event)
+                                    _prev_event = None
+                                emitted = await self._emit(tc_ev, session_id)
+                                if emitted is not None:
+                                    yield emitted
+                                    _prev_event = emitted
                             _current_tool_name = ""
                             _current_tool_input_json = ""
                             _current_tool_raw = None
@@ -470,22 +477,25 @@ class AgentLoop:
                         _current_tool_input_json,
                         _current_tool_raw,
                     )
-                    tool_calls.append(tc)
-                    # Emit TOOL_CALL with full input
-                    tc_ev = AgentEvent(
-                        kind=AgentEventKind.TOOL_CALL,
-                        tool_name=tc.name,
-                        tool_input=tc.input,
-                        turn=turn,
-                        raw=tc.raw,
-                    )
-                    if _prev_event is not None:
-                        await self._post_emit(_prev_event)
-                        _prev_event = None
-                    emitted = await self._emit(tc_ev, session_id)
-                    if emitted is not None:
-                        yield emitted
-                        _prev_event = emitted
+                    _dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
+                    if _dedup_key not in _emitted_tool_keys:
+                        _emitted_tool_keys.add(_dedup_key)
+                        tool_calls.append(tc)
+                        # Emit TOOL_CALL with full input
+                        tc_ev = AgentEvent(
+                            kind=AgentEventKind.TOOL_CALL,
+                            tool_name=tc.name,
+                            tool_input=tc.input,
+                            turn=turn,
+                            raw=tc.raw,
+                        )
+                        if _prev_event is not None:
+                            await self._post_emit(_prev_event)
+                            _prev_event = None
+                        emitted = await self._emit(tc_ev, session_id)
+                        if emitted is not None:
+                            yield emitted
+                            _prev_event = emitted
 
             except Exception as exc:
                 err_event = AgentEvent(
@@ -1113,6 +1123,7 @@ class AgentLoop:
                 text=chunk.text,
                 turn=turn,
                 raw=chunk.raw,
+                metadata=chunk.metadata,
             )
         return None
 

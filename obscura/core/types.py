@@ -527,3 +527,4 @@ class AgentEvent:
     is_error: bool = False
     turn: int = 0
     raw: Any = None
+    metadata: StreamMetadata | None = None

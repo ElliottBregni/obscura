@@ -40,6 +40,35 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Registration validation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RegistrationIssue:
+    """A single problem found during tool registration validation."""
+
+    level: str  # "critical" | "warning"
+    message: str
+
+
+@dataclass
+class RegistrationResult:
+    """Outcome of a tool registration attempt."""
+
+    status: str  # "registered" | "quarantined"
+    issues: list[RegistrationIssue] = field(default_factory=list)
+
+    @property
+    def has_critical(self) -> bool:
+        return any(i.level == "critical" for i in self.issues)
+
+    @property
+    def summary(self) -> str:
+        return "; ".join(i.message for i in self.issues)
+
+
+# ---------------------------------------------------------------------------
 # Approval callback protocol
 # ---------------------------------------------------------------------------
 
@@ -57,13 +86,15 @@ async def _auto_deny(_envelope: ToolCallEnvelope, reason: str) -> bool:
 # Audit event
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BrokerAuditEntry:
     """Structured audit record emitted for every broker invocation."""
+
     call_id: str
     tool: str
     agent_id: str
-    action: str              # "executed" | "denied" | "approval_denied" | "error" | "timeout"
+    action: str  # "executed" | "denied" | "approval_denied" | "error" | "timeout"
     matched_rule: str = ""
     latency_ms: int = 0
     error: str = ""
@@ -73,6 +104,7 @@ class BrokerAuditEntry:
 # ---------------------------------------------------------------------------
 # Broker
 # ---------------------------------------------------------------------------
+
 
 class ToolBroker:
     """Single choke-point for plugin tool execution.
@@ -98,6 +130,8 @@ class ToolBroker:
         approval_callback: ApprovalCallback | None = None,
         default_timeout: float = 30.0,
         max_retries: int = 0,
+        lazy_manager: Any | None = None,
+        score_index: Any | None = None,
     ) -> None:
         self._policy = policy_engine
         self._resolver = capability_resolver
@@ -108,6 +142,15 @@ class ToolBroker:
         self._schemas: dict[str, dict[str, Any]] = {}
         self._audit_log: list[BrokerAuditEntry] = []
         self._specs: dict[str, Any] = {}
+        self._lazy_manager = lazy_manager
+        self._score_index = score_index
+        self._quarantined: dict[str, tuple[Any, RegistrationResult]] = {}
+
+    # -- Lazy loading --------------------------------------------------------
+
+    def set_lazy_manager(self, manager: Any) -> None:
+        """Attach a LazyPluginManager for on-demand handler resolution."""
+        self._lazy_manager = manager
 
     # -- Handler registration ----------------------------------------------
 
@@ -126,11 +169,72 @@ class ToolBroker:
         if parameters is not None:
             self._schemas[name] = parameters
 
-    def register_tool_spec(self, spec: Any) -> None:
-        """Register a tool from its full ToolSpec."""
+    def register_tool_spec(self, spec: Any) -> RegistrationResult:
+        """Register a tool from its full ToolSpec, with quality gate.
+
+        Validates the spec before adding it to the active registry.  Tools
+        that fail critical checks are quarantined (stored but excluded from
+        the active handler/schema dicts).
+        """
+        result = self._validate_registration(spec)
+        if result.has_critical:
+            self._quarantined[spec.name] = (spec, result)
+            logger.warning("Tool %s quarantined: %s", spec.name, result.summary)
+            return result
+
         self._handlers[spec.name] = spec.handler
         self._schemas[spec.name] = spec.parameters
         self._specs[spec.name] = spec
+
+        if result.issues:
+            logger.info(
+                "Tool %s registered with warnings: %s", spec.name, result.summary
+            )
+        return result
+
+    @property
+    def quarantined_tools(self) -> list[str]:
+        """Return names of quarantined (failed-validation) tools."""
+        return list(self._quarantined.keys())
+
+    @staticmethod
+    def _validate_registration(spec: Any) -> RegistrationResult:
+        """Run registration-time quality checks on a ToolSpec."""
+        import re
+
+        issues: list[RegistrationIssue] = []
+
+        # Handler must be callable
+        if not callable(getattr(spec, "handler", None)):
+            issues.append(
+                RegistrationIssue("critical", "handler is not callable")
+            )
+
+        # Name must be a valid identifier
+        name = getattr(spec, "name", "")
+        if not name or not re.match(r"^[a-zA-Z0-9_.:-]+$", name):
+            issues.append(
+                RegistrationIssue("critical", f"invalid tool name: {name!r}")
+            )
+
+        # Description should be present
+        desc = getattr(spec, "description", "")
+        if not desc:
+            issues.append(
+                RegistrationIssue("warning", "missing description")
+            )
+
+        # Parameters should be a dict (JSON Schema)
+        params = getattr(spec, "parameters", None)
+        if params is not None and not isinstance(params, dict):
+            issues.append(
+                RegistrationIssue("critical", "parameters is not a dict")
+            )
+
+        return RegistrationResult(
+            status="quarantined" if any(i.level == "critical" for i in issues) else "registered",
+            issues=issues,
+        )
 
     def all_specs(self) -> list[Any]:
         """Return all registered ToolSpec objects."""
@@ -155,7 +259,9 @@ class ToolBroker:
         start = time.monotonic()
 
         # 1. Policy check
-        decision = self._policy.can_execute_tool(envelope.tool, agent_id=envelope.agent_id)
+        decision = self._policy.can_execute_tool(
+            envelope.tool, agent_id=envelope.agent_id
+        )
         if not decision.allowed:
             return self._denied(envelope, decision.reason, decision.matched_rule, start)
 
@@ -180,7 +286,7 @@ class ToolBroker:
                     action="approval_denied",
                     matched_rule=decision.matched_rule,
                 )
-                self._audit_log.append(entry)
+                self._record_audit(entry)
                 return ToolResultEnvelope(
                     call_id=envelope.call_id,
                     tool=envelope.tool,
@@ -191,10 +297,15 @@ class ToolBroker:
                     ),
                 )
 
-        # 4. Resolve handler
+        # 4. Resolve handler (lazy-init plugin if needed)
         handler = self._handlers.get(envelope.tool)
+        if handler is None and self._lazy_manager is not None:
+            if self._lazy_manager.ensure_tool_ready(envelope.tool):
+                handler = self._handlers.get(envelope.tool)
         if handler is None:
-            return self._error(envelope, "no_handler", f"No handler for tool: {envelope.tool}", start)
+            return self._error(
+                envelope, "no_handler", f"No handler for tool: {envelope.tool}", start
+            )
 
         # 5. Execute with timeout and retry
         last_error: Exception | None = None
@@ -210,7 +321,7 @@ class ToolBroker:
                     action="executed",
                     latency_ms=latency,
                 )
-                self._audit_log.append(entry)
+                self._record_audit(entry)
                 return ToolResultEnvelope(
                     call_id=envelope.call_id,
                     tool=envelope.tool,
@@ -220,15 +331,30 @@ class ToolBroker:
                 )
             except asyncio.TimeoutError:
                 last_error = asyncio.TimeoutError(f"Tool {envelope.tool} timed out")
-                logger.warning("Timeout on %s (attempt %d/%d)", envelope.tool, attempt + 1, attempts)
+                logger.warning(
+                    "Timeout on %s (attempt %d/%d)",
+                    envelope.tool,
+                    attempt + 1,
+                    attempts,
+                )
             except Exception as exc:
                 last_error = exc
-                logger.warning("Error on %s (attempt %d/%d): %s", envelope.tool, attempt + 1, attempts, exc)
+                logger.warning(
+                    "Error on %s (attempt %d/%d): %s",
+                    envelope.tool,
+                    attempt + 1,
+                    attempts,
+                    exc,
+                )
 
         # All retries exhausted
         latency = int((time.monotonic() - start) * 1000)
         error_msg = str(last_error) if last_error else "Unknown error"
-        error_type = ToolErrorType.TIMEOUT if isinstance(last_error, asyncio.TimeoutError) else ToolErrorType.UNKNOWN
+        error_type = (
+            ToolErrorType.TIMEOUT
+            if isinstance(last_error, asyncio.TimeoutError)
+            else ToolErrorType.UNKNOWN
+        )
         entry = BrokerAuditEntry(
             call_id=envelope.call_id,
             tool=envelope.tool,
@@ -237,7 +363,7 @@ class ToolBroker:
             latency_ms=latency,
             error=error_msg,
         )
-        self._audit_log.append(entry)
+        self._record_audit(entry)
         return ToolResultEnvelope(
             call_id=envelope.call_id,
             tool=envelope.tool,
@@ -252,9 +378,15 @@ class ToolBroker:
 
     # -- Internals ---------------------------------------------------------
 
-    async def _invoke(self, handler: Callable[..., Any], envelope: ToolCallEnvelope) -> Any:
+    async def _invoke(
+        self, handler: Callable[..., Any], envelope: ToolCallEnvelope
+    ) -> Any:
         """Invoke handler with timeout."""
-        coro = handler(**envelope.args) if asyncio.iscoroutinefunction(handler) else asyncio.to_thread(handler, **envelope.args)
+        coro = (
+            handler(**envelope.args)
+            if asyncio.iscoroutinefunction(handler)
+            else asyncio.to_thread(handler, **envelope.args)
+        )
         return await asyncio.wait_for(coro, timeout=self._default_timeout)
 
     def _check_capabilities(self, envelope: ToolCallEnvelope) -> bool:
@@ -280,7 +412,7 @@ class ToolBroker:
             matched_rule=rule,
             latency_ms=latency,
         )
-        self._audit_log.append(entry)
+        self._record_audit(entry)
         return ToolResultEnvelope(
             call_id=envelope.call_id,
             tool=envelope.tool,
@@ -308,7 +440,7 @@ class ToolBroker:
             latency_ms=latency,
             error=message,
         )
-        self._audit_log.append(entry)
+        self._record_audit(entry)
         return ToolResultEnvelope(
             call_id=envelope.call_id,
             tool=envelope.tool,
@@ -319,6 +451,18 @@ class ToolBroker:
             ),
             latency_ms=latency,
         )
+
+    # -- Score index -------------------------------------------------------
+
+    def set_score_index(self, index: Any) -> None:
+        """Attach a :class:`ToolScoreIndex` for live quality tracking."""
+        self._score_index = index
+
+    def _record_audit(self, entry: BrokerAuditEntry) -> None:
+        """Append audit entry and feed the score index if available."""
+        self._audit_log.append(entry)
+        if self._score_index is not None:
+            self._score_index.record(entry)
 
     # -- Audit access ------------------------------------------------------
 
@@ -331,4 +475,6 @@ __all__ = [
     "ToolBroker",
     "BrokerAuditEntry",
     "ApprovalCallback",
+    "RegistrationIssue",
+    "RegistrationResult",
 ]

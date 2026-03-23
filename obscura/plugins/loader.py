@@ -52,6 +52,7 @@ def _load_plugin_config_flag(key: str, default: bool = True) -> bool:
     """
     try:
         from obscura.core.workspace import load_workspace_config
+
         config = load_workspace_config()
         section = config.get("plugins", {})
         for part in key.split("."):
@@ -173,7 +174,9 @@ def _resolve_handler_from_plugin_module(
     except Exception as exc:
         logger.debug(
             "Failed to resolve tool %s from plugin module %s: %s",
-            tool_name, tools_module, exc,
+            tool_name,
+            tools_module,
+            exc,
         )
         return None
     finally:
@@ -272,7 +275,9 @@ class PluginLoader:
                         spec = parse_manifest_file(manifest)
                         specs.append(spec)
                     except ManifestError as exc:
-                        logger.warning("Skipping invalid manifest %s: %s", manifest, exc)
+                        logger.warning(
+                            "Skipping invalid manifest %s: %s", manifest, exc
+                        )
             elif entry.suffix in (".toml", ".yaml") and entry.name != "registry.json":
                 # Flat layout: *.toml or *.yaml
                 try:
@@ -317,7 +322,8 @@ class PluginLoader:
             if lenient:
                 logger.info(
                     "Plugin %s missing config (%s) — tools registered but may fail at runtime",
-                    spec.id, ", ".join(missing),
+                    spec.id,
+                    ", ".join(missing),
                 )
             else:
                 status.state = "disabled"
@@ -335,21 +341,33 @@ class PluginLoader:
                     if lenient:
                         logger.info(
                             "Plugin %s bootstrap incomplete (%s) — tools registered but may fail at runtime",
-                            spec.id, "; ".join(bootstrap_result.errors),
+                            spec.id,
+                            "; ".join(bootstrap_result.errors),
                         )
                     else:
                         status.state = "failed"
-                        status.error = f"Bootstrap failed: {'; '.join(bootstrap_result.errors)}"
-                        logger.warning("Plugin %s bootstrap failed: %s", spec.id, bootstrap_result.errors)
+                        status.error = (
+                            f"Bootstrap failed: {'; '.join(bootstrap_result.errors)}"
+                        )
+                        logger.warning(
+                            "Plugin %s bootstrap failed: %s",
+                            spec.id,
+                            bootstrap_result.errors,
+                        )
                         return status
                 if bootstrap_result.installed:
                     logger.info(
                         "Plugin %s bootstrapped: installed %s",
-                        spec.id, ", ".join(bootstrap_result.installed),
+                        spec.id,
+                        ", ".join(bootstrap_result.installed),
                     )
             except Exception as exc:
                 if lenient:
-                    logger.info("Plugin %s bootstrap skipped: %s — tools still registered", spec.id, exc)
+                    logger.info(
+                        "Plugin %s bootstrap skipped: %s — tools still registered",
+                        spec.id,
+                        exc,
+                    )
                 else:
                     status.state = "failed"
                     status.error = f"Bootstrap error: {exc}"
@@ -364,7 +382,9 @@ class PluginLoader:
             self._specs.append(spec)
             logger.info(
                 "Plugin %s (%s) loaded: %d tools declared (served externally)",
-                spec.id, spec.runtime_type, len(spec.tools),
+                spec.id,
+                spec.runtime_type,
+                len(spec.tools),
             )
             return status
 
@@ -375,11 +395,15 @@ class PluginLoader:
             for tool_contrib in spec.tools:
                 handler = _resolve_handler(tool_contrib.handler_ref)
                 if handler is None:
-                    handler = _resolve_handler_from_plugin_module(tool_contrib.name, spec)
+                    handler = _resolve_handler_from_plugin_module(
+                        tool_contrib.name, spec
+                    )
                 if handler is None:
                     logger.warning(
                         "Plugin %s: could not resolve handler for tool %s (%s)",
-                        spec.id, tool_contrib.name, tool_contrib.handler_ref,
+                        spec.id,
+                        tool_contrib.name,
+                        tool_contrib.handler_ref,
                     )
                     continue
                 tool_spec = ToolSpec(
@@ -400,7 +424,8 @@ class PluginLoader:
             self._specs.append(spec)
             logger.info(
                 "Plugin %s loaded: %d tools registered",
-                spec.id, registered_count,
+                spec.id,
+                registered_count,
             )
         except Exception as exc:
             status.state = "failed"
@@ -477,6 +502,94 @@ class PluginLoader:
         """Convenience alias for ``load_all``."""
         return self.load_all(broker)
 
+    def load_lazy(
+        self,
+        broker: Any,
+        *,
+        plugin_include: frozenset[str] | None = None,
+        plugin_exclude: frozenset[str] | None = None,
+        eager_plugins: set[str] | None = None,
+    ) -> Any:
+        """Discover all plugins but defer initialization until first tool use.
+
+        Returns a :class:`LazyPluginManager` that is wired into the *broker*
+        via ``broker.set_lazy_manager()``.  Only tool schemas (name,
+        description, parameters) are registered eagerly so the LLM can see
+        them; actual handler modules are imported on first call.
+
+        Parameters
+        ----------
+        broker : ToolBroker
+            The broker that will receive handler registrations on lazy init.
+        plugin_include / plugin_exclude :
+            Pack-level filtering (same semantics as workspace filters).
+        eager_plugins :
+            Plugin IDs to initialize immediately (prewarm set).
+        """
+        from obscura.core.types import ToolSpec
+        from obscura.plugins.lazy import LazyPluginManager
+
+        load_builtins = _load_plugin_config_flag("load_builtins")
+
+        all_specs: list[PluginSpec] = []
+        if load_builtins:
+            all_specs.extend(self.discover_builtins())
+        all_specs.extend(self.discover_local())
+        all_specs.extend(self.discover_user())
+
+        # Apply pack-based filtering
+        if plugin_include:
+            all_specs = [s for s in all_specs if s.id in plugin_include]
+        if plugin_exclude:
+            all_specs = [s for s in all_specs if s.id not in plugin_exclude]
+
+        # Filter out external runtimes (MCP/gRPC/Docker served externally)
+        all_specs = [
+            s for s in all_specs if s.runtime_type not in _EXTERNAL_RUNTIME_TYPES
+        ]
+
+        def _init_plugin(spec: PluginSpec) -> None:
+            """Fully initialize a plugin: resolve handlers, register on broker."""
+            self._load_spec(spec, broker)
+
+        manager = LazyPluginManager(
+            init_fn=_init_plugin,
+            prewarm=eager_plugins or set(),
+        )
+
+        # Register all discovered plugins (metadata + schemas only)
+        for spec in all_specs:
+            manager.register(spec)
+
+            # Register tool schemas on broker so the LLM can see them.
+            # No handler is registered — the lazy manager will resolve it
+            # on first call via broker's lazy resolution path.
+            for tool in spec.tools:
+                if not broker._specs.get(tool.name):
+                    if tool.parameters:
+                        broker._schemas[tool.name] = tool.parameters
+                    broker._specs[tool.name] = ToolSpec(
+                        name=tool.name,
+                        description=tool.description,
+                        parameters=tool.parameters,
+                        handler=lambda **_kw: None,  # placeholder, never called
+                        side_effects=tool.side_effects,
+                        required_tier=tool.required_tier,
+                        timeout_seconds=tool.timeout_seconds,
+                        retries=tool.retries,
+                    )
+
+        # Wire the manager into the broker for on-demand resolution
+        broker.set_lazy_manager(manager)
+
+        logger.info(
+            "Lazy plugin loader: %d plugins discovered, %d eager, %d lazy",
+            len(all_specs),
+            len(eager_plugins or set()),
+            len(all_specs) - len(eager_plugins or set()),
+        )
+        return manager
+
     def load_scoped(
         self,
         broker: Any,
@@ -491,7 +604,9 @@ class PluginLoader:
         Raises ``RuntimeError`` if any *required* plugin is not found or
         fails to reach the ``enabled`` state.
         """
-        all_specs = self.discover_builtins() + self.discover_local() + self.discover_user()
+        all_specs = (
+            self.discover_builtins() + self.discover_local() + self.discover_user()
+        )
         wanted = set(required_ids) | set(optional_ids)
         spec_map: dict[str, PluginSpec] = {}
         for spec in all_specs:
@@ -504,7 +619,9 @@ class PluginLoader:
             spec = spec_map.get(pid)
             if spec is None:
                 status = PluginStatus(
-                    plugin_id=pid, state="failed", error="not found",
+                    plugin_id=pid,
+                    state="failed",
+                    error="not found",
                 )
                 results[pid] = status
                 self._loaded[pid] = status
@@ -523,20 +640,21 @@ class PluginLoader:
             self._loaded[pid] = status
             if status.state != "enabled":
                 logger.warning(
-                    "Optional plugin %s failed to load: %s", pid, status.error,
+                    "Optional plugin %s failed to load: %s",
+                    pid,
+                    status.error,
                 )
 
         failed_required = [
-            pid for pid in required_ids
+            pid
+            for pid in required_ids
             if pid in results and results[pid].state != "enabled"
         ]
         if failed_required:
             details = "; ".join(
                 f"{pid}: {results[pid].error}" for pid in failed_required
             )
-            raise RuntimeError(
-                f"Required plugins failed to load: {details}"
-            )
+            raise RuntimeError(f"Required plugins failed to load: {details}")
 
         return results
 
@@ -585,19 +703,92 @@ def get_all_builtin_tool_specs() -> list[Any]:
             if handler is None:
                 logger.debug(
                     "Skipping unresolvable tool %s (%s)",
-                    tool.name, tool.handler_ref,
+                    tool.name,
+                    tool.handler_ref,
                 )
                 continue
-            specs.append(ToolSpec(
-                name=tool.name,
-                description=tool.description,
-                parameters=tool.parameters,
-                handler=handler,
-                side_effects=tool.side_effects,
-                required_tier=tool.required_tier,
-                timeout_seconds=tool.timeout_seconds,
-                retries=tool.retries,
-            ))
+            specs.append(
+                ToolSpec(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                    handler=handler,
+                    side_effects=tool.side_effects,
+                    required_tier=tool.required_tier,
+                    timeout_seconds=tool.timeout_seconds,
+                    retries=tool.retries,
+                )
+            )
+    return specs
+
+
+def get_filtered_builtin_tool_specs(
+    plugin_include: frozenset[str] | None = None,
+    plugin_exclude: frozenset[str] | None = None,
+) -> list[Any]:
+    """Resolve builtin/user plugin tools, filtered by include/exclude sets.
+
+    Like :func:`get_all_builtin_tool_specs` but applies pack-based filtering:
+
+    * If *plugin_include* is non-empty, only plugins whose ``id`` is in the
+      set are kept.
+    * Plugins whose ``id`` is in *plugin_exclude* are always removed.
+
+    This enables pack-scoped sessions where only a subset of available
+    plugins (and therefore tools) are loaded into the model context.
+    """
+    from obscura.core.types import ToolSpec
+
+    load_builtins = _load_plugin_config_flag("load_builtins")
+
+    loader = PluginLoader()
+    all_plugin_specs: list[PluginSpec] = []
+    if load_builtins:
+        all_plugin_specs.extend(loader.discover_builtins())
+    all_plugin_specs.extend(loader.discover_local())
+    all_plugin_specs.extend(loader.discover_user())
+
+    # Apply pack-based filtering
+    if plugin_include:
+        all_plugin_specs = [s for s in all_plugin_specs if s.id in plugin_include]
+    if plugin_exclude:
+        all_plugin_specs = [s for s in all_plugin_specs if s.id not in plugin_exclude]
+
+    specs: list[Any] = []
+    for plugin_spec in all_plugin_specs:
+        if plugin_spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
+            continue
+        for tool in plugin_spec.tools:
+            handler = _resolve_handler(tool.handler_ref)
+            if handler is None:
+                handler = _resolve_handler_from_plugin_module(tool.name, plugin_spec)
+            if handler is None:
+                logger.debug(
+                    "Skipping unresolvable tool %s (%s)",
+                    tool.name,
+                    tool.handler_ref,
+                )
+                continue
+            specs.append(
+                ToolSpec(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                    handler=handler,
+                    side_effects=tool.side_effects,
+                    required_tier=tool.required_tier,
+                    timeout_seconds=tool.timeout_seconds,
+                    retries=tool.retries,
+                )
+            )
+
+    logger.info(
+        "Filtered plugin tools: %d plugins → %d tools (include=%s, exclude=%s)",
+        len(all_plugin_specs),
+        len(specs),
+        plugin_include or "all",
+        plugin_exclude or "none",
+    )
     return specs
 
 
@@ -631,25 +822,29 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
             if handler is None:
                 logger.debug(
                     "Skipping unresolvable tool %s (%s)",
-                    tool.name, tool.handler_ref,
+                    tool.name,
+                    tool.handler_ref,
                 )
                 skipped.append((tool.name, tool.handler_ref))
                 continue
-            specs.append(ToolSpec(
-                name=tool.name,
-                description=tool.description,
-                parameters=tool.parameters,
-                handler=handler,
-                side_effects=tool.side_effects,
-                required_tier=tool.required_tier,
-                timeout_seconds=tool.timeout_seconds,
-                retries=tool.retries,
-            ))
+            specs.append(
+                ToolSpec(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                    handler=handler,
+                    side_effects=tool.side_effects,
+                    required_tier=tool.required_tier,
+                    timeout_seconds=tool.timeout_seconds,
+                    retries=tool.retries,
+                )
+            )
     return specs, skipped
 
 
 __all__ = [
     "PluginLoader",
     "get_all_builtin_tool_specs",
+    "get_filtered_builtin_tool_specs",
     "get_all_builtin_tool_specs_with_report",
 ]

@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import logging
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -21,6 +23,8 @@ from qdrant_client.models import (
 from obscura.memory import MemoryKey
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
 from obscura.vector_memory.vector_memory_filters import MetadataFilter
+
+logger = logging.getLogger(__name__)
 
 
 def _point_id(namespace: str, key: str) -> int:
@@ -114,10 +118,16 @@ class QdrantBackend:
         }
         if expires_at:
             payload["expires_at"] = expires_at.isoformat()
-        self.client.upsert(
-            self.collection_name,
-            [PointStruct(id=point_id, vector=embedding, payload=payload)],
-        )
+        try:
+            self.client.upsert(
+                self.collection_name,
+                [PointStruct(id=point_id, vector=embedding, payload=payload)],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to upsert vector for %s:%s", key.namespace, key.key
+            )
+            raise
 
     def get_vector(self, key: MemoryKey) -> VectorEntry | None:
         point_id = _point_id(key.namespace, key.key)

@@ -40,6 +40,8 @@ class PluginDepsConfig(BaseModel):
 
     require: list[str] = Field(default_factory=_empty_str_list)
     optional: list[str] = Field(default_factory=_empty_str_list)
+    lazy_load: bool = False
+    eager: list[str] = Field(default_factory=_empty_str_list)
 
 
 class HookDefinition(BaseModel):
@@ -74,22 +76,22 @@ class SkillManifest(BaseModel):
 
 class InstructionManifest(BaseModel):
     """Instruction manifest for context-specific agent behavior."""
-    
+
     apply_to: list[str] = Field(default_factory=_empty_str_list)
     body: str = ""
-    
+
     model_config = {"arbitrary_types_allowed": True}
 
 
 class MCPServerRef(BaseModel):
     """Reference to an MCP (Model Context Protocol) server configuration."""
-    
+
     name: str
     transport: str = "stdio"
     command: str = ""
     args: list[str] = Field(default_factory=_empty_str_list)
     env: dict[str, str] = Field(default_factory=_empty_dict)
-    
+
     model_config = {"arbitrary_types_allowed": True}
 
 
@@ -102,8 +104,8 @@ def _empty_mcp_refs() -> list[MCPServerRef]:
 
 
 class AgentManifest(BaseModel):
-    """Complete parsed agent manifest from an ``*.agent.md`` file.
-    """
+    """Complete parsed agent manifest from an ``*.agent.md`` file."""
+
     name: str
     description: str = ""
     provider: str = "copilot"
@@ -145,6 +147,7 @@ class AgentManifest(BaseModel):
     def model(self) -> str:
         """Deprecated: use provider instead."""
         import warnings
+
         warnings.warn(
             "AgentManifest.model is deprecated. Use .provider instead.",
             DeprecationWarning,
@@ -183,9 +186,20 @@ def agent_manifest_from_frontmatter(
     }
 
     _DIRECT_FIELDS = {
-        "name", "description", "provider", "model_id", "tools", "tool_allowlist",
-        "mcp_servers", "can_delegate", "delegate_allowlist",
-        "max_delegation_depth", "agent_type", "max_turns", "tags", "triggers",
+        "name",
+        "description",
+        "provider",
+        "model_id",
+        "tools",
+        "tool_allowlist",
+        "mcp_servers",
+        "can_delegate",
+        "delegate_allowlist",
+        "max_delegation_depth",
+        "agent_type",
+        "max_turns",
+        "tags",
+        "triggers",
     }
     for field_name in _DIRECT_FIELDS:
         if field_name in normalised:
@@ -226,7 +240,9 @@ def agent_manifest_from_frontmatter(
         raw_filter = raw_skills.get("filter")
         if isinstance(raw_filter, list):
             skill_caps = [f"skill.{str(name).replace('-', '_')}" for name in raw_filter]
-            existing_caps: CapabilityConfig = kwargs.get("capabilities", CapabilityConfig())
+            existing_caps: CapabilityConfig = kwargs.get(
+                "capabilities", CapabilityConfig()
+            )
             merged_grant = list(existing_caps.grant) + skill_caps
             kwargs["capabilities"] = CapabilityConfig(
                 grant=merged_grant,
@@ -239,7 +255,14 @@ def agent_manifest_from_frontmatter(
         plugins_dict = cast("dict[str, Any]", raw_plugins)
         p_require: list[str] = list(plugins_dict.get("require") or [])
         p_optional: list[str] = list(plugins_dict.get("optional") or [])
-        kwargs["plugins"] = PluginDepsConfig(require=p_require, optional=p_optional)
+        p_lazy_load: bool = bool(plugins_dict.get("lazy_load", False))
+        p_eager: list[str] = list(plugins_dict.get("eager") or [])
+        kwargs["plugins"] = PluginDepsConfig(
+            require=p_require,
+            optional=p_optional,
+            lazy_load=p_lazy_load,
+            eager=p_eager,
+        )
 
     # Backward compatibility: accept 'model' field and map to 'provider'
     if "model" in normalised and "provider" not in normalised:

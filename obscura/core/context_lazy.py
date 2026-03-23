@@ -181,6 +181,28 @@ def _parse_tool_list(raw: str | list[str] | None) -> list[str]:
     return [t.strip() for t in str(raw).split(",") if t.strip()]
 
 
+def _parse_eval_section(meta: dict[str, Any]) -> tuple[list[str] | None, int | None]:
+    """Extract eval criteria and pass_threshold from frontmatter ``eval:`` section.
+
+    Returns ``(criteria_list, pass_threshold)`` — both ``None`` when absent.
+    """
+    eval_section = meta.get("eval")
+    if not isinstance(eval_section, dict):
+        return None, None
+    raw_criteria = eval_section.get("criteria")
+    criteria: list[str] | None = None
+    if isinstance(raw_criteria, list):
+        criteria = [str(c).strip() for c in raw_criteria if str(c).strip()]
+    threshold: int | None = None
+    raw_threshold = eval_section.get("pass_threshold")
+    if raw_threshold is not None:
+        try:
+            threshold = int(raw_threshold)
+        except (ValueError, TypeError):
+            pass
+    return criteria, threshold
+
+
 class CommandMetadata:
     """Metadata for a markdown @command file."""
 
@@ -195,6 +217,8 @@ class CommandMetadata:
         model: str | None = None,
         *,
         builtin_content: str | None = None,
+        eval_criteria: list[str] | None = None,
+        eval_pass_threshold: int | None = None,
     ):
         self.name = name
         self.description = description
@@ -204,6 +228,8 @@ class CommandMetadata:
         self.denied_tools = denied_tools or []
         self.model = model
         self.builtin_content = builtin_content
+        self.eval_criteria = eval_criteria
+        self.eval_pass_threshold = eval_pass_threshold
 
     @property
     def tools_enabled(self) -> bool:
@@ -256,6 +282,7 @@ class LazyCommandLoader:
                     result = parse_frontmatter(raw, source_path=cmd_file)
                     meta = result.metadata
 
+                    eval_criteria, eval_threshold = _parse_eval_section(meta)
                     cmd_meta = CommandMetadata(
                         name=name,
                         description=str(meta.get("description", "")),
@@ -264,6 +291,8 @@ class LazyCommandLoader:
                         allowed_tools=str(meta.get("allowed-tools", meta.get("allowed_tools", "*"))),
                         denied_tools=_parse_tool_list(meta.get("denied-tools", meta.get("denied_tools"))),
                         model=meta.get("model"),
+                        eval_criteria=eval_criteria,
+                        eval_pass_threshold=eval_threshold,
                     )
                     self._metadata_cache[name] = cmd_meta
                     logger.debug("Discovered command: %s at %s", name, cmd_file)
@@ -284,6 +313,7 @@ class LazyCommandLoader:
             try:
                 result = parse_frontmatter(content.strip())
                 meta = result.metadata
+                eval_criteria, eval_threshold = _parse_eval_section(meta)
                 cmd_meta = CommandMetadata(
                     name=name,
                     description=str(meta.get("description", "")),
@@ -292,6 +322,8 @@ class LazyCommandLoader:
                     denied_tools=_parse_tool_list(meta.get("denied-tools", meta.get("denied_tools"))),
                     model=meta.get("model"),
                     builtin_content=content.strip(),
+                    eval_criteria=eval_criteria,
+                    eval_pass_threshold=eval_threshold,
                 )
                 self._metadata_cache[name] = cmd_meta
                 logger.debug("Loaded built-in command: %s", name)

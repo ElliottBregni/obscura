@@ -52,7 +52,7 @@ class CopilotBackend:
         system_prompt: str = "",
         mcp_servers: list[dict[str, Any]] | None = None,
         streaming: bool = True,
-    tool_policy: ToolPolicy | None = None,
+        tool_policy: ToolPolicy | None = None,
     ) -> None:
         self._auth = auth
         self._model = model or "gpt-5-mini"
@@ -72,9 +72,18 @@ class CopilotBackend:
             hp: [] for hp in HookPoint
         }
 
+        # Tool routing
+        self._tool_router: Any | None = None
+
         # Session tracking
         self._session_store = SessionStore()
         self._log = logging.getLogger(__name__)
+
+    # -- Tool routing --------------------------------------------------------
+
+    def set_tool_router(self, router: Any) -> None:
+        """Attach a :class:`ToolRouter` for per-turn tool selection."""
+        self._tool_router = router
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -241,7 +250,9 @@ class CopilotBackend:
             async for chunk in self._do_stream(prompt, **kwargs):
                 yield chunk
 
-    async def _do_stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+    async def _do_stream(
+        self, prompt: str, **kwargs: Any
+    ) -> AsyncIterator[StreamChunk]:
         """Core streaming implementation."""
         bridge = EventToIteratorBridge()
         unsub_fns: list[Callable[..., Any]] = []
@@ -281,7 +292,19 @@ class CopilotBackend:
             bridge.finish(event)
 
         def _on_error(event: Any) -> None:
-            bridge.error(event)
+            # Enrich the error chunk with runtime context so downstream
+            # consumers (event store, supervisor) see session/model info
+            # instead of all-None fields.
+            from obscura.core.types import StreamMetadata
+
+            session_id = ""
+            if self._session and hasattr(self._session, "session_id"):
+                session_id = str(self._session.session_id)
+            meta = StreamMetadata(
+                model_id=self._model or "",
+                session_id=session_id,
+            )
+            bridge.error(event, metadata=meta)
 
         # Subscribe to session events
         unsub_fns.append(
@@ -416,8 +439,7 @@ class CopilotBackend:
         """Build a human-readable tool listing for the system prompt."""
         lines = ["## Available Tools", ""]
         lines.append(
-            "You have the following tools. "
-            "Use these EXACT names when calling tools:"
+            "You have the following tools. Use these EXACT names when calling tools:"
         )
         lines.append("")
         for spec in self._tools:
@@ -425,8 +447,7 @@ class CopilotBackend:
             lines.append(f"- `{self._sanitize_tool_name(spec.name)}`: {desc}")
         lines.append("")
         lines.append(
-            "Do NOT invent tool names. "
-            "If none of these tools fit, tell the user."
+            "Do NOT invent tool names. If none of these tools fit, tell the user."
         )
         return "\n".join(lines)
 
@@ -468,12 +489,11 @@ class CopilotBackend:
 
     # -- Internals -----------------------------------------------------------
 
-
     # -- Provider Registry (model discovery) ---------------------------------
 
     async def list_models(self) -> list[RegistryModelInfo]:
         """List models available from Copilot (hybrid approach)."""
-            # Use fallback only for now TODO: Verify we can pull model info from.. somewhere
+        # Use fallback only for now TODO: Verify we can pull model info from.. somewhere
         return self._get_fallback_models()
 
     def get_default_model(self) -> str:
@@ -511,7 +531,8 @@ class CopilotBackend:
     def _sanitize_tool_name(name: str) -> str:
         """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
         import re
-        return re.sub(r'[^a-zA-Z0-9_-]', '_', name)[:128]
+
+        return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:128]
 
     def _convert_tools_to_copilot(self, tools: list[ToolSpec]) -> list[Any]:
         """Convert Obscura ToolSpec objects to Copilot SDK Tool format.
@@ -561,10 +582,14 @@ class CopilotBackend:
 
             # Ensure parameters is always a valid JSON Schema object —
             # the Copilot SDK crashes with .map() on undefined if None.
-            params = spec.parameters if spec.parameters else {
-                "type": "object",
-                "properties": {},
-            }
+            params = (
+                spec.parameters
+                if spec.parameters
+                else {
+                    "type": "object",
+                    "properties": {},
+                }
+            )
             converted.append(
                 Tool(
                     name=self._sanitize_tool_name(spec.name),
@@ -584,7 +609,9 @@ class CopilotBackend:
 
         from copilot.types import PermissionRequest, PermissionRequestResult
 
-        def _approve_all(request: PermissionRequest, _context: dict[str, str]) -> PermissionRequestResult:
+        def _approve_all(
+            request: PermissionRequest, _context: dict[str, str]
+        ) -> PermissionRequestResult:
             return PermissionRequestResult(kind="approved", rules=[])
 
         config["on_permission_request"] = _approve_all
@@ -593,7 +620,11 @@ class CopilotBackend:
             config["model"] = self._model
         prompt = self._system_prompt or ""
         if self._tools:
-            prompt = f"{prompt}\n\n{self._build_tool_listing()}" if prompt else self._build_tool_listing()
+            prompt = (
+                f"{prompt}\n\n{self._build_tool_listing()}"
+                if prompt
+                else self._build_tool_listing()
+            )
         if prompt:
             config["system_message"] = {
                 "mode": "append",
@@ -606,6 +637,34 @@ class CopilotBackend:
         if self._tools:
             # Filter tools first via policy
             filtered = self._tool_policy.filter_tools(self._tools)
+
+            # Apply eval-driven tool routing if a router is configured.
+            if self._tool_router is not None:
+                from obscura.core.tool_router import RoutingResult
+
+                result: RoutingResult = self._tool_router.select(prompt, filtered)
+                filtered = result.tools
+                if result.dropped_count > 0:
+                    _log.info(
+                        "Tool router: %d/%d (pinned=%d, cap=%d, scored=%d, quarantined=%d)",
+                        len(filtered),
+                        len(filtered) + result.dropped_count,
+                        len(result.pinned),
+                        len(result.capability_matched),
+                        len(result.score_ranked),
+                        result.quarantined_count,
+                    )
+
+            # Safety-net hard cap — should rarely trigger with a router.
+            _MAX_COPILOT_TOOLS = 128
+            if len(filtered) > _MAX_COPILOT_TOOLS:
+                _log.warning(
+                    "Copilot tool cap: %d tools exceeds limit of %d — truncating",
+                    len(filtered),
+                    _MAX_COPILOT_TOOLS,
+                )
+                filtered = filtered[:_MAX_COPILOT_TOOLS]
+
             _log.debug(
                 "Building session with %d tools (system prompt %d chars)",
                 len(filtered),
@@ -615,7 +674,9 @@ class CopilotBackend:
             config["tools"] = self._convert_tools_to_copilot(filtered)
             # Use correct SessionConfig field name: available_tools (not allowed_tools)
             if not self._tool_policy.allow_native:
-                config["available_tools"] = [self._sanitize_tool_name(t.name) for t in filtered]
+                config["available_tools"] = [
+                    self._sanitize_tool_name(t.name) for t in filtered
+                ]
 
         # Apply hook mappings
         hooks = self.build_hooks_config()

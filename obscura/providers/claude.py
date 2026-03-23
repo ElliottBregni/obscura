@@ -72,8 +72,17 @@ class ClaudeBackend:
             hp: [] for hp in HookPoint
         }
 
+        # Tool routing
+        self._tool_router: Any | None = None
+
         # Session tracking
         self._session_store = SessionStore()
+
+    # -- Tool routing --------------------------------------------------------
+
+    def set_tool_router(self, router: Any) -> None:
+        """Attach a :class:`ToolRouter` for per-turn tool selection."""
+        self._tool_router = router
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -552,6 +561,16 @@ class ClaudeBackend:
         # Apply tool policy to filter tools
         if self._tools and self._tool_policy:
             filtered = self._tool_policy.filter_tools(self._tools)
+
+            # Apply eval-driven tool routing if a router is configured.
+            if self._tool_router is not None:
+                from obscura.core.tool_router import RoutingResult
+
+                result: RoutingResult = self._tool_router.select(
+                    opts.get("system_prompt", ""), filtered
+                )
+                filtered = result.tools
+
             if not self._tool_policy.allow_native or len(filtered) < len(self._tools):
                 # When native tools are blocked (default) OR the filter reduced
                 # the set, set an explicit allowlist so the LLM can only call

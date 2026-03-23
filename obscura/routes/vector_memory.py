@@ -163,9 +163,23 @@ async def vector_memory_set(
     text: str = body.get("text", "")
     metadata: dict[str, Any] = body.get("metadata", {})
     memory_type: str = body.get("memory_type", "general")
-    store.set(
-        key, text, metadata=metadata, namespace=namespace, memory_type=memory_type
-    )
+    try:
+        store.set(
+            key, text, metadata=metadata, namespace=namespace, memory_type=memory_type
+        )
+    except Exception:
+        audit(
+            "vector_memory.set", user, f"vector:{namespace}:{key}", "write", "failure"
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "namespace": namespace,
+                "key": key,
+                "stored": False,
+                "type": "vector",
+            },
+        )
     audit("vector_memory.set", user, f"vector:{namespace}:{key}", "write", "success")
     return JSONResponse(
         content={"namespace": namespace, "key": key, "stored": True, "type": "vector"}

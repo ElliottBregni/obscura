@@ -31,6 +31,7 @@ class SupervisorState(enum.Enum):
     COMMITTING_MEMORY = "committing_memory"
     FINALIZING = "finalizing"
     FAILED = "failed"
+    EVAL_FAILED = "eval_failed"
 
 
 # Valid transitions: source → set of allowed targets
@@ -50,10 +51,11 @@ VALID_SUPERVISOR_TRANSITIONS: dict[SupervisorState, frozenset[SupervisorState]] 
         {SupervisorState.RUNNING_MODEL, SupervisorState.COMMITTING_MEMORY, SupervisorState.FAILED}
     ),
     SupervisorState.COMMITTING_MEMORY: frozenset(
-        {SupervisorState.FINALIZING, SupervisorState.FAILED}
+        {SupervisorState.FINALIZING, SupervisorState.FAILED, SupervisorState.EVAL_FAILED}
     ),
     SupervisorState.FINALIZING: frozenset({SupervisorState.IDLE}),
     SupervisorState.FAILED: frozenset({SupervisorState.IDLE}),
+    SupervisorState.EVAL_FAILED: frozenset({SupervisorState.IDLE}),
 }
 
 

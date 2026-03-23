@@ -131,7 +131,9 @@ class AgentConfig(BaseModel):
     name: str
     provider: str  # "copilot", "claude", "localllm", "openai", or "moonshot"
 
-    model_id: str | None = None  # Specific model (optional, uses provider default if None)
+    model_id: str | None = (
+        None  # Specific model (optional, uses provider default if None)
+    )
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
@@ -150,25 +152,29 @@ class AgentConfig(BaseModel):
 
     # Tool allowlist (None = all tools allowed)
     tool_allowlist: list[str] | None = None
-    
+
     # Capability grants
     capabilities: dict[str, list[str]] = Field(default_factory=dict)
-    plugins: dict[str, list[str]] = Field(default_factory=dict)
+    plugins: dict[str, Any] = Field(default_factory=dict)
 
     # Skill loading configuration
     lazy_load_skills: bool = False
     skill_filter: list[str] | None = None
+
+    # Eval hooks — run deterministic checks on tool results
+    eval_tools: bool = True
+
     @property
     def model(self) -> str:
         """Deprecated: use provider instead."""
         import warnings
+
         warnings.warn(
             "AgentConfig.model is deprecated. Use .provider instead.",
             DeprecationWarning,
             stacklevel=2,
         )
         return self.provider
-
 
     @classmethod
     def from_manifest(cls, manifest: AgentManifest) -> AgentConfig:
@@ -188,10 +194,7 @@ class AgentConfig(BaseModel):
         mcp_enabled = bool(mcp_configs) or bool(manifest.mcp_servers)
         server_names: list[str] = []
         if isinstance(manifest.mcp_servers, list):
-            server_names = [
-                str(s) for s in manifest.mcp_servers
-                if isinstance(s, str)
-            ]
+            server_names = [str(s) for s in manifest.mcp_servers if isinstance(s, str)]
 
         mcp = MCPConfig(
             enabled=mcp_enabled,
@@ -204,11 +207,9 @@ class AgentConfig(BaseModel):
         lazy_load = bool(skills_cfg.get("lazy_load", False))
         raw_filter = skills_cfg.get("filter", None)
         skill_filter = (
-            [str(item) for item in raw_filter]
-            if isinstance(raw_filter, list)
-            else None
+            [str(item) for item in raw_filter] if isinstance(raw_filter, list) else None
         )
-        
+
         return cls(
             name=manifest.name,
             provider=manifest.provider,
@@ -220,7 +221,9 @@ class AgentConfig(BaseModel):
             can_delegate=manifest.can_delegate,
             delegate_allowlist=list(manifest.delegate_allowlist),
             max_delegation_depth=manifest.max_delegation_depth,
-            tool_allowlist=list(manifest.tool_allowlist) if manifest.tool_allowlist is not None else None,
+            tool_allowlist=list(manifest.tool_allowlist)
+            if manifest.tool_allowlist is not None
+            else None,
             capabilities={
                 "grant": list(manifest.capabilities.grant),
                 "deny": list(manifest.capabilities.deny),
@@ -228,6 +231,8 @@ class AgentConfig(BaseModel):
             plugins={
                 "require": list(manifest.plugins.require),
                 "optional": list(manifest.plugins.optional),
+                "lazy_load": manifest.plugins.lazy_load,
+                "eager": list(manifest.plugins.eager),
             },
             lazy_load_skills=lazy_load,
             skill_filter=skill_filter,
@@ -409,6 +414,7 @@ class Agent:
         plugin_loader = None
         try:
             from obscura.plugins.loader import PluginLoader
+
             plugin_loader = PluginLoader()
         except Exception:
             pass
@@ -417,6 +423,7 @@ class Agent:
         # so skill gating is active when the system prompt is assembled)
         capability_resolver = None
         allowed_tools: set[str] | None = None
+        cap_index: Any = None
         try:
             from obscura.plugins.capabilities import CapabilityResolver
             from obscura.plugins.registries.capability_index import CapabilityIndex
@@ -426,7 +433,9 @@ class Agent:
             tool_idx = ToolIndex()
 
             if plugin_loader is not None:
-                for spec in plugin_loader.discover_builtins() + plugin_loader.discover_local():
+                for spec in (
+                    plugin_loader.discover_builtins() + plugin_loader.discover_local()
+                ):
                     for cap in spec.capabilities:
                         cap_index.register(cap, spec.id)
                     for tool_contrib in spec.tools:
@@ -481,7 +490,9 @@ class Agent:
         )
 
         ctx = BrokerContext(
-            broker=broker, agent=self, allowed_tool_names=allowed_tools,
+            broker=broker,
+            agent=self,
+            allowed_tool_names=allowed_tools,
         )
         providers: list[Any] = []
 
@@ -509,6 +520,34 @@ class Agent:
                 selected_names=selected_names,
                 primary_server_name=self.config.mcp.primary_server_name,
             )
+
+        # Skip MCP servers whose tools are already provided by a plugin.
+        # Plugin IDs and MCP server names use the same convention (e.g.
+        # "msgraph", "github"), so a name match means the plugin covers
+        # that server's functionality — no need to spawn the subprocess.
+        if server_configs and plugin_loader is not None:
+            try:
+                plugin_ids: set[str] = {
+                    spec.id
+                    for spec in (
+                        plugin_loader.discover_builtins()
+                        + plugin_loader.discover_local()
+                    )
+                }
+                before = len(server_configs)
+                server_configs = [
+                    cfg
+                    for cfg in server_configs
+                    if cfg.get("name", "") not in plugin_ids
+                ]
+                skipped = before - len(server_configs)
+                if skipped:
+                    logger.info(
+                        "Skipped %d MCP server(s) — plugin provides equivalent tools",
+                        skipped,
+                    )
+            except Exception as exc:
+                logger.debug("Plugin-based MCP filtering failed: %s", exc)
 
         if self.config.mcp.enabled and server_configs:
             from obscura.integrations.mcp.types import (
@@ -548,8 +587,35 @@ class Agent:
             try:
                 required = self.config.plugins.get("require", [])
                 optional = self.config.plugins.get("optional", [])
+                lazy_enabled = self.config.plugins.get("lazy_load", False)
+
                 if required or optional:
                     plugin_loader.load_scoped(broker, required, optional)
+                elif lazy_enabled:
+                    # Lazy mode: discover all plugins, register schemas only,
+                    # defer handler loading until first tool call.
+                    _ws_include = None
+                    _ws_exclude = None
+                    _eager = set[str]()
+                    if (
+                        hasattr(self, "_compiled_workspace")
+                        and self._compiled_workspace
+                    ):
+                        _ws_include = getattr(
+                            self._compiled_workspace, "plugin_include", None
+                        )
+                        _ws_exclude = getattr(
+                            self._compiled_workspace, "plugin_exclude", None
+                        )
+                    _eager_cfg = self.config.plugins.get("eager", [])
+                    if isinstance(_eager_cfg, list):
+                        _eager = set(_eager_cfg)
+                    plugin_loader.load_lazy(
+                        broker,
+                        plugin_include=_ws_include,
+                        plugin_exclude=_ws_exclude,
+                        eager_plugins=_eager,
+                    )
                 else:
                     plugin_loader.load_all_enabled(broker)
             except Exception:
@@ -619,6 +685,50 @@ class Agent:
         for tool_spec in broker.all_specs():
             self._client.register_tool(tool_spec)
 
+        # Wire eval-driven tool router into the backend
+        try:
+            from pathlib import Path
+
+            from obscura.core.compiler.compiled import ToolRoutingConfig
+            from obscura.core.tool_router import ToolRouter
+            from obscura.core.tool_score_index import ToolScoreIndex
+
+            backend_obj = getattr(self._client, "_backend", None)
+            if backend_obj is not None and hasattr(backend_obj, "set_tool_router"):
+                # Load persisted scores from previous sessions
+                scores_db = str(
+                    Path.home() / ".obscura" / "tool_scores.db"
+                )
+                score_index = ToolScoreIndex.from_db(scores_db)
+                broker.set_score_index(score_index)
+                self._score_index = score_index
+                self._scores_db = scores_db
+
+                routing_config = ToolRoutingConfig()
+                if cap_index is not None:
+                    router = ToolRouter.from_capability_index(
+                        config=routing_config,
+                        score_index=score_index,
+                        capability_index=cap_index,
+                        quarantined_tools=set(broker.quarantined_tools),
+                        backend=self.config.backend or "copilot",
+                    )
+                else:
+                    router = ToolRouter(
+                        config=routing_config,
+                        score_index=score_index,
+                        backend=self.config.backend or "copilot",
+                    )
+                backend_obj.set_tool_router(router)
+                logger.info(
+                    "Tool router attached (%d capabilities, %d cap-tool mappings, %d historical scores)",
+                    len(router._cap_descriptions),
+                    sum(len(v) for v in router._cap_tool_map.values()),
+                    len(score_index),
+                )
+        except Exception as exc:
+            logger.debug("Could not attach tool router: %s", exc)
+
         # Merge manifest hooks into the agent's client hook registry
         if self.manifest_proxy is not None:
             manifest_hooks = self.manifest_proxy.hook_registry
@@ -626,13 +736,33 @@ class Agent:
                 from obscura.core.hooks import HookRegistry
 
                 # If the client has a hook registry, merge; otherwise set it
-                existing: HookRegistry | None = getattr(
-                    self._client, "hooks", None
-                )
+                existing: HookRegistry | None = getattr(self._client, "hooks", None)
                 if existing is not None:
                     existing.merge(manifest_hooks)
                 else:
                     setattr(self._client, "hooks", manifest_hooks)
+
+        # Register eval hooks (tool checks + past-failure memory injection)
+        if self.config.eval_tools:
+            try:
+                from obscura.core.hooks import HookRegistry
+                from obscura.core.lifecycle import (
+                    make_eval_memory_inject_hook,
+                    make_tool_eval_hook,
+                )
+                from obscura.core.types import AgentEventKind as _AEK
+
+                hook_reg: HookRegistry | None = getattr(self._client, "hooks", None)
+                if hook_reg is None:
+                    hook_reg = HookRegistry()
+                    setattr(self._client, "hooks", hook_reg)
+                hook_reg.add_before(make_tool_eval_hook(), _AEK.TOOL_RESULT)
+                hook_reg.add_before(make_eval_memory_inject_hook(), _AEK.TURN_START)
+                logger.info(
+                    "Eval hooks registered for agent %s (tool checks + memory)", self.id
+                )
+            except Exception as exc:
+                logger.debug("Could not register eval hooks: %s", exc)
 
         # Initialize heartbeat client if enabled
         if self._heartbeat_enabled:
@@ -1108,6 +1238,19 @@ class Agent:
             message="Stopping agent and releasing resources.",
         )
         self.status = AgentStatus.STOPPED
+
+        # Persist tool quality scores to disk
+        score_index = getattr(self, "_score_index", None)
+        scores_db = getattr(self, "_scores_db", None)
+        if score_index is not None and scores_db is not None:
+            try:
+                score_index.save(scores_db)
+                logger.debug(
+                    "Persisted %d tool scores to %s", len(score_index), scores_db
+                )
+            except Exception as exc:
+                logger.debug("Failed to persist tool scores: %s", exc)
+
         if self._client:
             try:
                 await self._client.stop()

@@ -91,10 +91,19 @@ class OpenAIBackend:
             hp: [] for hp in HookPoint
         }
 
+        # Tool routing
+        self._tool_router: Any | None = None
+
         # Session tracking
         self._session_store = SessionStore()
         self._conversations: dict[str, list[ChatMessage]] = {}
         self._active_session: str | None = None
+
+    # -- Tool routing --------------------------------------------------------
+
+    def set_tool_router(self, router: Any) -> None:
+        """Attach a :class:`ToolRouter` for per-turn tool selection."""
+        self._tool_router = router
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -753,11 +762,20 @@ class OpenAIBackend:
         if self._system_prompt and "instructions" not in req:
             req["instructions"] = self._system_prompt
         if self._tools and "tools" not in req:
+            tools_to_send = list(self._tools)
+
+            # Apply eval-driven tool routing if a router is configured.
+            if self._tool_router is not None:
+                from obscura.core.tool_router import RoutingResult
+
+                result: RoutingResult = self._tool_router.select(prompt, tools_to_send)
+                tools_to_send = result.tools
+
             req["tools"] = [
                 ToolCallDefinition(
                     t.name, t.description, t.parameters
                 ).to_openai_function()
-                for t in self._tools
+                for t in tools_to_send
             ]
         # Allow explicit low-level overrides from call kwargs.
         if "response_create_kwargs" in kwargs:
@@ -885,11 +903,19 @@ class OpenAIBackend:
 
         # Register tools as OpenAI function calling format
         if self._tools:
+            tools_to_send = list(self._tools)
+
+            if self._tool_router is not None:
+                from obscura.core.tool_router import RoutingResult
+
+                routed: RoutingResult = self._tool_router.select("", tools_to_send)
+                tools_to_send = routed.tools
+
             tool_defs = [
                 ToolCallDefinition(
                     t.name, t.description, t.parameters
                 ).to_openai_function()
-                for t in self._tools
+                for t in tools_to_send
             ]
             result["tools"] = tool_defs
 

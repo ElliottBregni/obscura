@@ -197,6 +197,10 @@ def _serialize_event(event: AgentEvent) -> str:
         "is_error": event.is_error,
         "turn": event.turn,
     }
+    if event.metadata is not None:
+        from dataclasses import asdict
+
+        payload["metadata"] = asdict(event.metadata)
     return json.dumps(payload, default=str)
 
 
