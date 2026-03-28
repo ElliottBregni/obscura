@@ -239,5 +239,4 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
             "required": ["agent_type", "prompt"],
         },
         handler=_handler,
-        required_tier="privileged",
     )

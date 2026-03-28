@@ -185,7 +185,6 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
             "required": ["prompt"],
         },
         handler=_task_handler,
-        required_tier="privileged",
     )
 
 

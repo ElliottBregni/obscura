@@ -191,13 +191,11 @@ class ObscuraClient:
             tool_policy=self._tool_policy,
         )
 
-        # Register tools with backend (filtered by capability tier)
-        tier_value = (
-            self._capability_token.tier.value
-            if self._capability_token is not None
-            else "public"
-        )
-        for t in self._tool_registry.for_tier(tier_value):
+        # Register all tools with backend.
+        # Access control is handled by ToolPolicy + CapabilityResolver + ToolBroker,
+        # not by the legacy tier system which silently dropped privileged tools
+        # when no capability_token was set (the common CLI case).
+        for t in self._tool_registry.all():
             self._backend.register_tool(t)
 
     def set_capability_resolver(self, resolver: Any, agent_id: str) -> None:

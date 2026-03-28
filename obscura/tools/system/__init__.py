@@ -183,7 +183,6 @@ def _resolve_command(command: str) -> str:
         },
         "required": ["code"],
     },
-    required_tier="privileged",
 )
 async def run_python3(
     code: str,
@@ -229,7 +228,6 @@ async def run_python3(
         },
         "required": ["args"],
     },
-    required_tier="privileged",
 )
 async def run_npx(
     args: list[str],
@@ -275,7 +273,6 @@ async def run_npx(
         },
         "required": ["command"],
     },
-    required_tier="privileged",
 )
 async def run_command(
     command: str,
@@ -342,7 +339,6 @@ async def run_command(
             "timeout_seconds": {"type": "number"},
         },
     },
-    required_tier="privileged",
 )
 async def run_shell(
     script: str = "",
@@ -385,7 +381,6 @@ async def run_shell(
         },
         "required": ["url"],
     },
-    required_tier="privileged",
 )
 async def web_fetch(
     url: str,
@@ -456,7 +451,6 @@ async def web_fetch(
         },
         "required": ["code"],
     },
-    required_tier="privileged",
 )
 async def run_python(
     code: str,
@@ -477,7 +471,6 @@ async def run_python(
         },
         "required": ["query"],
     },
-    required_tier="privileged",
 )
 async def web_search(query: str, max_results: int = 5) -> str:
     """Search the web via DuckDuckGo HTML scraping (no API key required)."""
@@ -547,7 +540,6 @@ async def web_search(query: str, max_results: int = 5) -> str:
         },
         "required": ["prompt"],
     },
-    required_tier="privileged",
 )
 async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) -> str:
     obscura_bin = _resolve_command("obscura")
@@ -596,7 +588,6 @@ async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) ->
         "properties": {"command": {"type": "string"}},
         "required": ["command"],
     },
-    required_tier="privileged",
 )
 async def which_command(command: str) -> str:
     normalized = command.strip()
@@ -627,7 +618,6 @@ async def which_command(command: str) -> str:
             "include_builtins": {"type": "boolean"},
         },
     },
-    required_tier="privileged",
 )
 async def discover_all_commands(
     limit: int = 500,
@@ -680,7 +670,6 @@ async def discover_all_commands(
         "properties": {"path": {"type": "string"}},
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def list_directory(path: str) -> str:
     target = _resolve_path(path)
@@ -713,7 +702,6 @@ async def list_directory(path: str) -> str:
         "properties": {"path": {"type": "string"}, "max_bytes": {"type": "integer"}},
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def read_text_file(path: str, max_bytes: int = 200_000) -> str:
     target = _resolve_path(path)
@@ -754,7 +742,6 @@ async def read_text_file(path: str, max_bytes: int = 200_000) -> str:
         },
         "required": ["path", "text"],
     },
-    required_tier="privileged",
 )
 async def write_text_file(
     path: str,
@@ -793,7 +780,6 @@ async def write_text_file(
         },
         "required": ["path", "text"],
     },
-    required_tier="privileged",
 )
 async def append_text_file(path: str, text: str, create_dirs: bool = True) -> str:
     target = _resolve_path(path)
@@ -826,7 +812,6 @@ async def append_text_file(path: str, text: str, create_dirs: bool = True) -> st
         },
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def make_directory(
     path: str,
@@ -852,7 +837,6 @@ async def make_directory(
         },
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def remove_path(
     path: str,
@@ -887,7 +871,6 @@ async def remove_path(
             "include_values": {"type": "boolean"},
         },
     },
-    required_tier="privileged",
 )
 async def get_environment(prefix: str = "", include_values: bool = False) -> str:
     selected: dict[str, str | None] = {}
@@ -905,7 +888,6 @@ async def get_environment(prefix: str = "", include_values: bool = False) -> str
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def get_system_info() -> str:
     info = {
@@ -934,7 +916,6 @@ async def get_system_info() -> str:
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def list_processes() -> str:
     return await run_command(
@@ -955,7 +936,6 @@ async def list_processes() -> str:
         },
         "required": ["pid"],
     },
-    required_tier="privileged",
 )
 async def signal_process(pid: int, signal: str = "TERM") -> str:
     return await run_command(
@@ -970,7 +950,6 @@ async def signal_process(pid: int, signal: str = "TERM") -> str:
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def list_listening_ports() -> str:
     if shutil.which("lsof"):
@@ -996,7 +975,6 @@ async def list_listening_ports() -> str:
         },
         "required": ["check"],
     },
-    required_tier="privileged",
 )
 async def security_lookup(
     check: Literal[
@@ -1065,7 +1043,6 @@ async def security_lookup(
         },
         "required": ["action"],
     },
-    required_tier="privileged",
 )
 async def manage_crontab(
     action: Literal["list", "add", "remove"],
@@ -1146,7 +1123,6 @@ async def manage_crontab(
         },
         "required": ["pattern", "path"],
     },
-    required_tier="privileged",
 )
 async def grep_files(
     pattern: str,
@@ -1224,7 +1200,6 @@ async def grep_files(
         },
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def find_files(
     path: str,
@@ -1287,7 +1262,6 @@ async def find_files(
         },
         "required": ["path", "old_text", "new_text"],
     },
-    required_tier="privileged",
 )
 async def edit_text_file(
     path: str,
@@ -1335,7 +1309,6 @@ async def edit_text_file(
         },
         "required": ["src", "dst"],
     },
-    required_tier="privileged",
 )
 async def copy_path(src: str, dst: str, overwrite: bool = False) -> str:
     src_path = _resolve_path(src)
@@ -1373,7 +1346,6 @@ async def copy_path(src: str, dst: str, overwrite: bool = False) -> str:
         },
         "required": ["src", "dst"],
     },
-    required_tier="privileged",
 )
 async def move_path(src: str, dst: str, overwrite: bool = False) -> str:
     src_path = _resolve_path(src)
@@ -1401,7 +1373,6 @@ async def move_path(src: str, dst: str, overwrite: bool = False) -> str:
         "properties": {"path": {"type": "string"}},
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def file_info(path: str) -> str:
     target = _resolve_path(path)
@@ -1468,7 +1439,6 @@ def _guess_mime(path: Path) -> str:
         },
         "required": ["path"],
     },
-    required_tier="privileged",
 )
 async def tree_directory(
     path: str,
@@ -1535,7 +1505,6 @@ async def tree_directory(
         },
         "required": ["file_a", "file_b"],
     },
-    required_tier="privileged",
 )
 async def diff_files(file_a: str, file_b: str, context_lines: int = 3) -> str:
     path_a = _resolve_path(file_a)
@@ -1609,7 +1578,6 @@ async def _git(args: list[str], cwd: str = "", timeout: float = 30.0) -> dict[st
             "short": {"type": "boolean", "description": "Use short format (default: true)."},
         },
     },
-    required_tier="privileged",
 )
 async def git_status(cwd: str = "", short: bool = True) -> str:
     args = ["status"]
@@ -1633,7 +1601,6 @@ async def git_status(cwd: str = "", short: bool = True) -> str:
             "cwd": {"type": "string"},
         },
     },
-    required_tier="privileged",
 )
 async def git_diff(
     ref: str = "",
@@ -1674,7 +1641,6 @@ async def git_diff(
             "cwd": {"type": "string"},
         },
     },
-    required_tier="privileged",
 )
 async def git_log(
     max_count: int = 10,
@@ -1719,7 +1685,6 @@ async def git_log(
         },
         "required": ["message"],
     },
-    required_tier="privileged",
 )
 async def git_commit(
     message: str,
@@ -1752,7 +1717,6 @@ async def git_commit(
         },
         "required": ["action"],
     },
-    required_tier="privileged",
 )
 async def git_branch(
     action: str = "list",
@@ -1794,7 +1758,6 @@ async def git_branch(
         },
         "required": ["url", "path"],
     },
-    required_tier="privileged",
 )
 async def download_file(
     url: str,
@@ -1845,7 +1808,6 @@ async def download_file(
         },
         "required": ["url"],
     },
-    required_tier="privileged",
 )
 async def http_request(
     url: str,
@@ -1919,7 +1881,6 @@ async def http_request(
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def clipboard_read() -> str:
     if platform.system() != "Darwin":
@@ -1945,7 +1906,6 @@ async def clipboard_read() -> str:
         },
         "required": ["text"],
     },
-    required_tier="privileged",
 )
 async def clipboard_write(text: str) -> str:
     if platform.system() != "Darwin":
@@ -1985,7 +1945,6 @@ async def clipboard_write(text: str) -> str:
         },
         "required": ["query"],
     },
-    required_tier="privileged",
 )
 async def json_query(
     query: str,
@@ -2094,7 +2053,6 @@ _dynamic_tools: dict[str, ToolSpec] = {}
         },
         "required": ["name", "description", "code"],
     },
-    required_tier="privileged",
 )
 async def create_tool(
     name: str,
@@ -2146,7 +2104,6 @@ async def create_tool(
         description=description,
         parameters=parameters or {"type": "object", "properties": {}},
         handler=handler,
-        required_tier="privileged",
     )
     _dynamic_tools[clean_name] = spec
 
@@ -2169,7 +2126,6 @@ async def create_tool(
         },
         "required": ["name"],
     },
-    required_tier="privileged",
 )
 async def call_dynamic_tool(name: str, args: dict[str, Any] | None = None) -> str:
     clean_name = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
@@ -2195,7 +2151,6 @@ async def call_dynamic_tool(name: str, args: dict[str, Any] | None = None) -> st
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def list_dynamic_tools() -> str:
     tools = [
@@ -2236,7 +2191,6 @@ async def list_dynamic_tools() -> str:
         },
         "required": ["language", "code"],
     },
-    required_tier="privileged",
 )
 async def code_sandbox(
     language: str,
@@ -2371,7 +2325,6 @@ async def code_sandbox(
         },
         "required": ["prompt"],
     },
-    required_tier="privileged",
 )
 async def copilot_query(
     prompt: str,
@@ -2468,7 +2421,6 @@ def update_token_usage(
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def context_window_status() -> str:
     window = _token_usage.get("context_window", 0) or 200_000
@@ -2502,7 +2454,6 @@ async def context_window_status() -> str:
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def list_unix_capabilities() -> str:
     tool_names = [spec.name for spec in get_system_tool_specs()]
@@ -2608,7 +2559,6 @@ async def report_intent(intent: str) -> str:
         "type": "object",
         "properties": {},
     },
-    required_tier="privileged",
 )
 async def list_system_tools() -> str:
     tool_specs = get_system_tool_specs()

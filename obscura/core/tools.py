@@ -370,28 +370,21 @@ class ToolRegistry:
         return name in self._tools
 
     def for_tier(self, tier_value: str) -> list[ToolSpec]:
-        """Return tools accessible at *tier_value*.
+        """Return all non-disabled tools.
 
-        ``"privileged"`` gets all tools; ``"public"`` gets only those
-        with ``required_tier == "public"``.  Disabled tools are excluded.
+        .. deprecated::
+            The tier system is superseded by ToolPolicy + CapabilityResolver.
+            This method now ignores *tier_value* and returns ``self.all()``.
         """
-        if tier_value == "privileged":
-            return self.all()
-        seen: set[str] = set()
-        result: list[ToolSpec] = []
-        for t in self._tools.values():
-            if (
-                t.name not in self._disabled
-                and t.name not in seen
-                and getattr(t, "required_tier", None) in (None, "public")
-            ):
-                seen.add(t.name)
-                result.append(t)
-        return result
+        return self.all()
 
     def names_for_tier(self, tier_value: str) -> list[str]:
-        """Return tool names accessible at *tier_value*."""
-        return [t.name for t in self.for_tier(tier_value)]
+        """Return all non-disabled tool names.
+
+        .. deprecated::
+            See :meth:`for_tier`.
+        """
+        return [t.name for t in self.all()]
 
     # -- Per-tool enable / disable ------------------------------------------
 
