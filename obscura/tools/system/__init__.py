@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import difflib
 import fnmatch
 import html as _html

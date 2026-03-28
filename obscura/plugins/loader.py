@@ -415,6 +415,7 @@ class PluginLoader:
                     required_tier=tool_contrib.required_tier,
                     timeout_seconds=tool_contrib.timeout_seconds,
                     retries=tool_contrib.retries,
+                    capability=tool_contrib.capability,
                 )
                 broker.register_tool_spec(tool_spec)
                 registered_count += 1
@@ -577,6 +578,7 @@ class PluginLoader:
                         required_tier=tool.required_tier,
                         timeout_seconds=tool.timeout_seconds,
                         retries=tool.retries,
+                        capability=tool.capability,
                     )
 
         # Wire the manager into the broker for on-demand resolution
@@ -717,6 +719,7 @@ def get_all_builtin_tool_specs() -> list[Any]:
                     required_tier=tool.required_tier,
                     timeout_seconds=tool.timeout_seconds,
                     retries=tool.retries,
+                    capability=tool.capability,
                 )
             )
     return specs
@@ -779,6 +782,7 @@ def get_filtered_builtin_tool_specs(
                     required_tier=tool.required_tier,
                     timeout_seconds=tool.timeout_seconds,
                     retries=tool.retries,
+                    capability=tool.capability,
                 )
             )
 
@@ -837,9 +841,35 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
                     required_tier=tool.required_tier,
                     timeout_seconds=tool.timeout_seconds,
                     retries=tool.retries,
+                    capability=tool.capability,
                 )
             )
     return specs, skipped
+
+
+def get_capability_map() -> dict[str, str]:
+    """Return ``{tool_name: capability_id}`` from all loaded plugin manifests.
+
+    Scans all discoverable plugin specs (builtin, local, user) and builds a
+    reverse lookup from tool name to the capability it belongs to.  This is
+    used to backfill the ``capability`` field on system tools that are
+    registered via the ``@tool()`` decorator (which has no capability param).
+    """
+    load_builtins = _load_plugin_config_flag("load_builtins")
+
+    loader = PluginLoader()
+    all_plugin_specs: list[PluginSpec] = []
+    if load_builtins:
+        all_plugin_specs.extend(loader.discover_builtins())
+    all_plugin_specs.extend(loader.discover_local())
+    all_plugin_specs.extend(loader.discover_user())
+
+    cap_map: dict[str, str] = {}
+    for plugin_spec in all_plugin_specs:
+        for tool in plugin_spec.tools:
+            if tool.capability:
+                cap_map[tool.name] = tool.capability
+    return cap_map
 
 
 __all__ = [
@@ -847,4 +877,5 @@ __all__ = [
     "get_all_builtin_tool_specs",
     "get_filtered_builtin_tool_specs",
     "get_all_builtin_tool_specs_with_report",
+    "get_capability_map",
 ]

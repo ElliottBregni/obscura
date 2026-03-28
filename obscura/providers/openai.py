@@ -488,12 +488,21 @@ class OpenAIBackend:
         lines.append("")
         for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
-            lines.append(f"- `{spec.name}`: {desc}")
+            cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
+            lines.append(f"- `{spec.name}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
             "Do NOT invent tool names. "
             "If none of these tools fit, tell the user."
         )
+        try:
+            from obscura.plugins.capabilities import build_capability_map_section
+            cap_section = build_capability_map_section(self._tools)
+            if cap_section:
+                lines.append("")
+                lines.append(cap_section)
+        except Exception:
+            pass
         return "\n".join(lines)
 
     def get_tool_registry(self) -> ToolRegistry:

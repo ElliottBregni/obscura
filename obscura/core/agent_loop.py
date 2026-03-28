@@ -64,7 +64,7 @@ from obscura.core.types import (
     ToolSpec,
 )
 
-from obscura.core.event_store import EventRecord, EventStoreProtocol
+from obscura.core.event_store import EventRecord, EventStoreProtocol, SessionStatus
 from obscura.core.hooks import HookRegistry
 
 logger = logging.getLogger(__name__)
@@ -300,8 +300,6 @@ class AgentLoop:
         if session is None:
             raise ValueError(f"Session {session_id!r} not found")
 
-        from obscura.core.event_store import SessionStatus
-
         if session.status != SessionStatus.PAUSED:
             raise ValueError(
                 f"Session {session_id!r} is {session.status.value}, not paused"
@@ -408,30 +406,14 @@ class AgentLoop:
                         # Flush previous tool if any (fallback for backends
                         # that don't emit TOOL_USE_END)
                         if _current_tool_name:
-                            tc = self._parse_tool_call(
-                                _current_tool_name,
-                                _current_tool_input_json,
-                                _current_tool_raw,
+                            _to_yield, _prev_event = await self._flush_pending_tool(
+                                _current_tool_name, _current_tool_input_json, _current_tool_raw,
+                                turn=turn, emitted_keys=_emitted_tool_keys,
+                                tool_calls=tool_calls, prev_event=_prev_event,
+                                session_id=session_id,
                             )
-                            _dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
-                            if _dedup_key not in _emitted_tool_keys:
-                                _emitted_tool_keys.add(_dedup_key)
-                                tool_calls.append(tc)
-                                # Emit TOOL_CALL with full input
-                                tc_ev = AgentEvent(
-                                    kind=AgentEventKind.TOOL_CALL,
-                                    tool_name=tc.name,
-                                    tool_input=tc.input,
-                                    turn=turn,
-                                    raw=tc.raw,
-                                )
-                                if _prev_event is not None:
-                                    await self._post_emit(_prev_event)
-                                    _prev_event = None
-                                emitted = await self._emit(tc_ev, session_id)
-                                if emitted is not None:
-                                    yield emitted
-                                    _prev_event = emitted
+                            if _to_yield is not None:
+                                yield _to_yield
                         _current_tool_name = chunk.tool_name
                         _current_tool_input_json = ""
                         _current_tool_raw = chunk.raw
@@ -442,60 +424,28 @@ class AgentLoop:
                     # TOOL_USE_END — flush accumulated tool immediately
                     if chunk.kind == ChunkKind.TOOL_USE_END:
                         if _current_tool_name:
-                            tc = self._parse_tool_call(
-                                _current_tool_name,
-                                _current_tool_input_json,
-                                _current_tool_raw,
+                            _to_yield, _prev_event = await self._flush_pending_tool(
+                                _current_tool_name, _current_tool_input_json, _current_tool_raw,
+                                turn=turn, emitted_keys=_emitted_tool_keys,
+                                tool_calls=tool_calls, prev_event=_prev_event,
+                                session_id=session_id,
                             )
-                            _dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
-                            if _dedup_key not in _emitted_tool_keys:
-                                _emitted_tool_keys.add(_dedup_key)
-                                tool_calls.append(tc)
-                                # Emit TOOL_CALL with full input
-                                tc_ev = AgentEvent(
-                                    kind=AgentEventKind.TOOL_CALL,
-                                    tool_name=tc.name,
-                                    tool_input=tc.input,
-                                    turn=turn,
-                                    raw=tc.raw,
-                                )
-                                if _prev_event is not None:
-                                    await self._post_emit(_prev_event)
-                                    _prev_event = None
-                                emitted = await self._emit(tc_ev, session_id)
-                                if emitted is not None:
-                                    yield emitted
-                                    _prev_event = emitted
+                            if _to_yield is not None:
+                                yield _to_yield
                             _current_tool_name = ""
                             _current_tool_input_json = ""
                             _current_tool_raw = None
 
                 # Flush last tool call (fallback if no TOOL_USE_END received)
                 if _current_tool_name:
-                    tc = self._parse_tool_call(
-                        _current_tool_name,
-                        _current_tool_input_json,
-                        _current_tool_raw,
+                    _to_yield, _prev_event = await self._flush_pending_tool(
+                        _current_tool_name, _current_tool_input_json, _current_tool_raw,
+                        turn=turn, emitted_keys=_emitted_tool_keys,
+                        tool_calls=tool_calls, prev_event=_prev_event,
+                        session_id=session_id,
                     )
-                    _dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
-                    if _dedup_key not in _emitted_tool_keys:
-                        _emitted_tool_keys.add(_dedup_key)
-                        tool_calls.append(tc)
-                        # Emit TOOL_CALL with full input
-                        tc_ev = AgentEvent(
-                            kind=AgentEventKind.TOOL_CALL,
-                            tool_name=tc.name,
-                            tool_input=tc.input,
-                            turn=turn,
-                            raw=tc.raw,
-                        )
-                        if _prev_event is not None:
-                            await self._post_emit(_prev_event)
-                            _prev_event = None
-                        emitted = await self._emit(tc_ev, session_id)
-                        if emitted is not None:
-                            yield emitted
-                            _prev_event = emitted
+                    if _to_yield is not None:
+                        yield _to_yield
 
             except Exception as exc:
                 err_event = AgentEvent(
@@ -512,14 +462,12 @@ class AgentLoop:
                     await self._post_emit(emitted)
                 # Mark session failed
                 if self._auto_complete and self._event_store is not None and session_id is not None:
-                    from obscura.core.event_store import SessionStatus
-
                     try:
                         await self._event_store.update_status(
                             session_id, SessionStatus.FAILED
                         )
                     except Exception:
-                        pass
+                        logger.debug("Failed to mark session failed", exc_info=True)
                 return
 
             accumulated_text += turn_text
@@ -556,14 +504,12 @@ class AgentLoop:
                     await self._post_emit(emitted)
                 # Mark session paused
                 if self._event_store is not None and session_id is not None:
-                    from obscura.core.event_store import SessionStatus
-
                     try:
                         await self._event_store.update_status(
                             session_id, SessionStatus.PAUSED
                         )
                     except Exception:
-                        pass
+                        logger.debug("Failed to mark session paused", exc_info=True)
                 return
 
             # Mid-run user input — drain queue, use as next prompt
@@ -606,18 +552,16 @@ class AgentLoop:
                     await self._post_emit(emitted)
                 # Mark session completed
                 if self._auto_complete and self._event_store is not None and session_id is not None:
-                    from obscura.core.event_store import SessionStatus
-
                     try:
                         await self._event_store.update_status(
                             session_id, SessionStatus.COMPLETED
                         )
                     except Exception:
-                        pass
+                        logger.debug("Failed to mark session completed", exc_info=True)
                 return
 
             # Execute tool calls and build results for next turn
-            tool_results = await self._execute_tools(tool_calls, turn)
+            tool_results = await self._execute_tools(tool_calls)
 
             # Yield tool result events
             for result in tool_results:
@@ -691,12 +635,10 @@ class AgentLoop:
             await self._post_emit(emitted)
         # Mark session completed
         if self._auto_complete and self._event_store is not None and session_id is not None:
-            from obscura.core.event_store import SessionStatus
-
             try:
                 await self._event_store.update_status(session_id, SessionStatus.COMPLETED)
             except Exception:
-                pass
+                logger.debug("Failed to mark session completed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Convenience: run and collect final text
@@ -717,16 +659,55 @@ class AgentLoop:
         return "".join(text_parts)
 
     # ------------------------------------------------------------------
+    # Tool-call flush helper (shared by TOOL_USE_START/END/fallback)
+    # ------------------------------------------------------------------
+
+    async def _flush_pending_tool(
+        self,
+        name: str,
+        input_json: str,
+        raw: Any,
+        *,
+        turn: int,
+        emitted_keys: set[str],
+        tool_calls: list[ToolCallInfo],
+        prev_event: AgentEvent | None,
+        session_id: str | None,
+    ) -> tuple[AgentEvent | None, AgentEvent | None]:
+        """Parse, deduplicate, and emit a tool call event.
+
+        Returns ``(event_to_yield, new_prev_event)``.  The caller must
+        ``yield event_to_yield`` if it is not ``None``.
+        """
+        tc = self._parse_tool_call(name, input_json, raw)
+        dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
+        if dedup_key in emitted_keys:
+            return None, prev_event
+        emitted_keys.add(dedup_key)
+        tool_calls.append(tc)
+        tc_ev = AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            tool_name=tc.name,
+            tool_input=tc.input,
+            turn=turn,
+            raw=tc.raw,
+        )
+        if prev_event is not None:
+            await self._post_emit(prev_event)
+        emitted = await self._emit(tc_ev, session_id)
+        if emitted is not None:
+            return emitted, emitted
+        return None, None
+
+    # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
 
     async def _execute_tools(
         self,
         tool_calls: list[ToolCallInfo],
-        turn: int,
     ) -> list[ToolResultEnvelope]:
         """Execute tool calls and return canonical result envelopes."""
-        del turn
         results: list[ToolResultEnvelope] = []
 
         # Deduplicate: skip tool calls with identical name+input in the same
@@ -898,7 +879,7 @@ class AgentLoop:
                         )
                         continue
                 except Exception:
-                    pass  # Degrade gracefully if capability module unavailable
+                    logger.debug("Capability module unavailable", exc_info=True)
 
             try:
                 result = await self._call_handler(spec, tc.input)
@@ -1539,4 +1520,4 @@ def _audit_tool_denied(tool_name: str, reason: str) -> None:
             )
         )
     except Exception:
-        pass
+        logger.debug("Failed to emit audit event for denied tool", exc_info=True)

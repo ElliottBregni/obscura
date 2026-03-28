@@ -217,6 +217,7 @@ class ToolSpec:
     timeout_seconds: float = 60.0
     retries: int = 0
     examples: tuple[dict[str, Any], ...] = field(default_factory=lambda: ())
+    capability: str = ""  # capability group ID (e.g. "git.ops")
 
 
 # Hook config type for Copilot backend

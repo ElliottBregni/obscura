@@ -518,6 +518,10 @@ _DEFAULT_CONFIG_TOML = textwrap.dedent("""\
     auto_install = true
     lenient_builtins = true
 
+    # Capability grants control which tools are available.
+    # Plugins with default_grant=true in their manifest are auto-included.
+    # Add capabilities here to grant non-default plugins, or use deny to block.
+    # Each capability maps to specific tools (e.g. git.ops → git_diff, git_log, etc.)
     [defaults.capabilities]
     grant = [
         "shell.exec",

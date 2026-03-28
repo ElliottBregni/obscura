@@ -588,7 +588,8 @@ class ClaudeBackend:
         lines.append("")
         for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
-            lines.append(f"- `{spec.name}`: {desc}")
+            cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
+            lines.append(f"- `{spec.name}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
             "IMPORTANT: Do NOT use tool names from other systems. "
@@ -596,6 +597,14 @@ class ClaudeBackend:
             "WebFetch, Agent, TodoWrite, NotebookEdit are NOT valid here. "
             "Use ONLY the exact names listed above."
         )
+        try:
+            from obscura.plugins.capabilities import build_capability_map_section
+            cap_section = build_capability_map_section(self._tools)
+            if cap_section:
+                lines.append("")
+                lines.append(cap_section)
+        except Exception:
+            pass
         return "\n".join(lines)
 
     def _build_mcp_tools(self) -> dict[str, Any]:

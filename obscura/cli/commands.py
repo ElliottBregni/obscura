@@ -319,10 +319,23 @@ class REPLContext:
             from obscura.cli.app.modes import MODE_TOOL_GROUPS
             all_specs = get_system_tool_specs()
             mm = self._mode_manager
-            allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
+            mode_allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
+            # Also apply capability-based filtering from config.toml
+            cap_allowed: set[str] | None = None
+            try:
+                from obscura.plugins.capabilities import resolve_allowed_tools_from_config
+                cap_allowed = resolve_allowed_tools_from_config()
+            except Exception:
+                pass
             for spec in all_specs:
-                if allowed is None or spec.name in allowed:
-                    new_client.register_tool(spec)
+                # Mode filter (None = all modes allowed)
+                if mode_allowed is not None and spec.name not in mode_allowed:
+                    continue
+                # Capability filter (None = no cap filtering)
+                cap = getattr(spec, "capability", "")
+                if cap_allowed is not None and cap and spec.name not in cap_allowed:
+                    continue
+                new_client.register_tool(spec)
         self.client = new_client
         self.backend = backend
         self.model = model

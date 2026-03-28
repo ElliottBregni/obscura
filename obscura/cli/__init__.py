@@ -21,8 +21,6 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -66,202 +64,16 @@ from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
 
 
 # ---------------------------------------------------------------------------
-# MCP discovery
+# MCP / agent discovery — canonical implementations live in bootstrap.py
 # ---------------------------------------------------------------------------
-
-
-def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
-    """Auto-discover MCP servers from ~/.obscura/mcp/. Returns (configs, names)."""
-    try:
-        from obscura.integrations.mcp.config_loader import (
-            build_runtime_server_configs,
-            discover_mcp_servers,
-        )
-
-        discovered = discover_mcp_servers()
-        if discovered:
-            configs = build_runtime_server_configs(discovered)
-            names = [s.name for s in discovered]
-            return configs, names
-    except Exception:
-        pass
-    return [], []
-
-
-@dataclass
-class AgentInfo:
-    """Lightweight descriptor for a configured agent."""
-
-    name: str
-    type: str = "loop"
-    model: str = "default"
-    status: str = "configured"  # configured | running | stopped
-
-
-def _discover_agents() -> list[str]:
-    """Read agent names from ~/.obscura/agents.yaml without instantiating AgentRuntime.
-
-    Fully lazy — just parses YAML names, deduplicates, returns list.
-    Returns empty list on any error.
-    """
-    return [a.name for a in _discover_agent_infos()]
-
-
-def _discover_agent_infos() -> list[AgentInfo]:
-    """Read agent metadata from ~/.obscura/agents.yaml.
-
-    Returns a list of :class:`AgentInfo` with name/type/model for each
-    configured agent.  Fully lazy — no runtime instantiated.
-    """
-    try:
-        import yaml  # type: ignore[import-untyped]
-
-        agents_yaml = resolve_obscura_home() / "agents.yaml"
-        if not agents_yaml.exists():
-            return []
-        with open(agents_yaml) as f:
-            config = yaml.safe_load(f) or {}
-        seen: set[str] = set()
-        infos: list[AgentInfo] = []
-        for agent in config.get("agents", []):
-            name = agent.get("name", "")
-            if name and name not in seen:
-                seen.add(name)
-                infos.append(
-                    AgentInfo(
-                        name=name,
-                        type=agent.get("type", "loop"),
-                        model=agent.get("model", "default"),
-                    )
-                )
-        return infos
-    except Exception:
-        return []
-
-
-_INLINE_AGENT_MENTION_RE = re.compile(
-    r"^\s*@(?P<name>[A-Za-z0-9][A-Za-z0-9_-]*)\s+(?P<prompt>.+?)\s*$",
-    re.DOTALL,
+from obscura.cli.bootstrap import (  # noqa: E402
+    AgentInfo as AgentInfo,
+    _discover_agent_infos,
+    _discover_agents,
+    _discover_mcp,
+    _parse_inline_agent_mention,
+    _run_inline_agent_from_mention,
 )
-
-
-def _parse_inline_agent_mention(text: str) -> tuple[str, str] | None:
-    """Parse ``@agent <prompt>`` syntax from a user message."""
-    match = _INLINE_AGENT_MENTION_RE.match(text)
-    if not match:
-        return None
-    agent_name = match.group("name").strip()
-    prompt = match.group("prompt").strip()
-    if not agent_name or not prompt:
-        return None
-    return agent_name, prompt
-
-
-async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | None:
-    """Execute ``@agent <prompt>`` inline using manifest config when available."""
-    parsed = _parse_inline_agent_mention(text)
-    if parsed is None:
-        return None
-
-    agent_name, prompt = parsed
-    runtime = await ctx.get_runtime()
-
-    from obscura.manifest.models import AgentManifest
-    from obscura.core.paths import resolve_obscura_home
-    from obscura.cli.render import LabeledStreamRenderer
-
-    manifest: AgentManifest | None = None
-    agents_yaml = resolve_obscura_home() / "agents.yaml"
-    if agents_yaml.exists():
-        try:
-            import yaml
-
-            with open(agents_yaml) as f:
-                config = yaml.safe_load(f) or {}
-            agent_configs = {
-                a.get("name", ""): a
-                for a in config.get("agents", [])
-                if isinstance(a, dict)
-            }
-            cfg = agent_configs.get(agent_name)
-            if cfg is not None:
-                if cfg.get("type") == "daemon":
-                    print_warning(
-                        f"@{agent_name} is a daemon agent and cannot be invoked inline."
-                    )
-                    return ""
-                skills_cfg = cfg.get("skills", {})
-                if not isinstance(skills_cfg, dict):
-                    skills_cfg = {}
-                raw_mcp_servers = cfg.get("mcp_servers", [])
-                parsed_mcp_servers: list[dict[str, Any]] = []
-                if isinstance(raw_mcp_servers, list):
-                    for server in raw_mcp_servers:
-                        if isinstance(server, dict):
-                            parsed_mcp_servers.append(server)
-                        elif isinstance(server, str) and server.strip():
-                            parsed_mcp_servers.append({"name": server.strip()})
-
-                manifest = AgentManifest(
-                    name=str(cfg.get("name", agent_name)),
-                    provider=str(cfg.get("provider") or cfg.get("model", ctx.backend)),
-                    system_prompt=str(cfg.get("system_prompt", "")),
-                    max_turns=int(cfg.get("max_turns", ctx.max_turns)),
-                    tools=list(cfg.get("tools", []))
-                    if isinstance(cfg.get("tools"), list)
-                    else [],
-                    tags=list(cfg.get("tags", []))
-                    if isinstance(cfg.get("tags"), list)
-                    else [],
-                    mcp_servers=parsed_mcp_servers,
-                    skills_config=skills_cfg,
-                    can_delegate=bool(cfg.get("can_delegate", False)),
-                    delegate_allowlist=list(cfg.get("delegate_allowlist", []))
-                    if isinstance(cfg.get("delegate_allowlist"), list)
-                    else [],
-                    max_delegation_depth=int(cfg.get("max_delegation_depth", 3)),
-                    tool_allowlist=list(cfg.get("tool_allowlist", []))
-                    if isinstance(cfg.get("tool_allowlist"), list)
-                    else None,
-                )
-        except Exception as exc:
-            print_warning(f"Failed loading @{agent_name} manifest: {exc}")
-
-    if manifest is None:
-        print_warning(
-            f"No manifest found for @{agent_name}; running with SDK defaults."
-        )
-        agent = runtime.spawn(
-            agent_name,
-            model=ctx.backend,
-            system_prompt="",
-        )
-    else:
-        agent = runtime.spawn_from_manifest(manifest, provider_override=ctx.backend)
-    await agent.start()
-
-    renderer = LabeledStreamRenderer(agent_name, "cyan")
-    output_chunks: list[str] = []
-    try:
-        async for event in agent.stream_loop(prompt):
-            renderer.handle(event)
-            if getattr(event, "text", None):
-                output_chunks.append(event.text)
-    except KeyboardInterrupt:
-        renderer.finish()
-        console.print("[dim][interrupted][/]")
-    except Exception as exc:
-        renderer.finish()
-        print_error(f"Inline @{agent_name} failed: {exc}")
-    else:
-        renderer.finish()
-    finally:
-        try:
-            await agent.stop()
-        except Exception:
-            pass
-    console.print()
-    return "".join(output_chunks).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -893,6 +705,41 @@ async def _repl(
         except Exception:
             pass
 
+    # Backfill capability field on system tools from plugin manifests.
+    # System tools registered via @tool() don't carry capability metadata,
+    # but the plugin manifests (system-tools.toml etc.) declare the mapping.
+    if tools_enabled and system_tools:
+        try:
+            from dataclasses import replace as _dc_replace
+            from obscura.plugins.loader import get_capability_map
+
+            _cap_map = get_capability_map()
+            system_tools = [
+                _dc_replace(t, capability=_cap_map[t.name])
+                if not getattr(t, "capability", "") and t.name in _cap_map
+                else t
+                for t in system_tools
+            ]
+        except Exception:
+            pass
+
+    # Filter tools by capability grants from config.toml.
+    # Tools whose capability is not in the grant list are removed.
+    # Tools with no capability (uncategorized) are always kept.
+    if tools_enabled and system_tools:
+        try:
+            from obscura.plugins.capabilities import resolve_allowed_tools_from_config
+
+            _allowed = resolve_allowed_tools_from_config()
+            if _allowed is not None:
+                system_tools = [
+                    t for t in system_tools
+                    if not getattr(t, "capability", "")  # no capability → keep
+                    or t.name in _allowed                 # in grant list → keep
+                ]
+        except Exception:
+            pass
+
     tool_count = len(system_tools)
 
     # Wire the ask_user callback so the tool can present TUI widgets
@@ -1022,6 +869,42 @@ async def _repl(
         mcp_servers=mcp_configs or None,
         hooks=project_hooks,
     ) as client:
+        # Wire eval-driven tool router so the backend selects a relevant
+        # subset of tools per turn (pinned core tools + capability matches).
+        # Without this, all 100+ tools get sent to the model every turn.
+        if tools_enabled:
+            try:
+                from obscura.core.tool_router import ToolRouter
+                from obscura.core.tool_score_index import ToolScoreIndex
+                from obscura.core.compiler.compiled import ToolRoutingConfig
+                from obscura.plugins.registries.capability_index import CapabilityIndex
+                from obscura.plugins.loader import PluginLoader, _load_plugin_config_flag
+
+                _routing_config = ToolRoutingConfig()
+                _score_index = ToolScoreIndex()
+
+                # Build capability index from loaded plugins
+                _cap_index = CapabilityIndex()
+                _pl = PluginLoader()
+                _all_pspecs = []
+                if _load_plugin_config_flag("load_builtins"):
+                    _all_pspecs.extend(_pl.discover_builtins())
+                _all_pspecs.extend(_pl.discover_local())
+                _all_pspecs.extend(_pl.discover_user())
+                for _ps in _all_pspecs:
+                    for _cap in _ps.capabilities:
+                        _cap_index.register(_cap, _ps.id)
+
+                _router = ToolRouter.from_capability_index(
+                    config=_routing_config,
+                    score_index=_score_index,
+                    capability_index=_cap_index,
+                    backend=backend,
+                )
+                client._backend.set_tool_router(_router)
+            except Exception:
+                pass
+
         # Session resume
         if session_id:
             try:

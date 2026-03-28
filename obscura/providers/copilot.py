@@ -37,6 +37,57 @@ from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 
 # ---------------------------------------------------------------------------
+# Priority-aware tool truncation
+# ---------------------------------------------------------------------------
+
+# Core tools that must never be dropped by naive truncation.
+# Mirrors DEFAULT_PINNED_TOOLS in tool_router.py.
+_CORE_TOOL_NAMES: frozenset[str] = frozenset({
+    "run_shell",
+    "read_text_file",
+    "write_text_file",
+    "edit_text_file",
+    "list_directory",
+    "grep_files",
+    "find_files",
+    "git_status",
+})
+
+
+def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
+    """Truncate *tools* to *limit*, keeping core tools and dropping plugins first.
+
+    Tiers (kept in order):
+      1. Core system tools (always kept)
+      2. MCP tools that match core names (e.g. ``mcp__obscura_tools__run_shell``)
+      3. Non-MCP tools (native plugins)
+      4. Remaining MCP tools (plugin MCP tools — dropped first)
+    """
+    core: list[ToolSpec] = []
+    mcp_core: list[ToolSpec] = []
+    native: list[ToolSpec] = []
+    mcp_other: list[ToolSpec] = []
+
+    for t in tools:
+        name = t.name
+        if name in _CORE_TOOL_NAMES:
+            core.append(t)
+        elif name.startswith("mcp__"):
+            # Check if the MCP tool name ends with a core tool name
+            suffix = name.rsplit("__", 1)[-1] if "__" in name else ""
+            if suffix in _CORE_TOOL_NAMES:
+                mcp_core.append(t)
+            else:
+                mcp_other.append(t)
+        else:
+            native.append(t)
+
+    # Assemble in priority order: core first, MCP plugins last
+    prioritised = core + mcp_core + native + mcp_other
+    return prioritised[:limit]
+
+
+# ---------------------------------------------------------------------------
 # Backend implementation
 # ---------------------------------------------------------------------------
 
@@ -448,11 +499,20 @@ class CopilotBackend:
         lines.append("")
         for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
-            lines.append(f"- `{self._sanitize_tool_name(spec.name)}`: {desc}")
+            cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
+            lines.append(f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
             "Do NOT invent tool names. If none of these tools fit, tell the user."
         )
+        try:
+            from obscura.plugins.capabilities import build_capability_map_section
+            cap_section = build_capability_map_section(self._tools)
+            if cap_section:
+                lines.append("")
+                lines.append(cap_section)
+        except Exception:
+            pass
         return "\n".join(lines)
 
     # -- Hooks ---------------------------------------------------------------
@@ -678,7 +738,7 @@ class CopilotBackend:
                     len(filtered),
                     _MAX_COPILOT_TOOLS,
                 )
-                filtered = filtered[:_MAX_COPILOT_TOOLS]
+                filtered = _priority_truncate(filtered, _MAX_COPILOT_TOOLS)
 
             _log.debug(
                 "Building session with %d tools (system prompt %d chars)",

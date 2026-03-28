@@ -196,8 +196,105 @@ class CapabilityResolver:
         return list(set(list(self._grants.keys()) + list(self._denials.keys())))
 
 
+def build_capability_map_section(tools: list[Any]) -> str:
+    """Build a markdown section mapping capability groups to their tool names.
+
+    Takes the final list of loaded tools (with ``.capability`` populated) and
+    produces a human-readable section for the system prompt so the LLM
+    understands that capability IDs like ``git.ops`` are permission groups,
+    not tool names.
+
+    Only capabilities with at least one loaded tool are included.
+    """
+    from collections import defaultdict
+
+    groups: dict[str, list[str]] = defaultdict(list)
+    for tool in tools:
+        cap = getattr(tool, "capability", "")
+        if cap:
+            groups[cap].append(tool.name)
+
+    if not groups:
+        return ""
+
+    lines = [
+        "## Capability Groups",
+        "",
+        "Capabilities in config.toml are permission groups, not tool names. "
+        "Each maps to these tools:",
+        "",
+    ]
+    for cap_id in sorted(groups):
+        tool_names = ", ".join(f"`{t}`" for t in sorted(groups[cap_id]))
+        lines.append(f"- **{cap_id}**: {tool_names}")
+    return "\n".join(lines)
+
+
+def resolve_allowed_tools_from_config() -> set[str] | None:
+    """Read capability grants/denies from config.toml and resolve to tool names.
+
+    Returns a set of allowed tool names, or ``None`` if no capability filtering
+    should be applied (e.g. config missing or empty grants).
+
+    Logic:
+    1. Read ``[defaults.capabilities]`` grant and deny lists from config.toml.
+    2. Discover all plugin manifests and their capability metadata.
+    3. Auto-include capabilities with ``default_grant = true`` in manifests.
+    4. Add explicitly granted capabilities from config.
+    5. Remove tools from denied capabilities.
+    6. Tools with no capability (uncategorized) are always allowed.
+    """
+    try:
+        from obscura.core.workspace import load_workspace_config
+        from obscura.plugins.loader import PluginLoader, get_capability_map, _load_plugin_config_flag
+
+        config = load_workspace_config()
+        caps_cfg = config.get("defaults", {}).get("capabilities", {})
+        grant_ids: set[str] = set(caps_cfg.get("grant", []))
+        deny_ids: set[str] = set(caps_cfg.get("deny", []))
+
+        # Discover all plugin specs to read default_grant flags
+        load_builtins = _load_plugin_config_flag("load_builtins")
+        loader = PluginLoader()
+        all_specs = []
+        if load_builtins:
+            all_specs.extend(loader.discover_builtins())
+        all_specs.extend(loader.discover_local())
+        all_specs.extend(loader.discover_user())
+
+        # Auto-grant capabilities with default_grant=true
+        for plugin_spec in all_specs:
+            for cap in plugin_spec.capabilities:
+                if cap.default_grant:
+                    grant_ids.add(cap.id)
+
+        if not grant_ids:
+            return None  # nothing to grant → no filtering
+
+        # Remove denied from grants
+        grant_ids -= deny_ids
+
+        # Build reverse map: capability_id → set of tool names
+        cap_map = get_capability_map()  # tool_name → capability_id
+        cap_to_tools: dict[str, set[str]] = {}
+        for tool_name, cap_id in cap_map.items():
+            cap_to_tools.setdefault(cap_id, set()).add(tool_name)
+
+        # Expand grants to tool names
+        allowed: set[str] = set()
+        for cap_id in grant_ids:
+            allowed.update(cap_to_tools.get(cap_id, set()))
+
+        return allowed
+    except Exception:
+        logger.debug("Failed to resolve capability grants from config", exc_info=True)
+        return None
+
+
 __all__ = [
     "CapabilityGrant",
     "CapabilityDenial",
     "CapabilityResolver",
+    "build_capability_map_section",
+    "resolve_allowed_tools_from_config",
 ]
