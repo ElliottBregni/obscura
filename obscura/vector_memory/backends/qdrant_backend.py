@@ -18,6 +18,7 @@ from qdrant_client.models import (
     MatchValue,
     PointStruct,
     VectorParams,,
+    KeywordIndexParams,,
     KeywordIndexParams,
 )
 
@@ -116,6 +117,10 @@ class QdrantBackend:
             "metadata": metadata,
             "memory_type": memory_type,
             "created_at": datetime.now(UTC).isoformat(),
+            ,
+            "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
+            "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
+            "embedding_ts": datetime.now(UTC).isoformat(),
             ,
             "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
             "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
