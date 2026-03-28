@@ -17,7 +17,8 @@ from qdrant_client.models import (
     Filter,
     MatchValue,
     PointStruct,
-    VectorParams,
+    VectorParams,,
+    KeywordIndexParams,
 )
 
 from obscura.memory import MemoryKey
@@ -90,12 +91,12 @@ class QdrantBackend:
             self.client.create_payload_index(
                 self.collection_name,
                 "namespace",
-                "keyword",
+                KeywordIndexParams(),
             )
             self.client.create_payload_index(
                 self.collection_name,
                 "memory_type",
-                "keyword",
+                KeywordIndexParams(),
             )
 
     def store_vector(
@@ -115,6 +116,10 @@ class QdrantBackend:
             "metadata": metadata,
             "memory_type": memory_type,
             "created_at": datetime.now(UTC).isoformat(),
+            ,
+            "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
+            "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
+            "embedding_ts": datetime.now(UTC).isoformat(),
         }
         if expires_at:
             payload["expires_at"] = expires_at.isoformat()
