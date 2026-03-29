@@ -758,6 +758,8 @@ class AgentLoop:
     async def _execute_tools(
         self,
         tool_calls: list[ToolCallInfo],
+        turn: int | None = None,
+        **kwargs: object,
     ) -> list[ToolResultEnvelope]:
         """Execute tool calls and return canonical result envelopes."""
         results: list[ToolResultEnvelope] = []
