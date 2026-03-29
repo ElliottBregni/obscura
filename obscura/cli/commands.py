@@ -4498,3 +4498,9 @@ async def handle_command(raw: str, ctx: REPLContext) -> str | None:
         print_error(f"Unknown command: /{cmd_name}. Type /help for commands.")
         return None
     return await handler(cmd_args, ctx)
+
+
+# Backwards-compatible stub for cmd_secret used in tests
+def cmd_secret(*args, **kwargs):
+    """Deprecated placeholder command used in tests. Returns None."""
+    return None
