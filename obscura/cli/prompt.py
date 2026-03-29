@@ -441,6 +441,8 @@ def create_prompt_session(
     prompt_status: PromptStatus | None = None,
     at_command_names: Callable[[], list[str]] | None = None,
     dollar_skill_names: Callable[[], list[str]] | None = None,
+,
+    hud_provider: Callable[[], dict] | None = None,
 ) -> PromptSession[str]:
     """Create a configured PromptSession for the Obscura REPL."""
     # Ensure the Obscura home directory exists so FileHistory can write.
@@ -483,6 +485,29 @@ def create_prompt_session(
 
     # Dynamic toolbar — reads PromptStatus on every render.
     def _toolbar() -> HTML:
+        # Backwards-compatible HUD provider for older tests
+        if hud_provider is not None:
+            try:
+                data = hud_provider() or {}
+                menu = data.get("menu_items", [])
+                tasks = ""
+                for k, v in menu:
+                    if k == "tasks":
+                        tasks = v
+                approvals_on = any(k == "approvals" and v == "on" for k, v in menu)
+                reasoning_on = any(k == "reasoning" and v == "on" for k, v in menu)
+                model_text = get_model_space_delta() if data.get("model_enabled") else ""
+                hud = PromptHUDState(
+                    model_text=model_text,
+                    right_enabled=bool(data.get("right_enabled", False)),
+                    tasks_value=tasks,
+                    approvals_enabled=approvals_on,
+                    reasoning_enabled=reasoning_on,
+                    menu_items=menu,
+                )
+                return HTML(_render_menu_line(80, hud, PromptLayoutConfig()))
+            except Exception:
+                pass
         if _prompt_status is not None:
             return HTML(_build_toolbar_html(_prompt_status))
         return HTML(_fallback_text)
