@@ -17,6 +17,7 @@ class BackendConfig:
     user_id: str
     embedding_dim: int
     namespace: str | None = None
+    decay_half_life_seconds: float | None = None
 
 
 @dataclass

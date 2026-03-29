@@ -172,10 +172,15 @@ class VectorMemoryStore:
         logger = logging.getLogger(__name__)
         backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "qdrant").lower()
 
+        try:
+            half_life = float(os.environ.get('OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS'))
+        except Exception:
+            half_life = None
         config = BackendConfig(
             user_id=self.user_id,
             embedding_dim=self.embedding_dim,
             namespace=None,
+            decay_half_life_seconds=half_life,
         )
 
         # Prefer Qdrant if available, fallback to SQLite
@@ -338,7 +343,12 @@ class VectorMemoryStore:
             filters=filters or None,
         )
 
-        return results
+        # Ensure results are sorted by final_score (backend may apply decay), fallback to score.
+        for r in results:
+            if not getattr(r, 'final_score', None):
+                r.final_score = r.score or 0.0
+        results.sort(key=lambda x: getattr(x, 'final_score', x.score or 0.0), reverse=True)
+        return results[:top_k]
 
     def search_reranked(
         self,
