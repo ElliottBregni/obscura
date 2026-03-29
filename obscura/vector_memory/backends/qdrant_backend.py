@@ -91,12 +91,12 @@ class QdrantBackend:
             self.client.create_payload_index(
                 self.collection_name,
                 "namespace",
-                KeywordIndexParams(),
+                KeywordIndexParams(type="keyword"),
             )
             self.client.create_payload_index(
                 self.collection_name,
                 "memory_type",
-                KeywordIndexParams(),
+                KeywordIndexParams(type="keyword"),
             )
 
     def store_vector(
