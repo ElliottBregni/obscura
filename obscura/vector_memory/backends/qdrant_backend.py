@@ -243,11 +243,10 @@ class QdrantBackend:
             with_vectors=False,
         )
         entries = []
-        # Half-life in seconds for time decay. Default: 30 days.
-        try:
-            half_life = float(os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS", str(30 * 24 * 3600)))
-        except Exception:
-            half_life = 30 * 24 * 3600
+        # Half-life in seconds for time decay. Prefer backend config if provided, default to 30 days.
+        half_life = (self.config.decay_half_life_seconds
+                     if getattr(self.config, "decay_half_life_seconds", None) is not None
+                     else 30 * 24 * 3600)
         now = datetime.now(UTC)
         for hit in response.points:
             # Skip expired
