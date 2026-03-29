@@ -14,8 +14,43 @@ def _build_imessage_adapter(*, contacts: list[str], account_id: str = "default")
     return IMessageAdapter(contacts, account_id=account_id)
 
 
+def _build_whatsapp_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.whatsapp import WhatsAppAdapter
+
+    return WhatsAppAdapter(contacts, account_id=account_id)
+
+
+def _build_signal_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.signal import SignalAdapter
+
+    return SignalAdapter(contacts, account_id=account_id)
+
+
+def _build_slack_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.slack import SlackAdapter
+
+    return SlackAdapter(contacts, account_id=account_id)
+
+
+def _build_webhook_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.webhook import WebhookAdapter
+
+    return WebhookAdapter(contacts, account_id=account_id)
+
+
+def _build_push_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.push import PushAdapter
+
+    return PushAdapter(contacts, account_id=account_id)
+
+
 _ADAPTER_BUILDERS: dict[str, AdapterBuilder] = {
     "imessage": _build_imessage_adapter,
+    "whatsapp": _build_whatsapp_adapter,
+    "signal": _build_signal_adapter,
+    "slack": _build_slack_adapter,
+    "webhook": _build_webhook_adapter,
+    "push": _build_push_adapter,
 }
 
 
