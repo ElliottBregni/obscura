@@ -756,8 +756,17 @@ class Agent:
                 if hook_reg is None:
                     hook_reg = HookRegistry()
                     setattr(self._client, "hooks", hook_reg)
-                hook_reg.add_before(make_tool_eval_hook(), _AEK.TOOL_RESULT)
-                hook_reg.add_before(make_eval_memory_inject_hook(), _AEK.TURN_START)
+                import inspect
+
+                hook_fn = make_tool_eval_hook()
+                if inspect.isawaitable(hook_fn):
+                    hook_fn = await hook_fn
+                hook_reg.add_before(hook_fn, _AEK.TOOL_RESULT)
+
+                hook_fn2 = make_eval_memory_inject_hook()
+                if inspect.isawaitable(hook_fn2):
+                    hook_fn2 = await hook_fn2
+                hook_reg.add_before(hook_fn2, _AEK.TURN_START)
                 logger.info(
                     "Eval hooks registered for agent %s (tool checks + memory)", self.id
                 )
