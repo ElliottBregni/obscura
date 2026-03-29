@@ -544,3 +544,13 @@ async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
             return (await session.prompt_async(message)).strip().lower()
     except (EOFError, KeyboardInterrupt):
         return "n"
+
+
+# Backwards-compatible dataclass expected by older tests
+@dataclass
+class PromptLayoutConfig:
+    show_session: bool = True
+    show_branch: bool = True
+    show_model: bool = True
+    show_context: bool = True
+
