@@ -1350,9 +1350,13 @@ class AgentLoop:
         for result in results:
             status = "error" if result.status == "error" else "success"
             result_text = AgentLoop._render_tool_result_text(result)
+            # Include an explicit status marker line for LLM-facing formatting
+            # so tests and downstream parsers can look for "OK" / "ERROR".
+            status_label = "ERROR" if status == "error" else "OK"
             parts.append(
                 f'<tool_result tool="{result.tool}" '
                 f'id="{result.tool_use_id}" status="{status}">\n'
+                f"{status_label}\n"
                 f"{result_text}\n"
                 f"</tool_result>"
             )
