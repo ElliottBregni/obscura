@@ -486,31 +486,41 @@ def create_prompt_session(
         return HTML(_build_prompt_message_html(width, model_text, PromptLayoutConfig()))
 
 
-    # Dynamic toolbar — reads PromptStatus on every render.
+    # If a static hud_provider was supplied, compute a one-shot toolbar
+    _static_hud_html: str | None = None
+    if hud_provider is not None:
+        try:
+            data = hud_provider() or {}
+            menu = data.get("menu_items", [])
+            tasks = ""
+            for k, v in menu:
+                if k == "tasks":
+                    tasks = v
+            approvals_on = any(k == "approvals" and v == "on" for k, v in menu)
+            reasoning_on = any(k == "reasoning" and v == "on" for k, v in menu)
+            model_text = ""
+            if data.get("model_enabled"):
+                try:
+                    from obscura.cli.render import get_model_space_delta
+
+                    model_text = get_model_space_delta()
+                except Exception:
+                    model_text = ""
+            hud = PromptHUDState(
+                model_text=model_text,
+                right_enabled=bool(data.get("right_enabled", False)),
+                tasks_value=tasks,
+                approvals_enabled=approvals_on,
+                reasoning_enabled=reasoning_on,
+                menu_items=menu,
+            )
+            _static_hud_html = _render_menu_line(80, hud, PromptLayoutConfig())
+        except Exception:
+            _static_hud_html = None
+
     def _toolbar() -> HTML:
-        # Backwards-compatible HUD provider for older tests
-        if hud_provider is not None:
-            try:
-                data = hud_provider() or {}
-                menu = data.get("menu_items", [])
-                tasks = ""
-                for k, v in menu:
-                    if k == "tasks":
-                        tasks = v
-                approvals_on = any(k == "approvals" and v == "on" for k, v in menu)
-                reasoning_on = any(k == "reasoning" and v == "on" for k, v in menu)
-                model_text = get_model_space_delta() if data.get("model_enabled") else ""
-                hud = PromptHUDState(
-                    model_text=model_text,
-                    right_enabled=bool(data.get("right_enabled", False)),
-                    tasks_value=tasks,
-                    approvals_enabled=approvals_on,
-                    reasoning_enabled=reasoning_on,
-                    menu_items=menu,
-                )
-                return HTML(_render_menu_line(80, hud, PromptLayoutConfig()))
-            except Exception:
-                pass
+        if _static_hud_html is not None:
+            return HTML(_static_hud_html)
         if _prompt_status is not None:
             return HTML(_build_toolbar_html(_prompt_status))
         return HTML(_fallback_text)
