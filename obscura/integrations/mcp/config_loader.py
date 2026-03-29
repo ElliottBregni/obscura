@@ -77,6 +77,14 @@ def _resolve_default_config_paths() -> list[Path]:
     """Return MCP config paths in merge order (global first, local last)."""
     from obscura.core.paths import resolve_all_mcp_dirs
 
+    # Prefer a project-local .obscura/mcp when present (tests and local
+    # workflows expect local overrides to be used in preference to global
+    # catalogs).  Only fall back to the global+local merge when no local
+    # directory exists in the current working directory.
+    local_mcp = Path.cwd().resolve() / ".obscura" / "mcp"
+    if local_mcp.is_dir():
+        return [local_mcp]
+
     dirs = resolve_all_mcp_dirs()
     if dirs:
         return dirs
