@@ -216,9 +216,27 @@ class SQLiteBackend:
                 else None,
                 score=similarity,
             )
+            # Apply time-based decay if configured in backend config
+            try:
+                half_life = self.config.decay_half_life_seconds if getattr(self.config, 'decay_half_life_seconds', None) is not None else None
+            except Exception:
+                half_life = None
+            if half_life:
+                now = datetime.now(UTC)
+                try:
+                    created = datetime.fromisoformat(row['created_at'])
+                    age_seconds = (now - created).total_seconds()
+                    decay = 0.5 ** (age_seconds / half_life) if half_life > 0 else 1.0
+                except Exception:
+                    decay = 1.0
+                entry.rerank_score = decay
+                entry.final_score = entry.score * decay
+            else:
+                entry.rerank_score = 1.0
+                entry.final_score = entry.score
             results.append(entry)
 
-        results.sort(key=lambda x: x.score, reverse=True)
+        results.sort(key=lambda x: x.final_score, reverse=True)
         return results[:top_k]
 
     def delete_vector(self, key: MemoryKey) -> bool:
