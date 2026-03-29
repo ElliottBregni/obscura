@@ -280,7 +280,7 @@ class StreamRenderer:
         # StreamingStatus from prompt.py (toolbar spinner)
         self._ss: object | None = external_status or streaming_status
         # jitter control for reasoning preview
-        self._last_preview_update: float = 0.0
+        self._last_preview_update: float = float('-inf')
         import os as _os
         self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
 
@@ -464,9 +464,7 @@ class StreamRenderer:
                     if cur:
                         paragraphs.append(cur)
                         cur = []
-                    else:
-                        # multiple blanks -> preserve by appending empty paragraph
-                        paragraphs.append([])
+                    # skip consecutive blanks; treat any number as a single separator
                 else:
                     cur.append(re.sub(r"\s+"," ", ln))
             if cur:
