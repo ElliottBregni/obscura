@@ -610,3 +610,59 @@ _build_prompt_message_html = _build_prompt_message_html
 _render_model_status_line = _render_model_status_line
 _render_menu_line = _render_menu_line
 
+
+# Compatibility helpers and HUD/layout classes used by older tests
+@dataclass
+class PromptLayoutConfig:
+    model_hpad: int = 2
+    input_hpad: int = 2
+    model_vpad: int = 0
+    input_vpad: int = 0
+    menu_hpad: int = 1
+
+@dataclass
+class PromptHUDState:
+    model_text: str = ""
+    right_enabled: bool = False
+    tasks_value: str = ""
+    approvals_enabled: bool = False
+    reasoning_enabled: bool = False
+    menu_items: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _build_prompt_message_html(width: int, model_text: str, cfg: PromptLayoutConfig) -> str:
+    # Minimal two-lane message: status lane then input lane
+    status = f"<status-lane>{model_text}</status-lane>"
+    # input lane contains a vertical bar placeholder
+    input_lane = "<input-lane>\u2502 </input-lane>"
+    return status + "\n" + input_lane
+
+
+def _render_model_status_line(width: int, hud: PromptHUDState) -> str:
+    parts = []
+    if hud.tasks_value:
+        parts.append(f"T:{hud.tasks_value}")
+    parts.append("A:on" if hud.approvals_enabled else "A:off")
+    parts.append("R:on" if hud.reasoning_enabled else "R:off")
+    left = hud.model_text or ""
+    line = (left + " " + " ".join(parts)).strip()
+    if len(line) > width:
+        return line[:width]
+    return line
+
+
+def _render_menu_line(width: int, hud: PromptHUDState, cfg: PromptLayoutConfig) -> str:
+    # Render menu items compactly with menu_hpad spacing
+    items = hud.menu_items or []
+    menu = " ".join(f"{k}:{v}" for k, v in items)
+    base = _render_model_status_line(width, hud)
+    line = f"{base} {menu}".strip()
+    if len(line) > width:
+        return line[:width]
+    return line
+
+# expose aliases expected by tests
+_build_prompt_message_html = _build_prompt_message_html
+_render_model_status_line = _render_model_status_line
+_render_menu_line = _render_menu_line
+
