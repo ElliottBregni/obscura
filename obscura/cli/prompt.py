@@ -477,7 +477,12 @@ def create_prompt_session(
             return HTML(status_lane + "\n" + input_lane)
 
         # Idle: render the standard two-lane layout using model-space delta
-        model_text = get_model_space_delta()
+        try:
+            from obscura.cli.render import get_model_space_delta
+
+            model_text = get_model_space_delta()
+        except Exception:
+            model_text = ""
         return HTML(_build_prompt_message_html(width, model_text, PromptLayoutConfig()))
 
 
