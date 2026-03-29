@@ -114,7 +114,7 @@ class AgentManifest(BaseModel):
     system_prompt: str = ""
     tools: list[str] = Field(default_factory=_empty_str_list)
     tool_allowlist: list[str] | None = None
-    mcp_servers: list[MCPServerRef | str] = Field(default_factory=_empty_mcp_refs, alias="mcp_server_refs")
+    mcp_servers: list[Any] = Field(default_factory=_empty_mcp_refs, alias="mcp_server_refs")
     permissions: PermissionConfig = Field(default_factory=PermissionConfig)
     hooks: list[HookDefinition] = Field(default_factory=list)
 
