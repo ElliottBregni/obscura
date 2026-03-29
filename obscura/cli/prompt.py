@@ -473,9 +473,8 @@ def create_prompt_session(
                     preview = preview[: max_prev - 3] + "..."
                 label_part = label_part + f" <status-preview>{_html.escape(preview)}</status-preview>"
             status_lane = f"<status-lane>{label_part}</status-lane>"
-            input_lane = "<input-lane>❯ </input-lane>"
-            return HTML(status_lane + "
-" + input_lane)
+            input_lane = "<input-lane>\u276f </input-lane>"
+            return HTML(status_lane + "\n" + input_lane)
 
         # Idle: render the standard two-lane layout using model-space delta
         model_text = get_model_space_delta()
