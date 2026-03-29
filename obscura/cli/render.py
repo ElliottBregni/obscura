@@ -265,7 +265,18 @@ class StreamRenderer:
     ``patch_stdout``.
     """
 
-    def __init__(self, streaming_status: object | None = None) -> None:
+    def __init__(self, streaming_status: object | None = None, external_status: object | None = None) -> None:\n        """Constructor accepts both streaming_status and external_status (tests pass external_status).\n\n        The renderer is tolerant of StreamingStatus objects that either expose\n        attributes (active/text/preview) or provide an update(payload) method.\n        """
+        self._text_buf: list[str] = []
+        self._thinking_buf: list[str] = []
+        self._all_text: list[str] = []
+        self._thinking_blocks: list[str] = []  # completed thinking blocks
+        self._in_thinking = False
+        # StreamingStatus from prompt.py (toolbar spinner)
+        self._ss: object | None = external_status or streaming_status
+        # jitter control for reasoning preview
+        self._last_preview_update: float = 0.0
+        import os as _os
+        self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
         self._text_buf: list[str] = []
         self._thinking_buf: list[str] = []
         self._all_text: list[str] = []
@@ -325,19 +336,61 @@ class StreamRenderer:
     # -- toolbar status helpers ---------------------------------------------
 
     def _start_thinking(self) -> None:
-        if self._ss is not None:
-            from obscura.cli.prompt import random_thinking_message
-            self._ss.active = True  # type: ignore[attr-defined]
-            self._ss.text = random_thinking_message()  # type: ignore[attr-defined]
-            self._ss.preview = ""  # type: ignore[attr-defined]
-
-    def _update_thinking_preview(self) -> None:
         if self._ss is None:
             return
-        preview = "".join(self._thinking_buf).strip().replace("\n", " ")
-        if len(preview) > 80:
-            preview = "..." + preview[-77:]
-        self._ss.preview = preview  # type: ignore[attr-defined]
+        from obscura.cli.prompt import random_thinking_message
+        msg = random_thinking_message()
+        try:
+            # Prefer update(payload) API if available
+            if hasattr(self._ss, "update"):
+                self._ss.update({"active": True, "text": msg, "preview": ""})
+            else:
+                self._ss.active = True  # type: ignore[attr-defined]
+                self._ss.text = msg  # type: ignore[attr-defined]
+                self._ss.preview = ""  # type: ignore[attr-defined]
+        except Exception:
+            # best-effort
+            try:
+                self._ss.active = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+    def _update_thinking_preview(self, raw_status: dict | None = None) -> None:
+        """Update toolbar preview, but respect jitter so updates are rate-limited."""
+        if self._ss is None:
+            return
+        try:
+            import time
+
+            now = time.monotonic()
+            ms_elapsed = (now - self._last_preview_update) * 1000.0
+            if ms_elapsed < self._jitter_ms:
+                return
+            preview = "".join(self._thinking_buf).strip().replace("\n", " ")
+            if len(preview) > 80:
+                preview = "..." + preview[-77:]
+            payload = {"preview": preview}
+            if raw_status and isinstance(raw_status, dict) and "status" in raw_status:
+                payload["status"] = raw_status.get("status")
+            if hasattr(self._ss, "update"):
+                try:
+                    self._ss.update(payload)
+                except Exception:
+                    # fallback to attribute assignment
+                    try:
+                        self._ss.preview = preview  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            else:
+                try:
+                    self._ss.preview = preview  # type: ignore[attr-defined]
+                    if raw_status and isinstance(raw_status, dict) and "status" in raw_status:
+                        self._ss.text = raw_status.get("status")  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            self._last_preview_update = now
+        except Exception:
+            pass
 
     def _stop_status(self) -> None:
         if self._ss is not None:
