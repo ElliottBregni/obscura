@@ -20,9 +20,7 @@ def test_purge_expired_deletes_old_points():
 
     config = BackendConfig(user_id=test_user.user_id, embedding_dim=16)
     backend = QdrantBackend(config=config, mode="memory")
-    # Ensure embedding function matches backend.embedding_dim to avoid local-client errors
-    embedding_fn = lambda text: [0.0] * config.embedding_dim
-    store = VectorMemoryStore(test_user, backend=backend, embedding_fn=embedding_fn)
+    store = VectorMemoryStore(test_user, backend=backend)
 
     # Store an expired memory
     expires = datetime.now(UTC) - timedelta(seconds=10)
