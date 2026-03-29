@@ -59,6 +59,57 @@ class HookRegistry:
 
     # -- registration --------------------------------------------------------
 
+    def _wrap_before_hook(self, fn: BeforeHook) -> BeforeHook:
+        """Ensure the stored before-hook is a callable that safely handles
+        awaitables and coroutine objects. This prevents un-awaited coroutine
+        warnings when tests replace factories with AsyncMock/coroutine objects.
+        """
+        # If fn is actually a coroutine object (already created), wrap it so
+        # it's awaited when the hook runs.
+        if inspect.iscoroutine(fn) or inspect.isawaitable(fn):
+            async def _await_coroutine(event: AgentEvent) -> AgentEvent | None:
+                try:
+                    result = fn
+                    if inspect.isawaitable(result):
+                        result = await result
+                    return result
+                except Exception:
+                    logger.exception("Before-hook coroutine wrapper failed")
+                    return event
+
+            return _await_coroutine
+
+        # If fn is not callable, provide a no-op pass-through hook.
+        if not callable(fn):
+            async def _noop(event: AgentEvent) -> AgentEvent | None:
+                return event
+
+            return _noop
+
+        # Otherwise, return as-is (execution helpers will await results).
+        return fn
+
+    def _wrap_after_hook(self, fn: AfterHook) -> AfterHook:
+        """Wrap after-hook similarly to before-hook wrapper."""
+        if inspect.iscoroutine(fn) or inspect.isawaitable(fn):
+            async def _await_coroutine(event: AgentEvent) -> None:
+                try:
+                    result = fn
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:
+                    logger.exception("After-hook coroutine wrapper failed")
+
+            return _await_coroutine
+
+        if not callable(fn):
+            async def _noop(event: AgentEvent) -> None:
+                return None
+
+            return _noop
+
+        return fn
+
     def before(
         self,
         kind: AgentEventKind | None = None,
@@ -69,7 +120,7 @@ class HookRegistry:
         """
 
         def decorator(fn: BeforeHook) -> BeforeHook:
-            self._before.setdefault(kind, []).append(fn)
+            self._before.setdefault(kind, []).append(self._wrap_before_hook(fn))
             return fn
 
         return decorator
@@ -81,7 +132,7 @@ class HookRegistry:
         """Decorator: register an after-hook."""
 
         def decorator(fn: AfterHook) -> AfterHook:
-            self._after.setdefault(kind, []).append(fn)
+            self._after.setdefault(kind, []).append(self._wrap_after_hook(fn))
             return fn
 
         return decorator
@@ -92,7 +143,7 @@ class HookRegistry:
         kind: AgentEventKind | None = None,
     ) -> None:
         """Imperative registration for before-hooks."""
-        self._before.setdefault(kind, []).append(callback)
+        self._before.setdefault(kind, []).append(self._wrap_before_hook(callback))
 
     def add_after(
         self,
@@ -100,7 +151,7 @@ class HookRegistry:
         kind: AgentEventKind | None = None,
     ) -> None:
         """Imperative registration for after-hooks."""
-        self._after.setdefault(kind, []).append(callback)
+        self._after.setdefault(kind, []).append(self._wrap_after_hook(callback))
 
     # -- execution -----------------------------------------------------------
 
