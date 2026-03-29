@@ -210,6 +210,10 @@ class REPLContext:
     # Vector memory store (None if disabled)
     vector_store: Any = field(default=None, repr=False)
 
+    # Memory channel router and classifier (None if no channels configured)
+    _context_router: Any = field(default=None, repr=False)
+    _turn_classifier: Any = field(default=None, repr=False)
+
     # Agent runtime (lazy-created on first /agent or /fleet command)
     _runtime: Any = field(default=None, repr=False)
 

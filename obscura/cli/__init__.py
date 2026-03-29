@@ -57,6 +57,7 @@ from obscura.cli.vector_memory_bridge import (
     load_startup_memories,
     run_startup_maintenance,
     search_relevant_context,
+    search_with_router,
 )
 from obscura.core.client import ObscuraClient
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
@@ -186,6 +187,7 @@ async def send_message(
                 text,
                 inline_agent_response,
                 turn_number=turn_num,
+                classifier=ctx._turn_classifier,
             )
         return inline_agent_response
 
@@ -227,7 +229,10 @@ async def send_message(
         augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
     if ctx.vector_store is not None:
-        vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
+        if ctx._context_router is not None:
+            vm_context = search_with_router(ctx._context_router, text)
+        else:
+            vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
         if vm_context:
             augmented_text = f"{vm_context}\n\n---\n\n{augmented_text}"
 
@@ -399,6 +404,7 @@ async def send_message(
             text,
             response_text,
             turn_number=turn_num,
+            classifier=ctx._turn_classifier,
         )
 
     # Post-send: update token tracker and show nudge
@@ -607,6 +613,24 @@ async def _repl(
     if vector_store is not None:
         run_startup_maintenance(vector_store)
 
+    # Initialize memory channel router (dynamic context injection)
+    _context_router = None
+    _turn_classifier = None
+    if vector_store is not None:
+        try:
+            from obscura.memory_channels import (
+                ContextRouter,
+                TurnClassifier,
+                load_channels_from_config,
+            )
+
+            _channels = load_channels_from_config()
+            if _channels:
+                _context_router = ContextRouter(_channels, vector_store)
+                _turn_classifier = TurnClassifier(_channels)
+        except Exception:
+            pass
+
     # Compose system prompt: default Obscura identity + user prompt + session memory
     from obscura.core.context import load_obscura_memory
     from obscura.core.system_prompts import (
@@ -633,6 +657,15 @@ async def _repl(
         vm_startup = load_startup_memories(vector_store, sid, top_k=3)
         if vm_startup:
             custom_sections.append(vm_startup)
+
+    # Inject system-level memory channels (always-on channels, user prefs, etc.)
+    if _context_router is not None:
+        try:
+            sys_channel_ctx = _context_router.get_system_channels()
+            if sys_channel_ctx:
+                custom_sections.append(sys_channel_ctx)
+        except Exception:
+            pass
 
     # Inject environment context (available plugins, capabilities, agent types)
     try:
@@ -945,6 +978,8 @@ async def _repl(
             mcp_configs=mcp_configs,
             confirm_enabled=confirm,
             vector_store=vector_store,
+            _context_router=_context_router,
+            _turn_classifier=_turn_classifier,
         )
 
         # --- Single-shot mode ---
