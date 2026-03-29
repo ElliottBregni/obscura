@@ -680,6 +680,53 @@ class AgentLoop:
         ``yield event_to_yield`` if it is not ``None``.
         """
         tc = self._parse_tool_call(name, input_json, raw)
+
+        # Special-case: expand multi-tool wrapper payloads (e.g. "parallel"
+        # or other orchestrators that carry a list of nested tool_uses).
+        multi_wrappers = {"parallel", "multi_tool", "multi_tool_use"}
+        if isinstance(tc.name, str) and tc.name in multi_wrappers:
+            inner = tc.input.get("tool_uses") or tc.input.get("toolUses") or []
+            last_emitted: AgentEvent | None = None
+            for use in inner:
+                if not isinstance(use, dict):
+                    continue
+                recipient = use.get("recipient_name") or use.get("recipient")
+                params = use.get("parameters") or use.get("args") or {}
+                if not recipient:
+                    continue
+                # Normalize dotted provider prefixes
+                if isinstance(recipient, str) and "." in recipient:
+                    recipient = recipient.split(".")[-1]
+
+                inner_tc = ToolCallInfo(
+                    tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
+                    name=recipient,
+                    input=cast(dict[str, Any], params) if isinstance(params, dict) else {},
+                    raw=use,
+                )
+                dedup_key = f"{inner_tc.name}|{json.dumps(inner_tc.input, sort_keys=True)}"
+                if dedup_key in emitted_keys:
+                    continue
+                emitted_keys.add(dedup_key)
+                tool_calls.append(inner_tc)
+
+                tc_ev = AgentEvent(
+                    kind=AgentEventKind.TOOL_CALL,
+                    tool_name=inner_tc.name,
+                    tool_input=inner_tc.input,
+                    turn=turn,
+                    raw=inner_tc.raw,
+                )
+                if prev_event is not None:
+                    await self._post_emit(prev_event)
+                    prev_event = None
+                emitted = await self._emit(tc_ev, session_id)
+                if emitted is not None:
+                    last_emitted = emitted
+
+            return last_emitted, last_emitted
+
+        # Default single-tool flow
         dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
         if dedup_key in emitted_keys:
             return None, prev_event
