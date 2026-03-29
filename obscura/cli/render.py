@@ -332,13 +332,17 @@ class StreamRenderer:
                 self._print_reasoning(text)
 
     def _print_reasoning(self, text: str) -> None:
-        """Display reasoning as a collapsed one-liner; full text stored for Ctrl+T."""
+        """Display reasoning inline in the chat window."""
         safe = _sanitize_text(text.strip())
         self._thinking_blocks.append(safe)
-        word_count = len(safe.split())
         console.print(
-            f"  [{THINKING_COLOR}]\u25b6 Thinking[/]  "
-            f"[dim]({word_count} words \u2014 Ctrl+T to expand)[/]"
+            Panel(
+                Text(safe, style="dim italic"),
+                border_style=THINKING_COLOR,
+                title="reasoning",
+                title_align="left",
+                padding=(0, 1),
+            )
         )
 
     def get_thinking_blocks(self) -> list[str]:

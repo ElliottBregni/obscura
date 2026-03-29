@@ -117,8 +117,21 @@ def _dict_of_any(value: Any) -> Mapping[str, Any]:
 def _resolve_command_binary(command: str) -> str:
     if not command:
         return ""
+    # If an explicit path is provided, keep it.
     if "/" in command:
         return command
+
+    # Preserve the command name as given (do not resolve to an absolute path).
+    # Resolving to absolute paths (e.g. "/opt/homebrew/bin/npx") caused tests
+    # to fail because expectations use the plain command name ("npx"). The
+    # runtime that executes the command should rely on PATH to locate binaries.
+    return command
+
+    # Preserve the command name as given (do not resolve to an absolute path).
+    # Resolving to absolute paths (e.g. "/opt/homebrew/bin/npx") caused tests
+    # to fail because expectations use the plain command name ("npx"). The
+    # runtime that executes the command should rely on PATH to locate binaries.
+    return command
 
     direct = shutil.which(command)
     if direct:
