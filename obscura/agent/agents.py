@@ -758,15 +758,26 @@ class Agent:
                     setattr(self._client, "hooks", hook_reg)
                 import inspect
 
-                hook_fn = make_tool_eval_hook()
-                if inspect.isawaitable(hook_fn):
-                    hook_fn = await hook_fn
-                hook_reg.add_before(hook_fn, _AEK.TOOL_RESULT)
+                # Defer factory execution until the hook is actually run. Some
+                # test suites patch the factory with AsyncMock() which would
+                # return a coroutine when called during registration — this
+                # produces RuntimeWarnings because the coroutine is not
+                # awaited. Wrap the factory so it's only called when the
+                # event executes, and await any coroutine results then.
+                def _defer_factory(factory):
+                    async def _deferred(event):
+                        hook = factory()
+                        if inspect.isawaitable(hook):
+                            hook = await hook
+                        result = hook(event)
+                        if inspect.isawaitable(result):
+                            return await result
+                        return result
 
-                hook_fn2 = make_eval_memory_inject_hook()
-                if inspect.isawaitable(hook_fn2):
-                    hook_fn2 = await hook_fn2
-                hook_reg.add_before(hook_fn2, _AEK.TURN_START)
+                    return _deferred
+
+                hook_reg.add_before(_defer_factory(make_tool_eval_hook), _AEK.TOOL_RESULT)
+                hook_reg.add_before(_defer_factory(make_eval_memory_inject_hook), _AEK.TURN_START)
                 logger.info(
                     "Eval hooks registered for agent %s (tool checks + memory)", self.id
                 )
