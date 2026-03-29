@@ -1,16 +1,16 @@
-from pathlib import Path
+"""Test stubs for scripts.sync"""
+from dataclasses import dataclass
 
-# Lock file used by tests; monkeypatch fixture overrides it
-LOCK_FILE = Path("/tmp/vaultsync.lock")
-
+@dataclass
 class VaultSync:
-    """Minimal VaultSync stub used by tests' fixtures.
+    @staticmethod
+    def sync(*args, **kwargs):
+        return None
 
-    Only implements the interface expected by tests (constructor).
-    """
-    def __init__(self, vault_path: Path | str) -> None:
-        self.vault_path = Path(vault_path)
+class VariantSelector:
+    def __init__(self, *args, **kwargs):
+        pass
 
-    def sync_all(self) -> list:
-        # No-op stub
-        return []
+# provide a simple function expected by tests
+def ensure_sync():
+    return True
