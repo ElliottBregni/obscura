@@ -2004,9 +2004,9 @@ def _emit_context_warnings(*args, **kwargs):
     from .warnings import emit_context_warnings as _impl
     return _impl(*args, **kwargs)
 
-def _copilot_budget_pct():
-    from .config import get_copilot_budget_pct as _impl
-    return _impl()
+def _copilot_budget_pct(tokens: int, context_window: int):
+    from .warnings import get_copilot_budget_pct as _impl
+    return _impl(tokens, context_window)
 
 def _parse_confirm_decision(answer: str) -> str | None:
     a = (answer or "").lower()
