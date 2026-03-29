@@ -308,6 +308,14 @@ class StreamRenderer:
                     self._flush_text()
                     self._in_thinking = True
                 self._thinking_buf.append(event.text)
+                # Persist hidden reasoning deltas to session log for later replay
+                try:
+                    status = None
+                    if hasattr(event, "raw") and isinstance(event.raw, dict):
+                        status = event.raw.get("status", "")
+                    output.capture_hidden_delta("REASONING_DELTA", event.text, status=status or "")
+                except Exception:
+                    pass
                 self._update_thinking_preview(getattr(event, "raw", None))
 
             case AgentEventKind.TEXT_DELTA:
