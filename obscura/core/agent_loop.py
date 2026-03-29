@@ -698,11 +698,6 @@ class AgentLoop:
                 if isinstance(recipient, str) and "." in recipient:
                     recipient = recipient.split(".")[-1]
 
-                # Skip inner recipients that are not registered to avoid
-                # emitting error results for orchestrator wrapper entries.
-                if self._tools.get(recipient) is None:
-                    continue
-
                 inner_tc = ToolCallInfo(
                     tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
                     name=recipient,
