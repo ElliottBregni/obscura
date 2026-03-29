@@ -187,7 +187,7 @@ class MemoryConsolidator:
 
             # Run in a new event loop if we're not in one
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 # We're in an async context — can't nest.  Fall through to fallback.
                 raise RuntimeError("Cannot run nested event loop")
             except RuntimeError:
