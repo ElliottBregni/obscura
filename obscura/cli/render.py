@@ -293,7 +293,7 @@ class StreamRenderer:
         # StreamingStatus from prompt.py (toolbar spinner)
         self._ss: object | None = external_status or streaming_status
         # jitter control for reasoning preview
-        self._last_preview_update: float = float('-inf')
+        self._last_preview_update: float = 0.0
         import os as _os
         self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
 
