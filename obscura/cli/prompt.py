@@ -441,7 +441,6 @@ def create_prompt_session(
     prompt_status: PromptStatus | None = None,
     at_command_names: Callable[[], list[str]] | None = None,
     dollar_skill_names: Callable[[], list[str]] | None = None,
-,
     hud_provider: Callable[[], dict] | None = None,
 ) -> PromptSession[str]:
     """Create a configured PromptSession for the Obscura REPL."""
