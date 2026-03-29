@@ -4510,3 +4510,72 @@ def set_secret_menu_visibility(visible: bool) -> None:
     """Stub: set visibility for secret menu (tests toggle this)."""
     # In real app this would toggle behavior; stub stores no state.
     return None
+
+
+# Minimal test-compatible implementations for cmd_tasks and cmd_menu
+import asyncio
+
+async def cmd_tasks(command: str, ctx: REPLContext) -> None:
+    cmd = (command or "").strip().lower()
+    # ensure lists/dicts exist
+    if not hasattr(ctx, 'background_tasks'):
+        ctx.background_tasks = []
+    if not hasattr(ctx, 'python_tasks'):
+        ctx.python_tasks = []
+    if not hasattr(ctx, '_background_task_refs'):
+        ctx._background_task_refs = {}
+
+    if cmd == 'clear':
+        ctx.background_tasks.clear()
+        ctx.python_tasks.clear()
+        return
+
+    if cmd.startswith('interrupt'):
+        # interrupt all
+        if 'all' in cmd:
+            for tid, task in list(getattr(ctx, '_background_task_refs', {}).items()):
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+                # mark entry cancelled
+                for entry in ctx.background_tasks:
+                    if entry.get('id') == tid:
+                        entry['status'] = 'cancelled'
+            return
+        # interrupt specific id
+        parts = cmd.split()
+        if len(parts) >= 2:
+            target = parts[-1]
+            t = getattr(ctx, '_background_task_refs', {}).get(target)
+            if t:
+                try:
+                    t.cancel()
+                except Exception:
+                    pass
+            for entry in ctx.background_tasks:
+                if entry.get('id') == target:
+                    entry['status'] = 'cancelled'
+        return
+
+
+async def cmd_menu(command: str, ctx: REPLContext) -> None:
+    cmd = (command or "").strip()
+    if not hasattr(ctx, 'ui_right_menu_enabled'):
+        ctx.ui_right_menu_enabled = True
+    if not hasattr(ctx, 'ui_menu_items'):
+        ctx.ui_menu_items = {}
+
+    if cmd == 'off':
+        ctx.ui_right_menu_enabled = False
+        return
+    if cmd == 'on':
+        ctx.ui_right_menu_enabled = True
+        return
+    # Expect forms like 'reasoning off' or 'reasoning on'
+    parts = cmd.split()
+    if len(parts) >= 2:
+        key = parts[0]
+        val = parts[-1].lower()
+        ctx.ui_menu_items[key] = val in ('on', 'true', '1')
+        return
