@@ -7,8 +7,18 @@ from obscura.vector_memory.backends import BackendConfig
 from obscura.vector_memory.backends.qdrant_backend import QdrantBackend, _point_id
 
 
-def test_qdrant_embedding_metadata(test_user: AuthenticatedUser) -> None:
+def test_qdrant_embedding_metadata() -> None:
     """Ensure embedding provenance fields are present in Qdrant payload."""
+    # Create a lightweight AuthenticatedUser for this test (no test fixture required)
+    test_user = AuthenticatedUser(
+        user_id="u-qdrant-meta-test",
+        email="qdrant@tests.local",
+        roles=("tester",),
+        org_id="org-test",
+        token_type="user",
+        raw_token="test",
+    )
+
     config = BackendConfig(user_id=test_user.user_id, embedding_dim=384)
     backend = QdrantBackend(config=config, mode="memory")
     store = VectorMemoryStore(test_user, backend=backend)
