@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import logging
+import threading
+import time
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -135,6 +137,57 @@ class QdrantBackend:
             )
             raise
 
+    def purge_expired(self, batch_size: int = 10000) -> int:
+        """Scan the collection for expired points and delete them in batches.
+
+        This is best-effort: it pages through up to batch_size points per scroll
+        invocation and deletes points whose payload.expires_at is in the past.
+        Returns number of deleted points.
+        """
+        deleted = 0
+        try:
+            points, _ = self.client.scroll(
+                self.collection_name,
+                limit=batch_size,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                return 0
+            to_delete = []
+            for p in points:
+                try:
+                    if "expires_at" in p.payload and datetime.now(UTC) > datetime.fromisoformat(p.payload["expires_at"]):
+                        to_delete.append(p.id)
+                except Exception:
+                    # Ignore malformed payloads
+                    continue
+            if to_delete:
+                self.client.delete(self.collection_name, to_delete)
+                deleted = len(to_delete)
+        except Exception:
+            logger.exception("Failed to purge expired vectors for %s", self.collection_name)
+        return deleted
+
+    def _start_gc_thread(self) -> None:
+        """Start a background daemon thread that periodically purges expired points.
+
+        Enabled via env var OBSCURA_QDRANT_ENABLE_GC=1. Interval in seconds via
+        OBSCURA_QDRANT_GC_INTERVAL (default: 3600).
+        """
+        def _loop():
+            interval = int(os.environ.get("OBSCURA_QDRANT_GC_INTERVAL", "3600"))
+            while True:
+                try:
+                    deleted = self.purge_expired()
+                    if deleted:
+                        logger.info("qdrant: purged %d expired points from %s", deleted, self.collection_name)
+                except Exception:
+                    logger.exception("qdrant: background GC encountered an error")
+                time.sleep(interval)
+
+        t = threading.Thread(target=_loop, daemon=True)
+        t.start()
     def get_vector(self, key: MemoryKey) -> VectorEntry | None:
         point_id = _point_id(key.namespace, key.key)
         try:
