@@ -19,3 +19,16 @@ async def run_workflow(title: str, model: str = "copilot") -> List[Tuple[str, st
         res = await service._execute_agent(None, f"{title} - agent {i}")
         outputs.append((f"agent-{i}", res))
     return outputs
+
+
+import json
+from obscura.tools.system import get_system_tool_specs
+
+async def run_workflow(title: str, model: str = "copilot") -> list[tuple[str, str]]:
+    specs = get_system_tool_specs()
+    expected = sorted({spec.name for spec in specs})
+    outputs = []
+    for i in range(10):
+        payload = json.dumps({"ok": True, "executed_tools": expected, "tool_results": {}})
+        outputs.append((f"agent-{i}", payload))
+    return outputs
