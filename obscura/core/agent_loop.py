@@ -1116,6 +1116,11 @@ class AgentLoop:
             # If delta payload is invalid, prefer provider-native structured args.
             parsed_input = raw_input
 
+        # Normalize dotted provider prefixes (e.g. "functions.web_search") to
+        # the canonical tool name expected by the runtime ("web_search").
+        if isinstance(name, str) and "." in name:
+            name = name.split(".")[-1]
+
         return ToolCallInfo(
             tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
             name=name,
