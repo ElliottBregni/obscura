@@ -658,9 +658,14 @@ async def _repl(
         if vm_startup:
             custom_sections.append(vm_startup)
 
-    # Inject system-level memory channels (always-on channels, user prefs, etc.)
+    # Inject memory channel documentation and system-level channel context
     if _context_router is not None:
         try:
+            from obscura.tools.memory_tools import build_channels_prompt_section
+            channels_doc = build_channels_prompt_section(_context_router.channels)
+            if channels_doc:
+                custom_sections.append(channels_doc)
+
             sys_channel_ctx = _context_router.get_system_channels()
             if sys_channel_ctx:
                 custom_sections.append(sys_channel_ctx)
