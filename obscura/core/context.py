@@ -252,7 +252,6 @@ def load_obscura_memory(session_id: str, db_path: Path, max_events: int = 50) ->
     """
     import sqlite3
     import json
-    from datetime import datetime
     
     if not db_path.exists():
         return ""

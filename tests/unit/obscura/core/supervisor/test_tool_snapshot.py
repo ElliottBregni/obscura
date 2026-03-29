@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from obscura.core.supervisor.tool_snapshot import (
     FrozenToolEntry,

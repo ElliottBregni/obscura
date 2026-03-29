@@ -14,7 +14,6 @@ from typing import Any
 from obscura.core.compiler.errors import ResolutionError
 from obscura.core.compiler.loader import SpecRegistry
 from obscura.core.compiler.specs import (
-    PackSpec,
     PluginFilterSpec,
     PolicySpec,
     TemplateSpec,

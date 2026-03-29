@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any
 
 from obscura.core.supervisor.schema import init_supervisor_schema
-from obscura.core.supervisor.types import SupervisorEvent, SupervisorEventKind
 
 logger = logging.getLogger(__name__)
 

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from obscura.core.compiler.compiled import ToolRoutingConfig
-from obscura.core.tool_router import DEFAULT_PINNED_TOOLS, ToolRouter
+from obscura.core.tool_router import ToolRouter
 from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import ToolSpec
 

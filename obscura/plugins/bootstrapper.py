@@ -22,9 +22,8 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from obscura.plugins.models import BootstrapDep, BootstrapSpec, PluginSpec
+from obscura.plugins.models import BootstrapDep, PluginSpec
 
 logger = logging.getLogger(__name__)
 

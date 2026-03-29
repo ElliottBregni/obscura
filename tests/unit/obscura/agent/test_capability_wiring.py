@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
 
 from obscura.agent.agents import AgentConfig
 from obscura.manifest.models import (

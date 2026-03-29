@@ -21,12 +21,9 @@ Coverage targets:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from obscura.core.compiler.compiled import ToolRoutingConfig
 from obscura.core.tool_router import DEFAULT_PINNED_TOOLS, ToolRouter
@@ -827,7 +824,7 @@ class TestPriorityTruncate:
             _make_spec("mcp__obscura_tools__read_text_file"),
             _make_spec("mcp__obscura_tools__write_text_file"),
         ]
-        native_plugins = _make_tools([f"fd_find", "rg_search", "report_intent",
+        native_plugins = _make_tools(["fd_find", "rg_search", "report_intent",
                                        "recall_memory", "store_memory", "semantic_search",
                                        "todo_write", "ask_user", "user_interact", "fetch_url",
                                        "web_search", "store_searchable"])

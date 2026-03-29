@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 
-from obscura.core.supervisor.observability import RunMetrics, RunObserver
+from obscura.core.supervisor.observability import RunObserver
 from obscura.core.supervisor.types import SupervisorEvent, SupervisorEventKind
 
 

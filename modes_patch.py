@@ -1,4 +1,3 @@
-import re
 
 path = "/Users/elliottbregni/dev/obscura-main/obscura/cli/app/modes.py"
 with open(path, "r") as f:

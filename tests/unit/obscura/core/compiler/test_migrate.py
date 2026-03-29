@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from obscura.core.compiler.migrate import MigrationResult, migrate_agents_yaml
+from obscura.core.compiler.migrate import migrate_agents_yaml
 
 
 def _write_agents_yaml(path: Path, agents: list[dict]) -> None:

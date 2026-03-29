@@ -13,7 +13,6 @@ Keep this module minimal — other modules should import these constants instead
 from __future__ import annotations
 
 import os
-from typing import Any
 
 
 def _env_flag(name: str, default: bool = False) -> bool:

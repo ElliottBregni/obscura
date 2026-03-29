@@ -399,7 +399,7 @@ async def _run_text_input(placeholder: str = "") -> str:
     session: PromptSession[str] = PromptSession()
     try:
         with patch_stdout(raw=True):
-            return (await session.prompt_async(f"  \u25b8 ")).strip()
+            return (await session.prompt_async("  \u25b8 ")).strip()
     except (EOFError, KeyboardInterrupt):
         return ""
 

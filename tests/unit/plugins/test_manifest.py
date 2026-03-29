@@ -24,14 +24,8 @@ from obscura.plugins.manifest import (
 from obscura.plugins.models import (
     BootstrapDep,
     BootstrapSpec,
-    CapabilitySpec,
-    ConfigRequirement,
     HealthcheckSpec,
-    InstructionSpec,
     PluginSpec,
-    PolicyHintSpec,
-    ToolContribution,
-    WorkflowSpec,
 )
 
 

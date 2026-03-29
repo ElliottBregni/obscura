@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from obscura.auth.models import AuthenticatedUser
 from obscura.vector_memory import VectorMemoryStore
 from obscura.vector_memory.backends import BackendConfig

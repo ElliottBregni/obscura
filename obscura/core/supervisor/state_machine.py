@@ -8,7 +8,6 @@ and provides invariant checking at each state boundary.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from obscura.core.supervisor.errors import StateTransitionError

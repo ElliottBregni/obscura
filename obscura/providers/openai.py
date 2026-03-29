@@ -42,7 +42,6 @@ from obscura.providers.models import (
     ChatMessage,
     CompletionParams,
     MCPServerConfig,
-    ModelInfo,
     ToolCallDefinition,
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo

@@ -43,7 +43,6 @@ from typing import Any, AsyncIterator
 
 from obscura.core.supervisor.errors import (
     LockExpiredError,
-    RunTimeoutError,
     SupervisorError,
 )
 from obscura.core.supervisor.heartbeat import SessionHeartbeatManager

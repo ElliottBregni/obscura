@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from obscura.core.paths import resolve_obscura_home
-from obscura.plugins.models import PluginSpec, PluginStatus, TRUST_LEVELS
+from obscura.plugins.models import PluginSpec, PluginStatus
 
 logger = logging.getLogger(__name__)
 

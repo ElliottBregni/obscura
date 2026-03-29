@@ -27,11 +27,9 @@ import logging
 from typing import Any
 
 from obscura.core.context_window import (
-    CONTEXT_WINDOW_HARD_MIN_TOKENS,
     estimate_message_tokens,
     estimate_messages_tokens,
     estimate_tokens,
-    evaluate_context_status,
     get_context_window,
 )
 

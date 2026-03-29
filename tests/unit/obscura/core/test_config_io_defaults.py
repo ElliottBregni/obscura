@@ -9,7 +9,6 @@ import copy
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml  # type: ignore[import-untyped]
 
 from obscura.core.config_io import (

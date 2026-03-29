@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from obscura.core.compiler.compiled import (
     CompiledAgent,
-    CompiledPolicy,
     CompiledWorkspace,
 )
 from obscura.core.compiler.validator import validate_workspace

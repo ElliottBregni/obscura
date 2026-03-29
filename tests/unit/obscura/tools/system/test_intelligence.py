@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sqlite3
-import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -26,7 +24,6 @@ from unittest.mock import patch
 import pytest
 
 from obscura.tools.system.intelligence import (
-    _get_supervisor_db,
     _open_db,
     _rows,
     causal_trace,

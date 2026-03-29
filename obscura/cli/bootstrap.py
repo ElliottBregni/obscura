@@ -18,7 +18,6 @@ from typing import Any
 from obscura.cli.commands import REPLContext
 from obscura.cli.render import console, print_warning
 from obscura.core.client import ObscuraClient
-from obscura.core.paths import resolve_obscura_home
 
 
 def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:

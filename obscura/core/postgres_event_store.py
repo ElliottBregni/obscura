@@ -1,18 +1,20 @@
 """PostgreSQL adapter for Obscura event store - API compatible with SQLite."""
 from __future__ import annotations
-import asyncio, json, os
+import asyncio
+import json
+import os
 from datetime import UTC, datetime
-from typing import Any
 
 try:
-    import psycopg2, psycopg2.pool
+    import psycopg2
+    import psycopg2.pool
     from psycopg2.extras import RealDictCursor
     HAS_PSYCOPG2 = True
 except ImportError:
     HAS_PSYCOPG2 = False
 
 from obscura.core.event_store import EventRecord, SessionRecord, SessionStatus
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEventKind
 
 class PostgreSQLEventStore:
     def __init__(self, host=None, port=None, database=None, user=None, password=None, min_connections=2, max_connections=10):

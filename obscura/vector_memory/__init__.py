@@ -2,24 +2,32 @@
 Vector memory package exports.
 """
 
+from obscura.vector_memory.consolidator import MemoryConsolidator
+from obscura.vector_memory.decay import (
+    DecayConfig,
+    DecayProfile,
+    compute_decay,
+    load_decay_config,
+)
 from obscura.vector_memory.vector_memory import (
-    VectorMemoryStore,
-    VectorMemoryEntry,
-    simple_embedding,
-    cosine_similarity,
+    MaintenanceReport,
     SemanticMemoryMixin,
+    VectorMemoryEntry,
+    VectorMemoryStore,
+    cosine_similarity,
+    simple_embedding,
 )
 from obscura.vector_memory.vector_memory_filters import (
-    MetadataFilter,
     DateRangeFilter,
-    TagFilter,
     FilterBuilder,
+    MetadataFilter,
+    TagFilter,
     match_metadata_filters,
 )
 from obscura.vector_memory.vector_memory_rerank import (
+    RecencyReranker,
     RerankRequest,
     RerankResponse,
-    RecencyReranker,
 )
 from obscura.vector_memory.vector_memory_router import (
     MemoryRouter,
@@ -28,10 +36,16 @@ from obscura.vector_memory.vector_memory_router import (
 )
 
 __all__ = [
+    "DecayConfig",
+    "DecayProfile",
+    "MaintenanceReport",
+    "MemoryConsolidator",
     "VectorMemoryStore",
     "VectorMemoryEntry",
     "simple_embedding",
     "cosine_similarity",
+    "compute_decay",
+    "load_decay_config",
     "SemanticMemoryMixin",
     "MetadataFilter",
     "DateRangeFilter",

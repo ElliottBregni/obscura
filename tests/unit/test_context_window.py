@@ -2,7 +2,6 @@
 from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
 
 
 class TestEstimateTokens:
@@ -75,7 +74,7 @@ class TestEvaluateContextStatus:
         assert not status.should_block
 
     def test_warn_threshold(self):
-        from obscura.core.context_window import evaluate_context_status, CONTEXT_WINDOW_WARN_BELOW_TOKENS
+        from obscura.core.context_window import evaluate_context_status
         with patch("obscura.core.context_window.estimate_messages_tokens", return_value=200_000 - 30_000 - 4096):
             s = evaluate_context_status([], "claude-opus-4-5")
             assert s.should_warn and not s.should_block

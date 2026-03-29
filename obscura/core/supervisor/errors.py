@@ -8,7 +8,6 @@ for the supervisor to decide retry vs fail.
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
 from typing import Any
 
 

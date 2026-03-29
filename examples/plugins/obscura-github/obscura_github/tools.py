@@ -6,10 +6,8 @@ referenced via its ``handler`` field (e.g. ``obscura_github.tools:search_repo``)
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
-from typing import Any
 
 
 def _gh(*args: str) -> str:

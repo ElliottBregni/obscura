@@ -1,4 +1,3 @@
-import re
 
 with open('/Users/elliottbregni/dev/obscura-main/obscura/cli/__init__.py', 'r', encoding='utf-8') as f:
     content = f.read()

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 import json
-import os
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -14,7 +13,6 @@ from rich.syntax import Syntax
 from rich.text import Text
 from rich.rule import Rule
 from rich.table import Table
-from datetime import datetime
 
 from obscura.core.types import AgentEvent, AgentEventKind
 
@@ -172,7 +170,8 @@ if config.CAPTURE_PRINTS:
 # StdoutProxy that positions output above the prompt and redraws.  By writing
 # through sys.stdout (instead of a dup'd raw fd), Rich console output no
 # longer overwrites the prompt while the agent is streaming.
-import os as _os, sys as _sys
+import os as _os
+import sys as _sys
 
 _real_stdout_fd = _os.dup(_sys.stdout.fileno())  # keep for fileno() queries
 
@@ -538,7 +537,7 @@ def render_diff_summary(changes: list[Any]) -> None:
                 f"{status_icon}[/]"
             )
             hunk_idx += 1
-    console.print(f"\n[dim]/diff accept <n|all>  /diff reject <n|all>  /diff apply[/]")
+    console.print("\n[dim]/diff accept <n|all>  /diff reject <n|all>  /diff apply[/]")
 
 
 # ---------------------------------------------------------------------------
@@ -803,14 +802,14 @@ def print_banner(
                 f"[{type_color}]{ai.type}[/]  "
                 f"[dim]{ai.model}[/]"
             )
-        console.print(f"  [dim]@name <prompt> to invoke, /agent spawn <name> to start[/]")
+        console.print("  [dim]@name <prompt> to invoke, /agent spawn <name> to start[/]")
     elif available_agents:
         console.print(
             f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   "
             "[dim]/agent spawn <name> or @name <prompt>[/]"
         )
     console.print()
-    console.print(f"  [dim]Type [bold]/help[/bold] for commands, [bold]/quit[/bold] to exit.[/]")
+    console.print("  [dim]Type [bold]/help[/bold] for commands, [bold]/quit[/bold] to exit.[/]")
     console.print()
 
 
@@ -848,7 +847,7 @@ def export_transcript_markdown(history: list[tuple[str, str]]) -> str:
             lines.append("```\n" + text.strip() + "\n```")
             lines.append("")
         else:
-            lines.append(f"> Assistant (rendered)\n")
+            lines.append("> Assistant (rendered)\n")
             assistant_block = text.rstrip()
             lines.append(assistant_block)
             lines.append("")

@@ -8,7 +8,6 @@ import pytest
 
 from obscura.cli.widgets import (
     AttentionWidgetRequest,
-    DetectedQuestion,
     ModelQuestionRequest,
     ToolConfirmRequest,
     WidgetResult,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Migrate vector memories from SQLite to Qdrant server at localhost:6333."""
-import json, sqlite3
+import json
+import sqlite3
 from datetime import timezone, datetime
 from pathlib import Path
 from qdrant_client import QdrantClient

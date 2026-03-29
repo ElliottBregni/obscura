@@ -8,7 +8,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Iterable
 
-from obscura.core.paths import resolve_obscura_home
 
 
 _lock = Lock()

@@ -1,6 +1,5 @@
 """Tests for system prompts functionality."""
 
-from pathlib import Path
 
 import pytest
 

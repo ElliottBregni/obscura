@@ -55,6 +55,7 @@ from obscura.cli.vector_memory_bridge import (
     auto_save_turn,
     init_vector_store,
     load_startup_memories,
+    run_startup_maintenance,
     search_relevant_context,
 )
 from obscura.core.client import ObscuraClient
@@ -601,6 +602,10 @@ async def _repl(
 
     # Initialize vector memory store
     vector_store = init_vector_store(cli_user)
+
+    # Run decay maintenance (purge expired, consolidate old episodes) in background
+    if vector_store is not None:
+        run_startup_maintenance(vector_store)
 
     # Compose system prompt: default Obscura identity + user prompt + session memory
     from obscura.core.context import load_obscura_memory

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from obscura.eval.compiler import compile_suite, compile_suite_from_path
 from obscura.eval.specs import (

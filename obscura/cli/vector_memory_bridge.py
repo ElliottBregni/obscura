@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -80,7 +80,7 @@ def load_startup_memories(
             query="recent conversation context and important information",
             namespace=CLI_NAMESPACE,
             top_k=top_k,
-            recency_weight=0.5,
+            recency_weight=0.6,
         )
         if not results:
             return ""
@@ -169,11 +169,41 @@ def auto_save_turn(
                 },
                 namespace=CLI_NAMESPACE,
                 memory_type="episode",
+                ttl=timedelta(days=30),
             )
         except Exception as e:
             _logger.debug(f"Auto-save to vector memory failed: {e}")
 
     thread = threading.Thread(target=_save, daemon=True)
+    thread.start()
+
+
+def run_startup_maintenance(store: VectorMemoryStore) -> None:
+    """Run decay maintenance in a background daemon thread.
+
+    Called at session start when ``maintenance_on_startup`` is enabled.
+    Non-blocking — the REPL is not held up.
+    """
+    if not getattr(store, "decay_config", None):
+        return
+    if not store.decay_config.maintenance_on_startup:
+        return
+
+    def _run() -> None:
+        try:
+            report = store.run_maintenance()
+            if report.expired_purged or report.episodes_consolidated:
+                _logger.info(
+                    "Startup maintenance: purged=%d, consolidated=%d, summaries=%d (%.0fms)",
+                    report.expired_purged,
+                    report.episodes_consolidated,
+                    report.summaries_created,
+                    report.duration_ms,
+                )
+        except Exception:
+            _logger.debug("Startup maintenance failed", exc_info=True)
+
+    thread = threading.Thread(target=_run, daemon=True)
     thread.start()
 
 

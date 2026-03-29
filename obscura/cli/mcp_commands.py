@@ -5,22 +5,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from rich.table import Table
 
 from obscura.cli.render import console, print_error, print_info, print_ok
 from obscura.integrations.mcp.catalog import (
-    MCPCatalogEntry,
-    MCPRegistryAPICatalogProvider,
-    MCPServersOrgCatalogProvider,
     MCPSoCatalogProvider,
     REGISTRY_ALIASES,
     get_provider_for_registry,
-    write_catalog_config,
 )
 from obscura.integrations.mcp.config_loader import (
-    DiscoveredMCPServer,
     discover_mcp_servers,
     select_servers_for_task,
 )
@@ -191,7 +186,7 @@ def cmd_mcp_list(args: list[str]) -> None:
             console.print(f"\n\u26a0\ufe0f  [yellow]{missing_count} server(s) need environment variables[/yellow]")
             console.print("\U0001f4a1 Use [cyan]/mcp env[/cyan] to set up missing variables\n")
         else:
-            console.print(f"\n\u2705 [green]All servers ready to use![/green]\n")
+            console.print("\n\u2705 [green]All servers ready to use![/green]\n")
 
     except Exception as e:
         print_error(f"Failed to list servers: {e}")
@@ -242,7 +237,7 @@ def cmd_mcp_select(args: list[str]) -> None:
                 table.add_row(name, ", ".join(matched_kws[:3]), status)
 
             console.print(table)
-            console.print(f"\n\U0001f4a1 These servers will be used for this task\n")
+            console.print("\n\U0001f4a1 These servers will be used for this task\n")
         else:
             console.print("\u2139\ufe0f  [yellow]No specific servers matched[/yellow]")
             console.print("   Using all available servers\n")
@@ -272,7 +267,7 @@ def cmd_mcp_env(args: list[str]) -> None:
             print_ok("\u2705 All environment variables are set!")
             return
 
-        console.print(f"\n\u26a0\ufe0f  [yellow]Missing Environment Variables[/yellow]\n")
+        console.print("\n\u26a0\ufe0f  [yellow]Missing Environment Variables[/yellow]\n")
 
         if export_format:
             console.print("[dim]# Add these to your ~/.zshrc or ~/.bashrc:[/dim]\n")
@@ -295,7 +290,7 @@ def cmd_mcp_env(args: list[str]) -> None:
                     table.add_row(server_name, var, display_value)
 
             console.print(table)
-            console.print(f"\n\U0001f4a1 Use [cyan]/mcp env --export[/cyan] to get export commands\n")
+            console.print("\n\U0001f4a1 Use [cyan]/mcp env --export[/cyan] to get export commands\n")
 
     except Exception as e:
         print_error(f"Failed to check environment: {e}")
@@ -354,7 +349,7 @@ def cmd_mcp_install(args: list[str]) -> None:
 
         print_ok(f"\u2705 Installed '{name}' \u2192 {slug}")
         print_info(f"Config: {config_file}")
-        console.print(f"\n\U0001f4a1 Run [cyan]/mcp list[/cyan] to see all configured servers\n")
+        console.print("\n\U0001f4a1 Run [cyan]/mcp list[/cyan] to see all configured servers\n")
 
     except Exception as e:
         print_error(f"Installation failed: {e}")
@@ -386,8 +381,8 @@ def handle_mcp_command(args: list[str]) -> None:
 
         console.print(table)
         console.print(
-            f"\n[dim]Default registry:[/dim] [cyan]mcp.so[/cyan]  "
-            f"[dim]|  Switch:[/dim] [cyan]/mcp discover --registry mcpservers.org[/cyan]"
+            "\n[dim]Default registry:[/dim] [cyan]mcp.so[/cyan]  "
+            "[dim]|  Switch:[/dim] [cyan]/mcp discover --registry mcpservers.org[/cyan]"
         )
         console.print("\U0001f4a1 Use [cyan]/mcp discover --page N[/cyan] for pagination\n")
         return

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import patch
 
 from obscura.core.circuit_breaker import (
     CircuitBreaker,

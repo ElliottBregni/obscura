@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, override
+from typing import Any, AsyncIterator, Callable
 
 import pytest
 

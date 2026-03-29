@@ -3,7 +3,7 @@
 import pytest
 from datetime import timedelta
 from obscura.core.types import Backend
-from obscura.providers.registry import ModelInfo, ProviderRegistry
+from obscura.providers.registry import ModelInfo
 from obscura.providers.model_cache import (
     ModelCache,
     list_provider_models,

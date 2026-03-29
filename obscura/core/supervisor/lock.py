@@ -17,14 +17,12 @@ import logging
 import sqlite3
 import threading
 import time
-import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
-from obscura.core.supervisor.errors import LockAcquisitionError, LockExpiredError
+from obscura.core.supervisor.errors import LockAcquisitionError
 from obscura.core.supervisor.schema import init_supervisor_schema
-from obscura.core.supervisor.types import LockInfo, SupervisorEvent, SupervisorEventKind
+from obscura.core.supervisor.types import LockInfo
 
 logger = logging.getLogger(__name__)
 

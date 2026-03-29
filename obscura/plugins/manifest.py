@@ -28,7 +28,6 @@ from obscura.plugins.models import (
     PolicyHintSpec,
     ToolContribution,
     WorkflowSpec,
-    validate_capability_id,
     validate_plugin_id,
     validate_semver,
 )

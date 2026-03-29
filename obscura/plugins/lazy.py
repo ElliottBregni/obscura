@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
 
-from obscura.plugins.models import PluginSpec, PluginStatus
+from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
 

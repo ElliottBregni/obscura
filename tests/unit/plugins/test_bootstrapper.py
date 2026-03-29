@@ -9,7 +9,6 @@ import subprocess
 from dataclasses import fields
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from obscura.plugins import bootstrapper as bootstrapper_mod
 from obscura.plugins.bootstrapper import (

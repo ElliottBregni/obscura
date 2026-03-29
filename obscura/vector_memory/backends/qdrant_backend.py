@@ -55,6 +55,7 @@ class QdrantBackend:
         api_key: str | None = None,
     ):
         self.config = config
+        self._decay_config = decay_config
         self._db_id = hashlib.sha256(config.user_id.encode()).hexdigest()[:16]
         self.collection_name = f"user_{self._db_id}"
 
@@ -80,6 +81,10 @@ class QdrantBackend:
             raise ValueError(f"Unknown Qdrant mode: {mode}")
 
         self._init_collection()
+
+        # Enable background GC if opted in via env var
+        if os.environ.get("OBSCURA_QDRANT_ENABLE_GC", "").strip() == "1":
+            self._start_gc_thread()
 
     def _init_collection(self) -> None:
         collections = self.client.get_collections().collections
@@ -119,6 +124,7 @@ class QdrantBackend:
             "metadata": metadata,
             "memory_type": memory_type,
             "created_at": datetime.now(UTC).isoformat(),
+            "accessed_at": datetime.now(UTC).isoformat(),
             # Embedding provenance (best-effort from env vars)
             "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
             "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
@@ -206,6 +212,7 @@ class QdrantBackend:
             ):
                 self.delete_vector(key)
                 return None
+            accessed_at_str = p.payload.get("accessed_at")
             return VectorEntry(
                 key=MemoryKey(namespace=p.payload["namespace"], key=p.payload["key"]),
                 text=p.payload["text"],
@@ -213,6 +220,7 @@ class QdrantBackend:
                 metadata=p.payload.get("metadata", {}),
                 memory_type=p.payload.get("memory_type", "general"),
                 created_at=datetime.fromisoformat(p.payload["created_at"]),
+                accessed_at=datetime.fromisoformat(accessed_at_str) if accessed_at_str else None,
             )
         except Exception:
             return None
@@ -244,10 +252,6 @@ class QdrantBackend:
             with_vectors=False,
         )
         entries = []
-        # Half-life in seconds for time decay. Prefer backend config if provided, default to 30 days.
-        half_life = (self.config.decay_half_life_seconds
-                     if getattr(self.config, "decay_half_life_seconds", None) is not None
-                     else 30 * 24 * 3600)
         now = datetime.now(UTC)
         for hit in response.points:
             # Skip expired
@@ -257,11 +261,25 @@ class QdrantBackend:
                 created = datetime.fromisoformat(hit.payload["created_at"])
             except Exception:
                 created = now
-            age_seconds = (now - created).total_seconds()
-            decay = 1.0
-            if half_life > 0:
-                decay = 0.5 ** (age_seconds / half_life)
-            final_score = hit.score * decay if hit.score is not None else 0.0
+            accessed_at_str = hit.payload.get("accessed_at")
+            accessed_at = datetime.fromisoformat(accessed_at_str) if accessed_at_str else None
+            memory_type = hit.payload.get("memory_type", "general")
+
+            # Per-type decay via centralized compute_decay
+            if self._decay_config is not None:
+                from obscura.vector_memory.decay import compute_decay as _compute_decay
+                decay = _compute_decay(memory_type, created, accessed_at, self._decay_config, now=now)
+            else:
+                # Legacy single half-life fallback
+                half_life = (
+                    self.config.decay_half_life_seconds
+                    if getattr(self.config, "decay_half_life_seconds", None) is not None
+                    else 30 * 24 * 3600
+                )
+                age_seconds = (now - created).total_seconds()
+                decay = 0.5 ** (age_seconds / half_life) if half_life > 0 else 1.0
+
+            raw_score = hit.score or 0.0
             entries.append(
                 VectorEntry(
                     key=MemoryKey(
@@ -271,11 +289,12 @@ class QdrantBackend:
                     text=hit.payload["text"],
                     embedding=[],
                     metadata=hit.payload.get("metadata", {}),
-                    memory_type=hit.payload.get("memory_type", "general"),
-                    created_at=datetime.fromisoformat(hit.payload["created_at"]),
-                    score=hit.score or 0.0,
+                    memory_type=memory_type,
+                    created_at=created,
+                    accessed_at=accessed_at,
+                    score=raw_score,
                     rerank_score=decay,
-                    final_score=final_score,
+                    final_score=raw_score * decay,
                 ),
             )
         return entries
@@ -333,6 +352,57 @@ class QdrantBackend:
             "collection_name": self.collection_name,
             "embedding_dim": self.config.embedding_dim,
         }
+
+    def touch_vector(self, key: MemoryKey) -> None:
+        """Update ``accessed_at`` to now.  No-op if key doesn't exist."""
+        point_id = _point_id(key.namespace, key.key)
+        try:
+            self.client.set_payload(
+                self.collection_name,
+                {"accessed_at": datetime.now(UTC).isoformat()},
+                [point_id],
+            )
+        except Exception:
+            pass  # best-effort
+
+    def list_by_type(
+        self,
+        memory_type: str,
+        older_than: datetime | None = None,
+        limit: int = 100,
+    ) -> list[VectorEntry]:
+        """List entries of a given type, optionally filtered by age."""
+        filt = Filter(
+            must=[FieldCondition(key="memory_type", match=MatchValue(value=memory_type))],
+        )
+        points, _ = self.client.scroll(
+            self.collection_name,
+            scroll_filter=filt,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        entries: list[VectorEntry] = []
+        for p in points:
+            try:
+                created = datetime.fromisoformat(p.payload["created_at"])
+            except Exception:
+                continue
+            if older_than is not None and created >= older_than:
+                continue
+            accessed_at_str = p.payload.get("accessed_at")
+            entries.append(
+                VectorEntry(
+                    key=MemoryKey(namespace=p.payload["namespace"], key=p.payload["key"]),
+                    text=p.payload["text"],
+                    embedding=[],
+                    metadata=p.payload.get("metadata", {}),
+                    memory_type=p.payload.get("memory_type", "general"),
+                    created_at=created,
+                    accessed_at=datetime.fromisoformat(accessed_at_str) if accessed_at_str else None,
+                ),
+            )
+        return entries
 
     def close(self) -> None:
         pass

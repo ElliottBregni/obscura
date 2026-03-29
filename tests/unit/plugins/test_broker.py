@@ -6,14 +6,10 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from obscura.core.types import (
     ToolCallEnvelope,
-    ToolCallContext,
     ToolErrorType,
-    ToolExecutionError,
-    ToolResultEnvelope,
 )
 from obscura.plugins.broker import BrokerAuditEntry, ToolBroker, _auto_deny
 from obscura.plugins.policy import PolicyAction, PolicyDecision

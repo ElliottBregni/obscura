@@ -23,8 +23,6 @@ from obscura.core.compiler.specs import (
     WorkspaceAgentRef,
     WorkspaceSpec,
     WorkspaceSpecBody,
-    PluginFilterSpec,
-    MemoryBindingSpec,
     StartupSpec,
 )
 

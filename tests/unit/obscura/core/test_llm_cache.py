@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import patch
 
-from obscura.core.llm_cache import CacheEntry, CacheStats, LLMCache
+from obscura.core.llm_cache import CacheEntry, LLMCache
 
 
 class TestCacheEntry:

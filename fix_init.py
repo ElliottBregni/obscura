@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """One-shot fix: remove duplicate import block and dangling cast lines from __init__.py"""
-import sys
 
 f = 'obscura/tools/system/__init__.py'
 lines = open(f).readlines()

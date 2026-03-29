@@ -19,13 +19,11 @@ from obscura.cli.render import (
     print_ok,
     print_warning,
     render_agent_output,
-    render_attention_request,
     render_diff_summary,
     render_plan,
 )
 from obscura.core.context_window import estimate_tokens as _cw_estimate_tokens
 from obscura.core.client import ObscuraClient
-from obscura.cli import trace as trace_mod
 from obscura.cli.control_commands import cmd_heartbeat, cmd_policies, cmd_replay, cmd_status
 from obscura.core.context_lazy import (
     EVAL_GRADING_PROMPT,
@@ -38,7 +36,6 @@ from obscura.core.context_lazy import (
 )
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
 from obscura.core.paths import resolve_obscura_skills_dir
-from obscura.core.types import AgentEventKind, Backend, SessionRef
 
 
 # ---------------------------------------------------------------------------
@@ -3127,7 +3124,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
                     console.print(f"    • {s.name} ({s.transport}) → {cmd}")
 
             if agent.env:
-                console.print(f"\n  [bold]Environment:[/]")
+                console.print("\n  [bold]Environment:[/]")
                 console.print(f"    Python: {agent.env.python_version}")
                 if agent.env.binaries:
                     console.print(f"    Binaries: {', '.join(agent.env.binaries)}")
@@ -3256,19 +3253,19 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             for p in pack.spec.policies:
                 console.print(f"    • {p}")
         if pack.spec.capabilities.grant:
-            console.print(f"\n  [bold]Capabilities (grant):[/]")
+            console.print("\n  [bold]Capabilities (grant):[/]")
             for c in pack.spec.capabilities.grant:
                 console.print(f"    • [green]{c}[/]")
         if pack.spec.capabilities.deny:
-            console.print(f"\n  [bold]Capabilities (deny):[/]")
+            console.print("\n  [bold]Capabilities (deny):[/]")
             for c in pack.spec.capabilities.deny:
                 console.print(f"    • [red]{c}[/]")
         if pack.spec.config:
-            console.print(f"\n  [bold]Config defaults:[/]")
+            console.print("\n  [bold]Config defaults:[/]")
             for k, v in pack.spec.config.items():
                 console.print(f"    {k}: {v}")
         if pack.spec.instructions.strip():
-            console.print(f"\n  [bold]Instructions:[/]")
+            console.print("\n  [bold]Instructions:[/]")
             for line in pack.spec.instructions.strip().splitlines():
                 console.print(f"    {line}")
 
@@ -3461,7 +3458,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
             if task.history:
                 for msg in task.history:
                     if msg.role == "agent":
-                        console.print(f"\n[bold green]Agent Response:[/bold green]")
+                        console.print("\n[bold green]Agent Response:[/bold green]")
                         for part in msg.parts:
                             if hasattr(part, 'text'):
                                 console.print(part.text)

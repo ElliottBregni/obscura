@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from obscura.plugins.builtins import BUILTINS_DIR
 from obscura.plugins.manifest import parse_manifest_file

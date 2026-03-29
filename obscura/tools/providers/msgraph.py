@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from obscura.integrations.msgraph import GraphOAuth, DEFAULT_SCOPES
+from obscura.integrations.msgraph import GraphOAuth
 
 logger = logging.getLogger(__name__)
 

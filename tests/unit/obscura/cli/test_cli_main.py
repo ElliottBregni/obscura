@@ -6,13 +6,10 @@ hooks loading, MCP discovery, file tracking, plan parsing.
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
-from dataclasses import field
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner

@@ -6,7 +6,6 @@ import pytest
 
 from obscura.core.supervisor.errors import DriftDetectedError, PromptAssemblyError
 from obscura.core.supervisor.prompt_assembler import (
-    SECTION_ORDER,
     PromptAssembler,
     format_tool_definitions,
 )

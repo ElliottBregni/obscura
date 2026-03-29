@@ -23,12 +23,17 @@ Usage::
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import threading
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -46,6 +51,7 @@ try:
 except ImportError:
     QDRANT_AVAILABLE: bool 
     QdrantBackend: callable = lambda *args, **kwargs: None  # type: ignore
+from obscura.vector_memory.decay import DecayConfig, load_decay_config_from_disk
 from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 
@@ -151,9 +157,11 @@ class VectorMemoryStore:
         user: AuthenticatedUser,
         backend: VectorBackend | None = None,
         embedding_fn: Callable[[str], list[float]] | None = None,
+        decay_config: DecayConfig | None = None,
     ):
         self.user = user
         self.user_id = user.user_id
+        self.decay_config = decay_config or load_decay_config_from_disk()
 
         self.embedding_fn = embedding_fn or _make_default_embedding_fn()
         self.embedding_dim = len(self.embedding_fn("test"))
@@ -193,6 +201,7 @@ class VectorMemoryStore:
                 try:
                     return QdrantBackend(
                         config=config,
+                        decay_config=self.decay_config,
                         mode=mode,
                         path=path,
                         url=url,
@@ -216,7 +225,7 @@ class VectorMemoryStore:
         db_id = hashlib.sha256(self.user_id.encode()).hexdigest()[:16]
         db_path = base_dir / f"{db_id}.db"
 
-        return SQLiteBackend(config=config, db_path=db_path)
+        return SQLiteBackend(config=config, db_path=db_path, decay_config=self.decay_config)
 
     @classmethod
     def for_user(
@@ -361,7 +370,7 @@ class VectorMemoryStore:
         metadata_filters: list[MetadataFilter] | None = None,
         date_range: tuple[datetime, datetime] | None = None,
         reranker: Any | None = None,
-        recency_weight: float = 0.2,
+        recency_weight: float = 0.4,
     ) -> list[VectorMemoryEntry]:
         """Two-stage retrieval with reranking.
 
@@ -402,7 +411,9 @@ class VectorMemoryStore:
 
         # Stage 2: rerank
         if reranker is None:
-            reranker = RecencyReranker(weight=recency_weight)
+            reranker = RecencyReranker(
+                weight=recency_weight, decay_config=self.decay_config,
+            )
 
         query_embedding = self.embedding_fn(query)
 
@@ -439,9 +450,73 @@ class VectorMemoryStore:
             "backend": backend_stats.get("backend", backend_stats.get("backend_type", "unknown")),
         }
 
+    def touch(self, key: str | MemoryKey, namespace: str = "default") -> None:
+        """Update ``accessed_at`` to now, refreshing effective age for decay."""
+        if isinstance(key, str):
+            key = MemoryKey(namespace=namespace, key=key)
+        self.backend.touch_vector(key)
+
+    def _touch_results_async(self, entries: list[VectorEntry]) -> None:
+        """Touch all entries in a background thread (fire-and-forget)."""
+        def _do() -> None:
+            for e in entries:
+                try:
+                    self.backend.touch_vector(e.key)
+                except Exception:
+                    pass
+        t = threading.Thread(target=_do, daemon=True)
+        t.start()
+
+    def run_maintenance(self) -> MaintenanceReport:
+        """Purge expired entries and consolidate old episodes.
+
+        Returns a :class:`MaintenanceReport` with counts.
+        """
+        start = time.monotonic()
+        expired = 0
+        consolidated = 0
+        summaries = 0
+
+        # 1. Purge expired
+        try:
+            expired = self.backend.purge_expired()
+        except Exception:
+            _log.debug("purge_expired failed", exc_info=True)
+
+        # 2. Consolidation (import here to avoid circular)
+        try:
+            from obscura.vector_memory.consolidator import MemoryConsolidator
+            consolidator = MemoryConsolidator(store=self, config=self.decay_config)
+            consolidated, summaries = consolidator.consolidate()
+        except Exception:
+            _log.debug("consolidation failed", exc_info=True)
+
+        duration = (time.monotonic() - start) * 1000
+        report = MaintenanceReport(
+            expired_purged=expired,
+            episodes_consolidated=consolidated,
+            summaries_created=summaries,
+            duration_ms=duration,
+        )
+        _log.info(
+            "memory maintenance: purged=%d consolidated=%d summaries=%d (%.0fms)",
+            expired, consolidated, summaries, duration,
+        )
+        return report
+
     def close(self) -> None:
         """Close the database connection."""
         self.backend.close()
+
+
+@dataclass
+class MaintenanceReport:
+    """Result of a :meth:`VectorMemoryStore.run_maintenance` run."""
+
+    expired_purged: int = 0
+    episodes_consolidated: int = 0
+    summaries_created: int = 0
+    duration_ms: float = 0.0
 
 
 # Integration with Agent class

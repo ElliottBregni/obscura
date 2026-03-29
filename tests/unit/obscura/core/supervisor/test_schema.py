@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
 
 from obscura.core.supervisor.schema import (
     REQUIRED_TABLES,

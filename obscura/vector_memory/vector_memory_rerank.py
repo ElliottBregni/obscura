@@ -22,7 +22,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from obscura.vector_memory import VectorMemoryEntry
@@ -103,14 +103,17 @@ class BM25Reranker:
 
 @dataclass
 class RecencyReranker:
-    """
-    Boost recent memories with exponential decay.
+    """Boost recent memories with exponential decay.
 
-    Score = exp(-age_days / decay_days) * weight
+    When a :class:`~obscura.vector_memory.decay.DecayConfig` is provided,
+    delegates to :func:`~obscura.vector_memory.decay.compute_decay` which
+    gives per-type decay rates and respects ``accessed_at``.  Otherwise
+    falls back to a simple ``exp(-age / decay_days)`` formula.
     """
 
     decay_days: float = 30.0
     weight: float = 1.0
+    decay_config: Any | None = None  # Optional DecayConfig
 
     def score(
         self,
@@ -118,6 +121,14 @@ class RecencyReranker:
         entry: VectorMemoryEntry,
         query_embedding: list[float],
     ) -> float:
+        if self.decay_config is not None:
+            from obscura.vector_memory.decay import compute_decay
+            accessed_at = getattr(entry, "accessed_at", None)
+            return compute_decay(
+                entry.memory_type, entry.created_at, accessed_at, self.decay_config,
+            ) * self.weight
+
+        # Legacy fallback
         now = datetime.now(UTC)
         created = entry.created_at
         # Handle naive datetimes
