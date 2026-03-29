@@ -852,3 +852,15 @@ def export_transcript_markdown(history: list[tuple[str, str]]) -> str:
             lines.append(assistant_block)
             lines.append("")
     return "\n".join(lines)
+
+
+# Model-space delta for prompt HUD tests
+_model_space_delta: str = ""
+
+def set_model_space_delta(delta: str) -> None:
+    """Set a small short-lived model text delta used by prompt HUD tests."""
+    global _model_space_delta
+    _model_space_delta = delta
+
+def get_model_space_delta() -> str:
+    return _model_space_delta
