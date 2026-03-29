@@ -27,7 +27,12 @@ def _migrate_state_file(old: Path, new: Path) -> None:
 class _SQLiteBase:
     def __init__(self, db_path: Path | None = None) -> None:
         if db_path is None:
-            new_path = resolve_obscura_state_dir() / _DB_FILENAME
+            # Backwards-compat: use the legacy OBSCURA_HOME/messaging_state.db
+            # location so tests and existing installs find the DB where they
+            # expect it.  The previous behaviour moved files into
+            # OBSCURA_HOME/state/; keep migration support but prefer the
+            # legacy root path for now to reduce surprises.
+            new_path = resolve_obscura_home() / _DB_FILENAME
             old_path = resolve_obscura_home() / _DB_FILENAME
             _migrate_state_file(old_path, new_path)
             db_path = new_path
