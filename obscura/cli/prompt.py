@@ -458,29 +458,29 @@ def create_prompt_session(
 
     # Fixed thinking delta line above ❯ — always reserved, never collapses.
     def _message() -> HTML:
+        # Produce a two-line HTML fragment with <status-lane> and <input-lane>
+        width = shutil.get_terminal_size((80, 24)).columns
+        # Active streaming status shows spinner + label in the status lane
         if _status is not None and _status.active:
             frame = _html.escape(_status.spinner_char)
             label = _html.escape(_status.text or "working...")
             preview = _status.preview
+            label_part = f"<status-spinner>{frame}</status-spinner> {label}"
             if preview:
-                max_prev = shutil.get_terminal_size((80, 24)).columns - len(label) - 10
+                # trim preview to available width
+                max_prev = width - len(label) - 10
                 if len(preview) > max_prev:
-                    preview = preview[:max_prev - 3] + "..."
-                preview = _html.escape(preview)
-                return HTML(
-                    f"<status-line><status-spinner>{frame}</status-spinner> {label}"
-                    f" <status-preview>{preview}</status-preview></status-line>\n"
-                    f"<prompt>\u276f </prompt>"
-                )
-            return HTML(
-                f"<status-line><status-spinner>{frame}</status-spinner> {label}</status-line>\n"
-                f"<prompt>\u276f </prompt>"
-            )
-        # Idle: empty reserved line keeps the input position fixed.
-        return HTML(
-            "<status-line> </status-line>\n"
-            "<prompt>\u276f </prompt>"
-        )
+                    preview = preview[: max_prev - 3] + "..."
+                label_part = label_part + f" <status-preview>{_html.escape(preview)}</status-preview>"
+            status_lane = f"<status-lane>{label_part}</status-lane>"
+            input_lane = "<input-lane>❯ </input-lane>"
+            return HTML(status_lane + "
+" + input_lane)
+
+        # Idle: render the standard two-lane layout using model-space delta
+        model_text = get_model_space_delta()
+        return HTML(_build_prompt_message_html(width, model_text, PromptLayoutConfig()))
+
 
     # Dynamic toolbar — reads PromptStatus on every render.
     def _toolbar() -> HTML:
