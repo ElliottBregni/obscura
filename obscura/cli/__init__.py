@@ -1967,3 +1967,15 @@ def _emit_context_warnings(*args, **kwargs):
 def _copilot_budget_pct():
     from .config import get_copilot_budget_pct as _impl
     return _impl()
+
+def _parse_confirm_decision(answer: str) -> str | None:
+    a = (answer or "").lower()
+    if "approve" in a or a.strip().startswith("yes") or "accept" in a:
+        return "approve"
+    if "deny" in a or a.strip().startswith("no") or "do not" in a or "dont" in a:
+        return "deny"
+    return None
+
+def _track_task_surface_event(ctx, ev) -> None:
+    """Compatibility stub: track a task-surface event (no-op)."""
+    return None
