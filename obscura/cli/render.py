@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 import json
+import time
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -446,6 +447,52 @@ class StreamRenderer:
                 padding=(0, 1),
             )
         )
+
+    @staticmethod
+    def _normalize_reasoning_text(raw: str) -> str:
+        """Normalize multi-line reasoning into cleaned paragraphs.
+
+        Joins consecutive non-empty lines with a single space, preserves
+        paragraph breaks as double-newlines, and trims extra whitespace.
+        """
+        try:
+            lines = [ln.strip() for ln in raw.splitlines()]
+            paragraphs: list[list[str]] = []
+            cur: list[str] = []
+            for ln in lines:
+                if ln == "":
+                    if cur:
+                        paragraphs.append(cur)
+                        cur = []
+                    else:
+                        # multiple blanks -> preserve by appending empty paragraph
+                        paragraphs.append([])
+                else:
+                    cur.append(re.sub(r"\s+"," ", ln))
+            if cur:
+                paragraphs.append(cur)
+            out_parts: list[str] = []
+            for p in paragraphs:
+                if not p:
+                    # represent paragraph break
+                    out_parts.append("")
+                else:
+                    out_parts.append(" ".join(p))
+            # collapse consecutive empty markers into single blank lines
+            # then join with double-newline
+            cleaned_parts: list[str] = []
+            prev_empty = False
+            for part in out_parts:
+                if part == "":
+                    if not prev_empty:
+                        cleaned_parts.append("")
+                        prev_empty = True
+                else:
+                    cleaned_parts.append(part)
+                    prev_empty = False
+            return "\n\n".join(cleaned_parts).strip()
+        except Exception:
+            return raw.strip()
 
     def get_thinking_blocks(self) -> list[str]:
         """Return all completed thinking blocks from this session."""
