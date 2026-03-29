@@ -215,7 +215,6 @@ class QdrantBackend:
             )
         except Exception:
             return None
-
     def search_vectors(
         self,
         query_embedding: list[float],
@@ -224,6 +223,11 @@ class QdrantBackend:
         threshold: float | None = None,
         filters: list[MetadataFilter] | None = None,
     ) -> list[VectorEntry]:
+        """Search for similar vectors and apply optional time-based decay to scores.
+
+        Decay is applied as an exponential half-life: final_score = raw_score * (0.5 ** (age_seconds / half_life_seconds)).
+        Configure half-life via OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS (default: 30 days).
+        """
         must = (
             [FieldCondition(key="namespace", match=MatchValue(value=namespace))]
             if namespace
@@ -239,11 +243,25 @@ class QdrantBackend:
             with_vectors=False,
         )
         entries = []
+        # Half-life in seconds for time decay. Default: 30 days.
+        try:
+            half_life = float(os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS", str(30 * 24 * 3600)))
+        except Exception:
+            half_life = 30 * 24 * 3600
+        now = datetime.now(UTC)
         for hit in response.points:
-            if "expires_at" in hit.payload and datetime.now(
-                UTC,
-            ) > datetime.fromisoformat(hit.payload["expires_at"]):
+            # Skip expired
+            if "expires_at" in hit.payload and now > datetime.fromisoformat(hit.payload["expires_at"]):
                 continue
+            try:
+                created = datetime.fromisoformat(hit.payload["created_at"])
+            except Exception:
+                created = now
+            age_seconds = (now - created).total_seconds()
+            decay = 1.0
+            if half_life > 0:
+                decay = 0.5 ** (age_seconds / half_life)
+            final_score = hit.score * decay if hit.score is not None else 0.0
             entries.append(
                 VectorEntry(
                     key=MemoryKey(
@@ -255,7 +273,9 @@ class QdrantBackend:
                     metadata=hit.payload.get("metadata", {}),
                     memory_type=hit.payload.get("memory_type", "general"),
                     created_at=datetime.fromisoformat(hit.payload["created_at"]),
-                    score=hit.score,
+                    score=hit.score or 0.0,
+                    rerank_score=decay,
+                    final_score=final_score,
                 ),
             )
         return entries
