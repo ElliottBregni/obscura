@@ -108,7 +108,7 @@ class AgentManifest(BaseModel):
 
     name: str
     description: str = ""
-    provider: str = "copilot"
+    provider: str = Field("copilot", alias="model")
     model_id: str | None = None
     system_prompt: str = ""
     tools: list[str] = Field(default_factory=_empty_str_list)
