@@ -89,6 +89,7 @@ class MCPServerRef(BaseModel):
     name: str
     transport: str = "stdio"
     command: str = ""
+    url: str = ""
     args: list[str] = Field(default_factory=_empty_str_list)
     env: dict[str, str] = Field(default_factory=_empty_dict)
 
