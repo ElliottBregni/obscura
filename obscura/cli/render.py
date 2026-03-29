@@ -294,7 +294,7 @@ class StreamRenderer:
                     self._flush_text()
                     self._in_thinking = True
                 self._thinking_buf.append(event.text)
-                self._update_thinking_preview()
+                self._update_thinking_preview(getattr(event, "raw", None))
 
             case AgentEventKind.TEXT_DELTA:
                 self._stop_status()
@@ -392,10 +392,23 @@ class StreamRenderer:
             pass
 
     def _stop_status(self) -> None:
-        if self._ss is not None:
-            self._ss.active = False  # type: ignore[attr-defined]
-            self._ss.text = ""  # type: ignore[attr-defined]
-            self._ss.preview = ""  # type: ignore[attr-defined]
+        if self._ss is None:
+            return
+        try:
+            if hasattr(self._ss, "update"):
+                try:
+                    self._ss.update({"active": False, "text": "", "preview": ""})
+                except Exception:
+                    # fallback to attribute assignment
+                    self._ss.active = False  # type: ignore[attr-defined]
+                    self._ss.text = ""  # type: ignore[attr-defined]
+                    self._ss.preview = ""  # type: ignore[attr-defined]
+            else:
+                self._ss.active = False  # type: ignore[attr-defined]
+                self._ss.text = ""  # type: ignore[attr-defined]
+                self._ss.preview = ""  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     # -- flush helpers -------------------------------------------------------
 
