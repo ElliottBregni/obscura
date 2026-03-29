@@ -1958,3 +1958,12 @@ def template_inspect(name: str) -> None:
         if len(spec.instructions) > 200:
             preview += "..."
         click.echo(f"  Instructions: {preview}")
+
+# Backwards-compat aliases added by test harness
+def _emit_context_warnings(*args, **kwargs):
+    from .warnings import emit_context_warnings as _impl
+    return _impl(*args, **kwargs)
+
+def _copilot_budget_pct():
+    from .config import get_copilot_budget_pct as _impl
+    return _impl()
