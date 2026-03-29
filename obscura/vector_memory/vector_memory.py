@@ -33,8 +33,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-_log = logging.getLogger(__name__)
-
 import numpy as np
 
 from obscura.auth.models import AuthenticatedUser
@@ -49,10 +47,15 @@ from obscura.vector_memory.backends import (
 try:
     from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
 except ImportError:
-    QDRANT_AVAILABLE: bool 
-    QdrantBackend: callable = lambda *args, **kwargs: None  # type: ignore
+    QDRANT_AVAILABLE: bool
+
+    def QdrantBackend(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+        """Stub when qdrant-client is not installed."""
+
 from obscura.vector_memory.decay import DecayConfig, load_decay_config_from_disk
 from obscura.vector_memory.vector_memory_filters import MetadataFilter
+
+_log = logging.getLogger(__name__)
 
 
 def simple_embedding(text: str, dim: int = 384) -> list[float]:
@@ -464,6 +467,8 @@ class VectorMemoryStore:
                     self.backend.touch_vector(e.key)
                 except Exception:
                     pass
+        # daemon=True: fire-and-forget touch — data loss on exit is acceptable
+        # because touch only updates access timestamps (best-effort freshness).
         t = threading.Thread(target=_do, daemon=True)
         t.start()
 

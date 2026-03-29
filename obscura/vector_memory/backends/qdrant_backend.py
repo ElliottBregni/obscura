@@ -117,18 +117,31 @@ class QdrantBackend:
         expires_at: datetime | None,
     ) -> None:
         point_id = _point_id(key.namespace, key.key)
+        now_iso = datetime.now(UTC).isoformat()
+
+        # Preserve created_at on upsert — only set if this is a new point.
+        existing_created_at = now_iso
+        try:
+            existing = self.client.retrieve(
+                self.collection_name, [point_id], with_payload=True, with_vectors=False,
+            )
+            if existing and "created_at" in existing[0].payload:
+                existing_created_at = existing[0].payload["created_at"]
+        except Exception:
+            pass  # new point — use now
+
         payload = {
             "namespace": key.namespace,
             "key": key.key,
             "text": text,
             "metadata": metadata,
             "memory_type": memory_type,
-            "created_at": datetime.now(UTC).isoformat(),
-            "accessed_at": datetime.now(UTC).isoformat(),
+            "created_at": existing_created_at,
+            "accessed_at": now_iso,
             # Embedding provenance (best-effort from env vars)
             "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
             "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
-            "embedding_ts": datetime.now(UTC).isoformat(),
+            "embedding_ts": now_iso,
         }
 
         if expires_at:
@@ -193,8 +206,11 @@ class QdrantBackend:
                     logger.exception("qdrant: background GC encountered an error")
                 time.sleep(interval)
 
+        # daemon=True: intentional — GC is best-effort cleanup; losing an
+        # in-flight purge cycle on interpreter shutdown is harmless.
         t = threading.Thread(target=_loop, daemon=True)
         t.start()
+
     def get_vector(self, key: MemoryKey) -> VectorEntry | None:
         point_id = _point_id(key.namespace, key.key)
         try:

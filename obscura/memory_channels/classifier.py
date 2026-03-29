@@ -37,7 +37,7 @@ class TurnClassifier:
         Always includes :data:`_DEFAULT_NAMESPACE`.  Additional namespaces
         are added when keyword or file-glob triggers match.
         """
-        combined = f"{user_text}\n{assistant_text}".lower()
+        combined = f"{user_text or ''}\n{assistant_text or ''}".lower()
         file_paths = set(_FILE_PATH_RE.findall(combined))
 
         namespaces: list[str] = [_DEFAULT_NAMESPACE]
@@ -51,29 +51,28 @@ class TurnClassifier:
                     namespaces.append(channel.namespace)
                 continue
 
+            if channel.namespace in namespaces:
+                continue
+
             # Keyword match
             if triggers.keywords:
-                for kw in triggers.keywords:
-                    if kw.lower() in combined:
-                        if channel.namespace not in namespaces:
-                            namespaces.append(channel.namespace)
-                        break
+                if any(kw.lower() in combined for kw in triggers.keywords):
+                    namespaces.append(channel.namespace)
+                    continue
 
             # File glob match
-            if triggers.file_globs and channel.namespace not in namespaces:
-                for glob_pattern in triggers.file_globs:
-                    matched = any(fnmatch.fnmatch(fp, glob_pattern) for fp in file_paths)
-                    if matched:
-                        if channel.namespace not in namespaces:
-                            namespaces.append(channel.namespace)
-                        break
+            if triggers.file_globs:
+                if any(
+                    fnmatch.fnmatch(fp, pat)
+                    for pat in triggers.file_globs
+                    for fp in file_paths
+                ):
+                    namespaces.append(channel.namespace)
+                    continue
 
             # Tool name match (check if tool names appear in text)
-            if triggers.tool_names and channel.namespace not in namespaces:
-                for tn in triggers.tool_names:
-                    if tn.lower() in combined:
-                        if channel.namespace not in namespaces:
-                            namespaces.append(channel.namespace)
-                        break
+            if triggers.tool_names:
+                if any(tn.lower() in combined for tn in triggers.tool_names):
+                    namespaces.append(channel.namespace)
 
         return namespaces

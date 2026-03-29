@@ -14,6 +14,53 @@ from obscura.vector_memory import VectorMemoryStore
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
+    from obscura.memory_channels.models import MemoryChannel
+
+
+def build_channels_prompt_section(channels: list[MemoryChannel]) -> str:
+    """Build a system prompt section describing available memory channels.
+
+    Returns ``""`` if no channels are configured.
+    """
+    if not channels:
+        return ""
+
+    lines = [
+        "## Memory Channels",
+        "",
+        "Context is automatically injected from these channels based on what you're working on.",
+        "You can also explicitly store/search memories in channel namespaces using `store_searchable` and `semantic_search`.",
+        "",
+    ]
+
+    for ch in sorted(channels, key=lambda c: c.priority, reverse=True):
+        trigger_parts: list[str] = []
+        if ch.triggers.always:
+            trigger_parts.append("always active")
+        if ch.triggers.file_globs:
+            trigger_parts.append(f"files: {', '.join(ch.triggers.file_globs)}")
+        if ch.triggers.keywords:
+            trigger_parts.append(f"keywords: {', '.join(ch.triggers.keywords)}")
+        if ch.triggers.tool_names:
+            trigger_parts.append(f"tools: {', '.join(ch.triggers.tool_names)}")
+
+        trigger_str = "; ".join(trigger_parts) if trigger_parts else "manual"
+        injection = "system prompt" if ch.injection == "system" else "per-turn"
+
+        lines.append(
+            f"- **{ch.name}** → namespace `{ch.namespace}` "
+            f"({injection}, {trigger_str})"
+        )
+
+    lines.append("")
+    lines.append(
+        "To store a memory: `store_searchable(key, text, namespace=\"<namespace>\", memory_type=\"fact\")`"
+    )
+    lines.append(
+        "To search a channel: `semantic_search(query, namespace=\"<namespace>\")`"
+    )
+
+    return "\n".join(lines)
 
 
 def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
@@ -31,15 +78,22 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
         result = store.get(namespace=namespace, key=key)
         return result if result is not None else None
 
-    def semantic_search_impl(query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """Search memory using semantic similarity."""
+    def semantic_search_impl(
+        query: str,
+        top_k: int = 5,
+        namespace: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search memory using semantic similarity, optionally in a specific namespace."""
         store = VectorMemoryStore.for_user(user)
-        results = store.search_similar(query, top_k=top_k)
+        results = store.search_similar(query, namespace=namespace, top_k=top_k)
         return [
             {
                 "key": str(r.key),
-                "score": r.score,
+                "namespace": r.key.namespace if hasattr(r.key, "namespace") else "",
+                "score": round(r.score, 3),
+                "final_score": round(r.final_score, 3),
                 "text": r.text,
+                "memory_type": r.memory_type,
                 "metadata": r.metadata,
             }
             for r in results
@@ -48,12 +102,20 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
     def store_searchable_impl(
         key: str,
         text: str,
+        namespace: str = "default",
+        memory_type: str = "general",
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        """Store text with vector embedding for semantic search."""
+        """Store text with vector embedding for semantic search in a specific namespace."""
         store = VectorMemoryStore.for_user(user)
-        store.set(key=key, text=text, metadata=metadata or {})
-        return f"✅ Stored searchable content: {key}"
+        store.set(
+            key=key,
+            text=text,
+            namespace=namespace,
+            memory_type=memory_type,
+            metadata=metadata or {},
+        )
+        return f"✅ Stored in {namespace} ({memory_type}): {key}"
 
     return [
         ToolSpec(
@@ -101,7 +163,12 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
         ),
         ToolSpec(
             name="semantic_search",
-            description="Search memory using semantic similarity",
+            description=(
+                "Search vector memory using semantic similarity. "
+                "Use namespace to search a specific memory channel "
+                "(e.g. 'workspace:architecture', 'project:jira'). "
+                "Omit namespace to search all."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -114,6 +181,14 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                         "description": "Number of results (default: 5)",
                         "default": 5,
                     },
+                    "namespace": {
+                        "type": "string",
+                        "description": (
+                            "Memory channel namespace to search "
+                            "(e.g. 'workspace:architecture', 'project:jira'). "
+                            "Omit to search all namespaces."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },
@@ -121,7 +196,11 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
         ),
         ToolSpec(
             name="store_searchable",
-            description="Store text with vector embedding for semantic search",
+            description=(
+                "Store text with vector embedding for semantic search. "
+                "Use namespace to store in a specific memory channel "
+                "(e.g. 'workspace:architecture', 'project:jira', 'user:preferences')."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -132,6 +211,24 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                     "text": {
                         "type": "string",
                         "description": "Text to store and embed",
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": (
+                            "Memory channel namespace "
+                            "(e.g. 'workspace:architecture', 'project:jira'). "
+                            "Default: 'default'"
+                        ),
+                        "default": "default",
+                    },
+                    "memory_type": {
+                        "type": "string",
+                        "description": (
+                            "Memory type: 'fact', 'episode', 'summary', "
+                            "'preference', or 'general' (default)"
+                        ),
+                        "default": "general",
+                        "enum": ["general", "fact", "episode", "summary", "preference"],
                     },
                     "metadata": {
                         "type": "object",

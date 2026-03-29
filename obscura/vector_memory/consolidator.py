@@ -75,6 +75,12 @@ class MemoryConsolidator:
     def consolidate(self, namespace: str | None = None) -> tuple[int, int]:
         """Run one consolidation pass.
 
+        Parameters
+        ----------
+        namespace:
+            If provided, only consolidate episodes in this namespace.
+            ``None`` consolidates across all namespaces.
+
         Returns ``(episodes_deleted, summaries_created)``.
         """
         cutoff = datetime.now(UTC) - timedelta(days=self.config.consolidation_age_days)
@@ -83,6 +89,9 @@ class MemoryConsolidator:
         episodes = self.store.backend.list_by_type(
             "episode", older_than=cutoff, limit=limit,
         )
+        # Filter by namespace if specified
+        if namespace is not None:
+            episodes = [e for e in episodes if e.key.namespace == namespace]
         if not episodes:
             return 0, 0
 
@@ -168,32 +177,31 @@ class MemoryConsolidator:
         """
         import asyncio
 
-        # Try to use the Copilot backend for a cheap summarization call
-        try:
-            from obscura.providers.copilot import CopilotBackend
+        from obscura.providers.copilot import CopilotBackend
 
-            backend = CopilotBackend(
-                model="gpt-4o-mini",
-                system_prompt="You are a concise summarizer.",
-            )
+        backend = CopilotBackend(
+            model="gpt-4o-mini",
+            system_prompt="You are a concise summarizer.",
+        )
 
-            async def _run() -> str:
-                await backend.start()
-                try:
-                    response = await backend.send(prompt, options={})
-                    return response.text if hasattr(response, "text") else str(response)
-                finally:
-                    await backend.stop()
-
-            # Run in a new event loop if we're not in one
+        async def _run() -> str:
+            await backend.start()
             try:
-                asyncio.get_running_loop()
-                # We're in an async context — can't nest.  Fall through to fallback.
-                raise RuntimeError("Cannot run nested event loop")
-            except RuntimeError:
-                return asyncio.run(_run())
-        except Exception:
-            raise
+                response = await backend.send(prompt, options={})
+                return response.text if hasattr(response, "text") else str(response)
+            finally:
+                await backend.stop()
+
+        # Only safe to call asyncio.run() when no loop is running
+        has_loop = True
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            has_loop = False
+
+        if has_loop:
+            raise RuntimeError("Cannot summarize from async context")
+        return asyncio.run(_run())
 
     @staticmethod
     def _fallback_summarize(texts: list[str]) -> str:

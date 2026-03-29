@@ -903,6 +903,24 @@ async def _repl(
     except Exception:
         pass
 
+    # Wire memory channel TOOL_CALL hook to capture file paths + tool names.
+    # Also feeds file_context to the tool router for context-aware tool selection.
+    _tool_router_ref = None  # set after client creation
+    if _context_router is not None:
+        from obscura.core.hooks import HookRegistry
+        from obscura.core.types import AgentEventKind as _AEK
+
+        if project_hooks is None:
+            project_hooks = HookRegistry()
+
+        def _channel_tool_signal(event: Any) -> None:
+            _context_router.update_signals_from_event(event)
+            # Sync file paths to tool router for context-aware recall
+            if _tool_router_ref is not None and _context_router.signals.file_paths:
+                _tool_router_ref.set_file_context(list(_context_router.signals.file_paths))
+
+        project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
+
     # Build client (MCP servers connect during start())
     async with ObscuraClient(
         backend,
@@ -945,6 +963,8 @@ async def _repl(
                     backend=backend,
                 )
                 client._backend.set_tool_router(_router)
+                # Let the TOOL_CALL hook feed file_context to this router
+                _tool_router_ref = _router  # noqa: F841 — read by _channel_tool_signal closure
             except Exception:
                 pass
 

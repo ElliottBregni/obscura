@@ -127,6 +127,11 @@ class ToolRouter:
         self._default_grant_tools = default_grant_tools or set()
         self._quarantined = quarantined_tools or set()
         self._backend = backend
+        self._file_context: list[str] = []
+
+    def set_file_context(self, file_paths: list[str]) -> None:
+        """Update the file context for context-aware tool recall."""
+        self._file_context = list(file_paths)
 
     # -- Factory -------------------------------------------------------------
 
@@ -196,6 +201,10 @@ class ToolRouter:
         """
         if not self._config.enabled:
             return RoutingResult(tools=available_tools)
+
+        # Use stored file_context if caller doesn't provide one
+        if file_context is None and self._file_context:
+            file_context = self._file_context
 
         try:
             return self._do_select(prompt, available_tools, file_context)

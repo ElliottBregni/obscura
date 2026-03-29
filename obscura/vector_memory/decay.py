@@ -110,6 +110,14 @@ def compute_decay(
 
     age_days = max((now - effective_ts).total_seconds() / 86400.0, 0.0)
 
+    # Access boost: if accessed within boost window, reduce effective age
+    if accessed_at is not None and config.access_boost_days > 0:
+        access_age_days = max((now - accessed_at).total_seconds() / 86400.0, 0.0)
+        if access_age_days < config.access_boost_days:
+            # Scale the boost: full boost at access_age=0, no boost at access_age=boost_window
+            boost_factor = 1.0 - (access_age_days / config.access_boost_days)
+            age_days = age_days * (1.0 - boost_factor * 0.5)  # up to 50% age reduction
+
     if profile.half_life_days <= 0:
         return 1.0
 

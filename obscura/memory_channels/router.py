@@ -90,12 +90,14 @@ class ContextRouter:
 
         kind_val = kind_name.value if hasattr(kind_name, "value") else str(kind_name)
 
-        if kind_val == "turn_start" and event.text:
-            self.update_signals_from_text(event.text)
+        if kind_val == "turn_start":
+            text = getattr(event, "text", None)
+            if text:
+                self.update_signals_from_text(text)
         elif kind_val == "tool_call":
             self.update_signals_from_tool_call(
-                event.tool_name or "",
-                event.tool_input or {},
+                getattr(event, "tool_name", None) or "",
+                getattr(event, "tool_input", None) or {},
             )
 
     # ------------------------------------------------------------------
@@ -162,7 +164,8 @@ class ContextRouter:
 
             # Format results within channel budget
             channel_budget_chars = channel.max_tokens * _CHARS_PER_TOKEN
-            section_lines = [f"**[{channel.name}]**"]
+            trigger_reason = self._describe_trigger(channel)
+            section_lines = [f"**[{channel.name}]** _{trigger_reason}_"]
             section_chars = 0
 
             for entry in results:
@@ -218,6 +221,35 @@ class ContextRouter:
                     return True
 
         return False
+
+    def _describe_trigger(self, channel: MemoryChannel) -> str:
+        """Return a short human-readable reason why this channel was triggered."""
+        triggers = channel.triggers
+        if triggers.always:
+            return "always active"
+
+        reasons: list[str] = []
+        if triggers.file_globs:
+            matched = [
+                fp for glob_pat in triggers.file_globs
+                for fp in self._signals.file_paths
+                if fnmatch.fnmatch(fp, glob_pat)
+            ]
+            if matched:
+                reasons.append(f"file: {matched[0]}")
+
+        if triggers.keywords:
+            query_lower = self._signals.current_query.lower()
+            matched_kw = [kw for kw in triggers.keywords if kw.lower() in query_lower]
+            if matched_kw:
+                reasons.append(f"keyword: {matched_kw[0]}")
+
+        if triggers.tool_names:
+            matched_tools = [tn for tn in triggers.tool_names if tn in self._signals.tool_names]
+            if matched_tools:
+                reasons.append(f"tool: {matched_tools[0]}")
+
+        return ", ".join(reasons) if reasons else "matched"
 
     # ------------------------------------------------------------------
     # Template rendering
