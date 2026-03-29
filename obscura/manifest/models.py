@@ -128,6 +128,9 @@ class AgentManifest(BaseModel):
         default_factory=_empty_instruction_list,
     )
 
+    # Inline skill manifests (when constructed programmatically)
+    skills: list[SkillManifest] = Field(default_factory=list)
+
     # Delegation
     can_delegate: bool = False
     delegate_allowlist: list[str] = Field(default_factory=_empty_str_list)
