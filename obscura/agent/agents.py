@@ -228,11 +228,11 @@ class AgentConfig(BaseModel):
                 "grant": list(manifest.capabilities.grant),
                 "deny": list(manifest.capabilities.deny),
             },
+            # Tests expect only require/optional to be present in the
+            # plugins mapping produced from manifests.
             plugins={
                 "require": list(manifest.plugins.require),
                 "optional": list(manifest.plugins.optional),
-                "lazy_load": manifest.plugins.lazy_load,
-                "eager": list(manifest.plugins.eager),
             },
             lazy_load_skills=lazy_load,
             skill_filter=skill_filter,
