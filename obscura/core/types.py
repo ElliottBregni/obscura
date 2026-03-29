@@ -514,9 +514,17 @@ class ToolResultEnvelope:
         """Allow tuple-unpacking compatibility used in some tests.
 
         Unpacks as: (call_id, result_text, is_error)
+        For error results, prefer the error.message so legacy tests see a useful
+        human-readable message (e.g. "Capability token invalid or expired.").
         """
-        result_text = self.result if isinstance(self.result, str) else str(self.result)
         is_error = self.status == "error"
+        if not is_error:
+            result_text = self.result if isinstance(self.result, str) else str(self.result)
+        else:
+            if self.error is not None:
+                result_text = self.error.message
+            else:
+                result_text = "Tool error"
         yield self.call_id
         yield result_text
         yield is_error
