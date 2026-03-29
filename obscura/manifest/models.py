@@ -71,7 +71,7 @@ class SkillManifest(BaseModel):
     body: str = ""
     source_path: Path | None = None
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "populate_by_name": True}
 
 
 class InstructionManifest(BaseModel):
@@ -80,7 +80,7 @@ class InstructionManifest(BaseModel):
     apply_to: list[str] = Field(default_factory=_empty_str_list)
     body: str = ""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "populate_by_name": True}
 
 
 class MCPServerRef(BaseModel):
@@ -93,7 +93,7 @@ class MCPServerRef(BaseModel):
     args: list[str] = Field(default_factory=_empty_str_list)
     env: dict[str, str] = Field(default_factory=_empty_dict)
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "populate_by_name": True}
 
 
 def _empty_instruction_list() -> list[InstructionManifest]:
@@ -142,7 +142,7 @@ class AgentManifest(BaseModel):
     # Source tracking
     source_path: Path | None = None
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "populate_by_name": True}
 
     @property
     def model(self) -> str:
