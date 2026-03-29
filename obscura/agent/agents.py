@@ -164,6 +164,10 @@ class AgentConfig(BaseModel):
     # Eval hooks — run deterministic checks on tool results
     eval_tools: bool = True
 
+    # Pacing hooks — nudge model to surface status after consecutive tool calls
+    pace_tools: bool = True
+    max_consecutive_tools: int = 3
+
     @property
     def model(self) -> str:
         """Deprecated: use provider instead."""
@@ -783,6 +787,32 @@ class Agent:
                 )
             except Exception as exc:
                 logger.debug("Could not register eval hooks: %s", exc)
+
+        # Register tool pacing hooks (status nudges after consecutive tool calls)
+        if self.config.pace_tools:
+            try:
+                from obscura.core.hooks import HookRegistry
+                from obscura.core.lifecycle import make_tool_pace_hook
+                from obscura.core.types import AgentEventKind as _AEK
+
+                hook_reg_: HookRegistry | None = getattr(self._client, "hooks", None)
+                if hook_reg_ is None:
+                    hook_reg_ = HookRegistry()
+                    setattr(self._client, "hooks", hook_reg_)
+
+                count_hook, remind_hook, text_reset_hook = make_tool_pace_hook(
+                    max_consecutive=self.config.max_consecutive_tools,
+                )
+                hook_reg_.add_after(count_hook, _AEK.TOOL_CALL)
+                hook_reg_.add_before(remind_hook, _AEK.TURN_START)
+                hook_reg_.add_after(text_reset_hook, _AEK.TEXT_DELTA)
+                logger.info(
+                    "Tool pacing hooks registered for agent %s (threshold=%d)",
+                    self.id,
+                    self.config.max_consecutive_tools,
+                )
+            except Exception as exc:
+                logger.debug("Could not register pacing hooks: %s", exc)
 
         # Initialize heartbeat client if enabled
         if self._heartbeat_enabled:

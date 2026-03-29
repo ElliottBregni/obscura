@@ -90,7 +90,8 @@ class WebhookClient:
             headers["X-Obscura-Signature"] = f"sha256={sig}"
 
         status_code = 0
-        for attempt, backoff in enumerate((*_RETRY_BACKOFF_S, None)):  # type: ignore[misc]
+        backoffs = (*_RETRY_BACKOFF_S, None)
+        for attempt, backoff in enumerate(backoffs):
             try:
                 req = urllib.request.Request(url, data=body, headers=headers, method="POST")
                 with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:

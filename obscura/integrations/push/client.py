@@ -174,10 +174,10 @@ class PushClient:
             from apns2.client import APNsClient, Notification  # type: ignore[import-untyped]
             from apns2.payload import Payload  # type: ignore[import-untyped]
 
-            client = APNsClient(credentials=self._apns_key_path, use_sandbox=False)
-            payload = Payload(alert={"title": title, "body": body}, custom=data)
-            notif = Notification(token=token, payload=payload)
-            client.send_notification(notif, self._apns_bundle_id)
+            client: Any = APNsClient(credentials=self._apns_key_path, use_sandbox=False)
+            payload: Any = Payload(alert={"title": title, "body": body}, custom=data)
+            notif: Any = Notification(token=token, payload=payload)
+            client.send_notification(notif, self._apns_bundle_id)  # type: ignore[no-untyped-call]
             return PushReceipt(
                 notification_id=nid, provider="apns", token=token, success=True
             )

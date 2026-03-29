@@ -12,6 +12,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _str_any_dict() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True)
 class SlackMessage:
     """A single inbound Slack message."""
@@ -22,7 +26,7 @@ class SlackMessage:
     text: str
     thread_ts: str | None
     timestamp: datetime
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=_str_any_dict)
 
 
 class SlackClient:
@@ -49,7 +53,7 @@ class SlackClient:
                     "slack_sdk is required for Slack integration. "
                     "Install with: pip install slack_sdk"
                 ) from e
-        return self._client
+        return self._client  # type: ignore[return-value]
 
     async def check_access(self) -> bool:
         loop = asyncio.get_event_loop()

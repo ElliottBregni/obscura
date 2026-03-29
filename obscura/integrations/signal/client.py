@@ -14,9 +14,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _str_any_dict() -> dict[str, Any]:
+    return {}
+
+
 _DEFAULT_BASE_URL = "http://localhost:8080"
 _DEFAULT_TIMEOUT_S = 10
-
 
 @dataclass(frozen=True)
 class SignalMessage:
@@ -29,7 +33,7 @@ class SignalMessage:
     body: str
     timestamp: datetime
     group_id: str | None
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=_str_any_dict)
 
 
 class SignalClient:
@@ -121,7 +125,7 @@ class SignalClient:
                     body=body,
                     timestamp=timestamp,
                     group_id=group_id,
-                    raw=env,
+                    raw=dict(env),
                 )
             )
         return out

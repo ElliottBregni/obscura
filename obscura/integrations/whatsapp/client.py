@@ -12,8 +12,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_POLL_WINDOW_S = 60.0  # seconds of history to fetch on each poll
 
+def _str_any_dict() -> dict[str, Any]:
+    return {}
+
+
+_POLL_WINDOW_S = 60.0  # seconds of history to fetch on each poll
 
 @dataclass(frozen=True)
 class WhatsAppMessage:
@@ -25,7 +29,7 @@ class WhatsAppMessage:
     body: str
     date_created: datetime
     status: str
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=_str_any_dict)
 
 
 class WhatsAppClient:
@@ -56,13 +60,14 @@ class WhatsAppClient:
         if self._client is None:
             try:
                 from twilio.rest import Client  # type: ignore[import-untyped]
+
                 self._client = Client(self._account_sid, self._auth_token)
             except ImportError as e:
                 raise RuntimeError(
                     "twilio package is required for WhatsApp integration. "
                     "Install with: pip install twilio"
                 ) from e
-        return self._client
+        return self._client  # type: ignore[return-value]
 
     async def check_access(self) -> bool:
         """Verify Twilio credentials are configured."""
@@ -111,7 +116,11 @@ class WhatsAppClient:
                         else datetime.now(tz=timezone.utc)
                     ),
                     status=str(m.status),
-                    raw={"sid": m.sid, "status": m.status, "direction": getattr(m, "direction", "")},
+                    raw={
+                        "sid": str(m.sid),
+                        "status": str(m.status),
+                        "direction": str(getattr(m, "direction", "")),
+                    },
                 )
             )
         return out

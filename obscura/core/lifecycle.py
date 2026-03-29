@@ -305,6 +305,60 @@ def make_eval_memory_inject_hook() -> BeforeHook:
     return _hook
 
 
+# ---------------------------------------------------------------------------
+# Tool pacing
+# ---------------------------------------------------------------------------
+
+
+def make_tool_pace_hook(
+    max_consecutive: int = 3,
+) -> tuple[AfterHook, BeforeHook, AfterHook]:
+    """Create hooks that nudge the model to surface status after consecutive tool calls.
+
+    Returns a tuple of three hooks:
+      1. **after-hook for TOOL_CALL** — increments consecutive tool counter
+      2. **before-hook for TURN_START** — injects a status reminder if threshold met
+      3. **after-hook for TEXT_DELTA** — resets counter when model produces visible text
+
+    Parameters
+    ----------
+    max_consecutive:
+        Number of consecutive tool calls before injecting a reminder.
+    """
+    state: dict[str, int] = {"consecutive_tools": 0}
+
+    def _count_tool_calls(event: AgentEvent) -> None:
+        """After-hook on TOOL_CALL: increment counter."""
+        if event.kind == AgentEventKind.TOOL_CALL:
+            state["consecutive_tools"] += 1
+
+    def _maybe_inject_reminder(event: AgentEvent) -> AgentEvent | None:
+        """Before-hook on TURN_START: inject status reminder if threshold met."""
+        if event.kind != AgentEventKind.TURN_START:
+            return event
+        count = state["consecutive_tools"]
+        if count >= max_consecutive:
+            reminder = (
+                f"\n[SYSTEM: You have made {count} consecutive tool calls. "
+                "Before calling another tool, briefly tell the user what you've "
+                "found so far and what you plan to do next.]\n"
+            )
+            event.text = reminder + (event.text or "")
+            logger.debug(
+                "Tool pace hook injected reminder after %d consecutive tools",
+                count,
+            )
+        # Reset counter on every TURN_START
+        state["consecutive_tools"] = 0
+        return event
+
+    def _reset_on_text(event: AgentEvent) -> None:
+        """After-hook on TEXT_DELTA: reset counter when model produces visible text."""
+        state["consecutive_tools"] = 0
+
+    return _count_tool_calls, _maybe_inject_reminder, _reset_on_text
+
+
 __all__ = [
     "make_policy_gate_hook",
     "make_audit_hook",
@@ -313,4 +367,5 @@ __all__ = [
     "make_memory_inject_hook",
     "make_tool_eval_hook",
     "make_eval_memory_inject_hook",
+    "make_tool_pace_hook",
 ]
