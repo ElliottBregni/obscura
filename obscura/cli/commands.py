@@ -4489,6 +4489,9 @@ COMPLETIONS: dict[str, list[str]] = {
     "search-tools": [],
 }
 
+# Add secret menu stub (tests toggle visibility)
+COMPLETIONS.setdefault("secret", ["status", "unlock", "lock"])
+
 
 async def handle_command(raw: str, ctx: REPLContext) -> str | None:
     """Parse and dispatch a slash command. Returns 'quit' to exit."""
@@ -4505,14 +4508,51 @@ async def handle_command(raw: str, ctx: REPLContext) -> str | None:
 
 
 # Backwards-compatible stub for cmd_secret used in tests
-def cmd_secret(*args, **kwargs):
-    """Deprecated placeholder command used in tests. Returns None."""
+async def cmd_secret(command: str, ctx: REPLContext):
+    """Simple secret command used by tests to toggle secret menu visibility.
+
+    Usage: /secret unlock | lock | status
+    """
+    cmd = (command or "").strip().lower()
+    if cmd == "unlock":
+        try:
+            ctx.secret_menu_unlocked = True
+        except Exception:
+            pass
+        set_secret_menu_visibility(True)
+        return None
+    if cmd == "lock":
+        try:
+            ctx.secret_menu_unlocked = False
+        except Exception:
+            pass
+        set_secret_menu_visibility(False)
+        return None
+    # status / other
     return None
 
 
 def set_secret_menu_visibility(visible: bool) -> None:
-    """Stub: set visibility for secret menu (tests toggle this)."""
-    # In real app this would toggle behavior; stub stores no state.
+    """Enable/disable additional secret completions used in tests.
+
+    When enabled, add top-level 'loglevel' and 'jitter' entries and expose
+    them under the 'secret' submenu. When disabled, remove them.
+    """
+    if visible:
+        # top-level quick completions
+        COMPLETIONS.setdefault("loglevel", [])
+        COMPLETIONS.setdefault("jitter", [])
+        # ensure secret submenu contains them
+        secret = COMPLETIONS.setdefault("secret", ["status", "unlock", "lock"])
+        if "loglevel" not in secret:
+            secret.append("loglevel")
+        if "jitter" not in secret:
+            secret.append("jitter")
+    else:
+        # reset secret submenu to locked state
+        COMPLETIONS["secret"] = ["status", "unlock", "lock"]
+        COMPLETIONS.pop("loglevel", None)
+        COMPLETIONS.pop("jitter", None)
     return None
 
 
