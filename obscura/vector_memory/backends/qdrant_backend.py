@@ -17,8 +17,7 @@ from qdrant_client.models import (
     Filter,
     MatchValue,
     PointStruct,
-    VectorParams,,
-    KeywordIndexParams,,
+    VectorParams,
     KeywordIndexParams,
 )
 
@@ -117,15 +116,12 @@ class QdrantBackend:
             "metadata": metadata,
             "memory_type": memory_type,
             "created_at": datetime.now(UTC).isoformat(),
-            ,
-            "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
-            "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
-            "embedding_ts": datetime.now(UTC).isoformat(),
-            ,
+            # Embedding provenance (best-effort from env vars)
             "embedding_model": os.environ.get("OBSCURA_EMBEDDING_MODEL", "unknown"),
             "embedding_version": os.environ.get("OBSCURA_EMBEDDING_VERSION", "unknown"),
             "embedding_ts": datetime.now(UTC).isoformat(),
         }
+
         if expires_at:
             payload["expires_at"] = expires_at.isoformat()
         try:
