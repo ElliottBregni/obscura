@@ -265,7 +265,12 @@ class StreamRenderer:
     ``patch_stdout``.
     """
 
-    def __init__(self, streaming_status: object | None = None, external_status: object | None = None) -> None:\n        """Constructor accepts both streaming_status and external_status (tests pass external_status).\n\n        The renderer is tolerant of StreamingStatus objects that either expose\n        attributes (active/text/preview) or provide an update(payload) method.\n        """
+    def __init__(self, streaming_status: object | None = None, external_status: object | None = None) -> None:
+        """Constructor accepts both streaming_status and external_status (tests pass external_status).
+
+        The renderer is tolerant of StreamingStatus objects that either expose
+        attributes (active/text/preview) or provide an update(payload) method.
+        """
         self._text_buf: list[str] = []
         self._thinking_buf: list[str] = []
         self._all_text: list[str] = []
@@ -277,13 +282,7 @@ class StreamRenderer:
         self._last_preview_update: float = 0.0
         import os as _os
         self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
-        self._text_buf: list[str] = []
-        self._thinking_buf: list[str] = []
-        self._all_text: list[str] = []
-        self._thinking_blocks: list[str] = []  # completed thinking blocks
-        self._in_thinking = False
-        # StreamingStatus from prompt.py (toolbar spinner)
-        self._ss: object | None = streaming_status
+
 
     def handle(self, event: AgentEvent) -> None:
         match event.kind:
