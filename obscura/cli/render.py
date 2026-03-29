@@ -108,12 +108,49 @@ def _render_structured(text: str) -> Syntax | None:
 
 
 class OutputManager:
-    """Lightweight output manager for routing internal debug and prints."""
+    """Lightweight output manager for routing internal debug and prints.
 
-    def __init__(self, env: str = "cli", verbose_internals: bool = False) -> None:
+    Backwards-compatible: accepts optional log_level kw used by tests.
+    """
+
+    def __init__(self, env: str = "cli", verbose_internals: bool = False, log_level: str | None = None) -> None:
         self.env = env
         self.verbose = verbose_internals
+        self.log_level = log_level or "info"
         self._buffer: list[str] = []
+        self._session_log_path = None
+
+    def configure_session_log_path(self, path) -> None:
+        """Configure directory where session hidden deltas will be stored.
+
+        Expects a pathlib.Path or str directory. Creates a file named
+        'hidden_deltas.log' in the provided directory.
+        """
+        try:
+            from pathlib import Path
+
+            p = Path(path)
+            p.mkdir(parents=True, exist_ok=True)
+            file_path = p / "hidden_deltas.log"
+            # Touch the file
+            file_path.write_text("", encoding="utf-8")
+            self._session_log_path = file_path
+        except Exception:
+            self._session_log_path = None
+
+    def capture_hidden_delta(self, kind: str, text: str, *, status: str = "") -> None:
+        """Append a hidden delta JSON line to the configured session log."""
+        try:
+            if self._session_log_path is None:
+                return
+            import json
+            import time
+
+            row = {"kind": kind, "status": status, "text": text, "ts": time.time()}
+            with open(self._session_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     def capture_internal(self, message: str) -> None:
         if not self.verbose:
