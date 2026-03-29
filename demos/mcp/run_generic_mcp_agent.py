@@ -31,5 +31,4 @@ def add_server(*, path: str | Path, name: str, transport: str, command: str, arg
         "tools": [],
     }
 
-    p.write_text(json.dumps(root, indent=2) + "
-", encoding="utf-8")
+    p.write_text(json.dumps(root, indent=2) + "\n", encoding="utf-8")
