@@ -48,6 +48,7 @@ class QdrantBackend:
     def __init__(
         self,
         config: BackendConfig,
+        decay_config: Any = None,
         mode: str = "local",
         path: str | None = None,
         url: str | None = None,
