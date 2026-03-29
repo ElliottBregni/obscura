@@ -126,6 +126,23 @@ def search_relevant_context(
         return ""
 
 
+def search_with_router(
+    router: Any,
+    text: str,
+) -> str:
+    """Query active memory channels via the :class:`ContextRouter`.
+
+    Updates signals from the user text, then queries matched channels.
+    Returns formatted context block, or ``""`` if no channels matched.
+    """
+    try:
+        router.update_signals_from_text(text)
+        return router.query_active_channels(query=text)
+    except Exception as e:
+        _logger.debug(f"Channel router query failed: {e}")
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Post-message auto-save
 # ---------------------------------------------------------------------------
@@ -137,10 +154,13 @@ def auto_save_turn(
     user_text: str,
     assistant_text: str,
     turn_number: int,
+    classifier: Any | None = None,
 ) -> None:
     """Save a conversation turn to vector memory in a background thread.
 
     Saves a combined summary of the user message and assistant response.
+    When a :class:`TurnClassifier` is provided, the turn is also saved to
+    matched channel namespaces.
     Runs in a daemon thread so it does not block the REPL.
     """
 
@@ -151,26 +171,38 @@ def auto_save_turn(
                 return
 
             timestamp = datetime.now(UTC).isoformat()
-            key = f"turn_{session_id}_{turn_number}_{timestamp}"
+            base_key = f"turn_{session_id}_{turn_number}_{timestamp}"
 
             user_snippet = user_text[:500]
             assistant_snippet = assistant_text[:1000]
 
             combined = f"User: {user_snippet}\nAssistant: {assistant_snippet}"
 
-            store.set(
-                key=key,
-                text=combined,
-                metadata={
-                    "session_id": session_id,
-                    "turn": turn_number,
-                    "timestamp": timestamp,
-                    "user_message_preview": user_text[:100],
-                },
-                namespace=CLI_NAMESPACE,
-                memory_type="episode",
-                ttl=timedelta(days=30),
-            )
+            meta = {
+                "session_id": session_id,
+                "turn": turn_number,
+                "timestamp": timestamp,
+                "user_message_preview": user_text[:100],
+            }
+
+            # Determine namespaces to save to
+            namespaces = [CLI_NAMESPACE]
+            if classifier is not None:
+                try:
+                    namespaces = classifier.classify(user_text, assistant_text)
+                except Exception:
+                    _logger.debug("Turn classification failed, using default namespace")
+
+            for ns in namespaces:
+                key = f"{base_key}_{ns}" if ns != CLI_NAMESPACE else base_key
+                store.set(
+                    key=key,
+                    text=combined,
+                    metadata=meta,
+                    namespace=ns,
+                    memory_type="episode",
+                    ttl=timedelta(days=30),
+                )
         except Exception as e:
             _logger.debug(f"Auto-save to vector memory failed: {e}")
 
