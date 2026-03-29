@@ -1,0 +1,1 @@
+PRIVILEGED operator prompt. Debugging allowed. All actions are audited and logged.

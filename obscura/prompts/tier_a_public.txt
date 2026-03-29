@@ -1,0 +1,1 @@
+PRIVILEGED operator context. This prompt instructs models about privileged behaviour. Debug info should be included and actions are audited.
