@@ -6,6 +6,7 @@ from obscura.auth.models import AuthenticatedUser
 from obscura.vector_memory import VectorMemoryStore
 from obscura.vector_memory.backends import BackendConfig
 from obscura.vector_memory.backends.qdrant_backend import QdrantBackend, _point_id
+from qdrant_client.models import PointStruct
 
 
 def test_purge_expired_deletes_old_points():
@@ -33,10 +34,10 @@ def test_purge_expired_deletes_old_points():
     backend.client.upsert(
         backend.collection_name,
         [
-            {
-                "id": point_id,
-                "vector": [0.0] * backend.config.embedding_dim,
-                "payload": {
+            PointStruct(
+                id=point_id,
+                vector=[0.0] * backend.config.embedding_dim,
+                payload={
                     "namespace": "default",
                     "key": "old",
                     "text": "expired",
@@ -48,7 +49,7 @@ def test_purge_expired_deletes_old_points():
                     "embedding_version": "v1",
                     "embedding_ts": datetime.now(UTC).isoformat(),
                 },
-            }
+            )
         ],
     )
 
