@@ -31,6 +31,7 @@ class VectorEntry:
     memory_type: str
     created_at: datetime
     updated_at: datetime | None = None
+    accessed_at: datetime | None = None
     score: float = 0.0
     rerank_score: float = 0.0
     final_score: float = 0.0
@@ -85,4 +86,21 @@ class VectorBackend(Protocol):
 
     def close(self) -> None:
         """Close backend connections."""
+        ...
+
+    def touch_vector(self, key: MemoryKey) -> None:
+        """Update ``accessed_at`` to now.  No-op if key doesn't exist."""
+        ...
+
+    def list_by_type(
+        self,
+        memory_type: str,
+        older_than: datetime | None = None,
+        limit: int = 100,
+    ) -> list[VectorEntry]:
+        """List entries of a given type, optionally filtered by age."""
+        ...
+
+    def purge_expired(self) -> int:
+        """Delete entries whose ``expires_at`` is in the past.  Returns count."""
         ...

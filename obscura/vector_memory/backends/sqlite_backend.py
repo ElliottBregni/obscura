@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -19,6 +20,8 @@ from obscura.vector_memory.vector_memory_filters import (
     MetadataFilter,
     match_metadata_filters,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -42,9 +45,15 @@ class SQLiteBackend:
     Thread-safe with per-thread connections.
     """
 
-    def __init__(self, config: BackendConfig, db_path: Path | None = None):
+    def __init__(
+        self,
+        config: BackendConfig,
+        db_path: Path | None = None,
+        decay_config: Any | None = None,
+    ):
         """Initialize SQLite backend."""
         self.config = config
+        self._decay_config = decay_config
         self._db_id = hashlib.sha256(config.user_id.encode()).hexdigest()[:16]
 
         if db_path is None:
@@ -103,6 +112,17 @@ class SQLiteBackend:
         )
 
         conn.commit()
+
+        # Schema migration: add accessed_at column (idempotent)
+        try:
+            conn.execute("ALTER TABLE vector_memory ADD COLUMN accessed_at TIMESTAMP")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_vec_memory_accessed ON vector_memory(accessed_at)",
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists — expected on subsequent runs
+            pass
 
     def store_vector(
         self,
@@ -166,6 +186,9 @@ class SQLiteBackend:
             updated_at=datetime.fromisoformat(row["updated_at"])
             if row["updated_at"]
             else None,
+            accessed_at=datetime.fromisoformat(row["accessed_at"])
+            if row["accessed_at"]
+            else None,
         )
 
     def search_vectors(
@@ -204,36 +227,47 @@ class SQLiteBackend:
             if filters and not match_metadata_filters(metadata, filters):
                 continue
 
+            created_at = datetime.fromisoformat(row["created_at"])
+            updated_at = (
+                datetime.fromisoformat(row["updated_at"])
+                if row["updated_at"]
+                else None
+            )
+            accessed_at_raw = row["accessed_at"] if "accessed_at" in row.keys() else None
+            accessed_at = (
+                datetime.fromisoformat(accessed_at_raw)
+                if accessed_at_raw
+                else None
+            )
+
+            # Per-type decay via centralized compute_decay
+            from obscura.vector_memory.decay import compute_decay as _compute_decay
+
+            if self._decay_config is not None:
+                decay = _compute_decay(
+                    row["memory_type"], created_at, accessed_at, self._decay_config,
+                )
+            elif getattr(self.config, "decay_half_life_seconds", None):
+                # Legacy single half-life fallback
+                half_life = self.config.decay_half_life_seconds or (30 * 86400)
+                age_s = (datetime.now(UTC) - created_at).total_seconds()
+                decay = 0.5 ** (age_s / half_life) if half_life > 0 else 1.0
+            else:
+                decay = 1.0
+
             entry = VectorEntry(
                 key=MemoryKey(namespace=row["namespace"], key=row["key"]),
                 text=row["text"],
                 embedding=embedding,
                 metadata=metadata,
                 memory_type=row["memory_type"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"])
-                if row["updated_at"]
-                else None,
+                created_at=created_at,
+                updated_at=updated_at,
+                accessed_at=accessed_at,
                 score=similarity,
+                rerank_score=decay,
+                final_score=similarity * decay,
             )
-            # Apply time-based decay if configured in backend config
-            try:
-                half_life = self.config.decay_half_life_seconds if getattr(self.config, 'decay_half_life_seconds', None) is not None else None
-            except Exception:
-                half_life = None
-            if half_life:
-                now = datetime.now(UTC)
-                try:
-                    created = datetime.fromisoformat(row['created_at'])
-                    age_seconds = (now - created).total_seconds()
-                    decay = 0.5 ** (age_seconds / half_life) if half_life > 0 else 1.0
-                except Exception:
-                    decay = 1.0
-                entry.rerank_score = decay
-                entry.final_score = entry.score * decay
-            else:
-                entry.rerank_score = 1.0
-                entry.final_score = entry.score
             results.append(entry)
 
         results.sort(key=lambda x: x.final_score, reverse=True)
@@ -291,6 +325,63 @@ class SQLiteBackend:
             "db_path": str(self.db_path),
             "embedding_dim": self.config.embedding_dim,
         }
+
+    def touch_vector(self, key: MemoryKey) -> None:
+        """Update ``accessed_at`` to now.  No-op if key doesn't exist."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE vector_memory SET accessed_at = ? WHERE namespace = ? AND key = ?",
+            (datetime.now(UTC).isoformat(), key.namespace, key.key),
+        )
+        conn.commit()
+
+    def list_by_type(
+        self,
+        memory_type: str,
+        older_than: datetime | None = None,
+        limit: int = 100,
+    ) -> list[VectorEntry]:
+        """List entries of a given type, optionally filtered by age."""
+        conn = self._get_conn()
+        query = "SELECT * FROM vector_memory WHERE memory_type = ?"
+        params: list[Any] = [memory_type]
+        if older_than is not None:
+            query += " AND created_at < ?"
+            params.append(older_than.isoformat())
+        query += " ORDER BY created_at ASC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        entries: list[VectorEntry] = []
+        for row in rows:
+            accessed_at_raw = row["accessed_at"] if "accessed_at" in row.keys() else None
+            entries.append(
+                VectorEntry(
+                    key=MemoryKey(namespace=row["namespace"], key=row["key"]),
+                    text=row["text"],
+                    embedding=json.loads(row["embedding"]),
+                    metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                    memory_type=row["memory_type"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    updated_at=datetime.fromisoformat(row["updated_at"])
+                    if row["updated_at"]
+                    else None,
+                    accessed_at=datetime.fromisoformat(accessed_at_raw)
+                    if accessed_at_raw
+                    else None,
+                ),
+            )
+        return entries
+
+    def purge_expired(self) -> int:
+        """Delete entries whose ``expires_at`` is in the past."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM vector_memory WHERE expires_at IS NOT NULL AND expires_at < ?",
+            (datetime.now(UTC).isoformat(),),
+        )
+        conn.commit()
+        return cursor.rowcount
 
     def close(self) -> None:
         """Close the database connection."""
