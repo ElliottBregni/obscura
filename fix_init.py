@@ -9,7 +9,7 @@ print(f'Before: {len(lines)} lines')
 #   31-35: duplicate `from obscura.tools.system.intelligence import (...)` block
 #   2965-2968: dangling cast lines after the `]` closing static_specs
 bad = set(range(31, 36)) | set(range(2965, 2969))
-new = [l for i, l in enumerate(lines) if i not in bad]
+new = [line for i, line in enumerate(lines) if i not in bad]
 print(f'After: {len(new)} lines ({len(lines) - len(new)} lines removed)')
 open(f, 'w').writelines(new)
 print('Done ✓')
