@@ -4504,3 +4504,9 @@ async def handle_command(raw: str, ctx: REPLContext) -> str | None:
 def cmd_secret(*args, **kwargs):
     """Deprecated placeholder command used in tests. Returns None."""
     return None
+
+
+def set_secret_menu_visibility(visible: bool) -> None:
+    """Stub: set visibility for secret menu (tests toggle this)."""
+    # In real app this would toggle behavior; stub stores no state.
+    return None
