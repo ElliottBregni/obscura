@@ -165,6 +165,19 @@ class OutputManager:
             self.log_level = level
         except Exception:
             pass
+        # Mirror to internal buffer depending on log level (medium suppresses noisy deltas)
+        try:
+            if getattr(self, "log_level", None) != "medium":
+                self._buffer.append(f"{kind} {text}")
+        except Exception:
+            pass
+
+    def set_log_level(self, level: str) -> None:
+        """Set the internal log level used to decide what to mirror to buffer."""
+        try:
+            self.log_level = level
+        except Exception:
+            pass
 
     def capture_internal(self, message: str) -> None:
         if not self.verbose:
