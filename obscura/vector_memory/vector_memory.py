@@ -422,7 +422,7 @@ class VectorMemoryStore:
 
         for entry in candidates:
             entry.rerank_score = reranker.score(query, entry, query_embedding)
-            entry.final_score = entry.score + entry.rerank_score
+            entry.final_score = entry.score * entry.rerank_score
 
         candidates.sort(key=lambda x: x.final_score, reverse=True)
         return candidates[:top_k]
