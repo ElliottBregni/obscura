@@ -177,9 +177,12 @@ class MemoryConsolidator:
         """
         import asyncio
 
+        from obscura.core.auth import AuthConfig
         from obscura.providers.copilot import CopilotBackend
 
+        auth = AuthConfig()
         backend = CopilotBackend(
+            auth,
             model="gpt-4o-mini",
             system_prompt="You are a concise summarizer.",
         )

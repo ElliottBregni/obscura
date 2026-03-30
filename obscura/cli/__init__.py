@@ -574,15 +574,25 @@ async def _repl(
     store = SQLiteEventStore(db_path)
     sid = session_id or uuid.uuid4().hex
 
-    # Load .env best-effort
+    # Load .env best-effort — global first, then project-local overlay.
+    # load_dotenv(override=False) never overwrites already-set vars, so
+    # ordering is: shell env > global ~/.obscura/.env > project .obscura/.env > CWD .env
     try:
         from dotenv import load_dotenv
+        from obscura.core.paths import resolve_obscura_global_home
 
-        # Load .env from ~/.obscura/ (or $OBSCURA_HOME), then CWD as fallback
-        home_env = resolve_obscura_home() / ".env"
-        if home_env.is_file():
-            load_dotenv(home_env)
-        load_dotenv()  # CWD .env (won't overwrite already-set vars)
+        # 1. Always load the global ~/.obscura/.env (user-wide creds/keys)
+        global_env = resolve_obscura_global_home() / ".env"
+        if global_env.is_file():
+            load_dotenv(global_env)
+
+        # 2. Load project-local .obscura/.env if it differs from global
+        local_env = resolve_obscura_home() / ".env"
+        if local_env.is_file() and local_env.resolve() != global_env.resolve():
+            load_dotenv(local_env)
+
+        # 3. CWD .env (won't overwrite already-set vars)
+        load_dotenv()
     except Exception:
         pass
 
