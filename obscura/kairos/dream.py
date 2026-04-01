@@ -23,8 +23,6 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime, timezone
-from datetime import datetime, timezone
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +91,18 @@ class DreamConsolidator:
         self._min_hours = min_hours
         self._min_sessions = min_sessions
 
+    def _memory_dir(self) -> Path:
+        """Runtime-resolved memory directory (respects $HOME)."""
+        return Path.home() / ".obscura" / "memory"
+
+    def _lock_file(self) -> Path:
+        """Path to the consolidation lock file."""
+        return self._memory_dir() / ".consolidate-lock"
+
+    def _memory_index(self) -> Path:
+        """Path to the MEMORY.md index file."""
+        return self._memory_dir() / "MEMORY.md"
+
     def should_run(self) -> bool:
         """Check all gates to determine if consolidation should run."""
         # Gate 1: Time since last consolidation.
@@ -126,11 +136,11 @@ class DreamConsolidator:
 
         try:
             logger.info("Dream consolidation starting...")
-            _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+            self._memory_dir().mkdir(parents=True, exist_ok=True)
 
             # Ensure MEMORY.md exists.
-            if not _MEMORY_INDEX.exists():
-                _MEMORY_INDEX.write_text(
+            if not self._memory_index().exists():
+                self._memory_index().write_text(
                     "# Memory Index\n\nNo memories recorded yet.\n",
                     encoding="utf-8",
                 )
@@ -157,9 +167,27 @@ class DreamConsolidator:
             self._update_lock_timestamp()
 
     def _last_consolidated_at(self) -> float:
-        """Return timestamp of last consolidation (lock file mtime)."""
-        if _LOCK_FILE.exists():
-            return _LOCK_FILE.stat().st_mtime
+        """Return timestamp of last consolidation.
+
+        Prefer explicit timestamp stored in the lock file metadata (JSON).
+        Fall back to the lock file mtime for compatibility.
+        """
+        if not self._lock_file().exists():
+            return 0.0
+        try:
+            raw = self._lock_file().read_text(encoding="utf-8")
+            import json
+
+            data = json.loads(raw)
+            ts = float(data.get("ts", 0))
+            if ts > 0:
+                return ts
+        except Exception:
+            # Fall back to mtime if file doesn't contain JSON or parse fails.
+            try:
+                return self._lock_file().stat().st_mtime
+            except Exception:
+                return 0.0
         return 0.0
 
     def _sessions_since(self, since_ts: float) -> int:
@@ -187,46 +215,94 @@ class DreamConsolidator:
             return 0
 
     def _is_locked(self) -> bool:
-        """Check if another process holds the consolidation lock."""
-        if not _LOCK_FILE.exists():
+        """Check if another process holds the consolidation lock.
+
+        Lock file now stores JSON: {"pid": <int>, "ts": <float epoch seconds>}.
+        Returns True if the PID appears to be running. On PermissionError,
+        conservatively treat the lock as held (True).
+        """
+        if not self._lock_file().exists():
             return False
         try:
-            content = _LOCK_FILE.read_text().strip()
-            pid = int(content)
-            # Check if PID is still running.
+            raw = self._lock_file().read_text(encoding="utf-8")
+            import json
+
+            data = json.loads(raw)
+            pid = int(data.get("pid", 0))
+        except Exception:
+            # Backwards compatibility: file might contain plain PID.
+            try:
+                pid = int(self._lock_file().read_text(encoding="utf-8").strip())
+            except Exception:
+                return False
+
+        try:
             os.kill(pid, 0)
-            return True  # Process exists.
-        except (ValueError, ProcessLookupError, PermissionError):
-            return False  # Stale lock.
+            return True
+        except ProcessLookupError:
+            # PID does not exist -> stale lock
+            return False
+        except PermissionError:
+            # Unable to query PID -> assume it's held by another user/process
+            return True
+        except Exception:
+            return False
 
     def _acquire_lock(self) -> bool:
         """Try to acquire the consolidation lock."""
-        _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        self._memory_dir().mkdir(parents=True, exist_ok=True)
         if self._is_locked():
             return False
-        _LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
-        return True
+        # Write JSON metadata atomically.
+        try:
+            import json
+
+            meta = {"pid": os.getpid(), "ts": time.time()}
+            tmp = self._lock_file().with_suffix(".tmp")
+            tmp.write_text(json.dumps(meta), encoding="utf-8")
+            os.replace(str(tmp), str(self._lock_file()))
+            return True
+        except Exception:
+            return False
 
     def _rollback_lock(self) -> None:
         """Remove lock on failure (allow retry)."""
-        _LOCK_FILE.unlink(missing_ok=True)
+        self._lock_file().unlink(missing_ok=True)
 
     def _update_lock_timestamp(self) -> None:
-        """Touch the lock file to record consolidation time."""
-        _LOCK_FILE.touch()
+        """Update the lock file timestamp stored in JSON metadata.
+
+        Fall back to touching the file if parsing/writing fails.
+        """
+        if not self._lock_file().exists():
+            return
+        try:
+            import json
+
+            raw = self._lock_file().read_text(encoding="utf-8")
+            data = json.loads(raw)
+            data["ts"] = time.time()
+            tmp = self._lock_file().with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(str(tmp), str(self._lock_file()))
+        except Exception:
+            try:
+                self._lock_file().touch()
+            except Exception:
+                pass
 
     def _prune_index(self) -> None:
         """Ensure MEMORY.md stays within limits."""
-        if not _MEMORY_INDEX.exists():
+        if not self._memory_index().exists():
             return
-        content = _MEMORY_INDEX.read_text(encoding="utf-8")
+        content = self._memory_index().read_text(encoding="utf-8")
         lines = content.splitlines()
         if len(lines) > MEMORY_INDEX_MAX_LINES:
             lines = lines[:MEMORY_INDEX_MAX_LINES]
             lines.append("\n<!-- Truncated: index exceeded 200 lines -->")
-            _MEMORY_INDEX.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self._memory_index().write_text("\n".join(lines) + "\n", encoding="utf-8")
         if len(content.encode("utf-8")) > MEMORY_INDEX_MAX_BYTES:
             # Binary chop to fit.
             while len("\n".join(lines).encode("utf-8")) > MEMORY_INDEX_MAX_BYTES and lines:
                 lines.pop()
-            _MEMORY_INDEX.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self._memory_index().write_text("\n".join(lines) + "\n", encoding="utf-8")
