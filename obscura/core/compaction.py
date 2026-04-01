@@ -318,7 +318,131 @@ async def compact_history(
         estimate_messages_tokens(current),
         history_budget,
     )
-    return current, was_compacted
+
+    # ── Memory extraction from pruned messages ─────────────────────────────
+    extracted_memories: list[dict[str, str]] = []
+    if was_compacted and prune_count > 0:
+        # Collect the messages that were dropped (first prune_count msgs).
+        dropped = messages[:prune_count]
+        try:
+            extracted_memories = await extract_memories(dropped, model_id, backend)
+            if extracted_memories:
+                logger.info(
+                    "compact_history: extracted %d memories from %d pruned messages",
+                    len(extracted_memories),
+                    len(dropped),
+                )
+        except Exception:
+            logger.debug("compact_history: memory extraction failed", exc_info=True)
+
+    return current, was_compacted, extracted_memories
+
+
+async def extract_memories(
+    messages: list[Any],
+    model_id: str,
+    backend: Any,
+) -> list[dict[str, str]]:
+    """Extract key facts/learnings from messages before they are discarded.
+
+    Sends the about-to-be-pruned conversation segment to the LLM with
+    a memory extraction prompt. Returns a list of {"key": ..., "value": ...}
+    entries suitable for storage in MemoryStore.
+
+    Pattern from claude-code's ``extractMemories`` service.
+    """
+    if not messages:
+        return []
+
+    lines: list[str] = []
+    for msg in messages:
+        role = _get_role(msg) or "unknown"
+        content = _get_content(msg)
+        if isinstance(content, str):
+            lines.append(f"[{role}]: {content[:500]}")
+        elif isinstance(content, list):
+            for block in content:
+                if _get_block_type(block) == "text":
+                    text = _get_block_text(block)
+                    if text:
+                        lines.append(f"[{role}]: {text[:500]}")
+
+    if not lines:
+        return []
+
+    # Strip image blocks to avoid bloating the extraction request.
+    conversation_text = "\n".join(lines)
+    # Cap at ~10K chars to avoid exceeding context.
+    if len(conversation_text) > 10_000:
+        conversation_text = conversation_text[:10_000] + "\n...[truncated]"
+
+    prompt = (
+        "Extract key facts, decisions, and learnings from this conversation segment "
+        "that should be remembered for future sessions. Return a JSON array of objects "
+        "with 'key' and 'value' fields. Only include genuinely useful information — "
+        "file paths, architectural decisions, user preferences, error resolutions, etc.\n\n"
+        "Example output:\n"
+        '[{"key": "auth_approach", "value": "Using JWT with 24h expiry, refresh tokens in httpOnly cookies"},\n'
+        ' {"key": "user_pref_testing", "value": "User prefers integration tests over unit tests for DB code"}]\n\n'
+        "If there's nothing worth remembering, return an empty array: []\n\n"
+        f"<conversation>\n{conversation_text}\n</conversation>\n\n"
+        "JSON array:"
+    )
+
+    try:
+        result_text = ""
+        if hasattr(backend, "complete"):
+            result_text = str(await backend.complete(prompt, max_tokens=1024)).strip()
+        elif hasattr(backend, "generate"):
+            result_text = str(await backend.generate(prompt, max_tokens=1024)).strip()
+        elif hasattr(backend, "chat"):
+            result = await backend.chat([{"role": "user", "content": prompt}])
+            if isinstance(result, dict):
+                result_text = str(result.get("content", result.get("text", ""))).strip()
+            else:
+                result_text = str(result).strip()
+
+        if not result_text:
+            return []
+
+        # Parse JSON from response (may have markdown wrapping).
+        import json
+        import re
+        # Strip markdown code fences if present.
+        cleaned = re.sub(r"```(?:json)?\s*", "", result_text).strip()
+        cleaned = cleaned.rstrip("`").strip()
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, list):
+            return [
+                {"key": str(m.get("key", "")), "value": str(m.get("value", ""))}
+                for m in parsed
+                if isinstance(m, dict) and m.get("key") and m.get("value")
+            ]
+        return []
+    except Exception:
+        logger.debug("extract_memories: failed to parse response", exc_info=True)
+        return []
+
+
+def should_auto_compact(
+    messages: list[Any],
+    model_id: str,
+    system_prompt: str = "",
+    threshold: float = 0.80,
+) -> bool:
+    """Check if auto-compaction should trigger.
+
+    Returns True if token usage exceeds *threshold* (default 80%) of the
+    context window.
+    """
+    if not messages:
+        return False
+    context_window = get_context_window(model_id)
+    sys_tokens = estimate_tokens(system_prompt) if system_prompt else 0
+    msg_tokens = estimate_messages_tokens(messages)
+    used = sys_tokens + msg_tokens
+    usage_ratio = used / context_window if context_window > 0 else 0.0
+    return usage_ratio >= threshold
 
 
 # ── Message duck-typing helpers ────────────────────────────────────────────────

@@ -5072,6 +5072,100 @@ async def cmd_cache_stats(_args: str, _ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_workflow(args: str, ctx: REPLContext) -> str | None:
+    """Run or list workflow scripts. Usage: /workflow list|run <name>"""
+    from obscura.core.workflows import list_workflows, load_workflow, run_workflow
+
+    parts = args.strip().split(None, 1)
+    sub = parts[0] if parts else "list"
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if sub == "list":
+        workflows = list_workflows()
+        if not workflows:
+            print_info("No workflows found. Create one in ~/.obscura/workflows/")
+            return None
+        table = Table(title="Workflows", expand=False)
+        table.add_column("Name", width=20)
+        table.add_column("Steps", width=8, justify="right")
+        table.add_column("Description", max_width=40)
+        for wf in workflows:
+            table.add_row(wf.name, str(len(wf.steps)), wf.description[:40])
+        console.print(table)
+        return None
+
+    if sub == "run":
+        name = rest.strip()
+        if not name:
+            print_error("Usage: /workflow run <name>")
+            return None
+        wf = load_workflow(name)
+        if wf is None:
+            print_error(f"Workflow not found: {name}")
+            return None
+        print_info(f"Running workflow '{wf.name}' ({len(wf.steps)} steps)...")
+
+        def on_start(step_name: str) -> None:
+            console.print(f"[cyan]Step: {step_name}[/]")
+
+        def on_done(step_name: str, result: dict[str, Any]) -> None:
+            status = result.get("status", "?")
+            icon = "[green]✓[/]" if status == "ok" else "[red]✗[/]"
+            console.print(f"  {icon} {step_name}: {status}")
+
+        results = await run_workflow(wf, ctx.client, on_step_start=on_start, on_step_complete=on_done)
+        ok_count = sum(1 for r in results if r["status"] == "ok")
+        print_ok(f"Workflow complete: {ok_count}/{len(results)} steps succeeded")
+        return None
+
+    print_info("Usage: /workflow list|run <name>")
+    return None
+
+
+async def cmd_peers(_args: str, ctx: REPLContext) -> str | None:
+    """List other running obscura sessions (peer discovery)."""
+    from obscura.kairos.uds_messaging import discover_peers
+
+    peers = discover_peers()
+    if not peers:
+        print_info("No other sessions found.")
+        return None
+
+    current = ctx.session_id[:12] if ctx.session_id else "?"
+    table = Table(title="Active Peers", expand=False)
+    table.add_column("Session ID", width=14)
+    table.add_column("Status", width=8)
+    for p in peers:
+        is_self = "(self)" if p.startswith(current) else ""
+        table.add_row(p[:12], f"active {is_self}")
+    console.print(table)
+    return None
+
+
+async def cmd_send(args: str, ctx: REPLContext) -> str | None:
+    """Send a message to another session. Usage: /send <session_id> <message>"""
+    from obscura.kairos.uds_messaging import send_message as uds_send
+
+    parts = args.strip().split(None, 1)
+    if len(parts) < 2:
+        print_error("Usage: /send <session_id> <message>")
+        return None
+    target = parts[0]
+    message_text = parts[1]
+
+    delivered = await uds_send(target, {
+        "type": "text",
+        "from": ctx.session_id[:12] if ctx.session_id else "unknown",
+        "text": message_text,
+        "timestamp": __import__("time").time(),
+    })
+    if delivered:
+        print_ok(f"Message sent to {target[:12]}")
+    else:
+        print_error(f"Failed to deliver to {target[:12]} (session may not be running)")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -5161,6 +5255,10 @@ COMMANDS: dict[str, CommandHandler] = {
     # Context & cache
     "suggestions": cmd_suggestions,
     "cache-stats": cmd_cache_stats,
+    # Workflows & messaging
+    "workflow": cmd_workflow,
+    "peers": cmd_peers,
+    "send": cmd_send,
 }
 
 # Subcommand completions for readline tab-complete
@@ -5233,6 +5331,9 @@ COMPLETIONS: dict[str, list[str]] = {
     "kill-session": [],
     "suggestions": [],
     "cache-stats": [],
+    "workflow": ["list", "run"],
+    "peers": [],
+    "send": [],
 }
 
 # Add secret menu stub (tests toggle visibility)

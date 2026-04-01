@@ -814,6 +814,14 @@ async def _repl(
         except Exception:
             pass
 
+        # Add browser automation tool (Playwright)
+        try:
+            from obscura.tools.browser import get_browser_tool_specs
+
+            system_tools.extend(get_browser_tool_specs())
+        except Exception:
+            pass
+
         # Load builtin plugin tools — filtered by workspace packs when available
         try:
             existing_names = {t.name for t in system_tools}
@@ -1333,6 +1341,36 @@ async def _repl(
                     break
                 if not user_input:
                     continue
+
+                # Voice input: intercept __VOICE_RECORD__ marker from Ctrl+Space.
+                if user_input == "__VOICE_RECORD__":
+                    voice_enabled = getattr(ctx, "_voice_enabled", False)
+                    if not voice_enabled:
+                        console.print("[dim]Voice mode is off. Enable with /voice on[/]")
+                        continue
+                    try:
+                        from obscura.voice.session import VoiceSession
+                        _vsession = VoiceSession()
+                        if not _vsession.is_available:
+                            console.print(f"[red]Voice unavailable: {_vsession.install_hint}[/]")
+                            continue
+                        console.print("[yellow]Recording... (speak now, press Enter when done)[/]")
+                        await _vsession.start_recording()
+                        # Wait for user to press Enter to stop.
+                        try:
+                            await bordered_prompt(session)
+                        except (EOFError, KeyboardInterrupt):
+                            pass
+                        transcript = await _vsession.stop_and_transcribe()
+                        if transcript:
+                            console.print(f"[green]Voice:[/] {transcript}")
+                            user_input = transcript
+                        else:
+                            console.print("[dim]No speech detected.[/]")
+                            continue
+                    except Exception as voice_exc:
+                        console.print(f"[red]Voice error: {voice_exc}[/]")
+                        continue
 
                 # KAIROS: log user message
                 if _kairos_engine is not None and _kairos_engine.is_running:

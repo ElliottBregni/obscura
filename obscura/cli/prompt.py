@@ -344,6 +344,17 @@ def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
     def _expand_thinking(event: object) -> None:  # pyright: ignore[reportUnusedFunction]
         _expand_thinking_action()
 
+    # Voice input: Ctrl+Space triggers push-to-talk recording
+    @kb.add("c-space")
+    def _voice_record(event: object) -> None:  # pyright: ignore[reportUnusedFunction]
+        from prompt_toolkit.key_binding import KeyPressEvent
+
+        assert isinstance(event, KeyPressEvent)
+        buf = event.current_buffer
+        # Insert a voice marker that the REPL will intercept.
+        buf.text = "__VOICE_RECORD__"
+        buf.validate_and_handle()
+
     return kb
 
 
