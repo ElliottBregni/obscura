@@ -22,9 +22,17 @@ import asyncio
 import time
 import uuid
 from pathlib import Path
+import logging
 from typing import Any
 
 import click
+
+_log = logging.getLogger("obscura.cli")
+
+
+def _swallow(label: str, exc: Exception) -> None:
+    """Log a swallowed exception at DEBUG level instead of silently ignoring."""
+    _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
 from obscura.cli.commands import (
     COMPLETIONS,
@@ -217,13 +225,29 @@ async def send_message(
         pass
     accumulated: list[str] = []
 
-    # Build confirm callback if enabled
-    confirm_cb = None
-    if ctx.confirm_enabled:
-        from obscura.core.types import ToolCallInfo
+    # Build confirm callback with permission mode integration.
+    # This callback is called by AgentLoop before every tool execution.
+    from obscura.core.types import ToolCallInfo
 
-        async def confirm_cb(tc: ToolCallInfo) -> bool:
+    async def confirm_cb(tc: ToolCallInfo) -> bool:
+        # 1. Check permission mode (dangerous patterns + mode restrictions).
+        try:
+            from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+            mode_str = getattr(ctx, "_permission_mode", "default")
+            engine = PermissionModeEngine(PermissionMode(mode_str))
+            decision = engine.evaluate(tc.name, tc.input)
+            if not decision.allowed:
+                from obscura.cli.render import print_warning
+                print_warning(f"Blocked by {mode_str} mode: {tc.name}")
+                return False
+            if decision.auto_approved:
+                return True
+        except Exception:
+            pass
+        # 2. If confirm is enabled, prompt user.
+        if ctx.confirm_enabled:
             return await _cli_confirm(ctx, tc.name, tc.input)
+        return True
 
     # ── Token-aware auto-compact ────────────────────────────────────────────
     # Use provider-specific thresholds from ctx.client so Claude (200k),
@@ -291,6 +315,7 @@ async def send_message(
         )
         await cmd_compact("6", ctx)
 
+    _tip_scheduler = None  # initialised later; declared here so nested fn can reference it
     # ── Streaming with graceful retry on context-limit errors ────────────────
     async def _stream_with_retry(
         context_retry_used: bool = False, dead_session_retry_used: bool = False
@@ -299,10 +324,10 @@ async def send_message(
         _buf: list[str] = []
         # Inject effort-level thinking budget if set.
         _effective_kwargs = dict(loop_kwargs)
-        if hasattr(ctx, "_effort_level") and ctx._effort_level:  # type: ignore[attr-defined]
+        if hasattr(ctx, "_effort_level") and ctx._effort_level:
             try:
                 from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
-                _lvl = EffortLevel(ctx._effort_level)  # type: ignore[attr-defined]
+                _lvl = EffortLevel(ctx._effort_level)
                 _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[_lvl]
             except (ValueError, KeyError):
                 pass
@@ -341,6 +366,22 @@ async def send_message(
                     _stream_output_chars += len(event.text)
                     _push_stream_token_usage()
                 _track_file_event(event.kind, ctx, event)
+                # Deep logging: log every tool call and API event.
+                try:
+                    from obscura.core.deep_log import dlog
+                    if event.kind == AgentEventKind.TOOL_CALL:
+                        dlog.tool_call(
+                            getattr(event, "tool_name", ""),
+                            getattr(event, "tool_input", {}),
+                        )
+                    elif event.kind == AgentEventKind.TOOL_RESULT:
+                        dlog.tool_call(
+                            getattr(event, "tool_name", ""),
+                            ok=not getattr(event, "is_error", False),
+                            result_preview=str(getattr(event, "tool_result", ""))[:200],
+                        )
+                except Exception:
+                    pass
                 # Tool output collapsing: group consecutive read/search calls.
                 if event.kind == AgentEventKind.TOOL_CALL:
                     tool_name = getattr(event, "tool_name", "")
@@ -348,10 +389,18 @@ async def send_message(
                     try:
                         from obscura.cli.tool_collapse import ToolCollapser
                         if not hasattr(ctx, "_collapser"):
-                            ctx._collapser = ToolCollapser()  # type: ignore[attr-defined]
-                        ctx._collapser.record(tool_name, tool_input)  # type: ignore[attr-defined]
+                            ctx._collapser = ToolCollapser()
+                        ctx._collapser.record(tool_name, tool_input)
                     except Exception:
                         pass
+                    # Tips: record tool type for targeted tips.
+                    if _tip_scheduler is not None:
+                        _FILE_TOOLS = {"write_text_file", "edit_text_file", "append_text_file"}
+                        _SEARCH_TOOLS = {"grep_files", "find_files", "web_search"}
+                        if tool_name in _FILE_TOOLS:
+                            _tip_scheduler.record_edit()
+                        elif tool_name in _SEARCH_TOOLS:
+                            _tip_scheduler.record_search()
                 elif event.kind == AgentEventKind.TEXT_DELTA:
                     # Flush collapsed tools before text output.
                     collapser = getattr(ctx, "_collapser", None)
@@ -366,8 +415,14 @@ async def send_message(
                 if event.kind in (AgentEventKind.TURN_COMPLETE, AgentEventKind.AGENT_DONE):
                     meta = getattr(event, "metadata", None)
                     if meta is not None:
-                        inp = getattr(meta, "input_tokens", 0) or 0
-                        out = getattr(meta, "output_tokens", 0) or 0
+                        # StreamMetadata stores usage in .usage dict, not direct attributes.
+                        _usage = getattr(meta, "usage", None) or {}
+                        if isinstance(_usage, dict):
+                            inp = _usage.get("input_tokens", 0) or 0
+                            out = _usage.get("output_tokens", 0) or 0
+                        else:
+                            inp = getattr(_usage, "input_tokens", 0) or 0
+                            out = getattr(_usage, "output_tokens", 0) or 0
                         if inp > 0 or out > 0:
                             try:
                                 from obscura.core.cost_tracker import get_cost_tracker
@@ -482,6 +537,32 @@ async def send_message(
             f"Auto-compact at {_compact_threshold:,} (60%).[/]"
         )
 
+    # Auto-compact: trigger if context exceeds 80% of window.
+    if _post_tokens > _compact_threshold:
+        try:
+            from obscura.core.compaction import should_auto_compact
+            if should_auto_compact(
+                [{"role": r, "content": t} for r, t in ctx.message_history],
+                ctx.model or "default",
+                system_prompt=ctx.system_prompt,
+            ):
+                console.print("[dim cyan]  Auto-compacting context...[/]")
+                from obscura.cli.commands import cmd_compact
+                await cmd_compact("4", ctx)
+        except Exception:
+            pass
+
+    # Auto-title: generate session title after first exchange.
+    if not _session_state["titled"] and len(ctx.message_history) >= 2:
+        _session_state["titled"] = True
+        try:
+            from obscura.core.session_utils import generate_session_title
+            title = await generate_session_title(text, ctx.client._backend)
+            if title:
+                await ctx.store.update_summary(ctx.session_id, title)
+        except Exception:
+            pass
+
     # Parse plan if in PLAN mode
     _maybe_parse_plan(response_text, ctx)
 
@@ -583,8 +664,7 @@ async def _start_imessage_daemon(
         await daemon_client.__aenter__()
 
         daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
-        daemon._bus = bus  # type: ignore[attr-defined]
-
+        daemon._bus = bus
         task: asyncio.Task[None] = asyncio.create_task(
             daemon.loop_forever(),  # type: ignore[arg-type]
             name=f"daemon-{agent_def.name}",
@@ -601,7 +681,7 @@ async def _start_imessage_daemon(
 
         task.add_done_callback(_on_task_done)
         # Stash client on the task so we can close it later
-        task._daemon_client = daemon_client  # type: ignore[attr-defined]
+        task._daemon_client = daemon_client
         return task
 
     return None
@@ -1271,18 +1351,33 @@ async def _repl(
             from obscura.kairos.engine import KairosEngine, is_kairos_enabled
             if is_kairos_enabled():
                 _kairos_engine = KairosEngine()
-                import asyncio as _kairos_aio
-                _kairos_aio.get_event_loop().run_until_complete(_kairos_engine.start())
-        except Exception:
-            pass
+                await _kairos_engine.start()
+        except Exception as _e:
+            _swallow("kairos_start", _e)
 
         # --- Tips scheduler ---
         _tip_scheduler = None
         try:
             from obscura.cli.tips import TipScheduler
             _tip_scheduler = TipScheduler()
-        except Exception:
-            pass
+        except Exception as _e:
+            _swallow("tips_init", _e)
+
+        # --- Frustration detector ---
+        _frustration_detector = None
+        try:
+            from obscura.kairos.frustration import FrustrationDetector
+            _frustration_detector = FrustrationDetector()
+        except Exception as _e:
+            _swallow("frustration_init", _e)
+
+        # --- Away summary tracker ---
+        _away_tracker = None
+        try:
+            from obscura.kairos.away_summary import AwaySummaryTracker
+            _away_tracker = AwaySummaryTracker()
+        except Exception as _e:
+            _swallow("away_init", _e)
 
         # --- Prompt cache ---
         _prompt_cache = None
@@ -1296,9 +1391,51 @@ async def _repl(
         try:
             from obscura.core.cleanup import register_cleanup, cleanup_stale_files
             register_cleanup("stale_files", lambda: cleanup_stale_files(max_age_days=30))
-            register_cleanup("cost_save", lambda: None)  # placeholder for future cost persistence
+        except Exception as _e:
+            _swallow("cleanup_init", _e)
+
+        # --- Concurrent session detection ---
+        try:
+            from obscura.core.session_utils import (
+                register_session, unregister_session, check_concurrent_sessions,
+                install_signal_handlers, register_shutdown_handler,
+            )
+            register_session(sid, backend=backend_name, model=model_name or "")
+            register_shutdown_handler(lambda: unregister_session(sid))
+            install_signal_handlers()
+            concurrent = check_concurrent_sessions(sid)
+            if concurrent:
+                console.print(
+                    f"[yellow]Note: {len(concurrent)} other session(s) running in this workspace[/]"
+                )
         except Exception:
             pass
+
+        # --- Deep log session start ---
+        try:
+            from obscura.core.deep_log import dlog
+            dlog.session_event("start", session_id=sid, backend=backend_name, model=model_name or "")
+        except Exception:
+            pass
+
+        # --- UDS inbox for cross-session messaging ---
+        _uds_inbox = None
+        try:
+            from obscura.kairos.uds_messaging import UDSInbox
+            _uds_inbox = UDSInbox(sid)
+
+            def _on_peer_message(msg: dict) -> None:
+                sender = msg.get("from", "?")
+                text = msg.get("text", "")
+                console.print(f"\n[bold cyan]Message from {sender}:[/] {text}")
+
+            await _uds_inbox.start(on_message=_on_peer_message)
+        except Exception as _e:
+            _swallow("uds_init", _e)
+            _uds_inbox = None
+
+        # --- Auto-title tracking (mutable container for closure access) ---
+        _session_state = {"titled": False}
 
         background_tasks: set[asyncio.Task[str]] = set()
         try:
@@ -1376,6 +1513,40 @@ async def _repl(
                 if _kairos_engine is not None and _kairos_engine.is_running:
                     try:
                         _kairos_engine.log_user_message(user_input)
+                    except Exception:
+                        pass
+
+                # Keyword detection: "ultrathink" triggers max effort + visual.
+                if "ultrathink" in user_input.lower() and not user_input.startswith("/"):
+                    if getattr(ctx, "_effort_level", "medium") != "max":
+                        ctx._effort_level = "max"
+                        try:
+                            from obscura.cli.tui_effects import ultrathink_banner
+                            ultrathink_banner()
+                        except Exception:
+                            console.print("[bold bright_magenta]⚡ ULTRATHINK activated[/]")
+
+                # Frustration detection: check user input for frustration signals.
+                if _frustration_detector is not None and not user_input.startswith("/"):
+                    try:
+                        _sentiment = _frustration_detector.analyze(user_input)
+                        if _sentiment.is_frustrated and _sentiment.consecutive_frustrations >= 2:
+                            console.print(
+                                "[dim italic]I notice some frustration — "
+                                "let me be more careful with my approach.[/]"
+                            )
+                    except Exception:
+                        pass
+
+                # Away summary: mark user as active, show summary if returning.
+                if _away_tracker is not None:
+                    try:
+                        if _away_tracker.should_generate():
+                            from obscura.kairos.away_summary import generate_away_summary
+                            _summary = await generate_away_summary(ctx.message_history)
+                            if _summary:
+                                console.print(f"[dim]{_summary}[/]")
+                        _away_tracker.mark_active()
                     except Exception:
                         pass
 
@@ -1812,6 +1983,20 @@ async def _repl(
             if background_tasks:
                 await asyncio.gather(*background_tasks, return_exceptions=True)
             await ctx.stop_runtime()
+            # Stop UDS inbox.
+            if _uds_inbox is not None:
+                try:
+                    await _uds_inbox.stop()
+                except Exception:
+                    pass
+            # Flush deep log.
+            try:
+                from obscura.core.deep_log import dlog
+                dlog.session_event("end", session_id=ctx.session_id)
+                dlog.flush()
+                dlog.close()
+            except Exception:
+                pass
             # KAIROS: stop engine + trigger dream consolidation
             if _kairos_engine is not None:
                 try:

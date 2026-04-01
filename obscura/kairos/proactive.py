@@ -92,13 +92,37 @@ class ProactiveMode:
         logger.info("Proactive mode stopped after %d ticks", self._tick_count)
 
     async def _tick_loop(self) -> None:
-        """Periodically send tick prompts."""
+        """Periodically fire tick events for proactive monitoring."""
         while not self._stopped:
             await asyncio.sleep(self._tick_interval)
             if self._stopped:
                 break
             self._tick_count += 1
             self._last_tick = time.time()
+
+            # Log tick to daily log.
+            try:
+                from obscura.kairos.daily_log import DailyLog
+                DailyLog().append(f"tick #{self._tick_count}", source="proactive")
+            except Exception:
+                pass
+
+            # Fire on_tick callback if set.
+            if self._on_tick is not None:
+                try:
+                    result = self._on_tick(self._tick_count)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception:
+                    logger.debug("Proactive tick callback failed", exc_info=True)
+
+            # Log to deep log.
+            try:
+                from obscura.core.deep_log import dlog
+                dlog.event("proactive_tick", tick=self._tick_count)
+            except Exception:
+                pass
+
             logger.debug("Proactive tick #%d", self._tick_count)
 
     @property

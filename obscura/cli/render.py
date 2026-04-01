@@ -165,19 +165,6 @@ class OutputManager:
             self.log_level = level
         except Exception:
             pass
-        # Mirror to internal buffer depending on log level (medium suppresses noisy deltas)
-        try:
-            if getattr(self, "log_level", None) != "medium":
-                self._buffer.append(f"{kind} {text}")
-        except Exception:
-            pass
-
-    def set_log_level(self, level: str) -> None:
-        """Set the internal log level used to decide what to mirror to buffer."""
-        try:
-            self.log_level = level
-        except Exception:
-            pass
 
     def capture_internal(self, message: str) -> None:
         if not self.verbose:
@@ -472,11 +459,20 @@ class StreamRenderer:
         """Display reasoning inline in the chat window."""
         safe = _sanitize_text(text.strip())
         self._thinking_blocks.append(safe)
+
+        # Determine effort level for display customization.
+        try:
+            from obscura.cli.tui_effects import thinking_indicator
+            effort = "medium"  # default
+            title = thinking_indicator(effort)
+        except Exception:
+            title = "reasoning"
+
         console.print(
             Panel(
                 Text(safe, style="dim italic"),
                 border_style=THINKING_COLOR,
-                title="reasoning",
+                title=f"[{THINKING_COLOR}]{title}[/]" if "⟪" not in str(title) else "reasoning",
                 title_align="left",
                 padding=(0, 1),
             )
@@ -692,37 +688,78 @@ def render_plan(plan: Any) -> None:
 
 
 def render_diff_summary(changes: list[Any]) -> None:
-    """Render a summary of file changes with hunk details."""
+    """Render a summary of file changes with hunk details and syntax highlighting."""
     if not changes:
         print_info("No file changes in this session.")
         return
     from obscura.cli.app.diff_engine import DiffEngine
 
     engine = DiffEngine()
+
+    # File-level summary header.
+    total_insertions = 0
+    total_deletions = 0
+    total_hunks = 0
+    for fc in changes:
+        diff_fc = engine.compute_change(fc["path"], fc["original"], fc["modified"])
+        for hunk in diff_fc.hunks:
+            for ln in hunk.lines:
+                if ln.tag == "+":
+                    total_insertions += 1
+                elif ln.tag == "-":
+                    total_deletions += 1
+        total_hunks += len(diff_fc.hunks)
+
+    console.print(
+        f"\n[bold]{len(changes)} file(s) changed[/]  "
+        f"[{OK_COLOR}]+{total_insertions}[/]  "
+        f"[{ERROR_COLOR}]-{total_deletions}[/]  "
+        f"[dim]({total_hunks} hunks)[/]"
+    )
+    console.print(Rule(style="dim"))
+
     hunk_idx = 0
     for fc in changes:
         diff_fc = engine.compute_change(fc["path"], fc["original"], fc["modified"])
+
+        # Per-file stats.
+        file_ins = sum(1 for h in diff_fc.hunks for ln in h.lines if ln.tag == "+")
+        file_del = sum(1 for h in diff_fc.hunks for ln in h.lines if ln.tag == "-")
+
         console.print(
-            f"\n[bold {ACCENT}]{fc['path']}[/]  [dim]({len(diff_fc.hunks)} hunks)[/]"
+            f"\n[bold {ACCENT}]{fc['path']}[/]  "
+            f"[{OK_COLOR}]+{file_ins}[/] [{ERROR_COLOR}]-{file_del}[/]"
         )
+
+        # Syntax-highlighted unified diff.
         unified = engine.format_unified(diff_fc)
         if unified.strip():
             try:
-                console.print(Syntax(unified, "diff", theme=CODE_THEME))
+                console.print(Syntax(unified, "diff", theme=CODE_THEME, line_numbers=True))
             except Exception:
                 console.print(unified)
+
+        # Hunk status indicators.
         for hunk in diff_fc.hunks:
-            status_icon = {"accepted": "", "rejected": ""}.get(
-                hunk.status, ""
-            )
+            status_map = {
+                "accepted": f"[{OK_COLOR}]✓ accepted[/]",
+                "rejected": f"[{ERROR_COLOR}]✗ rejected[/]",
+                "pending": "[dim]○ pending[/]",
+            }
+            status = status_map.get(hunk.status, "[dim]○ pending[/]")
             console.print(
-                f"  [dim]hunk {hunk_idx}: "
+                f"  [dim]#{hunk_idx}[/] "
                 f"@@ -{hunk.old_start},{hunk.old_count} "
-                f"+{hunk.new_start},{hunk.new_count} @@ "
-                f"{status_icon}[/]"
+                f"+{hunk.new_start},{hunk.new_count} @@  "
+                f"{status}"
             )
             hunk_idx += 1
-    console.print("\n[dim]/diff accept <n|all>  /diff reject <n|all>  /diff apply[/]")
+
+    console.print()
+    console.print(
+        "[dim]Commands: /diff overlay  /diff accept <n|all>  "
+        "/diff reject <n|all>  /diff apply[/]"
+    )
 
 
 # ---------------------------------------------------------------------------

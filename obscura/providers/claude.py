@@ -435,9 +435,9 @@ class ClaudeBackend:
     def _build_query_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Convert unified kwargs into Claude query kwargs.
 
-        Forwards ``tool_choice`` and ``messages`` (structured tool results)
-        so the SDK can pass proper tool_result content blocks to the API
-        instead of relying on plain-text prompt formatting.
+        Forwards ``tool_choice``, ``messages`` (structured tool results),
+        and ``max_thinking_tokens`` (extended thinking budget) so the SDK
+        can pass them through to the API.
         """
         result: dict[str, Any] = {}
 
@@ -449,6 +449,15 @@ class ClaudeBackend:
         messages = kwargs.get("messages")
         if messages:
             result["messages"] = messages
+
+        # Forward extended thinking budget.
+        # Claude API accepts: thinking={"type": "enabled", "budget_tokens": N}
+        max_thinking = kwargs.get("max_thinking_tokens")
+        if max_thinking and int(max_thinking) > 0:
+            result["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": int(max_thinking),
+            }
 
         return result
 

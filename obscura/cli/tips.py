@@ -39,7 +39,7 @@ TIPS: list[Tip] = [
     Tip("security", "Run `/security-review` before merging security-sensitive changes.", "after_edit", 72),
     Tip("worktree", "Use worktree tools for isolated git work.", "after_search", 72),
     Tip("voice", "Enable voice input with `/voice on` (requires SoX).", "first_use", 336),
-    Tip("init", "Run `/init` to generate a CLAUDE.md for this repository.", "first_use", 336),
+    Tip("init", "Run `/init` to generate an OBSCURA.md for this repository.", "first_use", 336),
     Tip("kairos", "Set `OBSCURA_KAIROS=1` to enable autonomous background monitoring.", "first_use", 336),
     Tip("coordinator", "Use `/coordinator on` for multi-worker agent orchestration.", "first_use", 336),
     Tip("search_tools", "Use `/search-tools <query>` to find available tools.", "after_search", 48),

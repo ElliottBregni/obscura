@@ -49,19 +49,12 @@ Do not blow your cover.
 def is_undercover() -> bool:
     """Check if undercover mode should be active.
 
-    Active when:
-      1. ``OBSCURA_UNDERCOVER=1`` is set (explicit override), OR
-      2. The current repository appears to be public/non-internal
+    **ON by default.** Only disabled when explicitly set to off.
     """
-    # Explicit override.
-    env_val = os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower()
-    if env_val in ("1", "true", "yes", "on"):
-        return True
+    env_val = os.environ.get("OBSCURA_UNDERCOVER", "1").strip().lower()
     if env_val in ("0", "false", "no", "off"):
         return False
-
-    # Auto-detect: check if repo is internal.
-    return _get_repo_class() != "internal"
+    return True
 
 
 @lru_cache(maxsize=1)

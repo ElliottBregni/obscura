@@ -136,7 +136,7 @@ class ObscuraClient:
             except Exception:
                 pass  # Degrade gracefully if capability module not available
 
-        # Inject ~/.claude context (CLAUDE.md + instructions + skills)
+        # Inject project context (OBSCURA.md + instructions + skills)
         # Off by default — Obscura uses its own system prompts
         if inject_claude_context:
             try:

@@ -487,10 +487,20 @@ class Agent:
         from obscura.plugins.policy import PluginPolicyEngine
 
         policy_engine = PluginPolicyEngine()
+
+        # Wire permission mode engine if available.
+        _perm_engine = None
+        try:
+            from obscura.core.permission_modes import PermissionModeEngine
+            _perm_engine = PermissionModeEngine()
+        except Exception:
+            pass
+
         broker = ToolBroker(
             policy_engine=policy_engine,
             capability_resolver=self._capability_resolver,
             default_timeout=30.0,
+            permission_mode_engine=_perm_engine,
         )
 
         ctx = BrokerContext(

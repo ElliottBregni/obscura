@@ -307,6 +307,7 @@ class OpenAIBackend:
                 model=self._model,
                 messages=messages,
                 stream=True,
+                stream_options={"include_usage": True},
                 **create_kwargs,
             )
 
@@ -316,7 +317,9 @@ class OpenAIBackend:
             _active_tool_name = ""
             _active_tool_id = ""
             _active_tool_input = ""
+            _last_chunk = None
             async for chunk in response:
+                _last_chunk = chunk
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
@@ -408,12 +411,22 @@ class OpenAIBackend:
         finally:
             span.end()
 
+            # Extract usage from the last streaming chunk if available.
+            _usage: dict[str, int] | None = None
+            if _last_chunk is not None and hasattr(_last_chunk, "usage") and _last_chunk.usage:
+                _u = _last_chunk.usage
+                _usage = {
+                    "input_tokens": getattr(_u, "prompt_tokens", 0) or 0,
+                    "output_tokens": getattr(_u, "completion_tokens", 0) or 0,
+                }
+
             yield StreamChunk(
                 kind=ChunkKind.DONE,
                 raw=None,
                 metadata=StreamMetadata(
                     finish_reason=finish_reason,
                     model_id=self._model,
+                    usage=_usage,
                 ),
             )
 
@@ -926,6 +939,18 @@ class OpenAIBackend:
                 for t in tools_to_send
             ]
             result["tools"] = tool_defs
+
+        # Forward extended thinking budget for o-series models.
+        # OpenAI o1/o3 accept: reasoning_effort = "low"|"medium"|"high"
+        max_thinking = kwargs.get("max_thinking_tokens")
+        if max_thinking and int(max_thinking) > 0:
+            budget = int(max_thinking)
+            if budget <= 2048:
+                result["reasoning_effort"] = "low"
+            elif budget <= 8192:
+                result["reasoning_effort"] = "medium"
+            else:
+                result["reasoning_effort"] = "high"
 
         return result
 

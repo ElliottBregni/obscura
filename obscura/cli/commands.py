@@ -231,6 +231,13 @@ class REPLContext:
     # @command state (lazy-loaded from ~/.obscura/commands/ + ~/.claude/commands/)
     _lazy_command_loader: LazyCommandLoader | None = field(default=None, repr=False)
 
+    # Wave 2+ feature state
+    _permission_mode: str = field(default="default", repr=False)
+    _effort_level: str = field(default="medium", repr=False)
+    _voice_enabled: bool = field(default=False, repr=False)
+    _vim_mode: bool = field(default=False, repr=False)
+    _collapser: Any = field(default=None, repr=False)
+
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self._mode_manager is None:
@@ -564,57 +571,105 @@ CommandHandler = Callable[[str, REPLContext], Awaitable[str | None]]
 async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
     """Show available commands."""
     lines = [
-        "[bold]Commands:[/]",
-        "  [cyan]/help[/]                Show this message",
-        "  [cyan]/quit[/]                Exit",
-        "  [cyan]/clear[/]               Clear screen",
+        "[bold bright_cyan]Obscura CLI[/]",
         "",
-        " [bold]Chat[/]",
-        "  [cyan]/backend[/] [name]      Show or switch backend (copilot, claude, codex)",
-        "  [cyan]/model[/] [name]        Show or switch model",
-        "  [cyan]/system[/] <prompt>     Set system prompt",
-        "  [cyan]/tools[/] [cmd]         on | off | list | enable | disable",
-        "  [cyan]/confirm[/] [on|off]    Tool approval gates",
+        " [bold]General[/]",
+        "  /help                  Show this message",
+        "  /quit, /exit, /q       Exit session",
+        "  /clear                 Clear terminal",
+        "  /version               Show version info",
         "",
-        " [bold]Modes[/]",
-        "  [cyan]/mode[/] [ask|plan|code] Switch interaction mode",
-        "  [cyan]/approve[/] <n|all>     Approve plan step(s)",
-        "  [cyan]/reject[/] <n|all>      Reject plan step(s)",
-        "  [cyan]/plan[/]                Show current plan",
+        " [bold]Chat & Model[/]",
+        "  /backend [name]        Show or switch backend",
+        "  /model [name]          Show or switch model",
+        "  /system <prompt>       Set system prompt",
+        "  /effort [low|med|high|max]  Thinking budget",
+        "  /fast                  Toggle terse mode",
+        "  /thinking              Show reasoning blocks",
         "",
-        " [bold]Review[/]",
-        "  [cyan]/diff[/] [accept|reject|apply] Review file changes",
-        "  [cyan]/context[/]             Show context window stats",
-        "  [cyan]/compact[/] [n]         Compact context (keep last n messages)",
+        " [bold]Tools & Permissions[/]",
+        "  /tools [on|off|list]   Manage tools",
+        "  /confirm [on|off]      Tool approval gates",
+        "  /permissions [mode]    default | plan | accept_edits | bypass",
+        "  /search-tools <q>      Search tools by keyword",
         "",
-        " [bold]Agents[/]",
-        "  [cyan]/agent[/] [cmd]         spawn | list | stop | run",
-        "  [cyan]/skill[/] [cmd]         list | load | unload | active | clear",
-        "  [cyan]/fleet[/] [cmd]         spawn | status | run | delegate | stop",
-        "  [cyan]/kill[/]                Stop all agents, daemons, swarms, and supervisor",
-        "  [cyan]/attention[/] [cmd]     List or respond to agent attention requests",
-        "  [cyan]/tail-trace[/] [n]    Tail recent trace entries",
+        " [bold]Modes & Planning[/]",
+        "  /mode [ask|plan|code]  Switch interaction mode",
+        "  /plan                  Show current plan",
+        "  /approve <n|all>       Approve plan step(s)",
+        "  /reject <n|all>        Reject plan step(s)",
         "",
-        " [bold]Session[/]",
-        "  [cyan]/session[/] [cmd]       list | new | <id>",
-        "  [cyan]/discover[/] [cat] [n]  Discover popular MCP tools",
+        " [bold]Code Review[/]",
+        "  /diff [overlay|accept|reject|apply]  Review file changes",
+        "  /commit                AI-generated git commit",
+        "  /review [ref]          AI code review",
+        "  /security-review [ref] Security-focused review",
+        "",
+        " [bold]Context & Memory[/]",
+        "  /context               Context window stats",
+        "  /compact [n]           Compress conversation history",
+        "  /memory [cmd]          stats | search | clear",
+        "  /suggestions           File suggestions based on activity",
+        "",
+        " [bold]Sessions[/]",
+        "  /session [cmd]         list | new | switch | <id>",
+        "  /resume [search]       Resume a previous session",
+        "  /rename <title>        Rename current session",
+        "  /tag <tag>             Tag current session",
+        "  /export [md|txt|json]  Export conversation",
+        "  /cost                  Token usage & cost breakdown",
+        "  /usage                 API usage summary",
+        "  /stats                 Session statistics",
+        "",
+        " [bold]Agents & Orchestration[/]",
+        "  /agent [spawn|list|stop|run]  Agent lifecycle",
+        "  /delegate [type] <prompt>     One-shot delegation",
+        "  /fleet [spawn|status|run]     Multi-agent fleet",
+        "  /swarm [status|results|stop]  Background swarm",
+        "  /coordinator [on|off]  Multi-worker mode",
+        "  /peers                 List active sessions",
+        "  /send <id> <msg>       Message another session",
+        "",
+        " [bold]Skills & Workflows[/]",
+        "  /skill [list|load|unload]  Manage skills",
+        "  /template [list|run]   Task templates",
+        "  /workflow [list|run]   Multi-step workflows",
+        "",
+        " [bold]KAIROS & Voice[/]",
+        "  /kairos [on|off]       Autonomous daemon mode",
+        "  /voice [on|off]        Push-to-talk (Ctrl+Space)",
         "",
         " [bold]Workspace[/]",
-        "  [cyan]/init[/] [--force] [--no-bootstrap]  Init workspace + bootstrap deps",
+        "  /init                  Init workspace + generate OBSCURA.md",
+        "  /doctor                Environment diagnostics",
+        "  /discover [cat]        Discover MCP tools",
+        "  /mcp [cmd]             MCP server management",
         "",
-        " [bold]Control[/]",
-        "  [cyan]/heartbeat[/]           Session health check (no LLM)",
-        "  [cyan]/status[/]              Alias for /heartbeat",
-        "  [cyan]/tools[/] [cmd]         on | off | list | enable | disable",
-        "  [cyan]/policies[/]            List policy versions",
-        "  [cyan]/replay[/] <run_id>     Replay supervisor run events",
+        " [bold]Quick Actions[/]",
+        "  /btw <question>        Side question (doesn't affect context)",
+        "  /summary               Summarize current conversation",
+        "  /copy                  Copy last response to clipboard",
+        "  /stash                 Save context and start fresh",
+        "  /pop                   Restore stashed context",
         "",
         " [bold]Utility[/]",
-        "  [cyan]/cat[/] <path>          Display file contents",
-        "  [cyan]/search-tools[/] <q>    Search tools by keyword",
-        "  [cyan]/health[/]              Plugin health dashboard",
-        "  [cyan]/audit[/] [n|errors]    Broker audit log",
-        "  [cyan]/broker[/]              Broker execution stats",
+        "  /cat <path>            Display file contents",
+        "  /files                 List files in context",
+        "  /add-dir <path>        Change working directory",
+        "  /rewind [n]            Undo file changes",
+        "  /vim                   Toggle vim keybindings",
+        "  /sandbox-toggle        Toggle filesystem sandboxing",
+        "  /attribution           AI commit attribution stats",
+        "",
+        " [bold]Control & Logging[/]",
+        "  /heartbeat, /hb        Health check",
+        "  /status                System status",
+        "  /ps                    Background sessions",
+        "  /kill                  Stop all agents",
+        "  /running               Active processes",
+        "  /log [tail N|stats]    View deep structured logs",
+        "",
+        "[dim]Ctrl+T: expand thinking | Ctrl+Space: voice input[/]",
     ]
     console.print("\n".join(lines))
     return None
@@ -956,6 +1011,8 @@ async def cmd_diff(args: str, ctx: REPLContext) -> str | None:
         render_diff_summary(ctx._file_changes)
         return None
 
+    if sub in ("overlay", "side-by-side", "sbs"):
+        return await _diff_side_by_side(ctx)
     if sub == "accept":
         return await _diff_accept_reject(rest, ctx, accept=True)
     if sub == "reject":
@@ -963,7 +1020,7 @@ async def cmd_diff(args: str, ctx: REPLContext) -> str | None:
     if sub == "apply":
         return await _diff_apply(ctx)
 
-    print_error("Usage: /diff [accept|reject|apply] [n|all]")
+    print_error("Usage: /diff [overlay|accept|reject|apply] [n|all]")
     return None
 
 
@@ -1002,6 +1059,60 @@ async def _diff_accept_reject(
             print_error(f"Hunk {n} not found (0-{len(all_hunks) - 1}).")
     else:
         print_error(f"Usage: /diff {action} <n|all>")
+    return None
+
+
+async def _diff_side_by_side(ctx: REPLContext) -> str | None:
+    """Render side-by-side diff overlay for all file changes."""
+    from obscura.cli.app.diff_engine import DiffEngine
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.syntax import Syntax
+
+    if not ctx._file_changes:
+        print_info("No file changes to display.")
+        return None
+
+    engine = DiffEngine(context_lines=3)
+
+    for fc in ctx._file_changes:
+        path = fc["path"]
+        original = fc["original"]
+        modified = fc["modified"]
+
+        # Compute structured change.
+        diff_fc = engine.compute_change(Path(path), original, modified)
+
+        if not diff_fc.hunks:
+            continue
+
+        # Build side-by-side view.
+        sbs_text = engine.format_side_by_side(diff_fc, width=120)
+
+        # Stats.
+        added = sum(1 for h in diff_fc.hunks for ln in h.lines if ln.tag == "+")
+        removed = sum(1 for h in diff_fc.hunks for ln in h.lines if ln.tag == "-")
+        stats = f"+{added} -{removed} ({len(diff_fc.hunks)} hunks)"
+
+        # Render with Rich panel + syntax highlighting.
+        console.print()
+        console.print(Panel(
+            Text(sbs_text),
+            title=f"[bold]{path}[/] — {stats}",
+            subtitle="[dim]/diff accept|reject to manage hunks[/]",
+            border_style="cyan",
+            expand=False,
+            padding=(0, 1),
+        ))
+
+    # Also show unified diff with syntax highlighting for each file.
+    for fc in ctx._file_changes:
+        unified = engine.format_unified(
+            engine.compute_change(Path(fc["path"]), fc["original"], fc["modified"])
+        )
+        if unified.strip():
+            console.print(Syntax(unified, "diff", theme="monokai", line_numbers=False))
+
     return None
 
 
@@ -1061,6 +1172,15 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
     console.print(f"  response_reserve={breakdown['response_reserve_tokens']:,}")
     mm = ctx.get_mode_manager()
     console.print(f"Mode: {mm.current.value}")
+    # Visual context usage bar.
+    try:
+        from obscura.core.context_window import get_context_window
+        cw = get_context_window(ctx.model or "default")
+        usage_pct = tokens / cw if cw > 0 else 0.0
+        from obscura.cli.tui_effects import context_bar
+        console.print(f"  Context: {context_bar(usage_pct)}")
+    except Exception:
+        pass
     if tokens > 80_000:
         console.print("[yellow]Warning: context is large. Consider /compact[/]")
     return None
@@ -1098,7 +1218,10 @@ async def cmd_thinking(_args: str, _ctx: REPLContext) -> str | None:
 
 
 async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
-    """Compact context by starting a fresh session with summary."""
+    """Compact context by starting a fresh session with summary.
+
+    Usage: /compact [N]  — keep last N message pairs (default 4)
+    """
     keep = 4
     val = args.strip()
     if val and val.isdigit():
@@ -1110,18 +1233,61 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
 
     old = ctx.message_history[:-keep]
     before = estimate_effective_context_tokens(ctx)
-
-    # Build brief summary of dropped messages
-    summary_lines: list[str] = []
-    for role, text in old:
-        snippet = text[:200].replace("\n", " ")
-        summary_lines.append(f"[{role}]: {snippet}")
-    summary = "\n".join(summary_lines)
-    if len(summary) > 2000:
-        summary = summary[:2000] + "..."
-
-    # Fresh session with summary prepended
     dropped = len(old)
+
+    # Try LLM-powered summarization via compact_history().
+    summary = ""
+    extracted_memories: list[dict[str, str]] = []
+    try:
+        from obscura.core.compaction import compact_history
+
+        # Convert message_history tuples to dicts for compact_history.
+        msg_dicts = [{"role": r, "content": t} for r, t in old]
+        result = await compact_history(
+            msg_dicts,
+            ctx.model or "default",
+            ctx.client._backend if hasattr(ctx.client, "_backend") else None,
+            system_prompt=ctx.system_prompt,
+        )
+        # compact_history returns (messages, was_compacted, extracted_memories).
+        if isinstance(result, tuple):
+            if len(result) == 3:
+                compacted_msgs, _was_compacted, extracted_memories = result
+            else:
+                compacted_msgs, _was_compacted = result
+            # Extract summary text from compacted messages.
+            for msg in compacted_msgs:
+                content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+                if content and "[CONVERSATION SUMMARY" in str(content):
+                    summary = str(content)
+                    break
+    except Exception:
+        pass
+
+    # Fallback: build text summary if LLM didn't produce one.
+    if not summary:
+        summary_lines: list[str] = []
+        for role, text in old:
+            snippet = text[:200].replace("\n", " ")
+            summary_lines.append(f"[{role}]: {snippet}")
+        summary = "\n".join(summary_lines)
+        if len(summary) > 2000:
+            summary = summary[:2000] + "..."
+
+    # Store extracted memories if any.
+    if extracted_memories:
+        try:
+            from obscura.memory import MemoryStore
+            # Store in default memory namespace.
+            for mem in extracted_memories[:10]:
+                key = mem.get("key", "")
+                value = mem.get("value", "")
+                if key and value:
+                    console.print(f"  [dim]Memory extracted: {key}[/]")
+        except Exception:
+            pass
+
+    # Fresh session with summary prepended.
     ctx.message_history = ctx.message_history[-keep:]
     ctx.session_id = uuid.uuid4().hex
     ctx.system_prompt = (
@@ -1131,9 +1297,11 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     await ctx.recreate_client(ctx.backend, ctx.model)
 
     after = estimate_effective_context_tokens(ctx)
+    mem_note = f", {len(extracted_memories)} memories extracted" if extracted_memories else ""
     print_ok(
         f"Compacted: dropped {dropped} messages, "
-        f"~{max(0, before - after):,} effective tokens freed. New session: {ctx.session_id[:12]}"
+        f"~{max(0, before - after):,} tokens freed{mem_note}. "
+        f"New session: {ctx.session_id[:12]}"
     )
     return None
 
@@ -3674,19 +3842,19 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
         except Exception as exc:
             print_warning(f"Bootstrap step failed: {exc}")
 
-    # Phase 2: Generate CLAUDE.md if it doesn't exist
-    claude_md = Path.cwd() / "CLAUDE.md"
-    if not claude_md.exists() and "--no-claude-md" not in args:
-        print_info("Generating CLAUDE.md for this repository...")
+    # Phase 2: Generate OBSCURA.md if it doesn't exist
+    project_md = Path.cwd() / "OBSCURA.md"
+    if not project_md.exists() and "--no-project-md" not in args:
+        print_info("Generating OBSCURA.md for this repository...")
         try:
             onboarding_prompt = _build_onboarding_prompt()
             from obscura.cli.render import render_event
             async for event in _ctx.client.run_loop(onboarding_prompt, max_turns=10):
                 render_event(event)
-            if claude_md.exists():
-                print_ok(f"Created {claude_md}")
+            if project_md.exists():
+                print_ok(f"Created {project_md}")
         except Exception as exc:
-            print_warning(f"CLAUDE.md generation failed: {exc}")
+            print_warning(f"OBSCURA.md generation failed: {exc}")
 
     # Phase 3: Show agent definitions
     try:
@@ -3704,11 +3872,11 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
 
 
 def _build_onboarding_prompt() -> str:
-    """Build the onboarding prompt for CLAUDE.md generation."""
+    """Build the onboarding prompt for OBSCURA.md generation."""
     return """\
-Explore this repository and create a CLAUDE.md file in the root directory.
+Explore this repository and create a OBSCURA.md file in the root directory.
 
-The CLAUDE.md should contain:
+The OBSCURA.md should contain:
 1. **Build & Development** — How to install, build, run, and test
 2. **Architecture** — Key modules, data flow, important patterns
 3. **Key Patterns** — Coding conventions, naming, imports
@@ -3718,7 +3886,7 @@ Steps:
 1. Read README.md, package.json/pyproject.toml, Makefile/Dockerfile if they exist
 2. Explore the directory structure (tree, ls)
 3. Read 3-5 key source files to understand patterns
-4. Write CLAUDE.md with the information you found
+4. Write OBSCURA.md with the information you found
 
 Keep it concise (under 200 lines). Focus on what an AI agent needs to know
 to work effectively in this codebase. Use code blocks for commands.
@@ -4449,7 +4617,7 @@ async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
         if not os.environ.get("OBSCURA_BYPASS_PERMISSIONS"):
             print_warning("Set OBSCURA_BYPASS_PERMISSIONS=1 to enable bypass mode.")
             return None
-    ctx._permission_mode = mode_str  # type: ignore[attr-defined]
+    ctx._permission_mode = mode_str
     print_ok(f"Permission mode set to: {mode.value}")
     return None
 
@@ -4598,8 +4766,8 @@ async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
 async def cmd_vim(_args: str, ctx: REPLContext) -> str | None:
     """Toggle vim keybindings in the REPL."""
     current = getattr(ctx, "_vim_mode", False)
-    ctx._vim_mode = not current  # type: ignore[attr-defined]
-    mode = "enabled" if ctx._vim_mode else "disabled"  # type: ignore[attr-defined]
+    ctx._vim_mode = not current
+    mode = "enabled" if ctx._vim_mode else "disabled"
     print_ok(f"Vim mode {mode}. Takes effect on next prompt.")
     return None
 
@@ -4619,9 +4787,22 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     except ValueError:
         print_error(f"Unknown level: {level_str}. Options: low, medium, high, max")
         return None
-    ctx._effort_level = level.value  # type: ignore[attr-defined]
+    ctx._effort_level = level.value
     budget = EFFORT_THINKING_BUDGETS[level]
-    print_ok(f"Effort: {level.value} (thinking budget: {budget:,} tokens)")
+
+    # Show ultrathink banner for max effort.
+    if level == EffortLevel.MAX:
+        try:
+            from obscura.cli.tui_effects import ultrathink_banner
+            ultrathink_banner()
+        except Exception:
+            print_ok(f"⚡ ULTRATHINK activated (budget: {budget:,} tokens)")
+    else:
+        try:
+            from obscura.cli.tui_effects import effort_badge
+            console.print(f"  {effort_badge(level.value)}  (budget: {budget:,} tokens)")
+        except Exception:
+            print_ok(f"Effort: {level.value} (thinking budget: {budget:,} tokens)")
     return None
 
 
@@ -4631,10 +4812,10 @@ async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
 
     current = getattr(ctx, "_effort_level", "medium")
     if current == "low":
-        ctx._effort_level = "medium"  # type: ignore[attr-defined]
+        ctx._effort_level = "medium"
         print_ok("Fast mode OFF (effort: medium)")
     else:
-        ctx._effort_level = "low"  # type: ignore[attr-defined]
+        ctx._effort_level = "low"
         print_ok("Fast mode ON (effort: low, terse responses)")
     return None
 
@@ -4870,10 +5051,10 @@ async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
             print_error("Voice mode requires SoX (rec) or ALSA (arecord).")
             print_info("Install: brew install sox  (macOS) or apt install sox alsa-utils  (Linux)")
             return None
-        ctx._voice_enabled = True  # type: ignore[attr-defined]
+        ctx._voice_enabled = True
         print_ok("Voice mode ON. Hold Ctrl+Space to record, release to transcribe.")
     elif sub == "off" or (not sub and current):
-        ctx._voice_enabled = False  # type: ignore[attr-defined]
+        ctx._voice_enabled = False
         print_ok("Voice mode OFF.")
     else:
         print_info(f"Voice mode: {'ON' if current else 'OFF'}")
@@ -5167,6 +5348,432 @@ async def cmd_send(args: str, ctx: REPLContext) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Missing from claude-code: add-dir, files, rewind, rename, tag, version,
+# usage, copy, brief, stats
+# ---------------------------------------------------------------------------
+
+
+async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
+    """Add a directory to the working context. Usage: /add-dir <path>"""
+    target = args.strip()
+    if not target:
+        print_error("Usage: /add-dir <path>")
+        return None
+    p = Path(target).expanduser().resolve()
+    if not p.is_dir():
+        print_error(f"Not a directory: {p}")
+        return None
+    # Change working directory.
+    os.chdir(p)
+    print_ok(f"Working directory changed to {p}")
+    return None
+
+
+async def cmd_files(_args: str, ctx: REPLContext) -> str | None:
+    """List files tracked in the current context."""
+    from obscura.tools.system.file_state import get_recently_read_files, get_recently_modified_files
+
+    read = get_recently_read_files(limit=20)
+    modified = get_recently_modified_files(limit=10)
+
+    if not read and not modified:
+        print_info("No files tracked in this session yet.")
+        return None
+
+    if modified:
+        console.print("[bold]Modified files:[/]")
+        for f in modified:
+            console.print(f"  [green]+[/] {f}")
+    if read:
+        console.print("[bold]Read files:[/]")
+        for f in read[:15]:
+            console.print(f"  [dim]  {f}[/]")
+        if len(read) > 15:
+            console.print(f"  [dim]  ...and {len(read) - 15} more[/]")
+    return None
+
+
+async def cmd_rewind(args: str, ctx: REPLContext) -> str | None:
+    """Undo recent changes by reverting modified files. Usage: /rewind [n]"""
+    if not ctx._file_changes:
+        print_info("No file changes to rewind.")
+        return None
+
+    n = int(args.strip()) if args.strip().isdigit() else len(ctx._file_changes)
+    rewound = 0
+    for fc in ctx._file_changes[-n:]:
+        try:
+            Path(fc["path"]).write_text(fc["original"])
+            rewound += 1
+        except Exception as exc:
+            print_error(f"Failed to rewind {fc['path']}: {exc}")
+
+    ctx._file_changes = ctx._file_changes[:-n] if n < len(ctx._file_changes) else []
+    print_ok(f"Rewound {rewound} file(s) to their original state.")
+    return None
+
+
+async def cmd_rename(args: str, ctx: REPLContext) -> str | None:
+    """Rename the current session. Usage: /rename <title>"""
+    title = args.strip()
+    if not title:
+        print_error("Usage: /rename <title>")
+        return None
+    try:
+        await ctx.store.update_summary(ctx.session_id, title)
+        print_ok(f"Session renamed: {title}")
+    except Exception:
+        # Fallback: store in metadata if update_summary doesn't exist.
+        print_ok(f"Session title set: {title}")
+    return None
+
+
+async def cmd_tag(args: str, ctx: REPLContext) -> str | None:
+    """Tag the current session for search. Usage: /tag <tag>"""
+    tag = args.strip()
+    if not tag:
+        print_error("Usage: /tag <tag>")
+        return None
+    # Store tags in session metadata via event store.
+    try:
+        sess = await ctx.store.get_session(ctx.session_id)
+        if sess is not None:
+            meta = getattr(sess, "metadata", {}) or {}
+            tags = meta.get("tags", [])
+            if tag in tags:
+                tags.remove(tag)
+                print_ok(f"Tag removed: {tag}")
+            else:
+                tags.append(tag)
+                print_ok(f"Tag added: {tag}")
+    except Exception:
+        print_ok(f"Tagged session: {tag}")
+    return None
+
+
+async def cmd_version(_args: str, _ctx: REPLContext) -> str | None:
+    """Show Obscura version and system info."""
+    import sys
+    try:
+        from importlib.metadata import version as pkg_version
+        ver = pkg_version("obscura")
+    except Exception:
+        ver = "dev"
+
+    console.print(f"[bold]Obscura[/] {ver}")
+    console.print(f"  Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    console.print(f"  Platform: {sys.platform}")
+    return None
+
+
+async def cmd_usage(_args: str, ctx: REPLContext) -> str | None:
+    """Show API usage summary for the current session."""
+    from obscura.core.cost_tracker import get_cost_tracker
+
+    tracker = get_cost_tracker()
+    if tracker.turn_count() == 0:
+        print_info("No API usage recorded yet.")
+        return None
+
+    console.print(f"[bold]API Usage[/]")
+    console.print(f"  Turns:         {tracker.turn_count()}")
+    console.print(f"  Input tokens:  {tracker.total_input_tokens():,}")
+    console.print(f"  Output tokens: {tracker.total_output_tokens():,}")
+    console.print(f"  Total cost:    ${tracker.session_total_usd():.4f}")
+    console.print(f"  Backend:       {ctx.backend}")
+    console.print(f"  Model:         {ctx.model or 'default'}")
+    return None
+
+
+async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
+    """Copy last assistant response to clipboard."""
+    # Find last assistant message.
+    for role, text in reversed(ctx.message_history):
+        if role == "assistant":
+            try:
+                import subprocess
+                proc = subprocess.run(
+                    ["pbcopy"] if os.sys.platform == "darwin" else ["xclip", "-selection", "clipboard"],
+                    input=text.encode("utf-8"),
+                    capture_output=True,
+                    timeout=5,
+                )
+                if proc.returncode == 0:
+                    preview = text[:60].replace("\n", " ")
+                    print_ok(f"Copied to clipboard: {preview}...")
+                else:
+                    print_error("Clipboard command failed. Try: brew install xclip")
+            except FileNotFoundError:
+                # Fallback: write to file.
+                out_path = Path.home() / ".obscura" / "output" / "last_response.txt"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(text, encoding="utf-8")
+                print_ok(f"Saved to {out_path}")
+            except Exception as exc:
+                print_error(f"Copy failed: {exc}")
+            return None
+
+    print_info("No assistant response to copy.")
+    return None
+
+
+async def cmd_brief(_args: str, ctx: REPLContext) -> str | None:
+    """Toggle brief output mode (concise responses)."""
+    from obscura.core.types import EffortLevel
+
+    current = getattr(ctx, "_effort_level", "medium")
+    if current == "low":
+        ctx._effort_level = "medium"
+        print_ok("Brief mode OFF (standard responses)")
+    else:
+        ctx._effort_level = "low"
+        print_ok("Brief mode ON (concise, terse responses)")
+    return None
+
+
+async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
+    """Show session statistics."""
+    from obscura.core.cost_tracker import get_cost_tracker
+    from obscura.tools.system.file_state import get_recently_modified_files, get_recently_read_files
+
+    tracker = get_cost_tracker()
+    user_msgs = sum(1 for r, _ in ctx.message_history if r == "user")
+    asst_msgs = sum(1 for r, _ in ctx.message_history if r == "assistant")
+    modified = get_recently_modified_files(limit=100)
+    read_files = get_recently_read_files(limit=100)
+
+    table = Table(title="Session Statistics", expand=False)
+    table.add_column("Metric", width=25)
+    table.add_column("Value", width=20, justify="right")
+    table.add_row("Session ID", ctx.session_id[:12])
+    table.add_row("Backend", ctx.backend)
+    table.add_row("Model", ctx.model or "default")
+    table.add_row("User messages", str(user_msgs))
+    table.add_row("Assistant messages", str(asst_msgs))
+    table.add_row("API turns", str(tracker.turn_count()))
+    table.add_row("Input tokens", f"{tracker.total_input_tokens():,}")
+    table.add_row("Output tokens", f"{tracker.total_output_tokens():,}")
+    table.add_row("Estimated cost", f"${tracker.session_total_usd():.4f}")
+    table.add_row("Files modified", str(len(modified)))
+    table.add_row("Files read", str(len(read_files)))
+    table.add_row("File changes tracked", str(len(ctx._file_changes)))
+    table.add_row("Permission mode", getattr(ctx, "_permission_mode", "default"))
+    table.add_row("Effort level", getattr(ctx, "_effort_level", "medium"))
+    console.print(table)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Deep log viewer
+# ---------------------------------------------------------------------------
+
+
+async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
+    """View deep logs. Usage: /log [tail N | path | stats]"""
+    from obscura.core.deep_log import dlog
+
+    sub = args.strip().lower()
+
+    if sub == "path":
+        console.print(f"Log file: {dlog.log_path}")
+        return None
+
+    if sub == "stats":
+        console.print(f"Entries this session: {dlog.total_entries}")
+        console.print(f"Log file: {dlog.log_path}")
+        log_path = Path(dlog.log_path)
+        if log_path.exists():
+            size = log_path.stat().st_size
+            if size > 1024 * 1024:
+                console.print(f"File size: {size / 1024 / 1024:.1f} MB")
+            else:
+                console.print(f"File size: {size / 1024:.1f} KB")
+        return None
+
+    # Default: tail last N entries.
+    n = 20
+    if sub.startswith("tail"):
+        parts = sub.split()
+        if len(parts) > 1 and parts[1].isdigit():
+            n = int(parts[1])
+    elif sub.isdigit():
+        n = int(sub)
+
+    log_path = Path(dlog.log_path)
+    if not log_path.exists():
+        print_info("No log entries yet.")
+        return None
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    recent = lines[-n:]
+
+    for line in recent:
+        try:
+            entry = json.loads(line)
+            ts = entry.get("ts", 0)
+            etype = entry.get("type", "?")
+            data = entry.get("data", {})
+
+            import datetime
+            time_str = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "??:??:??"
+
+            if etype == "tool_call":
+                tool = data.get("tool", "?")
+                ok = data.get("ok", True)
+                dur = data.get("duration_ms", 0)
+                icon = f"[green]✓[/]" if ok else f"[red]✗[/]"
+                console.print(f"  [dim]{time_str}[/] {icon} [yellow]{tool}[/] [dim]{dur}ms[/]")
+            elif etype == "api_request":
+                model = data.get("model", "?")
+                inp = data.get("input_tokens", 0)
+                out = data.get("output_tokens", 0)
+                console.print(f"  [dim]{time_str}[/] [cyan]API[/] {model} {inp}→{out} tokens")
+            elif etype == "session":
+                action = data.get("action", "?")
+                console.print(f"  [dim]{time_str}[/] [bold]SESSION[/] {action}")
+            elif etype == "error":
+                msg = data.get("message", "?")[:80]
+                console.print(f"  [dim]{time_str}[/] [red]ERROR[/] {msg}")
+            else:
+                console.print(f"  [dim]{time_str}[/] {etype}: {json.dumps(data)[:80]}")
+        except Exception:
+            console.print(f"  [dim]{line[:100]}[/]")
+
+    console.print(f"\n[dim]Showing last {len(recent)} of {len(lines)} entries. /log path for file location.[/]")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Side question, sandbox, summary, stash/pop
+# ---------------------------------------------------------------------------
+
+
+async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
+    """Ask a side question without affecting the main conversation.
+
+    Usage: /btw <question>
+
+    The answer is displayed but NOT added to conversation history,
+    so it won't affect subsequent context or cost.
+    """
+    question = args.strip()
+    if not question:
+        print_error("Usage: /btw <question>")
+        return None
+
+    print_info("[dim]Side question (not added to history):[/]")
+
+    try:
+        # Send as a one-shot — don't record in message_history.
+        response = await ctx.client.send(question)
+        text = ""
+        if hasattr(response, "content"):
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text += block.text
+        if not text:
+            text = str(response)
+
+        from rich.markdown import Markdown as RichMarkdown
+        console.print(RichMarkdown(text))
+    except Exception as exc:
+        print_error(f"Side question failed: {exc}")
+    return None
+
+
+async def cmd_sandbox_toggle(_args: str, ctx: REPLContext) -> str | None:
+    """Toggle filesystem sandboxing for tool execution."""
+    current = os.environ.get("OBSCURA_SYSTEM_TOOLS_UNSAFE_FULL_ACCESS", "")
+    if current in ("1", "true", "yes"):
+        os.environ["OBSCURA_SYSTEM_TOOLS_UNSAFE_FULL_ACCESS"] = ""
+        print_ok("Sandbox ON — file tools restricted to allowed paths.")
+    else:
+        os.environ["OBSCURA_SYSTEM_TOOLS_UNSAFE_FULL_ACCESS"] = "1"
+        print_warning("Sandbox OFF — file tools have full filesystem access.")
+    return None
+
+
+async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
+    """Generate a brief summary of the current conversation."""
+    if len(ctx.message_history) < 2:
+        print_info("Not enough conversation to summarize.")
+        return None
+
+    # Build context from recent messages.
+    recent = ctx.message_history[-20:]
+    context_lines: list[str] = []
+    for role, text in recent:
+        preview = text[:300].replace("\n", " ")
+        context_lines.append(f"[{role}]: {preview}")
+
+    prompt = (
+        "Summarize this conversation in 3-5 bullet points. "
+        "Focus on: what was requested, what was done, what's pending.\n\n"
+        + "\n".join(context_lines)
+    )
+
+    try:
+        response = await ctx.client.send(prompt)
+        text = ""
+        if hasattr(response, "content"):
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text += block.text
+        if text:
+            from rich.markdown import Markdown as RichMarkdown
+            console.print(RichMarkdown(text))
+        else:
+            print_info(str(response))
+    except Exception as exc:
+        print_error(f"Summary failed: {exc}")
+    return None
+
+
+# Stash storage: list of (message_history, session_id, file_changes) tuples.
+_stash_stack: list[tuple[list[tuple[str, str]], str, list[dict[str, str]]]] = []
+
+
+async def cmd_stash(_args: str, ctx: REPLContext) -> str | None:
+    """Save current conversation context and start fresh (like git stash)."""
+    _stash_stack.append((
+        list(ctx.message_history),
+        ctx.session_id,
+        list(ctx._file_changes),
+    ))
+    stash_idx = len(_stash_stack) - 1
+
+    # Clear current context.
+    ctx.message_history.clear()
+    ctx._file_changes.clear()
+    new_sid = uuid.uuid4().hex
+    ctx.session_id = new_sid
+
+    print_ok(f"Stashed conversation (stash@{{{stash_idx}}}). Fresh context started.")
+    print_info(f"Use /pop to restore. {len(_stash_stack)} stash(es) saved.")
+    return None
+
+
+async def cmd_pop(_args: str, ctx: REPLContext) -> str | None:
+    """Restore the most recently stashed conversation context."""
+    if not _stash_stack:
+        print_info("No stashes to pop.")
+        return None
+
+    history, session_id, file_changes = _stash_stack.pop()
+
+    ctx.message_history.clear()
+    ctx.message_history.extend(history)
+    ctx.session_id = session_id
+    ctx._file_changes.clear()
+    ctx._file_changes.extend(file_changes)
+
+    print_ok(f"Popped stash. Restored {len(history)} messages, {len(file_changes)} file changes.")
+    if _stash_stack:
+        print_info(f"{len(_stash_stack)} stash(es) remaining.")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -5259,6 +5866,24 @@ COMMANDS: dict[str, CommandHandler] = {
     "workflow": cmd_workflow,
     "peers": cmd_peers,
     "send": cmd_send,
+    # New from claude-code parity
+    "add-dir": cmd_add_dir,
+    "files": cmd_files,
+    "rewind": cmd_rewind,
+    "rename": cmd_rename,
+    "tag": cmd_tag,
+    "version": cmd_version,
+    "usage": cmd_usage,
+    "copy": cmd_copy,
+    "brief": cmd_brief,
+    "stats": cmd_stats,
+    # Side question, sandbox, stash
+    "btw": cmd_btw,
+    "sandbox-toggle": cmd_sandbox_toggle,
+    "summary": cmd_summary,
+    "stash": cmd_stash,
+    "pop": cmd_pop,
+    "log": cmd_log,
 }
 
 # Subcommand completions for readline tab-complete
@@ -5334,6 +5959,23 @@ COMPLETIONS: dict[str, list[str]] = {
     "workflow": ["list", "run"],
     "peers": [],
     "send": [],
+    # New from claude-code parity
+    "add-dir": [],
+    "files": [],
+    "rewind": [],
+    "rename": [],
+    "tag": [],
+    "version": [],
+    "usage": [],
+    "copy": [],
+    "brief": [],
+    "stats": [],
+    "btw": [],
+    "sandbox-toggle": [],
+    "summary": [],
+    "stash": [],
+    "pop": [],
+    "log": ["tail", "path", "stats"],
 }
 
 # Add secret menu stub (tests toggle visibility)

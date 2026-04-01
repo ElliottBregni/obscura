@@ -122,5 +122,6 @@ def definition_to_config_dict(
         "provider": model,
         "system_prompt": defn.system_prompt,
         "max_iterations": defn.max_turns,
+        "max_turns": defn.max_turns,
         "tool_allowlist": list(defn.tools) if defn.tools else None,
     }

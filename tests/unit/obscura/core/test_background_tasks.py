@@ -23,6 +23,7 @@ async def test_list_tasks() -> None:
     mgr = BackgroundTaskManager()
     await mgr.start("echo one", timeout=5.0)
     await mgr.start("echo two", timeout=5.0)
+    await asyncio.sleep(0.3)  # let tasks register
     tasks = mgr.list_tasks()
     assert len(tasks) == 2
     await mgr.shutdown()

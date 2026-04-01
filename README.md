@@ -12,6 +12,20 @@ cd obscura
 uv sync
 ```
 
+### Voice mode dependencies
+
+Voice mode (`/voice on`) needs audio capture + STT dependencies:
+
+```bash
+uv sync --extra voice
+```
+
+On macOS, also install SoX and FFmpeg:
+
+```bash
+brew install sox ffmpeg
+```
+
 ## CLI Usage
 
 ```bash
