@@ -129,6 +129,22 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
             after = ""
         if after != before:
             ctx.add_file_change(path, before, after)
+            # Record attribution.
+            try:
+                from obscura.core.commit_attribution import get_attribution_tracker
+                added = len(after.splitlines()) - len(before.splitlines())
+                if added >= 0:
+                    get_attribution_tracker().record_agent_edit(path, lines_added=added)
+                else:
+                    get_attribution_tracker().record_agent_edit(path, lines_removed=abs(added))
+            except Exception:
+                pass
+            # Record in file history.
+            try:
+                from obscura.tools.system.file_state import record_file_access
+                record_file_access(Path(path), "edit")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +297,15 @@ async def send_message(
     ) -> list[str]:
         nonlocal _stream_output_chars
         _buf: list[str] = []
+        # Inject effort-level thinking budget if set.
+        _effective_kwargs = dict(loop_kwargs)
+        if hasattr(ctx, "_effort_level") and ctx._effort_level:  # type: ignore[attr-defined]
+            try:
+                from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+                _lvl = EffortLevel(ctx._effort_level)  # type: ignore[attr-defined]
+                _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[_lvl]
+            except (ValueError, KeyError):
+                pass
         _s = ctx.client.run_loop(
             augmented_text,
             max_turns=ctx.max_turns,
@@ -288,7 +313,7 @@ async def send_message(
             session_id=ctx.session_id,
             auto_complete=False,
             on_confirm=confirm_cb,
-            **loop_kwargs,
+            **_effective_kwargs,
         )
         try:
             async for event in _s:
@@ -316,6 +341,39 @@ async def send_message(
                     _stream_output_chars += len(event.text)
                     _push_stream_token_usage()
                 _track_file_event(event.kind, ctx, event)
+                # Tool output collapsing: group consecutive read/search calls.
+                if event.kind == AgentEventKind.TOOL_CALL:
+                    tool_name = getattr(event, "tool_name", "")
+                    tool_input = getattr(event, "tool_input", {})
+                    try:
+                        from obscura.cli.tool_collapse import ToolCollapser
+                        if not hasattr(ctx, "_collapser"):
+                            ctx._collapser = ToolCollapser()  # type: ignore[attr-defined]
+                        ctx._collapser.record(tool_name, tool_input)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                elif event.kind == AgentEventKind.TEXT_DELTA:
+                    # Flush collapsed tools before text output.
+                    collapser = getattr(ctx, "_collapser", None)
+                    if collapser is not None and collapser.pending:
+                        try:
+                            summary = collapser.flush_summary()
+                            if summary:
+                                console.print(f"[dim]  {summary}[/]")
+                        except Exception:
+                            pass
+                # Track costs on turn completion.
+                if event.kind in (AgentEventKind.TURN_COMPLETE, AgentEventKind.AGENT_DONE):
+                    meta = getattr(event, "metadata", None)
+                    if meta is not None:
+                        inp = getattr(meta, "input_tokens", 0) or 0
+                        out = getattr(meta, "output_tokens", 0) or 0
+                        if inp > 0 or out > 0:
+                            try:
+                                from obscura.core.cost_tracker import get_cost_tracker
+                                get_cost_tracker().record(inp, out, ctx.model or ctx.backend)
+                            except Exception:
+                                pass
         except KeyboardInterrupt:
             pass
         except Exception as exc:
@@ -732,6 +790,30 @@ async def _repl(
             except Exception:
                 pass
 
+        # Add worktree tools (enter_worktree, exit_worktree)
+        try:
+            from obscura.tools.worktree import get_worktree_tool_specs
+
+            system_tools.extend(get_worktree_tool_specs())
+        except Exception:
+            pass
+
+        # Add task management tools (task_create, task_get, task_list, etc.)
+        try:
+            from obscura.tools.task_tools import get_task_tool_specs
+
+            system_tools.extend(get_task_tool_specs())
+        except Exception:
+            pass
+
+        # Add LSP tool (code navigation)
+        try:
+            from obscura.tools.lsp import get_lsp_tool_specs
+
+            system_tools.extend(get_lsp_tool_specs())
+        except Exception:
+            pass
+
         # Load builtin plugin tools — filtered by workspace packs when available
         try:
             existing_names = {t.name for t in system_tools}
@@ -1000,6 +1082,19 @@ async def _repl(
         if not tools_enabled:
             loop_kwargs["tool_choice"] = ToolChoice.none()
 
+        # Wire effort level → thinking budget if set on context.
+        def _inject_effort(kwargs: dict[str, Any], ctx_ref: Any) -> dict[str, Any]:
+            """Inject max_thinking_tokens from effort level into loop kwargs."""
+            effort_val = getattr(ctx_ref, "_effort_level", None)
+            if effort_val:
+                try:
+                    from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+                    level = EffortLevel(effort_val)
+                    kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[level]
+                except (ValueError, KeyError):
+                    pass
+            return kwargs
+
         # Build REPL context
         ctx = REPLContext(
             client=client,
@@ -1162,6 +1257,41 @@ async def _repl(
         # Background spinner animation for the toolbar
         spinner_task = asyncio.create_task(animate_spinner(ss))
 
+        # --- KAIROS integration: start engine if enabled ---
+        _kairos_engine = None
+        try:
+            from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+            if is_kairos_enabled():
+                _kairos_engine = KairosEngine()
+                import asyncio as _kairos_aio
+                _kairos_aio.get_event_loop().run_until_complete(_kairos_engine.start())
+        except Exception:
+            pass
+
+        # --- Tips scheduler ---
+        _tip_scheduler = None
+        try:
+            from obscura.cli.tips import TipScheduler
+            _tip_scheduler = TipScheduler()
+        except Exception:
+            pass
+
+        # --- Prompt cache ---
+        _prompt_cache = None
+        try:
+            from obscura.core.prompt_cache import PromptCacheManager
+            _prompt_cache = PromptCacheManager()
+        except Exception:
+            pass
+
+        # --- Register cleanup tasks ---
+        try:
+            from obscura.core.cleanup import register_cleanup, cleanup_stale_files
+            register_cleanup("stale_files", lambda: cleanup_stale_files(max_age_days=30))
+            register_cleanup("cost_save", lambda: None)  # placeholder for future cost persistence
+        except Exception:
+            pass
+
         background_tasks: set[asyncio.Task[str]] = set()
         try:
             while True:
@@ -1203,6 +1333,13 @@ async def _repl(
                     break
                 if not user_input:
                     continue
+
+                # KAIROS: log user message
+                if _kairos_engine is not None and _kairos_engine.is_running:
+                    try:
+                        _kairos_engine.log_user_message(user_input)
+                    except Exception:
+                        pass
 
                 # Slash command
                 if user_input.startswith("/"):
@@ -1584,6 +1721,13 @@ async def _repl(
                 elif ctx.tools_enabled:
                     loop_kwargs.pop("tool_choice", None)
 
+                # Tips: record user message and maybe show a tip.
+                if _tip_scheduler is not None:
+                    _tip_scheduler.record_message()
+                    tip = _tip_scheduler.get_tip()
+                    if tip:
+                        console.print(f"[dim italic]{tip}[/]")
+
                 # Chat message: run in background so prompt stays responsive.
                 # The StreamingStatus drives the toolbar spinner instead of
                 # console.status() which conflicts with patch_stdout.
@@ -1630,6 +1774,24 @@ async def _repl(
             if background_tasks:
                 await asyncio.gather(*background_tasks, return_exceptions=True)
             await ctx.stop_runtime()
+            # KAIROS: stop engine + trigger dream consolidation
+            if _kairos_engine is not None:
+                try:
+                    await _kairos_engine.stop()
+                except Exception:
+                    pass
+            # Run cleanup tasks (stale files, etc.)
+            try:
+                from obscura.core.cleanup import run_cleanup
+                await run_cleanup()
+            except Exception:
+                pass
+            # Save commit attribution
+            try:
+                from obscura.core.commit_attribution import get_attribution_tracker
+                get_attribution_tracker().save()
+            except Exception:
+                pass
             try:
                 sess = await store.get_session(sid)
                 if sess is not None and sess.status == SessionStatus.RUNNING:

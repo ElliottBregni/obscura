@@ -285,7 +285,10 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
         "warnings": [],
     }
 
-    for spec in loader.discover_builtins():
+    from obscura.plugins.loader import _apply_plugin_filters
+
+    all_specs = _apply_plugin_filters(list(loader.discover_builtins()))
+    for spec in all_specs:
         if spec.bootstrap is None or not spec.bootstrap.deps:
             continue
         result = run_bootstrap(spec)

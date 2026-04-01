@@ -233,3 +233,40 @@ def evaluate_context_status(
         logger.debug("Context window OK: %s", status)
 
     return status
+
+
+# ---------------------------------------------------------------------------
+# Token budget helpers — used by tools to cap response sizes.
+# ---------------------------------------------------------------------------
+
+MAX_FILE_READ_TOKENS = 100_000
+"""Hard ceiling for file content returned by ``read_text_file``."""
+
+MAX_WEB_FETCH_TOKENS = 50_000
+"""Hard ceiling for web content returned by ``web_fetch``."""
+
+
+def truncate_to_token_budget(
+    text: str,
+    max_tokens: int,
+) -> tuple[str, bool]:
+    """Truncate *text* so it fits within *max_tokens*.
+
+    Returns ``(possibly_truncated_text, was_truncated)``.
+
+    The function uses a binary-search approach to avoid calling
+    ``estimate_tokens`` on the full string more than necessary.
+    """
+    token_count = estimate_tokens(text)
+    if token_count <= max_tokens:
+        return text, False
+
+    # Heuristic: ~4 chars per token on average.
+    approx_chars = max_tokens * 4
+    truncated = text[:approx_chars]
+
+    # Refine: shrink until within budget.
+    while estimate_tokens(truncated) > max_tokens and len(truncated) > 100:
+        truncated = truncated[: int(len(truncated) * 0.9)]
+
+    return truncated, True

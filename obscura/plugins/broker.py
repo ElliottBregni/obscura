@@ -132,6 +132,7 @@ class ToolBroker:
         max_retries: int = 0,
         lazy_manager: Any | None = None,
         score_index: Any | None = None,
+        permission_mode_engine: Any | None = None,
     ) -> None:
         self._policy = policy_engine
         self._resolver = capability_resolver
@@ -145,6 +146,7 @@ class ToolBroker:
         self._lazy_manager = lazy_manager
         self._score_index = score_index
         self._quarantined: dict[str, tuple[Any, RegistrationResult]] = {}
+        self._permission_engine = permission_mode_engine
 
     # -- Lazy loading --------------------------------------------------------
 
@@ -268,6 +270,25 @@ class ToolBroker:
         if not decision.allowed:
             return self._denied(envelope, decision.reason, decision.matched_rule, start)
 
+        # 1b. Permission mode check (dangerous patterns + mode restrictions)
+        if self._permission_engine is not None:
+            perm_decision = self._permission_engine.evaluate(
+                envelope.tool, envelope.args
+            )
+            if not perm_decision.allowed:
+                return self._denied(
+                    envelope, perm_decision.reason, "permission-mode", start
+                )
+            # If auto-approved by permission mode, skip the approval gate later.
+            if perm_decision.auto_approved:
+                decision = type(decision)(
+                    action=decision.action,
+                    reason=decision.reason,
+                    matched_rule=decision.matched_rule,
+                )
+                # Override requires_approval to False since mode auto-approves.
+                object.__setattr__(decision, "_auto_approved", True)
+
         # 2. Capability check (if resolver available)
         if self._resolver is not None:
             if not self._check_capabilities(envelope):
@@ -278,8 +299,9 @@ class ToolBroker:
                     start,
                 )
 
-        # 3. Approval gate
-        if decision.requires_approval:
+        # 3. Approval gate (skip if permission mode auto-approved)
+        _mode_auto = getattr(decision, "_auto_approved", False)
+        if decision.requires_approval and not _mode_auto:
             approved = await self._approval(envelope, decision.reason)
             if not approved:
                 entry = BrokerAuditEntry(

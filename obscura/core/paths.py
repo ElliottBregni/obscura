@@ -179,6 +179,34 @@ def resolve_obscura_commands_dir(cwd: Path | None = None) -> Path:
     return resolve_obscura_home(cwd) / "commands"
 
 
+def resolve_all_agents_dirs(cwd: Path | None = None) -> list[Path]:
+    """Return agent definition directories in merge order.
+
+    Order (lowest to highest priority):
+      1. Built-in (``obscura/agent/builtin/``)
+      2. Global ``~/.obscura/agents/``
+      3. Local ``.obscura/agents/``
+    """
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+
+    # Built-in agents (always present).
+    from obscura.agent.definitions import _BUILTIN_DIR
+    if _BUILTIN_DIR.is_dir():
+        dirs.append(_BUILTIN_DIR)
+        seen.add(_BUILTIN_DIR.resolve())
+
+    local, global_ = resolve_all_obscura_homes(cwd)
+    for parent in (global_, local):
+        agents_dir = parent / "agents"
+        resolved = agents_dir.resolve()
+        if agents_dir.is_dir() and resolved not in seen:
+            dirs.append(agents_dir)
+            seen.add(resolved)
+
+    return dirs
+
+
 def resolve_all_commands_dirs(cwd: Path | None = None) -> list[Path]:
     """Return command directories: ~/.obscura/commands/ then ~/.claude/commands/.
 

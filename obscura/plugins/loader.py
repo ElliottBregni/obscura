@@ -62,6 +62,46 @@ def _load_plugin_config_flag(key: str, default: bool = True) -> bool:
         return default
 
 
+def _load_plugin_config_list(key: str) -> frozenset[str]:
+    """Read a list of plugin IDs from workspace config ``plugins`` section.
+
+    Supports keys like ``"include"`` or ``"exclude"`` under ``[plugins]``.
+    Returns an empty frozenset on any failure or if the key is absent.
+    """
+    try:
+        from obscura.core.workspace import load_workspace_config
+
+        config = load_workspace_config()
+        section = config.get("plugins", {})
+        val = section.get(key)
+        if isinstance(val, list):
+            return frozenset(str(v) for v in val)
+        return frozenset()
+    except Exception:
+        return frozenset()
+
+
+def _apply_plugin_filters(specs: list[PluginSpec]) -> list[PluginSpec]:
+    """Filter plugin specs using ``plugins.include`` / ``plugins.exclude`` from config.toml.
+
+    * If ``include`` is non-empty, only plugins whose ``id`` is in the set are kept.
+    * Plugins whose ``id`` is in ``exclude`` are always removed.
+    * Local and user plugins are never filtered out by ``include`` (only builtins).
+    """
+    include = _load_plugin_config_list("include")
+    exclude = _load_plugin_config_list("exclude")
+    if not include and not exclude:
+        return specs
+    filtered: list[PluginSpec] = []
+    for s in specs:
+        if exclude and s.id in exclude:
+            continue
+        if include and s.id not in include:
+            continue
+        filtered.append(s)
+    return filtered
+
+
 # ---------------------------------------------------------------------------
 # Config resolution
 # ---------------------------------------------------------------------------
@@ -436,9 +476,9 @@ class PluginLoader:
         return status
 
     def load_builtins(self, broker: Any) -> dict[str, PluginStatus]:
-        """Load all built-in plugins."""
+        """Load all built-in plugins, respecting ``plugins.include``/``exclude``."""
         results: dict[str, PluginStatus] = {}
-        for spec in self.discover_builtins():
+        for spec in _apply_plugin_filters(list(self.discover_builtins())):
             status = self._load_spec(spec, broker)
             self._loaded[spec.id] = status
             results[spec.id] = status
@@ -538,7 +578,10 @@ class PluginLoader:
         all_specs.extend(self.discover_local())
         all_specs.extend(self.discover_user())
 
-        # Apply pack-based filtering
+        # Apply config.toml-level filtering first
+        all_specs = _apply_plugin_filters(all_specs)
+
+        # Apply pack-based filtering (from compiled workspace specs)
         if plugin_include:
             all_specs = [s for s in all_specs if s.id in plugin_include]
         if plugin_exclude:
@@ -693,6 +736,7 @@ def get_all_builtin_tool_specs() -> list[Any]:
         all_plugin_specs.extend(loader.discover_builtins())
     all_plugin_specs.extend(loader.discover_local())
     all_plugin_specs.extend(loader.discover_user())
+    all_plugin_specs = _apply_plugin_filters(all_plugin_specs)
 
     specs: list[Any] = []
     for plugin_spec in all_plugin_specs:
@@ -813,6 +857,7 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
         all_plugin_specs.extend(loader.discover_builtins())
     all_plugin_specs.extend(loader.discover_local())
     all_plugin_specs.extend(loader.discover_user())
+    all_plugin_specs = _apply_plugin_filters(all_plugin_specs)
 
     specs: list[Any] = []
     skipped: list[tuple[str, str]] = []
@@ -863,6 +908,7 @@ def get_capability_map() -> dict[str, str]:
         all_plugin_specs.extend(loader.discover_builtins())
     all_plugin_specs.extend(loader.discover_local())
     all_plugin_specs.extend(loader.discover_user())
+    all_plugin_specs = _apply_plugin_filters(all_plugin_specs)
 
     cap_map: dict[str, str] = {}
     for plugin_spec in all_plugin_specs:

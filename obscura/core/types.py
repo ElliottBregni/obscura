@@ -415,6 +415,29 @@ class BackendProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Effort levels — thinking budget allocation
+# ---------------------------------------------------------------------------
+
+
+class EffortLevel(str, enum.Enum):
+    """Effort level controlling thinking budget and response verbosity."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    MAX = "max"
+
+
+EFFORT_THINKING_BUDGETS: dict[EffortLevel, int] = {
+    EffortLevel.LOW: 1024,
+    EffortLevel.MEDIUM: 4096,
+    EffortLevel.HIGH: 16384,
+    EffortLevel.MAX: 65536,
+}
+
+
+# ---------------------------------------------------------------------------
 # Agent loop event types
 # ---------------------------------------------------------------------------
 

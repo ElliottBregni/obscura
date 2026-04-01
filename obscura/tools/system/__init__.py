@@ -329,7 +329,11 @@ async def run_command(
 
 @tool(
     "run_shell",
-    "Execute a shell command via /bin/zsh -lc and return stdout/stderr/exit_code.",
+    (
+        "Execute a shell command via /bin/zsh -lc and return stdout/stderr/exit_code. "
+        "Set run_in_background=true for long-running commands; returns a task_id "
+        "that can be checked later."
+    ),
     {
         "type": "object",
         "properties": {
@@ -337,6 +341,8 @@ async def run_command(
             "command": {"type": "string", "description": "Alias for script (LLM compat)."},
             "cwd": {"type": "string"},
             "timeout_seconds": {"type": "number"},
+            "description": {"type": "string", "description": "User-facing description of what this command does."},
+            "run_in_background": {"type": "boolean", "description": "Run async and return a task_id immediately."},
         },
     },
 )
@@ -345,25 +351,74 @@ async def run_shell(
     command: str = "",
     cwd: str = "",
     timeout_seconds: float = 60.0,
+    description: str = "",
+    run_in_background: bool = False,
 ) -> str:
     actual_script = script or command
     if not actual_script:
         return json.dumps({"ok": False, "error": "no_script_provided"})
-    return await run_command(
+
+    if run_in_background:
+        from obscura.core.background_tasks import get_background_task_manager
+        mgr = get_background_task_manager()
+        task_id = await mgr.start(
+            f"/bin/zsh -lc {_shell_quote(actual_script)}",
+            cwd=cwd,
+            timeout=float(timeout_seconds),
+        )
+        return json.dumps({
+            "ok": True,
+            "background": True,
+            "task_id": task_id,
+            "command": actual_script[:200],
+            "description": description,
+        })
+
+    result_json = await run_command(
         "/bin/zsh",
         args=["-lc", actual_script],
         cwd=cwd,
         timeout_seconds=float(timeout_seconds),
     )
 
+    # Post-process: truncate large output and persist to disk.
+    result = json.loads(result_json)
+    _MAX_INLINE_OUTPUT = 100_000  # 100KB
+    for key in ("stdout", "stderr"):
+        val = result.get(key, "")
+        if len(val) > _MAX_INLINE_OUTPUT:
+            # Persist full output to disk.
+            output_dir = Path.home() / ".obscura" / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            import hashlib
+            h = hashlib.sha256(val.encode("utf-8")).hexdigest()[:12]
+            output_path = output_dir / f"{key}_{h}.txt"
+            output_path.write_text(val, encoding="utf-8")
+            result[key] = val[:_MAX_INLINE_OUTPUT]
+            result[f"{key}_truncated"] = True
+            result[f"{key}_full_path"] = str(output_path)
+            result[f"{key}_full_size"] = len(val)
+
+    return json.dumps(result)
+
+
+def _shell_quote(s: str) -> str:
+    """Single-quote a string for safe shell embedding."""
+    return "'" + s.replace("'", "'\"'\"'") + "'"
+
+
+# Response cache for web_fetch: {(url, prompt): (timestamp, response_json)}
+_web_fetch_cache: dict[tuple[str, str], tuple[float, str]] = {}
+_WEB_FETCH_CACHE_TTL = 900.0  # 15 minutes
+
 
 @tool(
     "web_fetch",
     (
-        "Fetch a URL and return the page content as plain text. "
-        "Provide a `prompt` describing what to extract (e.g. 'list the top 5 stock gainers') "
-        "and the response will include that context alongside the body so you can extract it. "
-        "HTML is automatically stripped to clean readable text."
+        "Fetch a URL and return the page content. "
+        "HTML is automatically converted to Markdown (or plain text as fallback). "
+        "Provide a `prompt` describing what to extract. "
+        "Results are cached for 15 minutes."
     ),
     {
         "type": "object",
@@ -391,6 +446,15 @@ async def web_fetch(
     timeout_seconds: float = 20.0,
     max_bytes: int = 200_000,
 ) -> str:
+    # Check cache for GET requests.
+    cache_key = (url, prompt)
+    if method.upper() == "GET" and cache_key in _web_fetch_cache:
+        cached_ts, cached_result = _web_fetch_cache[cache_key]
+        if _time.time() - cached_ts < _WEB_FETCH_CACHE_TTL:
+            result = json.loads(cached_result)
+            result["cached"] = True
+            return json.dumps(result)
+
     timeout_seconds = float(timeout_seconds)
     max_bytes = int(max_bytes)
     request_headers = headers or {}
@@ -410,11 +474,37 @@ async def web_fetch(
             response_headers = {k: v for k, v in response.headers.items()}
             content_type = response_headers.get("Content-Type", "").lower()
             is_html = "html" in content_type or text.lstrip().startswith("<")
-            body_text = _strip_html(text) if is_html else text
+
+            # Convert HTML to Markdown if available, else strip tags.
+            if is_html:
+                body_text = _html_to_markdown(text)
+            else:
+                body_text = text
+
+            # Token budget truncation.
+            from obscura.core.context_window import truncate_to_token_budget, MAX_WEB_FETCH_TOKENS
+            body_text, token_truncated = truncate_to_token_budget(body_text, MAX_WEB_FETCH_TOKENS)
+            truncated = truncated or token_truncated
+
+            # Redirect detection.
+            final_url = response.geturl()
+            redirect_info: dict[str, object] = {}
+            if final_url != url:
+                from urllib.parse import urlparse
+                orig_host = urlparse(url).hostname
+                final_host = urlparse(final_url).hostname
+                if orig_host != final_host:
+                    redirect_info = {
+                        "redirected": True,
+                        "original_host": orig_host,
+                        "final_host": final_host,
+                        "warning": "Redirected to a different domain",
+                    }
+
             result: dict[str, object] = {
                 "ok": True,
                 "url": url,
-                "final_url": response.geturl(),
+                "final_url": final_url,
                 "status": getattr(response, "status", 200),
                 "content_type": content_type,
                 "body": body_text,
@@ -423,20 +513,34 @@ async def web_fetch(
             }
             if prompt:
                 result["prompt"] = prompt
-            return json.dumps(result)
+            if redirect_info:
+                result["redirect"] = redirect_info
+
+            result_json = json.dumps(result)
+            # Cache GET responses.
+            if method.upper() == "GET":
+                _web_fetch_cache[cache_key] = (_time.time(), result_json)
+            return result_json
     except url_error.HTTPError as exc:
         raw_error = exc.read(max_bytes)
-        return json.dumps(
-            {
-                "ok": False,
-                "url": url,
-                "status": exc.code,
-                "error": "http_error",
-                "body": raw_error.decode("utf-8", errors="replace"),
-            }
-        )
+        return json.dumps({
+            "ok": False,
+            "url": url,
+            "status": exc.code,
+            "error": "http_error",
+            "body": raw_error.decode("utf-8", errors="replace"),
+        })
     except Exception as exc:
         return _json_error("web_fetch_failed", url=url, detail=str(exc))
+
+
+def _html_to_markdown(html_text: str) -> str:
+    """Convert HTML to Markdown using markdownify if available, else strip tags."""
+    try:
+        import markdownify
+        return markdownify.markdownify(html_text, heading_style="ATX", strip=["img", "script", "style"])
+    except ImportError:
+        return _strip_html(html_text)
 
 
 @tool(
@@ -462,17 +566,35 @@ async def run_python(
 
 @tool(
     "web_search",
-    "Search the web for a query and return concise result items.",
+    (
+        "Search the web for a query and return concise result items. "
+        "Optionally filter by allowed_domains or blocked_domains."
+    ),
     {
         "type": "object",
         "properties": {
             "query": {"type": "string"},
             "max_results": {"type": "integer"},
+            "allowed_domains": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Only include results from these domains.",
+            },
+            "blocked_domains": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Exclude results from these domains.",
+            },
         },
         "required": ["query"],
     },
 )
-async def web_search(query: str, max_results: int = 5) -> str:
+async def web_search(
+    query: str,
+    max_results: int = 5,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+) -> str:
     """Search the web via DuckDuckGo HTML scraping (no API key required)."""
     limit = max(1, min(int(max_results), 20))
     encoded = url_parse.quote_plus(query)
@@ -516,6 +638,19 @@ async def web_search(query: str, max_results: int = 5) -> str:
             href = url_parse.unquote_plus(uddg_match.group(1)) if uddg_match else href
         url = href or (urls_fb[i] if i < len(urls_fb) else "")
         snippet = snippets[i] if i < len(snippets) else ""
+
+        # Domain filtering.
+        if url and (allowed_domains or blocked_domains):
+            try:
+                from urllib.parse import urlparse as _urlparse
+                domain = (_urlparse(url).hostname or "").lower()
+            except Exception:
+                domain = ""
+            if allowed_domains and not any(domain.endswith(d.lower()) for d in allowed_domains):
+                continue
+            if blocked_domains and any(domain.endswith(d.lower()) for d in blocked_domains):
+                continue
+
         items.append({"title": title, "url": url, "snippet": snippet})
 
     return json.dumps({"ok": True, "query": query, "count": len(items), "results": items})
@@ -696,14 +831,32 @@ async def list_directory(path: str) -> str:
 
 @tool(
     "read_text_file",
-    "Read a UTF-8 text file.",
+    (
+        "Read a file. Supports text, images (PNG/JPG/GIF/WebP as base64), "
+        "PDFs (text extraction), and Jupyter notebooks (.ipynb cell parsing). "
+        "Use offset/limit for large text files."
+    ),
     {
         "type": "object",
-        "properties": {"path": {"type": "string"}, "max_bytes": {"type": "integer"}},
+        "properties": {
+            "path": {"type": "string"},
+            "max_bytes": {"type": "integer", "description": "Max bytes for text files (default 200K)."},
+            "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed)."},
+            "limit": {"type": "integer", "description": "Number of lines to read."},
+            "pages": {"type": "string", "description": "Page range for PDFs (e.g. '1-5', '3', '10-20')."},
+        },
         "required": ["path"],
     },
 )
-async def read_text_file(path: str, max_bytes: int = 200_000) -> str:
+async def read_text_file(
+    path: str,
+    max_bytes: int = 200_000,
+    offset: int = 0,
+    limit: int = 0,
+    pages: str = "",
+) -> str:
+    from obscura.tools.system.file_state import record_read, is_unchanged
+
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
@@ -712,26 +865,160 @@ async def read_text_file(path: str, max_bytes: int = 200_000) -> str:
     if not target.is_file():
         return _json_error("not_a_file", path=str(target))
 
+    # Mtime-based read dedup: skip re-reading unchanged files.
+    read_offset = offset if offset > 0 else None
+    read_limit = limit if limit > 0 else None
+    if is_unchanged(target, offset=read_offset, limit=read_limit):
+        return json.dumps({"ok": True, "kind": "file_unchanged", "path": str(target)})
+
+    suffix = target.suffix.lower()
+
+    # --- Image files ---
+    _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    if suffix in _IMAGE_EXTS:
+        import base64 as _b64
+
+        media_map = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".webp": "image/webp",
+        }
+        data = target.read_bytes()
+        encoded = _b64.b64encode(data).decode("ascii")
+        record_read(target, offset=read_offset, limit=read_limit)
+        return json.dumps({
+            "ok": True,
+            "kind": "image",
+            "path": str(target),
+            "media_type": media_map.get(suffix, "application/octet-stream"),
+            "base64": encoded,
+            "size_bytes": len(data),
+        })
+
+    # --- PDF files ---
+    if suffix == ".pdf":
+        try:
+            import pdfplumber
+        except ImportError:
+            return _json_error(
+                "missing_dependency",
+                detail="PDF reading requires pdfplumber. Install with: uv pip install pdfplumber",
+            )
+        try:
+            with pdfplumber.open(target) as pdf:
+                total_pages = len(pdf.pages)
+                # Parse page range.
+                if pages:
+                    start_page, end_page = _parse_page_range(pages, total_pages)
+                else:
+                    start_page, end_page = 1, min(total_pages, 20)
+                extracted: list[str] = []
+                for i in range(start_page - 1, end_page):
+                    page_text = pdf.pages[i].extract_text() or ""
+                    extracted.append(page_text)
+                text = "\n\n--- Page Break ---\n\n".join(extracted)
+        except Exception as exc:
+            return _json_error("pdf_read_error", detail=str(exc))
+        record_read(target, offset=read_offset, limit=read_limit)
+        return json.dumps({
+            "ok": True,
+            "kind": "pdf",
+            "path": str(target),
+            "text": text,
+            "pages_read": f"{start_page}-{end_page}",
+            "total_pages": total_pages,
+        })
+
+    # --- Jupyter notebooks ---
+    if suffix == ".ipynb":
+        try:
+            nb_data = json.loads(target.read_text(encoding="utf-8"))
+            cells = nb_data.get("cells", [])
+            parsed_cells: list[dict[str, Any]] = []
+            for idx, cell in enumerate(cells):
+                source = "".join(cell.get("source", []))
+                cell_type = cell.get("cell_type", "code")
+                outputs: list[str] = []
+                for out in cell.get("outputs", []):
+                    if "text" in out:
+                        outputs.append("".join(out["text"]))
+                    elif "data" in out and "text/plain" in out["data"]:
+                        outputs.append("".join(out["data"]["text/plain"]))
+                parsed_cells.append({
+                    "index": idx,
+                    "cell_type": cell_type,
+                    "source": source,
+                    "outputs": outputs,
+                })
+        except Exception as exc:
+            return _json_error("notebook_parse_error", detail=str(exc))
+        record_read(target, offset=read_offset, limit=read_limit)
+        return json.dumps({
+            "ok": True,
+            "kind": "notebook",
+            "path": str(target),
+            "cell_count": len(parsed_cells),
+            "cells": parsed_cells,
+        })
+
+    # --- Default: text files ---
     data = target.read_bytes()
     truncated = False
     if len(data) > max_bytes:
         data = data[:max_bytes]
         truncated = True
     text = data.decode("utf-8", errors="replace")
-    return json.dumps(
-        {
-            "ok": True,
-            "path": str(target),
-            "text": text,
-            "truncated": truncated,
-            "bytes_read": len(data),
-        }
-    )
+
+    # Line-based pagination via offset/limit.
+    all_lines = text.splitlines(keepends=True)
+    total_lines = len(all_lines)
+    if offset > 0 or limit > 0:
+        start = max(0, offset - 1) if offset > 0 else 0
+        end = (start + limit) if limit > 0 else total_lines
+        selected = all_lines[start:end]
+        # Add line numbers.
+        numbered = "".join(
+            f"{start + i + 1:>6}\t{ln}" for i, ln in enumerate(selected)
+        )
+        text = numbered
+        truncated = end < total_lines
+
+    # Apply token budget.
+    from obscura.core.context_window import truncate_to_token_budget, MAX_FILE_READ_TOKENS
+    text, token_truncated = truncate_to_token_budget(text, MAX_FILE_READ_TOKENS)
+    truncated = truncated or token_truncated
+
+    record_read(target, offset=read_offset, limit=read_limit)
+    return json.dumps({
+        "ok": True,
+        "kind": "text",
+        "path": str(target),
+        "text": text,
+        "truncated": truncated,
+        "bytes_read": len(data),
+        "total_lines": total_lines,
+    })
+
+
+def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
+    """Parse a page range string like '1-5' or '3' into (start, end) 1-indexed."""
+    pages = pages.strip()
+    if "-" in pages:
+        parts = pages.split("-", 1)
+        start = max(1, int(parts[0].strip()))
+        end = min(total, int(parts[1].strip()))
+    else:
+        start = max(1, int(pages))
+        end = start
+    return start, end
 
 
 @tool(
     "write_text_file",
-    "Write UTF-8 text to a file (overwrites by default).",
+    (
+        "Write UTF-8 text to a file (overwrites by default). "
+        "For existing files, rejects stale writes if the file was modified "
+        "externally since the last read. Returns a structured diff."
+    ),
     {
         "type": "object",
         "properties": {
@@ -749,6 +1036,9 @@ async def write_text_file(
     overwrite: bool = True,
     create_dirs: bool = True,
 ) -> str:
+    from obscura.tools.system.file_state import check_staleness
+    from obscura.tools.system.diff_utils import compute_unified_diff
+
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
@@ -756,16 +1046,34 @@ async def write_text_file(
         return _json_error("path_is_directory", path=str(target))
     if target.exists() and not overwrite:
         return _json_error("file_exists", path=str(target))
+
+    is_new = not target.exists()
+    original = ""
+
+    if not is_new:
+        # Staleness check for existing files.
+        staleness_err = check_staleness(target)
+        if staleness_err is not None:
+            return _json_error("stale_file", path=str(target), detail=staleness_err)
+        original = target.read_text(encoding="utf-8")
+        # Preserve original line endings if the file uses CRLF.
+        if "\r\n" in original and "\r\n" not in text:
+            text = text.replace("\n", "\r\n")
+
     if create_dirs:
         target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-    return json.dumps(
-        {
-            "ok": True,
-            "path": str(target),
-            "bytes_written": len(text.encode("utf-8")),
-        }
-    )
+
+    # Generate diff.
+    diff = compute_unified_diff(original, text, str(target))
+
+    return json.dumps({
+        "ok": True,
+        "path": str(target),
+        "bytes_written": len(text.encode("utf-8")),
+        "is_new": is_new,
+        "diff": diff,
+    })
 
 
 @tool(
@@ -1111,15 +1419,32 @@ async def manage_crontab(
 
 @tool(
     "grep_files",
-    "Search file contents with regex. Returns matching lines with file paths and line numbers.",
+    (
+        "Search file contents with regex. Supports multiple output modes: "
+        "'content' shows matching lines, 'files_with_matches' shows file paths, "
+        "'count' shows match counts. Uses ripgrep when available for speed."
+    ),
     {
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Regex pattern to search for."},
             "path": {"type": "string", "description": "File or directory to search in."},
             "include": {"type": "string", "description": "Glob filter for filenames (e.g. '*.py')."},
-            "max_results": {"type": "integer"},
-            "case_sensitive": {"type": "boolean"},
+            "glob": {"type": "string", "description": "Glob pattern passed to rg --glob (e.g. '*.{ts,tsx}')."},
+            "type": {"type": "string", "description": "File type filter for rg --type (e.g. 'py', 'js')."},
+            "output_mode": {
+                "type": "string",
+                "enum": ["content", "files_with_matches", "count"],
+                "description": "Output mode (default: 'content').",
+            },
+            "context": {"type": "integer", "description": "Context lines before and after each match (-C)."},
+            "before_context": {"type": "integer", "description": "Lines before each match (-B)."},
+            "after_context": {"type": "integer", "description": "Lines after each match (-A)."},
+            "case_sensitive": {"type": "boolean", "description": "Case-sensitive matching (default: true)."},
+            "multiline": {"type": "boolean", "description": "Enable multiline matching."},
+            "head_limit": {"type": "integer", "description": "Limit results (default: 250; 0=unlimited)."},
+            "offset": {"type": "integer", "description": "Skip first N results before applying head_limit."},
+            "max_results": {"type": "integer", "description": "Legacy alias for head_limit."},
         },
         "required": ["pattern", "path"],
     },
@@ -1128,8 +1453,17 @@ async def grep_files(
     pattern: str,
     path: str,
     include: str = "",
-    max_results: int = 100,
+    glob: str = "",
+    output_mode: str = "content",
+    context: int = 0,
+    before_context: int = 0,
+    after_context: int = 0,
     case_sensitive: bool = True,
+    multiline: bool = False,
+    head_limit: int = 250,
+    offset: int = 0,
+    max_results: int = 0,
+    **kwargs: Any,
 ) -> str:
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
@@ -1137,52 +1471,272 @@ async def grep_files(
     if not target.exists():
         return _json_error("path_not_found", path=str(target))
 
+    # Legacy compat: max_results overrides head_limit when provided.
+    effective_limit = max_results if max_results > 0 else head_limit
+    file_type = kwargs.get("type", "")
+
+    # Try ripgrep first, fall back to Python implementation.
+    rg_path = shutil.which("rg")
+    if rg_path is not None:
+        return await _grep_via_ripgrep(
+            rg_path=rg_path,
+            pattern=pattern,
+            target=target,
+            include=include,
+            glob_pattern=glob,
+            file_type=str(file_type),
+            output_mode=output_mode,
+            context=context,
+            before_context=before_context,
+            after_context=after_context,
+            case_sensitive=case_sensitive,
+            multiline=multiline,
+            head_limit=effective_limit,
+            offset=offset,
+        )
+
+    return await _grep_via_python(
+        pattern=pattern,
+        target=target,
+        include=include,
+        case_sensitive=case_sensitive,
+        output_mode=output_mode,
+        head_limit=effective_limit,
+        offset=offset,
+    )
+
+
+async def _grep_via_ripgrep(
+    *,
+    rg_path: str,
+    pattern: str,
+    target: Path,
+    include: str,
+    glob_pattern: str,
+    file_type: str,
+    output_mode: str,
+    context: int,
+    before_context: int,
+    after_context: int,
+    case_sensitive: bool,
+    multiline: bool,
+    head_limit: int,
+    offset: int,
+) -> str:
+    """Execute grep via ripgrep subprocess and parse results."""
+    cmd: list[str] = [rg_path, "--no-heading", "--with-filename", "--line-number"]
+
+    if not case_sensitive:
+        cmd.append("-i")
+    if multiline:
+        cmd.extend(["-U", "--multiline-dotall"])
+    if context > 0:
+        cmd.extend(["-C", str(context)])
+    else:
+        if before_context > 0:
+            cmd.extend(["-B", str(before_context)])
+        if after_context > 0:
+            cmd.extend(["-A", str(after_context)])
+
+    # File filtering.
+    if include:
+        cmd.extend(["--glob", include])
+    if glob_pattern:
+        for g in glob_pattern.split():
+            cmd.extend(["--glob", g])
+    if file_type:
+        cmd.extend(["--type", file_type])
+
+    if output_mode == "files_with_matches":
+        cmd.append("-l")
+    elif output_mode == "count":
+        cmd.append("-c")
+
+    cmd.extend(["--", pattern, str(target)])
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return _json_error("timeout", detail="ripgrep timed out after 30s")
+
+    raw = stdout_bytes.decode("utf-8", errors="replace")
+    lines = [ln for ln in raw.splitlines() if ln]
+
+    # Apply offset/limit pagination.
+    if offset > 0:
+        lines = lines[offset:]
+    if head_limit > 0:
+        truncated = len(lines) > head_limit
+        lines = lines[:head_limit]
+    else:
+        truncated = False
+
+    if output_mode == "files_with_matches":
+        # Sort by mtime (most recent first).
+        def _mtime(fp: str) -> float:
+            try:
+                return Path(fp).stat().st_mtime
+            except OSError:
+                return 0.0
+        files = sorted(lines, key=_mtime, reverse=True)
+        return json.dumps({
+            "ok": True,
+            "mode": "files_with_matches",
+            "pattern": pattern,
+            "path": str(target),
+            "count": len(files),
+            "truncated": truncated,
+            "files": files,
+        })
+
+    if output_mode == "count":
+        total_matches = 0
+        count_entries: list[dict[str, object]] = []
+        for ln in lines:
+            if ":" in ln:
+                fp, cnt = ln.rsplit(":", 1)
+                try:
+                    c = int(cnt.strip())
+                except ValueError:
+                    c = 0
+                count_entries.append({"file": fp, "count": c})
+                total_matches += c
+        return json.dumps({
+            "ok": True,
+            "mode": "count",
+            "pattern": pattern,
+            "path": str(target),
+            "num_files": len(count_entries),
+            "total_matches": total_matches,
+            "truncated": truncated,
+            "counts": count_entries,
+        })
+
+    # Default: content mode.
+    matches: list[dict[str, object]] = []
+    for ln in lines:
+        # Format: file:line:content  or  file-line-content (context)
+        parts = ln.split(":", 2) if ":" in ln else [ln]
+        if len(parts) >= 3:
+            matches.append({"file": parts[0], "line": parts[1], "text": parts[2][:500]})
+        else:
+            matches.append({"text": ln[:500]})
+
+    return json.dumps({
+        "ok": True,
+        "mode": "content",
+        "pattern": pattern,
+        "path": str(target),
+        "count": len(matches),
+        "truncated": truncated,
+        "matches": matches,
+    })
+
+
+async def _grep_via_python(
+    *,
+    pattern: str,
+    target: Path,
+    include: str,
+    case_sensitive: bool,
+    output_mode: str,
+    head_limit: int,
+    offset: int,
+) -> str:
+    """Fallback grep using Python re when ripgrep is unavailable."""
     flags = 0 if case_sensitive else re.IGNORECASE
     try:
         regex = re.compile(pattern, flags)
     except re.error as exc:
         return _json_error("invalid_regex", pattern=pattern, detail=str(exc))
 
-    limit = max(1, min(max_results, 1000))
+    _BINARY_EXTS = {
+        ".pyc", ".pyo", ".so", ".dylib", ".bin", ".exe", ".o", ".a",
+        ".class", ".jar", ".whl", ".gz", ".zip", ".tar", ".png",
+        ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+    }
+
+    limit = max(1, head_limit) if head_limit > 0 else 10_000
     matches: list[dict[str, object]] = []
+    file_counts: dict[str, int] = {}
+    matched_files: list[str] = []
 
     def _search_file(fp: Path) -> None:
         try:
             text = fp.read_text(encoding="utf-8", errors="replace")
         except (OSError, PermissionError):
             return
+        file_match_count = 0
         for lineno, line in enumerate(text.splitlines(), 1):
-            if len(matches) >= limit:
-                return
             if regex.search(line):
-                matches.append({
-                    "file": str(fp),
-                    "line": lineno,
-                    "text": line.rstrip()[:500],
-                })
+                file_match_count += 1
+                if output_mode == "content":
+                    matches.append({"file": str(fp), "line": lineno, "text": line.rstrip()[:500]})
+        if file_match_count > 0:
+            file_counts[str(fp)] = file_match_count
+            matched_files.append(str(fp))
 
     if target.is_file():
         _search_file(target)
     else:
         for fp in sorted(target.rglob("*")):
-            if len(matches) >= limit:
-                break
             if not fp.is_file():
                 continue
             if include and not fnmatch.fnmatch(fp.name, include):
                 continue
-            # Skip binary-looking files
-            if fp.suffix in {".pyc", ".pyo", ".so", ".dylib", ".bin", ".exe", ".o", ".a", ".class", ".jar", ".whl", ".gz", ".zip", ".tar", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot"}:
+            if fp.suffix in _BINARY_EXTS:
                 continue
             _search_file(fp)
 
+    if output_mode == "files_with_matches":
+        results = matched_files[offset:]
+        truncated = len(results) > limit
+        results = results[:limit]
+        return json.dumps({
+            "ok": True,
+            "mode": "files_with_matches",
+            "pattern": pattern,
+            "path": str(target),
+            "count": len(results),
+            "truncated": truncated,
+            "files": results,
+        })
+
+    if output_mode == "count":
+        entries = [{"file": f, "count": c} for f, c in file_counts.items()]
+        entries = entries[offset:]
+        truncated = len(entries) > limit
+        entries = entries[:limit]
+        return json.dumps({
+            "ok": True,
+            "mode": "count",
+            "pattern": pattern,
+            "path": str(target),
+            "num_files": len(entries),
+            "total_matches": sum(e["count"] for e in entries),
+            "truncated": truncated,
+            "counts": entries,
+        })
+
+    # Content mode.
+    paginated = matches[offset:]
+    truncated = len(paginated) > limit
+    paginated = paginated[:limit]
     return json.dumps({
         "ok": True,
+        "mode": "content",
         "pattern": pattern,
         "path": str(target),
-        "count": len(matches),
-        "truncated": len(matches) >= limit,
-        "matches": matches,
+        "count": len(paginated),
+        "truncated": truncated,
+        "matches": paginated,
     })
 
 
@@ -1251,7 +1805,12 @@ async def find_files(
 
 @tool(
     "edit_text_file",
-    "Perform a surgical find-and-replace edit in a file. Replaces the first (or all) occurrence(s) of old_text with new_text.",
+    (
+        "Perform a surgical find-and-replace edit in a file. "
+        "Replaces the first (or all) occurrence(s) of old_text with new_text. "
+        "The file must have been read first — rejects stale edits if the file "
+        "was modified externally since the last read."
+    ),
     {
         "type": "object",
         "properties": {
@@ -1269,6 +1828,9 @@ async def edit_text_file(
     new_text: str,
     replace_all: bool = False,
 ) -> str:
+    from obscura.tools.system.file_state import check_staleness
+    from obscura.tools.system.diff_utils import compute_unified_diff
+
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
@@ -1277,24 +1839,60 @@ async def edit_text_file(
     if not target.is_file():
         return _json_error("not_a_file", path=str(target))
 
+    # Staleness check — reject if file changed since last read.
+    staleness_err = check_staleness(target)
+    if staleness_err is not None:
+        return _json_error("stale_file", path=str(target), detail=staleness_err)
+
+    # Read content — no awaits between here and write (atomic).
     content = target.read_text(encoding="utf-8")
+
+    # Try exact match first, then quote-normalized fallback.
+    actual_old = old_text
     if old_text not in content:
-        return _json_error("text_not_found", path=str(target), old_text=old_text[:200])
+        normalized_old = _normalize_quotes(old_text)
+        normalized_content = _normalize_quotes(content)
+        if normalized_old in normalized_content:
+            # Find the actual substring in original content by position.
+            pos = normalized_content.index(normalized_old)
+            actual_old = content[pos:pos + len(old_text)]
+            if actual_old not in content:
+                return _json_error("text_not_found", path=str(target), old_text=old_text[:200])
+        else:
+            return _json_error("text_not_found", path=str(target), old_text=old_text[:200])
 
     if replace_all:
-        new_content = content.replace(old_text, new_text)
-        count = content.count(old_text)
+        new_content = content.replace(actual_old, new_text)
+        count = content.count(actual_old)
     else:
-        new_content = content.replace(old_text, new_text, 1)
+        new_content = content.replace(actual_old, new_text, 1)
         count = 1
 
+    # Atomic write — no async between staleness check and here.
     target.write_text(new_content, encoding="utf-8")
+
+    # Generate structured diff for the response.
+    diff = compute_unified_diff(content, new_content, str(target))
+
     return json.dumps({
         "ok": True,
         "path": str(target),
         "replacements": count,
         "bytes_written": len(new_content.encode("utf-8")),
+        "diff": diff,
     })
+
+
+def _normalize_quotes(text: str) -> str:
+    """Normalize curly/smart quotes to straight ASCII quotes."""
+    replacements = {
+        "\u2018": "'", "\u2019": "'",  # Single curly quotes
+        "\u201c": '"', "\u201d": '"',  # Double curly quotes
+        "\u2032": "'", "\u2033": '"',  # Prime marks
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
 
 
 @tool(
@@ -2870,6 +3468,362 @@ async def user_interact(
         return _json_error("invalid_mode", detail=f"Unknown mode: {mode}")
 
 
+# ---------------------------------------------------------------------------
+# History snip — selective context compression
+# ---------------------------------------------------------------------------
+
+
+# Module-level message history reference (set by REPL).
+_snip_message_history: list[Any] | None = None
+
+
+def set_snip_message_history(history: list[Any]) -> None:
+    """Set the message history reference for the snip tool."""
+    global _snip_message_history
+    _snip_message_history = history
+
+
+@tool(
+    "history_snip",
+    (
+        "Remove specific message segments from the conversation history "
+        "to free context window space. Specify a range of turn indices to remove."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "start_turn": {
+                "type": "integer",
+                "description": "First turn index to remove (0-based).",
+            },
+            "end_turn": {
+                "type": "integer",
+                "description": "Last turn index to remove (inclusive).",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why these turns are being removed.",
+            },
+        },
+        "required": ["start_turn", "end_turn"],
+    },
+)
+async def history_snip(
+    start_turn: int,
+    end_turn: int,
+    reason: str = "",
+) -> str:
+    if _snip_message_history is None:
+        return json.dumps({"ok": False, "error": "no_history", "detail": "Message history not available"})
+
+    total = len(_snip_message_history)
+    if start_turn < 0 or end_turn >= total or start_turn > end_turn:
+        return json.dumps({
+            "ok": False,
+            "error": "invalid_range",
+            "detail": f"Range {start_turn}-{end_turn} invalid (history has {total} entries)",
+        })
+
+    # Remove the specified range.
+    removed_count = end_turn - start_turn + 1
+    del _snip_message_history[start_turn:end_turn + 1]
+
+    return json.dumps({
+        "ok": True,
+        "removed_turns": removed_count,
+        "remaining_turns": len(_snip_message_history),
+        "reason": reason,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Notebook edit — Jupyter notebook cell editing
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "notebook_edit",
+    (
+        "Edit a Jupyter notebook (.ipynb) cell. Supports replacing cell content, "
+        "inserting new cells, or deleting cells."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "notebook_path": {"type": "string", "description": "Path to the .ipynb file."},
+            "cell_index": {"type": "integer", "description": "0-based index of the cell to edit/insert after/delete."},
+            "new_source": {"type": "string", "description": "New cell source content (required for replace/insert)."},
+            "cell_type": {
+                "type": "string",
+                "enum": ["code", "markdown"],
+                "description": "Cell type (required for insert).",
+            },
+            "edit_mode": {
+                "type": "string",
+                "enum": ["replace", "insert", "delete"],
+                "description": "Edit mode: replace, insert after cell_index, or delete (default: replace).",
+            },
+        },
+        "required": ["notebook_path", "cell_index"],
+    },
+)
+async def notebook_edit(
+    notebook_path: str,
+    cell_index: int,
+    new_source: str = "",
+    cell_type: str = "code",
+    edit_mode: str = "replace",
+) -> str:
+    target = _resolve_path(notebook_path)
+    if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
+        return _json_error("path_not_allowed", path=str(target))
+    if not target.exists():
+        return _json_error("path_not_found", path=str(target))
+    if target.suffix.lower() != ".ipynb":
+        return _json_error("not_a_notebook", path=str(target))
+
+    try:
+        nb_data = json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return _json_error("notebook_parse_error", detail=str(exc))
+
+    cells = nb_data.get("cells", [])
+
+    if edit_mode == "delete":
+        if cell_index < 0 or cell_index >= len(cells):
+            return _json_error("cell_index_out_of_range", index=cell_index, total_cells=len(cells))
+        old_source = "".join(cells[cell_index].get("source", []))
+        del cells[cell_index]
+        target.write_text(json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return json.dumps({
+            "ok": True,
+            "edit_mode": "delete",
+            "cell_index": cell_index,
+            "deleted_source": old_source[:200],
+            "cell_count": len(cells),
+        })
+
+    if edit_mode == "replace":
+        if cell_index < 0 or cell_index >= len(cells):
+            return _json_error("cell_index_out_of_range", index=cell_index, total_cells=len(cells))
+        old_source = "".join(cells[cell_index].get("source", []))
+        cells[cell_index]["source"] = new_source.splitlines(keepends=True)
+        if cell_type:
+            cells[cell_index]["cell_type"] = cell_type
+        target.write_text(json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return json.dumps({
+            "ok": True,
+            "edit_mode": "replace",
+            "cell_index": cell_index,
+            "cell_type": cells[cell_index].get("cell_type", "code"),
+            "old_source": old_source[:200],
+            "new_source": new_source[:200],
+        })
+
+    if edit_mode == "insert":
+        if cell_index < -1 or cell_index >= len(cells):
+            return _json_error("cell_index_out_of_range", index=cell_index, total_cells=len(cells))
+        new_cell: dict[str, Any] = {
+            "cell_type": cell_type,
+            "source": new_source.splitlines(keepends=True),
+            "metadata": {},
+            "outputs": [] if cell_type == "code" else [],
+        }
+        if cell_type == "code":
+            new_cell["execution_count"] = None
+        cells.insert(cell_index + 1, new_cell)
+        target.write_text(json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return json.dumps({
+            "ok": True,
+            "edit_mode": "insert",
+            "inserted_after": cell_index,
+            "cell_type": cell_type,
+            "new_source": new_source[:200],
+            "cell_count": len(cells),
+        })
+
+    return _json_error("invalid_edit_mode", detail=f"Unknown edit_mode: {edit_mode}")
+
+
+# ---------------------------------------------------------------------------
+# Tool search — deferred tool discovery
+# ---------------------------------------------------------------------------
+
+# Global reference set by the REPL/runtime at startup.
+_tool_registry_ref: Any = None
+
+
+def set_tool_registry(registry: Any) -> None:
+    """Set the global ToolRegistry reference for tool_search."""
+    global _tool_registry_ref
+    _tool_registry_ref = registry
+
+
+@tool(
+    "tool_search",
+    (
+        "Search for available tools by name or keyword. "
+        "Use 'select:ToolName' for exact match, or keywords for fuzzy search."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query. 'select:name' for exact match, or keywords.",
+            },
+            "max_results": {"type": "integer", "description": "Max results (default 5)."},
+        },
+        "required": ["query"],
+    },
+)
+async def tool_search(query: str, max_results: int = 5) -> str:
+    if _tool_registry_ref is None:
+        return _json_error("no_registry", detail="Tool registry not available")
+
+    all_specs = _tool_registry_ref.all()
+    cap = max(1, min(max_results, 50))
+
+    # Exact match mode: "select:ToolName,OtherTool"
+    if query.startswith("select:"):
+        names = [n.strip() for n in query[7:].split(",") if n.strip()]
+        found = []
+        for name in names:
+            spec = _tool_registry_ref.get(name)
+            if spec is not None:
+                found.append({"name": spec.name, "description": spec.description})
+        return json.dumps({
+            "ok": True,
+            "query": query,
+            "matches": found,
+            "total_tools": len(all_specs),
+        })
+
+    # Keyword search: score each tool by query term matches.
+    terms = query.lower().split()
+    scored: list[tuple[float, Any]] = []
+    for spec in all_specs:
+        name_lower = spec.name.lower()
+        desc_lower = spec.description.lower()
+        score = 0.0
+        for term in terms:
+            if term == name_lower:
+                score += 10.0  # Exact name match
+            elif term in name_lower:
+                score += 5.0   # Partial name match
+            if term in desc_lower:
+                score += 1.0   # Description match
+        if score > 0:
+            scored.append((score, spec))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    matches = [
+        {"name": spec.name, "description": spec.description}
+        for _, spec in scored[:cap]
+    ]
+    return json.dumps({
+        "ok": True,
+        "query": query,
+        "matches": matches,
+        "total_tools": len(all_specs),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Sleep tool — wait/poll for proactive-mode agents
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "sleep",
+    "Pause execution for a specified number of seconds. Max 300s.",
+    {
+        "type": "object",
+        "properties": {
+            "seconds": {
+                "type": "number",
+                "description": "How long to sleep (max 300).",
+            },
+        },
+        "required": ["seconds"],
+    },
+)
+async def sleep_tool(seconds: float = 10.0) -> str:
+    capped = max(0.0, min(float(seconds), 300.0))
+    await asyncio.sleep(capped)
+    return json.dumps({"ok": True, "slept_seconds": capped})
+
+
+# ---------------------------------------------------------------------------
+# Config tool — read/write settings from within agent
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "config",
+    "Read or write Obscura settings (~/.obscura/settings.json).",
+    {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["get", "set", "list"],
+                "description": "Action: 'get' a key, 'set' a key, or 'list' all settings.",
+            },
+            "key": {"type": "string", "description": "Settings key (dot-notation, e.g. 'backend.default')."},
+            "value": {"description": "Value to set (for 'set' action). Can be string, number, bool, or null."},
+        },
+        "required": ["action"],
+    },
+)
+async def config_tool(
+    action: str,
+    key: str = "",
+    value: Any = None,
+) -> str:
+    settings_path = Path.home() / ".obscura" / "settings.json"
+
+    # Load current settings.
+    settings: dict[str, Any] = {}
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            settings = {}
+
+    if action == "list":
+        return json.dumps({"ok": True, "settings": settings})
+
+    if action == "get":
+        if not key:
+            return _json_error("missing_key", detail="'key' is required for 'get' action")
+        # Support dot-notation: "backend.default" → settings["backend"]["default"]
+        parts = key.split(".")
+        current: Any = settings
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return json.dumps({"ok": True, "key": key, "value": None, "found": False})
+        return json.dumps({"ok": True, "key": key, "value": current, "found": True})
+
+    if action == "set":
+        if not key:
+            return _json_error("missing_key", detail="'key' is required for 'set' action")
+        parts = key.split(".")
+        target_dict = settings
+        for part in parts[:-1]:
+            if part not in target_dict or not isinstance(target_dict[part], dict):
+                target_dict[part] = {}
+            target_dict = target_dict[part]
+        target_dict[parts[-1]] = value
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        return json.dumps({"ok": True, "key": key, "value": value, "written": True})
+
+    return _json_error("invalid_action", detail=f"Unknown action: {action}")
+
+
 def get_system_tool_specs() -> list[ToolSpec]:
     """Return default system tool specs for agent runtime."""
     static_specs = [
@@ -2947,6 +3901,15 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast(ToolSpec, getattr(cast(Any, policy_probe), "spec")),
         # Team prompt
         cast(ToolSpec, getattr(cast(Any, read_team_prompt), "spec")),
+        # History snip
+        cast(ToolSpec, getattr(cast(Any, history_snip), "spec")),
+        # Notebook edit
+        cast(ToolSpec, getattr(cast(Any, notebook_edit), "spec")),
+        # Tool search
+        cast(ToolSpec, getattr(cast(Any, tool_search), "spec")),
+        # Sleep & Config
+        cast(ToolSpec, getattr(cast(Any, sleep_tool), "spec")),
+        cast(ToolSpec, getattr(cast(Any, config_tool), "spec")),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():

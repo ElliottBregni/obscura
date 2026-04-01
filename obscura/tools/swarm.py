@@ -126,8 +126,24 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
         if runtime is None:
             return json.dumps({"ok": False, "error": "no_runtime"})
 
-        # Resolve agent config
-        cfg = ctx.agent_configs.get(agent_type)
+        # Resolve agent config — try markdown definitions first, then YAML.
+        cfg = None
+        _definition_match = False
+        try:
+            from obscura.agent.definitions import resolve_all_definitions, definition_to_config_dict
+            defs = resolve_all_definitions()
+            if agent_type in defs:
+                defn = defs[agent_type]
+                cfg = definition_to_config_dict(defn, parent_model=model or ctx.backend)
+                cfg["name"] = defn.name
+                cfg["system_prompt"] = defn.system_prompt
+                cfg["tools"] = list(defn.tools)
+                cfg["max_turns"] = defn.max_turns
+                _definition_match = True
+        except Exception:
+            pass
+        if cfg is None:
+            cfg = ctx.agent_configs.get(agent_type)
         agent = None
 
         try:

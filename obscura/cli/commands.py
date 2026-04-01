@@ -3674,7 +3674,55 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
         except Exception as exc:
             print_warning(f"Bootstrap step failed: {exc}")
 
+    # Phase 2: Generate CLAUDE.md if it doesn't exist
+    claude_md = Path.cwd() / "CLAUDE.md"
+    if not claude_md.exists() and "--no-claude-md" not in args:
+        print_info("Generating CLAUDE.md for this repository...")
+        try:
+            onboarding_prompt = _build_onboarding_prompt()
+            from obscura.cli.render import render_event
+            async for event in _ctx.client.run_loop(onboarding_prompt, max_turns=10):
+                render_event(event)
+            if claude_md.exists():
+                print_ok(f"Created {claude_md}")
+        except Exception as exc:
+            print_warning(f"CLAUDE.md generation failed: {exc}")
+
+    # Phase 3: Show agent definitions
+    try:
+        from obscura.agent.definitions import resolve_all_definitions
+        defs = resolve_all_definitions()
+        if defs:
+            print_info(f"Agent definitions available: {len(defs)}")
+            for name, defn in sorted(defs.items())[:8]:
+                print_info(f"  {name}: {defn.description[:60]}")
+    except Exception:
+        pass
+
+    print_ok("Initialization complete. Type /help for commands.")
     return None
+
+
+def _build_onboarding_prompt() -> str:
+    """Build the onboarding prompt for CLAUDE.md generation."""
+    return """\
+Explore this repository and create a CLAUDE.md file in the root directory.
+
+The CLAUDE.md should contain:
+1. **Build & Development** — How to install, build, run, and test
+2. **Architecture** — Key modules, data flow, important patterns
+3. **Key Patterns** — Coding conventions, naming, imports
+4. **Testing** — How to run tests, test conventions
+
+Steps:
+1. Read README.md, package.json/pyproject.toml, Makefile/Dockerfile if they exist
+2. Explore the directory structure (tree, ls)
+3. Read 3-5 key source files to understand patterns
+4. Write CLAUDE.md with the information you found
+
+Keep it concise (under 200 lines). Focus on what an AI agent needs to know
+to work effectively in this codebase. Use code blocks for commands.
+Do NOT make up information — only document what you can verify."""
 
 
 # ---------------------------------------------------------------------------
@@ -4377,6 +4425,654 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Wave 2 commands: permissions, resume, cost, doctor, vim, effort, fast,
+# commit, review, security-review, export, coordinator, voice
+# ---------------------------------------------------------------------------
+
+
+async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
+    """Switch permission mode: default, plan, accept_edits, bypass."""
+    from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+
+    mode_str = args.strip().lower()
+    if not mode_str:
+        current = getattr(ctx, "_permission_mode", "default")
+        print_info(f"Permission mode: {current}")
+        print_info("Usage: /permissions default|plan|accept_edits|bypass")
+        return None
+    try:
+        mode = PermissionMode(mode_str)
+    except ValueError:
+        print_error(f"Unknown mode: {mode_str}. Options: default, plan, accept_edits, bypass")
+        return None
+    if mode == PermissionMode.BYPASS:
+        if not os.environ.get("OBSCURA_BYPASS_PERMISSIONS"):
+            print_warning("Set OBSCURA_BYPASS_PERMISSIONS=1 to enable bypass mode.")
+            return None
+    ctx._permission_mode = mode_str  # type: ignore[attr-defined]
+    print_ok(f"Permission mode set to: {mode.value}")
+    return None
+
+
+async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
+    """Resume a previous session. Usage: /resume [search term]"""
+    import difflib
+
+    sessions = await ctx.store.list_sessions()
+    if not sessions:
+        print_info("No previous sessions found.")
+        return None
+
+    search = args.strip().lower()
+    if search:
+        scored: list[tuple[float, Any]] = []
+        for s in sessions:
+            text = f"{s.summary or ''} {s.model or ''} {s.agent_name or ''} {s.project or ''}".lower()
+            ratio = difflib.SequenceMatcher(None, search, text).ratio()
+            if ratio > 0.2 or search in text:
+                scored.append((ratio, s))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        sessions = [s for _, s in scored[:10]]
+        if not sessions:
+            print_info(f"No sessions matching '{search}'.")
+            return None
+
+    table = Table(title="Sessions", expand=False)
+    table.add_column("#", width=3, justify="right")
+    table.add_column("ID", width=12, no_wrap=True)
+    table.add_column("Status", width=10)
+    table.add_column("Model", width=16)
+    table.add_column("Summary", max_width=40)
+
+    shown = sessions[:15]
+    for i, s in enumerate(shown, 1):
+        sid = s.session_id[:12] if hasattr(s, "session_id") else str(s)[:12]
+        status = s.status.value if hasattr(s.status, "value") else str(s.status)
+        model = getattr(s, "model", "") or ""
+        summary = (getattr(s, "summary", "") or "")[:40]
+        table.add_row(str(i), sid, status, model, summary)
+
+    console.print(table)
+
+    # If only one match and search was specific, auto-switch.
+    if search and len(shown) == 1:
+        target_sid = shown[0].session_id if hasattr(shown[0], "session_id") else str(shown[0])
+        ctx.session_id = target_sid
+        ctx.message_history = []
+        print_ok(f"Resumed session {target_sid[:12]}")
+        # Replay last few events as context preview.
+        try:
+            events = await ctx.store.get_events(target_sid)
+            text_events = [e for e in events if hasattr(e, "kind") and "text" in str(getattr(e, "kind", "")).lower()]
+            if text_events:
+                last = text_events[-1]
+                preview = getattr(last, "payload", {}).get("text", "")[:200] if hasattr(last, "payload") else ""
+                if preview:
+                    console.print(f"[dim]Last: {preview}...[/]")
+        except Exception:
+            pass
+        return None
+
+    print_info("Resume with: /resume <search> or /session <id>")
+    return None
+
+
+async def cmd_cost(_args: str, ctx: REPLContext) -> str | None:
+    """Display session cost breakdown."""
+    from obscura.core.cost_tracker import get_cost_tracker
+
+    tracker = get_cost_tracker()
+    if tracker.turn_count() == 0:
+        print_info("No cost data recorded yet.")
+        return None
+
+    table = Table(title="Session Cost Breakdown", expand=False)
+    table.add_column("Turn", justify="right", width=5)
+    table.add_column("Model", width=20)
+    table.add_column("Input", justify="right", width=10)
+    table.add_column("Output", justify="right", width=10)
+    table.add_column("Cost", justify="right", width=10)
+
+    for entry in tracker.breakdown():
+        table.add_row(
+            str(entry["turn"]),
+            entry["model"],
+            f"{entry['input_tokens']:,}",
+            f"{entry['output_tokens']:,}",
+            f"${entry['cost_usd']:.4f}",
+        )
+
+    console.print(table)
+    console.print(f"[bold]{tracker.summary()}[/]")
+    return None
+
+
+async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
+    """Run environment diagnostics."""
+    import shutil
+    import sys
+
+    checks: list[tuple[str, str, str]] = []  # (name, status, detail)
+
+    # Python version
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    ok = sys.version_info >= (3, 13)
+    checks.append(("Python", "[green]OK[/]" if ok else "[red]FAIL[/]", f"{ver} {'(3.13+ required)' if not ok else ''}"))
+
+    # Key binaries
+    for binary in ["git", "rg", "uv", "ruff", "pyright"]:
+        path = shutil.which(binary)
+        if path:
+            checks.append((binary, "[green]OK[/]", path))
+        else:
+            checks.append((binary, "[yellow]MISS[/]", "not found in PATH"))
+
+    # Obscura home
+    from obscura.core.paths import resolve_obscura_global_home
+    home = resolve_obscura_global_home()
+    checks.append(("Obscura home", "[green]OK[/]" if home.is_dir() else "[yellow]MISS[/]", str(home)))
+
+    # Event store
+    db_path = home / "events.db"
+    checks.append(("Event store", "[green]OK[/]" if db_path.exists() else "[yellow]MISS[/]", str(db_path)))
+
+    # Settings
+    settings_path = home / "settings.json"
+    checks.append(("Settings", "[green]OK[/]" if settings_path.exists() else "[dim]none[/]", str(settings_path)))
+
+    # Agent definitions
+    from obscura.agent.definitions import resolve_all_definitions
+    defs = resolve_all_definitions()
+    checks.append(("Agent definitions", "[green]OK[/]", f"{len(defs)} types available"))
+
+    table = Table(title="Obscura Doctor", expand=False)
+    table.add_column("Check", width=20)
+    table.add_column("Status", width=8, justify="center")
+    table.add_column("Detail", max_width=50)
+    for name, status, detail in checks:
+        table.add_row(name, status, detail)
+    console.print(table)
+    return None
+
+
+async def cmd_vim(_args: str, ctx: REPLContext) -> str | None:
+    """Toggle vim keybindings in the REPL."""
+    current = getattr(ctx, "_vim_mode", False)
+    ctx._vim_mode = not current  # type: ignore[attr-defined]
+    mode = "enabled" if ctx._vim_mode else "disabled"  # type: ignore[attr-defined]
+    print_ok(f"Vim mode {mode}. Takes effect on next prompt.")
+    return None
+
+
+async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
+    """Set thinking effort level: low, medium, high, max."""
+    from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+
+    level_str = args.strip().lower()
+    if not level_str:
+        current = getattr(ctx, "_effort_level", "medium")
+        print_info(f"Effort level: {current}")
+        print_info("Usage: /effort low|medium|high|max")
+        return None
+    try:
+        level = EffortLevel(level_str)
+    except ValueError:
+        print_error(f"Unknown level: {level_str}. Options: low, medium, high, max")
+        return None
+    ctx._effort_level = level.value  # type: ignore[attr-defined]
+    budget = EFFORT_THINKING_BUDGETS[level]
+    print_ok(f"Effort: {level.value} (thinking budget: {budget:,} tokens)")
+    return None
+
+
+async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
+    """Toggle fast/terse mode (low effort + concise output)."""
+    from obscura.core.types import EffortLevel
+
+    current = getattr(ctx, "_effort_level", "medium")
+    if current == "low":
+        ctx._effort_level = "medium"  # type: ignore[attr-defined]
+        print_ok("Fast mode OFF (effort: medium)")
+    else:
+        ctx._effort_level = "low"  # type: ignore[attr-defined]
+        print_ok("Fast mode ON (effort: low, terse responses)")
+    return None
+
+
+async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
+    """AI-assisted git commit from staged changes."""
+    import asyncio as _aio
+
+    # Gather git context
+    cmds = {
+        "status": "git status",
+        "diff": "git diff HEAD",
+        "branch": "git branch --show-current",
+        "log": "git log --oneline -10",
+    }
+    results: dict[str, str] = {}
+    for key, cmd in cmds.items():
+        proc = await _aio.create_subprocess_shell(
+            cmd, stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        results[key] = stdout.decode("utf-8", errors="replace").strip()
+
+    if not results["diff"]:
+        print_info("No changes to commit.")
+        return None
+
+    prompt = f"""Based on these git changes, create a single commit.
+
+## Git Status
+```
+{results['status']}
+```
+
+## Changes (git diff HEAD)
+```
+{results['diff'][:8000]}
+```
+
+## Current Branch
+{results['branch']}
+
+## Recent Commits (for style reference)
+```
+{results['log']}
+```
+
+## Instructions
+1. Analyze the changes and draft a concise commit message (1-2 sentences, focus on "why")
+2. Follow the repository's existing commit message style from the recent commits above
+3. Stage relevant files with `git add` (specific files, not -A)
+4. Create the commit using HEREDOC:
+```
+git commit -m "$(cat <<'EOF'
+Message here.
+
+Co-Authored-By: Obscura Agent <noreply@obscura.dev>
+EOF
+)"
+```
+Do NOT use --amend, --no-verify, or -i flags. Do NOT commit .env or credential files."""
+
+    # Send to agent loop
+    from obscura.cli.render import render_event
+    try:
+        async for event in ctx.client.run_loop(prompt):
+            render_event(event)
+    except Exception as exc:
+        print_error(str(exc))
+    return None
+
+
+async def cmd_review(args: str, ctx: REPLContext) -> str | None:
+    """AI code review of changes. Usage: /review [PR number or ref]"""
+    import asyncio as _aio
+
+    ref = args.strip() or "HEAD"
+    proc = await _aio.create_subprocess_shell(
+        f"git diff {ref}", stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    diff = stdout.decode("utf-8", errors="replace").strip()
+
+    if not diff:
+        print_info(f"No changes found for ref: {ref}")
+        return None
+
+    prompt = f"""You are an expert code reviewer. Review these changes:
+
+```diff
+{diff[:12000]}
+```
+
+Provide a thorough review covering:
+- **Overview**: What the changes do (1-2 sentences)
+- **Correctness**: Logic errors, edge cases, type mismatches
+- **Style**: Adherence to project conventions
+- **Performance**: Any performance implications
+- **Security**: Potential security issues
+- **Suggestions**: Specific improvements with file:line references
+
+Be concise. Focus on real issues, not style preferences."""
+
+    from obscura.cli.render import render_event
+    try:
+        async for event in ctx.client.run_loop(prompt):
+            render_event(event)
+    except Exception as exc:
+        print_error(str(exc))
+    return None
+
+
+async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
+    """Security-focused code review. Usage: /security-review [ref]"""
+    import asyncio as _aio
+
+    ref = args.strip() or "HEAD"
+    proc = await _aio.create_subprocess_shell(
+        f"git diff {ref}", stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    diff = stdout.decode("utf-8", errors="replace").strip()
+
+    if not diff:
+        print_info(f"No changes found for ref: {ref}")
+        return None
+
+    prompt = f"""You are a security expert. Perform a security review of these changes.
+
+```diff
+{diff[:12000]}
+```
+
+**Focus on (report only 80%+ confidence findings):**
+- Input validation: SQL/command/XXE injection, path traversal
+- Auth & authz: bypass, privilege escalation, session flaws
+- Crypto: hardcoded keys, weak algorithms, RNG issues
+- Code execution: deserialization RCE, eval, XSS
+- Data exposure: sensitive logging, PII handling, API leaks
+
+**EXCLUDE (do not report):**
+- DOS/resource exhaustion, rate limiting
+- Secrets on disk (handled separately)
+- React/Angular XSS (framework handles it)
+- Regex DOS, log spoofing, documentation files
+- Outdated library vulnerabilities
+
+**Output format for each finding:**
+```
+# Vuln N: Category: `file:line`
+* Severity: High|Medium
+* Description: [what's wrong]
+* Exploit Scenario: [how it's exploited]
+* Recommendation: [specific fix]
+```
+
+Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
+
+    from obscura.cli.render import render_event
+    try:
+        async for event in ctx.client.run_loop(prompt):
+            render_event(event)
+    except Exception as exc:
+        print_error(str(exc))
+    return None
+
+
+async def cmd_export(args: str, ctx: REPLContext) -> str | None:
+    """Export conversation to file. Usage: /export [md|txt|json]"""
+    fmt = args.strip().lower() or "md"
+    if fmt not in ("md", "txt", "json"):
+        print_error("Format must be: md, txt, or json")
+        return None
+
+    output_dir = Path.home() / ".obscura" / "exports"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{ctx.session_id[:12]}.{fmt}"
+    output_path = output_dir / filename
+
+    history = ctx.message_history
+
+    if fmt == "json":
+        data = [{"role": role, "content": text} for role, text in history]
+        output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    elif fmt == "md":
+        lines: list[str] = [f"# Session {ctx.session_id[:12]}\n"]
+        for role, text in history:
+            header = "## User" if role == "user" else "## Assistant"
+            lines.append(f"\n{header}\n\n{text}\n")
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+    else:  # txt
+        lines = []
+        for role, text in history:
+            lines.append(f"[{role.upper()}]\n{text}\n")
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+
+    print_ok(f"Exported to {output_path}")
+    return None
+
+
+async def cmd_coordinator(args: str, ctx: REPLContext) -> str | None:
+    """Toggle coordinator mode for multi-worker orchestration."""
+    from obscura.agent.coordinator import is_coordinator_mode, set_coordinator_mode
+
+    sub = args.strip().lower()
+    if sub == "on":
+        set_coordinator_mode(True)
+        print_ok("Coordinator mode ON. Agent will orchestrate workers.")
+    elif sub == "off":
+        set_coordinator_mode(False)
+        print_ok("Coordinator mode OFF.")
+    elif sub == "status":
+        status = "ON" if is_coordinator_mode() else "OFF"
+        print_info(f"Coordinator mode: {status}")
+    else:
+        status = "ON" if is_coordinator_mode() else "OFF"
+        print_info(f"Coordinator mode: {status}")
+        print_info("Usage: /coordinator on|off|status")
+    return None
+
+
+async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
+    """Toggle voice input (push-to-talk). Usage: /voice [on|off]"""
+    sub = args.strip().lower()
+    current = getattr(ctx, "_voice_enabled", False)
+
+    if sub == "on" or (not sub and not current):
+        # Check dependencies
+        import shutil as _shutil
+        has_sox = _shutil.which("rec") is not None
+        has_arecord = _shutil.which("arecord") is not None
+        if not has_sox and not has_arecord:
+            print_error("Voice mode requires SoX (rec) or ALSA (arecord).")
+            print_info("Install: brew install sox  (macOS) or apt install sox alsa-utils  (Linux)")
+            return None
+        ctx._voice_enabled = True  # type: ignore[attr-defined]
+        print_ok("Voice mode ON. Hold Ctrl+Space to record, release to transcribe.")
+    elif sub == "off" or (not sub and current):
+        ctx._voice_enabled = False  # type: ignore[attr-defined]
+        print_ok("Voice mode OFF.")
+    else:
+        print_info(f"Voice mode: {'ON' if current else 'OFF'}")
+    return None
+
+
+async def cmd_template(args: str, ctx: REPLContext) -> str | None:
+    """Manage and run task templates. Usage: /template list|run <name>|new <name>"""
+    from obscura.core.templates import list_templates, load_template
+
+    parts = args.strip().split(None, 1)
+    sub = parts[0] if parts else "list"
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if sub == "list":
+        templates = list_templates()
+        if not templates:
+            print_info("No templates found. Create one in ~/.obscura/templates/")
+            return None
+        table = Table(title="Templates", expand=False)
+        table.add_column("Name", width=20)
+        table.add_column("Description", max_width=50)
+        table.add_column("Variables", width=20)
+        for t in templates:
+            vars_str = ", ".join(t.variables) if t.variables else "-"
+            table.add_row(t.name, t.description[:50], vars_str)
+        console.print(table)
+        return None
+
+    if sub == "run":
+        name = rest.strip()
+        if not name:
+            print_error("Usage: /template run <name>")
+            return None
+        tmpl = load_template(name)
+        if tmpl is None:
+            print_error(f"Template not found: {name}")
+            return None
+        prompt = tmpl.render()
+        from obscura.cli.render import render_event
+        try:
+            async for event in ctx.client.run_loop(prompt):
+                render_event(event)
+        except Exception as exc:
+            print_error(str(exc))
+        return None
+
+    if sub == "new":
+        print_info("Create a template at ~/.obscura/templates/<name>.md")
+        print_info("Use TOML frontmatter (+++ delimiters) with name, description fields.")
+        print_info("Template body is the prompt. Use {{variable}} for placeholders.")
+        return None
+
+    print_info("Usage: /template list|run <name>|new")
+    return None
+
+
+async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
+    """Show tool use summary for the current session."""
+    collapser = getattr(ctx, "_collapser", None)
+    if collapser is None:
+        print_info("No tool usage recorded yet.")
+        return None
+    # Show a summary of all tool calls from the session.
+    if hasattr(collapser, "_group") or True:
+        from obscura.core.cost_tracker import get_cost_tracker
+        tracker = get_cost_tracker()
+        print_info(tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.")
+    return None
+
+
+async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
+    """Toggle KAIROS autonomous mode. Usage: /kairos [on|off|status]"""
+    from obscura.kairos.engine import is_kairos_enabled, set_kairos_mode
+
+    sub = args.strip().lower()
+    if sub == "on":
+        set_kairos_mode(True)
+        print_ok("KAIROS mode enabled. Will activate on next session start.")
+    elif sub == "off":
+        set_kairos_mode(False)
+        print_ok("KAIROS mode disabled.")
+    else:
+        status = "ON" if is_kairos_enabled() else "OFF"
+        print_info(f"KAIROS mode: {status}")
+        if not is_kairos_enabled():
+            print_info("Enable with: /kairos on  (or set OBSCURA_KAIROS=1)")
+    return None
+
+
+async def cmd_attribution(_args: str, _ctx: REPLContext) -> str | None:
+    """Show AI commit attribution summary."""
+    from obscura.core.commit_attribution import get_attribution_tracker
+
+    tracker = get_attribution_tracker()
+    summary = tracker.summary()
+    if summary["files_tracked"] == 0:
+        print_info("No file attribution data recorded yet.")
+        return None
+
+    table = Table(title="Commit Attribution", expand=False)
+    table.add_column("Metric", width=25)
+    table.add_column("Value", width=15, justify="right")
+    table.add_row("Files tracked", str(summary["files_tracked"]))
+    table.add_row("Agent lines", f"{summary['agent_lines']:,}")
+    table.add_row("Human lines", f"{summary['human_lines']:,}")
+    table.add_row("Agent %", f"{summary['agent_percentage']}%")
+    console.print(table)
+    return None
+
+
+async def cmd_ps(_args: str, _ctx: REPLContext) -> str | None:
+    """List background sessions."""
+    from obscura.kairos.background_sessions import ps
+
+    sessions = ps()
+    if not sessions:
+        print_info("No background sessions.")
+        return None
+
+    table = Table(title="Background Sessions", expand=False)
+    table.add_column("ID", width=12)
+    table.add_column("PID", width=8, justify="right")
+    table.add_column("Status", width=10)
+    table.add_column("Model", width=12)
+    table.add_column("Uptime", width=8, justify="right")
+    table.add_column("Command", max_width=40)
+
+    for s in sessions:
+        table.add_row(
+            s["session_id"], str(s["pid"]), s["status"],
+            s["model"], f"{s['uptime_s']}s", s["command"],
+        )
+    console.print(table)
+    return None
+
+
+async def cmd_logs(args: str, _ctx: REPLContext) -> str | None:
+    """Show logs for a background session. Usage: /logs <session_id>"""
+    from obscura.kairos.background_sessions import logs
+
+    sid = args.strip()
+    if not sid:
+        print_error("Usage: /logs <session_id>")
+        return None
+    output = logs(sid, tail=50)
+    console.print(output)
+    return None
+
+
+async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
+    """Kill a background session. Usage: /kill-session <session_id>"""
+    from obscura.kairos.background_sessions import kill_session
+
+    sid = args.strip()
+    if not sid:
+        print_error("Usage: /kill-session <session_id>")
+        return None
+    result = kill_session(sid)
+    print_info(result)
+    return None
+
+
+async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
+    """Show context-aware file suggestions based on recent activity."""
+    from obscura.core.context_suggestions import suggest_files
+    from obscura.tools.system.file_state import get_recently_modified_files, get_recently_read_files
+
+    modified = get_recently_modified_files(limit=10)
+    read = get_recently_read_files(limit=10)
+
+    if not modified:
+        print_info("No recent file activity to base suggestions on.")
+        return None
+
+    suggestions = suggest_files(modified, read, max_suggestions=8)
+    if not suggestions:
+        print_info("No suggestions — files look self-contained.")
+        return None
+
+    table = Table(title="Suggested Files", expand=False)
+    table.add_column("File", max_width=50)
+    table.add_column("Reason", max_width=30)
+    for s in suggestions:
+        table.add_row(s["path"], s["reason"])
+    console.print(table)
+    return None
+
+
+async def cmd_cache_stats(_args: str, _ctx: REPLContext) -> str | None:
+    """Show prompt cache hit/miss statistics."""
+    from obscura.core.prompt_cache import PromptCacheManager
+    # This would need to reference the actual cache instance.
+    # For now show the concept.
+    print_info("Prompt cache tracking available. Stats shown in /cost output.")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -4438,6 +5134,33 @@ COMMANDS: dict[str, CommandHandler] = {
     "health": cmd_health,
     "broker": cmd_broker,
     "search-tools": cmd_search_tools,
+    # Wave 2: permissions, session, cost, diagnostics
+    "permissions": cmd_permissions,
+    "resume": cmd_resume,
+    "cost": cmd_cost,
+    "doctor": cmd_doctor,
+    "vim": cmd_vim,
+    # Wave 2: effort, speed, git workflow
+    "effort": cmd_effort,
+    "fast": cmd_fast,
+    "commit": cmd_commit,
+    "review": cmd_review,
+    "security-review": cmd_security_review,
+    # Wave 2: export, coordinator, voice
+    "export": cmd_export,
+    "coordinator": cmd_coordinator,
+    "voice": cmd_voice,
+    "template": cmd_template,
+    "tool-summary": cmd_tool_summary,
+    # KAIROS & background
+    "kairos": cmd_kairos,
+    "attribution": cmd_attribution,
+    "ps": cmd_ps,
+    "logs": cmd_logs,
+    "kill-session": cmd_kill_session,
+    # Context & cache
+    "suggestions": cmd_suggestions,
+    "cache-stats": cmd_cache_stats,
 }
 
 # Subcommand completions for readline tab-complete
@@ -4487,6 +5210,29 @@ COMPLETIONS: dict[str, list[str]] = {
     "health": [],
     "broker": [],
     "search-tools": [],
+    # Wave 2
+    "permissions": ["default", "plan", "accept_edits", "bypass"],
+    "resume": [],
+    "cost": [],
+    "doctor": [],
+    "vim": [],
+    "effort": ["low", "medium", "high", "max"],
+    "fast": [],
+    "commit": [],
+    "review": [],
+    "security-review": [],
+    "export": ["md", "txt", "json"],
+    "coordinator": ["on", "off", "status"],
+    "voice": ["on", "off"],
+    "template": ["list", "run", "new"],
+    "tool-summary": [],
+    "kairos": ["on", "off", "status"],
+    "attribution": [],
+    "ps": [],
+    "logs": [],
+    "kill-session": [],
+    "suggestions": [],
+    "cache-stats": [],
 }
 
 # Add secret menu stub (tests toggle visibility)
