@@ -22,6 +22,9 @@ import logging
 import os
 import time
 from pathlib import Path
+from datetime import datetime, timezone
+from datetime import datetime, timezone
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -167,9 +170,15 @@ class DreamConsolidator:
         try:
             import sqlite3
             conn = sqlite3.connect(str(events_db))
+            # Convert since_ts (seconds since epoch) to ISO8601 UTC string to
+            # compare against created_at TEXT columns stored in ISO format.
+            try:
+                since_iso = datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat()
+            except Exception:
+                since_iso = datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat()
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM sessions WHERE created_at > ?",
-                (since_ts,),
+                (since_iso,),
             )
             count = cursor.fetchone()[0]
             conn.close()
