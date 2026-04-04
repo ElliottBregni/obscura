@@ -598,6 +598,14 @@ async def send_message(
             title = await generate_session_title(text, ctx.client._backend)
             if title:
                 await ctx.store.update_summary(ctx.session_id, title)
+                # Update the prompt status so the title appears in the banner/toolbar
+                if hasattr(ctx, "_prompt_status") and ctx._prompt_status is not None:
+                    ctx._prompt_status.session_title = title
+                # Show a subtle notification
+                console.print(
+                    f"  [dim]session titled:[/] [bold bright_cyan]{title}[/]",
+                    highlight=False,
+                )
         except Exception:
             pass
 
@@ -899,6 +907,30 @@ async def _repl(
             _kairos_sys = _probe_engine.get_system_prompt_addition()
             if _kairos_sys:
                 custom_sections.append(_kairos_sys)
+    except Exception:
+        pass
+
+    # Inject coordinator system prompt when coordinator mode is active
+    try:
+        from obscura.agent.coordinator import (
+            get_coordinator_system_prompt,
+            is_coordinator_mode,
+        )
+
+        if is_coordinator_mode():
+            custom_sections.append(get_coordinator_system_prompt())
+
+            # Inject agent catalog so the LLM knows available agents + tags
+            try:
+                from obscura.tools.swarm import build_agent_catalog, load_agent_configs
+
+                catalog = build_agent_catalog(load_agent_configs())
+                if catalog:
+                    custom_sections.append(
+                        f"## Available Specialist Agents\n\n{catalog}"
+                    )
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -1386,6 +1418,8 @@ async def _repl(
             session_id=sid,
             mode=mm.current.value,
         )
+        # Stash on ctx so auto-title can update it from send_message
+        ctx._prompt_status = prompt_status  # type: ignore[attr-defined]
 
         def _refresh_prompt_status() -> None:
             """Refresh mutable fields of prompt_status before each prompt."""
@@ -1465,6 +1499,24 @@ async def _repl(
                     await _kairos_engine.start()
         except Exception as _e:
             _swallow("kairos_start", _e)
+
+        # Wire the active AgentLoop into KairosEngine for proactive tick injection.
+        if _kairos_engine is not None:
+            try:
+                _agent_loop = getattr(client, "_loop", None)
+                if _agent_loop is not None:
+                    _kairos_engine.register_agent_loop(_agent_loop)
+            except Exception as _e:
+                _swallow("kairos_loop_wire", _e)
+
+        # Wire the active AgentLoop into KairosEngine for proactive tick injection.
+        if _kairos_engine is not None:
+            try:
+                _agent_loop = getattr(client, "_loop", None)
+                if _agent_loop is not None:
+                    _kairos_engine.register_agent_loop(_agent_loop)
+            except Exception as _e:
+                _swallow("kairos_loop_wire", _e)
 
         # --- Tips scheduler ---
         _tip_scheduler = None

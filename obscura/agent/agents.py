@@ -670,6 +670,10 @@ class Agent:
                 make_send_message_tool,
                 make_spawn_agents_tool,
                 make_spawn_subagent_tool,
+                make_suggest_agents_tool,
+                make_team_memory_read_tool,
+                make_team_memory_write_tool,
+                make_team_status_tool,
             )
 
             swarm_ctx = SwarmToolContext(
@@ -683,6 +687,10 @@ class Agent:
             broker.register_tool_spec(make_spawn_agents_tool(swarm_ctx))
             broker.register_tool_spec(make_send_message_tool(swarm_ctx))
             broker.register_tool_spec(make_check_agent_tool())
+            broker.register_tool_spec(make_suggest_agents_tool(swarm_ctx))
+            broker.register_tool_spec(make_team_memory_write_tool())
+            broker.register_tool_spec(make_team_memory_read_tool())
+            broker.register_tool_spec(make_team_status_tool())
         except Exception as exc:
             logger.debug("Could not register swarm tools: %s", exc)
 

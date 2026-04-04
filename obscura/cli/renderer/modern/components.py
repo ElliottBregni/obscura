@@ -7,7 +7,6 @@ size and render itself into an allocated region.
 
 from __future__ import annotations
 
-import math
 import textwrap
 import time
 from dataclasses import dataclass
@@ -163,20 +162,31 @@ class TextComponent(Component):
 
 
 class StreamingTextComponent(Component):
-    """Accumulates text deltas and renders as wrapped text.
+    """Accumulates text deltas and renders with a reveal cursor.
 
-    Used for the main assistant output stream.
+    Characters beyond the reveal cursor are not yet visible.  The cursor
+    advances each frame by ``chars_per_frame`` (default 12), creating a
+    smooth typing effect.  A blinking block cursor (``▌``) is drawn at
+    the reveal edge while text is still being revealed.
     """
+
+    # Pacing: characters revealed per render frame
+    CHARS_PER_FRAME: int = 12
 
     def __init__(
         self,
         *,
         text_style: Style | None = None,
+        cursor_style: Style | None = None,
         style: BoxStyle | None = None,
     ) -> None:
         super().__init__(style=style)
         self._buf: list[str] = []
         self.text_style = text_style or STYLE_DEFAULT
+        self.cursor_style = cursor_style or STYLE_ACCENT
+        # Reveal cursor: how many chars are visible so far
+        self._reveal_pos: int = 0
+        self._cursor_visible: bool = True
 
     def append(self, text: str) -> None:
         self._buf.append(text)
@@ -185,18 +195,38 @@ class StreamingTextComponent(Component):
     def text(self) -> str:
         return "".join(self._buf)
 
+    @property
+    def fully_revealed(self) -> bool:
+        return self._reveal_pos >= len(self.text)
+
+    def advance_reveal(self) -> bool:
+        """Advance the reveal cursor.  Returns True if still revealing."""
+        total = len(self.text)
+        if self._reveal_pos >= total:
+            return False
+        # Accelerate: reveal faster when there's a large backlog
+        backlog = total - self._reveal_pos
+        burst = self.CHARS_PER_FRAME
+        if backlog > 200:
+            burst = max(burst, backlog // 4)
+        elif backlog > 80:
+            burst = max(burst, backlog // 6)
+        self._reveal_pos = min(total, self._reveal_pos + burst)
+        return self._reveal_pos < total
+
     def clear(self) -> None:
         self._buf.clear()
+        self._reveal_pos = 0
 
     def measure(self, available_width: int) -> tuple[int, int]:
-        text = self.text
+        text = self.text[: self._reveal_pos]
         if not text:
             return (0, 0)
         lines = self._wrap(text, available_width)
         return (available_width, len(lines))
 
     def render(self, buf: FrameBuffer, region: Region) -> int:
-        text = self.text
+        text = self.text[: self._reveal_pos]
         if not text:
             return 0
         lines = self._wrap(text, region.width)
@@ -205,7 +235,18 @@ class StreamingTextComponent(Component):
             if row >= region.y + region.height:
                 break
             buf.write_line(row, region.x, line, self.text_style)
+        # Draw cursor at reveal edge
+        if not self.fully_revealed and self._cursor_visible and lines:
+            last_line = lines[-1]
+            cursor_row = region.y + len(lines) - 1
+            cursor_col = region.x + len(last_line)
+            if cursor_col < region.x + region.width:
+                buf.write_line(cursor_row, cursor_col, "▌", self.cursor_style)
         return min(len(lines), region.height)
+
+    def toggle_cursor(self) -> None:
+        """Toggle cursor visibility for blink effect."""
+        self._cursor_visible = not self._cursor_visible
 
     @staticmethod
     def _wrap(text: str, width: int) -> list[str]:
@@ -258,7 +299,13 @@ class PanelComponent(Component):
     """Bordered panel with optional title.
 
     Used for thinking/reasoning blocks and tool result display.
+    When ``pulse=True``, the border color oscillates between the base
+    color and a dimmer shade, creating a breathing effect while the
+    model is actively thinking.
     """
+
+    # Pulse palette: cycles through these 256-color indices
+    _PULSE_PALETTE: list[int] = [201, 165, 129, 93, 129, 165]
 
     def __init__(
         self,
@@ -269,6 +316,7 @@ class PanelComponent(Component):
         title_style: Style | None = None,
         content_style: Style | None = None,
         style: BoxStyle | None = None,
+        pulse: bool = False,
     ) -> None:
         super().__init__(style=style)
         self.title = title
@@ -276,6 +324,9 @@ class PanelComponent(Component):
         self.border_color = border_color
         self.title_style = title_style or Style(fg=border_color, bold=True)
         self.content_style = content_style or STYLE_DEFAULT
+        self.pulse = pulse
+        self._pulse_idx: int = 0
+        self._birth: float = time.monotonic()
         self._lines: list[str] = []
 
     def append(self, text: str) -> None:
@@ -297,9 +348,20 @@ class PanelComponent(Component):
         wrapped = self._wrap_content(text, inner_w)
         return (available_width, len(wrapped) + 2)  # +2 for borders
 
+    def advance_pulse(self) -> None:
+        """Advance the pulse animation index."""
+        self._pulse_idx = (self._pulse_idx + 1) % len(self._PULSE_PALETTE)
+
+    @property
+    def _effective_border_color(self) -> int:
+        if self.pulse:
+            return self._PULSE_PALETTE[self._pulse_idx]
+        return self.border_color
+
     def render(self, buf: FrameBuffer, region: Region) -> int:
         h, v, tl, tr, bl, br = get_border_chars(self.border)
-        border_style = Style(fg=self.border_color)
+        color = self._effective_border_color
+        border_style = Style(fg=color)
         inner_w = max(0, region.width - 2)
 
         row = region.y
@@ -372,7 +434,13 @@ _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 class SpinnerComponent(Component):
-    """Animated braille spinner with status text."""
+    """Animated braille spinner with status text and elapsed timer.
+
+    Shows: ``⠹ thinking...  3.2s``
+
+    The dots animate (1–3 trailing dots cycle), and an elapsed-time
+    badge appears after the first second.
+    """
 
     def __init__(
         self,
@@ -380,33 +448,73 @@ class SpinnerComponent(Component):
         *,
         spinner_style: Style | None = None,
         text_style: Style | None = None,
+        timer_style: Style | None = None,
         style: BoxStyle | None = None,
     ) -> None:
         super().__init__(style=style)
         self.text = text
         self.spinner_style = spinner_style or STYLE_ACCENT
         self.text_style = text_style or STYLE_DIM
+        self.timer_style = timer_style or Style(fg=MUTED, dim=True)
         self.frame_idx: int = 0
+        self._start_time: float = time.monotonic()
+        self._dot_phase: int = 0
+
+    def reset_timer(self) -> None:
+        self._start_time = time.monotonic()
+        self.frame_idx = 0
+        self._dot_phase = 0
 
     def advance(self) -> None:
         self.frame_idx = (self.frame_idx + 1) % len(_SPINNER_FRAMES)
+        # Dots cycle every 3 spinner frames
+        if self.frame_idx % 3 == 0:
+            self._dot_phase = (self._dot_phase + 1) % 3
 
     @property
     def spinner_char(self) -> str:
         return _SPINNER_FRAMES[self.frame_idx]
 
+    @property
+    def _animated_text(self) -> str:
+        """Text with cycling trailing dots."""
+        base = self.text.rstrip(".")
+        dots = "." * (self._dot_phase + 1)
+        return base + dots
+
+    @property
+    def _elapsed_badge(self) -> str:
+        elapsed = time.monotonic() - self._start_time
+        if elapsed < 1.0:
+            return ""
+        if elapsed < 60:
+            return f"{elapsed:.1f}s"
+        minutes = int(elapsed // 60)
+        secs = int(elapsed % 60)
+        return f"{minutes}m{secs:02d}s"
+
     def measure(self, available_width: int) -> tuple[int, int]:
         return (available_width, 1)
 
     def render(self, buf: FrameBuffer, region: Region) -> int:
-        buf.write_line(region.y, region.x, self.spinner_char, self.spinner_style)
-        if self.text:
-            buf.write_line(
-                region.y,
-                region.x + 2,
-                self.text[: region.width - 2],
-                self.text_style,
-            )
+        col = region.x
+
+        # Spinner glyph
+        buf.write_line(region.y, col, self.spinner_char, self.spinner_style)
+        col += 2
+
+        # Animated status text
+        anim_text = self._animated_text
+        buf.write_line(
+            region.y, col, anim_text[: region.width - 4], self.text_style,
+        )
+        col += len(anim_text) + 2
+
+        # Elapsed timer badge
+        badge = self._elapsed_badge
+        if badge and col + len(badge) < region.x + region.width:
+            buf.write_line(region.y, col, badge, self.timer_style)
+
         return 1
 
 
@@ -416,7 +524,13 @@ class SpinnerComponent(Component):
 
 
 class ToolCallComponent(Component):
-    """One-line tool call summary with status indicator."""
+    """One-line tool call summary with status indicator and fade-in.
+
+    New tool calls start dim and brighten over ``_FADE_FRAMES`` frames.
+    Status transitions (running → done/error) trigger a brief flash.
+    """
+
+    _FADE_FRAMES: int = 6
 
     def __init__(
         self,
@@ -428,6 +542,17 @@ class ToolCallComponent(Component):
         super().__init__(style=style)
         self.summary = summary
         self.status = status
+        self._age: int = 0  # frames since creation
+
+    def advance_age(self) -> None:
+        self._age += 1
+
+    @property
+    def _opacity(self) -> float:
+        """0.0 → 1.0 over _FADE_FRAMES."""
+        if self._age >= self._FADE_FRAMES:
+            return 1.0
+        return self._age / self._FADE_FRAMES
 
     def measure(self, available_width: int) -> tuple[int, int]:
         return (available_width, 1)
@@ -443,6 +568,15 @@ class ToolCallComponent(Component):
             icon = "▶"
             icon_style = STYLE_TOOL
 
+        # Fade-in: during early frames, render with dim style
+        fading = self._opacity < 1.0
+        if fading:
+            icon_style = Style(fg=icon_style.fg, dim=True)
+
+        text_style = STYLE_TOOL if self.status == "running" else STYLE_DIM
+        if fading:
+            text_style = Style(fg=text_style.fg, dim=True)
+
         # "  ▶ summary..."
         buf.write_line(region.y, region.x, "  ", STYLE_DEFAULT)
         buf.write_line(region.y, region.x + 2, icon, icon_style)
@@ -450,7 +584,7 @@ class ToolCallComponent(Component):
             region.y,
             region.x + 4,
             self.summary[: region.width - 4],
-            STYLE_TOOL if self.status == "running" else STYLE_DIM,
+            text_style,
         )
         return 1
 

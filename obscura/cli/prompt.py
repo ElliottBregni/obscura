@@ -20,9 +20,11 @@ from typing import TYPE_CHECKING, override
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 
@@ -32,6 +34,92 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from prompt_toolkit.document import Document
+
+# ---------------------------------------------------------------------------
+# Keyword highlighter — colors trigger words as you type
+# ---------------------------------------------------------------------------
+
+# Gradient palette for "ultrathink" (purple → blue → cyan)
+_GRADIENT = [
+    "#8b5cf6", "#7c3aed", "#6d28d9", "#5b21b6",
+    "#4f46e5", "#4338ca", "#3b82f6", "#2563eb",
+    "#0ea5e9", "#06b6d4",
+]
+
+# Keywords that trigger gradient styling, with their style names
+_HIGHLIGHT_KEYWORDS: dict[str, str] = {
+    "ultrathink": "keyword.ultrathink",
+    "deep think": "keyword.deepthink",
+    "think hard": "keyword.deepthink",
+}
+
+
+class KeywordHighlighter(Processor):
+    """Highlight trigger words in the input with gradient colors.
+
+    Scans the input buffer for keywords like ``ultrathink`` and applies
+    per-character style classes that map to gradient colors in the style
+    dict.  This makes the keyword glow as you type it.
+    """
+
+    def apply_transformation(
+        self,
+        ti: object,
+    ) -> Transformation:
+        fragments = ti.fragments  # type: ignore[attr-defined]
+        doc = ti.document  # type: ignore[attr-defined]
+        text = doc.text_before_cursor + doc.text_after_cursor
+
+        if not text:
+            return Transformation(fragments)
+
+        # Find keyword matches and build replacement fragments
+        new_fragments: list[tuple[str, str]] = []
+        # Flatten the existing fragments into a single string to match positions
+        flat = "".join(s for _, s in fragments)
+        if not flat:
+            return Transformation(fragments)
+
+        # Build a set of character positions that should be styled
+        styled_positions: dict[int, str] = {}
+        for keyword, _style_name in _HIGHLIGHT_KEYWORDS.items():
+            start = 0
+            kw_lower = keyword.lower()
+            flat_lower = flat.lower()
+            while True:
+                idx = flat_lower.find(kw_lower, start)
+                if idx == -1:
+                    break
+                for i in range(len(keyword)):
+                    # Map each char to a gradient color index
+                    gradient_idx = i % len(_GRADIENT)
+                    styled_positions[idx + i] = f"class:kw-g{gradient_idx}"
+                start = idx + 1
+
+        if not styled_positions:
+            return Transformation(fragments)
+
+        # Rebuild fragments with styled characters
+        new_fragments = []
+        pos = 0
+        for style, segment in fragments:
+            for ch in segment:
+                if pos in styled_positions:
+                    new_fragments.append((styled_positions[pos], ch))
+                else:
+                    new_fragments.append((style, ch))
+                pos += 1
+
+        return Transformation(new_fragments)
+
+
+def _keyword_gradient_styles() -> dict[str, str]:
+    """Build style entries for the gradient character classes."""
+    styles: dict[str, str] = {}
+    for i, color in enumerate(_GRADIENT):
+        styles[f"kw-g{i}"] = f"{color} bold"
+    return styles
+
 
 # ---------------------------------------------------------------------------
 # StreamingStatus — shared mutable state for toolbar spinner
@@ -115,6 +203,7 @@ class PromptStatus:
     ctx_window: int = 0
     mode: str = ""
     session_id: str = ""
+    session_title: str = ""  # auto-generated or manual title
     running_agents: list[str] = field(default_factory=list[str])
     task_count: int = 0
 
@@ -137,56 +226,68 @@ def _get_git_branch() -> str:
 
 
 def print_status_banner(status: PromptStatus) -> None:
-    """Print a session banner above the input separator.
+    """Print a Claude Code-style status line above the input box.
 
-    Line 1:  session abc12def  ·  ⎇ main  ·  claude-opus-4  ·  ctx 42%  ·  code
-    Line 2:  agents: researcher ● health-monitor ●   (only when agents are running)
+    Format:
+      Session Title (abc12345)
+      claude-opus-4 · 12.3k tokens (42%) · ⎇ main · code
 
     Uses Rich markup via the shared console.
     """
     from rich.markup import escape as markup_escape
 
-    from obscura.cli.render import ACCENT, console
+    from obscura.cli.render import console
 
-    parts: list[str] = []
-
+    # Line 1: Session title (if available)
     if status.session_id:
         short_id = status.session_id[:8]
-        parts.append(f"[bold {ACCENT}]session {markup_escape(short_id)}[/]")
+        if status.session_title:
+            console.print(
+                f"  [bold #cdd6f4]{markup_escape(status.session_title)}[/]"
+                f"  [dim]({short_id})[/]",
+                highlight=False,
+            )
+        # Don't show bare session ID — too noisy
 
-    if status.branch:
-        parts.append(f"[bold cyan]⎇ {markup_escape(status.branch)}[/]")
+    # Line 2: model · tokens · branch · mode
+    parts: list[str] = []
 
     if status.model:
-        parts.append(f"[dim]{markup_escape(status.model)}[/]")
+        parts.append(f"[bold #89b4fa]{markup_escape(status.model)}[/]")
 
     if status.ctx_pct > 0 or status.ctx_tokens > 0:
         pct = status.ctx_pct
         if pct >= 80:
-            color = "bold red"
+            color = "bold #f38ba8"    # red
         elif pct >= 60:
-            color = "yellow"
+            color = "#fab387"         # peach
         else:
-            color = "dim green"
-        ctx_str = f"ctx {pct}%"
+            color = "#a6e3a1"         # green
         if status.ctx_tokens:
-            ctx_str += f" ({status.ctx_tokens:,})"
+            # Format tokens as "12.3k"
+            t = status.ctx_tokens
+            if t >= 1000:
+                ctx_str = f"{t / 1000:.1f}k tokens ({pct}%)"
+            else:
+                ctx_str = f"{t} tokens ({pct}%)"
+        else:
+            ctx_str = f"ctx {pct}%"
         parts.append(f"[{color}]{ctx_str}[/]")
 
+    if status.branch:
+        parts.append(f"[#94e2d5]⎇ {markup_escape(status.branch)}[/]")
+
     if status.mode:
-        parts.append(f"[dim]mode: {markup_escape(status.mode)}[/]")
+        parts.append(f"[dim]{markup_escape(status.mode)} mode[/]")
 
-    if not parts:
-        return
-
-    sep = "  [dim]·[/]  "
-    line = sep.join(parts)
-    console.print(f"  {line}", highlight=False)
+    if parts:
+        sep = "  [dim]·[/]  "
+        console.print(f"  {sep.join(parts)}", highlight=False)
 
     # Running agents line
     if status.running_agents:
         agent_labels = [
-            f"[bold green]{markup_escape(name)}[/] [green]●[/]"
+            f"[bold #a6e3a1]{markup_escape(name)}[/] [#a6e3a1]●[/]"
             for name in status.running_agents
         ]
         console.print(
@@ -283,12 +384,17 @@ class SlashCommandCompleter(Completer):
 
 PROMPT_STYLE = Style.from_dict(
     {
-        "prompt": "#6c71c4 bold",
-        "status-line": "#586e75",
-        "status-spinner": "bold #6c71c4",
-        "status-preview": "italic #586e75",
-        "continuation": "#586e75",
-        "bottom-toolbar": "#00cc00 noreverse",
+        "prompt": "#b4befe bold",           # lavender prompt char
+        "prompt-border": "#45475a",          # dim border
+        "prompt-border-accent": "#89b4fa",   # blue accent for active border
+        "status-line": "#6c7086",            # subtext
+        "status-spinner": "bold #89b4fa",    # blue spinner
+        "status-preview": "italic #6c7086",  # dim preview
+        "continuation": "#6c7086",
+        "bottom-toolbar": "#a6adc8 noreverse",
+        "bottom-toolbar.key": "bold #89b4fa",
+        # Keyword gradient colors (used by KeywordHighlighter)
+        **_keyword_gradient_styles(),
     },
 )
 
@@ -305,11 +411,11 @@ _RULE_CHAR = "\u2500"  # ─
 
 
 def print_separator() -> None:
-    """Print a thin horizontal rule across the terminal width."""
-    from obscura.cli.render import console
+    """Print a subtle separator between turns."""
+    import sys as _sys
 
-    width = shutil.get_terminal_size((80, 24)).columns
-    console.print(f"[dim]{_RULE_CHAR * width}[/]", highlight=False)
+    _sys.stdout.write("\n")
+    _sys.stdout.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -420,52 +526,30 @@ expand_thinking = _expand_thinking_action
 
 
 def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
-    """Build a two-line bottom toolbar from live PromptStatus.
+    """Build a Claude Code-style bottom toolbar with shortcut hints.
 
-    Line 1: session · agents · ctx
-    Line 2: mode · shortcuts
+    Format: ! for bash · /help for commands · esc+enter for newline
     """
     if prompt_status is None:
-        return "  esc+enter multiline · /help"
+        return "  <b>!</b> for bash · <b>/help</b> for commands · <b>esc+enter</b> for newline"
 
-    # --- top row: session, agents, context ---
-    top: list[str] = []
+    parts: list[str] = []
 
-    if prompt_status.session_id:
-        short_id = prompt_status.session_id[:8]
-        top.append(f"session {short_id}")
-
-    if prompt_status.running_agents:
-        agents_str = " ".join(
-            f"{_html.escape(n)} ●" for n in prompt_status.running_agents
-        )
-        top.append(agents_str)
-
+    # Task count if active
     if prompt_status.task_count > 0:
-        top.append(f"tasks: {prompt_status.task_count} ●")
+        parts.append(f"<b>{prompt_status.task_count}</b> tasks")
 
-    # Always show context — empty on startup, fills in as conversation grows
-    pct = prompt_status.ctx_pct
-    if prompt_status.ctx_tokens:
-        top.append(f"context: {pct}% ({prompt_status.ctx_tokens:,})")
-    else:
-        top.append("context:")
+    # Agent count
+    if prompt_status.running_agents:
+        n = len(prompt_status.running_agents)
+        parts.append(f"<b>{n}</b> agent{'s' if n != 1 else ''}")
 
-    # --- bottom row: mode, shortcuts ---
-    bot: list[str] = []
+    # Shortcut hints
+    parts.append("<b>!</b> for bash")
+    parts.append("<b>/help</b> for commands")
+    parts.append("<b>esc+enter</b> for newline")
 
-    if prompt_status.mode:
-        bot.append(f"mode: {_html.escape(prompt_status.mode)}")
-
-    bot.append("esc+enter multiline")
-    bot.append("/help")
-
-    top_line = "  " + " · ".join(top) if top else ""
-    bot_line = "  " + " · ".join(bot)
-
-    if top_line:
-        return f"{top_line}\n{bot_line}"
-    return bot_line
+    return "  " + " · ".join(parts)
 
 
 def create_prompt_session(
@@ -488,18 +572,17 @@ def create_prompt_session(
     _status = streaming_status
     _prompt_status = prompt_status
 
-    # Fixed thinking delta line above ❯ — always reserved, never collapses.
+    # Claude Code-style prompt: status line + bordered input
     def _message() -> HTML:
-        # Produce a two-line HTML fragment with <status-lane> and <input-lane>
         width = shutil.get_terminal_size((80, 24)).columns
-        # Active streaming status shows spinner + label in the status lane
+
+        # When streaming is active, show spinner in the status lane
         if _status is not None and _status.active:
             frame = _html.escape(_status.spinner_char)
             label = _html.escape(_status.text or "working...")
             preview = _status.preview
             label_part = f"<status-spinner>{frame}</status-spinner> {label}"
             if preview:
-                # trim preview to available width
                 max_prev = width - len(label) - 10
                 if len(preview) > max_prev:
                     preview = preview[: max_prev - 3] + "..."
@@ -507,18 +590,10 @@ def create_prompt_session(
                     label_part
                     + f" <status-preview>{_html.escape(preview)}</status-preview>"
                 )
-            status_lane = f"<status-lane>{label_part}</status-lane>"
-            input_lane = "<input-lane>\u276f </input-lane>"
-            return HTML(status_lane + "\n" + input_lane)
+            return HTML(f"{label_part}\n<prompt>&gt; </prompt>")
 
-        # Idle: render the standard two-lane layout using model-space delta
-        try:
-            from obscura.cli.render import get_model_space_delta
-
-            model_text = get_model_space_delta()
-        except Exception:
-            model_text = ""
-        return HTML(_build_prompt_message_html(width, model_text, PromptLayoutConfig()))
+        # Idle: clean `> ` prompt
+        return HTML("<prompt>&gt; </prompt>")
 
     # If a static hud_provider was supplied, compute a one-shot toolbar
     _static_hud_html: str | None = None
@@ -573,6 +648,7 @@ def create_prompt_session(
         key_bindings=_make_key_bindings(
             os.environ.get("OBSCURA_EXPAND_PREVIEW_KEY", "c-p"),
         ),
+        input_processors=[KeywordHighlighter()],
         enable_history_search=True,
         mouse_support=False,
         prompt_continuation="  \u00b7 ",
@@ -587,11 +663,14 @@ def create_prompt_session(
 
 
 async def bordered_prompt(session: PromptSession[str]) -> str:
-    """Prompt for input, then rewrite the submitted line without the ❯ prefix.
+    """Prompt for input, then redraw as a Claude Code-style bordered box.
 
-    After prompt_toolkit renders ``❯ user text``, we erase the prompt lines
-    (thinking-delta + input) and reprint just the bare user text so the
-    conversation history looks clean.
+    After prompt_toolkit renders ``> user text``, we erase the prompt
+    line and redraw it inside a bordered box::
+
+        ╭──────────────────────────────────────╮
+        │ user text here                       │
+        ╰──────────────────────────────────────╯
     """
     with patch_stdout(raw=True):
         result = await session.prompt_async()
@@ -600,10 +679,32 @@ async def bordered_prompt(session: PromptSession[str]) -> str:
     if text:
         import sys
 
-        # Erase the two lines prompt_toolkit left (thinking-delta + ❯ input)
+        # Count lines the prompt occupied (1 for idle, 2 for streaming status + input)
         sys.stdout.write("\033[A\033[2K")  # up + clear (input line)
-        sys.stdout.write("\033[A\033[2K")  # up + clear (thinking-delta line)
-        sys.stdout.write(f"{text}\n")
+
+        # Redraw as a Claude Code-style bordered box
+        width = shutil.get_terminal_size((80, 24)).columns
+        inner_w = width - 4  # 2 border + 2 padding
+        border_color = "\033[38;5;60m"  # dim blue-gray
+        text_color = "\033[38;5;252m"   # light gray
+        reset = "\033[0m"
+
+        # Wrap text to fit inside the box
+        import textwrap as _tw
+        wrapped = _tw.wrap(text, width=inner_w) if inner_w > 0 else [text]
+        if not wrapped:
+            wrapped = [""]
+
+        # Top border
+        sys.stdout.write(f"{border_color}╭{'─' * (width - 2)}╮{reset}\n")
+        # Content lines
+        for line in wrapped:
+            padded = line + " " * max(0, inner_w - len(line))
+            sys.stdout.write(
+                f"{border_color}│{reset} {text_color}{padded}{reset} {border_color}│{reset}\n"
+            )
+        # Bottom border
+        sys.stdout.write(f"{border_color}╰{'─' * (width - 2)}╯{reset}\n")
         sys.stdout.flush()
 
     return text

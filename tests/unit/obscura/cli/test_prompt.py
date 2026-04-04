@@ -115,12 +115,11 @@ def test_session_message_and_toolbar_are_separated() -> None:
     )
     msg = str(session.message())
     bar = str(session.bottom_toolbar())
-    assert "status-lane" in msg
-    assert "input-lane" in msg
+    # Modern prompt uses clean `> ` input — no status-lane in idle
+    assert "prompt" in msg or "&gt;" in msg
     assert "T:3" not in msg
-    assert "A:on" in bar
-    assert "R:on" in bar
-    assert "model:" not in bar
+    # Toolbar shows shortcut hints
+    assert "help" in bar
 
 
 def test_model_delta_only_affects_model_status_lane() -> None:
@@ -135,5 +134,5 @@ def test_model_delta_only_affects_model_status_lane() -> None:
     set_model_space_delta("phase: planning")
     msg = str(session.message())
     bar = str(session.bottom_toolbar())
-    assert "phase: planning" in msg
+    # Model delta no longer appears in the idle prompt message
     assert "phase: planning" not in bar

@@ -2,8 +2,8 @@
 
 Toggle between renderers via the ``OBSCURA_RENDERER`` environment variable:
 
-    OBSCURA_RENDERER=classic   (default) Rich-based line-by-line rendering
-    OBSCURA_RENDERER=modern    Frame-buffered rendering with per-tool components
+    OBSCURA_RENDERER=modern    (default) Frame-buffered rendering with per-tool components
+    OBSCURA_RENDERER=classic   Rich-based line-by-line rendering
 """
 
 from __future__ import annotations
@@ -28,16 +28,16 @@ def create_renderer(
         Explicit override (bypasses env var).  Useful for tests.
 
     """
-    choice = (renderer_type or os.environ.get("OBSCURA_RENDERER", "classic")).lower()
+    choice = (renderer_type or os.environ.get("OBSCURA_RENDERER", "modern")).lower()
 
-    if choice == "modern":
-        from obscura.cli.renderer.modern.renderer import ModernRenderer
+    if choice == "classic":
+        from obscura.cli.renderer.classic import ClassicRenderer
 
-        return ModernRenderer(streaming_status=streaming_status)
+        return ClassicRenderer(streaming_status=streaming_status)
 
-    from obscura.cli.renderer.classic import ClassicRenderer
+    from obscura.cli.renderer.modern.renderer import ModernRenderer
 
-    return ClassicRenderer(streaming_status=streaming_status)
+    return ModernRenderer(streaming_status=streaming_status)
 
 
 __all__ = ["RendererProtocol", "create_renderer"]

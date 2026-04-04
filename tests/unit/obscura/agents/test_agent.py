@@ -86,7 +86,7 @@ class TestAPERLoop:
             async def respond(self, ctx: AgentContext) -> None:
                 ctx.response = ctx.results
 
-        agent = InputAgent(client)
+        agent = InputAgent(client, aper_mode=APERMode.ALWAYS)
         result = await agent.run(input_data={"key": "value"})
         assert result == {"key": "value"}
 

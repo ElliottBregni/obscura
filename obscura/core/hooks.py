@@ -262,6 +262,8 @@ class HookRegistry:
             "onSessionStart": AgentEventKind.TURN_START,
             "sessionEnd": AgentEventKind.AGENT_DONE,
             "onStop": AgentEventKind.AGENT_DONE,
+            "stopCheck": AgentEventKind.STOP_CHECK,
+            "onStopCheck": AgentEventKind.STOP_CHECK,
             # Agent lifecycle
             "agentStart": AgentEventKind.AGENT_START,
             "agentStop": AgentEventKind.AGENT_STOP,

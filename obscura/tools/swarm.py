@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -82,8 +83,32 @@ def build_agent_catalog(agent_configs: dict[str, dict[str, Any]]) -> str:
         desc = sp[:120].replace("\n", " ").strip()
         if len(sp) > 120:
             desc += "..."
-        lines.append(f"- {name}: {desc}")
+        tags = cfg.get("tags", [])
+        tag_str = f" [{', '.join(tags)}]" if tags else ""
+        lines.append(f"- {name}{tag_str}: {desc}")
     return "\n".join(lines)
+
+
+def match_agents_by_tags(
+    query_tags: list[str],
+    agent_configs: dict[str, dict[str, Any]],
+) -> list[tuple[str, int, list[str]]]:
+    """Match agents by tag overlap with query tags.
+
+    Returns a list of (agent_name, match_count, matched_tags) sorted by
+    match count descending.  Only agents with at least one match are returned.
+    """
+    query_set = {t.lower() for t in query_tags}
+    matches: list[tuple[str, int, list[str]]] = []
+    for name, cfg in agent_configs.items():
+        if cfg.get("type", "loop") == "daemon":
+            continue
+        agent_tags = {t.lower() for t in cfg.get("tags", [])}
+        overlap = query_set & agent_tags
+        if overlap:
+            matches.append((name, len(overlap), sorted(overlap)))
+    matches.sort(key=lambda x: x[1], reverse=True)
+    return matches
 
 
 @dataclass(frozen=True)
@@ -100,6 +125,14 @@ class SwarmToolContext:
 # Background agent tracking — maps agent_id to progress info.
 # Shared across all tool instances in the same process.
 _background_agents: dict[str, dict[str, Any]] = {}
+
+# Team shared memory — lightweight in-process key-value store that all
+# agents in a session can read/write.  Keyed by (namespace, key).
+_team_memory: dict[str, dict[str, Any]] = {}
+
+
+# Agent team metrics — tracks timing and token usage per spawn.
+_team_metrics: list[dict[str, Any]] = []
 
 
 async def _run_background_agent(
@@ -383,6 +416,8 @@ async def _run_one_agent(
         PluginDepsConfig,
     )
 
+    started_at = time.monotonic()
+
     runtime = ctx.runtime
     if runtime is None:
         return {"ok": False, "error": "no_runtime", "agent_name": agent_type}
@@ -470,19 +505,39 @@ async def _run_one_agent(
             if hasattr(event, "text") and event.text:
                 output_lines.append(event.text)
 
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        _team_metrics.append({
+            "agent_name": agent_type,
+            "agent_id": agent.id,
+            "status": "completed",
+            "duration_ms": elapsed_ms,
+            "result_length": len("".join(output_lines)),
+            "iteration_count": agent.iteration_count,
+        })
+
         return {
             "ok": True,
             "agent_name": agent_type,
             "agent_id": agent.id,
             "result": "".join(output_lines),
+            "duration_ms": elapsed_ms,
         }
     except Exception as exc:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        _team_metrics.append({
+            "agent_name": agent_type,
+            "agent_id": getattr(agent, "id", "unknown") if agent else "unknown",
+            "status": "failed",
+            "duration_ms": elapsed_ms,
+            "error": str(exc),
+        })
         logger.warning("Agent '%s' failed: %s", agent_type, exc, exc_info=True)
         return {
             "ok": False,
             "error": "spawn_failed",
             "agent_name": agent_type,
             "message": str(exc),
+            "duration_ms": elapsed_ms,
         }
     finally:
         if agent is not None:
@@ -736,5 +791,229 @@ def make_check_agent_tool() -> ToolSpec:
             },
             "required": ["agent_id"],
         },
+        handler=_handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# suggest_agents — tag-based routing
+# ---------------------------------------------------------------------------
+
+
+def make_suggest_agents_tool(ctx: SwarmToolContext) -> ToolSpec:
+    """Build a ``suggest_agents`` ToolSpec for tag-based agent routing.
+
+    Given a list of keywords/tags describing a task, returns ranked
+    agent suggestions based on tag overlap.
+    """
+
+    async def _handler(tags: list[str]) -> str:
+        if not tags:
+            return json.dumps({"ok": False, "error": "no_tags_provided"})
+
+        matches = match_agents_by_tags(tags, ctx.agent_configs)
+        if not matches:
+            all_agents = [
+                {"name": name, "tags": cfg.get("tags", [])}
+                for name, cfg in ctx.agent_configs.items()
+                if cfg.get("type", "loop") != "daemon"
+            ]
+            return json.dumps({
+                "ok": True,
+                "matches": [],
+                "message": "No tag matches found.",
+                "all_agents": all_agents,
+            })
+
+        return json.dumps({
+            "ok": True,
+            "matches": [
+                {"agent": name, "match_count": count, "matched_tags": matched}
+                for name, count, matched in matches
+            ],
+        })
+
+    return ToolSpec(
+        name="suggest_agents",
+        description=(
+            "Find the best agent for a task by matching keywords/tags. "
+            "Pass task-related tags (e.g. ['python', 'testing', 'security']) "
+            "and get ranked agent suggestions based on tag overlap."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Keywords/tags describing the task.",
+                },
+            },
+            "required": ["tags"],
+        },
+        handler=_handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team shared memory
+# ---------------------------------------------------------------------------
+
+
+def make_team_memory_write_tool() -> ToolSpec:
+    """Build a ``team_memory_write`` tool for shared agent-to-agent state."""
+
+    async def _handler(key: str, value: Any, namespace: str = "default") -> str:
+        ns_key = f"{namespace}:{key}"
+        _team_memory[ns_key] = {
+            "value": value,
+            "written_at": time.time(),
+            "namespace": namespace,
+            "key": key,
+        }
+        return json.dumps({"ok": True, "key": ns_key})
+
+    return ToolSpec(
+        name="team_memory_write",
+        description=(
+            "Write a key-value pair to shared team memory. "
+            "All agents in this session can read it. Use to share "
+            "intermediate results, findings, or coordination state."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Memory key (e.g. 'search_results', 'findings').",
+                },
+                "value": {
+                    "description": "Any JSON-serializable value to store.",
+                },
+                "namespace": {
+                    "type": "string",
+                    "default": "default",
+                    "description": "Optional namespace for grouping.",
+                },
+            },
+            "required": ["key", "value"],
+        },
+        handler=_handler,
+    )
+
+
+def make_team_memory_read_tool() -> ToolSpec:
+    """Build a ``team_memory_read`` tool for reading shared state."""
+
+    async def _handler(key: str = "", namespace: str = "default") -> str:
+        if key:
+            ns_key = f"{namespace}:{key}"
+            entry = _team_memory.get(ns_key)
+            if entry is None:
+                return json.dumps({"ok": False, "error": "not_found", "key": ns_key})
+            return json.dumps({"ok": True, "key": ns_key, "entry": entry})
+
+        # No key: list all entries in namespace
+        entries = {
+            k: v for k, v in _team_memory.items() if v["namespace"] == namespace
+        }
+        return json.dumps({"ok": True, "namespace": namespace, "entries": entries})
+
+    return ToolSpec(
+        name="team_memory_read",
+        description=(
+            "Read from shared team memory. Pass a key to read one entry, "
+            "or omit key to list all entries in a namespace."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Key to read. Omit to list all keys.",
+                },
+                "namespace": {
+                    "type": "string",
+                    "default": "default",
+                    "description": "Namespace to read from.",
+                },
+            },
+        },
+        handler=_handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team status / metrics
+# ---------------------------------------------------------------------------
+
+
+def make_team_status_tool() -> ToolSpec:
+    """Build a ``team_status`` tool for viewing agent team metrics."""
+
+    async def _handler() -> str:
+        if not _team_metrics:
+            return json.dumps({
+                "ok": True,
+                "message": "No agents have been spawned yet.",
+                "agents_spawned": 0,
+            })
+
+        total = len(_team_metrics)
+        completed = [m for m in _team_metrics if m["status"] == "completed"]
+        failed = [m for m in _team_metrics if m["status"] == "failed"]
+
+        total_duration_ms = sum(m.get("duration_ms", 0) for m in _team_metrics)
+        max_duration_ms = max(
+            (m.get("duration_ms", 0) for m in _team_metrics), default=0
+        )
+
+        # Per-agent breakdown
+        by_agent: dict[str, list[dict[str, Any]]] = {}
+        for m in _team_metrics:
+            name = m["agent_name"]
+            by_agent.setdefault(name, []).append(m)
+
+        agent_summary = {}
+        for name, runs in by_agent.items():
+            agent_summary[name] = {
+                "runs": len(runs),
+                "completed": sum(1 for r in runs if r["status"] == "completed"),
+                "failed": sum(1 for r in runs if r["status"] == "failed"),
+                "avg_duration_ms": int(
+                    sum(r.get("duration_ms", 0) for r in runs) / len(runs)
+                ),
+                "total_iterations": sum(r.get("iteration_count", 0) for r in runs),
+            }
+
+        # Shared memory size
+        memory_keys = len(_team_memory)
+        bg_agents = len(_background_agents)
+
+        return json.dumps({
+            "ok": True,
+            "agents_spawned": total,
+            "completed": len(completed),
+            "failed": len(failed),
+            "total_duration_ms": total_duration_ms,
+            "max_duration_ms": max_duration_ms,
+            "parallel_speedup": (
+                f"{total_duration_ms / max_duration_ms:.1f}x"
+                if max_duration_ms > 0
+                else "N/A"
+            ),
+            "agent_breakdown": agent_summary,
+            "shared_memory_keys": memory_keys,
+            "background_agents": bg_agents,
+        })
+
+    return ToolSpec(
+        name="team_status",
+        description=(
+            "View agent team metrics: spawned count, success/failure rates, "
+            "timing breakdown per agent type, parallel speedup estimate, "
+            "and shared memory usage."
+        ),
+        parameters={"type": "object", "properties": {}},
         handler=_handler,
     )

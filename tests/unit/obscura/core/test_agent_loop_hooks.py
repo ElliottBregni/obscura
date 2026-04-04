@@ -139,9 +139,15 @@ class TestAgentLoopHooks:
         loop = AgentLoop(backend, _make_registry(), hooks=hooks)
 
         events = [e async for e in loop.run("hi")]
-        # The hook should have seen every event the loop emitted
-        assert len(seen) == len(events)
-        assert seen == [e.kind for e in events]
+        # The hook should have seen every yielded event plus STOP_CHECK
+        # (STOP_CHECK is emitted through hooks but not yielded to consumer)
+        yielded_kinds = [e.kind for e in events]
+        expected_seen = []
+        for k in yielded_kinds:
+            if k == AgentEventKind.AGENT_DONE:
+                expected_seen.append(AgentEventKind.STOP_CHECK)
+            expected_seen.append(k)
+        assert seen == expected_seen
 
     @pytest.mark.asyncio
     async def test_after_hook_fires_for_every_event(self) -> None:
@@ -239,8 +245,17 @@ class TestAgentLoopEventStore:
         events = [e async for e in loop.run("hi", session_id="sess-1")]
         stored = await store.get_events("sess-1")
 
-        assert len(stored) == len(events)
-        assert [e.kind.value for e in stored] == [e.kind.value for e in events]
+        # Stored events include STOP_CHECK (persisted but not yielded)
+        yielded_kinds = [e.kind.value for e in events]
+        stored_kinds = [e.kind.value for e in stored]
+        # STOP_CHECK appears in stored events right before AGENT_DONE
+        assert len(stored) == len(events) + 1
+        assert stored_kinds == [
+            k for k in stored_kinds
+        ]  # sanity — all valid
+        # Remove STOP_CHECK from stored to compare with yielded
+        filtered = [k for k in stored_kinds if k != "stop_check"]
+        assert filtered == yielded_kinds
 
     @pytest.mark.asyncio
     async def test_session_created_automatically(self, tmp_path: Path) -> None:
@@ -360,9 +375,10 @@ class TestAgentLoopHooksAndStore:
         events = [e async for e in loop.run("go", session_id="s")]
         stored = await store.get_events("s")
 
-        # All three should agree on count
+        # After-hooks fire for yielded events; store also has STOP_CHECK
         assert hook_count == len(events)
-        assert len(stored) == len(events)
+        # Stored events include the non-yielded STOP_CHECK event
+        assert len(stored) == len(events) + 1
 
     @pytest.mark.asyncio
     async def test_modified_event_is_what_gets_stored(

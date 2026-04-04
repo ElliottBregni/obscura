@@ -216,6 +216,10 @@ class ToolSpec:
     examples: tuple[dict[str, Any], ...] = field(default_factory=lambda: ())
     capability: str = ""  # capability group ID (e.g. "git.ops")
 
+    def is_concurrency_safe(self) -> bool:
+        """Tools without side effects can run concurrently."""
+        return not self.side_effects or self.side_effects == "none"
+
 
 # Hook config type for Copilot backend
 AgentHookConfig = dict[str, Callable[..., Any]]
@@ -450,6 +454,7 @@ class AgentEventKind(enum.Enum):
     TURN_COMPLETE = "turn_complete"
     TURN_START = "turn_start"
     AGENT_DONE = "agent_done"
+    STOP_CHECK = "stop_check"  # Fired when model wants to stop — hooks can prevent it
     ERROR = "error"
     SESSION_PAUSED = "session_paused"
     USER_INPUT = "user_input"

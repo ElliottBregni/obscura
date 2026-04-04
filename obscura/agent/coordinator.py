@@ -14,9 +14,12 @@ import textwrap
 
 
 def is_coordinator_mode() -> bool:
-    """Check if coordinator mode is enabled via environment variable."""
-    val = os.environ.get("OBSCURA_COORDINATOR_MODE", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    """Check if coordinator mode is enabled.
+
+    Defaults to **ON** — set ``OBSCURA_COORDINATOR_MODE=0`` to disable.
+    """
+    val = os.environ.get("OBSCURA_COORDINATOR_MODE", "1").strip().lower()
+    return val not in ("0", "false", "no", "off")
 
 
 def set_coordinator_mode(enabled: bool) -> None:

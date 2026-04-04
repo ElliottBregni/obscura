@@ -723,8 +723,8 @@ async def web_search(
     "task",
     (
         "Delegate a sub-task to a local Obscura agent subprocess. "
-        "Spawns 'obscura -p <prompt>' and returns the captured output. "
-        "Use 'target' to specify an agent_type hint (e.g. 'explore', 'bash'); "
+        "Spawns 'obscura <prompt>' and returns the captured output. "
+        "Use 'target' to specify a specialist hint (e.g. 'explore', 'bash'); "
         "omit for default."
     ),
     {
@@ -741,9 +741,11 @@ async def web_search(
 )
 async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) -> str:
     obscura_bin = _resolve_command("obscura")
-    cmd = [obscura_bin, "-p", prompt]
+    # prompt is a positional argument; use -s for agent type hint
+    cmd = [obscura_bin]
     if target:
-        cmd += ["--agent-type", target]
+        cmd += ["-s", f"You are a {target} specialist. Focus on {target} tasks."]
+    cmd += ["--max-turns", "25", "--no-confirm", prompt]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,

@@ -122,6 +122,8 @@ def build_delegate_tool_spec(
         ),
         parameters=schema,
         handler=_handle_delegate,
+        # Delegation can reach powerful peers; gate behind privileged tier.
+        required_tier="privileged",
         timeout_seconds=300.0,
     )
 

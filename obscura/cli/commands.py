@@ -5021,6 +5021,24 @@ async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_debug(_args: str, ctx: REPLContext) -> str | None:
+    """Toggle debug mode (verbose logging + internal output)."""
+    import obscura.config as _cfg
+    from obscura.cli.render import output as _output
+
+    if _cfg.VERBOSE:
+        _cfg.VERBOSE = False
+        _output.verbose = False
+        _output.set_log_level("info")
+        print_ok("Debug mode OFF (log level: info)")
+    else:
+        _cfg.VERBOSE = True
+        _output.verbose = True
+        _output.set_log_level("debug")
+        print_ok("Debug mode ON (verbose logging enabled)")
+    return None
+
+
 async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
     """AI-assisted git commit from staged changes."""
     import asyncio as _aio
@@ -5738,6 +5756,9 @@ async def cmd_rename(args: str, ctx: REPLContext) -> str | None:
         return None
     try:
         await ctx.store.update_summary(ctx.session_id, title)
+        # Update prompt status so the title appears immediately
+        if hasattr(ctx, "_prompt_status") and ctx._prompt_status is not None:
+            ctx._prompt_status.session_title = title
         print_ok(f"Session renamed: {title}")
     except Exception:
         # Fallback: store in metadata if update_summary doesn't exist.
@@ -6186,6 +6207,7 @@ COMMANDS: dict[str, CommandHandler] = {
     # Wave 2: effort, speed, git workflow
     "effort": cmd_effort,
     "fast": cmd_fast,
+    "debug": cmd_debug,
     "commit": cmd_commit,
     "review": cmd_review,
     "security-review": cmd_security_review,

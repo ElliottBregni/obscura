@@ -11,7 +11,8 @@ Usage::
 
     from obscura.core.agent_loop import AgentLoop
     from obscura.core.hooks import HookRegistry
-    from obscura.core.event_store import SQLiteEventStore
+    from obscura.core.compaction import compact_history
+from obscura.core.event_store import SQLiteEventStore
     from obscura.core.types import AgentEventKind
 
     hooks = HookRegistry()
@@ -37,13 +38,17 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import enum
 import difflib
 import inspect
 import json
 import logging
+import os
 import time
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, cast
 
 from obscura.core.tools import ToolRegistry
@@ -66,10 +71,255 @@ from obscura.core.types import (
     ToolSpec,
 )
 
+from obscura.core.compaction import compact_history
 from obscura.core.event_store import EventRecord, EventStoreProtocol, SessionStatus
 from obscura.core.hooks import HookRegistry
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Tool concurrency
+# ---------------------------------------------------------------------------
+
+MAX_TOOL_CONCURRENCY: int = int(
+    os.environ.get("OBSCURA_MAX_TOOL_CONCURRENCY", "10")
+)
+
+# Maximum times stop hooks can suppress the stop and continue the loop.
+# Prevents infinite loops from greedy hooks that always suppress the stop.
+MAX_STOP_HOOK_CONTINUATIONS: int = 5
+
+# ---------------------------------------------------------------------------
+# Max output tokens recovery
+# ---------------------------------------------------------------------------
+
+MAX_OUTPUT_TOKENS_RETRIES: int = 3
+DEFAULT_MAX_TOKENS: int = 16384  # 16k default
+ESCALATED_MAX_TOKENS: int = 65536  # 64k max escalation
+
+
+# ---------------------------------------------------------------------------
+# Streaming tool executor
+# ---------------------------------------------------------------------------
+
+
+class StreamingToolExecutor:
+    """Executes tools as they stream in from the model, not after the full response.
+
+    When a tool_use block finishes streaming, it is immediately handed to the
+    executor via :meth:`add_tool`.  Concurrency-safe tools run in parallel;
+    tools with side effects run alone.  Results are always returned in
+    submission order via :meth:`wait_for_all`.
+    """
+
+    def __init__(
+        self,
+        agent_loop: AgentLoop,
+        max_concurrency: int = MAX_TOOL_CONCURRENCY,
+    ) -> None:
+        self._agent_loop = agent_loop
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._pending: list[ToolCallInfo] = []  # tools waiting to start
+        self._in_flight: dict[str, asyncio.Task[None]] = {}  # tool_use_id -> task
+        self._completed: dict[str, ToolResultEnvelope] = {}  # tool_use_id -> result
+        self._order: list[str] = []  # tool_use_ids in submission order
+        self._tool_call_map: dict[str, ToolCallInfo] = {}  # tool_use_id -> ToolCallInfo
+        self._all_done = asyncio.Event()
+        self._safe_in_flight_count: int = 0  # how many concurrency-safe tools are running
+        self._seen_calls: dict[str, ToolResultEnvelope] = {}  # dedup cache shared across turn
+        self._abort = asyncio.Event()  # sibling abort signal
+        self._closed = False  # set when stream errors; reject further adds
+
+    def add_tool(self, tc: ToolCallInfo) -> None:
+        """Called when a tool_use block finishes streaming.
+
+        Starts execution immediately if concurrency allows, otherwise queues.
+        """
+        if self._closed:
+            return
+        self._order.append(tc.tool_use_id)
+        self._tool_call_map[tc.tool_use_id] = tc
+
+        spec = self._agent_loop._tools.get(tc.name)
+        is_safe = spec is not None and spec.is_concurrency_safe()
+
+        if is_safe and self._all_in_flight_are_safe():
+            # Start immediately in parallel
+            self._start_tool(tc)
+        else:
+            # Queue it -- will start when current batch completes
+            self._pending.append(tc)
+            self._process_queue()
+
+    def close(self) -> None:
+        """Mark executor as closed -- no more tools will be accepted."""
+        self._closed = True
+
+    def _start_tool(self, tc: ToolCallInfo) -> None:
+        """Launch a tool execution task."""
+        spec = self._agent_loop._tools.get(tc.name)
+        is_safe = spec is not None and spec.is_concurrency_safe()
+        if is_safe:
+            self._safe_in_flight_count += 1
+        task: asyncio.Task[None] = asyncio.create_task(self._run_tool(tc))
+        self._in_flight[tc.tool_use_id] = task
+
+    async def _run_tool(self, tc: ToolCallInfo) -> None:
+        """Execute a single tool with semaphore limiting."""
+        spec = self._agent_loop._tools.get(tc.name)
+        is_safe = spec is not None and spec.is_concurrency_safe()
+        try:
+            async with self._semaphore:
+                if self._abort.is_set():
+                    # Abort signalled -- return an error result
+                    result = ToolResultEnvelope(
+                        call_id=tc.tool_use_id,
+                        tool=tc.name,
+                        status="error",
+                        error=ToolExecutionError(
+                            type=ToolErrorType.UNKNOWN,
+                            message="Aborted: sibling tool failed.",
+                            safe_to_retry=False,
+                        ),
+                        tool_use_id=tc.tool_use_id,
+                        raw=tc.raw,
+                    )
+                else:
+                    result = await self._agent_loop._execute_single_tool(
+                        tc, self._seen_calls
+                    )
+        except Exception as exc:
+            logger.warning("StreamingToolExecutor: tool %s raised: %s", tc.name, exc)
+            result = ToolResultEnvelope(
+                call_id=tc.tool_use_id,
+                tool=tc.name,
+                status="error",
+                error=ToolExecutionError(
+                    type=ToolErrorType.UNKNOWN,
+                    message=str(exc),
+                    safe_to_retry=False,
+                ),
+                tool_use_id=tc.tool_use_id,
+                raw=tc.raw,
+            )
+        finally:
+            self._completed[tc.tool_use_id] = result
+            del self._in_flight[tc.tool_use_id]
+            if is_safe:
+                self._safe_in_flight_count -= 1
+
+            # Sibling abort: if a non-safe tool errors, signal others
+            if not is_safe and result.status == "error":
+                self._abort.set()
+
+            self._process_queue()
+            if not self._in_flight and not self._pending:
+                self._all_done.set()
+
+    def _process_queue(self) -> None:
+        """Start pending tools if concurrency allows."""
+        while self._pending:
+            tc = self._pending[0]
+            spec = self._agent_loop._tools.get(tc.name)
+            is_safe = spec is not None and spec.is_concurrency_safe()
+
+            if not self._in_flight:
+                # Nothing in flight, start this tool
+                self._pending.pop(0)
+                self._start_tool(tc)
+                if not is_safe:
+                    break  # Non-concurrent tool runs alone
+            elif is_safe and self._all_in_flight_are_safe():
+                # All in-flight are safe, add another safe one
+                self._pending.pop(0)
+                self._start_tool(tc)
+            else:
+                break  # Must wait for current batch to finish
+
+    def _all_in_flight_are_safe(self) -> bool:
+        """Check if all currently in-flight tools are concurrency-safe."""
+        if not self._in_flight:
+            return True
+        return self._safe_in_flight_count == len(self._in_flight)
+
+    def get_completed_in_order(self) -> list[ToolResultEnvelope]:
+        """Return completed results in submission order (non-blocking).
+
+        Stops at the first tool_use_id that has not yet completed, so
+        results are always contiguous from the start.
+        """
+        results: list[ToolResultEnvelope] = []
+        for tid in self._order:
+            if tid in self._completed:
+                results.append(self._completed[tid])
+            else:
+                break
+        return results
+
+    async def wait_for_all(self) -> list[ToolResultEnvelope]:
+        """Wait for all submitted tools to complete.
+
+        Returns results in submission order.
+        """
+        if self._in_flight or self._pending:
+            self._all_done.clear()
+            await self._all_done.wait()
+        return [self._completed[tid] for tid in self._order]
+
+    def get_tool_calls_in_order(self) -> list[ToolCallInfo]:
+        """Return all submitted ToolCallInfo objects in submission order."""
+        return [self._tool_call_map[tid] for tid in self._order]
+
+    @property
+    def has_pending_or_in_flight(self) -> bool:
+        """True if there are tools still pending or executing."""
+        return bool(self._pending or self._in_flight)
+
+    @property
+    def has_tools(self) -> bool:
+        """True if any tools were submitted."""
+        return bool(self._order)
+
+
+# ---------------------------------------------------------------------------
+# Tool result truncation constants
+# ---------------------------------------------------------------------------
+
+MAX_TOOL_RESULT_SIZE = 200 * 1024  # 200 KB (measured in UTF-8 bytes)
+TOOL_RESULT_CACHE_DIR = Path("~/.cache/obscura/tool-results").expanduser()
+
+
+def _maybe_truncate_result(result: str, tool_name: str, tool_use_id: str) -> str:
+    """If *result* exceeds MAX_TOOL_RESULT_SIZE bytes, write the full text to
+    disk and return a truncated preview with a pointer to the cached file.
+
+    The truncation cuts on the last newline boundary within the byte budget so
+    we never split a multi-byte character.
+    """
+    encoded = result.encode("utf-8")
+    if len(encoded) <= MAX_TOOL_RESULT_SIZE:
+        return result
+
+    # Ensure cache directory exists
+    TOOL_RESULT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Persist full result
+    result_path = TOOL_RESULT_CACHE_DIR / f"{tool_use_id}.txt"
+    result_path.write_text(result, encoding="utf-8")
+
+    # Truncate to budget — decode back so we never land inside a multi-byte
+    # sequence, then cut at the last newline for a clean break.
+    truncated = encoded[:MAX_TOOL_RESULT_SIZE].decode("utf-8", errors="ignore")
+    last_nl = truncated.rfind("\n")
+    if last_nl > 0:
+        truncated = truncated[:last_nl]
+
+    return (
+        f"{truncated}\n\n"
+        f"[Result truncated — {len(result):,} chars total. "
+        f"Full result saved to: {result_path}]"
+    )
+
 
 # Parameter name aliases for cross-provider compatibility.
 # Maps provider-specific parameter names to canonical tool parameter names.
@@ -118,6 +368,8 @@ class TurnState:
     messages: tuple[Message, ...] = ()
     input_tokens: int = 0
     output_tokens: int = 0
+    has_attempted_reactive_compact: bool = False
+    finish_reason: str = ""
 
     def replace(self, **changes: Any) -> TurnState:
         """Return a new ``TurnState`` with the given fields replaced."""
@@ -135,6 +387,8 @@ class TurnState:
             "messages": self.messages,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "has_attempted_reactive_compact": self.has_attempted_reactive_compact,
+            "finish_reason": self.finish_reason,
         }
         current.update(changes)
         return TurnState(**current)
@@ -163,6 +417,64 @@ class TurnMetrics:
     tool_count: int = 0
     accumulated_chars: int = 0
 
+
+
+
+# ---------------------------------------------------------------------------
+# Error categorisation for retry logic
+# ---------------------------------------------------------------------------
+
+
+class ErrorCategory(enum.Enum):
+    """Classification of errors for retry / fallback decisions."""
+
+    TRANSIENT = "transient"
+    MODEL_ERROR = "model_error"
+    FATAL = "fatal"
+
+
+def categorize_error(exc: Exception) -> ErrorCategory:
+    """Classify *exc* into a retry-relevant category."""
+    msg = str(exc).lower()
+
+    status: int | None = None
+    for attr in ("status_code", "status", "code"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, int):
+            status = val
+            break
+
+    # TRANSIENT
+    if status == 429 or "rate_limit" in msg or "rate limit" in msg:
+        return ErrorCategory.TRANSIENT
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return ErrorCategory.TRANSIENT
+    if isinstance(exc, (ConnectionError, OSError)):
+        return ErrorCategory.TRANSIENT
+    if "timeout" in msg or "timed out" in msg:
+        return ErrorCategory.TRANSIENT
+    if status is not None and 500 <= status < 600:
+        return ErrorCategory.TRANSIENT
+    if "connection" in msg and ("reset" in msg or "refused" in msg or "error" in msg):
+        return ErrorCategory.TRANSIENT
+    if "server error" in msg or "service unavailable" in msg:
+        return ErrorCategory.TRANSIENT
+
+    # MODEL_ERROR
+    if "context_length_exceeded" in msg or "prompt too long" in msg or "prompt is too long" in msg:
+        return ErrorCategory.MODEL_ERROR
+    if "max_tokens" in msg or "output truncated" in msg or "maximum context" in msg:
+        return ErrorCategory.MODEL_ERROR
+
+    # FATAL
+    if status in (401, 403):
+        return ErrorCategory.FATAL
+    if "unauthorized" in msg or "forbidden" in msg or "authentication" in msg:
+        return ErrorCategory.FATAL
+    if isinstance(exc, (ValueError, TypeError)):
+        return ErrorCategory.FATAL
+
+    return ErrorCategory.FATAL
 
 # Type alias for confirmation callbacks.
 # Receives a ToolCallInfo, returns True (approve) or False (deny).
@@ -436,6 +748,10 @@ class AgentLoop:
         current_prompt: str = prompt
         kwargs: dict[str, Any] = stream_kwargs
         _prev_event: AgentEvent | None = None
+        _retry_count: int = 0
+        _max_retries: int = 3
+        _stop_hook_continuations: int = 0
+        _max_tokens_retries: int = 0
 
         while state.turn < self._max_turns:
             state = state.replace(turn=state.turn + 1)
@@ -451,6 +767,7 @@ class AgentLoop:
                 emitted_keys=frozenset(),
                 input_tokens=0,
                 output_tokens=0,
+                finish_reason="",
             )
 
             # Run post-hook for the previous event before emitting next
@@ -467,6 +784,16 @@ class AgentLoop:
             # Mutable list used by _flush_pending_tool (passed by reference)
             _tool_calls_mut: list[ToolCallInfo] = []
             _emitted_keys_mut: set[str] = set()
+
+            # Streaming tool executor: starts tools as they arrive from
+            # the model stream, not after the full response completes.
+            executor = StreamingToolExecutor(self)
+
+            def _feed_new_tools_to_executor() -> None:
+                """Hand any newly-flushed tool calls to the executor."""
+                fed = len(executor._order)
+                for tc in _tool_calls_mut[fed:]:
+                    executor.add_tool(tc)
 
             try:
                 async for chunk in self._call_stream(current_prompt, kwargs):
@@ -511,6 +838,7 @@ class AgentLoop:
                             )
                             if _to_yield is not None:
                                 yield _to_yield
+                            _feed_new_tools_to_executor()
                         state = state.replace(
                             current_tool_name=chunk.tool_name,
                             current_tool_input_json="",
@@ -547,6 +875,8 @@ class AgentLoop:
                             )
                             if _to_yield is not None:
                                 yield _to_yield
+                            # Feed newly flushed tool to executor immediately
+                            _feed_new_tools_to_executor()
                             state = state.replace(
                                 current_tool_name="",
                                 current_tool_input_json="",
@@ -557,11 +887,12 @@ class AgentLoop:
                     # Fix #6: extract per-turn token usage from DONE metadata
                     if chunk.kind == ChunkKind.DONE and chunk.metadata is not None:
                         usage = chunk.metadata.usage
+                        finish_reason = getattr(chunk.metadata, "finish_reason", "") or ""
+                        updates: dict[str, Any] = {"finish_reason": finish_reason}
                         if usage is not None:
-                            state = state.replace(
-                                input_tokens=usage.get("input_tokens", 0),
-                                output_tokens=usage.get("output_tokens", 0),
-                            )
+                            updates["input_tokens"] = usage.get("input_tokens", 0)
+                            updates["output_tokens"] = usage.get("output_tokens", 0)
+                        state = state.replace(**updates)
 
                 # Flush last tool call (fallback if no TOOL_USE_END received)
                 if state.current_tool_name:
@@ -577,8 +908,122 @@ class AgentLoop:
                     )
                     if _to_yield is not None:
                         yield _to_yield
+                    _feed_new_tools_to_executor()
+
+                # Mark executor closed -- no more tools will arrive
+                executor.close()
+
+                # -- Max output tokens recovery --------------------------------
+                # If the model's response was truncated due to max_output_tokens,
+                # discard the (likely broken) output and retry with a higher limit.
+                if state.finish_reason == "max_tokens":
+                    if _max_tokens_retries < MAX_OUTPUT_TOKENS_RETRIES:
+                        _max_tokens_retries += 1
+
+                        # Cancel any in-flight tools from the truncated response
+                        executor._abort.set()
+                        for task in list(executor._in_flight.values()):
+                            task.cancel()
+
+                        # Escalate max_tokens
+                        current_max_tokens = kwargs.get(
+                            "max_tokens", DEFAULT_MAX_TOKENS
+                        )
+                        escalated = min(
+                            current_max_tokens * 2, ESCALATED_MAX_TOKENS
+                        )
+                        kwargs["max_tokens"] = escalated
+
+                        logger.warning(
+                            "Response truncated (max_tokens). Retrying with "
+                            "%d tokens (attempt %d/%d)",
+                            escalated,
+                            _max_tokens_retries,
+                            MAX_OUTPUT_TOKENS_RETRIES,
+                        )
+
+                        # Discard the truncated response — retry the turn
+                        state = state.replace(
+                            turn=state.turn - 1,
+                            turn_text="",
+                            tool_calls=(),
+                            finish_reason="",
+                        )
+                        continue  # Retry the turn with higher limit
+                    else:
+                        logger.error(
+                            "Max output tokens retries exhausted (%d attempts)",
+                            MAX_OUTPUT_TOKENS_RETRIES,
+                        )
+                        # Fall through to normal processing with whatever we got
+                else:
+                    # Successful (non-truncated) turn: reset retry counter
+                    _max_tokens_retries = 0
 
             except Exception as exc:
+                # Close executor and cancel in-flight tools on stream error
+                executor.close()
+                executor._abort.set()
+                for task in list(executor._in_flight.values()):
+                    task.cancel()
+
+                category = categorize_error(exc)
+
+                # -- TRANSIENT: retry with exponential backoff ---------------
+                if category is ErrorCategory.TRANSIENT and _retry_count < _max_retries:
+                    _retry_count += 1
+                    backoff = 2 ** (_retry_count - 1)  # 1s, 2s, 4s
+                    logger.warning(
+                        "Transient error on turn %d (attempt %d/%d), "
+                        "retrying in %ds: %s",
+                        state.turn, _retry_count, _max_retries, backoff, exc,
+                    )
+                    await asyncio.sleep(backoff)
+                    state = state.replace(turn=state.turn - 1)
+                    continue
+
+                # -- MODEL_ERROR: attempt recovery ---------------------------
+                if category is ErrorCategory.MODEL_ERROR:
+                    exc_msg = str(exc).lower()
+
+                    # Reactive mid-turn compaction for context-too-long errors
+                    if (
+                        self._is_context_too_long(exc)
+                        and not state.has_attempted_reactive_compact
+                    ):
+                        result = await self._reactive_compact(kwargs, state)
+                        if result is not None:
+                            kwargs, state = result
+                            # Emit compaction event
+                            compact_event = AgentEvent(
+                                kind=AgentEventKind.CONTEXT_COMPACT,
+                                text="Reactive mid-turn compaction triggered",
+                                turn=state.turn,
+                            )
+                            if _prev_event is not None:
+                                await self._post_emit(_prev_event)
+                                _prev_event = None
+                            emitted = await self._emit(compact_event, session_id)
+                            if emitted is not None:
+                                yield emitted
+                                _prev_event = emitted
+                            # Don't increment retry count — compaction is
+                            # recovery, not retry.  Rewind turn so the while
+                            # loop re-enters at the same turn number.
+                            state = state.replace(turn=state.turn - 1)
+                            continue
+
+                    if (
+                        "max_tokens" in exc_msg or "output truncated" in exc_msg
+                    ) and _retry_count < 1:
+                        _retry_count += 1
+                        logger.warning(
+                            "Output truncated on turn %d, retrying", state.turn,
+                        )
+                        state = state.replace(turn=state.turn - 1)
+                        continue
+
+                # -- FATAL (or exhausted retries) ----------------------------
                 err_event = AgentEvent(
                     kind=AgentEventKind.ERROR,
                     text=str(exc),
@@ -600,6 +1045,9 @@ class AgentLoop:
                     except Exception:
                         logger.debug("Failed to mark session failed", exc_info=True)
                 return
+            else:
+                # Successful turn: reset retry counter
+                _retry_count = 0
 
             # Sync mutable tool_calls back into immutable state
             state = state.replace(
@@ -689,11 +1137,48 @@ class AgentLoop:
                 kwargs.pop("messages", None)
                 continue
 
-            # No tool calls -> model is done
+            # No tool calls -> model wants to stop.
+            # Fire STOP_CHECK so before-hooks can intervene.
+            #
+            # Hook contract for STOP_CHECK before-hooks:
+            #   - Return None → suppress the stop, continue with empty prompt
+            #   - Return modified event with new .text → continue with that
+            #     text as the next prompt
+            #   - Return event unchanged → allow the stop (AGENT_DONE fires)
             if not state.tool_calls:
                 if _prev_event is not None:
                     await self._post_emit(_prev_event)
                     _prev_event = None
+
+                # Guard: force stop after too many hook continuations
+                if _stop_hook_continuations >= MAX_STOP_HOOK_CONTINUATIONS:
+                    logger.warning(
+                        "Stop hook continuation limit (%d) reached, forcing stop",
+                        MAX_STOP_HOOK_CONTINUATIONS,
+                    )
+                else:
+                    # Fire STOP_CHECK — before-hooks can suppress or redirect
+                    stop_event = AgentEvent(
+                        kind=AgentEventKind.STOP_CHECK,
+                        text=state.accumulated_text,
+                        turn=state.turn,
+                    )
+                    result = await self._emit(stop_event, session_id)
+
+                    if result is None:
+                        # Hook suppressed the stop — continue with empty prompt
+                        _stop_hook_continuations += 1
+                        current_prompt = ""
+                        continue
+
+                    if result.text and result.text != state.accumulated_text:
+                        # Hook provided a new prompt — continue with it
+                        _stop_hook_continuations += 1
+                        current_prompt = result.text
+                        kwargs.pop("messages", None)
+                        continue
+
+                # No hook intervention (or guard hit) — stop normally
                 done_event = AgentEvent(
                     kind=AgentEventKind.AGENT_DONE,
                     turn=state.turn,
@@ -715,8 +1200,16 @@ class AgentLoop:
 
             # Fix #2: Always execute tools locally -- backend is a pure
             # LLM interface.  No SDK/local execution fork.
-            tool_calls_list = list(state.tool_calls)
-            tool_results = await self._execute_tools(tool_calls_list)
+            # Tools were already dispatched to the StreamingToolExecutor
+            # during streaming.  Wait for any remaining in-flight tools.
+            tool_calls_list = executor.get_tool_calls_in_order()
+            if executor.has_tools:
+                tool_results = await executor.wait_for_all()
+            else:
+                # Fallback: if no tools were fed to executor (shouldn't
+                # happen when tool_calls is non-empty, but be defensive)
+                tool_calls_list = list(state.tool_calls)
+                tool_results = await self._execute_tools(tool_calls_list)
 
             # Yield tool result events
             for result in tool_results:
@@ -934,194 +1427,102 @@ class AgentLoop:
     # Tool execution
     # ------------------------------------------------------------------
 
-    async def _execute_tools(
+    def _partition_tool_calls(
         self,
         tool_calls: list[ToolCallInfo],
-        turn: int | None = None,
-        **kwargs: object,
-    ) -> list[ToolResultEnvelope]:
-        """Execute tool calls and return canonical result envelopes."""
-        results: list[ToolResultEnvelope] = []
+    ) -> list[tuple[bool, list[ToolCallInfo]]]:
+        """Partition into ``(is_concurrent, [calls])`` batches.
 
-        # Deduplicate: skip tool calls with identical name+input in the same
-        # turn.  LLMs sometimes emit the same call twice.  Reuse the first
-        # result so the model sees a consistent response for both call IDs.
-        seen_calls: dict[str, ToolResultEnvelope] = {}  # "name|input_json" -> result
-
+        Consecutive concurrency-safe tools form one batch.
+        Each non-concurrent tool is its own batch.
+        """
+        batches: list[tuple[bool, list[ToolCallInfo]]] = []
         for tc in tool_calls:
-            dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
-            if dedup_key in seen_calls:
-                prev = seen_calls[dedup_key]
-                results.append(
-                    ToolResultEnvelope(
-                        call_id=tc.tool_use_id,
-                        tool=prev.tool,
-                        status=prev.status,
-                        result=prev.result,
-                        error=prev.error,
-                        latency_ms=0,
-                        tool_use_id=tc.tool_use_id,
-                        raw=prev.raw,
-                    )
-                )
-                logger.debug("Dedup: skipped duplicate tool call %s", tc.name)
-                continue
-            call = ToolCallEnvelope(
-                call_id=tc.tool_use_id,
-                agent_id="agent_loop",
-                tool=tc.name,
-                args=tc.input,
-                context=ToolCallContext(trace_id=uuid.uuid4().hex, policy="default"),
-            )
-            started = time.monotonic()
+            spec = self._tools.get(tc.name)
+            is_safe = spec is not None and spec.is_concurrency_safe()
+            if batches and batches[-1][0] == is_safe:
+                batches[-1][1].append(tc)
+            else:
+                batches.append((is_safe, [tc]))
+        return batches
 
-            # Tool allowlist enforcement
-            if self._tool_allowlist is not None and tc.name not in self._tool_allowlist:
+    async def _gather_with_limit(
+        self,
+        coros: list[Coroutine[Any, Any, ToolResultEnvelope]],
+        limit: int,
+    ) -> list[ToolResultEnvelope]:
+        """Run coroutines concurrently with a semaphore-based limit."""
+        semaphore = asyncio.Semaphore(limit)
+
+        async def limited(coro: Coroutine[Any, Any, ToolResultEnvelope]) -> ToolResultEnvelope:
+            async with semaphore:
+                return await coro
+
+        return list(await asyncio.gather(*[limited(c) for c in coros]))
+
+    async def _execute_single_tool(
+        self,
+        tc: ToolCallInfo,
+        seen_calls: dict[str, ToolResultEnvelope],
+    ) -> ToolResultEnvelope:
+        """Execute a single tool call and return a canonical result envelope.
+
+        Handles deduplication, allowlist enforcement, confirmation gates,
+        capability token checks, and error normalization.
+        """
+        dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
+        if dedup_key in seen_calls:
+            prev = seen_calls[dedup_key]
+            logger.debug("Dedup: skipped duplicate tool call %s", tc.name)
+            return ToolResultEnvelope(
+                call_id=tc.tool_use_id,
+                tool=prev.tool,
+                status=prev.status,
+                result=prev.result,
+                error=prev.error,
+                latency_ms=0,
+                tool_use_id=tc.tool_use_id,
+                raw=prev.raw,
+            )
+
+        call = ToolCallEnvelope(
+            call_id=tc.tool_use_id,
+            agent_id="agent_loop",
+            tool=tc.name,
+            args=tc.input,
+            context=ToolCallContext(trace_id=uuid.uuid4().hex, policy="default"),
+        )
+        started = time.monotonic()
+
+        # Tool allowlist enforcement
+        if self._tool_allowlist is not None and tc.name not in self._tool_allowlist:
+            err = ToolExecutionError(
+                type=ToolErrorType.UNAUTHORIZED,
+                message=f"Tool '{tc.name}' not in allowlist.",
+                safe_to_retry=False,
+            )
+            return ToolResultEnvelope(
+                call_id=call.call_id,
+                tool=call.tool,
+                status="error",
+                error=err,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                tool_use_id=tc.tool_use_id,
+                raw=tc.raw,
+            )
+
+        # Confirmation gate
+        if self._on_confirm is not None:
+            approved = self._on_confirm(tc)
+            if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
+                approved = await approved
+            if not approved:
                 err = ToolExecutionError(
                     type=ToolErrorType.UNAUTHORIZED,
-                    message=f"Tool '{tc.name}' not in allowlist.",
+                    message="Tool call denied by user.",
                     safe_to_retry=False,
                 )
-                results.append(
-                    ToolResultEnvelope(
-                        call_id=call.call_id,
-                        tool=call.tool,
-                        status="error",
-                        error=err,
-                        latency_ms=int((time.monotonic() - started) * 1000),
-                        tool_use_id=tc.tool_use_id,
-                        raw=tc.raw,
-                    )
-                )
-                continue
-
-            # Confirmation gate
-            if self._on_confirm is not None:
-                approved = self._on_confirm(tc)
-                if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
-                    approved = await approved
-                if not approved:
-                    err = ToolExecutionError(
-                        type=ToolErrorType.UNAUTHORIZED,
-                        message="Tool call denied by user.",
-                        safe_to_retry=False,
-                    )
-                    results.append(
-                        ToolResultEnvelope(
-                            call_id=call.call_id,
-                            tool=call.tool,
-                            status="error",
-                            error=err,
-                            latency_ms=int((time.monotonic() - started) * 1000),
-                            tool_use_id=tc.tool_use_id,
-                            raw=tc.raw,
-                        )
-                    )
-                    continue
-
-            spec = self._tools.get(tc.name)
-            if spec is None:
-                # Track repeated NOT_FOUND to break infinite retry loops
-                self._not_found_counts[tc.name] = self._not_found_counts.get(tc.name, 0) + 1
-                count = self._not_found_counts[tc.name]
-
-                available = self._tools.names()
-                matches = difflib.get_close_matches(tc.name, available, n=3, cutoff=0.4)
-
-                if count >= 3:
-                    # After 3 failures, give a hard stop message
-                    msg = (
-                        f"STOP: `{tc.name}` does not exist and has failed {count} times. "
-                        f"Do NOT call it again. "
-                        f"Available tools: {', '.join(available[:20])}"
-                    )
-                elif matches:
-                    suggestions = ", ".join(f"`{m}`" for m in matches)
-                    msg = f"Unknown tool: {tc.name}. Did you mean: {suggestions}?"
-                else:
-                    msg = f"Unknown tool: {tc.name}. Use one of: {', '.join(available[:15])}"
-                err = ToolExecutionError(
-                    type=ToolErrorType.NOT_FOUND,
-                    message=msg,
-                    # Retryable if we have suggestions -- let the model self-correct.
-                    # After 3+ failures, stop retrying (the hard-stop message above).
-                    safe_to_retry=bool(matches) and count < 3,
-                )
-                results.append(
-                    ToolResultEnvelope(
-                        call_id=call.call_id,
-                        tool=call.tool,
-                        status="error",
-                        error=err,
-                        latency_ms=int((time.monotonic() - started) * 1000),
-                        tool_use_id=tc.tool_use_id,
-                        raw=tc.raw,
-                    )
-                )
-                continue
-
-            # Capability token enforcement (defense in depth)
-            if self._capability_token is not None:
-                try:
-                    from obscura.auth.capability import validate_capability_token
-
-                    if not validate_capability_token(self._capability_token):
-                        _audit_tool_denied(tc.name, "invalid_or_expired_token")
-                        err = ToolExecutionError(
-                            type=ToolErrorType.UNAUTHORIZED,
-                            message="Capability token invalid or expired.",
-                            safe_to_retry=False,
-                        )
-                        results.append(
-                            ToolResultEnvelope(
-                                call_id=call.call_id,
-                                tool=call.tool,
-                                status="error",
-                                error=err,
-                                latency_ms=int((time.monotonic() - started) * 1000),
-                                tool_use_id=tc.tool_use_id,
-                                raw=tc.raw,
-                            )
-                        )
-                        continue
-
-                    # Tier-based enforcement removed -- access control is handled
-                    # by ToolPolicy + CapabilityResolver + ToolBroker.
-                    pass
-                except Exception:
-                    logger.debug("Capability module unavailable", exc_info=True)
-
-            try:
-                result = await self._call_handler(spec, tc.input)
-                envelope = ToolResultEnvelope(
-                    call_id=call.call_id,
-                    tool=call.tool,
-                    status="ok",
-                    result=result,
-                    latency_ms=int((time.monotonic() - started) * 1000),
-                    tool_use_id=tc.tool_use_id,
-                    raw=tc.raw,
-                )
-                results.append(envelope)
-                seen_calls[dedup_key] = envelope
-            except Exception as exc:
-                logger.warning("Tool %s failed: %s", tc.name, exc)
-                err = self._normalize_tool_error(exc)
-                # Enrich INVALID_ARGS errors with the tool's required params
-                if err.type == ToolErrorType.INVALID_ARGS and spec is not None:
-                    required = spec.parameters.get("required", [])
-                    props = spec.parameters.get("properties", {})
-                    if required:
-                        param_hints = ", ".join(
-                            f"`{p}` ({props.get(p, {}).get('type', '?')})"
-                            for p in required
-                        )
-                        err = ToolExecutionError(
-                            type=err.type,
-                            message=f"{err.message}. Required params: {param_hints}",
-                            safe_to_retry=True,
-                        )
-                envelope = ToolResultEnvelope(
+                return ToolResultEnvelope(
                     call_id=call.call_id,
                     tool=call.tool,
                     status="error",
@@ -1130,8 +1531,148 @@ class AgentLoop:
                     tool_use_id=tc.tool_use_id,
                     raw=tc.raw,
                 )
-                results.append(envelope)
-                seen_calls[dedup_key] = envelope
+
+        spec = self._tools.get(tc.name)
+        if spec is None:
+            # Track repeated NOT_FOUND to break infinite retry loops
+            self._not_found_counts[tc.name] = self._not_found_counts.get(tc.name, 0) + 1
+            count = self._not_found_counts[tc.name]
+
+            available = self._tools.names()
+            matches = difflib.get_close_matches(tc.name, available, n=3, cutoff=0.4)
+
+            if count >= 3:
+                # After 3 failures, give a hard stop message
+                msg = (
+                    f"STOP: `{tc.name}` does not exist and has failed {count} times. "
+                    f"Do NOT call it again. "
+                    f"Available tools: {', '.join(available[:20])}"
+                )
+            elif matches:
+                suggestions = ", ".join(f"`{m}`" for m in matches)
+                msg = f"Unknown tool: {tc.name}. Did you mean: {suggestions}?"
+            else:
+                msg = f"Unknown tool: {tc.name}. Use one of: {', '.join(available[:15])}"
+            err = ToolExecutionError(
+                type=ToolErrorType.NOT_FOUND,
+                message=msg,
+                # Retryable if we have suggestions -- let the model self-correct.
+                # After 3+ failures, stop retrying (the hard-stop message above).
+                safe_to_retry=bool(matches) and count < 3,
+            )
+            return ToolResultEnvelope(
+                call_id=call.call_id,
+                tool=call.tool,
+                status="error",
+                error=err,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                tool_use_id=tc.tool_use_id,
+                raw=tc.raw,
+            )
+
+        # Capability token enforcement (defense in depth)
+        if self._capability_token is not None:
+            try:
+                from obscura.auth.capability import validate_capability_token
+
+                if not validate_capability_token(self._capability_token):
+                    _audit_tool_denied(tc.name, "invalid_or_expired_token")
+                    err = ToolExecutionError(
+                        type=ToolErrorType.UNAUTHORIZED,
+                        message="Capability token invalid or expired.",
+                        safe_to_retry=False,
+                    )
+                    return ToolResultEnvelope(
+                        call_id=call.call_id,
+                        tool=call.tool,
+                        status="error",
+                        error=err,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        tool_use_id=tc.tool_use_id,
+                        raw=tc.raw,
+                    )
+
+                # Tier-based enforcement removed -- access control is handled
+                # by ToolPolicy + CapabilityResolver + ToolBroker.
+                pass
+            except Exception:
+                logger.debug("Capability module unavailable", exc_info=True)
+
+        try:
+            result = await self._call_handler(spec, tc.input)
+            envelope = ToolResultEnvelope(
+                call_id=call.call_id,
+                tool=call.tool,
+                status="ok",
+                result=result,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                tool_use_id=tc.tool_use_id,
+                raw=tc.raw,
+            )
+            seen_calls[dedup_key] = envelope
+            return envelope
+        except Exception as exc:
+            logger.warning("Tool %s failed: %s", tc.name, exc)
+            err = self._normalize_tool_error(exc)
+            # Enrich INVALID_ARGS errors with the tool's required params
+            if err.type == ToolErrorType.INVALID_ARGS and spec is not None:
+                required = spec.parameters.get("required", [])
+                props = spec.parameters.get("properties", {})
+                if required:
+                    param_hints = ", ".join(
+                        f"`{p}` ({props.get(p, {}).get('type', '?')})"
+                        for p in required
+                    )
+                    err = ToolExecutionError(
+                        type=err.type,
+                        message=f"{err.message}. Required params: {param_hints}",
+                        safe_to_retry=True,
+                    )
+            envelope = ToolResultEnvelope(
+                call_id=call.call_id,
+                tool=call.tool,
+                status="error",
+                error=err,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                tool_use_id=tc.tool_use_id,
+                raw=tc.raw,
+            )
+            seen_calls[dedup_key] = envelope
+            return envelope
+
+    async def _execute_tools(
+        self,
+        tool_calls: list[ToolCallInfo],
+        turn: int | None = None,
+        **kwargs: object,
+    ) -> list[ToolResultEnvelope]:
+        """Execute tool calls and return canonical result envelopes.
+
+        Tool calls are partitioned into batches based on their
+        ``ToolSpec.is_concurrency_safe()`` flag.  Consecutive
+        side-effect-free tools run concurrently (up to
+        :data:`MAX_TOOL_CONCURRENCY`); tools with side effects run
+        serially in order.  Result ordering always matches the input
+        ``tool_calls`` list.
+        """
+        # Deduplicate: skip tool calls with identical name+input in the same
+        # turn.  LLMs sometimes emit the same call twice.  Reuse the first
+        # result so the model sees a consistent response for both call IDs.
+        seen_calls: dict[str, ToolResultEnvelope] = {}  # "name|input_json" -> result
+
+        batches = self._partition_tool_calls(tool_calls)
+
+        results: list[ToolResultEnvelope] = []
+        for is_concurrent, batch in batches:
+            if is_concurrent and len(batch) > 1:
+                batch_results = await self._gather_with_limit(
+                    [self._execute_single_tool(tc, seen_calls) for tc in batch],
+                    MAX_TOOL_CONCURRENCY,
+                )
+                results.extend(batch_results)
+            else:
+                for tc in batch:
+                    results.append(await self._execute_single_tool(tc, seen_calls))
 
         return results
 
@@ -1255,8 +1796,11 @@ class AgentLoop:
 
     @staticmethod
     def _render_tool_result_text(result: ToolResultEnvelope) -> str:
-        # Hard cap: truncate any single tool result to prevent context blowout
-        _MAX_RESULT_CHARS = 8000
+        """Render a ToolResultEnvelope as text for the model.
+
+        Large results are written to disk and replaced with a truncated
+        preview (see :func:`_maybe_truncate_result`).
+        """
 
         def _encode(obj: Any) -> str:
             """Encode as TOON (~40% fewer tokens), fall back to JSON."""
@@ -1266,18 +1810,13 @@ class AgentLoop:
             except Exception:
                 return json.dumps(obj, default=str)
 
-        def _cap(text: str) -> str:
-            if len(text) <= _MAX_RESULT_CHARS:
-                return text
-            return (
-                text[:_MAX_RESULT_CHARS]
-                + f"\n... [truncated, {len(text):,} chars total]"
-            )
-
         if result.status == "ok":
-            if isinstance(result.result, str):
-                return _cap(result.result)
-            return _cap(_encode(result.result))
+            text = (
+                result.result
+                if isinstance(result.result, str)
+                else _encode(result.result)
+            )
+            return _maybe_truncate_result(text, result.tool, result.tool_use_id)
         if result.error is None:
             return "Tool error"
         payload = {
@@ -1286,7 +1825,31 @@ class AgentLoop:
             "retry_after_ms": result.error.retry_after_ms,
             "safe_to_retry": result.error.safe_to_retry,
         }
-        return _cap(_encode(payload))
+        return _maybe_truncate_result(
+            _encode(payload), result.tool, result.tool_use_id
+        )
+
+    @staticmethod
+    def cleanup_result_cache(max_age_hours: int = 24) -> int:
+        """Remove cached tool results older than *max_age_hours*.
+
+        Returns the number of files deleted.
+        """
+        import os
+
+        if not TOOL_RESULT_CACHE_DIR.exists():
+            return 0
+
+        cutoff = time.time() - max_age_hours * 3600
+        deleted = 0
+        for path in TOOL_RESULT_CACHE_DIR.iterdir():
+            try:
+                if path.is_file() and os.path.getmtime(path) < cutoff:
+                    path.unlink()
+                    deleted += 1
+            except OSError:
+                logger.debug("Failed to remove cached result %s", path, exc_info=True)
+        return deleted
 
     @staticmethod
     def _map_chunk(chunk: StreamChunk, turn: int) -> AgentEvent | None:
@@ -1490,6 +2053,74 @@ class AgentLoop:
         )
 
         return [assistant_msg, result_msg]
+
+    @staticmethod
+    def _is_context_too_long(exc: Exception) -> bool:
+        """Check if an exception indicates the prompt/context is too large."""
+        msg = str(exc).lower()
+        return any(pattern in msg for pattern in (
+            "prompt_too_long", "prompt too long", "prompt is too long",
+            "context_length_exceeded", "too many tokens",
+            "maximum context length", "request too large", "input too long",
+        ))
+
+    async def _reactive_compact(
+        self,
+        kwargs: dict[str, Any],
+        state: TurnState,
+    ) -> tuple[dict[str, Any], TurnState] | None:
+        """Attempt to compact message history mid-turn to recover from prompt_too_long.
+
+        Returns updated kwargs and state, or None if compaction isn't possible.
+        """
+        messages: list[Message] = kwargs.get("messages", [])
+        if len(messages) <= 2:
+            return None  # Nothing to compact
+
+        # Keep the last 2 message pairs (4 messages), summarize the rest
+        keep_count = min(4, len(messages))
+        keep = messages[-keep_count:]
+        old = messages[:-keep_count]
+
+        if not old:
+            return None
+
+        # Build summary of compacted messages
+        tool_names: set[str] = set()
+        for msg in old:
+            for block in msg.content:
+                tn = getattr(block, "tool_name", None)
+                if tn:
+                    tool_names.add(tn)
+
+        summary_text = (
+            f"[Context compacted mid-turn: {len(old)} earlier messages removed. "
+            f"Tools used: {', '.join(sorted(tool_names)) if tool_names else 'none'}. "
+            f"Focus on the most recent context below.]"
+        )
+
+        summary_msg = Message(
+            role=Role.USER,
+            content=[ContentBlock(kind="text", text=summary_text)],
+        )
+
+        new_messages = [summary_msg] + keep
+        new_kwargs = {**kwargs, "messages": new_messages}
+
+        # Reset accumulated chars/tokens and mark compaction as attempted
+        new_state = state.replace(
+            accumulated_text="",
+            input_tokens=0,
+            output_tokens=0,
+            has_attempted_reactive_compact=True,
+        )
+
+        logger.warning(
+            "Reactive compaction on turn %d: removed %d messages, kept %d",
+            state.turn, len(old), keep_count,
+        )
+
+        return new_kwargs, new_state
 
     def _compact_messages(
         self,

@@ -303,13 +303,26 @@ def check_written_file_exists(
     return None
 
 
+def _coerce_result_str(tool_result: str | dict[str, Any] | Any) -> str:
+    """Coerce a tool result to string for eval checks.
+
+    MCP tools may return dicts; system tools return JSON strings.
+    """
+    if isinstance(tool_result, str):
+        return tool_result
+    if isinstance(tool_result, dict):
+        return json.dumps(tool_result)
+    return str(tool_result) if tool_result is not None else ""
+
+
 def check_empty_tool_result(
     tool_name: str,
     tool_input: dict[str, Any],
-    tool_result: str,
+    tool_result: str | Any,
 ) -> str | None:
     """Flag tool results that are completely empty (likely an error)."""
-    if not tool_result or not tool_result.strip():
+    result_str = _coerce_result_str(tool_result)
+    if not result_str or not result_str.strip():
         return "\n⚠ Tool returned empty result — may indicate a silent failure"
     return None
 
@@ -317,10 +330,10 @@ def check_empty_tool_result(
 def check_bash_error(
     tool_name: str,
     tool_input: dict[str, Any],
-    tool_result: str,
+    tool_result: str | Any,
 ) -> str | None:
     """Flag bash commands that produced error output."""
-    lower = tool_result.lower()
+    lower = _coerce_result_str(tool_result).lower()
     if ("traceback" in lower or "error:" in lower) and "exit code 0" in lower:
         return "\n⚠ Command succeeded but produced error output — check for warnings"
     return None

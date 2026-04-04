@@ -26,7 +26,7 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 # Public configuration values
 # NOTE: defaults chosen to preserve existing behavior where applicable.
-VERBOSE: bool = _env_flag("OBSCURA_VERBOSE", True)
+VERBOSE: bool = _env_flag("OBSCURA_VERBOSE", False)
 OUTPUT_MODE: str = os.environ.get("OBSCURA_OUTPUT_MODE", "cli")
 CAPTURE_PRINTS: bool = _env_flag("OBSCURA_CAPTURE_PRINTS", False)
 RENDERER: str = os.environ.get("OBSCURA_RENDERER", "modern")
