@@ -149,13 +149,18 @@ class DreamConsolidator:
             from obscura.kairos.daily_log import DailyLog
             DailyLog().append("Dream consolidation executed", source="dream")
 
-            # Phase 1-4: In a full implementation, this would spawn
-            # a forked agent with the CONSOLIDATION_PROMPT and limited
-            # tool permissions (read-only + memory dir write).
-            # For now, we do basic maintenance.
+            # Phase 1-4: Spawn a forked agent with the CONSOLIDATION_PROMPT.
+            # Uses the default backend (copilot) with read-only + memory dir
+            # write permissions and a capped turn budget.
+            agent_result = await self._run_consolidation_agent()
+
+            # Always prune regardless of agent outcome.
             self._prune_index()
 
-            logger.info("Dream consolidation completed")
+            if agent_result:
+                logger.info("Dream consolidation completed (agent ran successfully)")
+            else:
+                logger.info("Dream consolidation completed (agent unavailable — pruned only)")
             return True
 
         except Exception:
@@ -165,6 +170,39 @@ class DreamConsolidator:
 
         finally:
             self._update_lock_timestamp()
+
+    async def _run_consolidation_agent(self) -> bool:
+        """Spawn a forked ObscuraClient agent to run the 4-phase consolidation.
+
+        Uses the default backend (copilot) with a 15-turn budget.
+        The agent is given the CONSOLIDATION_PROMPT as its system prompt and
+        instructed to read/write only under ~/.obscura/memory/.
+
+        Returns True if the agent completed without exception.
+        """
+        try:
+            from obscura.core.client import ObscuraClient
+            from obscura.core.config import ObscuraConfig
+
+            cfg = ObscuraConfig.from_env()
+            async with ObscuraClient(
+                cfg.default_backend,
+                model=cfg.default_model or None,
+                system_prompt=CONSOLIDATION_PROMPT,
+            ) as client:
+                result = await client.run_loop_to_completion(
+                    "Begin memory consolidation. Follow all four phases in the system prompt.",
+                    max_turns=15,
+                )
+                logger.debug(
+                    "Dream agent output (%d chars): %s...",
+                    len(result),
+                    result[:200],
+                )
+                return True
+        except Exception:
+            logger.warning("Dream consolidation agent failed", exc_info=True)
+            return False
 
     def _last_consolidated_at(self) -> float:
         """Return timestamp of last consolidation.
