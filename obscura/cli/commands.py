@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -626,11 +627,13 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /approve <n|all>       Approve plan step(s)",
         "  /reject <n|all>        Reject plan step(s)",
         "",
-        " [bold]Code Review[/]",
+        " [bold]Code Review & Git[/]",
         "  /diff [overlay|accept|reject|apply]  Review file changes",
         "  /commit                AI-generated git commit",
         "  /review [ref]          AI code review",
         "  /security-review [ref] Security-focused review",
+        "  /branch [name|create|delete|list]   Git branch management",
+        "  /pr [base]             Create pull request",
         "",
         " [bold]Context & Memory[/]",
         "  /context               Context window stats",
@@ -662,6 +665,21 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /template [list|run]   Task templates",
         "  /workflow [list|run]   Multi-step workflows",
         "",
+        " [bold]Agent Steering[/]",
+        "  /goal <description>    Set a persistent session goal",
+        "  /goal check            Self-assess progress toward goal",
+        "  /persona [preset|text] Set agent persona (senior-backend, security-auditor, ...)",
+        "  /guardrails add <rule> Add runtime constraints (e.g. 'don't modify tests')",
+        "  /focus <path>          Restrict agent to specific files/dirs",
+        "  /token-budget <n|$n>   Set token or cost budget",
+        "  /tool-policy [cmd]     allow-all | custom-only | allow/deny <tools>",
+        "",
+        " [bold]Automation[/]",
+        "  /loop <interval> <cmd> Run prompt/command on interval (5m, 30s, 2h)",
+        "  /loop status|stop      Manage active loops",
+        "  /schedule create|list|delete|run  Cron-based scheduled tasks",
+        "  /listen [on|off]       Listen mode (passive, respond only when asked)",
+        "",
         " [bold]KAIROS & Voice[/]",
         "  /kairos [on|off|status|proactive on|off|dream on|off]",
         "  /voice [on|off]        Push-to-talk (Ctrl+Space)",
@@ -675,9 +693,20 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         " [bold]Quick Actions[/]",
         "  /btw <question>        Side question (doesn't affect context)",
         "  /summary               Summarize current conversation",
+        "  /recap                 Structured session recap (files, decisions, remaining)",
         "  /copy                  Copy last response to clipboard",
-        "  /stash                 Save context and start fresh",
-        "  /pop                   Restore stashed context",
+        "  /stash / /pop          Save/restore context",
+        "  /checkpoint save|restore  Named conversation snapshots",
+        "  /context-inject <path> Inject file or clipboard into conversation",
+        "  /undercover [on|off]   Suppress AI attribution",
+        "",
+        " [bold]Configuration[/]",
+        "  /config [key] [value]  View or edit settings",
+        "  /hooks [add|remove]    Manage event hooks",
+        "  /login [provider]      Auth status / login hints",
+        "  /logout <provider>     Clear auth for a provider",
+        "  /terminal-setup        Diagnose terminal capabilities",
+        "  /ide [vscode|jetbrains]  IDE integration",
         "",
         " [bold]Utility[/]",
         "  /cat <path>            Display file contents",
@@ -687,6 +716,8 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /vim                   Toggle vim keybindings",
         "  /sandbox-toggle        Toggle filesystem sandboxing",
         "  /attribution           AI commit attribution stats",
+        "  /bug [report]          View errors / generate bug report",
+        "  /release-notes         Show release notes",
         "",
         " [bold]Control & Logging[/]",
         "  /heartbeat, /hb        Health check",
@@ -1449,21 +1480,22 @@ def _session_print_table(
         )
         tbl.add_column("", width=2)  # current indicator
         tbl.add_column("Session", style="cyan", no_wrap=True)
+        tbl.add_column("Title", style="bold", max_width=30)
         tbl.add_column("Status", style="yellow")
-        tbl.add_column("Backend", style="dim")
         tbl.add_column("Model", style="dim")
-        tbl.add_column("Agent", style="green")
         tbl.add_column("Msgs", style="dim", justify="right")
         tbl.add_column("Created", style="dim")
         for s in rows[:20]:
             indicator = "[bold cyan]\u2192[/]" if s.id == current_id else ""
+            title = s.summary or "-"
+            if len(title) > 30:
+                title = title[:27] + "..."
             tbl.add_row(
                 indicator,
                 s.id[:12],
+                title,
                 s.status.value,
-                s.backend or "-",
                 s.model or "-",
-                s.active_agent or "-",
                 str(s.message_count) if s.message_count else "-",
                 s.created_at.strftime("%Y-%m-%d %H:%M"),
             )
@@ -1492,10 +1524,8 @@ async def _session_interactive_switch(
     choices: list[str] = []
     session_map: dict[str, Any] = {}
     for s in switchable[:15]:
-        label = (
-            f"{s.id[:8]} · {s.status.value}"
-            f" · {s.active_agent or s.backend or 'default'}"
-        )
+        name_part = s.summary or s.active_agent or s.backend or "default"
+        label = f"{s.id[:8]} · {s.status.value} · {name_part}"
         choices.append(label)
         session_map[label] = s
 
@@ -4800,7 +4830,7 @@ async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
     if search:
         scored: list[tuple[float, Any]] = []
         for s in sessions:
-            text = f"{s.summary or ''} {s.model or ''} {s.agent_name or ''} {s.project or ''}".lower()
+            text = f"{s.summary or ''} {s.model or ''} {s.active_agent or ''} {s.project or ''}".lower()
             ratio = difflib.SequenceMatcher(None, search, text).ratio()
             if ratio > 0.2 or search in text:
                 scored.append((ratio, s))
@@ -4812,26 +4842,24 @@ async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
 
     table = Table(title="Sessions", expand=False)
     table.add_column("#", width=3, justify="right")
-    table.add_column("ID", width=12, no_wrap=True)
+    table.add_column("Title", max_width=30, style="bold")
+    table.add_column("ID", width=12, no_wrap=True, style="cyan")
     table.add_column("Status", width=10)
-    table.add_column("Model", width=16)
-    table.add_column("Summary", max_width=40)
+    table.add_column("Model", width=16, style="dim")
 
     shown = sessions[:15]
     for i, s in enumerate(shown, 1):
-        sid = s.session_id[:12] if hasattr(s, "session_id") else str(s)[:12]
+        sid = s.id[:12]
         status = s.status.value if hasattr(s.status, "value") else str(s.status)
-        model = getattr(s, "model", "") or ""
-        summary = (getattr(s, "summary", "") or "")[:40]
-        table.add_row(str(i), sid, status, model, summary)
+        model = s.model or ""
+        title = (s.summary or "")[:30] or "-"
+        table.add_row(str(i), title, sid, status, model)
 
     console.print(table)
 
     # If only one match and search was specific, auto-switch.
     if search and len(shown) == 1:
-        target_sid = (
-            shown[0].session_id if hasattr(shown[0], "session_id") else str(shown[0])
-        )
+        target_sid = shown[0].id
         ctx.session_id = target_sid
         ctx.message_history = []
         print_ok(f"Resumed session {target_sid[:12]}")
@@ -5151,6 +5179,98 @@ Be concise. Focus on real issues, not style preferences."""
     return None
 
 
+async def cmd_pr(args: str, ctx: REPLContext) -> str | None:
+    """AI-assisted pull request creation. Usage: /pr [base-branch]."""
+    import asyncio as _aio
+
+    base = args.strip() or "main"
+
+    # Gather git context in parallel
+    cmds = {
+        "status": "git status",
+        "branch": "git branch --show-current",
+        "log": f"git log {base}...HEAD --oneline",
+        "diff": f"git diff {base}...HEAD",
+        "remote": "git remote -v",
+    }
+    results: dict[str, str] = {}
+    for key, cmd in cmds.items():
+        proc = await _aio.create_subprocess_shell(
+            cmd,
+            stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        results[key] = stdout.decode("utf-8", errors="replace").strip()
+
+    if not results["diff"] and not results["log"]:
+        print_info(f"No changes found between {base} and HEAD.")
+        return None
+
+    branch = results["branch"]
+    if branch == base:
+        print_warning(f"You are on '{base}'. Create a feature branch first.")
+        return None
+
+    prompt = f"""Create a GitHub pull request for the current branch.
+
+## Current Branch
+{branch}
+
+## Base Branch
+{base}
+
+## Commits (since diverged from {base})
+```
+{results["log"][:4000]}
+```
+
+## Changes (git diff {base}...HEAD)
+```diff
+{results["diff"][:10000]}
+```
+
+## Git Status
+```
+{results["status"]}
+```
+
+## Remote
+```
+{results["remote"]}
+```
+
+## Instructions
+1. Analyze ALL commits (not just the latest) and the full diff
+2. Draft a concise PR title (under 70 chars) and a body with:
+   - ## Summary (1-3 bullet points)
+   - ## Test plan (bulleted checklist)
+3. Check if the branch is pushed to remote. If not, push with `git push -u origin {branch}`
+4. Create the PR using:
+```
+gh pr create --title "title" --body "$(cat <<'EOF'
+## Summary
+- bullet points
+
+## Test plan
+- [ ] test items
+EOF
+)"
+```
+5. Return the PR URL when done.
+
+Do NOT use --force. Do NOT push to {base} directly."""
+
+    from obscura.cli.render import render_event
+
+    try:
+        async for event in ctx.client.run_loop(prompt):
+            render_event(event)
+    except Exception as exc:
+        print_error(str(exc))
+    return None
+
+
 async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
     """Security-focused code review. Usage: /security-review [ref]."""
     import asyncio as _aio
@@ -5361,6 +5481,127 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_goals(args: str, ctx: REPLContext) -> str | None:
+    """Manage the KAIROS goal board.
+
+    Usage:
+      /goals               List active goals
+      /goals list [status]  List goals (optionally filter by status)
+      /goals add <title>    Create a new goal
+      /goals show <id>      Show full goal details
+      /goals complete <id>  Mark goal as completed
+      /goals abandon <id>   Abandon a goal
+      /goals edit <id>      Open goal file in $EDITOR
+    """
+    from obscura.kairos.goals import GoalBoard
+
+    board = GoalBoard()
+    tokens = [t for t in args.strip().split(None, 1) if t]
+    sub = tokens[0].lower() if tokens else "list"
+    rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+    if sub in ("list", "ls"):
+        goals = board.load_all()
+        if rest:
+            goals = [g for g in goals if g.status == rest]
+        if not goals:
+            print_info("No goals found. Use `/goals add <title>` to create one.")
+            return None
+        table = Table(title="Goal Board", show_lines=False)
+        table.add_column("ID", style="cyan", max_width=25)
+        table.add_column("Priority", style="bold")
+        table.add_column("Status")
+        table.add_column("Progress")
+        table.add_column("Title", max_width=40)
+        _prio_colors = {"critical": "red", "high": "yellow", "medium": "blue", "low": "dim"}
+        _status_colors = {
+            "active": "green", "in_progress": "cyan",
+            "completed": "dim", "abandoned": "dim", "draft": "dim",
+        }
+        for g in goals:
+            prio_color = _prio_colors.get(g.priority, "")
+            stat_color = _status_colors.get(g.status, "")
+            bar = f"{'█' * (g.progress // 10)}{'░' * (10 - g.progress // 10)} {g.progress}%"
+            table.add_row(
+                g.id,
+                f"[{prio_color}]{g.priority}[/]",
+                f"[{stat_color}]{g.status}[/]",
+                bar,
+                g.title,
+            )
+        console.print(table)
+        return None
+
+    if sub == "add":
+        if not rest:
+            print_error("Usage: /goals add <title>")
+            return None
+        goal = board.create(rest)
+        print_ok(f"Goal created: {goal.id}")
+        print_info(f"  Edit: ~/.obscura/goals/{goal.id}.md")
+        return None
+
+    if sub == "show":
+        if not rest:
+            print_error("Usage: /goals show <id>")
+            return None
+        goal = board.load(rest)
+        if goal is None:
+            print_error(f"Goal not found: {rest}")
+            return None
+        console.print(f"\n[bold]{goal.title}[/]  ({goal.id})")
+        console.print(f"  Status: {goal.status}  |  Priority: {goal.priority}  |  Progress: {goal.progress}%")
+        if goal.acceptance_criteria:
+            console.print("  [bold]Acceptance Criteria:[/]")
+            for ac in goal.acceptance_criteria:
+                console.print(f"    - {ac}")
+        if goal.tasks:
+            console.print(f"  [bold]Linked Tasks:[/] {', '.join(goal.tasks)}")
+        if goal.depends_on:
+            console.print(f"  [bold]Depends On:[/] {', '.join(goal.depends_on)}")
+        if goal.body:
+            console.print(f"\n{goal.body}")
+        console.print()
+        return None
+
+    if sub == "complete":
+        if not rest:
+            print_error("Usage: /goals complete <id>")
+            return None
+        goal = board.complete(rest)
+        if goal is None:
+            print_error(f"Could not complete goal: {rest}")
+            return None
+        print_ok(f"Goal completed: {goal.title}")
+        return None
+
+    if sub == "abandon":
+        if not rest:
+            print_error("Usage: /goals abandon <id>")
+            return None
+        goal = board.abandon(rest)
+        if goal is None:
+            print_error(f"Could not abandon goal: {rest}")
+            return None
+        print_ok(f"Goal abandoned: {goal.title}")
+        return None
+
+    if sub == "edit":
+        if not rest:
+            print_error("Usage: /goals edit <id>")
+            return None
+        goal = board.load(rest)
+        if goal is None:
+            print_error(f"Goal not found: {rest}")
+            return None
+        editor = os.environ.get("EDITOR", "vim")
+        os.system(f'{editor} "{goal.path}"')  # noqa: S605
+        return None
+
+    print_error(f"Unknown subcommand: {sub}. Try /goals help")
+    return None
+
+
 async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
     """Toggle KAIROS autonomous mode.
 
@@ -5537,6 +5778,331 @@ async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
         return None
     result = kill_session(sid)
     print_info(result)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# /loop — recurring in-session prompt execution
+# ---------------------------------------------------------------------------
+
+# Active loop tasks — keyed by loop_id so /loop stop can cancel them.
+_active_loops: dict[str, asyncio.Task[None]] = {}
+
+
+def _parse_interval(text: str) -> float | None:
+    """Parse a human interval like '5m', '30s', '2h' into seconds."""
+    text = text.strip().lower()
+    multipliers = {"s": 1, "m": 60, "h": 3600}
+    if text and text[-1] in multipliers:
+        try:
+            return float(text[:-1]) * multipliers[text[-1]]
+        except ValueError:
+            return None
+    try:
+        return float(text) * 60  # bare number = minutes
+    except ValueError:
+        return None
+
+
+async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
+    """Run a prompt or slash command on a recurring interval.
+
+    Usage:
+      /loop <interval> <prompt or /command>   Start a loop
+      /loop list                              Show active loops
+      /loop stop [id]                         Stop a loop (or all)
+
+    Examples:
+      /loop 5m /status                        Run /status every 5 minutes
+      /loop 30s check build output            Send prompt every 30 seconds
+      /loop 2h /commit                        Auto-commit every 2 hours
+    """
+    tokens = args.strip().split(None, 1)
+    if not tokens:
+        print_error(
+            "Usage: /loop <interval> <prompt or /command>\n"
+            "       /loop list\n"
+            "       /loop stop [id]"
+        )
+        return None
+
+    # /loop list
+    if tokens[0] == "list":
+        if not _active_loops:
+            print_info("No active loops.")
+            return None
+        table = Table(title="Active Loops", expand=False)
+        table.add_column("ID", width=12)
+        table.add_column("Status", width=10)
+        for lid, task in _active_loops.items():
+            status = "running" if not task.done() else "stopped"
+            table.add_row(lid, status)
+        console.print(table)
+        return None
+
+    # /loop stop [id]
+    if tokens[0] == "stop":
+        target = tokens[1].strip() if len(tokens) > 1 else ""
+        if target:
+            task = _active_loops.pop(target, None)
+            if task is None:
+                print_error(f"No loop with id '{target}'. Use /loop list.")
+                return None
+            task.cancel()
+            print_ok(f"Stopped loop {target}.")
+        else:
+            for lid, task in _active_loops.items():
+                task.cancel()
+            count = len(_active_loops)
+            _active_loops.clear()
+            print_ok(f"Stopped {count} loop(s).")
+        return None
+
+    # /loop <interval> <body>
+    interval_s = _parse_interval(tokens[0])
+    if interval_s is None:
+        print_error(
+            f"Invalid interval '{tokens[0]}'. Use e.g. 30s, 5m, 2h."
+        )
+        return None
+    if len(tokens) < 2 or not tokens[1].strip():
+        print_error("Missing prompt or /command after interval.")
+        return None
+
+    body = tokens[1].strip()
+    loop_id = f"loop-{uuid.uuid4().hex[:6]}"
+
+    async def _run_loop() -> None:
+        iteration = 0
+        while True:
+            try:
+                await asyncio.sleep(interval_s)
+            except asyncio.CancelledError:
+                return
+            iteration += 1
+            console.print(
+                f"[dim]\\[{loop_id}] iteration {iteration}[/]"
+            )
+            try:
+                if body.startswith("/"):
+                    # Dispatch as slash command
+                    from obscura.cli.commands import handle_command
+
+                    await handle_command(body, ctx)
+                else:
+                    # Send as prompt to the active client
+                    result = await ctx.client.run_loop_to_completion(
+                        body, max_turns=ctx.max_turns,
+                    )
+                    if result.strip():
+                        console.print(result)
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                print_error(f"[{loop_id}] error: {exc}")
+
+    task = asyncio.create_task(_run_loop())
+    _active_loops[loop_id] = task
+    unit = "s" if interval_s < 60 else ("m" if interval_s < 3600 else "h")
+    divisor = 1 if unit == "s" else (60 if unit == "m" else 3600)
+    display = f"{interval_s / divisor:.0f}{unit}"
+    print_ok(
+        f"Started loop {loop_id}: every {display} → {body}\n"
+        f"Stop with: /loop stop {loop_id}"
+    )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# /schedule — persistent cron-based triggers on the daemon
+# ---------------------------------------------------------------------------
+
+
+async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
+    """Create, list, or remove cron-based scheduled triggers.
+
+    Usage:
+      /schedule list                                  List active schedules
+      /schedule add <cron> <prompt>                   Add a schedule
+      /schedule remove <id>                           Remove a schedule
+      /schedule run <id>                              Fire a schedule immediately
+
+    Examples:
+      /schedule add "*/5 * * * *" check for new PRs
+      /schedule add "0 9 * * 1-5" summarize overnight alerts
+      /schedule list
+      /schedule remove sched-abc123
+    """
+    from obscura.agent.daemon_agent import ScheduleTrigger
+
+    tokens = args.strip().split(None, 1)
+    if not tokens:
+        print_error(
+            "Usage: /schedule list | add <cron> <prompt> | remove <id> | run <id>"
+        )
+        return None
+
+    subcmd = tokens[0].lower()
+    rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+    # Persistence file for schedules
+    schedules_path = Path.home() / ".obscura" / "schedules.json"
+
+    def _load_schedules() -> list[dict[str, str]]:
+        if schedules_path.is_file():
+            try:
+                return json.loads(schedules_path.read_text(encoding="utf-8"))
+            except Exception:
+                return []
+        return []
+
+    def _save_schedules(schedules: list[dict[str, str]]) -> None:
+        schedules_path.parent.mkdir(parents=True, exist_ok=True)
+        schedules_path.write_text(
+            json.dumps(schedules, indent=2) + "\n", encoding="utf-8",
+        )
+
+    if subcmd == "list":
+        schedules = _load_schedules()
+        if not schedules:
+            print_info("No scheduled triggers. Add one with: /schedule add <cron> <prompt>")
+            return None
+        table = Table(title="Scheduled Triggers", expand=False)
+        table.add_column("ID", width=14)
+        table.add_column("Cron", width=16)
+        table.add_column("Prompt", max_width=50)
+        table.add_column("Notify", width=6)
+        for s in schedules:
+            table.add_row(
+                s.get("id", "?"),
+                s.get("cron", "?"),
+                s.get("prompt", "?")[:50],
+                "yes" if s.get("notify") else "no",
+            )
+        console.print(table)
+        return None
+
+    if subcmd == "add":
+        # Parse: first quoted string or 5-field cron, then the rest is prompt
+        if not rest:
+            print_error("Usage: /schedule add <cron> <prompt>")
+            return None
+
+        # Try to parse cron expression (5 fields)
+        cron_expr = ""
+        prompt_text = ""
+        if rest.startswith('"') or rest.startswith("'"):
+            # Quoted cron expression
+            quote = rest[0]
+            end = rest.find(quote, 1)
+            if end == -1:
+                print_error("Unterminated quote in cron expression.")
+                return None
+            cron_expr = rest[1:end]
+            prompt_text = rest[end + 1:].strip()
+        else:
+            # Assume first 5 space-separated tokens are the cron fields
+            parts = rest.split()
+            if len(parts) < 6:
+                print_error(
+                    "Need 5-field cron expression + prompt. "
+                    'Example: /schedule add "*/5 * * * *" check PRs'
+                )
+                return None
+            cron_expr = " ".join(parts[:5])
+            prompt_text = " ".join(parts[5:])
+
+        if not prompt_text:
+            print_error("Missing prompt after cron expression.")
+            return None
+
+        # Validate cron expression (basic: 5 fields)
+        if len(cron_expr.split()) != 5:
+            print_error(f"Invalid cron expression: '{cron_expr}' (need 5 fields)")
+            return None
+
+        sched_id = f"sched-{uuid.uuid4().hex[:6]}"
+        schedules = _load_schedules()
+        schedules.append({
+            "id": sched_id,
+            "cron": cron_expr,
+            "prompt": prompt_text,
+            "notify": True,
+        })
+        _save_schedules(schedules)
+
+        # If there's a running daemon, inject the trigger live
+        try:
+            runtime = await ctx.get_runtime()
+            for agent in runtime.agents.values():
+                daemon = getattr(agent, "_daemon", None)
+                if daemon is not None and hasattr(daemon, "fire"):
+                    trigger = ScheduleTrigger(
+                        cron=cron_expr,
+                        prompt=prompt_text,
+                        description=f"{sched_id}: {prompt_text[:40]}",
+                        notify_user=True,
+                    )
+                    daemon._static_triggers.append(trigger)
+                    # Restart scheduler to pick up new trigger
+                    if daemon._scheduler_task and not daemon._scheduler_task.done():
+                        daemon._scheduler_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await daemon._scheduler_task
+                    daemon._scheduler_task = asyncio.create_task(
+                        daemon._run_schedulers()
+                    )
+                    break
+        except Exception:
+            pass  # Daemon may not be running — schedule is persisted for next start
+
+        print_ok(
+            f"Created schedule {sched_id}\n"
+            f"  Cron: {cron_expr}\n"
+            f"  Prompt: {prompt_text}"
+        )
+        return None
+
+    if subcmd == "remove":
+        if not rest:
+            print_error("Usage: /schedule remove <id>")
+            return None
+        target_id = rest.strip()
+        schedules = _load_schedules()
+        before = len(schedules)
+        schedules = [s for s in schedules if s.get("id") != target_id]
+        if len(schedules) == before:
+            print_error(f"No schedule with id '{target_id}'. Use /schedule list.")
+            return None
+        _save_schedules(schedules)
+        print_ok(f"Removed schedule {target_id}.")
+        return None
+
+    if subcmd == "run":
+        if not rest:
+            print_error("Usage: /schedule run <id>")
+            return None
+        target_id = rest.strip()
+        schedules = _load_schedules()
+        match = next((s for s in schedules if s.get("id") == target_id), None)
+        if match is None:
+            print_error(f"No schedule with id '{target_id}'.")
+            return None
+        prompt_text = match["prompt"]
+        print_info(f"Running schedule {target_id}: {prompt_text[:60]}")
+        try:
+            result = await ctx.client.run_loop_to_completion(
+                prompt_text, max_turns=ctx.max_turns,
+            )
+            if result.strip():
+                console.print(result)
+        except Exception as exc:
+            print_error(f"Schedule execution failed: {exc}")
+        return None
+
+    print_error(
+        "Unknown subcommand. Use: /schedule list | add | remove | run"
+    )
     return None
 
 
@@ -5755,7 +6321,7 @@ async def cmd_rename(args: str, ctx: REPLContext) -> str | None:
         print_error("Usage: /rename <title>")
         return None
     try:
-        await ctx.store.update_summary(ctx.session_id, title)
+        await ctx.store.update_session(ctx.session_id, summary=title)
         # Update prompt status so the title appears immediately
         if hasattr(ctx, "_prompt_status") and ctx._prompt_status is not None:
             ctx._prompt_status.session_title = title
@@ -6005,6 +6571,25 @@ async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+async def _oneshot_stream(client: Any, prompt: str, timeout: float = 30.0) -> str:
+    """Stream a one-shot prompt and return the concatenated text.
+
+    Uses streaming instead of ``client.send()`` to avoid session state
+    conflicts with the copilot backend after ``run_loop`` streaming.
+    Resets the session first, then streams with a timeout.
+    """
+    await client.reset_session()
+    parts: list[str] = []
+
+    async def _collect() -> None:
+        async for chunk in client.stream(prompt):
+            if hasattr(chunk, "text") and chunk.text:
+                parts.append(chunk.text)
+
+    await asyncio.wait_for(_collect(), timeout=timeout)
+    return "".join(parts)
+
+
 async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
     """Ask a side question without affecting the main conversation.
 
@@ -6021,19 +6606,15 @@ async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
     print_info("[dim]Side question (not added to history):[/]")
 
     try:
-        # Send as a one-shot — don't record in message_history.
-        response = await ctx.client.send(question)
-        text = ""
-        if hasattr(response, "content"):
-            for block in response.content:
-                if hasattr(block, "text"):
-                    text += block.text
-        if not text:
-            text = str(response)
+        text = await _oneshot_stream(ctx.client, question)
+        if text:
+            from rich.markdown import Markdown as RichMarkdown
 
-        from rich.markdown import Markdown as RichMarkdown
-
-        console.print(RichMarkdown(text))
+            console.print(RichMarkdown(text))
+        else:
+            print_info("(no response)")
+    except asyncio.TimeoutError:
+        print_error("Side question timed out after 30 s.")
     except Exception as exc:
         print_error(f"Side question failed: {exc}")
     return None
@@ -6071,18 +6652,15 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
     )
 
     try:
-        response = await ctx.client.send(prompt)
-        text = ""
-        if hasattr(response, "content"):
-            for block in response.content:
-                if hasattr(block, "text"):
-                    text += block.text
+        text = await _oneshot_stream(ctx.client, prompt)
         if text:
             from rich.markdown import Markdown as RichMarkdown
 
             console.print(RichMarkdown(text))
         else:
-            print_info(str(response))
+            print_info("(no summary generated)")
+    except asyncio.TimeoutError:
+        print_error("Summary timed out after 30 s.")
     except Exception as exc:
         print_error(f"Summary failed: {exc}")
     return None
@@ -6134,6 +6712,1513 @@ async def cmd_pop(_args: str, ctx: REPLContext) -> str | None:
     if _stash_stack:
         print_info(f"{len(_stash_stack)} stash(es) remaining.")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Claude Code parity: loop, schedule, branch, config, hooks, listen, login,
+# logout, release-notes, ide, bug, terminal-setup
+# ---------------------------------------------------------------------------
+
+
+# ── /loop ─────────────────────────────────────────────────────────────────
+
+_loop_tasks: dict[str, asyncio.Task[None]] = {}
+
+
+async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
+    """Run a prompt or slash command on a recurring interval.
+
+    Usage:
+        /loop 5m /commit          — run /commit every 5 minutes
+        /loop 30s check deploy    — send "check deploy" every 30 seconds
+        /loop status              — show active loops
+        /loop stop [label]        — stop a loop (or all)
+    """
+    tokens = args.strip().split(None, 1)
+    if not tokens:
+        print_info(
+            "Usage: /loop <interval> <prompt|/cmd>  |  /loop status  |  /loop stop [label]",
+        )
+        return None
+
+    sub = tokens[0].lower()
+
+    if sub == "status":
+        if not _loop_tasks:
+            print_info("No active loops.")
+            return None
+        table = Table(title="Active Loops", expand=False)
+        table.add_column("Label", width=20)
+        table.add_column("Status", width=10)
+        for label, task in _loop_tasks.items():
+            table.add_row(label, "running" if not task.done() else "stopped")
+        console.print(table)
+        return None
+
+    if sub == "stop":
+        label = tokens[1].strip() if len(tokens) > 1 else ""
+        if label:
+            task = _loop_tasks.pop(label, None)
+            if task and not task.done():
+                task.cancel()
+                print_ok(f"Stopped loop: {label}")
+            else:
+                print_error(f"No active loop named '{label}'")
+        else:
+            for _lbl, task in _loop_tasks.items():
+                if not task.done():
+                    task.cancel()
+            count = len(_loop_tasks)
+            _loop_tasks.clear()
+            print_ok(f"Stopped {count} loop(s).")
+        return None
+
+    interval_str = sub
+    prompt_or_cmd = tokens[1].strip() if len(tokens) > 1 else ""
+    if not prompt_or_cmd:
+        print_error("Usage: /loop <interval> <prompt|/cmd>")
+        return None
+
+    interval_s = _parse_interval(interval_str)
+    if interval_s is None:
+        print_error(
+            f"Invalid interval '{interval_str}'. Use: 30s, 5m, 1h, or plain seconds.",
+        )
+        return None
+
+    if interval_s < 10:
+        print_error("Minimum interval is 10 seconds.")
+        return None
+
+    label = prompt_or_cmd[:30].replace(" ", "-").strip("/")
+
+    async def _loop_body() -> None:
+        iteration = 0
+        try:
+            while True:
+                await asyncio.sleep(interval_s)
+                iteration += 1
+                console.print(
+                    f"\n[dim]loop({label}) iteration {iteration}[/]",
+                    highlight=False,
+                )
+                if prompt_or_cmd.startswith("/"):
+                    await handle_command(prompt_or_cmd, ctx)
+                else:
+                    from obscura.cli.render import render_event
+
+                    try:
+                        async for event in ctx.client.run_loop(prompt_or_cmd):
+                            render_event(event)
+                    except Exception as exc:
+                        print_error(f"Loop error: {exc}")
+        except asyncio.CancelledError:
+            pass
+
+    task = asyncio.get_event_loop().create_task(_loop_body())
+    _loop_tasks[label] = task
+    _fmt = _format_interval(interval_s)
+    print_ok(f"Loop started: '{label}' every {_fmt}. Stop with /loop stop {label}")
+    return None
+
+
+def _parse_interval(s: str) -> float | None:
+    """Parse '5m', '30s', '1h' into seconds."""
+    s = s.strip().lower()
+    if s.isdigit():
+        return float(s)
+    try:
+        if s.endswith("s"):
+            return float(s[:-1])
+        if s.endswith("m"):
+            return float(s[:-1]) * 60
+        if s.endswith("h"):
+            return float(s[:-1]) * 3600
+    except ValueError:
+        pass
+    return None
+
+
+def _format_interval(seconds: float) -> str:
+    """Format seconds into a human-readable string."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        return f"{m}m{s}s" if s else f"{m}m"
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    return f"{h}h{m}m" if m else f"{h}h"
+
+
+# ── /schedule ─────────────────────────────────────────────────────────────
+
+
+async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
+    """Create, list, or manage scheduled agents (cron-style).
+
+    Usage:
+        /schedule list                          — list scheduled tasks
+        /schedule create "<cron>" <prompt>       — create a scheduled task
+        /schedule delete <id>                    — delete a scheduled task
+        /schedule run <id>                       — run a scheduled task now
+        /schedule pause <id> | resume <id>       — pause/resume a task
+
+    Examples:
+        /schedule create "0 9 * * *" run tests and report failures
+        /schedule create "*/30 * * * *" /commit
+    """
+    schedule_dir = Path.home() / ".obscura" / "schedules"
+    schedule_dir.mkdir(parents=True, exist_ok=True)
+
+    tokens = args.strip().split(None, 1)
+    sub = tokens[0].lower() if tokens else "list"
+    rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+    if sub == "list":
+        schedules = _load_schedules(schedule_dir)
+        if not schedules:
+            print_info(
+                'No scheduled tasks. Create one: /schedule create "<cron>" <prompt>',
+            )
+            return None
+        table = Table(title="Scheduled Tasks", expand=False)
+        table.add_column("ID", width=8)
+        table.add_column("Cron", width=16)
+        table.add_column("Status", width=8)
+        table.add_column("Prompt", max_width=40)
+        table.add_column("Last Run", width=16)
+        for s in schedules:
+            table.add_row(
+                s["id"][:8],
+                s["cron"],
+                s.get("status", "active"),
+                (s["prompt"][:37] + "...") if len(s["prompt"]) > 40 else s["prompt"],
+                s.get("last_run", "-") or "-",
+            )
+        console.print(table)
+        return None
+
+    if sub == "create":
+        if not rest:
+            print_error('Usage: /schedule create "<cron>" <prompt>')
+            return None
+        cron, prompt = _parse_cron_and_prompt(rest)
+        if not cron or not prompt:
+            print_error('Usage: /schedule create "*/5 * * * *" run tests')
+            return None
+        sched_id = uuid.uuid4().hex[:12]
+        sched_data = {
+            "id": sched_id,
+            "cron": cron,
+            "prompt": prompt,
+            "status": "active",
+            "created_at": __import__("datetime").datetime.now(UTC).isoformat(),
+            "last_run": None,
+            "model": ctx.model or "",
+            "backend": ctx.backend or "",
+        }
+        (schedule_dir / f"{sched_id}.json").write_text(
+            json.dumps(sched_data, indent=2), encoding="utf-8",
+        )
+        print_ok(f"Scheduled task created: {sched_id[:8]}")
+        print_info(f"  Cron: {cron}")
+        print_info(f"  Prompt: {prompt[:60]}")
+        pid_file = schedule_dir / ".scheduler.pid"
+        if not pid_file.exists():
+            console.print(
+                "[dim]Tip: Schedules run when obscura is running. "
+                "For persistent scheduling, use: obscura --daemon[/]",
+            )
+        return None
+
+    if sub == "delete":
+        sched_id = rest.strip()
+        if not sched_id:
+            print_error("Usage: /schedule delete <id>")
+            return None
+        if _delete_schedule(schedule_dir, sched_id):
+            print_ok(f"Deleted schedule: {sched_id[:8]}")
+        else:
+            print_error(f"Schedule not found: {sched_id[:8]}")
+        return None
+
+    if sub == "run":
+        sched_id = rest.strip()
+        if not sched_id:
+            print_error("Usage: /schedule run <id>")
+            return None
+        sched = _find_schedule(schedule_dir, sched_id)
+        if not sched:
+            print_error(f"Schedule not found: {sched_id[:8]}")
+            return None
+        print_info(f"Running schedule '{sched_id[:8]}' now...")
+        prompt = sched["prompt"]
+        if prompt.startswith("/"):
+            await handle_command(prompt, ctx)
+        else:
+            from obscura.cli.render import render_event
+
+            try:
+                async for event in ctx.client.run_loop(prompt):
+                    render_event(event)
+            except Exception as exc:
+                print_error(f"Schedule run error: {exc}")
+        sched["last_run"] = __import__("datetime").datetime.now(UTC).isoformat()
+        (schedule_dir / f"{sched['id']}.json").write_text(
+            json.dumps(sched, indent=2), encoding="utf-8",
+        )
+        return None
+
+    if sub in ("pause", "resume"):
+        sched_id = rest.strip()
+        if not sched_id:
+            print_error(f"Usage: /schedule {sub} <id>")
+            return None
+        sched = _find_schedule(schedule_dir, sched_id)
+        if not sched:
+            print_error(f"Schedule not found: {sched_id[:8]}")
+            return None
+        new_status = "paused" if sub == "pause" else "active"
+        sched["status"] = new_status
+        (schedule_dir / f"{sched['id']}.json").write_text(
+            json.dumps(sched, indent=2), encoding="utf-8",
+        )
+        print_ok(f"Schedule {sched_id[:8]} {new_status}.")
+        return None
+
+    print_info("Usage: /schedule list|create|delete|run|pause|resume")
+    return None
+
+
+def _load_schedules(sdir: Path) -> list[dict[str, Any]]:
+    schedules: list[dict[str, Any]] = []
+    for f in sorted(sdir.glob("*.json")):
+        try:
+            schedules.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return schedules
+
+
+def _find_schedule(sdir: Path, prefix: str) -> dict[str, Any] | None:
+    for s in _load_schedules(sdir):
+        if s["id"].startswith(prefix):
+            return s
+    return None
+
+
+def _delete_schedule(sdir: Path, prefix: str) -> bool:
+    for f in sdir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("id", "").startswith(prefix):
+                f.unlink()
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _parse_cron_and_prompt(s: str) -> tuple[str, str]:
+    if s.startswith('"'):
+        end = s.find('"', 1)
+        if end > 0:
+            return s[1:end].strip(), s[end + 1 :].strip()
+    if s.startswith("'"):
+        end = s.find("'", 1)
+        if end > 0:
+            return s[1:end].strip(), s[end + 1 :].strip()
+    parts = s.split()
+    if len(parts) >= 6:
+        return " ".join(parts[:5]), " ".join(parts[5:])
+    return "", ""
+
+
+# ── /branch ───────────────────────────────────────────────────────────────
+
+
+async def cmd_branch(args: str, _ctx: REPLContext) -> str | None:
+    """Git branch management.
+
+    Usage:
+        /branch                 — show current branch + recent branches
+        /branch <name>          — switch to branch (create if needed)
+        /branch list            — list all branches
+        /branch create <name>   — create and switch to a new branch
+        /branch delete <name>   — delete a branch
+    """
+    sub = args.strip()
+
+    if not sub or sub == "list":
+        proc = await asyncio.create_subprocess_shell(
+            "git branch -v --sort=-committerdate",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            print_error(f"git error: {stderr.decode().strip()}")
+            return None
+        output = stdout.decode().strip()
+        if not output:
+            print_info("No branches found.")
+            return None
+        for line in output.split("\n"):
+            if line.startswith("*"):
+                console.print(f"[bold green]{line}[/]")
+            else:
+                console.print(f"  [dim]{line.strip()}[/]")
+        return None
+
+    if sub.startswith("create "):
+        name = sub[7:].strip()
+        if not name:
+            print_error("Usage: /branch create <name>")
+            return None
+        proc = await asyncio.create_subprocess_shell(
+            f"git checkout -b {shlex.quote(name)}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            print_ok(f"Created and switched to branch: {name}")
+        else:
+            print_error(stderr.decode().strip())
+        return None
+
+    if sub.startswith("delete "):
+        name = sub[7:].strip()
+        if not name:
+            print_error("Usage: /branch delete <name>")
+            return None
+        if name in ("main", "master"):
+            print_error(f"Refusing to delete {name}.")
+            return None
+        proc = await asyncio.create_subprocess_shell(
+            f"git branch -d {shlex.quote(name)}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            print_ok(f"Deleted branch: {name}")
+        else:
+            print_error(stderr.decode().strip())
+        return None
+
+    # Default: switch (create if not exists)
+    name = sub
+    proc = await asyncio.create_subprocess_shell(
+        f"git rev-parse --verify {shlex.quote(name)} 2>/dev/null",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
+    exists = proc.returncode == 0
+
+    cmd = f"git checkout {shlex.quote(name)}" if exists else f"git checkout -b {shlex.quote(name)}"
+    proc = await asyncio.create_subprocess_shell(
+        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode == 0:
+        action = "Switched to" if exists else "Created and switched to"
+        print_ok(f"{action} branch: {name}")
+    else:
+        print_error(stderr.decode().strip())
+    return None
+
+
+# ── /config ───────────────────────────────────────────────────────────────
+
+
+async def cmd_config(args: str, _ctx: REPLContext) -> str | None:
+    """View or edit Obscura settings (~/.obscura/settings.json).
+
+    Usage:
+        /config                     — show current config
+        /config <key>               — show a specific key
+        /config <key> <value>       — set a config value
+        /config reset               — reset to defaults
+    """
+    settings_path = Path.home() / ".obscura" / "settings.json"
+
+    if not args.strip():
+        if not settings_path.exists():
+            print_info(f"No settings file. Using defaults. ({settings_path})")
+            return None
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+            from rich.syntax import Syntax
+
+            console.print(Syntax(json.dumps(data, indent=2), "json", theme="monokai"))
+        except Exception as exc:
+            print_error(f"Failed to read settings: {exc}")
+        return None
+
+    tokens = args.strip().split(None, 1)
+    key = tokens[0]
+
+    if key == "reset":
+        if settings_path.exists():
+            settings_path.unlink()
+            print_ok("Settings reset to defaults.")
+        else:
+            print_info("Already using defaults.")
+        return None
+
+    data: dict[str, Any] = {}
+    if settings_path.exists():
+        with contextlib.suppress(Exception):
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    if len(tokens) == 1:
+        val: Any = data
+        for part in key.split("."):
+            if isinstance(val, dict):
+                val = val.get(part)
+            else:
+                val = None
+                break
+        if val is not None:
+            console.print(f"[bold]{key}[/] = {json.dumps(val, indent=2)}")
+        else:
+            print_info(f"Key not set: {key}")
+        return None
+
+    value_str = tokens[1]
+    try:
+        value: Any = json.loads(value_str)
+    except json.JSONDecodeError:
+        value = value_str
+
+    parts_list = key.split(".")
+    cur: dict[str, Any] = data
+    for part in parts_list[:-1]:
+        if part not in cur or not isinstance(cur[part], dict):
+            cur[part] = {}
+        cur = cur[part]
+    cur[parts_list[-1]] = value
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print_ok(f"Set {key} = {json.dumps(value)}")
+    return None
+
+
+# ── /hooks ────────────────────────────────────────────────────────────────
+
+
+async def cmd_hooks(args: str, _ctx: REPLContext) -> str | None:
+    """Manage event hooks in settings.json.
+
+    Usage:
+        /hooks                  — list registered hooks
+        /hooks add <event> <cmd> — add a shell hook for an event
+        /hooks remove <event>   — remove hooks for an event
+    """
+    settings_path = Path.home() / ".obscura" / "settings.json"
+
+    def _load() -> dict[str, Any]:
+        if settings_path.exists():
+            with contextlib.suppress(Exception):
+                return json.loads(settings_path.read_text(encoding="utf-8"))
+        return {}
+
+    def _save(d: dict[str, Any]) -> None:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
+
+    tokens = args.strip().split(None, 2)
+    sub = tokens[0].lower() if tokens else "list"
+
+    if sub in ("list", ""):
+        hooks = _load().get("hooks", {})
+        if not hooks:
+            print_info("No hooks configured. Add with: /hooks add <event> <command>")
+            print_info("Events: tool_call, tool_result, turn_start, turn_complete, error")
+            return None
+        table = Table(title="Event Hooks", expand=False)
+        table.add_column("Event", width=20)
+        table.add_column("Command", max_width=50)
+        for event, cmds in hooks.items():
+            if isinstance(cmds, list):
+                for c in cmds:
+                    table.add_row(event, c)
+            else:
+                table.add_row(event, str(cmds))
+        console.print(table)
+        return None
+
+    if sub == "add":
+        if len(tokens) < 3:
+            print_error("Usage: /hooks add <event> <command>")
+            return None
+        event_name, command = tokens[1], tokens[2]
+        d = _load()
+        hooks = d.setdefault("hooks", {})
+        event_hooks = hooks.setdefault(event_name, [])
+        if not isinstance(event_hooks, list):
+            event_hooks = [event_hooks]
+            hooks[event_name] = event_hooks
+        event_hooks.append(command)
+        _save(d)
+        print_ok(f"Hook added: {event_name} -> {command}")
+        return None
+
+    if sub == "remove":
+        if len(tokens) < 2:
+            print_error("Usage: /hooks remove <event>")
+            return None
+        event_name = tokens[1]
+        d = _load()
+        hooks = d.get("hooks", {})
+        if event_name in hooks:
+            del hooks[event_name]
+            _save(d)
+            print_ok(f"Removed hooks for: {event_name}")
+        else:
+            print_info(f"No hooks registered for: {event_name}")
+        return None
+
+    print_info("Usage: /hooks [list|add <event> <cmd>|remove <event>]")
+    return None
+
+
+# ── /listen ───────────────────────────────────────────────────────────────
+
+_LISTEN_SUFFIX = (
+    "\n\n[LISTEN MODE] You are in listen mode. Observe the conversation "
+    "passively. Only respond when directly asked a question. Keep responses "
+    "minimal and to the point. Do not proactively suggest actions."
+)
+
+
+async def cmd_listen(args: str, ctx: REPLContext) -> str | None:
+    """Toggle listen mode — passively observe, only respond when asked.
+
+    Usage: /listen [on|off]
+    """
+    sub = args.strip().lower()
+    current = getattr(ctx, "_listen_mode", False)
+
+    if sub == "on" or (not sub and not current):
+        ctx._listen_mode = True  # type: ignore[attr-defined]
+        if not ctx.system_prompt.endswith(_LISTEN_SUFFIX):
+            ctx.system_prompt += _LISTEN_SUFFIX
+        print_ok("Listen mode ON — will only respond when asked.")
+    elif sub == "off" or (not sub and current):
+        ctx._listen_mode = False  # type: ignore[attr-defined]
+        ctx.system_prompt = ctx.system_prompt.replace(_LISTEN_SUFFIX, "")
+        print_ok("Listen mode OFF — normal interaction resumed.")
+    else:
+        print_info(f"Listen mode: {'ON' if current else 'OFF'}")
+    return None
+
+
+# ── /login + /logout ──────────────────────────────────────────────────────
+
+
+async def cmd_login(args: str, _ctx: REPLContext) -> str | None:
+    """Show auth status or login hints. Usage: /login [provider]."""
+    provider = args.strip().lower()
+
+    if not provider:
+        statuses: list[tuple[str, bool, str]] = []
+        ck = os.environ.get("ANTHROPIC_API_KEY", "")
+        statuses.append(("claude", bool(ck), f"...{ck[-4:]}" if ck else ""))
+        ok = os.environ.get("OPENAI_API_KEY", "")
+        statuses.append(("openai", bool(ok), f"...{ok[-4:]}" if ok else ""))
+        cp = (Path.home() / ".config" / "github-copilot" / "hosts.json").exists()
+        statuses.append(("copilot", cp, "token file" if cp else ""))
+
+        table = Table(title="Auth Status", expand=False)
+        table.add_column("Provider", width=12)
+        table.add_column("Status", width=14)
+        table.add_column("Key", width=15, style="dim")
+        for name, authed, hint in statuses:
+            st = "[green]authenticated[/]" if authed else "[red]not configured[/]"
+            table.add_row(name, st, hint)
+        console.print(table)
+        return None
+
+    if provider in ("claude", "anthropic"):
+        console.print("  [bold]export ANTHROPIC_API_KEY=sk-ant-...[/]")
+    elif provider in ("openai", "gpt"):
+        console.print("  [bold]export OPENAI_API_KEY=sk-...[/]")
+    elif provider in ("copilot", "github"):
+        console.print("  [bold]! obscura auth copilot[/]")
+    else:
+        print_error(f"Unknown provider: {provider}. Known: claude, openai, copilot")
+    return None
+
+
+async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
+    """Clear auth for a provider. Usage: /logout <provider>."""
+    provider = args.strip().lower()
+    if not provider:
+        print_error("Usage: /logout <provider>  (claude, openai, copilot)")
+        return None
+    env_map = {
+        "claude": "ANTHROPIC_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "gpt": "OPENAI_API_KEY",
+    }
+    env_var = env_map.get(provider)
+    if env_var:
+        if env_var in os.environ:
+            del os.environ[env_var]
+            print_ok(f"Cleared {env_var} from current session.")
+        else:
+            print_info(f"{env_var} not set in current session.")
+    elif provider in ("copilot", "github"):
+        print_info("Remove ~/.config/github-copilot/hosts.json to deauthorize.")
+    else:
+        print_error(f"Unknown provider: {provider}")
+    return None
+
+
+# ── /release-notes ────────────────────────────────────────────────────────
+
+
+async def cmd_release_notes(_args: str, _ctx: REPLContext) -> str | None:
+    """Show release notes for the current version."""
+    try:
+        from importlib.metadata import version as pkg_version
+
+        ver = pkg_version("obscura")
+    except Exception:
+        ver = "dev"
+
+    for candidate in [Path.cwd() / "CHANGELOG.md", Path.cwd().parent / "CHANGELOG.md"]:
+        if candidate.exists():
+            text = candidate.read_text(encoding="utf-8")
+            lines = text.split("\n")
+            section: list[str] = []
+            in_section = False
+            for line in lines:
+                if line.startswith("## "):
+                    if in_section:
+                        break
+                    if ver in line or not section:
+                        in_section = True
+                if in_section:
+                    section.append(line)
+            if section:
+                from rich.markdown import Markdown as RichMarkdown
+
+                console.print(RichMarkdown("\n".join(section[:50])))
+                return None
+
+    print_info(f"Obscura {ver} — no release notes found.")
+    return None
+
+
+# ── /ide ──────────────────────────────────────────────────────────────────
+
+
+async def cmd_ide(args: str, _ctx: REPLContext) -> str | None:
+    """IDE integration. Usage: /ide [vscode|jetbrains]."""
+    sub = args.strip().lower()
+
+    if not sub:
+        vsc = (Path.home() / ".vscode" / "extensions").exists()
+        jb = (Path.home() / ".config" / "JetBrains").exists()
+        console.print(f"  VS Code:    {'[green]detected[/]' if vsc else '[dim]not detected[/]'}")
+        console.print(f"  JetBrains:  {'[green]detected[/]' if jb else '[dim]not detected[/]'}")
+        print_info("Set up with: /ide vscode  or  /ide jetbrains")
+        return None
+
+    if sub == "vscode":
+        vscode_dir = Path.cwd() / ".vscode"
+        vscode_dir.mkdir(exist_ok=True)
+        tasks_file = vscode_dir / "tasks.json"
+        if not tasks_file.exists():
+            tasks_data = {
+                "version": "2.0.0",
+                "tasks": [
+                    {"label": "Obscura: Review", "type": "shell", "command": "obscura '/review'"},
+                    {"label": "Obscura: Commit", "type": "shell", "command": "obscura '/commit'"},
+                ],
+            }
+            tasks_file.write_text(json.dumps(tasks_data, indent=2) + "\n", encoding="utf-8")
+        print_ok("VS Code integration set up at .vscode/")
+        return None
+
+    if sub == "jetbrains":
+        idea_dir = Path.cwd() / ".idea"
+        idea_dir.mkdir(exist_ok=True)
+        ext_tools = idea_dir / "obscura-tools.xml"
+        if not ext_tools.exists():
+            ext_tools.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>\n<toolSet>\n'
+                '  <tool name="Obscura Review" program="obscura" parameters="\'/review\'" />\n'
+                '  <tool name="Obscura Commit" program="obscura" parameters="\'/commit\'" />\n'
+                "</toolSet>\n",
+                encoding="utf-8",
+            )
+        print_ok("JetBrains integration set up at .idea/")
+        return None
+
+    print_info("Usage: /ide [vscode|jetbrains]")
+    return None
+
+
+# ── /bug ──────────────────────────────────────────────────────────────────
+
+
+async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
+    """Report a bug or view recent errors. Usage: /bug [report]."""
+    sub = args.strip().lower()
+
+    if sub == "report":
+        import sys as _sys
+
+        try:
+            from importlib.metadata import version as pkg_version
+
+            ver = pkg_version("obscura")
+        except Exception:
+            ver = "dev"
+        report = (
+            f"## Bug Report\n\n"
+            f"- Obscura {ver}, Python {_sys.version_info.major}.{_sys.version_info.minor}, "
+            f"{_sys.platform}\n"
+            f"- Backend: {ctx.backend}, Model: {ctx.model or 'default'}\n\n"
+            f"### What happened?\n\n### Steps to reproduce\n\n1. \n"
+        )
+        console.print(report)
+        try:
+            import subprocess
+
+            subprocess.run(
+                ["pbcopy"] if __import__("sys").platform == "darwin"
+                else ["xclip", "-selection", "clipboard"],
+                input=report.encode(), capture_output=True, timeout=5,
+            )
+            print_ok("Template copied to clipboard.")
+        except Exception:
+            pass
+        return None
+
+    # Default: show recent errors
+    from obscura.core.deep_log import dlog
+
+    log_path = Path(dlog.log_path)
+    if not log_path.exists():
+        print_info("No errors recorded. Generate report: /bug report")
+        return None
+    errors: list[str] = []
+    for line in reversed(log_path.read_text(encoding="utf-8").splitlines()):
+        try:
+            entry = json.loads(line)
+            if entry.get("type") == "error":
+                errors.append(f"  {entry.get('data', {}).get('message', '?')[:100]}")
+        except Exception:
+            pass
+        if len(errors) >= 10:
+            break
+    if errors:
+        console.print("[bold]Recent errors:[/]")
+        for e in reversed(errors):
+            console.print(f"[red]{e}[/]")
+    else:
+        print_info("No errors recorded.")
+    return None
+
+
+# ── /terminal-setup ───────────────────────────────────────────────────────
+
+
+async def cmd_terminal_setup(_args: str, _ctx: REPLContext) -> str | None:
+    """Diagnose and configure terminal capabilities."""
+    import shutil as _shutil
+    import sys as _sys
+
+    cols, rows = _shutil.get_terminal_size()
+    term = os.environ.get("TERM", "unknown")
+    colorterm = os.environ.get("COLORTERM", "")
+    lang = os.environ.get("LANG", "")
+
+    s256 = "256color" in term or colorterm in ("truecolor", "24bit")
+    strue = colorterm in ("truecolor", "24bit")
+    suni = "utf" in lang.lower()
+
+    console.print("[bold]Terminal[/]")
+    console.print(f"  TERM={term}  COLORTERM={colorterm or '(none)'}  {cols}x{rows}")
+    console.print(f"  LANG={lang or '(none)'}  Shell={os.environ.get('SHELL', '?')}")
+
+    def _c(ok: bool) -> str:
+        return "[green]yes[/]" if ok else "[red]no[/]"
+
+    console.print(f"  256-color: {_c(s256)}  True-color: {_c(strue)}  Unicode: {_c(suni)}")
+    console.print(f"  TTY: stdin={_c(_sys.stdin.isatty())} stdout={_c(_sys.stdout.isatty())}")
+
+    issues: list[str] = []
+    if not suni:
+        issues.append("Set LANG=en_US.UTF-8")
+    if not s256:
+        issues.append("Set TERM=xterm-256color")
+    if cols < 80:
+        issues.append(f"Width {cols} is narrow (80+ recommended)")
+    if issues:
+        console.print("\n[yellow]Fix:[/] " + " | ".join(issues))
+    else:
+        console.print("\n[green]Looks good![/]")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Obscura-specific: goal, persona, guardrails, focus, checkpoint, undercover,
+# token-budget, tool-policy, context-inject, recap
+# ---------------------------------------------------------------------------
+
+
+async def cmd_goal(args: str, ctx: REPLContext) -> str | None:
+    """Set a persistent session goal that steers the agent across turns.
+
+    The goal is injected into the system prompt so the model always
+    keeps it in mind — even when you ask tangential follow-ups.
+
+    Usage:
+        /goal                               — show current goal
+        /goal <description>                 — set a new goal
+        /goal clear                         — remove the goal
+        /goal check                         — ask the agent to self-assess progress
+
+    Examples:
+        /goal Refactor the auth middleware to use JWT tokens
+        /goal Fix all failing tests in tests/unit/core/
+        /goal Ship the v2 API by EOD — focus on /users and /teams endpoints
+    """
+    text = args.strip()
+    current_goal = getattr(ctx, "_session_goal", "")
+
+    if not text:
+        if current_goal:
+            console.print(f"[bold]Current goal:[/] {current_goal}")
+        else:
+            print_info("No goal set. Use /goal <description> to set one.")
+        return None
+
+    if text == "clear":
+        if current_goal:
+            _remove_goal_from_prompt(ctx)
+            ctx._session_goal = ""  # type: ignore[attr-defined]
+            print_ok("Goal cleared.")
+        else:
+            print_info("No goal to clear.")
+        return None
+
+    if text == "check":
+        if not current_goal:
+            print_info("No goal set. Nothing to check.")
+            return None
+        check_prompt = (
+            f"My current goal is: {current_goal}\n\n"
+            "Briefly assess: (1) what progress has been made toward this goal, "
+            "(2) what remains to be done, (3) any blockers or risks. "
+            "Be direct and specific — reference actual files/changes."
+        )
+        from obscura.cli.render import render_event
+
+        try:
+            async for event in ctx.client.run_loop(check_prompt):
+                render_event(event)
+        except Exception as exc:
+            print_error(str(exc))
+        return None
+
+    # Set new goal
+    if current_goal:
+        _remove_goal_from_prompt(ctx)
+
+    ctx._session_goal = text  # type: ignore[attr-defined]
+    goal_block = f"\n\n[SESSION GOAL] {text}\nKeep this goal in mind across all responses. Prioritize actions that advance it."
+    ctx.system_prompt += goal_block
+    print_ok(f"Goal set: {text}")
+
+    # Persist to session metadata
+    try:
+        await ctx.store.update_session(
+            ctx.session_id, metadata={"goal": text},
+        )
+    except Exception:
+        pass
+    return None
+
+
+def _remove_goal_from_prompt(ctx: REPLContext) -> None:
+    """Strip the goal injection from the system prompt."""
+    import re
+
+    ctx.system_prompt = re.sub(
+        r"\n\n\[SESSION GOAL\].*?Prioritize actions that advance it\.",
+        "",
+        ctx.system_prompt,
+        flags=re.DOTALL,
+    )
+
+
+async def cmd_persona(args: str, ctx: REPLContext) -> str | None:
+    """Set an agent persona that shapes tone, expertise, and approach.
+
+    Usage:
+        /persona                              — show current persona
+        /persona <description>                — set a persona
+        /persona clear                        — remove persona
+        /persona senior-backend               — preset: senior backend engineer
+        /persona security-auditor             — preset: security reviewer
+        /persona code-reviewer                — preset: thorough code reviewer
+        /persona architect                    — preset: systems architect
+        /persona junior-friendly              — preset: patient teacher
+    """
+    text = args.strip()
+    current = getattr(ctx, "_persona", "")
+
+    presets = {
+        "senior-backend": (
+            "You are a senior backend engineer with 10+ years experience. "
+            "Focus on performance, correctness, and production readiness. "
+            "Flag potential scaling issues. Prefer simple, proven patterns over clever solutions."
+        ),
+        "security-auditor": (
+            "You are a security auditor. Prioritize identifying vulnerabilities: "
+            "injection, auth bypass, SSRF, path traversal, secrets in code. "
+            "Rate findings by severity. Suggest fixes with defense-in-depth."
+        ),
+        "code-reviewer": (
+            "You are a meticulous code reviewer. Check for bugs, edge cases, "
+            "naming consistency, test coverage gaps, and API contract violations. "
+            "Be constructive but thorough. Flag anything you'd comment on in a real PR."
+        ),
+        "architect": (
+            "You are a systems architect. Think about separation of concerns, "
+            "module boundaries, data flow, and long-term maintainability. "
+            "Suggest structural improvements. Consider backwards compatibility."
+        ),
+        "junior-friendly": (
+            "Explain your reasoning step by step. Define terms that might be unfamiliar. "
+            "When suggesting code, explain why each choice was made. "
+            "Offer links to relevant docs. Be encouraging."
+        ),
+    }
+
+    if not text:
+        if current:
+            console.print(f"[bold]Current persona:[/] {current[:80]}...")
+        else:
+            print_info("No persona set.")
+            print_info(f"Presets: {', '.join(presets)}")
+        return None
+
+    if text == "clear":
+        if current:
+            _remove_block_from_prompt(ctx, "PERSONA")
+            ctx._persona = ""  # type: ignore[attr-defined]
+            print_ok("Persona cleared.")
+        else:
+            print_info("No persona to clear.")
+        return None
+
+    # Resolve preset or use custom text
+    persona_text = presets.get(text, text)
+
+    if current:
+        _remove_block_from_prompt(ctx, "PERSONA")
+
+    ctx._persona = persona_text  # type: ignore[attr-defined]
+    ctx.system_prompt += f"\n\n[PERSONA] {persona_text}"
+    label = text if text in presets else persona_text[:60]
+    print_ok(f"Persona set: {label}")
+    return None
+
+
+async def cmd_guardrails(args: str, ctx: REPLContext) -> str | None:
+    """Set runtime guardrails — constraints the agent must follow.
+
+    Usage:
+        /guardrails                           — show active guardrails
+        /guardrails add <rule>                — add a guardrail
+        /guardrails remove <n>                — remove guardrail by number
+        /guardrails clear                     — remove all guardrails
+
+    Examples:
+        /guardrails add Do not modify any test files
+        /guardrails add Only edit files under src/api/
+        /guardrails add Always run tests after changing code
+        /guardrails add Never use force push
+    """
+    rules: list[str] = getattr(ctx, "_guardrails", [])
+    tokens = args.strip().split(None, 1)
+    sub = tokens[0].lower() if tokens else ""
+    rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+    if not sub:
+        if not rules:
+            print_info("No guardrails active. Add with: /guardrails add <rule>")
+            return None
+        console.print("[bold]Active guardrails:[/]")
+        for i, rule in enumerate(rules, 1):
+            console.print(f"  {i}. {rule}")
+        return None
+
+    if sub == "add":
+        if not rest:
+            print_error("Usage: /guardrails add <rule>")
+            return None
+        rules.append(rest)
+        ctx._guardrails = rules  # type: ignore[attr-defined]
+        _rebuild_guardrails_prompt(ctx, rules)
+        print_ok(f"Guardrail #{len(rules)} added: {rest}")
+        return None
+
+    if sub == "remove":
+        if not rest or not rest.isdigit():
+            print_error("Usage: /guardrails remove <number>")
+            return None
+        idx = int(rest) - 1
+        if 0 <= idx < len(rules):
+            removed = rules.pop(idx)
+            ctx._guardrails = rules  # type: ignore[attr-defined]
+            _rebuild_guardrails_prompt(ctx, rules)
+            print_ok(f"Removed: {removed}")
+        else:
+            print_error(f"Invalid index. Valid: 1-{len(rules)}")
+        return None
+
+    if sub == "clear":
+        rules.clear()
+        ctx._guardrails = rules  # type: ignore[attr-defined]
+        _remove_block_from_prompt(ctx, "GUARDRAILS")
+        print_ok("All guardrails cleared.")
+        return None
+
+    # Shorthand: treat entire args as a rule to add
+    rules.append(args.strip())
+    ctx._guardrails = rules  # type: ignore[attr-defined]
+    _rebuild_guardrails_prompt(ctx, rules)
+    print_ok(f"Guardrail #{len(rules)} added: {args.strip()}")
+    return None
+
+
+def _rebuild_guardrails_prompt(ctx: REPLContext, rules: list[str]) -> None:
+    """Rebuild the guardrails block in the system prompt."""
+    _remove_block_from_prompt(ctx, "GUARDRAILS")
+    if rules:
+        block = "\n".join(f"  - {r}" for r in rules)
+        ctx.system_prompt += (
+            f"\n\n[GUARDRAILS] You MUST follow these constraints:\n{block}"
+        )
+
+
+async def cmd_focus(args: str, ctx: REPLContext) -> str | None:
+    """Restrict the agent's attention to specific files or directories.
+
+    When focus is set, the agent is instructed to only read/modify files
+    within the focused paths. Useful for large repos.
+
+    Usage:
+        /focus                        — show current focus
+        /focus <path> [path...]       — set focus to these paths
+        /focus clear                  — remove focus restriction
+    """
+    current_focus: list[str] = getattr(ctx, "_focus_paths", [])
+    text = args.strip()
+
+    if not text:
+        if current_focus:
+            console.print("[bold]Focused on:[/]")
+            for p in current_focus:
+                console.print(f"  {p}")
+        else:
+            print_info("No focus set. Agent can access any files.")
+        return None
+
+    if text == "clear":
+        ctx._focus_paths = []  # type: ignore[attr-defined]
+        _remove_block_from_prompt(ctx, "FOCUS")
+        print_ok("Focus cleared — full codebase access.")
+        return None
+
+    paths = text.split()
+    # Validate paths exist
+    valid: list[str] = []
+    for p in paths:
+        resolved = Path(p).expanduser().resolve()
+        if resolved.exists():
+            valid.append(str(resolved))
+        else:
+            print_warning(f"Path not found: {p}")
+
+    if not valid:
+        print_error("No valid paths.")
+        return None
+
+    ctx._focus_paths = valid  # type: ignore[attr-defined]
+    _remove_block_from_prompt(ctx, "FOCUS")
+    path_list = "\n".join(f"  - {p}" for p in valid)
+    ctx.system_prompt += (
+        f"\n\n[FOCUS] Only read and modify files within these paths:\n{path_list}\n"
+        f"Do not touch files outside these paths unless explicitly asked."
+    )
+    print_ok(f"Focus set: {', '.join(Path(p).name for p in valid)}")
+    return None
+
+
+async def cmd_checkpoint(args: str, ctx: REPLContext) -> str | None:
+    """Save or restore a conversation checkpoint (snapshot).
+
+    Unlike /stash (which clears context), /checkpoint saves a named
+    snapshot you can return to — like a git tag for your conversation.
+
+    Usage:
+        /checkpoint save [name]       — save current state
+        /checkpoint list               — list saved checkpoints
+        /checkpoint restore <name>     — restore a checkpoint
+        /checkpoint delete <name>      — delete a checkpoint
+    """
+    checkpoints: dict[str, dict[str, Any]] = getattr(ctx, "_checkpoints", {})
+
+    tokens = args.strip().split(None, 1)
+    sub = tokens[0].lower() if tokens else "list"
+    rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+    if sub == "list":
+        if not checkpoints:
+            print_info("No checkpoints. Save one with: /checkpoint save [name]")
+            return None
+        table = Table(title="Checkpoints", expand=False)
+        table.add_column("Name", width=20)
+        table.add_column("Messages", width=8, justify="right")
+        table.add_column("Saved", width=16)
+        for name, cp in checkpoints.items():
+            table.add_row(name, str(cp["msg_count"]), cp["saved_at"])
+        console.print(table)
+        return None
+
+    if sub == "save":
+        import datetime
+
+        name = rest or f"cp-{len(checkpoints) + 1}"
+        checkpoints[name] = {
+            "history": list(ctx.message_history),
+            "system_prompt": ctx.system_prompt,
+            "file_changes": list(ctx._file_changes),
+            "msg_count": len(ctx.message_history),
+            "saved_at": datetime.datetime.now(UTC).strftime("%H:%M:%S"),
+        }
+        ctx._checkpoints = checkpoints  # type: ignore[attr-defined]
+        print_ok(f"Checkpoint '{name}' saved ({len(ctx.message_history)} messages).")
+        return None
+
+    if sub == "restore":
+        if not rest:
+            print_error("Usage: /checkpoint restore <name>")
+            return None
+        cp = checkpoints.get(rest)
+        if not cp:
+            print_error(f"Checkpoint '{rest}' not found.")
+            return None
+        ctx.message_history.clear()
+        ctx.message_history.extend(cp["history"])
+        ctx.system_prompt = cp["system_prompt"]
+        ctx._file_changes.clear()
+        ctx._file_changes.extend(cp["file_changes"])
+        print_ok(f"Restored checkpoint '{rest}' ({cp['msg_count']} messages).")
+        return None
+
+    if sub == "delete":
+        if not rest:
+            print_error("Usage: /checkpoint delete <name>")
+            return None
+        if rest in checkpoints:
+            del checkpoints[rest]
+            ctx._checkpoints = checkpoints  # type: ignore[attr-defined]
+            print_ok(f"Deleted checkpoint '{rest}'.")
+        else:
+            print_error(f"Checkpoint '{rest}' not found.")
+        return None
+
+    print_info("Usage: /checkpoint save|list|restore|delete")
+    return None
+
+
+async def cmd_undercover(args: str, _ctx: REPLContext) -> str | None:
+    """Toggle undercover mode (suppress AI attribution in commits/output).
+
+    Usage:
+        /undercover              — show status
+        /undercover on|off       — force on/off
+        /undercover auto         — auto-detect from repo context
+    """
+    from obscura.kairos.undercover import UndercoverMode
+
+    mode = UndercoverMode()
+    sub = args.strip().lower()
+
+    if not sub:
+        status = "ON" if mode.is_active else "OFF"
+        auto = "(auto-detected)" if not hasattr(mode, "_forced") or mode._forced is None else "(forced)"
+        print_info(f"Undercover mode: {status} {auto}")
+        return None
+
+    if sub == "on":
+        mode.force(True)
+        print_ok("Undercover mode ON — AI attribution suppressed.")
+    elif sub == "off":
+        mode.force(False)
+        print_ok("Undercover mode OFF — normal attribution.")
+    elif sub == "auto":
+        mode.auto()
+        status = "ON" if mode.is_active else "OFF"
+        print_ok(f"Undercover mode set to auto-detect (currently {status}).")
+    else:
+        print_info("Usage: /undercover [on|off|auto]")
+    return None
+
+
+async def cmd_token_budget(args: str, ctx: REPLContext) -> str | None:
+    """Set a token or cost budget for the session.
+
+    When the budget is exceeded, the agent pauses and asks before continuing.
+
+    Usage:
+        /token-budget                    — show current budget
+        /token-budget <tokens>           — set token budget (e.g. 50000, 100k)
+        /token-budget $<amount>          — set cost budget (e.g. $0.50, $5)
+        /token-budget off                — remove budget
+    """
+    from obscura.core.cost_tracker import get_cost_tracker
+
+    tracker = get_cost_tracker()
+    text = args.strip()
+    current_budget = getattr(ctx, "_token_budget", None)
+    current_cost_budget = getattr(ctx, "_cost_budget", None)
+
+    if not text:
+        used_tokens = tracker.total_input_tokens() + tracker.total_output_tokens()
+        used_cost = tracker.session_total_usd()
+        if current_budget:
+            pct = int(used_tokens / current_budget * 100) if current_budget else 0
+            console.print(f"[bold]Token budget:[/] {used_tokens:,} / {current_budget:,} ({pct}%)")
+        elif current_cost_budget:
+            pct = int(used_cost / current_cost_budget * 100) if current_cost_budget else 0
+            console.print(f"[bold]Cost budget:[/] ${used_cost:.4f} / ${current_cost_budget:.2f} ({pct}%)")
+        else:
+            console.print(f"No budget set. Used: {used_tokens:,} tokens, ${used_cost:.4f}")
+        return None
+
+    if text == "off":
+        ctx._token_budget = None  # type: ignore[attr-defined]
+        ctx._cost_budget = None  # type: ignore[attr-defined]
+        print_ok("Budget removed.")
+        return None
+
+    if text.startswith("$"):
+        try:
+            amount = float(text[1:])
+            ctx._cost_budget = amount  # type: ignore[attr-defined]
+            ctx._token_budget = None  # type: ignore[attr-defined]
+            print_ok(f"Cost budget set: ${amount:.2f}")
+        except ValueError:
+            print_error("Invalid amount. Use: /token-budget $0.50")
+        return None
+
+    # Parse token count (supports "50k", "100K", plain numbers)
+    try:
+        text_clean = text.lower().replace(",", "")
+        if text_clean.endswith("k"):
+            budget = int(float(text_clean[:-1]) * 1000)
+        elif text_clean.endswith("m"):
+            budget = int(float(text_clean[:-1]) * 1_000_000)
+        else:
+            budget = int(text_clean)
+        ctx._token_budget = budget  # type: ignore[attr-defined]
+        ctx._cost_budget = None  # type: ignore[attr-defined]
+        print_ok(f"Token budget set: {budget:,}")
+    except ValueError:
+        print_error("Invalid budget. Use: /token-budget 50000 or /token-budget 50k or /token-budget $0.50")
+    return None
+
+
+async def cmd_tool_policy(args: str, ctx: REPLContext) -> str | None:
+    """Configure tool access policy for the session.
+
+    Usage:
+        /tool-policy                         — show current policy
+        /tool-policy allow-all               — allow all tools (native + custom)
+        /tool-policy custom-only             — only custom tools (block native)
+        /tool-policy allow <tool> [tool...]   — whitelist specific tools
+        /tool-policy deny <tool> [tool...]    — blacklist specific tools
+        /tool-policy reset                   — restore default policy
+    """
+    from obscura.core.tool_policy import ToolPolicy
+
+    current: ToolPolicy | None = getattr(ctx.client, "_tool_policy", None)
+    tokens = args.strip().split()
+    sub = tokens[0].lower() if tokens else ""
+    rest = tokens[1:] if len(tokens) > 1 else []
+
+    if not sub:
+        if current is None:
+            print_info("Tool policy: default (custom tools only)")
+        else:
+            console.print(f"[bold]Tool policy:[/]")
+            console.print(f"  Native tools: {'allowed' if current.allow_native else 'blocked'}")
+            if current.allowed_tools is not None:
+                console.print(f"  Allowed: {', '.join(current.allowed_tools)}")
+            if current.denied_tools:
+                console.print(f"  Denied: {', '.join(current.denied_tools)}")
+        return None
+
+    if sub == "allow-all":
+        ctx.client._tool_policy = ToolPolicy.allow_all()  # type: ignore[attr-defined]
+        print_ok("Tool policy: all tools allowed (native + custom).")
+    elif sub == "custom-only":
+        ctx.client._tool_policy = ToolPolicy.custom_only()  # type: ignore[attr-defined]
+        print_ok("Tool policy: custom tools only.")
+    elif sub == "allow" and rest:
+        ctx.client._tool_policy = ToolPolicy.restricted(rest)  # type: ignore[attr-defined]
+        print_ok(f"Tool policy: only {', '.join(rest)} allowed.")
+    elif sub == "deny" and rest:
+        ctx.client._tool_policy = ToolPolicy.blocked(rest)  # type: ignore[attr-defined]
+        print_ok(f"Tool policy: {', '.join(rest)} blocked.")
+    elif sub == "reset":
+        ctx.client._tool_policy = None  # type: ignore[attr-defined]
+        print_ok("Tool policy reset to default.")
+    else:
+        print_info("Usage: /tool-policy [allow-all|custom-only|allow <t>|deny <t>|reset]")
+    return None
+
+
+async def cmd_context_inject(args: str, ctx: REPLContext) -> str | None:
+    """Inject context from a file or URL into the conversation.
+
+    The content is added as a user message prefixed with context markers,
+    so the agent sees it as reference material.
+
+    Usage:
+        /context-inject <path>         — inject file contents
+        /context-inject --paste        — inject from clipboard
+    """
+    text = args.strip()
+    if not text:
+        print_error("Usage: /context-inject <path>  or  /context-inject --paste")
+        return None
+
+    if text == "--paste":
+        try:
+            import subprocess
+
+            proc = subprocess.run(
+                ["pbpaste"] if __import__("sys").platform == "darwin"
+                else ["xclip", "-selection", "clipboard", "-o"],
+                capture_output=True, timeout=5,
+            )
+            content = proc.stdout.decode("utf-8", errors="replace")
+        except Exception as exc:
+            print_error(f"Clipboard read failed: {exc}")
+            return None
+    else:
+        path = Path(text).expanduser().resolve()
+        if not path.is_file():
+            print_error(f"Not a file: {path}")
+            return None
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            print_error(f"Failed to read: {exc}")
+            return None
+
+    if not content.strip():
+        print_info("Empty content — nothing injected.")
+        return None
+
+    # Truncate if very large
+    if len(content) > 50_000:
+        content = content[:50_000] + "\n\n... (truncated at 50k chars)"
+
+    label = text if text != "--paste" else "clipboard"
+    ctx.message_history.append((
+        "user",
+        f"[CONTEXT INJECTION: {label}]\n\n{content}",
+    ))
+    char_count = len(content)
+    if char_count > 1000:
+        size_str = f"{char_count / 1000:.1f}k chars"
+    else:
+        size_str = f"{char_count} chars"
+    print_ok(f"Injected {size_str} from {label}.")
+    return None
+
+
+async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
+    """Generate a structured recap of what the agent has done this session.
+
+    Outputs: files changed, tools used, key decisions, and remaining work.
+    More structured than /summary — designed for handoff or status reports.
+    """
+    if len(ctx.message_history) < 2:
+        print_info("Not enough conversation to recap.")
+        return None
+
+    from obscura.tools.system.file_state import (
+        get_recently_modified_files,
+        get_recently_read_files,
+    )
+
+    modified = get_recently_modified_files(limit=20)
+    read_files = get_recently_read_files(limit=20)
+    goal = getattr(ctx, "_session_goal", "")
+
+    recent = ctx.message_history[-30:]
+    context_lines = [f"[{r}]: {t[:200]}" for r, t in recent]
+
+    prompt = (
+        "Generate a structured session recap with these sections:\n"
+        "1. **What was done** — key actions and changes (2-4 bullets)\n"
+        "2. **Files modified** — list with one-line descriptions\n"
+        "3. **Key decisions** — important choices made and why\n"
+        "4. **Remaining work** — what's left to do\n"
+    )
+    if goal:
+        prompt += f"5. **Goal progress** — status toward: {goal}\n"
+    prompt += (
+        f"\nModified files: {', '.join(modified[:10]) if modified else 'none'}\n"
+        f"Read files: {', '.join(read_files[:10]) if read_files else 'none'}\n\n"
+        "Conversation:\n" + "\n".join(context_lines)
+    )
+
+    try:
+        text = await _oneshot_stream(ctx.client, prompt)
+        if text:
+            from rich.markdown import Markdown as RichMarkdown
+
+            console.print(RichMarkdown(text))
+        else:
+            print_info("(no recap generated)")
+    except asyncio.TimeoutError:
+        print_error("Recap timed out.")
+    except Exception as exc:
+        print_error(f"Recap failed: {exc}")
+    return None
+
+
+def _remove_block_from_prompt(ctx: REPLContext, tag: str) -> None:
+    """Remove a tagged block like [TAG] ... from the system prompt."""
+    import re
+
+    ctx.system_prompt = re.sub(
+        rf"\n\n\[{re.escape(tag)}\].*?(?=\n\n\[|$)",
+        "",
+        ctx.system_prompt,
+        flags=re.DOTALL,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6210,6 +8295,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "debug": cmd_debug,
     "commit": cmd_commit,
     "review": cmd_review,
+    "pr": cmd_pr,
     "security-review": cmd_security_review,
     # Wave 2: export, coordinator, voice
     "export": cmd_export,
@@ -6219,6 +8305,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "tool-summary": cmd_tool_summary,
     # KAIROS & background
     "kairos": cmd_kairos,
+    "goals": cmd_goal,
     "attribution": cmd_attribution,
     "ps": cmd_ps,
     "logs": cmd_logs,
@@ -6241,6 +8328,9 @@ COMMANDS: dict[str, CommandHandler] = {
     "copy": cmd_copy,
     "brief": cmd_brief,
     "stats": cmd_stats,
+    # Loop & schedule
+    "loop": cmd_loop,
+    "schedule": cmd_schedule,
     # Side question, sandbox, stash
     "btw": cmd_btw,
     "sandbox-toggle": cmd_sandbox_toggle,
@@ -6248,6 +8338,30 @@ COMMANDS: dict[str, CommandHandler] = {
     "stash": cmd_stash,
     "pop": cmd_pop,
     "log": cmd_log,
+    # Claude Code parity
+    "loop": cmd_loop,
+    "schedule": cmd_schedule,
+    "branch": cmd_branch,
+    "config": cmd_config,
+    "hooks": cmd_hooks,
+    "listen": cmd_listen,
+    "login": cmd_login,
+    "logout": cmd_logout,
+    "release-notes": cmd_release_notes,
+    "ide": cmd_ide,
+    "bug": cmd_bug,
+    "terminal-setup": cmd_terminal_setup,
+    # Obscura-specific steering
+    "goal": cmd_goal,
+    "persona": cmd_persona,
+    "guardrails": cmd_guardrails,
+    "focus": cmd_focus,
+    "checkpoint": cmd_checkpoint,
+    "undercover": cmd_undercover,
+    "token-budget": cmd_token_budget,
+    "tool-policy": cmd_tool_policy,
+    "context-inject": cmd_context_inject,
+    "recap": cmd_recap,
 }
 
 # Subcommand completions for readline tab-complete
@@ -6315,6 +8429,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "fast": [],
     "commit": [],
     "review": [],
+    "pr": ["main", "master", "develop"],
     "security-review": [],
     "export": ["md", "txt", "json"],
     "coordinator": ["on", "off", "status"],
@@ -6322,6 +8437,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "template": ["list", "run", "new"],
     "tool-summary": [],
     "kairos": ["on", "off", "status"],
+    "goals": ["list", "add", "show", "complete", "abandon", "edit"],
     "attribution": [],
     "ps": [],
     "logs": [],
@@ -6348,6 +8464,30 @@ COMPLETIONS: dict[str, list[str]] = {
     "stash": [],
     "pop": [],
     "log": ["tail", "path", "stats"],
+    "loop": ["status", "stop"],
+    "schedule": ["list", "create", "delete", "run", "pause", "resume"],
+    # Claude Code parity
+    "branch": ["list", "create", "delete"],
+    "config": ["reset"],
+    "hooks": ["list", "add", "remove"],
+    "listen": ["on", "off"],
+    "login": ["claude", "openai", "copilot"],
+    "logout": ["claude", "openai", "copilot"],
+    "release-notes": [],
+    "ide": ["vscode", "jetbrains"],
+    "bug": ["report"],
+    "terminal-setup": [],
+    # Obscura-specific steering
+    "goal": ["clear", "check"],
+    "persona": ["clear", "senior-backend", "security-auditor", "code-reviewer", "architect", "junior-friendly"],
+    "guardrails": ["add", "remove", "clear"],
+    "focus": ["clear"],
+    "checkpoint": ["save", "list", "restore", "delete"],
+    "undercover": ["on", "off", "auto"],
+    "token-budget": ["off"],
+    "tool-policy": ["allow-all", "custom-only", "allow", "deny", "reset"],
+    "context-inject": ["--paste"],
+    "recap": [],
 }
 
 # Add secret menu stub (tests toggle visibility)

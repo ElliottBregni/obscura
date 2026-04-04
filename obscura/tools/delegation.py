@@ -36,6 +36,27 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Default tool allowlist for delegated sub-agents.  Gives read, search,
+# shell, and basic write access — enough to be useful without granting
+# destructive operations (remove_path, signal_process, etc.).
+_DEFAULT_SUBAGENT_ALLOWLIST: list[str] = [
+    "run_shell",
+    "read_text_file",
+    "write_text_file",
+    "edit_text_file",
+    "grep_files",
+    "find_files",
+    "list_directory",
+    "tree_directory",
+    "file_info",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "web_fetch",
+    "run_python3",
+    "json_query",
+]
+
 
 @dataclass(frozen=True)
 class DelegationContext:
@@ -137,17 +158,22 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
                 logger.debug("Could not create child session", exc_info=True)
 
         # --- Inject sub-agent constraints BEFORE running ---
-        # This ensures the child agent:
-        #   1. Has a before(TOOL_CALL) hook that rewrites Claude Code native
-        #      tool names (Glob, Grep, Read, ...) to run_shell equivalents.
-        #   2. Has _tool_allowlist = ["run_shell"] so nothing else can slip
-        #      through even if the rewrite hook misses something.
-        #   3. Has SUBAGENT_SYSTEM_PROMPT prepended to its system prompt so
-        #      the model knows it only has run_shell available.
+        # 1. Prepends SUBAGENT_SYSTEM_PROMPT to the agent's system prompt.
+        # 2. Sets config.tool_allowlist so AgentLoop enforces it.
+        # 3. Installs a before-TOOL_CALL hook rewriting native tool names.
         try:
             from obscura.tools.policy.models import inject_subagent_context
 
-            inject_subagent_context(agent)
+            agent_config = getattr(agent, "config", None)
+            allowlist = (
+                getattr(agent_config, "tool_allowlist", None)
+                if agent_config is not None
+                else None
+            )
+            if allowlist is None:
+                allowlist = _DEFAULT_SUBAGENT_ALLOWLIST
+
+            inject_subagent_context(agent, tool_allowlist=allowlist)
         except Exception:
             logger.warning(
                 "inject_subagent_context failed for '%s' — proceeding without constraints",

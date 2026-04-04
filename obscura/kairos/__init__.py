@@ -19,6 +19,7 @@ from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.dream import DreamConsolidator
 from obscura.kairos.engine import KairosEngine
 from obscura.kairos.frustration import FrustrationDetector
+from obscura.kairos.goals import GoalBoard
 from obscura.kairos.proactive import ProactiveMode
 from obscura.kairos.undercover import UndercoverMode, is_undercover
 
@@ -26,6 +27,7 @@ __all__ = [
     "DailyLog",
     "DreamConsolidator",
     "FrustrationDetector",
+    "GoalBoard",
     "KairosEngine",
     "ProactiveMode",
     "UndercoverMode",

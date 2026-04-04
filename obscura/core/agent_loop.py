@@ -338,6 +338,14 @@ PARAMETER_ALIASES: dict[str, dict[str, str]] = {
         "file_path": "path",
         "filepath": "path",
     },
+    "edit_text_file": {
+        "file_path": "path",
+        "filepath": "path",
+        "old_string": "old_text",
+        "new_string": "new_text",
+        "oldText": "old_text",
+        "newText": "new_text",
+    },
 }
 
 
@@ -526,6 +534,8 @@ class AgentLoop:
         backend_name: str = "",
         model_name: str = "",
         context_budget: int = 0,
+        turn_timeout_s: float | None = None,
+        compiled_agent: Any | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -540,7 +550,13 @@ class AgentLoop:
         self._backend_name = backend_name
         self._model_name = model_name
         self._context_budget = context_budget  # 0 = unlimited (chars)
+        self._turn_timeout_s = turn_timeout_s  # per-turn stream timeout (None = no limit)
         self._accumulated_chars = 0
+        self._compiled_agent = compiled_agent
+
+        # Apply compiled agent settings if provided
+        if compiled_agent is not None:
+            self._apply_compiled_agent(compiled_agent)
 
         # Track repeated NOT_FOUND failures across turns to break retry loops
         self._not_found_counts: dict[str, int] = {}
@@ -548,6 +564,69 @@ class AgentLoop:
         # Pause / mid-run input state
         self._should_pause = False
         self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    # ------------------------------------------------------------------
+    # Compiled agent application
+    # ------------------------------------------------------------------
+
+    def _apply_compiled_agent(self, agent: Any) -> None:
+        """Apply settings from a CompiledAgent to this loop.
+
+        Reads tool_routing, env manifest, and MCP server configs from the
+        compiled agent and wires them into the loop's state.
+        """
+        # Apply tool routing config
+        if hasattr(agent, "tool_routing") and agent.tool_routing is not None:
+            try:
+                from obscura.core.tool_router import ToolRouter
+                from obscura.core.tool_score_index import ToolScoreIndex
+
+                router = ToolRouter(
+                    config=agent.tool_routing,
+                    score_index=ToolScoreIndex(),
+                    backend=self._backend_name or "copilot",
+                )
+                if self._backend is not None and hasattr(self._backend, "set_tool_router"):
+                    self._backend.set_tool_router(router)
+                logger.info("Applied tool routing from compiled agent")
+            except Exception:
+                logger.debug("Could not apply tool routing", exc_info=True)
+
+        # Apply tool allowlist from compiled agent
+        if hasattr(agent, "tool_allowlist") and agent.tool_allowlist:
+            self._tool_allowlist = list(agent.tool_allowlist)
+
+        # Apply max_turns from compiled agent
+        if hasattr(agent, "max_turns") and agent.max_turns is not None:
+            self._max_turns = agent.max_turns
+
+        # Apply agent name
+        if hasattr(agent, "name") and agent.name:
+            self._agent_name = agent.name
+
+        # Run preflight validation if env manifest is present
+        if hasattr(agent, "env") and agent.env is not None:
+            try:
+                from obscura.core.preflight import PreflightValidator
+
+                validator = PreflightValidator()
+                result = validator.validate(agent)
+                if result.passed:
+                    logger.info(
+                        "Preflight passed for agent '%s' (%d checks)",
+                        agent.name,
+                        len(result.checks),
+                    )
+                    self._preflight_result = result
+                else:
+                    logger.warning(
+                        "Preflight failed for agent '%s': %s",
+                        agent.name,
+                        "; ".join(c.message for c in result.errors),
+                    )
+                    self._preflight_result = result
+            except Exception:
+                logger.debug("Preflight validation failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Pause / mid-run input public API
@@ -638,8 +717,9 @@ class AgentLoop:
             TURN_START, TEXT_DELTA, THINKING_DELTA, TOOL_CALL, TOOL_RESULT,
             TURN_COMPLETE, and finally AGENT_DONE (or ERROR).
         """
-        # Reset pause state for this run
+        # Reset pause state and per-run counters for this run
         self._should_pause = False
+        self._not_found_counts.clear()
 
         # Create durable session if store is wired
         sid = session_id
@@ -653,8 +733,58 @@ class AgentLoop:
                     model=self._model_name,
                 )
 
-        async for event in self._run_inner(prompt, sid, 0, "", kwargs, initial_messages):
-            yield event
+        # Emit AGENT_START
+        start_event = AgentEvent(
+            kind=AgentEventKind.AGENT_START,
+            text=self._agent_name,
+        )
+        emitted = await self._emit(start_event, sid)
+        if emitted is not None:
+            yield emitted
+            await self._post_emit(emitted)
+
+        # Emit PREFLIGHT_PASS or PREFLIGHT_FAIL if preflight was run
+        preflight_result = getattr(self, "_preflight_result", None)
+        if preflight_result is not None:
+            pf_kind = (
+                AgentEventKind.PREFLIGHT_PASS
+                if preflight_result.passed
+                else AgentEventKind.PREFLIGHT_FAIL
+            )
+            pf_event = AgentEvent(
+                kind=pf_kind,
+                text="; ".join(c.message for c in preflight_result.checks),
+            )
+            emitted = await self._emit(pf_event, sid)
+            if emitted is not None:
+                yield emitted
+                await self._post_emit(emitted)
+
+            # Abort if preflight failed
+            if not preflight_result.passed:
+                err_event = AgentEvent(
+                    kind=AgentEventKind.ERROR,
+                    text=f"Preflight failed: {'; '.join(c.message for c in preflight_result.errors)}",
+                )
+                emitted = await self._emit(err_event, sid)
+                if emitted is not None:
+                    yield emitted
+                    await self._post_emit(emitted)
+                return
+
+        try:
+            async for event in self._run_inner(prompt, sid, 0, "", kwargs, initial_messages):
+                yield event
+        finally:
+            # Emit AGENT_STOP
+            stop_event = AgentEvent(
+                kind=AgentEventKind.AGENT_STOP,
+                text=self._agent_name,
+            )
+            emitted = await self._emit(stop_event, sid)
+            if emitted is not None:
+                yield emitted
+                await self._post_emit(emitted)
 
     async def resume(
         self,
@@ -796,103 +926,104 @@ class AgentLoop:
                     executor.add_tool(tc)
 
             try:
-                async for chunk in self._call_stream(current_prompt, kwargs):
-                    # Fix #4: suppress text only inside tool accumulation.
-                    # Text between TOOL_USE_START and TOOL_USE_END is dropped
-                    # (hallucinated tool output).  Text after TOOL_USE_END but
-                    # before the next TOOL_USE_START is kept (legitimate
-                    # interleaved explanation).
-                    if chunk.kind == ChunkKind.TEXT_DELTA and state.inside_tool_accumulation:
-                        continue
+                async with asyncio.timeout(self._turn_timeout_s):
+                    async for chunk in self._call_stream(current_prompt, kwargs):
+                        # Fix #4: suppress text only inside tool accumulation.
+                        # Text between TOOL_USE_START and TOOL_USE_END is dropped
+                        # (hallucinated tool output).  Text after TOOL_USE_END but
+                        # before the next TOOL_USE_START is kept (legitimate
+                        # interleaved explanation).
+                        if chunk.kind == ChunkKind.TEXT_DELTA and state.inside_tool_accumulation:
+                            continue
 
-                    event = self._map_chunk(chunk, state.turn)
-                    if event is not None:
-                        # Run post-hook for previous, then emit new
-                        if _prev_event is not None:
-                            await self._post_emit(_prev_event)
-                            _prev_event = None
-                        emitted = await self._emit(event, session_id)
-                        if emitted is not None:
-                            yield emitted
-                            _prev_event = emitted
+                        event = self._map_chunk(chunk, state.turn)
+                        if event is not None:
+                            # Run post-hook for previous, then emit new
+                            if _prev_event is not None:
+                                await self._post_emit(_prev_event)
+                                _prev_event = None
+                            emitted = await self._emit(event, session_id)
+                            if emitted is not None:
+                                yield emitted
+                                _prev_event = emitted
 
-                    # Accumulate text
-                    if chunk.kind == ChunkKind.TEXT_DELTA:
-                        state = state.replace(turn_text=state.turn_text + chunk.text)
+                        # Accumulate text
+                        if chunk.kind == ChunkKind.TEXT_DELTA:
+                            state = state.replace(turn_text=state.turn_text + chunk.text)
 
-                    # Collect tool calls
-                    if chunk.kind == ChunkKind.TOOL_USE_START:
-                        state = state.replace(inside_tool_accumulation=True)
-                        # Flush previous tool if any (fallback for backends
-                        # that don't emit TOOL_USE_END)
-                        if state.current_tool_name:
-                            _to_yield, _prev_event = await self._flush_pending_tool(
-                                state.current_tool_name,
-                                state.current_tool_input_json,
-                                state.current_tool_raw,
-                                turn=state.turn,
-                                emitted_keys=_emitted_keys_mut,
-                                tool_calls=_tool_calls_mut,
-                                prev_event=_prev_event,
-                                session_id=session_id,
-                            )
-                            if _to_yield is not None:
-                                yield _to_yield
-                            _feed_new_tools_to_executor()
-                        state = state.replace(
-                            current_tool_name=chunk.tool_name,
-                            current_tool_input_json="",
-                            current_tool_raw=chunk.raw,
-                        )
-
-                    if chunk.kind == ChunkKind.TOOL_USE_DELTA:
-                        state = state.replace(
-                            current_tool_input_json=(
-                                state.current_tool_input_json + chunk.tool_input_delta
-                            ),
-                        )
-
-                    # Fix #2: SDK tool results are logged but not collected
-                    # for re-use.  All tools are executed locally.
-                    if chunk.kind == ChunkKind.TOOL_RESULT:
-                        logger.debug(
-                            "SDK tool result received (ignored): %s",
-                            chunk.text[:120] if chunk.text else "",
-                        )
-
-                    # TOOL_USE_END -- flush accumulated tool immediately
-                    if chunk.kind == ChunkKind.TOOL_USE_END:
-                        if state.current_tool_name:
-                            _to_yield, _prev_event = await self._flush_pending_tool(
-                                state.current_tool_name,
-                                state.current_tool_input_json,
-                                state.current_tool_raw,
-                                turn=state.turn,
-                                emitted_keys=_emitted_keys_mut,
-                                tool_calls=_tool_calls_mut,
-                                prev_event=_prev_event,
-                                session_id=session_id,
-                            )
-                            if _to_yield is not None:
-                                yield _to_yield
-                            # Feed newly flushed tool to executor immediately
-                            _feed_new_tools_to_executor()
+                        # Collect tool calls
+                        if chunk.kind == ChunkKind.TOOL_USE_START:
+                            state = state.replace(inside_tool_accumulation=True)
+                            # Flush previous tool if any (fallback for backends
+                            # that don't emit TOOL_USE_END)
+                            if state.current_tool_name:
+                                _to_yield, _prev_event = await self._flush_pending_tool(
+                                    state.current_tool_name,
+                                    state.current_tool_input_json,
+                                    state.current_tool_raw,
+                                    turn=state.turn,
+                                    emitted_keys=_emitted_keys_mut,
+                                    tool_calls=_tool_calls_mut,
+                                    prev_event=_prev_event,
+                                    session_id=session_id,
+                                )
+                                if _to_yield is not None:
+                                    yield _to_yield
+                                _feed_new_tools_to_executor()
                             state = state.replace(
-                                current_tool_name="",
+                                current_tool_name=chunk.tool_name,
                                 current_tool_input_json="",
-                                current_tool_raw=None,
-                                inside_tool_accumulation=False,
+                                current_tool_raw=chunk.raw,
                             )
 
-                    # Fix #6: extract per-turn token usage from DONE metadata
-                    if chunk.kind == ChunkKind.DONE and chunk.metadata is not None:
-                        usage = chunk.metadata.usage
-                        finish_reason = getattr(chunk.metadata, "finish_reason", "") or ""
-                        updates: dict[str, Any] = {"finish_reason": finish_reason}
-                        if usage is not None:
-                            updates["input_tokens"] = usage.get("input_tokens", 0)
-                            updates["output_tokens"] = usage.get("output_tokens", 0)
-                        state = state.replace(**updates)
+                        if chunk.kind == ChunkKind.TOOL_USE_DELTA:
+                            state = state.replace(
+                                current_tool_input_json=(
+                                    state.current_tool_input_json + chunk.tool_input_delta
+                                ),
+                            )
+
+                        # Fix #2: SDK tool results are logged but not collected
+                        # for re-use.  All tools are executed locally.
+                        if chunk.kind == ChunkKind.TOOL_RESULT:
+                            logger.debug(
+                                "SDK tool result received (ignored): %s",
+                                chunk.text[:120] if chunk.text else "",
+                            )
+
+                        # TOOL_USE_END -- flush accumulated tool immediately
+                        if chunk.kind == ChunkKind.TOOL_USE_END:
+                            if state.current_tool_name:
+                                _to_yield, _prev_event = await self._flush_pending_tool(
+                                    state.current_tool_name,
+                                    state.current_tool_input_json,
+                                    state.current_tool_raw,
+                                    turn=state.turn,
+                                    emitted_keys=_emitted_keys_mut,
+                                    tool_calls=_tool_calls_mut,
+                                    prev_event=_prev_event,
+                                    session_id=session_id,
+                                )
+                                if _to_yield is not None:
+                                    yield _to_yield
+                                # Feed newly flushed tool to executor immediately
+                                _feed_new_tools_to_executor()
+                                state = state.replace(
+                                    current_tool_name="",
+                                    current_tool_input_json="",
+                                    current_tool_raw=None,
+                                    inside_tool_accumulation=False,
+                                )
+
+                        # Fix #6: extract per-turn token usage from DONE metadata
+                        if chunk.kind == ChunkKind.DONE and chunk.metadata is not None:
+                            usage = chunk.metadata.usage
+                            finish_reason = getattr(chunk.metadata, "finish_reason", "") or ""
+                            updates: dict[str, Any] = {"finish_reason": finish_reason}
+                            if usage is not None:
+                                updates["input_tokens"] = usage.get("input_tokens", 0)
+                                updates["output_tokens"] = usage.get("output_tokens", 0)
+                            state = state.replace(**updates)
 
                 # Flush last tool call (fallback if no TOOL_USE_END received)
                 if state.current_tool_name:
@@ -959,6 +1090,53 @@ class AgentLoop:
                 else:
                     # Successful (non-truncated) turn: reset retry counter
                     _max_tokens_retries = 0
+
+            except TimeoutError:
+                # Per-turn stream timeout — abort in-flight tools and
+                # surface as a retryable TRANSIENT error so the existing
+                # backoff logic can kick in.
+                executor.close()
+                executor._abort.set()
+                for task in list(executor._in_flight.values()):
+                    task.cancel()
+
+                if _retry_count < _max_retries:
+                    _retry_count += 1
+                    backoff = 2 ** (_retry_count - 1)
+                    logger.warning(
+                        "Turn %d timed out after %ss (attempt %d/%d), "
+                        "retrying in %ds",
+                        state.turn,
+                        self._turn_timeout_s,
+                        _retry_count,
+                        _max_retries,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    state = state.replace(turn=state.turn - 1)
+                    continue
+
+                # Exhausted retries — emit error and stop
+                err_event = AgentEvent(
+                    kind=AgentEventKind.ERROR,
+                    text=f"Turn timed out after {self._turn_timeout_s}s "
+                    f"({_max_retries} retries exhausted)",
+                    turn=state.turn,
+                )
+                if _prev_event is not None:
+                    await self._post_emit(_prev_event)
+                emitted = await self._emit(err_event, session_id)
+                if emitted is not None:
+                    yield emitted
+                    await self._post_emit(emitted)
+                if self._auto_complete and self._event_store is not None and session_id is not None:
+                    try:
+                        await self._event_store.update_status(
+                            session_id, SessionStatus.FAILED
+                        )
+                    except Exception:
+                        logger.debug("Failed to mark session failed", exc_info=True)
+                return
 
             except Exception as exc:
                 # Close executor and cancel in-flight tools on stream error
@@ -1211,7 +1389,7 @@ class AgentLoop:
                 tool_calls_list = list(state.tool_calls)
                 tool_results = await self._execute_tools(tool_calls_list)
 
-            # Yield tool result events
+            # Yield tool result events (and TOOL_CALL_FAILURE for errors)
             for result in tool_results:
                 if _prev_event is not None:
                     await self._post_emit(_prev_event)
@@ -1229,6 +1407,25 @@ class AgentLoop:
                 if emitted is not None:
                     yield emitted
                     _prev_event = emitted
+
+                # Emit TOOL_CALL_FAILURE for error results so hooks can react
+                if result.status == "error":
+                    if _prev_event is not None:
+                        await self._post_emit(_prev_event)
+                        _prev_event = None
+                    fail_event = AgentEvent(
+                        kind=AgentEventKind.TOOL_CALL_FAILURE,
+                        tool_name=result.tool,
+                        tool_use_id=result.tool_use_id,
+                        tool_result=result.error.message if result.error else "Tool error",
+                        is_error=True,
+                        turn=state.turn,
+                        raw=result,
+                    )
+                    emitted = await self._emit(fail_event, session_id)
+                    if emitted is not None:
+                        yield emitted
+                        _prev_event = emitted
 
             # Fix #5: Only use structured messages -- no dual prompt format.
             # Build structured messages and use an empty continuation prompt.
@@ -1496,9 +1693,13 @@ class AgentLoop:
 
         # Tool allowlist enforcement
         if self._tool_allowlist is not None and tc.name not in self._tool_allowlist:
+            allowed = ", ".join(sorted(self._tool_allowlist)[:20])
             err = ToolExecutionError(
                 type=ToolErrorType.UNAUTHORIZED,
-                message=f"Tool '{tc.name}' not in allowlist.",
+                message=(
+                    f"Tool '{tc.name}' not in allowlist. "
+                    f"Available tools: {allowed}"
+                ),
                 safe_to_retry=False,
             )
             return ToolResultEnvelope(
@@ -1686,14 +1887,42 @@ class AgentLoop:
         enumerate every LLM-convention parameter.
         """
         handler = spec.handler
-        
+
         # Normalize parameter names based on known aliases
         if spec.name in PARAMETER_ALIASES:
             aliases = PARAMETER_ALIASES[spec.name]
             for alias, canonical in aliases.items():
-                if alias in inputs and canonical not in inputs:
-                    inputs[canonical] = inputs.pop(alias)
-        
+                if alias in inputs:
+                    if canonical not in inputs:
+                        inputs[canonical] = inputs.pop(alias)
+                    else:
+                        # Both alias and canonical provided — keep canonical,
+                        # warn so we can diagnose if LLM sends conflicting values.
+                        logger.warning(
+                            "Tool %s: both '%s' (alias) and '%s' (canonical) "
+                            "provided; dropping alias value",
+                            spec.name,
+                            alias,
+                            canonical,
+                        )
+                        del inputs[alias]
+
+        # Pre-validate required params before calling handler — gives a
+        # cleaner error than the Python TypeError and avoids a traceback.
+        required = spec.parameters.get("required", [])
+        if required:
+            missing = [p for p in required if p not in inputs]
+            if missing:
+                props = spec.parameters.get("properties", {})
+                hints = ", ".join(
+                    f"`{p}` ({props.get(p, {}).get('type', '?')})"
+                    for p in missing
+                )
+                raise TypeError(
+                    f"{spec.name}() missing {len(missing)} required "
+                    f"positional arguments: {hints}"
+                )
+
         try:
             if inspect.iscoroutinefunction(handler):
                 return await handler(**inputs)
@@ -1899,8 +2128,19 @@ class AgentLoop:
                     parsed_input = cast(dict[str, Any], decoded)
                     delta_valid = True
                 else:
+                    logger.warning(
+                        "Tool %s: JSON input decoded to %s, not dict",
+                        name,
+                        type(decoded).__name__,
+                    )
                     parsed_input = {"_raw_input": input_json}
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as jde:
+                logger.warning(
+                    "Tool %s: malformed JSON input (%.80s…): %s",
+                    name,
+                    input_json,
+                    jde,
+                )
                 parsed_input = {"_raw_input": input_json}
 
         if delta_valid:
@@ -1911,11 +2151,6 @@ class AgentLoop:
         elif raw_input and parsed_input.keys() == {"_raw_input"}:
             # If delta payload is invalid, prefer provider-native structured args.
             parsed_input = raw_input
-
-        # Normalize dotted provider prefixes (e.g. "functions.web_search") to
-        # the canonical tool name expected by the runtime ("web_search").
-        if isinstance(name, str) and "." in name:
-            name = name.split(".")[-1]
 
         # Normalize dotted provider prefixes (e.g. "functions.web_search") to
         # the canonical tool name expected by the runtime ("web_search").
@@ -2037,6 +2272,19 @@ class AgentLoop:
         for tc in tool_calls:
             result = result_by_id.get(tc.tool_use_id)
             if result is None:
+                # Emit an explicit error so the LLM knows the call had no result
+                logger.warning(
+                    "Tool result missing for %s (id=%s)", tc.name, tc.tool_use_id,
+                )
+                result_blocks.append(
+                    ContentBlock(
+                        kind="tool_result",
+                        text=f"Internal error: no result received for {tc.name}. "
+                        "The tool call may have been dropped or timed out.",
+                        tool_use_id=tc.tool_use_id,
+                        is_error=True,
+                    )
+                )
                 continue
             result_blocks.append(
                 ContentBlock(

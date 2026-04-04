@@ -159,6 +159,10 @@ class AgentConfig(BaseModel):
     capabilities: dict[str, list[str]] = Field(default_factory=dict)
     plugins: dict[str, Any] = Field(default_factory=dict)
 
+    # Permission mode — inherited from parent when spawning subagents.
+    # None = use DEFAULT; otherwise one of "default", "plan", "accept_edits", "bypass".
+    permission_mode: str | None = None
+
     # Skill loading configuration
     lazy_load_skills: bool = False
     skill_filter: list[str] | None = None
@@ -489,12 +493,20 @@ class Agent:
 
         policy_engine = PluginPolicyEngine()
 
-        # Wire permission mode engine if available.
+        # Wire permission mode engine — inherit from config if set.
         _perm_engine = None
         try:
-            from obscura.core.permission_modes import PermissionModeEngine
+            from obscura.core.permission_modes import (
+                PermissionMode,
+                PermissionModeEngine,
+            )
 
-            _perm_engine = PermissionModeEngine()
+            mode = (
+                PermissionMode(self.config.permission_mode)
+                if self.config.permission_mode
+                else PermissionMode.DEFAULT
+            )
+            _perm_engine = PermissionModeEngine(mode)
         except Exception:
             pass
 
@@ -1006,6 +1018,7 @@ class Agent:
                     full_prompt,
                     max_turns=max_turns,
                     on_confirm=on_confirm,
+                    tool_allowlist=self.config.tool_allowlist,
                 ),
                 timeout=self.config.timeout_seconds,
             )
@@ -1636,6 +1649,15 @@ class AgentRuntime:
         """
         agent_id = f"agent-{uuid.uuid4().hex[:8]}"
 
+        # Inherit parent's permission mode and capabilities if not explicitly set.
+        if parent_agent_id and "permission_mode" not in config_kwargs:
+            parent = self._agents.get(parent_agent_id)
+            if parent is not None:
+                config_kwargs["permission_mode"] = parent.config.permission_mode
+                # Merge parent capabilities into child (child overrides win)
+                if "capabilities" not in config_kwargs and parent.config.capabilities:
+                    config_kwargs["capabilities"] = dict(parent.config.capabilities)
+
         config = AgentConfig(
             name=name,
             provider=model,
@@ -1682,6 +1704,7 @@ class AgentRuntime:
         manifest: AgentManifest,
         *,
         provider_override: str | None = None,
+        parent_agent_id: str | None = None,
     ) -> Agent:
         """Spawn an agent from a manifest definition.
 
@@ -1695,6 +1718,9 @@ class AgentRuntime:
                 the manifest.  Agents with ``provider: auto`` in their
                 manifest always resolve to this value (or ``"copilot"`` if
                 no override is supplied).
+            parent_agent_id: When set, the child inherits the parent's
+                permission mode and capability grants (unless the manifest
+                explicitly overrides them).
 
         """
         from obscura.manifest.lazy import LazyManifestProxy
@@ -1710,6 +1736,24 @@ class AgentRuntime:
 
         proxy = LazyManifestProxy(manifest)
         config = AgentConfig.from_manifest(manifest)
+
+        # Inherit parent's permission mode and capabilities if not
+        # explicitly set by the manifest.
+        if parent_agent_id:
+            parent = self._agents.get(parent_agent_id)
+            if parent is not None:
+                if config.permission_mode is None:
+                    config = config.model_copy(
+                        update={"permission_mode": parent.config.permission_mode},
+                    )
+                if not config.capabilities and parent.config.capabilities:
+                    config = config.model_copy(
+                        update={"capabilities": dict(parent.config.capabilities)},
+                    )
+                if config.parent_agent_id is None:
+                    config = config.model_copy(
+                        update={"parent_agent_id": parent_agent_id},
+                    )
 
         agent_id = f"agent-{uuid.uuid4().hex[:8]}"
         if self.user is None:

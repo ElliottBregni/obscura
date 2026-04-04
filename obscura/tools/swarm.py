@@ -306,7 +306,10 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     capabilities=cap_cfg,
                     plugins=plugin_deps,
                 )
-                agent = runtime.spawn_from_manifest(manifest)
+                agent = runtime.spawn_from_manifest(
+                    manifest,
+                    parent_agent_id=ctx.parent_agent_id or None,
+                )
             else:
                 # Fallback: spawn generic agent
                 agent = runtime.spawn(
@@ -490,7 +493,10 @@ async def _run_one_agent(
                 capabilities=cap_cfg,
                 plugins=plugin_deps,
             )
-            agent = runtime.spawn_from_manifest(manifest)
+            agent = runtime.spawn_from_manifest(
+                manifest,
+                parent_agent_id=ctx.parent_agent_id or None,
+            )
         else:
             agent = runtime.spawn(
                 agent_type,

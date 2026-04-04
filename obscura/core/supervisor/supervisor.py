@@ -127,6 +127,7 @@ class Supervisor:
         context_instructions: str = "",
         session_history: str = "",
         metadata: dict[str, Any] | None = None,
+        agent_loop: Any | None = None,
     ) -> AsyncIterator[SupervisorEvent]:
         """Execute a supervised run.
 
@@ -454,26 +455,110 @@ class Supervisor:
                 payload={"turn": 1},
             )
 
-            # NOTE: Actual model execution is delegated to AgentLoop.
-            # The Supervisor wraps AgentLoop, intercepting events for
-            # state machine management, hook firing, and observability.
-            #
-            # In a full integration, the supervisor would:
-            #   async for agent_event in agent_loop.run(prompt):
-            #       yield supervisor_event(agent_event)
-            #
-            # For now, we yield the model turn events for the caller
-            # to integrate with their existing AgentLoop.
+            # Fire pre-model hooks
+            await hooks.fire_before(
+                SupervisorHookPoint.PRE_MODEL_TURN,
+                {"prompt": prompt, "run_id": run_id},
+            )
 
-            # FIX: observe MODEL_TURN_END BEFORE yielding it, and use the
-            # correct event kind (was MODEL_TURN_START — wrong kind, wrong time).
-            # observer.observe() must be called before yield so the metrics are
-            # recorded in the observer before the caller receives the event.
+            # Drive the agent loop if provided, consuming its events
+            # and wrapping them as supervisor events for observability.
+            turn_count = 0
+            if agent_loop is not None:
+                try:
+                    async for agent_event in agent_loop.run(
+                        prompt, session_id=session_id
+                    ):
+                        # Track turns for the observer
+                        event_kind = getattr(agent_event, "kind", None)
+                        if event_kind is not None:
+                            kind_value = (
+                                event_kind.value
+                                if hasattr(event_kind, "value")
+                                else str(event_kind)
+                            )
+                        else:
+                            kind_value = "unknown"
+
+                        # Count turn completions
+                        from obscura.core.types import AgentEventKind as _AEK
+
+                        if event_kind == _AEK.TURN_COMPLETE:
+                            turn_count += 1
+                        elif event_kind == _AEK.TOOL_CALL:
+                            # Transition to RUNNING_TOOLS on tool calls
+                            if sm.state == SupervisorState.RUNNING_MODEL:
+                                try:
+                                    t_evt = sm.transition(
+                                        SupervisorState.RUNNING_TOOLS
+                                    )
+                                    yield t_evt
+                                    heartbeat.update_state(
+                                        SupervisorState.RUNNING_TOOLS
+                                    )
+                                except Exception:
+                                    pass
+                        elif event_kind == _AEK.TURN_START:
+                            # Transition back to RUNNING_MODEL on new turns
+                            if sm.state == SupervisorState.RUNNING_TOOLS:
+                                try:
+                                    t_evt = sm.transition(
+                                        SupervisorState.RUNNING_MODEL
+                                    )
+                                    yield t_evt
+                                    heartbeat.update_state(
+                                        SupervisorState.RUNNING_MODEL
+                                    )
+                                except Exception:
+                                    pass
+
+                        # Wrap agent event as supervisor event
+                        sv_event = SupervisorEvent(
+                            kind=SupervisorEventKind.MODEL_TURN_END,
+                            run_id=run_id,
+                            session_id=session_id,
+                            payload={
+                                "agent_event_kind": kind_value,
+                                "agent_event": agent_event,
+                            },
+                        )
+                        observer.observe(sv_event)
+                        yield sv_event
+                except Exception as loop_exc:
+                    logger.error(
+                        "Agent loop error in supervisor: %s", loop_exc
+                    )
+                    yield SupervisorEvent(
+                        kind=SupervisorEventKind.RUN_FAILED,
+                        run_id=run_id,
+                        session_id=session_id,
+                        payload={"error": str(loop_exc), "source": "agent_loop"},
+                    )
+            else:
+                # Legacy path: no agent_loop provided — yield placeholder
+                # for the caller to integrate with their own AgentLoop.
+                pass
+
+            # Ensure we're back in RUNNING_MODEL before transitioning
+            if sm.state == SupervisorState.RUNNING_TOOLS:
+                try:
+                    t_evt = sm.transition(SupervisorState.RUNNING_MODEL)
+                    yield t_evt
+                except Exception:
+                    pass
+
+            # Fire post-model hooks
+            await hooks.fire_after(
+                SupervisorHookPoint.POST_MODEL_TURN,
+                {"run_id": run_id},
+            )
+
+            _final_turn_count = turn_count if agent_loop is not None else 1  # noqa: F841
             _turn_end_event = SupervisorEvent(
                 kind=SupervisorEventKind.MODEL_TURN_END,
                 run_id=run_id,
                 session_id=session_id,
-                payload={"turn": 1},
+                payload={"turn": _final_turn_count},
             )
             observer.observe(_turn_end_event)
             yield _turn_end_event

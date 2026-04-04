@@ -26,6 +26,21 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Tools the dream consolidation agent is allowed to use.
+_DREAM_AGENT_TOOLS: list[str] = [
+    "read_text_file",
+    "write_text_file",
+    "edit_text_file",
+    "append_text_file",
+    "list_directory",
+    "find_files",
+    "grep_files",
+    "goal_list",
+    "goal_get",
+    "goal_update",
+    "goal_complete",
+]
+
 _MEMORY_DIR = Path.home() / ".obscura" / "memory"
 _LOCK_FILE = _MEMORY_DIR / ".consolidate-lock"
 _MEMORY_INDEX = _MEMORY_DIR / "MEMORY.md"
@@ -65,6 +80,29 @@ Look for new information worth persisting:
 - Remove pointers to deleted files
 - Remove stale or redundant entries
 
+## Phase 5 — Task Carry-forward
+Scan daily logs and session transcripts for incomplete work items:
+1. Look for `todo_write` tool calls or TodoWrite calls that contain tasks in
+   `in_progress` or `pending` state at session end
+2. Look for explicit statements like "next step is...", "still need to...",
+   "TODO:", "FIXME:", "need to implement..."
+3. Look for partial work — files being edited, tests that were failing,
+   features in mid-implementation
+
+Write results to `pending_tasks.md` in the memory directory:
+- Format each task as: `- [ ] <task description> (from: <source date/session>)`
+- Include enough context to resume the task cold (file names, function names, ticket IDs)
+- Mark previously-completed tasks with `[x]` and keep for 7 days, then remove
+- Keep the file under 50 lines; drop oldest completed tasks first
+
+## Phase 6 — Goal Progress Review
+Read all goal files in ~/.obscura/goals/ (use goal_list, then goal_get for each):
+1. For each active/in_progress goal, scan today's daily log for related work
+2. Update the goal's `progress` percentage based on evidence (use goal_update)
+3. If all acceptance criteria appear met, mark the goal completed (goal_complete)
+4. If no progress in 7+ days, add a note to the goal suggesting review or abandonment
+5. Do NOT create or delete goals — only update existing ones
+
 Rules:
 - Never fabricate information — only persist what's in the logs/transcripts
 - Prefer updating existing files over creating new ones
@@ -102,6 +140,10 @@ class DreamConsolidator:
     def _memory_index(self) -> Path:
         """Path to the MEMORY.md index file."""
         return self._memory_dir() / "MEMORY.md"
+
+    def _pending_tasks_file(self) -> Path:
+        """Path to the pending_tasks.md carry-forward file."""
+        return self._memory_dir() / "pending_tasks.md"
 
     def should_run(self) -> bool:
         """Check all gates to determine if consolidation should run."""
@@ -202,8 +244,9 @@ class DreamConsolidator:
                 system_prompt=CONSOLIDATION_PROMPT,
             ) as client:
                 result = await client.run_loop_to_completion(
-                    "Begin memory consolidation. Follow all four phases in the system prompt.",
+                    "Begin memory consolidation. Follow all phases in the system prompt.",
                     max_turns=15,
+                    tool_allowlist=_DREAM_AGENT_TOOLS,
                 )
                 logger.debug(
                     "Dream agent output (%d chars): %s...",
@@ -241,7 +284,17 @@ class DreamConsolidator:
 
     def _sessions_since(self, since_ts: float) -> int:
         """Count event store sessions modified since timestamp."""
-        events_db = Path.home() / ".obscura" / "events.db"
+        try:
+            from obscura.core.config import ObscuraConfig
+
+            cfg = ObscuraConfig.from_env()
+            events_db = (
+                Path(cfg.data_dir) / "events.db"
+                if hasattr(cfg, "data_dir")
+                else Path.home() / ".obscura" / "events.db"
+            )
+        except Exception:
+            events_db = Path.home() / ".obscura" / "events.db"
         if not events_db.exists():
             return 0
         try:

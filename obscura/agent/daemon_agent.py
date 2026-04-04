@@ -192,7 +192,8 @@ class DaemonAgent:
         self._send_event_store = MessageSendEventStore()
         self._runtime_event_store = MessageRuntimeEventStore()
         self._session_timeout: float = 3600.0  # 1 hour inactivity resets thread
-        self._trigger_timeout_s: float = 90.0  # LLM 60s + send 15s + 15s buffer
+        self._trigger_timeout_s: float = 600.0  # safety-net for entire trigger (10 min)
+        self._turn_timeout_s: float = 120.0  # per-turn stream timeout
         self._heartbeat_interval_s: float = 15.0
         self._last_heartbeat_monotonic: float = 0.0
         self._lock_name = f"daemon:{self._name}"
@@ -509,6 +510,7 @@ class DaemonAgent:
         result = await self._client.run_loop_to_completion(
             prompt,
             max_turns=self._max_turns,
+            turn_timeout_s=self._turn_timeout_s,
         )
 
         await self._emit_output(result, is_final=True)
@@ -637,9 +639,10 @@ class DaemonAgent:
         )
         try:
             await self._client.reset_session()
-            result = await asyncio.wait_for(
-                self._client.run_loop_to_completion(prompt, max_turns=self._max_turns),
-                timeout=60.0,
+            result = await self._client.run_loop_to_completion(
+                prompt,
+                max_turns=self._max_turns,
+                turn_timeout_s=self._turn_timeout_s,
             )
         except TimeoutError:
             logger.exception(

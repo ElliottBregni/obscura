@@ -375,7 +375,103 @@ def make_tool_pace_hook(
     return _count_tool_calls, _maybe_inject_reminder, _reset_on_text
 
 
+def bootstrap_hooks(
+    hooks: Any,  # HookRegistry (avoid circular import)
+    *,
+    policy_engine: Any | None = None,
+    audit_store: list[Any] | None = None,
+    redact_patterns: list[str] | None = None,
+    preflight_validator: Any | None = None,
+    memory_loader: Callable[[], str] | None = None,
+    enable_tool_eval: bool = True,
+    enable_eval_memory: bool = True,
+    enable_tool_pace: bool = True,
+    tool_pace_threshold: int = 3,
+) -> None:
+    """Auto-register all lifecycle hooks onto a HookRegistry.
+
+    This is the single wiring point that connects the built-in lifecycle
+    hook factories to an agent's hook registry.  Call this during agent
+    initialization to activate policy gating, audit logging, secret
+    redaction, preflight validation, tool eval, and tool pacing.
+
+    Parameters
+    ----------
+    hooks:
+        A :class:`HookRegistry` instance.
+    policy_engine:
+        Optional :class:`PluginPolicyEngine`.  When provided, tool calls
+        are gated by policy.
+    audit_store:
+        Optional list to accumulate :class:`BrokerAuditEntry` records.
+    redact_patterns:
+        Optional list of regex patterns for secret redaction.
+    preflight_validator:
+        Optional :class:`PreflightValidator`.  When provided, AGENT_START
+        events trigger preflight validation.
+    memory_loader:
+        Optional callable returning memory text to inject into TURN_START.
+    enable_tool_eval:
+        When True, register the tool-eval hook (ruff checks on written files).
+    enable_eval_memory:
+        When True, register the eval-memory injection hook.
+    enable_tool_pace:
+        When True, register tool-pacing hooks.
+    tool_pace_threshold:
+        Consecutive tool calls before injecting a status reminder.
+    """
+    # Policy gate (before TOOL_CALL)
+    if policy_engine is not None:
+        hooks.add_before(make_policy_gate_hook(policy_engine), AgentEventKind.TOOL_CALL)
+        logger.info("Registered policy gate hook")
+
+    # Audit (after all events)
+    audit_hook = make_audit_hook(audit_store)
+    hooks.add_after(audit_hook, None)  # wildcard — fires on every event
+    logger.info("Registered audit hook")
+
+    # Secret redaction (after TOOL_RESULT)
+    if redact_patterns:
+        hooks.add_after(make_redact_hook(redact_patterns), AgentEventKind.TOOL_RESULT)
+        logger.info("Registered redact hook with %d patterns", len(redact_patterns))
+
+    # Preflight (before AGENT_START)
+    if preflight_validator is not None:
+        hooks.add_before(
+            make_preflight_hook(preflight_validator), AgentEventKind.AGENT_START
+        )
+        logger.info("Registered preflight hook")
+
+    # Memory injection (before TURN_START)
+    if memory_loader is not None:
+        hooks.add_before(
+            make_memory_inject_hook(memory_loader), AgentEventKind.TURN_START
+        )
+        logger.info("Registered memory inject hook")
+
+    # Tool eval (before TOOL_RESULT — appends diagnostics)
+    if enable_tool_eval:
+        hooks.add_before(make_tool_eval_hook(), AgentEventKind.TOOL_RESULT)
+        logger.info("Registered tool eval hook")
+
+    # Eval memory injection (before TURN_START)
+    if enable_eval_memory:
+        hooks.add_before(
+            make_eval_memory_inject_hook(), AgentEventKind.TURN_START
+        )
+        logger.info("Registered eval memory inject hook")
+
+    # Tool pacing (multi-hook)
+    if enable_tool_pace:
+        count_hook, remind_hook, reset_hook = make_tool_pace_hook(tool_pace_threshold)
+        hooks.add_after(count_hook, AgentEventKind.TOOL_CALL)
+        hooks.add_before(remind_hook, AgentEventKind.TURN_START)
+        hooks.add_after(reset_hook, AgentEventKind.TEXT_DELTA)
+        logger.info("Registered tool pace hooks (threshold=%d)", tool_pace_threshold)
+
+
 __all__ = [
+    "bootstrap_hooks",
     "make_audit_hook",
     "make_eval_memory_inject_hook",
     "make_memory_inject_hook",

@@ -217,6 +217,7 @@ class KairosEngine:
 
         Injects a ``<tick>`` prompt into the active AgentLoop so the model
         can take a proactive action without waiting for user input.
+        Includes the top-priority goal hint so the model has fresh context.
         """
         loop = self._active_loop
         if loop is None:
@@ -224,7 +225,17 @@ class KairosEngine:
         try:
             inject = getattr(loop, "inject_user_input", None)
             if callable(inject):
-                inject(f"<tick>#{tick_count}</tick>")
+                goal_hint = ""
+                try:
+                    from obscura.kairos.goals import GoalBoard
+
+                    top = GoalBoard().active_goals()
+                    top = [g for g in top if not g.is_blocked][:1]
+                    if top:
+                        goal_hint = f" focus={top[0].id}({top[0].progress}%)"
+                except Exception:
+                    pass
+                inject(f"<tick>#{tick_count}{goal_hint}</tick>")
         except Exception:
             logger.debug("Proactive tick injection failed", exc_info=True)
 
@@ -256,7 +267,25 @@ class KairosEngine:
             "- Act on pending tasks during idle periods",
             "- Consolidate memories during dream cycles",
             "- Respect the 15-second blocking budget for proactive actions",
+            "- Work toward active goals on the goal board",
         ]
+
+        # Inject active goal summary.
+        try:
+            from obscura.kairos.goals import GoalBoard
+
+            summary = GoalBoard().active_summary(max_lines=8)
+            if summary:
+                parts.append("")
+                parts.append("## Active Goals")
+                parts.append(summary)
+                parts.append("")
+                parts.append(
+                    "When receiving <tick> prompts, prioritize the highest-priority "
+                    "unblocked goal. Take one small, concrete action per tick."
+                )
+        except Exception:
+            pass
         if self._proactive is not None and self._proactive.is_running:
             parts.append("")
             parts.append(self._proactive.get_system_prompt_addition())

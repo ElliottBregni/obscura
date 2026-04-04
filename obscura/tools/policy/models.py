@@ -18,22 +18,83 @@ def _empty_frozenset() -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-def inject_subagent_context(agent: Any) -> None:
+def inject_subagent_context(
+    agent: Any,
+    *,
+    tool_allowlist: list[str] | None = None,
+) -> None:
     """Inject sub-agent constraints into a child agent before it runs.
 
     Called by ``make_task_tool`` immediately before ``agent.run_loop()``.
 
-    Prepends ``SUBAGENT_SYSTEM_PROMPT`` to the agent's system prompt so the
-    model is told to use minimal native tools and not attempt unavailable ones.
+    This function does three things:
+    1. Prepends ``SUBAGENT_SYSTEM_PROMPT`` to the agent's system prompt.
+    2. Sets ``config.tool_allowlist`` so ``AgentLoop`` enforces it at
+       execution time.
+    3. If the agent already has a client with a hook registry, installs a
+       before-TOOL_CALL hook that rewrites common Claude Code native tool
+       names (Glob, Grep, Read, Edit, Write, Bash) to their Obscura
+       equivalents (find_files, grep_files, read_text_file, etc.).
     """
+    import logging
+
     from obscura.core.system_prompts import SUBAGENT_SYSTEM_PROMPT
 
+    _log = logging.getLogger(__name__)
+
+    # --- 1. System prompt ---------------------------------------------------
     if hasattr(agent, "_system_prompt"):
         existing = agent._system_prompt or ""
         agent._system_prompt = (
             SUBAGENT_SYSTEM_PROMPT + "\n\n---\n\n" + existing
             if existing
             else SUBAGENT_SYSTEM_PROMPT
+        )
+
+    # --- 2. Tool allowlist --------------------------------------------------
+    if tool_allowlist is not None and hasattr(agent, "config"):
+        agent.config.tool_allowlist = tool_allowlist
+        _log.debug(
+            "Set tool_allowlist on agent '%s': %s",
+            getattr(agent.config, "name", "?"),
+            tool_allowlist,
+        )
+
+    # --- 3. Native-tool rewrite hook ----------------------------------------
+    _NATIVE_REWRITES: dict[str, str] = {
+        "Glob": "find_files",
+        "Grep": "grep_files",
+        "Read": "read_text_file",
+        "Edit": "edit_text_file",
+        "Write": "write_text_file",
+        "Bash": "run_shell",
+    }
+
+    try:
+        from obscura.core.hooks import HookRegistry
+        from obscura.core.types import AgentEventKind
+
+        client = getattr(agent, "_client", None)
+        if client is not None:
+            hook_reg: HookRegistry | None = getattr(client, "hooks", None)
+            if hook_reg is None:
+                hook_reg = HookRegistry()
+                client.hooks = hook_reg
+
+            def _rewrite_native_tools(event: Any) -> Any:
+                """Rewrite Claude Code native tool names to Obscura equivalents."""
+                tool_name = getattr(event, "tool_name", None)
+                if tool_name and tool_name in _NATIVE_REWRITES:
+                    event.tool_name = _NATIVE_REWRITES[tool_name]
+                return event
+
+            hook_reg.add_before(_rewrite_native_tools, AgentEventKind.TOOL_CALL)
+            _log.debug("Installed native-tool rewrite hook on agent")
+    except Exception as exc:
+        _log.warning(
+            "Could not install native-tool rewrite hook — sub-agent may "
+            "fail with NOT_FOUND errors for Glob/Grep/Read/Edit/Write/Bash: %s",
+            exc,
         )
 
 

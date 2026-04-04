@@ -622,18 +622,44 @@ class ClaudeBackend:
         return "\n".join(lines)
 
     def _build_mcp_tools(self) -> dict[str, Any]:
-        """Convert registered ToolSpecs to a Claude in-process MCP server."""
+        """Convert registered ToolSpecs to a Claude in-process MCP server.
+
+        Wraps each handler with result normalisation so that JSON-string
+        returns from Obscura tools are converted to plain text content
+        that the MCP protocol expects.
+        """
+        import functools
+        import inspect
+
         from claude_agent_sdk import create_sdk_mcp_server
         from claude_agent_sdk import tool as claude_tool
 
+        def _wrap_handler(handler: Any) -> Any:
+            """Ensure the handler always returns a plain string for MCP."""
+            if inspect.iscoroutinefunction(handler):
+
+                @functools.wraps(handler)
+                async def _async_wrapper(**kwargs: Any) -> str:
+                    result = await handler(**kwargs)
+                    return str(result) if result is not None else ""
+
+                return _async_wrapper
+
+            @functools.wraps(handler)
+            def _sync_wrapper(**kwargs: Any) -> str:
+                result = handler(**kwargs)
+                return str(result) if result is not None else ""
+
+            return _sync_wrapper
+
         claude_tools: list[Any] = []
         for spec in self._tools:
-            # Create a claude @tool-decorated function for each ToolSpec
+            wrapped = _wrap_handler(spec.handler)
             decorated = claude_tool(
                 spec.name,
                 spec.description,
                 spec.parameters,
-            )(spec.handler)
+            )(wrapped)
             claude_tools.append(decorated)
 
         server = create_sdk_mcp_server(

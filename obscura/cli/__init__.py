@@ -29,6 +29,34 @@ import click
 
 _log = logging.getLogger("obscura.cli")
 
+
+def _sync_guide_files() -> None:
+    """Keep OBSCURA.md and CLAUDE.md in sync at startup.
+
+    Rules:
+      - OBSCURA.md exists → overwrite CLAUDE.md with its content.
+      - OBSCURA.md missing, CLAUDE.md exists → create OBSCURA.md from CLAUDE.md.
+      - Neither exists → no-op.
+
+    Only operates on the current working directory.  Failures are
+    silently logged — this must never block startup.
+    """
+    cwd = Path.cwd()
+    obscura_md = cwd / "OBSCURA.md"
+    claude_md = cwd / "CLAUDE.md"
+
+    try:
+        if obscura_md.is_file():
+            content = obscura_md.read_text(encoding="utf-8")
+            claude_md.write_text(content, encoding="utf-8")
+            _log.debug("Synced CLAUDE.md ← OBSCURA.md")
+        elif claude_md.is_file():
+            content = claude_md.read_text(encoding="utf-8")
+            obscura_md.write_text(content, encoding="utf-8")
+            _log.debug("Created OBSCURA.md ← CLAUDE.md")
+    except OSError as exc:
+        _log.debug("Guide file sync failed: %s", exc)
+
 _session_state: dict[str, bool] = {"titled": False}
 
 
@@ -229,6 +257,14 @@ async def send_message(
     from obscura.cli.renderer import create_renderer
 
     renderer = create_renderer(streaming_status=streaming_status)
+    # Feed session context into the modern renderer's status bar
+    if hasattr(renderer, "set_session_context"):
+        _ps = getattr(ctx, "_prompt_status", None)
+        renderer.set_session_context(
+            title=getattr(_ps, "session_title", "") or "",
+            model=ctx.model or "",
+            ctx_pct=getattr(_ps, "ctx_pct", 0),
+        )
     # Register active renderer so prompt can expand previews while streaming
     try:
         from obscura.cli.render import set_active_renderer
@@ -597,7 +633,7 @@ async def send_message(
 
             title = await generate_session_title(text, ctx.client._backend)
             if title:
-                await ctx.store.update_summary(ctx.session_id, title)
+                await ctx.store.update_session(ctx.session_id, summary=title)
                 # Update the prompt status so the title appears in the banner/toolbar
                 if hasattr(ctx, "_prompt_status") and ctx._prompt_status is not None:
                     ctx._prompt_status.session_title = title
@@ -713,6 +749,28 @@ async def _start_imessage_daemon(
             system_prompt=agent_def.system_prompt,
         )
         await daemon_client.__aenter__()
+
+        # Load persisted schedules from ~/.obscura/schedules.json
+        try:
+            from obscura.agent.daemon_agent import ScheduleTrigger as _ST
+
+            _schedules_path = Path.home() / ".obscura" / "schedules.json"
+            if _schedules_path.is_file():
+                import json as _sched_json
+
+                for sched in _sched_json.loads(
+                    _schedules_path.read_text(encoding="utf-8"),
+                ):
+                    triggers.append(
+                        _ST(
+                            cron=sched["cron"],
+                            prompt=sched["prompt"],
+                            description=f"{sched.get('id', '?')}: {sched['prompt'][:40]}",
+                            notify_user=bool(sched.get("notify", True)),
+                        ),
+                    )
+        except Exception as _sched_exc:
+            _log.debug("Failed to load persisted schedules: %s", _sched_exc)
 
         daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
         daemon._bus = bus
@@ -974,6 +1032,14 @@ async def _repl(
             from obscura.tools.task_tools import get_task_tool_specs
 
             system_tools.extend(get_task_tool_specs())
+        except Exception:
+            pass
+
+        # Add goal board tools (goal_create, goal_list, goal_get, etc.)
+        try:
+            from obscura.tools.goal_tools import get_goal_tool_specs
+
+            system_tools.extend(get_goal_tool_specs())
         except Exception:
             pass
 
@@ -1499,15 +1565,6 @@ async def _repl(
                     await _kairos_engine.start()
         except Exception as _e:
             _swallow("kairos_start", _e)
-
-        # Wire the active AgentLoop into KairosEngine for proactive tick injection.
-        if _kairos_engine is not None:
-            try:
-                _agent_loop = getattr(client, "_loop", None)
-                if _agent_loop is not None:
-                    _kairos_engine.register_agent_loop(_agent_loop)
-            except Exception as _e:
-                _swallow("kairos_loop_wire", _e)
 
         # Wire the active AgentLoop into KairosEngine for proactive tick injection.
         if _kairos_engine is not None:
@@ -2314,6 +2371,9 @@ def main(
     for h in cli_logger.handlers:
         if h.__class__.__name__ == "InfoHandler":
             h.setLevel(level)
+
+    # Sync OBSCURA.md ↔ CLAUDE.md before anything else touches the workspace.
+    _sync_guide_files()
 
     # Compile workspace if specified
     compiled_ws = None

@@ -526,30 +526,59 @@ expand_thinking = _expand_thinking_action
 
 
 def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
-    """Build a Claude Code-style bottom toolbar with shortcut hints.
+    """Build a Claude Code-style bottom toolbar.
 
-    Format: ! for bash · /help for commands · esc+enter for newline
+    Left side:  session title (or session ID) · model · context %
+    Right side: shortcut hints
     """
     if prompt_status is None:
         return "  <b>!</b> for bash · <b>/help</b> for commands · <b>esc+enter</b> for newline"
 
-    parts: list[str] = []
+    left_parts: list[str] = []
+    right_parts: list[str] = []
+
+    # Session title or short ID
+    if prompt_status.session_title:
+        left_parts.append(
+            f"<b>{_html.escape(prompt_status.session_title)}</b>"
+        )
+    elif prompt_status.session_id:
+        left_parts.append(
+            f"<style fg='#6c7086'>{_html.escape(prompt_status.session_id[:8])}</style>"
+        )
+
+    # Model
+    if prompt_status.model:
+        left_parts.append(_html.escape(prompt_status.model))
+
+    # Context usage
+    if prompt_status.ctx_pct > 0:
+        pct = prompt_status.ctx_pct
+        if pct >= 80:
+            ctx_str = f"<style fg='#f38ba8'>{pct}% context</style>"
+        elif pct >= 60:
+            ctx_str = f"<style fg='#fab387'>{pct}% context</style>"
+        else:
+            ctx_str = f"{pct}% context"
+        left_parts.append(ctx_str)
 
     # Task count if active
     if prompt_status.task_count > 0:
-        parts.append(f"<b>{prompt_status.task_count}</b> tasks")
+        left_parts.append(f"<b>{prompt_status.task_count}</b> tasks")
 
     # Agent count
     if prompt_status.running_agents:
         n = len(prompt_status.running_agents)
-        parts.append(f"<b>{n}</b> agent{'s' if n != 1 else ''}")
+        left_parts.append(f"<b>{n}</b> agent{'s' if n != 1 else ''}")
 
-    # Shortcut hints
-    parts.append("<b>!</b> for bash")
-    parts.append("<b>/help</b> for commands")
-    parts.append("<b>esc+enter</b> for newline")
+    # Shortcut hints (right side)
+    right_parts.append("<b>!</b> bash")
+    right_parts.append("<b>/help</b>")
+    right_parts.append("<b>esc+enter</b> newline")
 
-    return "  " + " · ".join(parts)
+    left = " · ".join(left_parts)
+    right = " · ".join(right_parts)
+    return f"  {left}    {right}"
 
 
 def create_prompt_session(

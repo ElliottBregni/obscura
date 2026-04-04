@@ -78,14 +78,19 @@ async def generate_away_summary(
         preview = text[:300].replace("\n", " ")
         context_parts.append(f"[{role}] {preview}")
 
-    _context = "\n".join(context_parts)
+    context = "\n".join(context_parts)
 
-    # In a full implementation, this would call the LLM with
-    # AWAY_SUMMARY_PROMPT + context. For now, extract from last
-    # assistant message.
+    # Try LLM-based summary first.
+    try:
+        llm_summary = await _generate_llm_summary(context)
+        if llm_summary:
+            return f"Welcome back. {llm_summary}"
+    except Exception:
+        pass
+
+    # Fallback: extract first sentence of last assistant message.
     for role, text in reversed(recent):
         if role == "assistant":
-            # Take first sentence as summary.
             sentences = text.split(". ")
             if sentences:
                 summary = sentences[0].strip()
@@ -93,3 +98,31 @@ async def generate_away_summary(
                     summary = summary[:197] + "..."
                 return f"Welcome back. {summary}."
     return ""
+
+
+async def _generate_llm_summary(context: str) -> str:
+    """Call the LLM with AWAY_SUMMARY_PROMPT + context to generate a summary.
+
+    Returns an empty string if the LLM is unavailable or fails.
+    """
+    try:
+        from obscura.core.client import ObscuraClient
+        from obscura.core.config import ObscuraConfig
+
+        cfg = ObscuraConfig.from_env()
+        prompt = f"{AWAY_SUMMARY_PROMPT}\n\nRecent conversation:\n{context[:3000]}"
+        async with ObscuraClient(
+            cfg.default_backend,
+            model=cfg.default_model or None,
+            system_prompt="You are a concise assistant summarizing recent work context.",
+        ) as client:
+            result = await client.run_loop_to_completion(prompt, max_turns=1)
+            # Strip to first 3 sentences max.
+            sentences = result.strip().split(". ")
+            summary = ". ".join(sentences[:3]).strip()
+            if summary and not summary.endswith("."):
+                summary += "."
+            return summary
+    except Exception:
+        logger.debug("LLM away summary failed, using fallback", exc_info=True)
+        return ""

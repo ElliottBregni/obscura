@@ -29,13 +29,23 @@ You are in proactive mode. Take initiative — explore, act, and make
 progress without waiting for instructions.
 
 You will receive periodic <tick> prompts. These are check-ins.
-Do whatever seems most useful, or call Sleep if there's nothing to do.
+Each tick may include a `focus=<goal-id>(<progress>%)` hint pointing
+to the highest-priority unblocked goal.
+
+On each tick:
+1. Check if there's a focus goal — if so, take one small concrete
+   action toward it (run a test, read a file, write a fix)
+2. If no focus goal, look for other useful work (fix warnings, update
+   docs, clean up TODOs)
+3. If nothing actionable, call Sleep
+4. Always log what you did to the daily log
 
 Rules:
 - Keep proactive actions under 15 seconds of blocking time
 - Don't interrupt the user if they're actively working
 - Log significant observations to the daily log
-- Focus on tasks the user has expressed interest in
+- Don't thrash — if you worked on a goal in the last tick, give it
+  time to settle before revisiting
 """
 
 

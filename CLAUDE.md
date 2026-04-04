@@ -1,8 +1,12 @@
-# CLAUDE.md
+# Obscura — Developer Guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI agents and humans working with code in this repository.
+
+> **Sync notice:** This file and `CLAUDE.md` share identical content. Edit either one, then copy to the other.
 
 ## Build & Development
+
+Requirements: Python 3.13+, uv, Node.js (for some tooling), optional Homebrew on macOS.
 
 ```bash
 # Install (uses uv for dependency resolution)
@@ -11,10 +15,19 @@ uv sync
 # Install with extras
 uv sync --extra dev --extra server --extra providers
 
+# Additional extras
+uv sync --extra voice              # Voice input/STT
+uv sync --extra server --extra telemetry  # API mode + observability
+
 # Run the CLI
 obscura                          # interactive REPL, default backend: copilot
 obscura -b claude                # use Claude backend
 obscura -b claude -m claude-sonnet-4-5-20250929 "one-shot prompt"
+```
+
+Server (FastAPI factory at `obscura/server/__init__.py:create_app`):
+```bash
+uv run python -m uvicorn obscura.server:create_app --factory --host 0.0.0.0 --port 8080
 ```
 
 ## Testing
@@ -33,7 +46,9 @@ pytest tests/unit/obscura/core/test_lifecycle.py -v -k "test_policy_gate_denies"
 pytest tests/ --cov=obscura --cov-report=term-missing
 
 # End-to-end tests (requires running server)
-pytest tests/ --run-e2e
+export OBSCURA_URL=http://localhost:8080
+export OBSCURA_TOKEN=local-dev-token
+pytest tests/e2e/ -v --run-e2e
 ```
 
 **Test conventions**: `asyncio_mode = "auto"` in pyproject.toml — all async tests run automatically without `@pytest.mark.asyncio`. Conftest provides autouse fixtures that reset singletons, disable OTEL, and route memory to tmp dirs.
@@ -129,6 +144,9 @@ Single-writer coordinator: `acquire_lock → build_context → run_model ⇄ run
 - **Python 3.13+** required (`requires-python = ">=3.13"`)
 - **async throughout** — agent loop, hooks, broker, event store all use `async`/`await`
 - **Type aliases** for hook signatures: `BeforeHook = Callable[[AgentEvent], Awaitable[AgentEvent | None] | AgentEvent | None]`
+- Tools: Define via `@tool` in `obscura/core/tools.py`; keep parameters JSON-schema friendly. Aliases are heavily normalized, so prefer canonical names when calling from agents.
+- Telemetry: Tool calls wrapped with OTel spans and metrics; server can enable OTel via env (`OTEL_ENABLED`, etc.).
+- Config via env: See `obscura/core/config.py` for supported vars (e.g., `OBSCURA_AUTH_ENABLED`, rate limits, A2A settings, Kairos toggles, undercover mode).
 
 ## Environment
 
@@ -137,89 +155,20 @@ Plugin Python dependencies install into `~/.obscura/venv/` (managed by `uv`). Th
 ## Docker
 
 ```bash
+docker build -t obscura:dev .
+docker run --rm -p 8080:8080 obscura:dev
+
 make dev-up          # docker-compose dev environment
 make dev-down
 make dev-logs
 make dev-restart
 ```
 
-Compose files: `docker-compose.{base,dev,staging,prod}.yml`. Environment-specific via `scripts/compose-env.sh`.
+Compose files: `docker-compose.{base,dev,staging,prod}.yml`. Environment-specific via `scripts/compose-env.sh`. Docker image exposes port 8080; health check probes `/health`.
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+## Notes
 
-This project is indexed by GitNexus as **obscura-main** (11423 symbols, 33657 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## When Debugging
-
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/obscura-main/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
-
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
-
-## Impact Risk Levels
-
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/obscura-main/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/obscura-main/clusters` | All functional areas |
-| `gitnexus://repo/obscura-main/processes` | All execution flows |
-| `gitnexus://repo/obscura-main/process/{name}` | Step-by-step execution trace |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
-
-## CLI
-
-- Re-index: `npx gitnexus analyze`
-- Check freshness: `npx gitnexus status`
-- Generate docs: `npx gitnexus wiki`
-
-<!-- gitnexus:end -->
+- Package entry points (pyproject): `obscura` (CLI) and `obscura-mcp` (MCP server).
+- Node tool `@mermaid-js/mermaid-cli` is present in `package.json` (for docs/diagrams).
+- Makefile targets: `make dist` (build), `make lint`, `make typecheck`, `make test`.
+- GitNexus (for contributors/agents editing code): AGENTS.md documents GitNexus workflows (impact analysis, detect changes, safe renames). Use those when modifying symbols or refactoring.

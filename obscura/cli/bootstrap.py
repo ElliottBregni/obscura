@@ -226,6 +226,30 @@ async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
             system_prompt=agent_def.system_prompt,
         )
         await daemon_client.__aenter__()
+        # Load persisted schedules from ~/.obscura/schedules.json
+        try:
+            from obscura.agent.daemon_agent import ScheduleTrigger as _ST
+
+            _schedules_path = Path.home() / ".obscura" / "schedules.json"
+            if _schedules_path.is_file():
+                import json as _json
+
+                for sched in _json.loads(_schedules_path.read_text(encoding="utf-8")):
+                    triggers.append(
+                        _ST(
+                            cron=sched["cron"],
+                            prompt=sched["prompt"],
+                            description=f"{sched.get('id', '?')}: {sched['prompt'][:40]}",
+                            notify_user=bool(sched.get("notify", True)),
+                        ),
+                    )
+        except Exception as _sched_exc:
+            import logging as _sched_log
+
+            _sched_log.getLogger(__name__).debug(
+                "Failed to load persisted schedules: %s", _sched_exc,
+            )
+
         daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
         daemon._bus = bus  # type: ignore[attr-defined]
         task: asyncio.Task[None] = asyncio.create_task(

@@ -138,6 +138,11 @@ class ModernRenderer:
         self._finished = False
         self._frame_count: int = 0
 
+        # Session context for status bar
+        self._session_title: str = ""
+        self._session_model: str = ""
+        self._session_ctx_pct: int = 0
+
         # Tool renderer registry (lazy)
         self._tool_registry: Any = None
 
@@ -200,6 +205,22 @@ class ModernRenderer:
 
     def get_last_thinking(self) -> str:
         return self._thinking_blocks[-1] if self._thinking_blocks else ""
+
+    def set_session_context(
+        self,
+        *,
+        title: str = "",
+        model: str = "",
+        ctx_pct: int = 0,
+    ) -> None:
+        """Update session metadata shown in the streaming status bar."""
+        if title:
+            self._session_title = title
+        if model:
+            self._session_model = model
+        if ctx_pct:
+            self._session_ctx_pct = ctx_pct
+        self._dirty = True
 
     # ── Event handlers ────────────────────────────────────────────────────
 
@@ -360,7 +381,21 @@ class ModernRenderer:
                             # Replace last line to add cursor
                             lines[-1] = last + _styled("▌", STYLE_ACCENT)
 
-        # 3. Spinner with animated dots + elapsed timer
+        # 3. Session status bar (shown during active streaming/thinking)
+        if (self._spinner_visible or self._in_thinking or self._stream_buf) and self._session_title:
+            status_parts: list[str] = []
+            if self._session_title:
+                status_parts.append(self._session_title)
+            if self._session_model:
+                status_parts.append(self._session_model)
+            if self._session_ctx_pct > 0:
+                status_parts.append(f"{self._session_ctx_pct}% context")
+            status_text = "  " + " · ".join(status_parts)
+            if len(status_text) > w:
+                status_text = status_text[:w]
+            lines.append(_styled(status_text, Style(fg=MUTED, dim=True)))
+
+        # 4. Spinner with animated dots + elapsed timer
         if self._spinner_visible:
             spinner_char = _SPINNER_FRAMES[self._spinner_idx % len(_SPINNER_FRAMES)]
             dots = "." * (self._dot_phase + 1)

@@ -110,6 +110,7 @@ class TestDaemonIMessageHandling:
         mock_client.run_loop_to_completion.assert_called_once_with(
             "do something",
             max_turns=15,
+            turn_timeout_s=120.0,
         )
 
     @pytest.mark.asyncio

@@ -18,6 +18,21 @@ from rich.text import Text
 from obscura.core.types import AgentEvent, AgentEventKind
 
 # ---------------------------------------------------------------------------
+# Figures (matching Claude Code's visual language)
+# ---------------------------------------------------------------------------
+
+import platform as _platform
+
+BLACK_CIRCLE = "⏺" if _platform.system() == "Darwin" else "●"
+BULLET = "∙"
+CHECK_MARK = "✓"
+CROSS_MARK = "✗"
+BLOCKQUOTE_BAR = "▎"
+HEAVY_HORIZONTAL = "━"
+LIGHTNING_BOLT = "↯"
+
+
+# ---------------------------------------------------------------------------
 # Theme constants
 # ---------------------------------------------------------------------------
 
@@ -362,7 +377,7 @@ class StreamRenderer:
 
             case AgentEventKind.CONTEXT_COMPACT:
                 console.print(
-                    f"  [yellow]⚡ {markup_escape(_sanitize_text(event.text))}[/]",
+                    f"  [{WARN_COLOR}]{LIGHTNING_BOLT} {markup_escape(_sanitize_text(event.text))}[/]",
                 )
 
             case _:
@@ -458,8 +473,8 @@ class StreamRenderer:
             text = "".join(self._text_buf)
             self._text_buf.clear()
             if text.strip():
-                console.print(Rule(style="dim cyan", characters="─"))
                 safe_text = _sanitize_text(text)
+                console.print()
                 console.print(
                     Markdown(safe_text, code_theme=CODE_THEME),
                     soft_wrap=True,
@@ -475,30 +490,24 @@ class StreamRenderer:
                 self._print_reasoning(text)
 
     def _print_reasoning(self, text: str) -> None:
-        """Display reasoning inline in the chat window."""
+        """Display reasoning inline — compact blockquote style like Claude Code."""
         safe = _sanitize_text(text.strip())
         self._thinking_blocks.append(safe)
 
-        # Determine effort level for display customization.
-        try:
-            from obscura.cli.tui_effects import thinking_indicator
+        # Compact display: blockquote bar + dimmed text (no bordered Panel)
+        lines = safe.split("\n")
+        # Show first few lines, collapse the rest
+        max_preview = 4
+        if len(lines) <= max_preview:
+            preview = safe
+        else:
+            preview = "\n".join(lines[:max_preview]) + f"\n... ({len(lines) - max_preview} more lines)"
 
-            effort = "medium"  # default
-            title = thinking_indicator(effort)
-        except Exception:
-            title = "reasoning"
-
-        console.print(
-            Panel(
-                Text(safe, style="dim italic"),
-                border_style=THINKING_COLOR,
-                title=f"[{THINKING_COLOR}]{title}[/]"
-                if "⟪" not in str(title)
-                else "reasoning",
-                title_align="left",
-                padding=(0, 1),
-            ),
-        )
+        # Render as dimmed blockquote with left bar
+        for line in preview.split("\n"):
+            console.print(
+                f"  [{THINKING_COLOR}]{BLOCKQUOTE_BAR}[/] [dim italic]{markup_escape(line)}[/]",
+            )
 
     @staticmethod
     def _normalize_reasoning_text(raw: str) -> str:
@@ -567,30 +576,51 @@ class StreamRenderer:
         with contextlib.suppress(Exception):
             output.capture_internal(f"TOOL_CALL {name} {_sanitize_text(summary)}")
 
-        console.print(
-            f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]",
-        )
+        # Claude Code style: ⏺ ActionVerb path/to/file
+        action, _, detail = summary.partition(" ")
+        if detail:
+            console.print(
+                f"\n  [{TOOL_COLOR}]{BLACK_CIRCLE}[/] "
+                f"[bold]{markup_escape(action)}[/] "
+                f"[dim]{markup_escape(detail)}[/]",
+            )
+        else:
+            console.print(
+                f"\n  [{TOOL_COLOR}]{BLACK_CIRCLE}[/] "
+                f"[bold]{markup_escape(summary)}[/]",
+            )
 
         # Update toolbar status
         if self._ss is not None:
-            self._ss.active = True  # type: ignore[attr-defined]
-            self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]
-            self._ss.preview = ""  # type: ignore[attr-defined]
+            try:
+                if hasattr(self._ss, "update"):
+                    self._ss.update({"active": True, "text": f"running {summary}...", "preview": ""})
+                else:
+                    self._ss.active = True  # type: ignore[attr-defined]
+                    self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]
+                    self._ss.preview = ""  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     def _show_tool_result(self, event: AgentEvent) -> None:
         raw = event.tool_result or ""
         is_err = event.is_error
 
         if is_err:
-            err_text = _sanitize_text(raw[:200]).replace("\n", " ")
-            console.print(f"  [{ERROR_COLOR}]\u2718 {markup_escape(err_text)}[/]")
+            err_text = _sanitize_text(raw[:300]).replace("\n", " ")
+            if len(err_text) > 120:
+                err_text = err_text[:117] + "..."
+            console.print(
+                f"    [{ERROR_COLOR}]{CROSS_MARK} {markup_escape(err_text)}[/]"
+            )
             return
 
-        # Compact success: one-line snippet
-        snippet = _sanitize_text(raw[:120]).replace("\n", " ")
-        if len(snippet) > 80:
-            snippet = snippet[:77] + "..."
-        console.print(f"  [dim {OK_COLOR}]\u2714 {markup_escape(snippet)}[/]")
+        # Compact success: show a snippet of the result
+        snippet = _sanitize_text(raw[:200]).replace("\n", " ").strip()
+        if len(snippet) > 100:
+            snippet = snippet[:97] + "..."
+        if snippet:
+            console.print(f"    [dim]{markup_escape(snippet)}[/]")
 
     def finish(self) -> None:
         self._stop_status()
@@ -656,16 +686,29 @@ def render_event(event: AgentEvent) -> None:
             pass  # thinking accumulated by StreamRenderer; silent in legacy path
         case AgentEventKind.TOOL_CALL:
             summary = summarize_tool_call(event.tool_name, event.tool_input)
-            console.print(
-                f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]",
-            )
-        case AgentEventKind.TOOL_RESULT:
-            raw = (event.tool_result or "")[:120]
-            snippet = markup_escape(_sanitize_text(raw).replace("\n", " "))
-            if event.is_error:
-                console.print(f"  [{ERROR_COLOR}]\u2718 {snippet}[/]")
+            action, _, detail = summary.partition(" ")
+            if detail:
+                console.print(
+                    f"\n  [{TOOL_COLOR}]{BLACK_CIRCLE}[/] "
+                    f"[bold]{markup_escape(action)}[/] "
+                    f"[dim]{markup_escape(detail)}[/]",
+                )
             else:
-                console.print(f"  [dim {OK_COLOR}]\u2714 {snippet}[/]")
+                console.print(
+                    f"\n  [{TOOL_COLOR}]{BLACK_CIRCLE}[/] "
+                    f"[bold]{markup_escape(summary)}[/]",
+                )
+        case AgentEventKind.TOOL_RESULT:
+            raw = (event.tool_result or "")[:200]
+            snippet = _sanitize_text(raw).replace("\n", " ").strip()
+            if len(snippet) > 100:
+                snippet = snippet[:97] + "..."
+            if event.is_error:
+                console.print(
+                    f"    [{ERROR_COLOR}]{CROSS_MARK} {markup_escape(snippet)}[/]"
+                )
+            elif snippet:
+                console.print(f"    [dim]{markup_escape(snippet)}[/]")
         case _:
             pass
 

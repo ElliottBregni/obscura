@@ -226,21 +226,19 @@ class CopilotBackend:
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient
-        from copilot.types import (
-            CopilotClientOptions,  # pyright: ignore[reportAttributeAccessIssue,reportUnknownVariableType]
-        )
+        from copilot.types import SubprocessConfig
 
         client_opts: Any = None
         if self._auth.github_token:
-            client_opts = CopilotClientOptions(github_token=self._auth.github_token)  # pyright: ignore[reportUnknownVariableType]
+            client_opts = SubprocessConfig(github_token=self._auth.github_token)
 
-        self._client = CopilotClient(client_opts)  # pyright: ignore[reportUnknownArgumentType]
+        self._client = CopilotClient(client_opts)
         await self._client.start()
 
         # Create default session
         session_config = self.build_session_config()
 
-        self._session = await self._client.create_session(session_config)
+        self._session = await self._client.create_session(**session_config)
 
     async def reset_session(self) -> None:
         """Create a fresh session, discarding prior conversation state.
@@ -250,7 +248,7 @@ class CopilotBackend:
         """
         self._ensure_client()
         config = self.build_session_config()
-        self._session = await self._client.create_session(config)
+        self._session = await self._client.create_session(**config)
 
     async def stop(self) -> None:
         """Gracefully shut down the client."""
@@ -273,7 +271,7 @@ class CopilotBackend:
         """Recreate the session after an expiry/idle timeout."""
         self._log.warning("Session expired after idle — recreating session")
         config = self.build_session_config()
-        self._session = await self._client.create_session(config)
+        self._session = await self._client.create_session(**config)
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
@@ -418,7 +416,7 @@ class CopilotBackend:
         """Create a new named session."""
         self._ensure_client()
         config = self.build_session_config(**kwargs)
-        session = await self._client.create_session(config)
+        session = await self._client.create_session(**config)
         ref = SessionRef(
             session_id=session.session_id,
             backend=Backend.COPILOT,
@@ -480,7 +478,7 @@ class CopilotBackend:
 
         # Logical fork fallback: create a fresh session that records parent lineage.
         config = self.build_session_config()
-        session = await self._client.create_session(config)
+        session = await self._client.create_session(**config)
         fork_ref = SessionRef(
             session_id=session.session_id,
             backend=Backend.COPILOT,

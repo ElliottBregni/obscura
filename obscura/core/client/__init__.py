@@ -399,6 +399,7 @@ class ObscuraClient:
         session_id: str | None = None,
         auto_complete: bool = True,
         load_session_history: bool = True,
+        tool_allowlist: list[str] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with automatic tool execution.
@@ -486,6 +487,7 @@ class ObscuraClient:
             backend_name=self._backend_type.value,
             model_name=self._model,
             context_budget=context_budget,
+            tool_allowlist=tool_allowlist,
         )
         self._current_loop = loop
         return loop.run(
@@ -501,6 +503,8 @@ class ObscuraClient:
         *,
         max_turns: int = 10,
         on_confirm: Callable[..., Any] | None = None,
+        turn_timeout_s: float | None = None,
+        tool_allowlist: list[str] | None = None,
         **kwargs: Any,
     ) -> str:
         """Run the agent loop and return the final concatenated text."""
@@ -514,6 +518,8 @@ class ObscuraClient:
             capability_token=self._capability_token,
             backend_name=self._backend_type.value,
             model_name=self._model,
+            turn_timeout_s=turn_timeout_s,
+            tool_allowlist=tool_allowlist,
         )
         return await loop.run_to_completion(prompt, **kwargs)
 
