@@ -40,14 +40,14 @@ Rules:
 
 
 def is_proactive_enabled() -> bool:
-    """Check if proactive mode is enabled."""
-    val = os.environ.get("OBSCURA_PROACTIVE", "").strip().lower()
+    """Check if proactive mode is enabled (Kairos subsystem)."""
+    val = os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").strip().lower()
     return val in ("1", "true", "yes", "on")
 
 
 def set_proactive_mode(enabled: bool) -> None:
-    """Enable or disable proactive mode."""
-    os.environ["OBSCURA_PROACTIVE"] = "1" if enabled else ""
+    """Enable or disable proactive mode (Kairos subsystem)."""
+    os.environ["OBSCURA_KAIROS_PROACTIVE"] = "1" if enabled else "0"
 
 
 class ProactiveMode:
