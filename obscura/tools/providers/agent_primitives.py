@@ -49,7 +49,8 @@ async def _http_json(
 def _env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
-        raise ValueError(f"Missing required env var: {name}")
+        msg = f"Missing required env var: {name}"
+        raise ValueError(msg)
     return value
 
 
@@ -81,7 +82,7 @@ async def censys_search(query: str, per_page: int = 10, **_: Any) -> dict[str, A
 
     api_id = _env("CENSYS_API_ID")
     api_secret = _env("CENSYS_API_SECRET")
-    auth = base64.b64encode(f"{api_id}:{api_secret}".encode("utf-8")).decode("utf-8")
+    auth = base64.b64encode(f"{api_id}:{api_secret}".encode()).decode("utf-8")
     return await _http_json(
         method="POST",
         url="https://search.censys.io/api/v2/hosts/search",
@@ -133,7 +134,11 @@ async def sentinelhub_process(payload: dict[str, Any], **_: Any) -> dict[str, An
     )
 
 
-async def marinetraffic_call(path: str, params: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+async def marinetraffic_call(
+    path: str,
+    params: dict[str, Any] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
     key = _env("MARINETRAFFIC_API_KEY")
     merged = dict(params or {})
     merged.setdefault("api_key", key)
@@ -144,7 +149,11 @@ async def marinetraffic_call(path: str, params: dict[str, Any] | None = None, **
     )
 
 
-async def flightaware_call(path: str, params: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+async def flightaware_call(
+    path: str,
+    params: dict[str, Any] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
     key = _env("FLIGHTAWARE_API_KEY")
     return await _http_json(
         method="GET",
@@ -154,7 +163,11 @@ async def flightaware_call(path: str, params: dict[str, Any] | None = None, **_:
     )
 
 
-async def browserless_content(url: str, wait_until: str = "networkidle", **_: Any) -> dict[str, Any]:
+async def browserless_content(
+    url: str,
+    wait_until: str = "networkidle",
+    **_: Any,
+) -> dict[str, Any]:
     token = _env("BROWSERLESS_TOKEN")
     endpoint = os.environ.get("BROWSERLESS_URL", "https://chrome.browserless.io")
     return await _http_json(
@@ -258,7 +271,11 @@ async def openalex_search(search: str, per_page: int = 25, **_: Any) -> dict[str
     )
 
 
-async def github_graphql(query: str, variables: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+async def github_graphql(
+    query: str,
+    variables: dict[str, Any] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
     token = _env("GITHUB_TOKEN")
     return await _http_json(
         method="POST",
@@ -286,7 +303,12 @@ async def prometheus_query(query: str, **_: Any) -> dict[str, Any]:
     )
 
 
-async def grafana_api(path: str = "/api/health", method: str = "GET", body: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+async def grafana_api(
+    path: str = "/api/health",
+    method: str = "GET",
+    body: dict[str, Any] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
     base = os.environ.get("GRAFANA_URL", "http://127.0.0.1:3000")
     token = os.environ.get("GRAFANA_TOKEN", "").strip()
     headers: dict[str, str] = {}
@@ -312,7 +334,12 @@ async def matrix_send(room_id: str, message: str, **_: Any) -> dict[str, Any]:
     )
 
 
-def nats_publish(subject: str, message: str, server: str = "nats://127.0.0.1:4222", **_: Any) -> dict[str, Any]:
+def nats_publish(
+    subject: str,
+    message: str,
+    server: str = "nats://127.0.0.1:4222",
+    **_: Any,
+) -> dict[str, Any]:
     return _run_cli(["nats", "--server", server, "pub", subject, message])
 
 
@@ -333,6 +360,7 @@ async def healthcheck(**_: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Datadog
 # ---------------------------------------------------------------------------
+
 
 def _dd_headers() -> dict[str, str]:
     """Return Datadog auth headers using DATADOG_API_KEY and DATADOG_APP_KEY env vars."""

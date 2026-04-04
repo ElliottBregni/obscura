@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rich.panel import Panel
@@ -30,6 +30,8 @@ from obscura.cli.render import (
 from obscura.core.paths import resolve_obscura_home
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from obscura.cli.commands import REPLContext
 
 
@@ -131,7 +133,9 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
     try:
         rec = await ctx.store.get_session(ctx.session_id)
         if rec is not None:
-            report.session_status = rec.status.value if hasattr(rec.status, "value") else str(rec.status)
+            report.session_status = (
+                rec.status.value if hasattr(rec.status, "value") else str(rec.status)
+            )
             report.message_count = rec.message_count
     except Exception:
         pass
@@ -170,10 +174,8 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
         pass
 
     # 6. Supervisor health (sync probe via thread)
-    try:
+    with contextlib.suppress(Exception):
         await asyncio.to_thread(_probe_supervisor_sync, report, ctx.session_id)
-    except Exception:
-        pass
 
     report.latency_ms = (time.monotonic() - t0) * 1000.0
     return report
@@ -254,7 +256,9 @@ def _render_heartbeat_rich(report: HeartbeatReport) -> None:
     table.add_column("value")
 
     # Session section
-    sid_short = report.session_id[:16] if len(report.session_id) > 16 else report.session_id
+    sid_short = (
+        report.session_id[:16] if len(report.session_id) > 16 else report.session_id
+    )
     status = report.session_status or "unknown"
     if status == "active":
         status_display = f"[{OK_COLOR}]{status}[/]"
@@ -270,8 +274,13 @@ def _render_heartbeat_rich(report: HeartbeatReport) -> None:
     table.add_row("events", str(report.event_count))
 
     # Tools
-    tools_status = f"[{OK_COLOR}]on[/]" if report.tools_enabled else f"[{WARN_COLOR}]off[/]"
-    table.add_row("tools", f"{tools_status}  [{TOOL_COLOR}]{report.tool_count}[/] registered")
+    tools_status = (
+        f"[{OK_COLOR}]on[/]" if report.tools_enabled else f"[{WARN_COLOR}]off[/]"
+    )
+    table.add_row(
+        "tools",
+        f"{tools_status}  [{TOOL_COLOR}]{report.tool_count}[/] registered",
+    )
 
     # Vector memory
     if report.vector_memory_count > 0 or report.vector_memory_backend:
@@ -290,13 +299,18 @@ def _render_heartbeat_rich(report: HeartbeatReport) -> None:
     # Supervisor (only if DB exists)
     if report.supervisor_db_exists:
         if report.supervisor_lock_held:
-            lock_display = f"[{WARN_COLOR}]held[/] by {report.supervisor_lock_holder[:16]}"
+            lock_display = (
+                f"[{WARN_COLOR}]held[/] by {report.supervisor_lock_holder[:16]}"
+            )
         else:
             lock_display = f"[{OK_COLOR}]free[/]"
         table.add_row("supervisor lock", lock_display)
 
         if report.supervisor_state:
-            table.add_row("supervisor state", f"[{ACCENT_DIM}]{report.supervisor_state}[/]")
+            table.add_row(
+                "supervisor state",
+                f"[{ACCENT_DIM}]{report.supervisor_state}[/]",
+            )
         if report.supervisor_heartbeat_count > 0:
             table.add_row("heartbeats", str(report.supervisor_heartbeat_count))
 
@@ -312,7 +326,7 @@ def _render_heartbeat_rich(report: HeartbeatReport) -> None:
             border_style=ACCENT_DIM,
             expand=False,
             padding=(0, 1),
-        )
+        ),
     )
 
 
@@ -327,7 +341,7 @@ async def cmd_heartbeat(args: str, ctx: REPLContext) -> str | None:
 
     if args.strip() == "--json":
         console.print(
-            Syntax(report.to_json(), "json", theme=CODE_THEME, word_wrap=True)
+            Syntax(report.to_json(), "json", theme=CODE_THEME, word_wrap=True),
         )
     else:
         _render_heartbeat_rich(report)
@@ -352,7 +366,7 @@ async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT policy_id, scope, scope_id, version, hash, created_at "
-            "FROM policy_versions ORDER BY created_at DESC"
+            "FROM policy_versions ORDER BY created_at DESC",
         ).fetchall()
         conn.close()
     except Exception as exc:
@@ -433,7 +447,10 @@ async def cmd_replay(args: str, ctx: REPLContext) -> str | None:
     info_table.add_column("value")
 
     info_table.add_row("run_id", f"[{ACCENT}]{run_id}[/]")
-    info_table.add_row("session_id", run_row["session_id"][:16] if run_row["session_id"] else "")
+    info_table.add_row(
+        "session_id",
+        run_row["session_id"][:16] if run_row["session_id"] else "",
+    )
     info_table.add_row("agent_id", run_row["agent_id"] or "")
     state_val = run_row["state"]
     if state_val == "completed":
@@ -457,7 +474,7 @@ async def cmd_replay(args: str, ctx: REPLContext) -> str | None:
             border_style=ACCENT_DIM,
             expand=False,
             padding=(0, 1),
-        )
+        ),
     )
 
     # Render events

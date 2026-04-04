@@ -1,5 +1,4 @@
-"""
-obscura.tools.lsp — Language Server Protocol tool.
+"""obscura.tools.lsp — Language Server Protocol tool.
 
 Provides code navigation operations via LSP:
   - goToDefinition: Find where a symbol is defined
@@ -11,10 +10,12 @@ Provides code navigation operations via LSP:
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.tools import tool
-from obscura.core.types import ToolSpec
+
+if TYPE_CHECKING:
+    from obscura.core.types import ToolSpec
 
 # Module-level LSP manager (set by REPL/runtime at startup).
 _lsp_manager: Any = None
@@ -60,9 +61,15 @@ def _format_locations(locs: list[dict[str, Any]] | dict[str, Any] | None) -> lis
                 "enum": ["goToDefinition", "findReferences", "hover", "documentSymbol"],
                 "description": "LSP operation to perform.",
             },
-            "file_path": {"type": "string", "description": "Absolute path to the file."},
+            "file_path": {
+                "type": "string",
+                "description": "Absolute path to the file.",
+            },
             "line": {"type": "integer", "description": "1-based line number."},
-            "character": {"type": "integer", "description": "1-based character offset."},
+            "character": {
+                "type": "integer",
+                "description": "1-based character offset.",
+            },
         },
         "required": ["operation", "file_path"],
     },
@@ -74,34 +81,50 @@ async def lsp_tool(
     character: int = 1,
 ) -> str:
     if _lsp_manager is None:
-        return json.dumps({"ok": False, "error": "lsp_not_available", "detail": "LSP server manager not initialized"})
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "lsp_not_available",
+                "detail": "LSP server manager not initialized",
+            },
+        )
 
     client = await _lsp_manager.get_client(file_path)
     if client is None:
-        return json.dumps({"ok": False, "error": "no_server", "detail": f"No LSP server available for {file_path}"})
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "no_server",
+                "detail": f"No LSP server available for {file_path}",
+            },
+        )
 
     try:
         if operation == "goToDefinition":
             result = await client.goto_definition(file_path, line, character)
             locations = _format_locations(result)
-            return json.dumps({
-                "ok": True,
-                "operation": operation,
-                "file_path": file_path,
-                "results": locations,
-                "count": len(locations),
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "operation": operation,
+                    "file_path": file_path,
+                    "results": locations,
+                    "count": len(locations),
+                },
+            )
 
         if operation == "findReferences":
             result = await client.find_references(file_path, line, character)
             locations = _format_locations(result)
-            return json.dumps({
-                "ok": True,
-                "operation": operation,
-                "file_path": file_path,
-                "results": locations,
-                "count": len(locations),
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "operation": operation,
+                    "file_path": file_path,
+                    "results": locations,
+                    "count": len(locations),
+                },
+            )
 
         if operation == "hover":
             result = await client.hover(file_path, line, character)
@@ -117,32 +140,40 @@ async def lsp_tool(
                         c.get("value", str(c)) if isinstance(c, dict) else str(c)
                         for c in contents
                     )
-            return json.dumps({
-                "ok": True,
-                "operation": operation,
-                "file_path": file_path,
-                "content": content,
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "operation": operation,
+                    "file_path": file_path,
+                    "content": content,
+                },
+            )
 
         if operation == "documentSymbol":
             result = await client.document_symbols(file_path)
             symbols = []
             if result:
                 for sym in result:
-                    symbols.append({
-                        "name": sym.get("name", ""),
-                        "kind": sym.get("kind", 0),
-                        "range": f"{sym.get('range', {}).get('start', {}).get('line', 0) + 1}",
-                    })
-            return json.dumps({
-                "ok": True,
-                "operation": operation,
-                "file_path": file_path,
-                "symbols": symbols,
-                "count": len(symbols),
-            })
+                    symbols.append(
+                        {
+                            "name": sym.get("name", ""),
+                            "kind": sym.get("kind", 0),
+                            "range": f"{sym.get('range', {}).get('start', {}).get('line', 0) + 1}",
+                        },
+                    )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "operation": operation,
+                    "file_path": file_path,
+                    "symbols": symbols,
+                    "count": len(symbols),
+                },
+            )
 
-        return json.dumps({"ok": False, "error": "unknown_operation", "detail": operation})
+        return json.dumps(
+            {"ok": False, "error": "unknown_operation", "detail": operation},
+        )
 
     except Exception as exc:
         return json.dumps({"ok": False, "error": "lsp_error", "detail": str(exc)})
@@ -150,4 +181,4 @@ async def lsp_tool(
 
 def get_lsp_tool_specs() -> list[ToolSpec]:
     """Return LSP tool specs for registration."""
-    return [cast(ToolSpec, getattr(lsp_tool, "spec"))]
+    return [cast("ToolSpec", lsp_tool.spec)]

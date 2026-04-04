@@ -26,7 +26,7 @@ def test_tool_approvals_list_and_resolve() -> None:
             tool_use_id="tool-u-1",
             tool_name="run_shell",
             tool_input={"script": "ls"},
-        )
+        ),
     )
 
     client = _make_client()

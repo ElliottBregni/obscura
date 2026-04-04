@@ -1,5 +1,4 @@
-"""
-obscura.internal.sessions — Lightweight session tracking across backends.
+"""obscura.internal.sessions — Lightweight session tracking across backends.
 
 ``SessionStore`` provides in-memory runtime tracking for active sessions.
 Backends that need to map session IDs to SDK objects (threads, etc.) use
@@ -13,12 +12,14 @@ this store.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Mapping, cast
+from typing import TYPE_CHECKING, cast
 
 from obscura.core.types import Backend, SessionRef
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Session store
@@ -35,7 +36,7 @@ class SessionStore:
     """
 
     _sessions: dict[str, SessionRef] = field(
-        default_factory=lambda: cast(dict[str, SessionRef], {})
+        default_factory=lambda: cast("dict[str, SessionRef]", {}),
     )
 
     def add(self, ref: SessionRef) -> None:
@@ -91,7 +92,7 @@ class PersistentSessionStore(SessionStore):
                 {
                     "session_id": ref.session_id,
                     "backend": ref.backend.value,
-                }
+                },
             )
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,11 +112,12 @@ class PersistentSessionStore(SessionStore):
         for raw_item in json.loads(raw):
             if not isinstance(raw_item, Mapping):
                 continue
-            item = cast(Mapping[str, object], raw_item)
+            item = cast("Mapping[str, object]", raw_item)
             session_id_obj = item.get("session_id")
             backend_name_obj = item.get("backend")
             if not isinstance(session_id_obj, str) or not isinstance(
-                backend_name_obj, str
+                backend_name_obj,
+                str,
             ):
                 continue
             session_id = session_id_obj

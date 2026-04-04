@@ -1,5 +1,4 @@
-"""
-obscura.a2a.client — A2A client for invoking remote A2A agents.
+"""obscura.a2a.client — A2A client for invoking remote A2A agents.
 
 Allows Obscura agents to discover, invoke, and monitor remote A2A agents
 using standard protocol bindings (JSON-RPC, REST, SSE).
@@ -22,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, Self
 
 import httpx
 
@@ -36,6 +35,9 @@ from obscura.integrations.a2a.types import (
     TaskStatusUpdateEvent,
     TextPart,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ class A2AClient:
         Optional bearer token for authentication.
     timeout:
         HTTP request timeout in seconds.
+
     """
 
     def __init__(
@@ -95,17 +98,18 @@ class A2AClient:
             await self._http.aclose()
             self._http = None
 
-    async def __aenter__(self) -> A2AClient:
+    async def __aenter__(self) -> Self:
         await self.connect()
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         await self.disconnect()
 
     def _ensure_connected(self) -> httpx.AsyncClient:
         if self._http is None:
+            msg = "Client not connected. Call connect() or use async context manager."
             raise RuntimeError(
-                "Client not connected. Call connect() or use async context manager."
+                msg,
             )
         return self._http
 
@@ -126,7 +130,9 @@ class A2AClient:
     # ------------------------------------------------------------------
 
     async def _rpc(
-        self, method: str, params: dict[str, Any] | None = None
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Send a JSON-RPC 2.0 request and return the result."""
         http = self._ensure_connected()
@@ -172,6 +178,7 @@ class A2AClient:
             Resume an existing task (for INPUT_REQUIRED flows).
         blocking:
             If True, waits for task completion.
+
         """
         message = A2AMessage(
             role="user",

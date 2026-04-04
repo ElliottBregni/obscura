@@ -7,7 +7,7 @@ without a local LLM server.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,6 +27,8 @@ from obscura.core.types import (
 from obscura.providers.localllm import LocalLLMBackend
 from obscura.providers.models import MCPServerConfig
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,7 +63,8 @@ async def _aiter(*items: Any) -> AsyncIterator[Any]:
 
 
 def _mock_completion(
-    content: str | None = "hello", tool_calls: Any = None
+    content: str | None = "hello",
+    tool_calls: Any = None,
 ) -> MagicMock:
     """Build a mock chat.completions.create response."""
     msg: Any = MagicMock()
@@ -265,7 +268,8 @@ class TestLocalLLMSend:
         b = _backend()
         client: Any = b.client
         client.chat.completions.create.return_value = _mock_completion(
-            content=None, tool_calls=[tc]
+            content=None,
+            tool_calls=[tc],
         )
 
         msg = await b.send("What is the weather?")
@@ -286,7 +290,7 @@ class TestLocalLLMSend:
 
         call_kwargs: Any = client.chat.completions.create.call_args
         messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get(
-            "messages"
+            "messages",
         )
         assert messages[0] == {"role": "system", "content": "Be concise"}
 
@@ -300,7 +304,7 @@ class TestLocalLLMSend:
 
         call_kwargs: Any = client.chat.completions.create.call_args
         messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get(
-            "messages"
+            "messages",
         )
         # No system message — first message should be the user prompt
         assert messages[0] == {"role": "user", "content": "Hi"}
@@ -311,7 +315,8 @@ class TestLocalLLMSend:
         b = _backend()
         client: Any = b.client
         client.chat.completions.create.return_value = _mock_completion(
-            content=None, tool_calls=None
+            content=None,
+            tool_calls=None,
         )
 
         msg = await b.send("hello")
@@ -353,7 +358,8 @@ class TestLocalLLMSend:
         b = _backend()
         client: Any = b.client
         client.chat.completions.create.return_value = _mock_completion(
-            content=None, tool_calls=[tc]
+            content=None,
+            tool_calls=[tc],
         )
 
         msg = await b.send("test")
@@ -586,7 +592,7 @@ class TestLocalLLMSessions:
         assert fork.session_id != src.session_id
         assert b.active_session == fork.session_id
         assert len(b.conversations[fork.session_id]) == len(
-            b.conversations[src.session_id]
+            b.conversations[src.session_id],
         )
 
     @pytest.mark.asyncio
@@ -631,7 +637,7 @@ class TestLocalLLMSessions:
 
         call_kwargs: Any = client.chat.completions.create.call_args
         messages: Any = call_kwargs.kwargs.get("messages") or call_kwargs[1].get(
-            "messages"
+            "messages",
         )
         # Should contain: history (user+assistant from first turn) + current user prompt
         user_messages: list[Any] = [m for m in messages if m["role"] == "user"]
@@ -756,7 +762,7 @@ class TestLocalLLMTools:
                 # Invalid params that should be filtered out
                 "invalid_param": "should_not_appear",
                 "foo": "bar",
-            }
+            },
         )
 
         assert result["temperature"] == 0.7
@@ -870,7 +876,8 @@ class TestLocalLLMHooks:
         client.chat.completions.create.return_value = _mock_completion("ok")
 
         def bad_hook(ctx: HookContext) -> None:
-            raise ValueError("hook exploded")
+            msg_0 = "hook exploded"
+            raise ValueError(msg_0)
 
         b.register_hook(HookPoint.USER_PROMPT_SUBMITTED, bad_hook)
 
@@ -912,7 +919,8 @@ class TestLocalLLMHooks:
         func_mock.arguments = '{"q":"weather"}'
         tc: Any = MagicMock(id="tc-search", function=func_mock)
         client.chat.completions.create.return_value = _mock_completion(
-            content=None, tool_calls=[tc]
+            content=None,
+            tool_calls=[tc],
         )
 
         pre_hook: Any = MagicMock()

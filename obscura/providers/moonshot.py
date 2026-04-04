@@ -1,5 +1,4 @@
-"""
-obscura.backends.moonshot — Moonshot/Kimi backend via OpenAI-compatible API.
+"""obscura.backends.moonshot — Moonshot/Kimi backend via OpenAI-compatible API.
 
 Implements Moonshot by reusing ``OpenAIBackend`` with provider-specific
 defaults:
@@ -11,9 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from obscura.providers.openai import OpenAIBackend
 from obscura.core.auth import AuthConfig
 from obscura.core.types import Backend
+from obscura.providers.openai import OpenAIBackend
 
 
 class MoonshotBackend(OpenAIBackend):

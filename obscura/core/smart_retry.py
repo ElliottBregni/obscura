@@ -1,5 +1,4 @@
-"""
-obscura.core.smart_retry — Smart retry with exponential backoff for API calls.
+"""obscura.core.smart_retry — Smart retry with exponential backoff for API calls.
 
 Handles:
   - 429 (rate limit): Wait for Retry-After header, then retry
@@ -24,7 +23,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Awaitable, Callable, TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +35,9 @@ T = TypeVar("T")
 # Default retry configuration.
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_INITIAL_BACKOFF = 1.0  # seconds
-DEFAULT_MAX_BACKOFF = 30.0     # seconds
+DEFAULT_MAX_BACKOFF = 30.0  # seconds
 DEFAULT_BACKOFF_MULTIPLIER = 2.0
-DEFAULT_JITTER = 0.25          # ±25%
+DEFAULT_JITTER = 0.25  # ±25%
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -61,10 +63,9 @@ def _is_retryable(exc: Exception) -> bool:
         return True
 
     # Connection errors.
-    if "connection" in msg and ("reset" in msg or "refused" in msg or "closed" in msg):
-        return True
-
-    return False
+    return bool(
+        "connection" in msg and ("reset" in msg or "refused" in msg or "closed" in msg),
+    )
 
 
 def _extract_retry_after(exc: Exception) -> float | None:
@@ -72,13 +73,14 @@ def _extract_retry_after(exc: Exception) -> float | None:
     msg = str(exc)
     # Look for "retry after N" or "Retry-After: N".
     import re
+
     match = re.search(r"retry.?after[:\s]+(\d+\.?\d*)", msg, re.IGNORECASE)
     if match:
         return float(match.group(1))
     return None
 
 
-async def with_smart_retry(
+async def with_smart_retry[T](
     fn: Callable[[], Awaitable[T]],
     *,
     max_retries: int = DEFAULT_MAX_RETRIES,
@@ -104,6 +106,7 @@ async def with_smart_retry(
 
     Raises:
         The last exception if all retries are exhausted.
+
     """
     backoff = initial_backoff
     last_exc: Exception | None = None
@@ -129,7 +132,10 @@ async def with_smart_retry(
 
             logger.info(
                 "Retry %d/%d after %.1fs: %s",
-                attempt + 1, max_retries, wait, type(exc).__name__,
+                attempt + 1,
+                max_retries,
+                wait,
+                type(exc).__name__,
             )
 
             if on_retry is not None:
@@ -138,6 +144,7 @@ async def with_smart_retry(
             # Log to deep log.
             try:
                 from obscura.core.deep_log import dlog
+
                 dlog.event(
                     "api_retry",
                     attempt=attempt + 1,

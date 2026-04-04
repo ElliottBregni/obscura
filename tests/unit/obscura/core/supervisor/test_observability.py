@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from obscura.core.supervisor.observability import RunObserver
 from obscura.core.supervisor.types import SupervisorEvent, SupervisorEventKind
 

@@ -29,7 +29,12 @@ def test_qdrant_embedding_metadata() -> None:
     point_id = _point_id("default", "meta-key")
 
     # Retrieve raw point from the Qdrant client
-    points = backend.client.retrieve(backend.collection_name, [point_id], with_payload=True, with_vectors=False)
+    points = backend.client.retrieve(
+        backend.collection_name,
+        [point_id],
+        with_payload=True,
+        with_vectors=False,
+    )
     assert points, "Expected point to be present in Qdrant memory"
     p = points[0]
 
@@ -39,4 +44,5 @@ def test_qdrant_embedding_metadata() -> None:
     assert "embedding_ts" in p.payload
 
     # embedding_ts should parse as ISO-ish string
-    assert isinstance(p.payload["embedding_ts"], str) and len(p.payload["embedding_ts"]) > 0
+    assert isinstance(p.payload["embedding_ts"], str)
+    assert len(p.payload["embedding_ts"]) > 0

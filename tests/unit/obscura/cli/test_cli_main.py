@@ -6,9 +6,9 @@ hooks loading, MCP discovery, file tracking, plan parsing.
 
 from __future__ import annotations
 
+import contextlib
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,16 +16,18 @@ from click.testing import CliRunner
 
 import obscura.cli as cli_module
 from obscura.cli import (
-    main,
-    send_message,
     _cli_confirm,
     _discover_mcp,
-    _track_file_event,
     _parse_inline_agent_mention,
+    _track_file_event,
+    main,
+    send_message,
 )
 from obscura.cli.commands import REPLContext, _fleet_delegate, cmd_delegate
 from obscura.core.types import AgentEvent, AgentEventKind
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +59,11 @@ def _text_event(text: str) -> AgentEvent:
     return AgentEvent(kind=AgentEventKind.TEXT_DELTA, text=text)
 
 
-def _tool_call_event(name: str, inp: dict[str, Any], use_id: str = "tc_1") -> AgentEvent:
+def _tool_call_event(
+    name: str,
+    inp: dict[str, Any],
+    use_id: str = "tc_1",
+) -> AgentEvent:
     return AgentEvent(
         kind=AgentEventKind.TOOL_CALL,
         tool_name=name,
@@ -123,7 +129,10 @@ class TestCliConfirm:
     """Tests for the tool call confirmation callback."""
 
     @pytest.mark.asyncio
-    async def test_always_list_skips_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_always_list_skips_prompt(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         ctx = _make_ctx(confirm_enabled=True)
         ctx.confirm_always.add("run_shell")
 
@@ -188,22 +197,31 @@ class TestCliConfirm:
 class TestDiscoverMCP:
     """Tests for MCP server auto-discovery."""
 
-    def test_returns_empty_when_no_servers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_empty_when_no_servers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         monkeypatch.setattr(
             "obscura.integrations.mcp.config_loader.discover_mcp_servers",
-            lambda: [],
+            list,
         )
         configs, names = _discover_mcp()
         assert configs == []
         assert names == []
 
-    def test_returns_empty_on_import_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_empty_on_import_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # If the MCP module can't be imported, should return empty
         import obscura.cli as cli_mod
 
-        original_discover = getattr(cli_mod, "_discover_mcp")
+        cli_mod._discover_mcp
         # Force import error by patching
-        with patch.dict("sys.modules", {"obscura.integrations.mcp.config_loader": None}):
+        with patch.dict(
+            "sys.modules",
+            {"obscura.integrations.mcp.config_loader": None},
+        ):
             configs, names = _discover_mcp()
         assert configs == []
         assert names == []
@@ -300,14 +318,18 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
 
         result = await send_message(ctx, "Hi there", {})
         assert result == "Hello World"
 
     @pytest.mark.asyncio
-    async def test_message_history_updated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_message_history_updated(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         ctx = _make_ctx()
 
         async def _fake_run_loop(*args: Any, **kwargs: Any):
@@ -317,7 +339,8 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
 
         await send_message(ctx, "Test prompt", {})
@@ -327,7 +350,10 @@ class TestSendMessage:
         assert ctx.message_history[1] == ("assistant", "Response")
 
     @pytest.mark.asyncio
-    async def test_empty_response_not_in_history(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_empty_response_not_in_history(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         ctx = _make_ctx()
 
         async def _fake_run_loop(*args: Any, **kwargs: Any):
@@ -337,7 +363,8 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
 
         await send_message(ctx, "No response expected", {})
@@ -346,7 +373,10 @@ class TestSendMessage:
         assert ctx.message_history[0] == ("user", "No response expected")
 
     @pytest.mark.asyncio
-    async def test_keyboard_interrupt_handled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_keyboard_interrupt_handled(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         ctx = _make_ctx()
 
         async def _fake_run_loop(*args: Any, **kwargs: Any):
@@ -357,7 +387,8 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
 
         # Should not raise
@@ -365,7 +396,10 @@ class TestSendMessage:
         assert result == "partial"
 
     @pytest.mark.asyncio
-    async def test_auto_compact_on_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_auto_compact_on_threshold(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         ctx = _make_ctx()
         ctx.client.context_window = 1000  # small window
         ctx.client.context_warn_threshold = 500
@@ -381,7 +415,8 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", mock_console)
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
         monkeypatch.setattr(
             "obscura.cli.commands.estimate_effective_context_tokens",
@@ -389,7 +424,6 @@ class TestSendMessage:
         )
 
         compact_called = False
-        original_cmd_compact = None
 
         async def _fake_compact(level: str, ctx: Any) -> None:
             nonlocal compact_called
@@ -401,7 +435,10 @@ class TestSendMessage:
         assert compact_called
 
     @pytest.mark.asyncio
-    async def test_vector_memory_augmentation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_vector_memory_augmentation(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         ctx = _make_ctx()
 
         # Mock vector store
@@ -418,7 +455,8 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
         monkeypatch.setattr(
             cli_module,
@@ -439,7 +477,8 @@ class TestSendMessage:
 
     @pytest.mark.asyncio
     async def test_active_skill_context_augmentation(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         ctx = _make_ctx()
 
@@ -453,7 +492,8 @@ class TestSendMessage:
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr(
-            "obscura.tools.system.update_token_usage", lambda **kw: None
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
         )
         monkeypatch.setattr(
             cli_module,
@@ -463,7 +503,9 @@ class TestSendMessage:
         monkeypatch.setattr(
             ctx,
             "build_active_skill_context",
-            lambda: "## Active Slash Skills\n\n## Skill: reviewer\n\nFocus on regressions.",
+            lambda: (
+                "## Active Slash Skills\n\n## Skill: reviewer\n\nFocus on regressions."
+            ),
         )
 
         await send_message(ctx, "check this diff", {})
@@ -473,7 +515,10 @@ class TestSendMessage:
         assert "check this diff" in captured_text[0]
 
     @pytest.mark.asyncio
-    async def test_dead_process_error_retries_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_dead_process_error_retries_once(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import obscura.cli as cli_module
 
         ctx = _make_ctx()
@@ -484,14 +529,18 @@ class TestSendMessage:
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise RuntimeError("can't send message to dead process")
+                msg = "can't send message to dead process"
+                raise RuntimeError(msg)
             yield _text_event("Recovered")
 
         ctx.client.run_loop = _fake_run_loop
         monkeypatch.setattr(cli_module, "console", MagicMock())
         monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
         monkeypatch.setattr("obscura.cli.commands._estimate_tokens", lambda x: 100)
-        monkeypatch.setattr("obscura.tools.system.update_token_usage", lambda **kw: None)
+        monkeypatch.setattr(
+            "obscura.tools.system.update_token_usage",
+            lambda **kw: None,
+        )
 
         result = await send_message(ctx, "retry me", {})
 
@@ -500,7 +549,10 @@ class TestSendMessage:
         ctx.client.reset_session.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_context_usage_updates_during_stream(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_context_usage_updates_during_stream(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import obscura.cli as cli_module
 
         ctx = _make_ctx()
@@ -524,10 +576,8 @@ class TestSendMessage:
 
         def _fake_monotonic() -> float:
             nonlocal last_tick
-            try:
+            with contextlib.suppress(StopIteration):
                 last_tick = next(ticks)
-            except StopIteration:
-                pass
             return last_tick
 
         monkeypatch.setattr(cli_module, "console", MagicMock())
@@ -545,7 +595,8 @@ class TestSendMessage:
 
     @pytest.mark.asyncio
     async def test_inline_agent_mention_short_circuits_base_client(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import obscura.cli as cli_module
 
@@ -587,35 +638,45 @@ class TestInlineAgentMentionParsing:
 class TestHooksLoading:
     """Tests for project hooks loading wired into CLI."""
 
-    def test_load_all_hooks_empty_when_no_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_all_hooks_empty_when_no_config(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """load_all_hooks returns empty registry when no .obscura dir exists."""
         from obscura.core.settings import load_all_hooks
 
         monkeypatch.setattr(
-            "obscura.core.paths.resolve_obscura_home", lambda cwd=None: tmp_path
+            "obscura.core.paths.resolve_obscura_home",
+            lambda cwd=None: tmp_path,
         )
         registry = load_all_hooks()
         assert registry.count == 0
 
-    def test_load_settings_hooks(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_settings_hooks(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Hooks from settings.json are loaded correctly."""
         from obscura.core.settings import load_settings_hooks
 
         settings = {
             "hooks": {
                 "preToolUse": [
-                    {"bash": "echo check", "matcher": "run_shell", "timeout_sec": 5}
+                    {"bash": "echo check", "matcher": "run_shell", "timeout_sec": 5},
                 ],
                 "postToolUse": [
-                    {"bash": "echo done"}
+                    {"bash": "echo done"},
                 ],
-            }
+            },
         }
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
 
         monkeypatch.setattr(
-            "obscura.core.settings.resolve_obscura_settings", lambda cwd=None: settings_file
+            "obscura.core.settings.resolve_obscura_settings",
+            lambda cwd=None: settings_file,
         )
         defs = load_settings_hooks()
         assert len(defs) == 2
@@ -631,7 +692,11 @@ class TestHooksLoading:
         assert post_hook.bash == "echo done"
         assert post_hook.matcher == ""
 
-    def test_load_settings_hooks_malformed_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_settings_hooks_malformed_json(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Malformed settings.json returns empty list."""
         from obscura.core.settings import load_settings_hooks
 
@@ -639,12 +704,17 @@ class TestHooksLoading:
         settings_file.write_text("not valid json {{{")
 
         monkeypatch.setattr(
-            "obscura.core.settings.resolve_obscura_settings", lambda cwd=None: settings_file
+            "obscura.core.settings.resolve_obscura_settings",
+            lambda cwd=None: settings_file,
         )
         defs = load_settings_hooks()
         assert defs == []
 
-    def test_load_directory_hooks(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_directory_hooks(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Hooks from .obscura/hooks/ directory are loaded correctly."""
         from obscura.core.settings import load_directory_hooks
 
@@ -665,7 +735,8 @@ class TestHooksLoading:
         script3.chmod(0o755)
 
         monkeypatch.setattr(
-            "obscura.core.settings.resolve_obscura_hooks_dir", lambda cwd=None: hooks_dir
+            "obscura.core.settings.resolve_obscura_hooks_dir",
+            lambda cwd=None: hooks_dir,
         )
         defs = load_directory_hooks()
         assert len(defs) == 3
@@ -688,7 +759,11 @@ class TestHooksLoading:
         assert session_hook.matcher == ""
         assert "bash" in session_hook.bash
 
-    def test_non_executable_scripts_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_executable_scripts_skipped(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Non-executable scripts in hooks/ are skipped with a warning."""
         from obscura.core.settings import load_directory_hooks
 
@@ -700,28 +775,35 @@ class TestHooksLoading:
         script.chmod(0o644)  # not executable
 
         monkeypatch.setattr(
-            "obscura.core.settings.resolve_obscura_hooks_dir", lambda cwd=None: hooks_dir
+            "obscura.core.settings.resolve_obscura_hooks_dir",
+            lambda cwd=None: hooks_dir,
         )
         defs = load_directory_hooks()
         assert len(defs) == 0
 
-    def test_list_hook_sources(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_list_hook_sources(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """list_hook_sources returns metadata for all hooks."""
         from obscura.core.settings import list_hook_sources
 
         settings = {
             "hooks": {
                 "preToolUse": [{"bash": "lint.sh", "matcher": "run_shell"}],
-            }
+            },
         }
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
 
         monkeypatch.setattr(
-            "obscura.core.settings.resolve_obscura_settings", lambda cwd=None: settings_file
+            "obscura.core.settings.resolve_obscura_settings",
+            lambda cwd=None: settings_file,
         )
         monkeypatch.setattr(
-            "obscura.core.settings.resolve_obscura_hooks_dir", lambda cwd=None: tmp_path / "nope"
+            "obscura.core.settings.resolve_obscura_hooks_dir",
+            lambda cwd=None: tmp_path / "nope",
         )
 
         sources = list_hook_sources()
@@ -807,8 +889,6 @@ class TestMatcherFiltering:
         """After-hook with matcher should skip when tool doesn't match."""
         from obscura.core.hooks import _make_command_after_hook
         from obscura.manifest.models import HookDefinition
-
-        ran = {"called": False}
 
         defn = HookDefinition(
             event="postToolUse",
@@ -934,19 +1014,29 @@ class TestApplyToCopilot:
 class TestPathHelpers:
     """Tests for the new path resolution functions."""
 
-    def test_resolve_hooks_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_resolve_hooks_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from obscura.core.paths import resolve_obscura_hooks_dir
 
         monkeypatch.setattr(
-            "obscura.core.paths.resolve_obscura_home", lambda cwd=None: tmp_path
+            "obscura.core.paths.resolve_obscura_home",
+            lambda cwd=None: tmp_path,
         )
         assert resolve_obscura_hooks_dir() == tmp_path / "hooks"
 
-    def test_resolve_settings(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_resolve_settings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from obscura.core.paths import resolve_obscura_settings
 
         monkeypatch.setattr(
-            "obscura.core.paths.resolve_obscura_home", lambda cwd=None: tmp_path
+            "obscura.core.paths.resolve_obscura_home",
+            lambda cwd=None: tmp_path,
         )
         assert resolve_obscura_settings() == tmp_path / "settings.json"
 
@@ -993,7 +1083,8 @@ class TestREPLContext:
 class TestDelegateModes:
     @pytest.mark.asyncio
     async def test_cmd_delegate_once_mode_calls_run(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         ctx = _make_ctx()
 
@@ -1026,7 +1117,8 @@ class TestDelegateModes:
 
     @pytest.mark.asyncio
     async def test_fleet_delegate_loop_with_done_if_continues_until_match(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         ctx = _make_ctx()
         events_by_call = [

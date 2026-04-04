@@ -1,5 +1,4 @@
-"""
-obscura.core.permission_modes — Permission mode engine.
+"""obscura.core.permission_modes — Permission mode engine.
 
 Implements named permission modes that control how tool execution
 is gated (prompted, auto-approved, or blocked).
@@ -22,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-class PermissionMode(str, enum.Enum):
+class PermissionMode(enum.StrEnum):
     """Named permission modes controlling tool execution gating."""
 
     DEFAULT = "default"
@@ -32,46 +31,50 @@ class PermissionMode(str, enum.Enum):
 
 
 # Tools allowed in PLAN mode (read-only operations).
-READ_ONLY_TOOLS: frozenset[str] = frozenset({
-    "read_text_file",
-    "grep_files",
-    "find_files",
-    "list_directory",
-    "tree_directory",
-    "file_info",
-    "diff_files",
-    "git_status",
-    "git_log",
-    "git_diff",
-    "web_search",
-    "web_fetch",
-    "which_command",
-    "get_system_info",
-    "get_environment",
-    "context_window_status",
-    "list_system_tools",
-    "list_unix_capabilities",
-    "tool_search",
-    "json_query",
-    "clipboard_read",
-    "todo_write",
-    "report_intent",
-    "ask_user",
-    "enter_plan_mode",
-    "exit_plan_mode",
-})
+READ_ONLY_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_text_file",
+        "grep_files",
+        "find_files",
+        "list_directory",
+        "tree_directory",
+        "file_info",
+        "diff_files",
+        "git_status",
+        "git_log",
+        "git_diff",
+        "web_search",
+        "web_fetch",
+        "which_command",
+        "get_system_info",
+        "get_environment",
+        "context_window_status",
+        "list_system_tools",
+        "list_unix_capabilities",
+        "tool_search",
+        "json_query",
+        "clipboard_read",
+        "todo_write",
+        "report_intent",
+        "ask_user",
+        "enter_plan_mode",
+        "exit_plan_mode",
+    },
+)
 
 # Tools auto-approved in ACCEPT_EDITS mode.
-FILE_MODIFICATION_TOOLS: frozenset[str] = frozenset({
-    "write_text_file",
-    "edit_text_file",
-    "append_text_file",
-    "make_directory",
-    "remove_path",
-    "copy_path",
-    "move_path",
-    "notebook_edit",
-})
+FILE_MODIFICATION_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_text_file",
+        "edit_text_file",
+        "append_text_file",
+        "make_directory",
+        "remove_path",
+        "copy_path",
+        "move_path",
+        "notebook_edit",
+    },
+)
 
 # Dangerous command patterns — always denied regardless of mode.
 _DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
@@ -119,7 +122,11 @@ class PermissionModeEngine:
     def mode(self, value: PermissionMode) -> None:
         self._mode = value
 
-    def evaluate(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> PermissionDecision:
+    def evaluate(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any] | None = None,
+    ) -> PermissionDecision:
         """Evaluate whether a tool call should be allowed, auto-approved, or denied.
 
         Returns a ``PermissionDecision`` indicating the outcome.
@@ -133,25 +140,52 @@ class PermissionModeEngine:
 
         # 2. BYPASS mode: auto-approve everything.
         if self._mode == PermissionMode.BYPASS:
-            return PermissionDecision(allowed=True, auto_approved=True, reason="bypass mode")
+            return PermissionDecision(
+                allowed=True,
+                auto_approved=True,
+                reason="bypass mode",
+            )
 
         # 3. PLAN mode: only read-only tools allowed.
         if self._mode == PermissionMode.PLAN:
             if tool_name in READ_ONLY_TOOLS:
-                return PermissionDecision(allowed=True, auto_approved=True, reason="plan mode read-only")
-            return PermissionDecision(allowed=False, reason=f"tool '{tool_name}' not allowed in plan mode")
+                return PermissionDecision(
+                    allowed=True,
+                    auto_approved=True,
+                    reason="plan mode read-only",
+                )
+            return PermissionDecision(
+                allowed=False,
+                reason=f"tool '{tool_name}' not allowed in plan mode",
+            )
 
         # 4. ACCEPT_EDITS mode: auto-approve file tools + read tools.
         if self._mode == PermissionMode.ACCEPT_EDITS:
             if tool_name in READ_ONLY_TOOLS or tool_name in FILE_MODIFICATION_TOOLS:
-                return PermissionDecision(allowed=True, auto_approved=True, reason="accept_edits mode")
+                return PermissionDecision(
+                    allowed=True,
+                    auto_approved=True,
+                    reason="accept_edits mode",
+                )
             # Other tools (bash, etc.) still need confirmation.
-            return PermissionDecision(allowed=True, auto_approved=False, reason="requires confirmation")
+            return PermissionDecision(
+                allowed=True,
+                auto_approved=False,
+                reason="requires confirmation",
+            )
 
         # 5. DEFAULT mode: allow but require confirmation.
-        return PermissionDecision(allowed=True, auto_approved=False, reason="default mode")
+        return PermissionDecision(
+            allowed=True,
+            auto_approved=False,
+            reason="default mode",
+        )
 
-    def is_dangerous(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> tuple[bool, str]:
+    def is_dangerous(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
         """Check if a tool call matches a dangerous pattern.
 
         Only applies to shell execution tools (run_shell, run_command, code_sandbox).
@@ -162,7 +196,9 @@ class PermissionModeEngine:
             return False, ""
 
         # Check the command/script content against dangerous patterns.
-        command_text = str(args.get("script", "") or args.get("command", "") or args.get("code", ""))
+        command_text = str(
+            args.get("script", "") or args.get("command", "") or args.get("code", ""),
+        )
         if not command_text:
             return False, ""
 

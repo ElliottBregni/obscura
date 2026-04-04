@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
-from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from obscura.auth.rate_limit_middleware import RateLimitMiddleware
 from obscura.core.rate_limiter import RateLimiter
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
 
 
 @dataclass
@@ -36,6 +38,7 @@ def _make_app(limiter: RateLimiter) -> Starlette:
             Route("/docs", homepage),
         ],
     )
+
     # Simulate authenticated user via middleware
     class _InjectUser:
         def __init__(self, app: Any) -> None:
@@ -51,7 +54,8 @@ def _make_app(limiter: RateLimiter) -> Starlette:
 
 
 def _make_app_with_user(
-    limiter: RateLimiter, user: _FakeUser | None = None
+    limiter: RateLimiter,
+    user: _FakeUser | None = None,
 ) -> Starlette:
     """Build app that injects a user into request.state."""
 
@@ -74,7 +78,9 @@ def _make_app_with_user(
 
     class _UserInjector(BaseHTTPMiddleware):
         async def dispatch(
-            self, request: Request, call_next: RequestResponseEndpoint
+            self,
+            request: Request,
+            call_next: RequestResponseEndpoint,
         ) -> Response:
             if user is not None:
                 request.state.user = user

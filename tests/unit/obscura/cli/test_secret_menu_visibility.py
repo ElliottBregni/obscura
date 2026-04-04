@@ -55,4 +55,3 @@ async def test_cmd_secret_unlock_lock_toggles_completions(monkeypatch) -> None:
     assert ctx.secret_menu_unlocked is False
     assert "loglevel" not in COMPLETIONS
     assert "jitter" not in COMPLETIONS
-

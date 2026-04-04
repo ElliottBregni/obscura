@@ -11,8 +11,10 @@ import copy
 import logging
 import tomllib
 import warnings
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ def load_config(path: Path, *, warn_yaml: bool = True) -> dict[str, Any]:
         If *path* does not exist.
     ValueError
         If the file extension is unsupported or parsing fails.
+
     """
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -49,7 +52,8 @@ def load_config(path: Path, *, warn_yaml: bool = True) -> dict[str, Any]:
             )
         return _load_yaml(path)
 
-    raise ValueError(f"Unsupported config file extension: {suffix}")
+    msg = f"Unsupported config file extension: {suffix}"
+    raise ValueError(msg)
 
 
 def try_load_config(
@@ -145,17 +149,23 @@ def load_merged_agents(
     Returns a mapping of agent name to config dict, filtering out
     disabled agents unless *include_disabled* is ``True``.
     """
-    primary_raw = try_load_config(
-        home / "agents.yaml",
-        home / "agents.toml",
-        warn_yaml=False,
-    ) or {}
+    primary_raw = (
+        try_load_config(
+            home / "agents.yaml",
+            home / "agents.toml",
+            warn_yaml=False,
+        )
+        or {}
+    )
 
-    catalog_raw = try_load_config(
-        home / "agents-available.yaml",
-        home / "agents-available.toml",
-        warn_yaml=False,
-    ) or {}
+    catalog_raw = (
+        try_load_config(
+            home / "agents-available.yaml",
+            home / "agents-available.toml",
+            warn_yaml=False,
+        )
+        or {}
+    )
 
     merged: dict[str, dict[str, Any]] = {}
 
@@ -231,11 +241,7 @@ def _deep_merge_new(base: dict[str, Any], override: dict[str, Any]) -> dict[str,
     """
     result = copy.deepcopy(base)
     for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge_new(result[key], value)
         else:
             result[key] = copy.deepcopy(value)
@@ -251,11 +257,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError as exc:
+        msg = f"PyYAML is required to read {path.name}; install it or convert to TOML."
         raise ValueError(
-            f"PyYAML is required to read {path.name}; install it or convert to TOML."
+            msg,
         ) from exc
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise ValueError(f"Expected a mapping in {path}, got {type(raw).__name__}")
+        msg = f"Expected a mapping in {path}, got {type(raw).__name__}"
+        raise ValueError(msg)
     return raw

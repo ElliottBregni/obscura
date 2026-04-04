@@ -8,16 +8,23 @@ system prompt composition) until first access.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from obscura.manifest.models import AgentManifest, InstructionManifest, SkillManifest
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from obscura.manifest.models import (
+        AgentManifest,
+        InstructionManifest,
+        SkillManifest,
+    )
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 
-class LazyField(Generic[T]):
+class LazyField[T]:
     """Descriptor that computes its value on first ``.get()``, then caches it."""
 
     def __init__(self, factory: Callable[[], T]) -> None:

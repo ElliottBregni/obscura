@@ -1,5 +1,4 @@
-"""
-obscura.config — Shared configuration for the Obscura platform.
+"""obscura.config — Shared configuration for the Obscura platform.
 
 Loads settings from environment variables, YAML files, or explicit values.
 All three subsystems (auth, telemetry, infrastructure) contribute sections
@@ -25,7 +24,9 @@ class ObscuraConfig(BaseModel):
     port: int = 8080
 
     # Auth
-    auth_enabled: bool = False  # default off for dev; set OBSCURA_AUTH_ENABLED=true in prod
+    auth_enabled: bool = (
+        False  # default off for dev; set OBSCURA_AUTH_ENABLED=true in prod
+    )
 
     # Telemetry (OpenTelemetry)
     otel_enabled: bool = True
@@ -86,7 +87,8 @@ class ObscuraConfig(BaseModel):
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
             otel_endpoint=os.environ.get(
-                "OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317"
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "http://127.0.0.1:4317",
             ),
             otel_service_name=os.environ.get("OTEL_SERVICE_NAME", "obscura-sdk"),
             log_level=os.environ.get("OBSCURA_LOG_LEVEL", "INFO"),
@@ -99,28 +101,28 @@ class ObscuraConfig(BaseModel):
             # Rate limiting
             rate_limit_rpm=int(os.environ.get("OBSCURA_RATE_LIMIT_RPM", "100")),
             rate_limit_concurrent=int(
-                os.environ.get("OBSCURA_RATE_LIMIT_CONCURRENT", "10")
+                os.environ.get("OBSCURA_RATE_LIMIT_CONCURRENT", "10"),
             ),
             # Circuit breaker
             circuit_breaker_threshold=int(
-                os.environ.get("OBSCURA_CIRCUIT_BREAKER_THRESHOLD", "5")
+                os.environ.get("OBSCURA_CIRCUIT_BREAKER_THRESHOLD", "5"),
             ),
             circuit_breaker_recovery=float(
-                os.environ.get("OBSCURA_CIRCUIT_BREAKER_RECOVERY", "30.0")
+                os.environ.get("OBSCURA_CIRCUIT_BREAKER_RECOVERY", "30.0"),
             ),
             # Retry
             max_retries=int(os.environ.get("OBSCURA_MAX_RETRIES", "2")),
             retry_initial_backoff=float(
-                os.environ.get("OBSCURA_RETRY_INITIAL_BACKOFF", "0.5")
+                os.environ.get("OBSCURA_RETRY_INITIAL_BACKOFF", "0.5"),
             ),
             # Cache
             cache_enabled=os.environ.get("OBSCURA_CACHE_ENABLED", "false").lower()
             == "true",
             cache_max_entries=int(
-                os.environ.get("OBSCURA_CACHE_MAX_ENTRIES", "1000")
+                os.environ.get("OBSCURA_CACHE_MAX_ENTRIES", "1000"),
             ),
             cache_default_ttl=float(
-                os.environ.get("OBSCURA_CACHE_DEFAULT_TTL", "300.0")
+                os.environ.get("OBSCURA_CACHE_DEFAULT_TTL", "300.0"),
             ),
             # A2A
             a2a_enabled=os.environ.get("OBSCURA_A2A_ENABLED", "false").lower()
@@ -131,9 +133,15 @@ class ObscuraConfig(BaseModel):
             a2a_agent_name=os.environ.get("OBSCURA_A2A_AGENT_NAME", "Obscura Agent"),
             a2a_agent_description=os.environ.get("OBSCURA_A2A_AGENT_DESCRIPTION", ""),
             # Kairos
-            kairos_enabled=os.environ.get("OBSCURA_KAIROS", "").strip().lower() not in ("0", "false", "no", "off"),
-            kairos_proactive=os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").strip().lower() not in ("0", "false", "no", "off"),
-            kairos_dream=os.environ.get("OBSCURA_KAIROS_DREAM", "").strip().lower() not in ("0", "false", "no", "off"),
+            kairos_enabled=os.environ.get("OBSCURA_KAIROS", "").strip().lower()
+            not in ("0", "false", "no", "off"),
+            kairos_proactive=os.environ.get("OBSCURA_KAIROS_PROACTIVE", "")
+            .strip()
+            .lower()
+            not in ("0", "false", "no", "off"),
+            kairos_dream=os.environ.get("OBSCURA_KAIROS_DREAM", "").strip().lower()
+            not in ("0", "false", "no", "off"),
             # Undercover
-            undercover_enabled=os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower() not in ("0", "false", "no", "off"),
+            undercover_enabled=os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower()
+            not in ("0", "false", "no", "off"),
         )

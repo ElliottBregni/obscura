@@ -1,6 +1,4 @@
-"""
-obscura.tools.policy.engine — Policy evaluation logic.
-"""
+"""obscura.tools.policy.engine — Policy evaluation logic."""
 
 from __future__ import annotations
 
@@ -18,7 +16,7 @@ _FS_TOOLS: frozenset[str] = frozenset(
         "search_files",
         "create_directory",
         "delete_file",
-    }
+    },
 )
 
 
@@ -42,12 +40,21 @@ def evaluate_policy(
     -------
     PolicyResult
         Whether the invocation is allowed and why.
+
     """
     if policy.full_access:
-        return PolicyResult(allowed=True, reason="full_access granted", matched_rule="full_access")
+        return PolicyResult(
+            allowed=True,
+            reason="full_access granted",
+            matched_rule="full_access",
+        )
 
     if tool_name in policy.deny_list:
-        return PolicyResult(allowed=False, reason=f"tool '{tool_name}' is in deny_list", matched_rule="deny_list")
+        return PolicyResult(
+            allowed=False,
+            reason=f"tool '{tool_name}' is in deny_list",
+            matched_rule="deny_list",
+        )
 
     if policy.allow_list and tool_name not in policy.allow_list:
         return PolicyResult(
@@ -61,7 +68,11 @@ def evaluate_policy(
         if not result.allowed:
             return result
 
-    return PolicyResult(allowed=True, reason="policy permits invocation", matched_rule="")
+    return PolicyResult(
+        allowed=True,
+        reason="policy permits invocation",
+        matched_rule="",
+    )
 
 
 def _check_base_dir(base_dir: Path, args: dict[str, Any]) -> PolicyResult:
@@ -79,4 +90,8 @@ def _check_base_dir(base_dir: Path, args: dict[str, Any]) -> PolicyResult:
                 reason=f"path '{target}' escapes base_dir '{base_dir}'",
                 matched_rule="base_dir",
             )
-    return PolicyResult(allowed=True, reason="path within base_dir", matched_rule="base_dir")
+    return PolicyResult(
+        allowed=True,
+        reason="path within base_dir",
+        matched_rule="base_dir",
+    )

@@ -1,5 +1,4 @@
-"""
-obscura.auth.prompt_filter -- Prompt injection defence for Tier A (public).
+"""obscura.auth.prompt_filter -- Prompt injection defence for Tier A (public).
 
 Provides input sanitisation and pattern-based filtering that is applied
 to all user prompts in the PUBLIC tier.  The PRIVILEGED tier bypasses
@@ -20,7 +19,6 @@ import re
 from dataclasses import dataclass
 
 from obscura.auth.capability import CapabilityTier
-
 
 # ---------------------------------------------------------------------------
 # Filter result

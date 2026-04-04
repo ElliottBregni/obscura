@@ -22,19 +22,36 @@ def _gh(*args: str) -> str:
         env=env,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
+        msg = f"gh {' '.join(args)} failed: {result.stderr.strip()}"
+        raise RuntimeError(msg)
     return result.stdout.strip()
 
 
 def search_repo(owner: str, repo: str, query: str) -> str:
     """Search repository contents by keyword."""
-    return _gh("search", "code", query, "--repo", f"{owner}/{repo}", "--json", "path,textMatches", "--limit", "20")
+    return _gh(
+        "search",
+        "code",
+        query,
+        "--repo",
+        f"{owner}/{repo}",
+        "--json",
+        "path,textMatches",
+        "--limit",
+        "20",
+    )
 
 
 def get_file(owner: str, repo: str, path: str, ref: str = "HEAD") -> str:
     """Get file contents from a repository."""
-    return _gh("api", f"/repos/{owner}/{repo}/contents/{path}?ref={ref}",
-               "--jq", ".content", "-H", "Accept: application/vnd.github.v3+json")
+    return _gh(
+        "api",
+        f"/repos/{owner}/{repo}/contents/{path}?ref={ref}",
+        "--jq",
+        ".content",
+        "-H",
+        "Accept: application/vnd.github.v3+json",
+    )
 
 
 def list_branches(owner: str, repo: str) -> str:
@@ -44,4 +61,12 @@ def list_branches(owner: str, repo: str) -> str:
 
 def comment_pr(owner: str, repo: str, pr_number: int, body: str) -> str:
     """Add a comment to a pull request."""
-    return _gh("pr", "comment", str(pr_number), "--repo", f"{owner}/{repo}", "--body", body)
+    return _gh(
+        "pr",
+        "comment",
+        str(pr_number),
+        "--repo",
+        f"{owner}/{repo}",
+        "--body",
+        body,
+    )

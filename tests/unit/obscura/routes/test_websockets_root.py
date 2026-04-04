@@ -1,14 +1,15 @@
 """Tests for sdk.routes.websockets — broadcast_event, notify_memory_change, and helpers."""
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from obscura.routes import websockets as ws_mod
 
 
 class TestBroadcastEvent:
     @pytest.mark.asyncio
-    async def test_broadcast_event_no_clients(self):
+    async def test_broadcast_event_no_clients(self) -> None:
         original = ws_mod.broadcast_clients().copy()
         ws_mod.clear_broadcast_clients()
         try:
@@ -17,7 +18,7 @@ class TestBroadcastEvent:
             ws_mod.broadcast_clients().extend(original)
 
     @pytest.mark.asyncio
-    async def test_broadcast_event_sends_to_clients(self):
+    async def test_broadcast_event_sends_to_clients(self) -> None:
         original = ws_mod.broadcast_clients().copy()
         ws_mod.clear_broadcast_clients()
         try:
@@ -39,7 +40,7 @@ class TestBroadcastEvent:
             ws_mod.broadcast_clients().extend(original)
 
     @pytest.mark.asyncio
-    async def test_broadcast_event_removes_disconnected(self):
+    async def test_broadcast_event_removes_disconnected(self) -> None:
         original = ws_mod.broadcast_clients().copy()
         ws_mod.clear_broadcast_clients()
         try:
@@ -60,7 +61,7 @@ class TestBroadcastEvent:
 
 class TestNotifyMemoryChange:
     @pytest.mark.asyncio
-    async def test_no_namespace(self):
+    async def test_no_namespace(self) -> None:
         original = ws_mod.memory_watch_clients().copy()
         ws_mod.clear_memory_watch_clients()
         try:
@@ -70,7 +71,7 @@ class TestNotifyMemoryChange:
             ws_mod.memory_watch_clients().update(original)
 
     @pytest.mark.asyncio
-    async def test_notify_sends_to_watchers(self):
+    async def test_notify_sends_to_watchers(self) -> None:
         original = ws_mod.memory_watch_clients().copy()
         ws_mod.clear_memory_watch_clients()
         try:
@@ -93,7 +94,7 @@ class TestNotifyMemoryChange:
             ws_mod.memory_watch_clients().update(original)
 
     @pytest.mark.asyncio
-    async def test_notify_removes_disconnected(self):
+    async def test_notify_removes_disconnected(self) -> None:
         original = ws_mod.memory_watch_clients().copy()
         ws_mod.clear_memory_watch_clients()
         try:
@@ -112,7 +113,7 @@ class TestNotifyMemoryChange:
             ws_mod.memory_watch_clients().update(original)
 
     @pytest.mark.asyncio
-    async def test_notify_different_namespaces(self):
+    async def test_notify_different_namespaces(self) -> None:
         original = ws_mod.memory_watch_clients().copy()
         ws_mod.clear_memory_watch_clients()
         try:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.eval.loader import load_eval_suite
 from obscura.eval.models import (
@@ -10,7 +10,16 @@ from obscura.eval.models import (
     CompiledEvalCase,
     CompiledExpectedToolCall,
 )
-from obscura.eval.specs import EvalAssertion, EvalCaseSpec, EvalExpectedToolCall, EvalSuiteSpec
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from obscura.eval.specs import (
+        EvalAssertion,
+        EvalCaseSpec,
+        EvalExpectedToolCall,
+        EvalSuiteSpec,
+    )
 
 
 def _compile_expected_tool_call(
@@ -20,9 +29,7 @@ def _compile_expected_tool_call(
     return CompiledExpectedToolCall(
         name=spec.name,
         order=spec.order,
-        args_contain=tuple(
-            (str(k), str(v)) for k, v in spec.args_contain.items()
-        ),
+        args_contain=tuple((str(k), str(v)) for k, v in spec.args_contain.items()),
     )
 
 

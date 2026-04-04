@@ -20,12 +20,16 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
-from obscura.core.hooks import AfterHook, BeforeHook
 from obscura.core.types import AgentEvent, AgentEventKind
 from obscura.plugins.broker import BrokerAuditEntry
-from obscura.plugins.policy import PluginPolicyEngine
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from obscura.core.hooks import AfterHook, BeforeHook
+    from obscura.plugins.policy import PluginPolicyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +136,7 @@ def make_preflight_hook(
     validator :
         A :class:`PreflightValidator` instance.  The hook calls
         ``validator.validate(agent)`` using agent info from the event.
+
     """
 
     def _hook(event: AgentEvent) -> AgentEvent | None:
@@ -208,9 +213,7 @@ def make_tool_eval_hook() -> BeforeHook:
             from obscura.core.eval_checks import run_tool_check
 
             file_path = str(
-                event.tool_input.get("file_path")
-                or event.tool_input.get("path")
-                or ""
+                event.tool_input.get("file_path") or event.tool_input.get("path") or "",
             )
 
             error = run_tool_check(
@@ -227,6 +230,7 @@ def make_tool_eval_hook() -> BeforeHook:
                 # Record failure in eval memory for future recall
                 try:
                     from obscura.eval.memory import EvalMemory
+
                     em = EvalMemory.get_instance()
                     em.record_tool_failure(
                         tool_name=event.tool_name,
@@ -235,18 +239,18 @@ def make_tool_eval_hook() -> BeforeHook:
                     )
                 except Exception:
                     pass
-            else:
-                # No errors — record success to resolve past failures (#3)
-                if file_path and event.tool_name:
-                    try:
-                        from obscura.eval.memory import EvalMemory
-                        em = EvalMemory.get_instance()
-                        em.record_tool_success(
-                            tool_name=event.tool_name,
-                            file_path=file_path,
-                        )
-                    except Exception:
-                        pass
+            # No errors — record success to resolve past failures (#3)
+            elif file_path and event.tool_name:
+                try:
+                    from obscura.eval.memory import EvalMemory
+
+                    em = EvalMemory.get_instance()
+                    em.record_tool_success(
+                        tool_name=event.tool_name,
+                        file_path=file_path,
+                    )
+                except Exception:
+                    pass
         except Exception:
             logger.debug("Tool eval hook error", exc_info=True)
         return event
@@ -265,12 +269,23 @@ def make_eval_memory_inject_hook() -> BeforeHook:
     def _extract_context(text: str) -> tuple[list[str], list[str]]:
         """Extract likely tool names and file paths from prompt text."""
         import re
+
         # File paths — anything that looks like a/b/c.py or /abs/path.toml
-        file_paths = re.findall(r'[\w/.-]+\.(?:py|toml|yaml|yml|json|md|ts|js)', text)
+        file_paths = re.findall(r"[\w/.-]+\.(?:py|toml|yaml|yml|json|md|ts|js)", text)
         # Tool names — common tool names that might appear in prompts
         tool_names: list[str] = []
-        for name in ("Write", "Edit", "Bash", "Read", "Grep", "Glob",
-                      "write_file", "edit_file", "create_file", "bash"):
+        for name in (
+            "Write",
+            "Edit",
+            "Bash",
+            "Read",
+            "Grep",
+            "Glob",
+            "write_file",
+            "edit_file",
+            "create_file",
+            "bash",
+        ):
             if name.lower() in text.lower():
                 tool_names.append(name)
         return tool_names, file_paths
@@ -324,6 +339,7 @@ def make_tool_pace_hook(
     ----------
     max_consecutive:
         Number of consecutive tool calls before injecting a reminder.
+
     """
     state: dict[str, int] = {"consecutive_tools": 0}
 
@@ -360,12 +376,12 @@ def make_tool_pace_hook(
 
 
 __all__ = [
-    "make_policy_gate_hook",
     "make_audit_hook",
-    "make_redact_hook",
-    "make_preflight_hook",
-    "make_memory_inject_hook",
-    "make_tool_eval_hook",
     "make_eval_memory_inject_hook",
+    "make_memory_inject_hook",
+    "make_policy_gate_hook",
+    "make_preflight_hook",
+    "make_redact_hook",
+    "make_tool_eval_hook",
     "make_tool_pace_hook",
 ]

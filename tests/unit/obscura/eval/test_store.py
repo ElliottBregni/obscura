@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,6 +16,9 @@ from obscura.eval.models import (
     ToolCallRecord,
 )
 from obscura.eval.store import EvalResultStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture

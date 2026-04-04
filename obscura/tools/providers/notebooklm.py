@@ -8,6 +8,7 @@ Auth is loaded from the cached token file written by ``notebooklm-mcp-auth``,
 or from the ``NOTEBOOKLM_COOKIES`` / ``NOTEBOOKLM_CSRF_TOKEN`` /
 ``NOTEBOOKLM_SESSION_ID`` environment variables.
 """
+
 from __future__ import annotations
 
 import logging
@@ -38,6 +39,7 @@ def _ensure_venv_path() -> None:
                 sys.path.insert(0, sp_str)
                 logger.debug("notebooklm: injected venv path %s", sp_str)
 
+
 def _get_client() -> Any:
     global _client
     if _client is not None:
@@ -66,9 +68,12 @@ def _get_client() -> Any:
                 csrf_token = csrf_token or cached.csrf_token
                 session_id = session_id or cached.session_id
             else:
-                raise ValueError(
+                msg = (
                     "No NotebookLM auth found. Run notebooklm-mcp-auth "
                     "to authenticate, or set NOTEBOOKLM_COOKIES env var."
+                )
+                raise ValueError(
+                    msg,
                 )
 
         _client = NotebookLMClient(
@@ -78,10 +83,13 @@ def _get_client() -> Any:
         )
         return _client
     except ImportError:
-        raise RuntimeError(
+        msg = (
             "notebooklm_mcp package not found. Install with:\n"
             "  uv pip install notebooklm-mcp\n"
             "  (or: pip install notebooklm-mcp)"
+        )
+        raise RuntimeError(
+            msg,
         )
 
 
@@ -107,9 +115,7 @@ async def _handler_list_notebooks(**kwargs: Any) -> dict[str, Any]:
         client = _get_client()
         notebooks = client.list_notebooks()
         return {
-            "notebooks": [
-                {"id": nb.id, "title": nb.title} for nb in notebooks
-            ],
+            "notebooks": [{"id": nb.id, "title": nb.title} for nb in notebooks],
             "count": len(notebooks),
         }
     except Exception as e:

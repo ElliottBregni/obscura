@@ -1,5 +1,4 @@
-"""
-obscura.auth.rbac -- Role-based access control dependencies for FastAPI.
+"""obscura.auth.rbac -- Role-based access control dependencies for FastAPI.
 
 Provides ``Depends()``-compatible callables for extracting the current
 user and enforcing role requirements on individual endpoints.
@@ -21,11 +20,14 @@ Roles
 from __future__ import annotations
 
 import os
-from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 
 from obscura.auth.models import AuthenticatedUser
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 # ---------------------------------------------------------------------------
 # Role constants — use these in route ``Depends()`` calls to keep role
@@ -77,7 +79,7 @@ def _load_api_keys() -> None:
                     "sync:write",
                     "sessions:manage",
                 ],
-            }
+            },
         }
         return
 
@@ -133,6 +135,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
 
     Raises:
         HTTPException(401): if no valid auth found.
+
     """
     # Check if auth is disabled via app config
     config = getattr(request.app.state, "config", None)
@@ -173,6 +176,7 @@ def require_role(role: str) -> Callable[..., Awaitable[AuthenticatedUser]]:
 
     Raises:
         HTTPException(403): if the user does not have the required role.
+
     """
 
     async def _enforcer(
@@ -195,6 +199,7 @@ def require_any_role(*roles: str) -> Callable[..., Awaitable[AuthenticatedUser]]
 
     Raises:
         HTTPException(403): if the user holds none of the listed roles.
+
     """
 
     async def _enforcer(

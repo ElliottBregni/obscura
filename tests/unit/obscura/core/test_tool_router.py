@@ -110,7 +110,14 @@ class TestCapabilityMatching:
             "web.browse": ["web_fetch", "web_search"],
         }
         tools = _make_tools(
-            ["git_status", "git_diff", "git_commit", "web_fetch", "web_search", "unrelated"]
+            [
+                "git_status",
+                "git_diff",
+                "git_commit",
+                "web_fetch",
+                "web_search",
+                "unrelated",
+            ],
         )
         router = _default_router(
             cap_descriptions=cap_desc,
@@ -141,7 +148,7 @@ class TestQualityGate:
                     error="fail",
                     latency_ms=9000,
                     timestamp=time.time() - 86400,  # old = low recency
-                )
+                ),
             )
 
         # Verify the score is actually below the threshold
@@ -184,7 +191,7 @@ class TestScoreRanking:
                     action="executed",
                     latency_ms=50,
                     timestamp=time.time(),
-                )
+                ),
             )
         # Make 'mediocre' have lower quality
         for _ in range(5):
@@ -196,7 +203,7 @@ class TestScoreRanking:
                     action="executed",
                     latency_ms=5000,
                     timestamp=time.time(),
-                )
+                ),
             )
             index.record(
                 BrokerAuditEntry(
@@ -206,7 +213,7 @@ class TestScoreRanking:
                     action="error",
                     error="fail",
                     timestamp=time.time(),
-                )
+                ),
             )
 
         tools = _make_tools(["good", "mediocre"])
@@ -223,7 +230,8 @@ class TestFallback:
         # Create a router with a score index that will raise
         class BrokenIndex(ToolScoreIndex):
             def get_score(self, tool_name: str) -> Any:
-                raise RuntimeError("broken")
+                msg = "broken"
+                raise RuntimeError(msg)
 
         config = ToolRoutingConfig(max_tools=50)
         router = ToolRouter(config=config, score_index=BrokenIndex())
@@ -257,7 +265,12 @@ class TestFromCapabilityIndex:
         class FakeIndex:
             def list_all(self) -> list[FakeCap]:
                 return [
-                    FakeCap("git.ops", "git operations", ("git_diff", "git_log"), False),
+                    FakeCap(
+                        "git.ops",
+                        "git operations",
+                        ("git_diff", "git_log"),
+                        False,
+                    ),
                     FakeCap("file.read", "file reading", ("read_text_file",), True),
                 ]
 

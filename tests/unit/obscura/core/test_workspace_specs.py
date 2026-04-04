@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import tomllib
+from typing import TYPE_CHECKING
 
 from obscura.core.workspace import init_workspace
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestWorkspaceSpecsScaffold:

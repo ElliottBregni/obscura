@@ -1,4 +1,5 @@
 """Gitleaks secret-scanning provider."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,11 +15,25 @@ async def _handler_scan_repo(**kwargs: Any) -> dict[str, Any]:
     path = kwargs.get("path", ".")
     binary = shutil.which("gitleaks")
     if not binary:
-        return {"error": "gitleaks binary not found on PATH. Install from https://github.com/gitleaks/gitleaks"}
-    cmd = [binary, "detect", "--source", str(path), "--report-format", "json", "--report-path", "/dev/stdout", "--no-banner"]
+        return {
+            "error": "gitleaks binary not found on PATH. Install from https://github.com/gitleaks/gitleaks",
+        }
+    cmd = [
+        binary,
+        "detect",
+        "--source",
+        str(path),
+        "--report-format",
+        "json",
+        "--report-path",
+        "/dev/stdout",
+        "--no-banner",
+    ]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         out = stdout.decode() if stdout else ""
@@ -28,7 +43,11 @@ async def _handler_scan_repo(**kwargs: Any) -> dict[str, Any]:
             return {"error": err or f"gitleaks exited {proc.returncode}"}
         try:
             findings: list[Any] = json.loads(out) if out.strip() else []
-            return {"findings": findings, "count": len(findings), "clean": len(findings) == 0}
+            return {
+                "findings": findings,
+                "count": len(findings),
+                "clean": len(findings) == 0,
+            }
         except (json.JSONDecodeError, ValueError):
             return {"output": out.strip(), "clean": "no leaks" in out.lower()}
     except Exception as e:

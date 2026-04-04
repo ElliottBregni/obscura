@@ -22,8 +22,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from obscura.plugins.models import BootstrapDep, PluginSpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import BootstrapDep, PluginSpec
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +64,10 @@ class BootstrapResult:
 
     plugin_id: str
     ok: bool = True
-    installed: list[str] = field(default_factory=list)   # deps that were installed
-    skipped: list[str] = field(default_factory=list)      # already present
-    errors: list[str] = field(default_factory=list)       # hard failures
-    warnings: list[str] = field(default_factory=list)     # optional dep failures
+    installed: list[str] = field(default_factory=list)  # deps that were installed
+    skipped: list[str] = field(default_factory=list)  # already present
+    errors: list[str] = field(default_factory=list)  # hard failures
+    warnings: list[str] = field(default_factory=list)  # optional dep failures
 
 
 # ---------------------------------------------------------------------------
@@ -79,14 +81,22 @@ def _is_pip_installed(package: str) -> bool:
     Prefers ``uv pip show`` (works without pip in the venv), falls back
     to ``python -m pip show`` for environments without uv.
     """
-    name = package.split("[")[0].split(">=")[0].split("==")[0].split("<")[0].strip()
+    name = (
+        package.split("[", maxsplit=1)[0]
+        .split(">=", maxsplit=1)[0]
+        .split("==", maxsplit=1)[0]
+        .split("<", maxsplit=1)[0]
+        .strip()
+    )
     venv_python = _obscura_venv_python()
     # Prefer uv — it doesn't need pip inside the venv
     if shutil.which("uv") is not None:
         try:
             result = subprocess.run(
                 ["uv", "pip", "show", name, "--python", venv_python],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             return result.returncode == 0
         except Exception:
@@ -95,7 +105,9 @@ def _is_pip_installed(package: str) -> bool:
     try:
         result = subprocess.run(
             [venv_python, "-m", "pip", "show", name],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         return result.returncode == 0
     except Exception:
@@ -112,9 +124,7 @@ def _is_binary_available(name: str) -> bool:
         return True
     # Check ~/.local/bin (user pip installs)
     local_bin = Path.home() / ".local" / "bin" / name
-    if local_bin.is_file():
-        return True
-    return False
+    return bool(local_bin.is_file())
 
 
 def _is_npm_installed(package: str) -> bool:
@@ -122,7 +132,9 @@ def _is_npm_installed(package: str) -> bool:
     try:
         result = subprocess.run(
             ["npm", "list", "-g", package, "--depth=0"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         return result.returncode == 0
     except Exception:
@@ -147,7 +159,9 @@ def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
         try:
             result = subprocess.run(
                 ["uv", "pip", "install", pkg, "--python", venv_python],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode == 0:
                 return True, ""
@@ -159,7 +173,9 @@ def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             [venv_python, "-m", "pip", "install", "--quiet", pkg],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0:
             return True, ""
@@ -178,7 +194,9 @@ def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["uv", "pip", "install", pkg, "--python", venv_python],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0:
             return True, ""
@@ -188,7 +206,7 @@ def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
 
 
 def _install_npx(dep: BootstrapDep) -> tuple[bool, str]:
-    """npx packages are run on-demand, just verify npx is available."""
+    """Npx packages are run on-demand, just verify npx is available."""
     if _is_binary_available("npx"):
         return True, ""
     return False, "npx not found — install Node.js"
@@ -200,7 +218,9 @@ def _install_npm(dep: BootstrapDep) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["npm", "install", "-g", pkg],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0:
             return True, ""
@@ -217,7 +237,9 @@ def _install_cargo(dep: BootstrapDep) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["cargo", "install", pkg],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         if result.returncode == 0:
             return True, ""
@@ -241,7 +263,9 @@ def _install_brew(dep: BootstrapDep) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["brew", "install", pkg],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         if result.returncode == 0:
             return True, ""
@@ -259,7 +283,9 @@ def _install_pipx(dep: BootstrapDep) -> tuple[bool, str]:
         try:
             result = subprocess.run(
                 [*cmd, dep.package],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode == 0:
                 return True, ""
@@ -274,6 +300,7 @@ def _install_pipx(dep: BootstrapDep) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
+
 
 def _brew_binary_name(package: str) -> str:
     """Extract the binary name from a brew package spec.
@@ -293,7 +320,7 @@ _INSTALLERS = {
     "cargo": (_is_binary_available, _install_cargo),
     "binary": (_is_binary_available, _check_binary),
     "brew": (lambda p: _is_binary_available(_brew_binary_name(p)), _install_brew),
-    "pipx": (lambda p: _is_binary_available(p), _install_pipx),
+    "pipx": (_is_binary_available, _install_pipx),
 }
 
 
@@ -337,7 +364,7 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
     bootstrap = spec.bootstrap
 
     for dep in bootstrap.deps:
-        action, ok, err = _bootstrap_dep(dep)
+        action, _ok, err = _bootstrap_dep(dep)
         label = f"{dep.type}:{dep.package}"
 
         if action == "skipped":
@@ -345,21 +372,22 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
         elif action == "installed":
             result.installed.append(label)
             logger.info("Installed %s for plugin %s", label, spec.id)
+        elif dep.optional:
+            result.warnings.append(f"{label}: {err}")
+            logger.debug("Optional dep %s failed for %s: %s", label, spec.id, err)
         else:
-            if dep.optional:
-                result.warnings.append(f"{label}: {err}")
-                logger.debug("Optional dep %s failed for %s: %s", label, spec.id, err)
-            else:
-                result.errors.append(f"{label}: {err}")
-                result.ok = False
-                logger.debug("Required dep %s failed for %s: %s", label, spec.id, err)
+            result.errors.append(f"{label}: {err}")
+            result.ok = False
+            logger.debug("Required dep %s failed for %s: %s", label, spec.id, err)
 
     # Run post_install command if all required deps succeeded
     if result.ok and bootstrap.post_install:
         try:
             proc = subprocess.run(
                 shlex.split(bootstrap.post_install),
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if proc.returncode != 0:
                 result.warnings.append(f"post_install failed: {proc.stderr.strip()}")
@@ -371,7 +399,9 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
         try:
             proc = subprocess.run(
                 shlex.split(bootstrap.check_command),
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if proc.returncode != 0:
                 result.warnings.append(f"check_command failed: {proc.stderr.strip()}")
@@ -382,6 +412,6 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
 
 
 __all__ = [
-    "run_bootstrap",
     "BootstrapResult",
+    "run_bootstrap",
 ]

@@ -1,5 +1,4 @@
-"""
-obscura.server -- FastAPI HTTP API wrapping the ObscuraClient SDK.
+"""obscura.server -- FastAPI HTTP API wrapping the ObscuraClient SDK.
 
 Endpoints are defined in ``obscura.routes.*`` and registered via
 ``app.include_router()``.  This module provides the app factory,
@@ -15,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +23,9 @@ from fastapi.responses import JSONResponse
 from obscura.auth.middleware import APIKeyAuthMiddleware
 from obscura.core.config import ObscuraConfig
 from obscura.deps import ClientFactory
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +36,13 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Startup / shutdown lifecycle for the server."""
     config: ObscuraConfig = app.state.config
     logger.info(
-        "Obscura SDK server starting (host=%s port=%d)", config.host, config.port
+        "Obscura SDK server starting (host=%s port=%d)",
+        config.host,
+        config.port,
     )
 
     # Initialize telemetry (traces, metrics, structured logging)
@@ -49,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Telemetry initialized (otel_enabled=%s)", config.otel_enabled)
     except Exception:
         logger.warning(
-            "Could not initialize telemetry; continuing without observability"
+            "Could not initialize telemetry; continuing without observability",
         )
 
     # Initialize A2A server
@@ -70,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Heartbeat monitor started")
     except Exception:
         logger.warning(
-            "Could not initialize heartbeat monitor; continuing without health monitoring"
+            "Could not initialize heartbeat monitor; continuing without health monitoring",
         )
         app.state._heartbeat_monitor = None
 
@@ -85,7 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Loaded %d persisted agent templates", len(persisted))
     except Exception:
         logger.warning(
-            "Could not load persisted agent templates; starting with empty store"
+            "Could not load persisted agent templates; starting with empty store",
         )
 
     yield
@@ -212,7 +216,8 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                 from obscura.integrations.a2a.store import RedisTaskStore
 
                 a2a_store = RedisTaskStore(
-                    config.a2a_redis_url, task_ttl=config.a2a_task_ttl
+                    config.a2a_redis_url,
+                    task_ttl=config.a2a_task_ttl,
                 )
             else:
                 from obscura.integrations.a2a.store import InMemoryTaskStore

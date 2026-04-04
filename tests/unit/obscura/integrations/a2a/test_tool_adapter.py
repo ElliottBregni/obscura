@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
+from obscura.core.tools import ToolRegistry
 from obscura.integrations.a2a.agent_card import AgentCardGenerator
 from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.service import A2AService
@@ -17,8 +18,9 @@ from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.tool_adapter import register_remote_agent_as_tool
 from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
 from obscura.integrations.a2a.transports.rest import create_wellknown_router
-from obscura.core.tools import ToolRegistry
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -42,7 +44,7 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-async def remote_client(app: FastAPI) -> AsyncGenerator[A2AClient, None]:
+async def remote_client(app: FastAPI) -> AsyncGenerator[A2AClient]:
     import httpx
 
     transport = ASGITransport(app=app)
@@ -75,7 +77,9 @@ class TestRegisterTool:
     async def test_custom_name(self, remote_client: A2AClient) -> None:
         registry = ToolRegistry()
         spec = register_remote_agent_as_tool(
-            registry, remote_client, tool_name="support"
+            registry,
+            remote_client,
+            tool_name="support",
         )
         assert spec.name == "support"
         assert registry.get("support") is not None
@@ -84,7 +88,9 @@ class TestRegisterTool:
     async def test_custom_description(self, remote_client: A2AClient) -> None:
         registry = ToolRegistry()
         spec = register_remote_agent_as_tool(
-            registry, remote_client, description="Custom desc"
+            registry,
+            remote_client,
+            description="Custom desc",
         )
         assert spec.description == "Custom desc"
 

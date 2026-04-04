@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from starlette.testclient import TestClient
+
+if TYPE_CHECKING:
+    from starlette.testclient import TestClient
 
 
 @pytest.mark.e2e
@@ -15,7 +17,8 @@ class TestAPIKeyAuth:
     def test_api_key_default_dev_key(self, client: TestClient) -> None:
         """Default dev API key should work."""
         resp = client.get(
-            "/api/v1/agents", headers={"X-API-Key": "obscura-dev-key-123"}
+            "/api/v1/agents",
+            headers={"X-API-Key": "obscura-dev-key-123"},
         )
         assert resp.status_code == 200
 
@@ -30,7 +33,8 @@ class TestAPIKeyAuth:
     def test_api_key_invalid(self, client_no_auth_override: TestClient) -> None:
         """Invalid API key should fail."""
         resp = client_no_auth_override.get(
-            "/api/v1/agents", headers={"X-API-Key": "invalid-key"}
+            "/api/v1/agents",
+            headers={"X-API-Key": "invalid-key"},
         )
         assert resp.status_code == 401
 
@@ -72,7 +76,8 @@ class TestAuthBypass:
     def test_spawn_without_auth_when_disabled(self, client: TestClient) -> None:
         """Can spawn agent without auth when disabled."""
         resp = client.post(
-            "/api/v1/agents", json={"name": "no-auth-test", "model": "claude"}
+            "/api/v1/agents",
+            json={"name": "no-auth-test", "model": "claude"},
         )
         assert resp.status_code == 200
         data: Any = resp.json()

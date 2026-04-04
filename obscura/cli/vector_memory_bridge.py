@@ -85,7 +85,8 @@ def load_startup_memories(
         if not results:
             return ""
         return _format_memories_section(
-            results, header="## Recalled Memories (from previous sessions)"
+            results,
+            header="## Recalled Memories (from previous sessions)",
         )
     except Exception as e:
         _logger.warning(f"Could not load startup memories: {e}")
@@ -119,7 +120,8 @@ def search_relevant_context(
         if not results:
             return ""
         return _format_memories_section(
-            results, header="[Relevant context from memory]"
+            results,
+            header="[Relevant context from memory]",
         )
     except Exception as e:
         _logger.debug(f"Vector memory search failed: {e}")
@@ -252,9 +254,8 @@ def clear_mcp_noise_memories(store: VectorMemoryStore) -> int:
             entry = store.get(key)
             if entry is None:
                 continue
-            if _is_mcp_noise_text(entry.text):
-                if store.delete(key):
-                    removed += 1
+            if _is_mcp_noise_text(entry.text) and store.delete(key):
+                removed += 1
         except Exception:
             continue
     return removed

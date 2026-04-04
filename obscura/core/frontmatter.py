@@ -1,5 +1,4 @@
-"""
-obscura.core.frontmatter — Parse frontmatter from markdown files.
+"""obscura.core.frontmatter — Parse frontmatter from markdown files.
 
 Supports TOML frontmatter (``+++`` delimited, preferred) and YAML
 frontmatter (``---`` delimited, deprecated).
@@ -20,8 +19,10 @@ import re
 import tomllib
 import warnings
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

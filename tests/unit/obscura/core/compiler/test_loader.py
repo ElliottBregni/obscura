@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import tomli_w
@@ -15,8 +15,11 @@ from obscura.core.compiler.specs import (
     WorkspaceSpec,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-@pytest.fixture()
+
+@pytest.fixture
 def specs_dir(tmp_path: Path) -> Path:
     """Create a temp directory with spec files."""
     d = tmp_path / "specs"
@@ -199,12 +202,14 @@ class TestLoadSpecsDir:
 class TestSpecRegistry:
     def test_add_and_get(self) -> None:
         registry = SpecRegistry()
-        tmpl = TemplateSpec.model_validate({
-            "apiVersion": "obscura/v1",
-            "kind": "Template",
-            "metadata": {"name": "t1"},
-            "spec": {},
-        })
+        tmpl = TemplateSpec.model_validate(
+            {
+                "apiVersion": "obscura/v1",
+                "kind": "Template",
+                "metadata": {"name": "t1"},
+                "spec": {},
+            },
+        )
         registry.add(tmpl)
         assert registry.get_template("t1") is tmpl
         assert registry.get_template("missing") is None

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Self
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,8 +22,8 @@ from obscura.tools.system import (
     list_processes,
     list_system_tools,
     list_unix_capabilities,
-    manage_crontab,
     make_directory,
+    manage_crontab,
     read_text_file,
     remove_path,
     run_command,
@@ -84,11 +84,12 @@ class TestRunNpx:
     @pytest.mark.asyncio
     async def test_timeout_returns_error_payload(self) -> None:
         proc = AsyncMock()
-        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+        proc.communicate = AsyncMock(side_effect=TimeoutError())
         proc.kill = MagicMock()
         proc.wait = AsyncMock()
         with patch(
-            "obscura.tools.system.asyncio.create_subprocess_exec", return_value=proc
+            "obscura.tools.system.asyncio.create_subprocess_exec",
+            return_value=proc,
         ):
             payload = json.loads(await run_npx(["--version"], timeout_seconds=0.01))
         assert payload["ok"] is False
@@ -131,14 +132,15 @@ class TestRunCommand:
     @pytest.mark.asyncio
     async def test_timeout_returns_error_payload(self) -> None:
         proc = AsyncMock()
-        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+        proc.communicate = AsyncMock(side_effect=TimeoutError())
         proc.kill = MagicMock()
         proc.wait = AsyncMock()
         with patch(
-            "obscura.tools.system.asyncio.create_subprocess_exec", return_value=proc
+            "obscura.tools.system.asyncio.create_subprocess_exec",
+            return_value=proc,
         ):
             payload = json.loads(
-                await run_command("echo", args=["slow"], timeout_seconds=0.01)
+                await run_command("echo", args=["slow"], timeout_seconds=0.01),
             )
         assert payload["ok"] is False
         assert payload["error"] == "timeout"
@@ -213,7 +215,7 @@ class TestWebCompatibilityTools:
             def geturl(self) -> str:
                 return "https://example.com"
 
-            def __enter__(self) -> _Resp:
+            def __enter__(self) -> Self:
                 return self
 
             def __exit__(self, *_args: object) -> None:
@@ -234,8 +236,13 @@ class TestWebCompatibilityTools:
                     "Heading": "Python",
                     "AbstractText": "Python language",
                     "AbstractURL": "https://python.org",
-                    "RelatedTopics": [{"Text": "Docs - Official docs", "FirstURL": "https://docs.python.org"}],
-                }
+                    "RelatedTopics": [
+                        {
+                            "Text": "Docs - Official docs",
+                            "FirstURL": "https://docs.python.org",
+                        },
+                    ],
+                },
             ),
         }
         with patch(
@@ -262,12 +269,12 @@ class TestFilesystemTools:
             file_path = base / "a" / "notes.txt"
 
             write_payload = json.loads(
-                await write_text_file(str(file_path), "line1\n", create_dirs=True)
+                await write_text_file(str(file_path), "line1\n", create_dirs=True),
             )
             assert write_payload["ok"] is True
 
             append_payload = json.loads(
-                await append_text_file(str(file_path), "line2\n")
+                await append_text_file(str(file_path), "line2\n"),
             )
             assert append_payload["ok"] is True
 
@@ -308,7 +315,7 @@ class TestFilesystemTools:
                 clear=False,
             ):
                 payload = json.loads(
-                    await write_text_file(str(blocked_file), "blocked")
+                    await write_text_file(str(blocked_file), "blocked"),
                 )
             assert payload["ok"] is False
             assert payload["error"] == "path_not_allowed"
@@ -342,7 +349,7 @@ class TestDiscoveryTools:
             clear=False,
         ):
             payload = json.loads(
-                await get_environment(prefix="OBSCURA_TEST_", include_values=True)
+                await get_environment(prefix="OBSCURA_TEST_", include_values=True),
             )
         assert payload["ok"] is True
         assert payload["count"] >= 1
@@ -397,7 +404,7 @@ class TestOpsAndSecurityTools:
     async def test_security_lookup_world_writable(self) -> None:
         with TemporaryDirectory() as tmpdir:
             payload = json.loads(
-                await security_lookup("world_writable", path=tmpdir, max_results=10)
+                await security_lookup("world_writable", path=tmpdir, max_results=10),
             )
         assert "ok" in payload
 
@@ -411,7 +418,8 @@ class TestOpsAndSecurityTools:
     @pytest.mark.asyncio
     async def test_manage_crontab_add_requires_fields(self) -> None:
         with patch(
-            "obscura.tools.system.shutil.which", return_value="/usr/bin/crontab"
+            "obscura.tools.system.shutil.which",
+            return_value="/usr/bin/crontab",
         ):
             payload = json.loads(await manage_crontab("add", schedule="", command=""))
         assert payload["ok"] is False

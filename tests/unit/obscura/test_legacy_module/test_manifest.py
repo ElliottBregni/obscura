@@ -3,23 +3,31 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from scripts.sync import VaultSync
+if TYPE_CHECKING:
+    from scripts.sync import VaultSync
 
 
 class TestManifestBuilding:
     """Manifest building: per-target and vault-wide agent filtering."""
 
     def test_build_target_manifest_copilot(
-        self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
+        mock_repo: Path,
     ) -> None:
         """Manifest for root target has copilot-specific files."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        root = [t for t in targets if t.repo_path == mock_repo][0]
+        root = next(t for t in targets if t.repo_path == mock_repo)
 
         manifest = sync_instance.build_target_manifest(
-            "copilot", root, vault_repo, mock_repo
+            "copilot",
+            root,
+            vault_repo,
+            mock_repo,
         )
 
         assert Path("copilot-instructions.md") in manifest, (
@@ -37,15 +45,21 @@ class TestManifestBuilding:
         )
 
     def test_build_target_manifest_claude(
-        self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
+        mock_repo: Path,
     ) -> None:
         """Manifest for root target filters copilot-specific files."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        root = [t for t in targets if t.repo_path == mock_repo][0]
+        root = next(t for t in targets if t.repo_path == mock_repo)
 
         manifest = sync_instance.build_target_manifest(
-            "claude", root, vault_repo, mock_repo
+            "claude",
+            root,
+            vault_repo,
+            mock_repo,
         )
 
         assert Path("copilot-instructions.md") not in manifest, (
@@ -54,15 +68,21 @@ class TestManifestBuilding:
         assert Path("agent.md") in manifest, "Claude should have agent.md"
 
     def test_build_target_manifest_no_vault_content(
-        self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
+        mock_repo: Path,
     ) -> None:
         """Root target manifest has NO vault-wide content."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        root = [t for t in targets if t.repo_path == mock_repo][0]
+        root = next(t for t in targets if t.repo_path == mock_repo)
 
         manifest = sync_instance.build_target_manifest(
-            "copilot", root, vault_repo, mock_repo
+            "copilot",
+            root,
+            vault_repo,
+            mock_repo,
         )
 
         assert Path("skills/git-workflow.md") not in manifest, (
@@ -73,15 +93,21 @@ class TestManifestBuilding:
         )
 
     def test_child_target_inherits_root_files(
-        self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
+        mock_repo: Path,
     ) -> None:
         """Non-root targets inherit root-level files."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        plat = [t for t in targets if t.repo_path == mock_repo / "platform"][0]
+        plat = next(t for t in targets if t.repo_path == mock_repo / "platform")
 
         manifest = sync_instance.build_target_manifest(
-            "copilot", plat, vault_repo, mock_repo
+            "copilot",
+            plat,
+            vault_repo,
+            mock_repo,
         )
 
         assert Path("agent.md") in manifest, (
@@ -92,15 +118,21 @@ class TestManifestBuilding:
         )
 
     def test_child_no_content_cascade(
-        self, sync_instance: VaultSync, vault_root: Path, mock_repo: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
+        mock_repo: Path,
     ) -> None:
         """Platform target does NOT get root's skills content."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        plat = [t for t in targets if t.repo_path == mock_repo / "platform"][0]
+        plat = next(t for t in targets if t.repo_path == mock_repo / "platform")
 
         manifest = sync_instance.build_target_manifest(
-            "copilot", plat, vault_repo, mock_repo
+            "copilot",
+            plat,
+            vault_repo,
+            mock_repo,
         )
 
         # Root has skills/changelog-generator/SKILL.md — platform should NOT inherit it
@@ -113,7 +145,9 @@ class TestManifestBuilding:
             )
 
     def test_vault_manifest_copilot(
-        self, sync_instance: VaultSync, vault_root: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
     ) -> None:
         manifest = sync_instance.build_vault_manifest("copilot")
 
@@ -126,7 +160,9 @@ class TestManifestBuilding:
         assert Path("skills/api-design.md") in manifest
 
     def test_vault_manifest_claude(
-        self, sync_instance: VaultSync, vault_root: Path
+        self,
+        sync_instance: VaultSync,
+        vault_root: Path,
     ) -> None:
         manifest = sync_instance.build_vault_manifest("claude")
 

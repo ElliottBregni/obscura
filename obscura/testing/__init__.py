@@ -16,9 +16,9 @@ Usage::
     )
 """
 
-from obscura.testing.mock_backend import (
-    MockBackend,
-    MockBackendBuilder,
+from obscura.testing.agents import (
+    StubAgent,
+    make_stub_agent,
 )
 from obscura.testing.chunks import (
     done_chunk,
@@ -28,63 +28,63 @@ from obscura.testing.chunks import (
     thinking_chunk,
     thinking_chunks,
     tool_call_chunks,
+    tool_delta_chunk,
     tool_end_chunk,
     tool_start_chunk,
-    tool_delta_chunk,
-)
-from obscura.testing.tools import (
-    echo_handler,
-    async_echo_handler,
-    failing_handler,
-    noop_handler,
-    make_tool,
-    make_registry,
 )
 from obscura.testing.fakes import (
-    FakeTextBlock,
-    FakeThinkingBlock,
-    FakeToolUseBlock,
     FakeAssistantMessage,
     FakeResultMessage,
     FakeSystemMessage,
+    FakeTextBlock,
+    FakeThinkingBlock,
+    FakeToolUseBlock,
     async_iter,
 )
-from obscura.testing.agents import (
-    StubAgent,
-    make_stub_agent,
+from obscura.testing.mock_backend import (
+    MockBackend,
+    MockBackendBuilder,
+)
+from obscura.testing.tools import (
+    async_echo_handler,
+    echo_handler,
+    failing_handler,
+    make_registry,
+    make_tool,
+    noop_handler,
 )
 
 __all__ = [
+    "FakeAssistantMessage",
+    "FakeResultMessage",
+    "FakeSystemMessage",
+    # Fakes (Claude SDK shims)
+    "FakeTextBlock",
+    "FakeThinkingBlock",
+    "FakeToolUseBlock",
     # Mock backend
     "MockBackend",
     "MockBackendBuilder",
+    # Agent helpers
+    "StubAgent",
+    "async_echo_handler",
+    "async_iter",
     # Chunk factories
     "done_chunk",
+    # Tool helpers
+    "echo_handler",
     "error_chunk",
+    "failing_handler",
+    "make_registry",
+    "make_stub_agent",
+    "make_tool",
+    "noop_handler",
     "text_chunk",
     "text_chunks",
     "thinking_chunk",
     "thinking_chunks",
     "tool_call_chunks",
+    "tool_delta_chunk",
     "tool_end_chunk",
     "tool_start_chunk",
-    "tool_delta_chunk",
-    # Tool helpers
-    "echo_handler",
-    "async_echo_handler",
-    "failing_handler",
-    "noop_handler",
-    "make_tool",
-    "make_registry",
-    # Fakes (Claude SDK shims)
-    "FakeTextBlock",
-    "FakeThinkingBlock",
-    "FakeToolUseBlock",
-    "FakeAssistantMessage",
-    "FakeResultMessage",
-    "FakeSystemMessage",
-    "async_iter",
-    # Agent helpers
-    "StubAgent",
-    "make_stub_agent",
 ]

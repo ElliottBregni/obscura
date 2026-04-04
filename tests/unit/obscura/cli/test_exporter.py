@@ -1,7 +1,7 @@
 from obscura.cli.render import export_transcript_markdown
 
 
-def test_export_simple():
+def test_export_simple() -> None:
     history = [
         ("user", "› hello"),
         ("assistant", "• Hi there\nI can help."),

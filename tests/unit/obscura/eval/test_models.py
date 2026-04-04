@@ -40,7 +40,8 @@ class TestFrozenDataclasses:
 
     def test_compiled_expected_tool_call(self) -> None:
         tc = CompiledExpectedToolCall(
-            name="bash", order=1,
+            name="bash",
+            order=1,
             args_contain=(("cmd", "ls"),),
         )
         assert tc.name == "bash"
@@ -48,8 +49,12 @@ class TestFrozenDataclasses:
 
     def test_compiled_eval_case_defaults(self) -> None:
         c = CompiledEvalCase(
-            id="c1", title="Test", prompt="Hello",
-            suite_id="s1", backend="claude", model="sonnet",
+            id="c1",
+            title="Test",
+            prompt="Hello",
+            suite_id="s1",
+            backend="claude",
+            model="sonnet",
         )
         assert c.max_turns == 10
         assert c.tool_mode == "live"
@@ -75,8 +80,11 @@ class TestFrozenDataclasses:
 
     def test_eval_case_result(self) -> None:
         r = EvalCaseResult(
-            case_id="c1", suite_id="s1", run_id="r1",
-            verdict=EvalVerdict.PASS, deterministic_score=1.0,
+            case_id="c1",
+            suite_id="s1",
+            run_id="r1",
+            verdict=EvalVerdict.PASS,
+            deterministic_score=1.0,
         )
         assert r.composite_score == 0.0
         assert r.judge_score is None
@@ -84,9 +92,17 @@ class TestFrozenDataclasses:
 
     def test_eval_run_summary(self) -> None:
         s = EvalRunSummary(
-            run_id="r1", suite_id="s1", backend="claude", model="sonnet",
-            total_cases=3, passed=2, failed=1, regressions=0, errors=0,
-            avg_deterministic_score=0.8, avg_judge_score=None,
+            run_id="r1",
+            suite_id="s1",
+            backend="claude",
+            model="sonnet",
+            total_cases=3,
+            passed=2,
+            failed=1,
+            regressions=0,
+            errors=0,
+            avg_deterministic_score=0.8,
+            avg_judge_score=None,
             avg_composite_score=0.8,
         )
         assert s.total_cases == 3
@@ -94,8 +110,12 @@ class TestFrozenDataclasses:
 
     def test_regression_comparison(self) -> None:
         rc = RegressionComparison(
-            case_id="c1", current_score=0.7, baseline_score=0.9,
-            delta=-0.2, is_regression=True, details="score dropped",
+            case_id="c1",
+            current_score=0.7,
+            baseline_score=0.9,
+            delta=-0.2,
+            is_regression=True,
+            details="score dropped",
         )
         assert rc.is_regression is True
         assert rc.delta == -0.2

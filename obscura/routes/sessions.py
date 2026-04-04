@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import require_role
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.types import Backend, SessionRef
@@ -21,6 +20,9 @@ from obscura.routes.session_ingest import (
 from obscura.routes.session_sync import sync_session_lifecycle
 from obscura.routes.websockets import broadcast_event
 from obscura.schemas import SessionCreateRequest, SessionResponse
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ def _get_event_store(request: Request) -> SQLiteEventStore:
 async def create_session(
     body: SessionCreateRequest,
     request: Request,
-    user: AuthenticatedUser = Depends(require_role("sessions:manage")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))],
 ) -> SessionResponse:
     """Create a new session."""
     factory: ClientFactory = request.app.state.client_factory
@@ -65,12 +67,15 @@ async def create_session(
                 event="created",
             )
         except Exception:
-            logger.debug("Failed to sync session create into vector memory", exc_info=True)
+            logger.debug(
+                "Failed to sync session create into vector memory",
+                exc_info=True,
+            )
         asyncio.create_task(
             broadcast_event(
                 "session_created",
                 {"session_id": ref.session_id, "backend": ref.backend.value},
-            )
+            ),
         )
         return SessionResponse(
             session_id=ref.session_id,
@@ -84,7 +89,7 @@ async def create_session(
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_sessions(
     request: Request,
-    user: AuthenticatedUser = Depends(require_role("sessions:manage")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))],
     backend: str | None = None,
     source: str | None = None,
 ) -> list[SessionResponse]:
@@ -146,7 +151,10 @@ async def ingest_sessions(
             force=force,
             copy_to_pwd=copy_to_pwd,
         )
-        return JSONResponse(status_code=500, content={"success": False, "error": str(exc)})
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(exc)},
+        )
 
     audit(
         "session.ingest",
@@ -171,14 +179,14 @@ async def ingest_sessions(
                 "entries": result.get("entries", 0),
                 "copy_to_pwd": copy_to_pwd,
             },
-        )
+        ),
     )
     return JSONResponse(content={"success": True, **result})
 
 
 @router.get("/sessions/ingest/preflight")
 async def ingest_sessions_preflight(
-    user: AuthenticatedUser = Depends(require_role("sessions:manage")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))],
 ) -> JSONResponse:
     """Return health checks for system session ingest readiness."""
     checks = preflight_system_session_ingest()
@@ -222,12 +230,15 @@ async def delete_session(
                 event="deleted",
             )
         except Exception:
-            logger.debug("Failed to sync session delete into vector memory", exc_info=True)
+            logger.debug(
+                "Failed to sync session delete into vector memory",
+                exc_info=True,
+            )
         asyncio.create_task(
             broadcast_event(
                 "session_deleted",
                 {"session_id": session_id, "backend": backend},
-            )
+            ),
         )
         return JSONResponse(content={"deleted": True, "session_id": session_id})
     finally:

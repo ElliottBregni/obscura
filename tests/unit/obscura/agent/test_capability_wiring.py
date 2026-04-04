@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from obscura.agent.agents import AgentConfig
 from obscura.manifest.models import (
     AgentManifest,

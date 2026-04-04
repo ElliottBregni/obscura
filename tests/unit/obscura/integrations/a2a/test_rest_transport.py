@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +16,8 @@ from obscura.integrations.a2a.transports.rest import (
     create_wellknown_router,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -36,14 +37,16 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 def _task_body(
-    text: str = "Hello", msg_id: str = "m1", blocking: bool = True
+    text: str = "Hello",
+    msg_id: str = "m1",
+    blocking: bool = True,
 ) -> dict[str, Any]:
     return {
         "message": {

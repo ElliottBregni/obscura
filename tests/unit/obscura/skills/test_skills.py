@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, AsyncIterator, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 
@@ -33,6 +33,8 @@ from obscura.skills.registry import (
     reset_global_registry,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ---------------------------------------------------------------------------
 # Concrete skill for testing
@@ -84,7 +86,8 @@ class EchoSkill(Skill):
             return params["text"]
         if capability == "count":
             return len(params["text"])
-        raise SkillExecutionError(f"Unknown capability: {capability}")
+        msg = f"Unknown capability: {capability}"
+        raise SkillExecutionError(msg)
 
     @override
     async def health_check(self) -> SkillHealth:
@@ -122,7 +125,9 @@ class StreamSkill(Skill):
 
     @override
     async def execute_stream(
-        self, capability: str, params: dict[str, Any]
+        self,
+        capability: str,
+        params: dict[str, Any],
     ) -> AsyncIterator[Any]:
         for word in params["sentence"].split():
             yield word
@@ -454,7 +459,7 @@ class TestLoadedSkill(Skill):
 
     async def shutdown(self) -> None:
         pass
-"""
+""",
         )
 
         loader = SkillLoader()
@@ -511,7 +516,7 @@ class GreetSkill(Skill):
 
     async def shutdown(self) -> None:
         pass
-"""
+""",
         )
 
         loader = SkillLoader()

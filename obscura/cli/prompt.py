@@ -8,19 +8,18 @@ concurrent input during streaming.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html as _html
+import os
 import random
 import shutil
-import os
 import subprocess
 from dataclasses import dataclass, field
-from collections.abc import Callable
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import Completer, Completion, CompleteEvent
-from prompt_toolkit.document import Document
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -29,6 +28,10 @@ from prompt_toolkit.styles import Style
 
 from obscura.core.paths import resolve_obscura_home
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from prompt_toolkit.document import Document
 
 # ---------------------------------------------------------------------------
 # StreamingStatus — shared mutable state for toolbar spinner
@@ -65,8 +68,8 @@ class StreamingStatus:
     """Mutable bag updated by StreamRenderer, read by the toolbar callable."""
 
     active: bool = False
-    text: str = ""        # e.g. "thinking...", "running edit_file..."
-    preview: str = ""     # thinking-delta preview snippet
+    text: str = ""  # e.g. "thinking...", "running edit_file..."
+    preview: str = ""  # thinking-delta preview snippet
     spinner_idx: int = 0
 
     @property
@@ -107,12 +110,12 @@ class PromptStatus:
 
     model: str = ""
     branch: str = ""
-    ctx_pct: int = 0          # 0-100
+    ctx_pct: int = 0  # 0-100
     ctx_tokens: int = 0
     ctx_window: int = 0
     mode: str = ""
     session_id: str = ""
-    running_agents: list[str] = field(default_factory=lambda: list[str]())
+    running_agents: list[str] = field(default_factory=list[str])
     task_count: int = 0
 
 
@@ -141,8 +144,9 @@ def print_status_banner(status: PromptStatus) -> None:
 
     Uses Rich markup via the shared console.
     """
-    from obscura.cli.render import console, ACCENT
     from rich.markup import escape as markup_escape
+
+    from obscura.cli.render import ACCENT, console
 
     parts: list[str] = []
 
@@ -211,7 +215,9 @@ class SlashCommandCompleter(Completer):
 
     @override
     def get_completions(
-        self, document: Document, complete_event: CompleteEvent
+        self,
+        document: Document,
+        complete_event: CompleteEvent,
     ) -> list[Completion]:
         text = document.text_before_cursor.lstrip()
 
@@ -222,7 +228,11 @@ class SlashCommandCompleter(Completer):
                 prefix = text[1:]
                 for cmd in sorted(self._completions):
                     if cmd.startswith(prefix):
-                        yield Completion("/" + cmd, start_position=-len(text), display="/" + cmd)
+                        yield Completion(
+                            "/" + cmd,
+                            start_position=-len(text),
+                            display="/" + cmd,
+                        )
                 return
             cmd = parts[0].lstrip("/")
             subs = self._completions.get(cmd, [])
@@ -246,14 +256,22 @@ class SlashCommandCompleter(Completer):
             prefix = word[1:]
             for name in self._dollar_skill_names():
                 if name.startswith(prefix):
-                    yield Completion("$" + name, start_position=-len(word), display="$" + name)
+                    yield Completion(
+                        "$" + name,
+                        start_position=-len(word),
+                        display="$" + name,
+                    )
             return
 
         if word.startswith("@") and self._at_command_names is not None:
             prefix = word[1:]
             for name in self._at_command_names():
                 if name.startswith(prefix):
-                    yield Completion("@" + name, start_position=-len(word), display="@" + name)
+                    yield Completion(
+                        "@" + name,
+                        start_position=-len(word),
+                        display="@" + name,
+                    )
             return
 
         return []
@@ -271,7 +289,7 @@ PROMPT_STYLE = Style.from_dict(
         "status-preview": "italic #586e75",
         "continuation": "#586e75",
         "bottom-toolbar": "#00cc00 noreverse",
-    }
+    },
 )
 
 
@@ -302,8 +320,9 @@ def print_separator() -> None:
 def _expand_preview_action() -> None:
     """Print the full accumulated assistant text from the active renderer."""
     try:
-        from obscura.cli.render import get_active_text, console
         from rich.markdown import Markdown
+
+        from obscura.cli.render import console, get_active_text
 
         text = get_active_text()
         if not text:
@@ -332,6 +351,7 @@ def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
 
     # Expand preview hotkey
     try:
+
         @kb.add(expand_key)
         def _expand(event: object) -> None:  # pyright: ignore[reportUnusedFunction]
             _expand_preview_action()
@@ -361,9 +381,10 @@ def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
 def _expand_thinking_action() -> None:
     """Print the last thinking block from the active renderer."""
     try:
-        from obscura.cli.render import _active_renderer, console, THINKING_COLOR
         from rich.panel import Panel
         from rich.text import Text
+
+        from obscura.cli.render import THINKING_COLOR, _active_renderer, console
 
         if _active_renderer is None:
             console.print("[dim]No active session.[/]")
@@ -381,7 +402,7 @@ def _expand_thinking_action() -> None:
                 border_style="dim magenta",
                 expand=False,
                 padding=(0, 1),
-            )
+            ),
         )
         console.print()
     except Exception:
@@ -415,7 +436,9 @@ def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
         top.append(f"session {short_id}")
 
     if prompt_status.running_agents:
-        agents_str = " ".join(f"{_html.escape(n)} ●" for n in prompt_status.running_agents)
+        agents_str = " ".join(
+            f"{_html.escape(n)} ●" for n in prompt_status.running_agents
+        )
         top.append(agents_str)
 
     if prompt_status.task_count > 0:
@@ -457,10 +480,8 @@ def create_prompt_session(
     """Create a configured PromptSession for the Obscura REPL."""
     # Ensure the Obscura home directory exists so FileHistory can write.
     home = resolve_obscura_home()
-    try:
+    with contextlib.suppress(Exception):
         home.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
     history_path = home / "cli_history_v2"
 
     _fallback_text = f"  {toolbar_text}" if toolbar_text else ""
@@ -482,7 +503,10 @@ def create_prompt_session(
                 max_prev = width - len(label) - 10
                 if len(preview) > max_prev:
                     preview = preview[: max_prev - 3] + "..."
-                label_part = label_part + f" <status-preview>{_html.escape(preview)}</status-preview>"
+                label_part = (
+                    label_part
+                    + f" <status-preview>{_html.escape(preview)}</status-preview>"
+                )
             status_lane = f"<status-lane>{label_part}</status-lane>"
             input_lane = "<input-lane>\u276f </input-lane>"
             return HTML(status_lane + "\n" + input_lane)
@@ -495,7 +519,6 @@ def create_prompt_session(
         except Exception:
             model_text = ""
         return HTML(_build_prompt_message_html(width, model_text, PromptLayoutConfig()))
-
 
     # If a static hud_provider was supplied, compute a one-shot toolbar
     _static_hud_html: str | None = None
@@ -541,9 +564,15 @@ def create_prompt_session(
         style=PROMPT_STYLE,
         history=FileHistory(str(history_path)),
         auto_suggest=AutoSuggestFromHistory(),
-        completer=SlashCommandCompleter(completions, at_command_names=at_command_names, dollar_skill_names=dollar_skill_names),
+        completer=SlashCommandCompleter(
+            completions,
+            at_command_names=at_command_names,
+            dollar_skill_names=dollar_skill_names,
+        ),
         complete_while_typing=False,
-        key_bindings=_make_key_bindings(os.environ.get("OBSCURA_EXPAND_PREVIEW_KEY", "c-p")),
+        key_bindings=_make_key_bindings(
+            os.environ.get("OBSCURA_EXPAND_PREVIEW_KEY", "c-p"),
+        ),
         enable_history_search=True,
         mouse_support=False,
         prompt_continuation="  \u00b7 ",
@@ -570,6 +599,7 @@ async def bordered_prompt(session: PromptSession[str]) -> str:
     text = result.strip()
     if text:
         import sys
+
         # Erase the two lines prompt_toolkit left (thinking-delta + ❯ input)
         sys.stdout.write("\033[A\033[2K")  # up + clear (input line)
         sys.stdout.write("\033[A\033[2K")  # up + clear (thinking-delta line)
@@ -613,6 +643,7 @@ class PromptLayoutConfig:
     input_vpad: int = 0
     menu_hpad: int = 1
 
+
 @dataclass
 class PromptHUDState:
     model_text: str = ""
@@ -623,7 +654,11 @@ class PromptHUDState:
     menu_items: list[tuple[str, str]] = field(default_factory=list)
 
 
-def _build_prompt_message_html(width: int, model_text: str, cfg: PromptLayoutConfig) -> str:
+def _build_prompt_message_html(
+    width: int,
+    model_text: str,
+    cfg: PromptLayoutConfig,
+) -> str:
     # Minimal two-lane message: status lane then input lane
     status = f"<status-lane>{model_text}</status-lane>"
     # input lane contains a vertical bar placeholder
@@ -653,6 +688,7 @@ def _render_menu_line(width: int, hud: PromptHUDState, cfg: PromptLayoutConfig) 
     if len(line) > width:
         return line[:width]
     return line
+
 
 # expose aliases expected by tests
 _build_prompt_message_html = _build_prompt_message_html
@@ -669,6 +705,7 @@ class PromptLayoutConfig:
     input_vpad: int = 0
     menu_hpad: int = 1
 
+
 @dataclass
 class PromptHUDState:
     model_text: str = ""
@@ -679,7 +716,11 @@ class PromptHUDState:
     menu_items: list[tuple[str, str]] = field(default_factory=list)
 
 
-def _build_prompt_message_html(width: int, model_text: str, cfg: PromptLayoutConfig) -> str:
+def _build_prompt_message_html(
+    width: int,
+    model_text: str,
+    cfg: PromptLayoutConfig,
+) -> str:
     # Minimal two-lane message: status lane then input lane
     status = f"<status-lane>{model_text}</status-lane>"
     # input lane contains a vertical bar placeholder
@@ -710,8 +751,8 @@ def _render_menu_line(width: int, hud: PromptHUDState, cfg: PromptLayoutConfig) 
         return line[:width]
     return line
 
+
 # expose aliases expected by tests
 _build_prompt_message_html = _build_prompt_message_html
 _render_model_status_line = _render_model_status_line
 _render_menu_line = _render_menu_line
-

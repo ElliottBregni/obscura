@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.errors — Error taxonomy for the supervisor.
+"""obscura.core.supervisor.errors — Error taxonomy for the supervisor.
 
 Separates retryable from fatal errors. Each error carries enough context
 for the supervisor to decide retry vs fail.
@@ -33,7 +32,7 @@ RETRYABLE_CATEGORIES: frozenset[ErrorCategory] = frozenset(
         ErrorCategory.LOCK_CONTENTION,
         ErrorCategory.LOCK_EXPIRED,
         ErrorCategory.MEMORY_ERROR,
-    }
+    },
 )
 
 
@@ -129,9 +128,7 @@ class ToolExecutionError(SupervisorError):
         retryable: bool = False,
     ) -> None:
         category = (
-            ErrorCategory.TOOL_TRANSIENT
-            if retryable
-            else ErrorCategory.TOOL_PERMANENT
+            ErrorCategory.TOOL_TRANSIENT if retryable else ErrorCategory.TOOL_PERMANENT
         )
         super().__init__(
             f"Tool '{tool_name}' failed: {message}",

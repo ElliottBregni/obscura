@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.tools.system.file_state import (
     check_staleness,
     clear,
+    get_recently_modified_files,
     is_unchanged,
     record_file_access,
     record_read,
-    get_recently_modified_files,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_record_and_check_fresh(tmp_path: Path) -> None:

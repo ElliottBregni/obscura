@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.types import Backend
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
@@ -21,7 +23,9 @@ def _provider_status(backend: Backend) -> dict[str, Any]:
         return {
             "ok": True,
             "backend": backend.value,
-            "mode": "oauth" if backend == Backend.CLAUDE and resolved.anthropic_api_key is None else "resolved",
+            "mode": "oauth"
+            if backend == Backend.CLAUDE and resolved.anthropic_api_key is None
+            else "resolved",
             "reason": "",
         }
     except Exception as exc:
@@ -36,7 +40,7 @@ def _provider_status(backend: Backend) -> dict[str, Any]:
 @router.get("/auth/diagnostics")
 async def auth_diagnostics(
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Report ingress auth mode and server-side auth configuration."""
     config = request.app.state.config
@@ -52,7 +56,7 @@ async def auth_diagnostics(
 
 @router.get("/providers/health")
 async def providers_health(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Report provider egress auth readiness."""
     statuses = [
@@ -68,5 +72,5 @@ async def providers_health(
         content={
             "ok": ok,
             "providers": statuses,
-        }
+        },
     )

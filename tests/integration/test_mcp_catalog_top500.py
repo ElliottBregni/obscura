@@ -8,19 +8,21 @@ import json
 import os
 import socket
 import threading
-from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import pytest
 
 from obscura.integrations.mcp.catalog import (
+    MCPRegistryAPICatalogProvider,
     MCPServersOrgCatalogProvider,
     write_catalog_config,
 )
-from obscura.integrations.mcp.catalog import MCPRegistryAPICatalogProvider
 from obscura.integrations.mcp.config_loader import discover_mcp_servers
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,7 @@ class _CatalogServer:
 class _CatalogRequestHandler(http.server.BaseHTTPRequestHandler):
     pages: dict[str, str] = {}
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         body = self.pages.get(self.path)
         if body is None:
             self.send_response(404)
@@ -71,7 +73,8 @@ def _run_catalog_server(pages: dict[str, str]) -> Iterator[_CatalogServer]:
         probe.bind(("127.0.0.1", 0))
         host, port = probe.getsockname()
     httpd = http.server.ThreadingHTTPServer(
-        (str(host), int(port)), _CatalogRequestHandler
+        (str(host), int(port)),
+        _CatalogRequestHandler,
     )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -176,7 +179,7 @@ def test_top_500_catalog_includes_supabase_from_source(tmp_path: Path) -> None:
 def test_live_mcpservers_org_top_500_optional() -> None:
     if not bool(int(os.environ.get("OBSCURA_RUN_LIVE_MCP_CATALOG", "0"))):
         pytest.skip(
-            "Set OBSCURA_RUN_LIVE_MCP_CATALOG=1 to run live mcpservers.org fetch"
+            "Set OBSCURA_RUN_LIVE_MCP_CATALOG=1 to run live mcpservers.org fetch",
         )
 
     provider = MCPServersOrgCatalogProvider(base_url="https://mcpservers.org")

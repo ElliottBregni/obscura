@@ -1,5 +1,4 @@
-"""
-obscura.core.workflows — Script-based workflow automation.
+"""obscura.core.workflows — Script-based workflow automation.
 
 Workflows are multi-step task definitions stored as markdown files
 in ``~/.obscura/workflows/`` with TOML frontmatter. Each step is
@@ -139,17 +138,21 @@ async def run_workflow(
                     output_parts.append(event.text)
 
             output = "".join(output_parts)
-            results.append({
-                "step": step.name,
-                "status": "ok",
-                "output": output[:5000],
-            })
+            results.append(
+                {
+                    "step": step.name,
+                    "status": "ok",
+                    "output": output[:5000],
+                },
+            )
         except Exception as exc:
-            results.append({
-                "step": step.name,
-                "status": "error",
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "step": step.name,
+                    "status": "error",
+                    "error": str(exc),
+                },
+            )
 
         if on_step_complete is not None:
             on_step_complete(step.name, results[-1])

@@ -1,5 +1,4 @@
-"""
-obscura.kairos.proactive — Tick-based proactive mode.
+"""obscura.kairos.proactive — Tick-based proactive mode.
 
 In proactive mode, the agent receives periodic ``<tick>`` prompts
 and can take autonomous actions without waiting for user input.
@@ -10,6 +9,7 @@ interrupting the user's workflow.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -84,10 +84,8 @@ class ProactiveMode:
         self._stopped = True
         if self._task is not None:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         logger.info("Proactive mode stopped after %d ticks", self._tick_count)
 
@@ -103,6 +101,7 @@ class ProactiveMode:
             # Log tick to daily log.
             try:
                 from obscura.kairos.daily_log import DailyLog
+
                 DailyLog().append(f"tick #{self._tick_count}", source="proactive")
             except Exception:
                 pass
@@ -119,6 +118,7 @@ class ProactiveMode:
             # Log to deep log.
             try:
                 from obscura.core.deep_log import dlog
+
                 dlog.event("proactive_tick", tick=self._tick_count)
             except Exception:
                 pass

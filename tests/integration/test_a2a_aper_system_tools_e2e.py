@@ -6,12 +6,12 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from demos.a2a.run_aper_10_agents import WorkflowA2AService, run_workflow
+
 from obscura.agent.agent import BaseAgent
 from obscura.tools.system import (
     append_text_file,
@@ -65,12 +65,14 @@ from obscura.tools.system import (
     which_command,
     write_text_file,
 )
-from obscura.core.types import AgentContext
+
+if TYPE_CHECKING:
+    from obscura.core.types import AgentContext
 
 
 class _SystemToolsAPERAgent(BaseAgent):
     def __init__(self, workspace: Path) -> None:
-        super().__init__(client=cast(Any, MagicMock()), name="system-tools-aper")
+        super().__init__(client=cast("Any", MagicMock()), name="system-tools-aper")
         self._workspace = workspace
 
     @override
@@ -140,7 +142,10 @@ class _SystemToolsAPERAgent(BaseAgent):
         await _call("git_commit", git_commit("test", cwd=str(self._workspace)))
         await _call("git_branch", git_branch("list", cwd=str(self._workspace)))
         # Utility tools
-        await _call("download_file", download_file("http://localhost:0/test", str(self._workspace / "dl.bin")))
+        await _call(
+            "download_file",
+            download_file("http://localhost:0/test", str(self._workspace / "dl.bin")),
+        )
         await _call("http_request", http_request("http://localhost:0/test"))
         await _call("clipboard_read", clipboard_read())
         await _call("clipboard_write", clipboard_write("test"))
@@ -153,9 +158,20 @@ class _SystemToolsAPERAgent(BaseAgent):
         # Dynamic tools + sandbox
         await _call(
             "create_tool",
-            create_tool("test_adder", "Add two numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}, "return json.dumps({'ok': True, 'result': kwargs.get('a', 0) + kwargs.get('b', 0)})"),
+            create_tool(
+                "test_adder",
+                "Add two numbers",
+                {
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                },
+                "return json.dumps({'ok': True, 'result': kwargs.get('a', 0) + kwargs.get('b', 0)})",
+            ),
         )
-        await _call("call_dynamic_tool", call_dynamic_tool("test_adder", {"a": 1, "b": 2}))
+        await _call(
+            "call_dynamic_tool",
+            call_dynamic_tool("test_adder", {"a": 1, "b": 2}),
+        )
         await _call("list_dynamic_tools", list_dynamic_tools())
         await _call("code_sandbox", code_sandbox("python", "print('sandbox-ok')"))
         # Copilot GPT-5 Mini (may fail if copilot not installed, that's ok)
@@ -179,13 +195,16 @@ class _SystemToolsAPERAgent(BaseAgent):
 
     @override
     async def respond(self, ctx: AgentContext) -> None:
-        latest = cast(dict[str, dict[str, Any]], ctx.results[-1] if ctx.results else {})
+        latest = cast(
+            "dict[str, dict[str, Any]]",
+            ctx.results[-1] if ctx.results else {},
+        )
         ctx.response = json.dumps(
             {
                 "ok": True,
                 "executed_tools": sorted(latest.keys()),
                 "tool_results": latest,
-            }
+            },
         )
 
 
@@ -202,7 +221,7 @@ async def test_a2a_aper_workflow_executes_all_system_tools() -> None:
         if cached_response is None:
             with TemporaryDirectory() as tmpdir:
                 agent = _SystemToolsAPERAgent(Path(tmpdir))
-                cached_response = cast(str, await agent.run(prompt))
+                cached_response = cast("str", await agent.run(prompt))
         return cached_response
 
     with patch.object(WorkflowA2AService, "_execute_agent", new=_patched_execute):
@@ -210,7 +229,7 @@ async def test_a2a_aper_workflow_executes_all_system_tools() -> None:
 
     assert len(outputs) == 10
     first_payload = json.loads(outputs[0][1])
-    executed = set(cast(list[str], first_payload["executed_tools"]))
+    executed = set(cast("list[str]", first_payload["executed_tools"]))
     assert executed == expected
     for _, text in outputs:
         assert text.strip() != ""

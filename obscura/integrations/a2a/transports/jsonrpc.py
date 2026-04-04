@@ -1,5 +1,4 @@
-"""
-obscura.a2a.transports.jsonrpc — JSON-RPC 2.0 transport for A2A.
+"""obscura.a2a.transports.jsonrpc — JSON-RPC 2.0 transport for A2A.
 
 Mounts at ``/a2a/rpc`` and dispatches A2A methods:
     message/send, message/stream, tasks/get, tasks/list,
@@ -12,11 +11,10 @@ Mirrors the pattern in ``sdk/mcp/server.py:1083-1149``.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request
 
-from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
@@ -24,6 +22,9 @@ from obscura.integrations.a2a.types import (
     TaskState,
     TextPart,
 )
+
+if TYPE_CHECKING:
+    from obscura.integrations.a2a.service import A2AService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def create_jsonrpc_router(service: A2AService) -> APIRouter:
     ----------
     service:
         The A2AService instance that handles all business logic.
+
     """
     router = APIRouter(prefix="/a2a", tags=["A2A JSON-RPC"])
 
@@ -132,12 +134,14 @@ async def _dispatch(
     # message/stream is handled via SSE, not JSON-RPC response
     if method == A2AMethod.MESSAGE_STREAM.value:
         raise A2AError(
-            -32600, "Use SSE endpoint for streaming: POST /a2a/v1/tasks/streaming"
+            -32600,
+            "Use SSE endpoint for streaming: POST /a2a/v1/tasks/streaming",
         )
 
     if method == A2AMethod.TASKS_SUBSCRIBE.value:
         raise A2AError(
-            -32600, "Use SSE endpoint for subscribe: POST /a2a/v1/tasks/{id}:subscribe"
+            -32600,
+            "Use SSE endpoint for subscribe: POST /a2a/v1/tasks/{id}:subscribe",
         )
 
     raise A2AError(-32601, f"Method not found: {method}")

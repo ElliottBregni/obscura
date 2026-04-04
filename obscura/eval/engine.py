@@ -16,7 +16,11 @@ from obscura.eval.models import (
     ToolCallRecord,
 )
 from obscura.eval.regression import compare_with_threshold
-from obscura.eval.scoring import compute_composite, score_deterministic, score_with_judge
+from obscura.eval.scoring import (
+    compute_composite,
+    score_deterministic,
+    score_with_judge,
+)
 
 if TYPE_CHECKING:
     from obscura.core.event_store import EventStoreProtocol
@@ -74,7 +78,7 @@ class EvalEngine:
                 self._backend.start(),  # type: ignore[union-attr]
                 timeout=10.0,
             )
-        except (Exception, asyncio.TimeoutError):
+        except (TimeoutError, Exception):
             pass  # already started, not required, or timed out
 
         loop = AgentLoop(
@@ -107,8 +111,10 @@ class EvalEngine:
                         ToolCallRecord(
                             turn=event.turn or current_turn,
                             tool_name=event.tool_name,
-                            tool_input=dict(event.tool_input) if event.tool_input else {},
-                        )
+                            tool_input=dict(event.tool_input)
+                            if event.tool_input
+                            else {},
+                        ),
                     )
                 elif event.kind == AgentEventKind.TOOL_RESULT:
                     # Update the last matching tool call with its result
@@ -145,7 +151,10 @@ class EvalEngine:
 
         # Score deterministically
         det_score, assertion_outcomes = score_deterministic(
-            case, events_tuple, output_text, tool_calls_tuple,
+            case,
+            events_tuple,
+            output_text,
+            tool_calls_tuple,
         )
 
         # Score with LLM judge if configured
@@ -153,7 +162,10 @@ class EvalEngine:
         judge_detail = None
         if case.judge_criteria and self._judge_backend is not None:
             judge_detail = await score_with_judge(
-                case, output_text, tool_calls_tuple, self._judge_backend,
+                case,
+                output_text,
+                tool_calls_tuple,
+                self._judge_backend,
             )
             judge_score_val = judge_detail.score
 
@@ -245,13 +257,9 @@ class EvalEngine:
         composite_scores = [r.composite_score for r in results]
 
         avg_det = sum(det_scores) / len(det_scores) if det_scores else 0.0
-        avg_judge = (
-            sum(judge_scores) / len(judge_scores) if judge_scores else None
-        )
+        avg_judge = sum(judge_scores) / len(judge_scores) if judge_scores else None
         avg_composite = (
-            sum(composite_scores) / len(composite_scores)
-            if composite_scores
-            else 0.0
+            sum(composite_scores) / len(composite_scores) if composite_scores else 0.0
         )
 
         summary = EvalRunSummary(

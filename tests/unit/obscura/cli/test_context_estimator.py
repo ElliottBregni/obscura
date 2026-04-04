@@ -61,4 +61,3 @@ def test_breakdown_adds_claude_tool_listing_tokens() -> None:
     assert codex_d["claude_tool_listing_tokens"] == 0
     assert claude_d["claude_tool_listing_tokens"] > 0
     assert claude_d["total_tokens"] > codex_d["total_tokens"]
-

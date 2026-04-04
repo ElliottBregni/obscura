@@ -1,10 +1,15 @@
 from __future__ import annotations
+
 import os
-from typing import Optional
-from .storage import Storage
+from typing import TYPE_CHECKING
+
 from .sqlite_impl import SQLiteStorage
 
-def create_storage(db_url: Optional[str] = None) -> Storage:
+if TYPE_CHECKING:
+    from .storage import Storage
+
+
+def create_storage(db_url: str | None = None) -> Storage:
     """Create a Storage implementation based on db_url or NOTIFY_DATABASE_URL env var.
 
     Defaults to SQLite file at ~/.obscura/notify.db when not provided.
@@ -14,11 +19,13 @@ def create_storage(db_url: Optional[str] = None) -> Storage:
     if not db_url:
         # default to SQLite file
         from config.notify import get_notify_db_url
+
         db_url = get_notify_db_url()
 
     if db_url.startswith("postgres"):
         # lazy import to avoid requiring asyncpg unless used
         from .postgres_impl import PostgresStorage
+
         return PostgresStorage(db_url)
 
     # treat everything else as sqlite

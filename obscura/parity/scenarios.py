@@ -5,7 +5,6 @@ from __future__ import annotations
 from obscura.core.types import Backend
 from obscura.parity.models import ScenarioExpectation, ScenarioSpec
 
-
 SCENARIOS: tuple[tuple[ScenarioSpec, ScenarioExpectation], ...] = (
     (
         ScenarioSpec(

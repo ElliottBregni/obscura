@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from obscura.core.stream import ClaudeIteratorAdapter, EventToIteratorBridge
 from obscura.core.types import ChunkKind, StreamChunk
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ---------------------------------------------------------------------------
 # EventToIteratorBridge (Copilot adapter)
@@ -216,7 +217,7 @@ class TestClaudeIteratorAdapter:
                 _FakeThinkingBlock("hmm"),
                 _FakeTextBlock("here's the answer"),
                 _FakeToolUseBlock("search"),
-            ]
+            ],
         )
         adapter = ClaudeIteratorAdapter(_async_iter([msg]))
 

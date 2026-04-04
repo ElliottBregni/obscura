@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any
 import json
-import time
+import re
+from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape as markup_escape
 from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.text import Text
 from rich.rule import Rule
+from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 from obscura.core.types import AgentEvent, AgentEventKind
-
-import re
-
 
 # ---------------------------------------------------------------------------
 # Theme constants
@@ -50,8 +47,7 @@ def _sanitize_text(s: str) -> str:
         # Bare ESC
         cleaned = re.sub(r"\x1B", "", cleaned)
         # C0 controls (keep TAB \x09, LF \x0A, CR \x0D)
-        cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", cleaned)
-        return cleaned
+        return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", cleaned)
     except Exception:
         return s
 
@@ -62,30 +58,35 @@ def _detect_language(text: str) -> str | None:
     if not stripped:
         return None
     # JSON
-    if (stripped.startswith("{") and stripped.endswith("}")) or \
-       (stripped.startswith("[") and stripped.endswith("]")):
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
         try:
             json.loads(stripped)
             return "json"
         except (json.JSONDecodeError, ValueError):
             pass
     # TOML
-    if re.match(r'^\[[\w.]+\]', stripped, re.MULTILINE):
+    if re.match(r"^\[[\w.]+\]", stripped, re.MULTILINE):
         return "toml"
     # YAML
-    if re.match(r'^[\w_]+:\s', stripped) and '\n' in stripped:
+    if re.match(r"^[\w_]+:\s", stripped) and "\n" in stripped:
         return "yaml"
     # Python
-    if re.match(r'^(def |class |import |from |if __name__|async def )', stripped):
+    if re.match(r"^(def |class |import |from |if __name__|async def )", stripped):
         return "python"
     # JavaScript/TypeScript
-    if re.match(r'^(const |let |var |function |export |import )', stripped):
+    if re.match(r"^(const |let |var |function |export |import )", stripped):
         return "javascript"
     # SQL
-    if re.match(r'^(SELECT |INSERT |UPDATE |DELETE |CREATE |ALTER |DROP )', stripped, re.IGNORECASE):
+    if re.match(
+        r"^(SELECT |INSERT |UPDATE |DELETE |CREATE |ALTER |DROP )",
+        stripped,
+        re.IGNORECASE,
+    ):
         return "sql"
     # Shell
-    if stripped.startswith("$ ") or stripped.startswith("#!"):
+    if stripped.startswith(("$ ", "#!")):
         return "bash"
     return None
 
@@ -114,7 +115,12 @@ class OutputManager:
     Backwards-compatible: accepts optional log_level kw used by tests.
     """
 
-    def __init__(self, env: str = "cli", verbose_internals: bool = False, log_level: str | None = None) -> None:
+    def __init__(
+        self,
+        env: str = "cli",
+        verbose_internals: bool = False,
+        log_level: str | None = None,
+    ) -> None:
         self.env = env
         self.verbose = verbose_internals
         self.log_level = log_level or "info"
@@ -198,6 +204,8 @@ class OutputManager:
         return list(self._buffer)
 
 
+import contextlib
+
 from obscura import config
 
 output = OutputManager(env=config.OUTPUT_MODE, verbose_internals=config.VERBOSE)
@@ -207,12 +215,10 @@ if config.CAPTURE_PRINTS:
 
     _orig_print = builtins.print
 
-    def _capturing_print(*args, **kwargs):
+    def _capturing_print(*args, **kwargs) -> None:
         _orig_print(*args, **kwargs)
-        try:
+        with contextlib.suppress(Exception):
             output.capture_internal(" ".join(str(a) for a in args))
-        except Exception:
-            pass
 
     builtins.print = _capturing_print
 
@@ -250,11 +256,13 @@ class _DynamicStdout:
 console = Console(file=_DynamicStdout(), force_terminal=True, legacy_windows=False)
 
 # Active renderer for expand-preview hotkey (set by send_message)
-_active_renderer: "StreamRenderer" | None = None
+_active_renderer: Any = None
 
-def set_active_renderer(r: "StreamRenderer" | None) -> None:
+
+def set_active_renderer(r: Any) -> None:
     global _active_renderer
     _active_renderer = r
+
 
 def get_active_text() -> str:
     try:
@@ -279,7 +287,11 @@ class StreamRenderer:
     ``patch_stdout``.
     """
 
-    def __init__(self, streaming_status: object | None = None, external_status: object | None = None) -> None:
+    def __init__(
+        self,
+        streaming_status: object | None = None,
+        external_status: object | None = None,
+    ) -> None:
         """Constructor accepts both streaming_status and external_status (tests pass external_status).
 
         The renderer is tolerant of StreamingStatus objects that either expose
@@ -293,10 +305,10 @@ class StreamRenderer:
         # StreamingStatus from prompt.py (toolbar spinner)
         self._ss: object | None = external_status or streaming_status
         # jitter control for reasoning preview
-        self._last_preview_update: float = float('-inf')
+        self._last_preview_update: float = float("-inf")
         import os as _os
-        self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
 
+        self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
 
     def handle(self, event: AgentEvent) -> None:
         match event.kind:
@@ -313,7 +325,11 @@ class StreamRenderer:
                     status = None
                     if hasattr(event, "raw") and isinstance(event.raw, dict):
                         status = event.raw.get("status", "")
-                    output.capture_hidden_delta("REASONING_DELTA", event.text, status=status or "")
+                    output.capture_hidden_delta(
+                        "REASONING_DELTA",
+                        event.text,
+                        status=status or "",
+                    )
                 except Exception:
                     pass
                 self._update_thinking_preview(getattr(event, "raw", None))
@@ -323,10 +339,8 @@ class StreamRenderer:
                 if self._in_thinking:
                     self._flush_thinking()
                 self._text_buf.append(event.text)
-                try:
+                with contextlib.suppress(Exception):
                     self._all_text.append(event.text)
-                except Exception:
-                    pass
 
             case AgentEventKind.TOOL_CALL:
                 self._stop_status()
@@ -348,7 +362,7 @@ class StreamRenderer:
 
             case AgentEventKind.CONTEXT_COMPACT:
                 console.print(
-                    f"  [yellow]⚡ {markup_escape(_sanitize_text(event.text))}[/]"
+                    f"  [yellow]⚡ {markup_escape(_sanitize_text(event.text))}[/]",
                 )
 
             case _:
@@ -360,6 +374,7 @@ class StreamRenderer:
         if self._ss is None:
             return
         from obscura.cli.prompt import random_thinking_message
+
         msg = random_thinking_message()
         try:
             # Prefer update(payload) API if available
@@ -405,7 +420,11 @@ class StreamRenderer:
             else:
                 try:
                     self._ss.preview = preview  # type: ignore[attr-defined]
-                    if raw_status and isinstance(raw_status, dict) and "status" in raw_status:
+                    if (
+                        raw_status
+                        and isinstance(raw_status, dict)
+                        and "status" in raw_status
+                    ):
                         self._ss.text = raw_status.get("status")  # type: ignore[attr-defined]
                 except Exception:
                     pass
@@ -463,6 +482,7 @@ class StreamRenderer:
         # Determine effort level for display customization.
         try:
             from obscura.cli.tui_effects import thinking_indicator
+
             effort = "medium"  # default
             title = thinking_indicator(effort)
         except Exception:
@@ -472,10 +492,12 @@ class StreamRenderer:
             Panel(
                 Text(safe, style="dim italic"),
                 border_style=THINKING_COLOR,
-                title=f"[{THINKING_COLOR}]{title}[/]" if "⟪" not in str(title) else "reasoning",
+                title=f"[{THINKING_COLOR}]{title}[/]"
+                if "⟪" not in str(title)
+                else "reasoning",
                 title_align="left",
                 padding=(0, 1),
-            )
+            ),
         )
 
     @staticmethod
@@ -496,7 +518,7 @@ class StreamRenderer:
                         cur = []
                     # skip consecutive blanks; treat any number as a single separator
                 else:
-                    cur.append(re.sub(r"\s+"," ", ln))
+                    cur.append(re.sub(r"\s+", " ", ln))
             if cur:
                 paragraphs.append(cur)
             out_parts: list[str] = []
@@ -542,13 +564,11 @@ class StreamRenderer:
         name = event.tool_name
         summary = summarize_tool_call(name, event.tool_input)
 
-        try:
+        with contextlib.suppress(Exception):
             output.capture_internal(f"TOOL_CALL {name} {_sanitize_text(summary)}")
-        except Exception:
-            pass
 
         console.print(
-            f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]"
+            f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]",
         )
 
         # Update toolbar status
@@ -611,7 +631,7 @@ class LabeledStreamRenderer(StreamRenderer):
                         Rule(
                             f"[bold {self._color}]{self._label}[/]",
                             style=self._color,
-                        )
+                        ),
                     )
                     self._header_printed = True
                 console.print(
@@ -637,7 +657,7 @@ def render_event(event: AgentEvent) -> None:
         case AgentEventKind.TOOL_CALL:
             summary = summarize_tool_call(event.tool_name, event.tool_input)
             console.print(
-                f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]"
+                f"\n  [{TOOL_COLOR}]\u25b6 {markup_escape(summary)}[/]",
             )
         case AgentEventKind.TOOL_RESULT:
             raw = (event.tool_result or "")[:120]
@@ -679,7 +699,7 @@ def render_plan(plan: Any) -> None:
     console.print(tbl)
     console.print(
         f"\n[dim]{plan.approved_count} approved  {plan.rejected_count} rejected  "
-        f"{plan.pending_count} pending[/]"
+        f"{plan.pending_count} pending[/]",
     )
     if plan.all_decided:
         console.print(f"[{OK_COLOR}]All steps decided. /mode code to execute.[/]")
@@ -714,7 +734,7 @@ def render_diff_summary(changes: list[Any]) -> None:
         f"\n[bold]{len(changes)} file(s) changed[/]  "
         f"[{OK_COLOR}]+{total_insertions}[/]  "
         f"[{ERROR_COLOR}]-{total_deletions}[/]  "
-        f"[dim]({total_hunks} hunks)[/]"
+        f"[dim]({total_hunks} hunks)[/]",
     )
     console.print(Rule(style="dim"))
 
@@ -728,14 +748,16 @@ def render_diff_summary(changes: list[Any]) -> None:
 
         console.print(
             f"\n[bold {ACCENT}]{fc['path']}[/]  "
-            f"[{OK_COLOR}]+{file_ins}[/] [{ERROR_COLOR}]-{file_del}[/]"
+            f"[{OK_COLOR}]+{file_ins}[/] [{ERROR_COLOR}]-{file_del}[/]",
         )
 
         # Syntax-highlighted unified diff.
         unified = engine.format_unified(diff_fc)
         if unified.strip():
             try:
-                console.print(Syntax(unified, "diff", theme=CODE_THEME, line_numbers=True))
+                console.print(
+                    Syntax(unified, "diff", theme=CODE_THEME, line_numbers=True),
+                )
             except Exception:
                 console.print(unified)
 
@@ -751,14 +773,14 @@ def render_diff_summary(changes: list[Any]) -> None:
                 f"  [dim]#{hunk_idx}[/] "
                 f"@@ -{hunk.old_start},{hunk.old_count} "
                 f"+{hunk.new_start},{hunk.new_count} @@  "
-                f"{status}"
+                f"{status}",
             )
             hunk_idx += 1
 
     console.print()
     console.print(
         "[dim]Commands: /diff overlay  /diff accept <n|all>  "
-        "/diff reject <n|all>  /diff apply[/]"
+        "/diff reject <n|all>  /diff apply[/]",
     )
 
 
@@ -785,7 +807,7 @@ def render_attention_request(request: Any) -> None:
             subtitle=f"[dim]{request.request_id[:12]}[/]",
             border_style=style,
             expand=False,
-        )
+        ),
     )
     actions = request.actions
     if actions and actions != ("ok",):
@@ -798,7 +820,9 @@ def render_agent_output(output_ev: Any) -> None:
         return
     safe_text = markup_escape(_sanitize_text(output_ev.text))
     if output_ev.is_final:
-        console.print(f"  [bold {ACCENT}]{markup_escape(_sanitize_text(output_ev.agent_name))}:[/] {safe_text}")
+        console.print(
+            f"  [bold {ACCENT}]{markup_escape(_sanitize_text(output_ev.agent_name))}:[/] {safe_text}",
+        )
     else:
         console.print(safe_text, end="")
 
@@ -817,15 +841,15 @@ def _banner_overhaul_block(solid_color: str | None = None) -> None:
     import sys
 
     RESET = "\033[0m"
-    BOLD  = "\033[1m"
-    GREEN = "\033[38;5;28m"   # Irish green
-    BLUE  = "\033[38;5;17m"   # deep dark navy blue
-    GRAY  = "\033[38;5;240m"
-    CAT_BLK  = "\033[38;5;232m"   # near-black for cat body
-    CAT_GRY  = "\033[38;5;236m"   # dark gray shading
-    CAT_NOSE = "\033[38;5;175m"   # pink nose
-    CAT_WHSK = "\033[38;5;250m"   # light gray whiskers
-    CAT_EYE  = "\033[38;5;46m"    # bright green eyes
+    BOLD = "\033[1m"
+    GREEN = "\033[38;5;28m"  # Irish green
+    BLUE = "\033[38;5;17m"  # deep dark navy blue
+    GRAY = "\033[38;5;240m"
+    CAT_BLK = "\033[38;5;232m"  # near-black for cat body
+    CAT_GRY = "\033[38;5;236m"  # dark gray shading
+    CAT_NOSE = "\033[38;5;175m"  # pink nose
+    CAT_WHSK = "\033[38;5;250m"  # light gray whiskers
+    CAT_EYE = "\033[38;5;46m"  # bright green eyes
 
     lines = [
         "  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557  \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2557",
@@ -843,7 +867,7 @@ def _banner_overhaul_block(solid_color: str | None = None) -> None:
     W = CAT_WHSK
     R = RESET
 
-    g = " " * 36          # gap between the two cats
+    g = " " * 36  # gap between the two cats
     g2 = " " * 34
     g3 = " " * 32
     g4 = " " * 30
@@ -863,7 +887,7 @@ def _banner_overhaul_block(solid_color: str | None = None) -> None:
 
     # OVERHAUL block text
     for i, line in enumerate(lines):
-        c = solid_color if solid_color else (GREEN if i % 2 == 0 else BLUE)
+        c = solid_color or (GREEN if i % 2 == 0 else BLUE)
         sys.stdout.write(f"  {BOLD}{c}{line}{RESET}\n")
     sys.stdout.write(f"\n{GRAY}  {chr(0x2501) * 66}{RESET}\n")
     sys.stdout.flush()
@@ -874,11 +898,11 @@ def _banner_obscura_by_overhaul() -> None:
     import sys
 
     RESET = "\033[0m"
-    BOLD  = "\033[1m"
-    CYAN  = "\033[38;5;51m"
-    TEAL  = "\033[38;5;37m"
+    BOLD = "\033[1m"
+    CYAN = "\033[38;5;51m"
+    TEAL = "\033[38;5;37m"
     GREEN = "\033[38;5;35m"
-    GRAY  = "\033[38;5;240m"
+    GRAY = "\033[38;5;240m"
 
     obscura_lines = [
         "  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 ",
@@ -954,6 +978,7 @@ def _obscura_ascii_banner() -> None:
     BOLD = "\033[1m"
 
     import sys
+
     sys.stdout.write("\n")
     for row_idx, line in enumerate(rows):
         colored = BOLD
@@ -993,7 +1018,9 @@ def print_banner(
     info_parts.append(f"mode: [bold]{mode}[/]")
     info_line = "  ".join(info_parts)
 
-    console.print(f"  [bold]model:[/]     [{ACCENT}]{model or 'default'}[/]   [dim]/model to change[/]")
+    console.print(
+        f"  [bold]model:[/]     [{ACCENT}]{model or 'default'}[/]   [dim]/model to change[/]",
+    )
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
@@ -1013,25 +1040,37 @@ def print_banner(
         console.print(f"  [bold]Fleet agents ({len(agent_infos)}):[/]")
         for ai in agent_infos:
             type_color = {"loop": ACCENT, "daemon": "yellow", "aper": "magenta"}.get(
-                getattr(ai, "type", "loop"), ACCENT
+                getattr(ai, "type", "loop"),
+                ACCENT,
             )
             status = getattr(ai, "status", "configured")
-            status_icon = {"running": "●", "configured": "○", "stopped": "◌"}.get(status, "○")
-            status_color = {"running": OK_COLOR, "configured": "dim", "stopped": ERROR_COLOR}.get(status, "dim")
+            status_icon = {"running": "●", "configured": "○", "stopped": "◌"}.get(
+                status,
+                "○",
+            )
+            status_color = {
+                "running": OK_COLOR,
+                "configured": "dim",
+                "stopped": ERROR_COLOR,
+            }.get(status, "dim")
             console.print(
                 f"    [{status_color}]{status_icon}[/] "
                 f"[bold]{ai.name}[/]  "
                 f"[{type_color}]{ai.type}[/]  "
-                f"[dim]{ai.model}[/]"
+                f"[dim]{ai.model}[/]",
             )
-        console.print("  [dim]@name <prompt> to invoke, /agent spawn <name> to start[/]")
+        console.print(
+            "  [dim]@name <prompt> to invoke, /agent spawn <name> to start[/]",
+        )
     elif available_agents:
         console.print(
             f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   "
-            "[dim]/agent spawn <name> or @name <prompt>[/]"
+            "[dim]/agent spawn <name> or @name <prompt>[/]",
         )
     console.print()
-    console.print("  [dim]Type [bold]/help[/bold] for commands, [bold]/quit[/bold] to exit.[/]")
+    console.print(
+        "  [dim]Type [bold]/help[/bold] for commands, [bold]/quit[/bold] to exit.[/]",
+    )
     console.print()
 
 
@@ -1059,6 +1098,7 @@ def print_ok(msg: str) -> None:
 # Markdown transcript export helper
 # ---------------------------------------------------------------------------
 
+
 def export_transcript_markdown(history: list[tuple[str, str]]) -> str:
     """Export a conversation history to a Markdown-formatted transcript."""
     lines: list[str] = []
@@ -1079,10 +1119,12 @@ def export_transcript_markdown(history: list[tuple[str, str]]) -> str:
 # Model-space delta for prompt HUD tests
 _model_space_delta: str = ""
 
+
 def set_model_space_delta(delta: str) -> None:
     """Set a small short-lived model text delta used by prompt HUD tests."""
     global _model_space_delta
     _model_space_delta = delta
+
 
 def get_model_space_delta() -> str:
     return _model_space_delta

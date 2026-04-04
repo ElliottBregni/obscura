@@ -1,5 +1,4 @@
-"""
-obscura.cli.tui_effects — Terminal UI visual effects.
+"""obscura.cli.tui_effects — Terminal UI visual effects.
 
 Provides colorful visual feedback for special modes and events:
   - Ultrathink activation animation
@@ -12,7 +11,6 @@ Provides colorful visual feedback for special modes and events:
 from __future__ import annotations
 
 import sys
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Color palettes
@@ -27,27 +25,27 @@ ULTRATHINK_GRADIENT = [
     "\033[38;5;129m",  # deep purple
     "\033[38;5;135m",  # purple
     "\033[38;5;141m",  # light purple
-    "\033[38;5;99m",   # blue-purple
-    "\033[38;5;63m",   # blue
-    "\033[38;5;33m",   # bright blue
-    "\033[38;5;39m",   # cyan-blue
-    "\033[38;5;51m",   # cyan
-    "\033[38;5;87m",   # light cyan
+    "\033[38;5;99m",  # blue-purple
+    "\033[38;5;63m",  # blue
+    "\033[38;5;33m",  # bright blue
+    "\033[38;5;39m",  # cyan-blue
+    "\033[38;5;51m",  # cyan
+    "\033[38;5;87m",  # light cyan
     "\033[38;5;123m",  # ice blue
 ]
 
 # Effort level colors
 EFFORT_COLORS = {
-    "low": "\033[38;5;242m",      # dim gray
-    "medium": "\033[38;5;75m",    # sky blue
-    "high": "\033[38;5;214m",     # orange
-    "max": "\033[38;5;196m",      # red-hot
+    "low": "\033[38;5;242m",  # dim gray
+    "medium": "\033[38;5;75m",  # sky blue
+    "high": "\033[38;5;214m",  # orange
+    "max": "\033[38;5;196m",  # red-hot
 }
 
 # Status bar segments
-STATUS_OK = "\033[38;5;46m"       # bright green
-STATUS_WARN = "\033[38;5;226m"    # yellow
-STATUS_CRIT = "\033[38;5;196m"    # red
+STATUS_OK = "\033[38;5;46m"  # bright green
+STATUS_WARN = "\033[38;5;226m"  # yellow
+STATUS_CRIT = "\033[38;5;196m"  # red
 
 
 def ultrathink_banner() -> None:
@@ -76,7 +74,9 @@ def ultrathink_banner() -> None:
             colored += gradient[ci] + ch
         colored += RESET
         sys.stdout.write(colored + "\n")
-    sys.stdout.write(f"\n{BOLD}\033[38;5;51m  ⚡ Maximum thinking budget activated ⚡{RESET}\n\n")
+    sys.stdout.write(
+        f"\n{BOLD}\033[38;5;51m  ⚡ Maximum thinking budget activated ⚡{RESET}\n\n",
+    )
     sys.stdout.flush()
 
 
@@ -132,7 +132,9 @@ def turn_summary(
                 tool_parts.append(f"{name} ×{count}")
             else:
                 tool_parts.append(name)
-        parts.append(f"{STATUS_OK}✓{RESET} {len(tools_used)} tools ({', '.join(tool_parts[:4])})")
+        parts.append(
+            f"{STATUS_OK}✓{RESET} {len(tools_used)} tools ({', '.join(tool_parts[:4])})",
+        )
     else:
         parts.append(f"{STATUS_OK}✓{RESET} response")
 

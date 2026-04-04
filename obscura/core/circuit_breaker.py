@@ -26,7 +26,7 @@ class CircuitOpenError(Exception):
         self.name = name
         self.retry_after = retry_after
         super().__init__(
-            f"Circuit breaker '{name}' is open; retry after {retry_after:.1f}s"
+            f"Circuit breaker '{name}' is open; retry after {retry_after:.1f}s",
         )
 
 
@@ -43,6 +43,7 @@ class CircuitBreaker:
         Seconds to wait in OPEN state before transitioning to HALF_OPEN.
     half_open_max:
         Maximum concurrent requests allowed in HALF_OPEN state.
+
     """
 
     def __init__(
@@ -153,7 +154,8 @@ class CircuitBreaker:
             from obscura.telemetry.metrics import get_metrics
 
             get_metrics().circuit_breaker_trips.add(
-                1, {"backend": self._name, "to_state": "open"}
+                1,
+                {"backend": self._name, "to_state": "open"},
             )
         except Exception:
             pass

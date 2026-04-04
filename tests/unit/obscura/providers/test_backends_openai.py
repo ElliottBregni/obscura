@@ -4,12 +4,14 @@ Covers initialization, lifecycle, send/stream, sessions, tools, and hooks.
 All OpenAI SDK interactions are mocked via AsyncMock/MagicMock.
 """
 
-from typing import Any, AsyncIterator
-
-import pytest
+from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from obscura.core.auth import AuthConfig
+from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     Backend,
     ChunkKind,
@@ -21,10 +23,8 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.core.tools import ToolRegistry
-from obscura.providers.openai import OpenAIBackend
 from obscura.providers.models import ChatMessage
-
+from obscura.providers.openai import OpenAIBackend
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,7 +61,9 @@ def _make_response(content: str | None = "Hello", tool_calls: Any = None) -> Any
 
 
 def _make_stream_chunk(
-    content: str | None = None, tool_calls: Any = None, choices: bool = True
+    content: str | None = None,
+    tool_calls: Any = None,
+    choices: bool = True,
 ) -> Any:
     """Build a MagicMock streaming chunk."""
     chunk: Any = MagicMock()
@@ -78,7 +80,9 @@ def _make_stream_chunk(
 
 
 def _make_tool_call(
-    name: str = "my_tool", arguments: str = '{"x": 1}', tc_id: str = "call_abc123"
+    name: str = "my_tool",
+    arguments: str = '{"x": 1}',
+    tc_id: str = "call_abc123",
 ) -> Any:
     """Build a MagicMock tool call object."""
     tc: Any = MagicMock()
@@ -240,7 +244,7 @@ class TestOpenAISend:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _make_response(
-            content="Response from OpenAI"
+            content="Response from OpenAI",
         )
 
         msg = await b.send("Hello")
@@ -260,7 +264,8 @@ class TestOpenAISend:
 
         tc = _make_tool_call(name="read_file", arguments='{"path": "/tmp/a.txt"}')
         b.client.chat.completions.create.return_value = _make_response(
-            content=None, tool_calls=[tc]
+            content=None,
+            tool_calls=[tc],
         )
 
         msg = await b.send("Read the file")
@@ -279,7 +284,8 @@ class TestOpenAISend:
 
         tc = _make_tool_call(name="calc", arguments="not-json")
         b.client.chat.completions.create.return_value = _make_response(
-            content=None, tool_calls=[tc]
+            content=None,
+            tool_calls=[tc],
         )
 
         msg = await b.send("Calculate")
@@ -320,7 +326,8 @@ class TestOpenAISend:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _make_response(
-            content=None, tool_calls=None
+            content=None,
+            tool_calls=None,
         )
 
         msg = await b.send("Hello")
@@ -348,7 +355,8 @@ class TestOpenAISend:
 
         tc = _make_tool_call(name="search", arguments='{"q": "test"}')
         b.client.chat.completions.create.return_value = _make_response(
-            content="Let me search for that.", tool_calls=[tc]
+            content="Let me search for that.",
+            tool_calls=[tc],
         )
 
         msg = await b.send("Find something")
@@ -474,7 +482,7 @@ class TestOpenAIStream:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _aiter(
-            _make_stream_chunk(content="x")
+            _make_stream_chunk(content="x"),
         )
 
         async for _ in b.stream("test"):
@@ -573,7 +581,7 @@ class TestOpenAISessions:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _make_response(
-            content="Reply 1"
+            content="Reply 1",
         )
 
         src = await b.create_session()
@@ -585,7 +593,7 @@ class TestOpenAISessions:
         assert fork.raw is not None
         assert b.active_session == fork.session_id
         assert len(b.conversations[fork.session_id]) == len(
-            b.conversations[src.session_id]
+            b.conversations[src.session_id],
         )
 
     @pytest.mark.asyncio
@@ -601,7 +609,7 @@ class TestOpenAISessions:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _make_response(
-            content="Reply 1"
+            content="Reply 1",
         )
 
         ref = await b.create_session()
@@ -629,7 +637,7 @@ class TestOpenAISessions:
         # Reset mock to capture next call
         b.client.chat.completions.create.reset_mock()
         b.client.chat.completions.create.return_value = _make_response(
-            content="Reply 2"
+            content="Reply 2",
         )
 
         await b.send("Second message")
@@ -670,7 +678,7 @@ class TestOpenAISessions:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _make_response(
-            content="Ephemeral reply"
+            content="Ephemeral reply",
         )
 
         await b.send("No session")
@@ -859,7 +867,7 @@ class TestOpenAIHooks:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _aiter(
-            _make_stream_chunk(content="hi")
+            _make_stream_chunk(content="hi"),
         )
 
         prompt_hook: Any = MagicMock()
@@ -881,7 +889,7 @@ class TestOpenAIHooks:
 
         call_log: list[Any] = []
 
-        async def async_hook(ctx: HookContext):
+        async def async_hook(ctx: HookContext) -> None:
             call_log.append(ctx.hook)
 
         b.register_hook(HookPoint.USER_PROMPT_SUBMITTED, async_hook)
@@ -898,11 +906,12 @@ class TestOpenAIHooks:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _make_response(
-            content="still works"
+            content="still works",
         )
 
         def bad_hook(ctx: Any) -> None:
-            raise ValueError("hook exploded")
+            msg_0 = "hook exploded"
+            raise ValueError(msg_0)
 
         b.register_hook(HookPoint.USER_PROMPT_SUBMITTED, bad_hook)
 
@@ -918,7 +927,8 @@ class TestOpenAIHooks:
         b.client.chat.completions.create.return_value = _make_response(content="fine")
 
         async def bad_async_hook(ctx: Any) -> None:
-            raise RuntimeError("async hook exploded")
+            msg_0 = "async hook exploded"
+            raise RuntimeError(msg_0)
 
         b.register_hook(HookPoint.STOP, bad_async_hook)
 
@@ -931,11 +941,12 @@ class TestOpenAIHooks:
         b = _backend(model="gpt-4o-test")
         b.set_client_for_testing(AsyncMock())
         b.client.chat.completions.create.return_value = _aiter(
-            _make_stream_chunk(content="ok")
+            _make_stream_chunk(content="ok"),
         )
 
         def bad_hook(ctx: Any) -> None:
-            raise Exception("boom")
+            msg = "boom"
+            raise Exception(msg)
 
         b.register_hook(HookPoint.USER_PROMPT_SUBMITTED, bad_hook)
 
@@ -952,7 +963,8 @@ class TestOpenAIHooks:
         b.set_client_for_testing(AsyncMock())
         tc = _make_tool_call(name="read_file", arguments='{"path":"/tmp/a.txt"}')
         b.client.chat.completions.create.return_value = _make_response(
-            content=None, tool_calls=[tc]
+            content=None,
+            tool_calls=[tc],
         )
 
         pre_hook: Any = MagicMock()

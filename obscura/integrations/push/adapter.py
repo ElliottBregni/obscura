@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.push.client import Provider, PushClient
 from obscura.integrations.push.state import PushState
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from obscura.integrations.messaging.models import PlatformMessage
 
 logger = logging.getLogger(__name__)
 _PLATFORM = "push"

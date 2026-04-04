@@ -1,14 +1,17 @@
 """Tests for sdk.deps — Shared FastAPI dependencies and helpers."""
 
 # pyright: reportPrivateUsage=false
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from obscura.auth.models import AuthenticatedUser
 from obscura.core.config import ObscuraConfig
 
 
 def _make_user(
-    user_id: str = "test-user", email: str = "test@example.com"
+    user_id: str = "test-user",
+    email: str = "test@example.com",
 ) -> AuthenticatedUser:
     return AuthenticatedUser(
         user_id=user_id,
@@ -22,7 +25,7 @@ def _make_user(
 
 class TestClientFactory:
     @pytest.mark.asyncio
-    async def test_create_client(self):
+    async def test_create_client(self) -> None:
         from obscura.deps import ClientFactory
 
         config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
@@ -38,7 +41,7 @@ class TestClientFactory:
             assert client == mock_instance
 
     @pytest.mark.asyncio
-    async def test_create_client_with_model(self):
+    async def test_create_client_with_model(self) -> None:
         from obscura.deps import ClientFactory
 
         config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
@@ -66,7 +69,7 @@ class TestClientFactory:
 
 class TestGetRuntime:
     @pytest.mark.asyncio
-    async def test_get_runtime_creates_new(self):
+    async def test_get_runtime_creates_new(self) -> None:
         from obscura.deps import _runtimes, get_runtime
 
         user = _make_user(user_id="new-user-123")
@@ -86,7 +89,7 @@ class TestGetRuntime:
         _runtimes.pop("new-user-123", None)
 
     @pytest.mark.asyncio
-    async def test_get_runtime_returns_cached(self):
+    async def test_get_runtime_returns_cached(self) -> None:
         from obscura.deps import _runtimes, get_runtime
 
         user = _make_user(user_id="cached-user-456")
@@ -101,7 +104,7 @@ class TestGetRuntime:
 
 
 class TestAudit:
-    def test_audit_stores_log(self):
+    def test_audit_stores_log(self) -> None:
         from obscura.deps import audit, audit_logs
 
         user = _make_user()
@@ -118,7 +121,7 @@ class TestAudit:
         assert last["outcome"] == "success"
         assert last["details"]["detail"] == "x"
 
-    def test_audit_max_logs_trimmed(self):
+    def test_audit_max_logs_trimmed(self) -> None:
         from obscura.deps import MAX_AUDIT_LOGS, audit, audit_logs
 
         user = _make_user()
@@ -131,7 +134,7 @@ class TestAudit:
 
 
 class TestRecordSyncMetric:
-    def test_record_sync_metric_success(self):
+    def test_record_sync_metric_success(self) -> None:
         from obscura.deps import record_sync_metric
 
         with patch("obscura.telemetry.metrics.get_metrics") as mock_get:
@@ -139,10 +142,11 @@ class TestRecordSyncMetric:
             mock_get.return_value = mock_metrics
             record_sync_metric("success")
             mock_metrics.sync_operations_total.add.assert_called_once_with(
-                1, {"status": "success"}
+                1,
+                {"status": "success"},
             )
 
-    def test_record_sync_metric_no_telemetry(self):
+    def test_record_sync_metric_no_telemetry(self) -> None:
         from obscura.deps import record_sync_metric
 
         # Should not raise even if telemetry is not available
@@ -152,7 +156,7 @@ class TestRecordSyncMetric:
 
 class TestAuthenticateWebsocket:
     @pytest.mark.asyncio
-    async def test_auth_disabled_returns_dev_user(self):
+    async def test_auth_disabled_returns_dev_user(self) -> None:
         from obscura.deps import authenticate_websocket
 
         mock_ws = MagicMock()
@@ -166,7 +170,7 @@ class TestAuthenticateWebsocket:
         assert user.user_id == "local-dev"
 
     @pytest.mark.asyncio
-    async def test_auth_disabled_no_config(self):
+    async def test_auth_disabled_no_config(self) -> None:
         from obscura.deps import authenticate_websocket
 
         mock_ws = MagicMock()
@@ -178,7 +182,7 @@ class TestAuthenticateWebsocket:
         assert user is not None
 
     @pytest.mark.asyncio
-    async def test_api_key_query_param_authenticates(self):
+    async def test_api_key_query_param_authenticates(self) -> None:
         from obscura.deps import authenticate_websocket
 
         mock_ws = MagicMock()
@@ -204,7 +208,7 @@ class TestAuthenticateWebsocket:
         assert user.user_id == "dev-user"
 
     @pytest.mark.asyncio
-    async def test_invalid_api_key_returns_none(self):
+    async def test_invalid_api_key_returns_none(self) -> None:
         from obscura.deps import authenticate_websocket
 
         mock_ws = MagicMock()

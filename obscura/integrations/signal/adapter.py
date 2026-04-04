@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.integrations.messaging.identity import normalize_identity
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.signal.client import SignalClient
 from obscura.integrations.signal.state import SignalState
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 _PLATFORM = "signal"
@@ -30,7 +33,11 @@ class SignalAdapter:
     ) -> None:
         self._contacts = contacts
         self._account_id = account_id
-        self._client = SignalClient(contacts, account_number=account_number, base_url=base_url)
+        self._client = SignalClient(
+            contacts,
+            account_number=account_number,
+            base_url=base_url,
+        )
         self._state = SignalState(state_path)
         self._account_number = account_number or ""
 
@@ -47,11 +54,9 @@ class SignalAdapter:
             if msg.envelope_ts_ms <= last_ts:
                 continue
             sender_id = normalize_identity(msg.sender_number)
-            channel_id = (
-                f"group:{msg.group_id}" if msg.group_id else f"dm:{sender_id}"
-            )
+            channel_id = f"group:{msg.group_id}" if msg.group_id else f"dm:{sender_id}"
             message_id = hashlib.sha1(
-                f"{sender_id}|{msg.envelope_ts_ms}|{msg.body}".encode()
+                f"{sender_id}|{msg.envelope_ts_ms}|{msg.body}".encode(),
             ).hexdigest()
             out.append(
                 PlatformMessage(
@@ -68,7 +73,7 @@ class SignalAdapter:
                         "group_id": msg.group_id,
                         "envelope_ts_ms": msg.envelope_ts_ms,
                     },
-                )
+                ),
             )
             self._state.update(self._account_number, msg.envelope_ts_ms)
         return out

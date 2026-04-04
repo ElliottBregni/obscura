@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.plugins.loader import PluginLoader
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-@pytest.fixture()
+
+@pytest.fixture
 def _fake_global_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Set OBSCURA_HOME to a temp dir to isolate global discovery."""
     global_home = tmp_path / "global_home"

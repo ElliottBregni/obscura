@@ -1,4 +1,5 @@
 """Google Workspace CLI provider — wraps the gws binary."""
+
 from __future__ import annotations
 
 import asyncio
@@ -50,7 +51,13 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
         # Check the obscura venv bin directory
         import os
         from pathlib import Path as _Path
-        venv_bin = _Path(os.environ.get("OBSCURA_HOME", _Path.home() / ".obscura")) / "venv" / "bin" / "gws-cli"
+
+        venv_bin = (
+            _Path(os.environ.get("OBSCURA_HOME", _Path.home() / ".obscura"))
+            / "venv"
+            / "bin"
+            / "gws-cli"
+        )
         if venv_bin.is_file():
             binary = str(venv_bin)
         else:

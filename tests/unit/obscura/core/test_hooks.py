@@ -9,7 +9,6 @@ import pytest
 from obscura.core.hooks import HookRegistry
 from obscura.core.types import AgentEvent, AgentEventKind
 
-
 # ---------------------------------------------------------------------------
 # Before-hooks
 # ---------------------------------------------------------------------------
@@ -90,7 +89,6 @@ class TestBeforeHooks:
         @hooks.before(AgentEventKind.TURN_START)
         def blocker(_event: AgentEvent) -> None:
             called.append("blocker")
-            return None
 
         @hooks.before(AgentEventKind.TURN_START)
         def after_blocker(event: AgentEvent) -> AgentEvent:
@@ -175,7 +173,8 @@ class TestAfterHooks:
 
         @hooks.after(AgentEventKind.AGENT_DONE)
         def explode(_event: AgentEvent) -> None:
-            raise RuntimeError("boom")
+            msg = "boom"
+            raise RuntimeError(msg)
 
         event = AgentEvent(kind=AgentEventKind.AGENT_DONE, text="done")
         # Should not raise
@@ -276,7 +275,8 @@ class TestRegistryManagement:
 
         @hooks.before(AgentEventKind.TEXT_DELTA)
         def explode(_event: AgentEvent) -> AgentEvent:
-            raise RuntimeError("hook failed")
+            msg = "hook failed"
+            raise RuntimeError(msg)
 
         event = AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="keep me")
         result = await hooks.run_before(event)

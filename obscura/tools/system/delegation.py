@@ -1,5 +1,4 @@
-"""
-obscura.tools.system.delegation — Grounded agent delegation tool.
+"""obscura.tools.system.delegation — Grounded agent delegation tool.
 
 Provides ``build_delegate_tool_spec()`` which dynamically creates a
 ``ToolSpec`` with an enum-constrained ``agent`` parameter populated from
@@ -13,6 +12,7 @@ section so the LLM knows *when* to delegate.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -71,8 +71,7 @@ def build_delegate_tool_spec(
     agent_property: dict[str, Any] = {
         "type": "string",
         "description": (
-            "Name of the agent to delegate to. "
-            "MUST be one of the listed values."
+            "Name of the agent to delegate to. MUST be one of the listed values."
         ),
     }
     if agent_names:
@@ -107,7 +106,11 @@ def build_delegate_tool_spec(
         **_kwargs: Any,
     ) -> str:
         return await _execute_delegation(
-            _runtime, _agent_map, agent, prompt, mode
+            _runtime,
+            _agent_map,
+            agent,
+            prompt,
+            mode,
         )
 
     return ToolSpec(
@@ -133,14 +136,16 @@ async def _execute_delegation(
     """Route a delegation call to the correct transport."""
     ref = agent_map.get(agent)
     if ref is None:
-        return json.dumps({
-            "ok": False,
-            "error": "agent_not_found",
-            "message": f"Agent '{agent}' is not available. "
-            f"Available agents: {sorted(agent_map.keys())}",
-            "agent": agent,
-            "prompt": prompt,
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "agent_not_found",
+                "message": f"Agent '{agent}' is not available. "
+                f"Available agents: {sorted(agent_map.keys())}",
+                "agent": agent,
+                "prompt": prompt,
+            },
+        )
 
     try:
         if isinstance(ref, AgentRef):
@@ -150,29 +155,35 @@ async def _execute_delegation(
         elif isinstance(ref, UnixSocketAgentRef):
             result = await _invoke_unix_socket(ref, prompt)
         else:
-            return json.dumps({
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "unsupported_transport",
+                    "message": f"Unknown agent ref kind: {type(ref).__name__}",
+                    "agent": agent,
+                    "prompt": prompt,
+                },
+            )
+
+        return json.dumps(
+            {
+                "ok": True,
+                "agent": agent,
+                "transport": ref.kind,
+                "result": result,
+                "prompt": prompt,
+            },
+        )
+    except Exception as exc:
+        return json.dumps(
+            {
                 "ok": False,
-                "error": "unsupported_transport",
-                "message": f"Unknown agent ref kind: {type(ref).__name__}",
+                "error": type(exc).__name__,
+                "message": str(exc),
                 "agent": agent,
                 "prompt": prompt,
-            })
-
-        return json.dumps({
-            "ok": True,
-            "agent": agent,
-            "transport": ref.kind,
-            "result": result,
-            "prompt": prompt,
-        })
-    except Exception as exc:
-        return json.dumps({
-            "ok": False,
-            "error": type(exc).__name__,
-            "message": str(exc),
-            "agent": agent,
-            "prompt": prompt,
-        })
+            },
+        )
 
 
 async def _invoke_local(
@@ -212,10 +223,8 @@ async def _invoke_remote(
         # Extract text from the completed task.
         return _extract_task_text(task)
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await client.disconnect()
-        except Exception:
-            pass
 
 
 async def _invoke_unix_socket(
@@ -230,13 +239,10 @@ async def _invoke_unix_socket(
     client = UnixSocketA2AClient(ref.socket_path)
     try:
         await client.connect()
-        result = await client.send_message(prompt)
-        return result
+        return await client.send_message(prompt)
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await client.disconnect()
-        except Exception:
-            pass
 
 
 def _extract_task_text(task: Any) -> str:
@@ -282,7 +288,7 @@ def build_agent_cards_section(
     for ref in local_refs:
         caps = ", ".join(ref.capabilities) if ref.capabilities else "general"
         lines.append(
-            f"- **{ref.name}** (local, {ref.model}): {caps} [status: {ref.status}]"
+            f"- **{ref.name}** (local, {ref.model}): {caps} [status: {ref.status}]",
         )
 
     for ref in remote_refs or []:
@@ -299,6 +305,6 @@ def build_agent_cards_section(
     lines.append("")
     lines.append(
         "Use the `delegate_to_agent` tool to send tasks to these agents. "
-        "Only delegate when the target agent has relevant capabilities."
+        "Only delegate when the target agent has relevant capabilities.",
     )
     return "\n".join(lines)

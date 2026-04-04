@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch
 from starlette.testclient import TestClient
+
 from obscura.core.config import ObscuraConfig
 from obscura.core.types import Backend, SessionRef
 
@@ -36,7 +37,8 @@ class TestSessionCreate:
     ) -> None:
         mock_client: Any = AsyncMock()
         mock_client.create_session.return_value = SessionRef(
-            session_id="sess-1", backend=Backend.COPILOT
+            session_id="sess-1",
+            backend=Backend.COPILOT,
         )
         mock_client.stop = AsyncMock()
         mock_factory: Any = AsyncMock()
@@ -84,7 +86,9 @@ class TestSessionList:
         assert isinstance(resp.json(), list)
 
     def test_list_sessions_includes_ingested_memory(
-        self, app: Any, client: TestClient
+        self,
+        app: Any,
+        client: TestClient,
     ) -> None:
         mock_factory: Any = AsyncMock()
         mock_factory.create.side_effect = RuntimeError("no backend")
@@ -98,7 +102,7 @@ class TestSessionList:
                     "id": "codex-session-1",
                     "agent": "codex",
                     "started": "2026-02-22T00:00:00+00:00",
-                }
+                },
             },
         )
 
@@ -204,7 +208,11 @@ class TestSessionIngest:
         assert resp.status_code == 400
 
     @patch("obscura.routes.sessions.preflight_system_session_ingest")
-    def test_ingest_sessions_preflight(self, mock_preflight: Any, client: TestClient) -> None:
+    def test_ingest_sessions_preflight(
+        self,
+        mock_preflight: Any,
+        client: TestClient,
+    ) -> None:
         mock_preflight.return_value = {
             "ready": True,
             "agent_sync_script_exists": True,

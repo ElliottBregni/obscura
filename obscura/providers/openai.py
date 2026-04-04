@@ -1,5 +1,4 @@
-"""
-obscura.backends.openai_compat — BackendProtocol implementation for the OpenAI SDK.
+"""obscura.backends.openai_compat — BackendProtocol implementation for the OpenAI SDK.
 
 Full proxy mode: ObscuraClient → openai Python SDK → OpenAI API (or any
 OpenAI-compatible provider: OpenRouter, Together, Groq, Fireworks, etc.).
@@ -13,9 +12,9 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, AsyncIterator, Callable, Mapping, cast
+from collections.abc import AsyncIterator, Callable, Mapping
+from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -24,18 +23,18 @@ from obscura.core.types import (
     BackendCapabilities,
     ChunkKind,
     ContentBlock,
+    ExecutionMode,
     HookContext,
     HookPoint,
     Message,
     NativeHandle,
+    ProviderNativeRequest,
     Role,
     SessionRef,
     StreamChunk,
     StreamMetadata,
     ToolChoice,
     ToolSpec,
-    ExecutionMode,
-    ProviderNativeRequest,
     UnifiedRequest,
 )
 from obscura.providers.models import (
@@ -45,6 +44,10 @@ from obscura.providers.models import (
     ToolCallDefinition,
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
+
+if TYPE_CHECKING:
+    from obscura.core.auth import AuthConfig
+    from obscura.core.tool_router import RoutingResult
 
 
 class OpenAIBackend:
@@ -197,7 +200,8 @@ class OpenAIBackend:
         """Send a prompt and wait for the full response."""
         self._ensure_client()
         prompt, structured, api_mode, native_openai = self._resolve_request(
-            prompt, kwargs
+            prompt,
+            kwargs,
         )
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("openai.send") as span:
@@ -205,7 +209,7 @@ class OpenAIBackend:
             _set_span_attr(span, "model", self._model)
 
             await self._run_hooks(
-                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
             )
 
             if api_mode == "responses":
@@ -229,7 +233,7 @@ class OpenAIBackend:
                         tool_name=block.tool_name,
                         tool_input=block.tool_input,
                         message=msg,
-                    )
+                    ),
                 )
                 await self._run_hooks(
                     HookContext(
@@ -237,13 +241,13 @@ class OpenAIBackend:
                         tool_name=block.tool_name,
                         tool_input=block.tool_input,
                         message=msg,
-                    )
+                    ),
                 )
 
             # Persist conversation history (including tool calls)
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
-                    ChatMessage(role="user", content=prompt)
+                    ChatMessage(role="user", content=prompt),
                 )
                 # Store tool_calls if present
                 if tool_blocks:
@@ -265,11 +269,11 @@ class OpenAIBackend:
                             role="assistant",
                             content=msg.text,
                             tool_calls=tc_list,
-                        )
+                        ),
                     )
                 else:
                     self._conversations[self._active_session].append(
-                        ChatMessage(role="assistant", content=msg.text)
+                        ChatMessage(role="assistant", content=msg.text),
                     )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
@@ -280,7 +284,8 @@ class OpenAIBackend:
         """Send a prompt and yield streaming chunks."""
         self._ensure_client()
         prompt, structured, api_mode, native_openai = self._resolve_request(
-            prompt, kwargs
+            prompt,
+            kwargs,
         )
         tracer = _get_backend_tracer()
         span = tracer.start_span("openai.stream")
@@ -289,12 +294,14 @@ class OpenAIBackend:
         finish_reason = ""
         try:
             await self._run_hooks(
-                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
             )
 
             if api_mode == "responses":
                 async for chunk in self._stream_via_responses(
-                    prompt, kwargs, native_openai
+                    prompt,
+                    kwargs,
+                    native_openai,
                 ):
                     yield chunk
                 await self._run_hooks(HookContext(hook=HookPoint.STOP))
@@ -345,7 +352,7 @@ class OpenAIBackend:
                                         hook=HookPoint.POST_TOOL_USE,
                                         tool_name=_active_tool_name,
                                         tool_input=tool_input,
-                                    )
+                                    ),
                                 )
                                 _active_tool_input = ""
                             _active_tool_name = tc.function.name
@@ -362,7 +369,7 @@ class OpenAIBackend:
                                     hook=HookPoint.PRE_TOOL_USE,
                                     tool_name=_active_tool_name,
                                     tool_input={},
-                                )
+                                ),
                             )
                         if tc.function and tc.function.arguments:
                             _active_tool_input += tc.function.arguments
@@ -395,16 +402,16 @@ class OpenAIBackend:
                         hook=HookPoint.POST_TOOL_USE,
                         tool_name=_active_tool_name,
                         tool_input=tool_input,
-                    )
+                    ),
                 )
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
-                    ChatMessage(role="user", content=prompt)
+                    ChatMessage(role="user", content=prompt),
                 )
                 self._conversations[self._active_session].append(
-                    ChatMessage(role="assistant", content=accumulated_text)
+                    ChatMessage(role="assistant", content=accumulated_text),
                 )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
@@ -413,7 +420,11 @@ class OpenAIBackend:
 
             # Extract usage from the last streaming chunk if available.
             _usage: dict[str, int] | None = None
-            if _last_chunk is not None and hasattr(_last_chunk, "usage") and _last_chunk.usage:
+            if (
+                _last_chunk is not None
+                and hasattr(_last_chunk, "usage")
+                and _last_chunk.usage
+            ):
                 _u = _last_chunk.usage
                 _usage = {
                     "input_tokens": getattr(_u, "prompt_tokens", 0) or 0,
@@ -449,7 +460,8 @@ class OpenAIBackend:
     async def resume_session(self, ref: SessionRef) -> None:
         """Resume a conversation session."""
         if ref.session_id not in self._conversations:
-            raise RuntimeError(f"Session {ref.session_id} not found")
+            msg = f"Session {ref.session_id} not found"
+            raise RuntimeError(msg)
         self._active_session = ref.session_id
 
     async def list_sessions(self) -> list[SessionRef]:
@@ -468,7 +480,8 @@ class OpenAIBackend:
 
         source = self._conversations.get(ref.session_id)
         if source is None:
-            raise RuntimeError(f"Session {ref.session_id} not found")
+            msg = f"Session {ref.session_id} not found"
+            raise RuntimeError(msg)
 
         session_id = str(uuid.uuid4())
         self._conversations[session_id] = copy.deepcopy(source)
@@ -494,8 +507,7 @@ class OpenAIBackend:
         """Build a human-readable tool listing for the system prompt."""
         lines = ["## Available Tools", ""]
         lines.append(
-            "You have the following tools. "
-            "Use these EXACT names when calling tools:"
+            "You have the following tools. Use these EXACT names when calling tools:",
         )
         lines.append("")
         for spec in self._tools:
@@ -504,11 +516,11 @@ class OpenAIBackend:
             lines.append(f"- `{spec.name}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
-            "Do NOT invent tool names. "
-            "If none of these tools fit, tell the user."
+            "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
             from obscura.plugins.capabilities import build_capability_map_section
+
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -571,22 +583,26 @@ class OpenAIBackend:
             model_list = []
             for model in models_response.data:
                 # Filter to OpenAI chat models only
-                if not model.id.startswith(('gpt-', 'o1-', 'o3-', 'chatgpt-')):
+                if not model.id.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
                     continue
 
                 # Infer capabilities from model ID
-                supports_vision = 'vision' in model.id.lower()
-                _no_tool_models = ('o1-preview', 'o1-mini')
-                supports_tools = not any(model.id.startswith(p) for p in _no_tool_models)
+                supports_vision = "vision" in model.id.lower()
+                _no_tool_models = ("o1-preview", "o1-mini")
+                supports_tools = not any(
+                    model.id.startswith(p) for p in _no_tool_models
+                )
 
-                model_list.append(RegistryModelInfo(
-                    id=model.id,
-                    name=self._format_model_name(model.id),
-                    provider="openai",
-                    supports_tools=supports_tools,
-                    supports_vision=supports_vision,
-                ))
-            return model_list if model_list else self._get_fallback_models()
+                model_list.append(
+                    RegistryModelInfo(
+                        id=model.id,
+                        name=self._format_model_name(model.id),
+                        provider="openai",
+                        supports_tools=supports_tools,
+                        supports_vision=supports_vision,
+                    ),
+                )
+            return model_list or self._get_fallback_models()
         except Exception:
             # API failure - return fallback models
             return self._get_fallback_models()
@@ -597,7 +613,7 @@ class OpenAIBackend:
 
     def validate_model(self, model_id: str) -> bool:
         """Check if a model ID is valid for OpenAI."""
-        valid_prefixes = ('gpt-', 'o1-', 'o3-', 'chatgpt-', 'text-')
+        valid_prefixes = ("gpt-", "o1-", "o3-", "chatgpt-", "text-")
         return any(model_id.startswith(prefix) for prefix in valid_prefixes)
 
     def _format_model_name(self, model_id: str) -> str:
@@ -605,9 +621,10 @@ class OpenAIBackend:
         # gpt-4o → GPT-4o
         # gpt-4-turbo → GPT-4 Turbo
         # o1-preview → O1 Preview
-        name = model_id.replace('gpt-', 'GPT-').replace('o1-', 'O1-').replace('o3-', 'O3-')
-        name = name.replace('-', ' ').title()
-        return name
+        name = (
+            model_id.replace("gpt-", "GPT-").replace("o1-", "O1-").replace("o3-", "O3-")
+        )
+        return name.replace("-", " ").title()
 
     def _get_fallback_models(self) -> list[RegistryModelInfo]:
         """Fallback list when API is unavailable (NOT source of truth)."""
@@ -660,7 +677,8 @@ class OpenAIBackend:
 
     def _ensure_client(self) -> None:
         if self._client is None:
-            raise RuntimeError("OpenAIBackend not started. Call start() first.")
+            msg = "OpenAIBackend not started. Call start() first."
+            raise RuntimeError(msg)
 
     def _resolve_request(
         self,
@@ -668,7 +686,7 @@ class OpenAIBackend:
         kwargs: dict[str, Any],
     ) -> tuple[str, list[Message] | None, str, Mapping[str, Any] | None]:
         """Resolve unified/native mode inputs into an execution plan."""
-        structured = cast(list[Message] | None, kwargs.pop("messages", None))
+        structured = cast("list[Message] | None", kwargs.pop("messages", None))
         mode_raw = kwargs.pop("mode", ExecutionMode.UNIFIED.value)
         api_mode = kwargs.pop("api_mode", None)
         native = kwargs.pop("native", None)
@@ -709,13 +727,13 @@ class OpenAIBackend:
         if isinstance(native, Mapping):
             if self._backend_type == Backend.MOONSHOT:
                 if "moonshot" in native and isinstance(native["moonshot"], Mapping):
-                    return cast(Mapping[str, Any], native["moonshot"])
+                    return cast("Mapping[str, Any]", native["moonshot"])
             if self._backend_type == Backend.CODEX:
                 if "codex" in native and isinstance(native["codex"], Mapping):
-                    return cast(Mapping[str, Any], native["codex"])
+                    return cast("Mapping[str, Any]", native["codex"])
             if "openai" in native and isinstance(native["openai"], Mapping):
-                return cast(Mapping[str, Any], native["openai"])
-            return cast(Mapping[str, Any], native)
+                return cast("Mapping[str, Any]", native["openai"])
+            return cast("Mapping[str, Any]", native)
         return None
 
     async def _send_via_responses(
@@ -787,14 +805,14 @@ class OpenAIBackend:
 
             # Apply eval-driven tool routing if a router is configured.
             if self._tool_router is not None:
-                from obscura.core.tool_router import RoutingResult
-
                 result: RoutingResult = self._tool_router.select(prompt, tools_to_send)
                 tools_to_send = result.tools
 
             req["tools"] = [
                 ToolCallDefinition(
-                    t.name, t.description, t.parameters
+                    t.name,
+                    t.description,
+                    t.parameters,
                 ).to_openai_function()
                 for t in tools_to_send
             ]
@@ -802,7 +820,7 @@ class OpenAIBackend:
         if "response_create_kwargs" in kwargs:
             extra = kwargs["response_create_kwargs"]
             if isinstance(extra, Mapping):
-                extra_map = cast(Mapping[str, Any], extra)
+                extra_map = cast("Mapping[str, Any]", extra)
                 req.update(dict(extra_map))
         return req
 
@@ -816,17 +834,17 @@ class OpenAIBackend:
         out = getattr(response, "output", None)
         if isinstance(out, list):
             parts: list[str] = []
-            out_list = cast(list[Any], out)
+            out_list = cast("list[Any]", out)
             for item in out_list:
                 content = getattr(item, "content", None)
                 if isinstance(content, list):
-                    content_list = cast(list[Any], content)
+                    content_list = cast("list[Any]", content)
                     for c in content_list:
                         txt = getattr(c, "text", None)
                         if isinstance(txt, str):
                             parts.append(txt)
                         elif isinstance(c, Mapping):
-                            c_map = cast(Mapping[str, Any], c)
+                            c_map = cast("Mapping[str, Any]", c)
                             mapped = c_map.get("text")
                             if isinstance(mapped, str):
                                 parts.append(mapped)
@@ -837,11 +855,11 @@ class OpenAIBackend:
     @staticmethod
     def _event_type(event: Any) -> str:
         if hasattr(event, "type"):
-            t = getattr(event, "type")
+            t = event.type
             if isinstance(t, str):
                 return t
         if isinstance(event, Mapping):
-            event_map = cast(Mapping[str, Any], event)
+            event_map = cast("Mapping[str, Any]", event)
             t = event_map.get("type")
             if isinstance(t, str):
                 return t
@@ -855,7 +873,7 @@ class OpenAIBackend:
             if isinstance(val, str) and val:
                 return val
         if isinstance(event, Mapping):
-            event_map = cast(Mapping[str, Any], event)
+            event_map = cast("Mapping[str, Any]", event)
             for key in ("delta", "text"):
                 val = event_map.get(key)
                 if isinstance(val, str) and val:
@@ -868,7 +886,7 @@ class OpenAIBackend:
         if isinstance(reason, str):
             return reason
         if isinstance(event, Mapping):
-            event_map = cast(Mapping[str, Any], event)
+            event_map = cast("Mapping[str, Any]", event)
             mapped = event_map.get("finish_reason")
             if isinstance(mapped, str):
                 return mapped
@@ -904,7 +922,7 @@ class OpenAIBackend:
         # Conversation history from active session
         if self._active_session and self._active_session in self._conversations:
             messages.extend(
-                [m.to_dict() for m in self._conversations[self._active_session]]
+                [m.to_dict() for m in self._conversations[self._active_session]],
             )
 
         messages.append({"role": "user", "content": prompt})
@@ -927,14 +945,14 @@ class OpenAIBackend:
             tools_to_send = list(self._tools)
 
             if self._tool_router is not None:
-                from obscura.core.tool_router import RoutingResult
-
                 routed: RoutingResult = self._tool_router.select("", tools_to_send)
                 tools_to_send = routed.tools
 
             tool_defs = [
                 ToolCallDefinition(
-                    t.name, t.description, t.parameters
+                    t.name,
+                    t.description,
+                    t.parameters,
                 ).to_openai_function()
                 for t in tools_to_send
             ]
@@ -985,7 +1003,7 @@ class OpenAIBackend:
                                 "role": "tool",
                                 "content": block.text,
                                 "tool_call_id": block.tool_use_id,
-                            }
+                            },
                         )
                 continue
 
@@ -1040,7 +1058,7 @@ class OpenAIBackend:
                         tool_name=tc.function.name,
                         tool_input=tool_input,
                         tool_use_id=tc.id,
-                    )
+                    ),
                 )
 
         if not blocks:
@@ -1061,7 +1079,7 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            return cast(dict[str, Any], parsed)
+            return cast("dict[str, Any]", parsed)
         return {"raw": raw}
     except json.JSONDecodeError:
         return {"raw": raw}

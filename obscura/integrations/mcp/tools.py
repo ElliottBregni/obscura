@@ -1,5 +1,4 @@
-"""
-obscura.mcp.tools — Tool conversion between MCP <-> Obscura.
+"""obscura.mcp.tools — Tool conversion between MCP <-> Obscura.
 
 Converts between Obscura ToolSpec and MCP tool definitions,
 and handles execution of MCP tools.
@@ -7,7 +6,8 @@ and handles execution of MCP tools.
 
 import json
 import logging
-from typing import Any, Awaitable, Callable, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from obscura.core.types import ToolSpec
 from obscura.integrations.mcp.types import (
@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 
 def obscura_tool_to_mcp(tool: ToolSpec) -> MCPTool:
-    """
-    Convert an Obscura ToolSpec to an MCP Tool definition.
+    """Convert an Obscura ToolSpec to an MCP Tool definition.
 
     Args:
         tool: Obscura ToolSpec to convert
 
     Returns:
         MCPTool definition for MCP protocol
+
     """
     # Convert parameters to JSON Schema format
     schema: dict[str, Any] = {
@@ -51,10 +51,10 @@ def obscura_tool_to_mcp(tool: ToolSpec) -> MCPTool:
 
 
 def mcp_tool_to_obscura(
-    tool: MCPTool, execute_fn: Callable[[dict[str, Any]], Awaitable[Any]]
+    tool: MCPTool,
+    execute_fn: Callable[[dict[str, Any]], Awaitable[Any]],
 ) -> ToolSpec:
-    """
-    Convert an MCP Tool definition to an Obscura ToolSpec.
+    """Convert an MCP Tool definition to an Obscura ToolSpec.
 
     Args:
         tool: MCP Tool definition
@@ -62,6 +62,7 @@ def mcp_tool_to_obscura(
 
     Returns:
         Obscura ToolSpec
+
     """
     # Normalise the MCP input schema so it always has "type": "object"
     # — some MCP servers omit it, which breaks OpenAI-compatible backends.
@@ -83,20 +84,20 @@ def mcp_tool_to_obscura(
 
 
 def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
-    """
-    Convert an Obscura tool execution result to MCP ToolResult.
+    """Convert an Obscura tool execution result to MCP ToolResult.
 
     Args:
         result: Result from Obscura tool execution
 
     Returns:
         MCPToolResult for MCP protocol
+
     """
     if result is None:
         return MCPToolResult(content=[])
 
     if isinstance(result, dict):
-        result_dict = cast(dict[str, Any], result)
+        result_dict = cast("dict[str, Any]", result)
         if "error" in result_dict:
             return MCPToolResult(
                 content=[{"type": "text", "text": str(result_dict["error"])}],
@@ -107,7 +108,7 @@ def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
                 {
                     "type": "text",
                     "text": json.dumps(result_dict, indent=2, default=str),
-                }
+                },
             ],
         )
 
@@ -117,13 +118,13 @@ def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
         )
 
     if isinstance(result, list):
-        result_list = cast(list[Any], result)
+        result_list = cast("list[Any]", result)
         content: list[dict[str, Any]] = []
         for item in result_list:
             if isinstance(item, str):
                 content.append({"type": "text", "text": item})
             elif isinstance(item, dict):
-                item_dict = cast(dict[str, Any], item)
+                item_dict = cast("dict[str, Any]", item)
                 if item_dict.get("type") in ["text", "image", "resource"]:
                     content.append(item_dict)
                 else:
@@ -131,7 +132,7 @@ def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
                         {
                             "type": "text",
                             "text": json.dumps(item_dict, indent=2),
-                        }
+                        },
                     )
             else:
                 content.append({"type": "text", "text": str(item)})
@@ -148,14 +149,14 @@ def obscura_result_to_mcp(result: object | None) -> MCPToolResult:
 
 
 def mcp_result_to_obscura(result: MCPToolResult) -> Any:
-    """
-    Convert an MCP ToolResult to an Obscura-friendly result.
+    """Convert an MCP ToolResult to an Obscura-friendly result.
 
     Args:
         result: MCP ToolResult
 
     Returns:
         Result suitable for Obscura
+
     """
     if result.isError:
         return {"error": result.content}
@@ -189,15 +190,15 @@ def mcp_result_to_obscura(result: MCPToolResult) -> Any:
 
 
 class ObscuraMCPToolRegistry:
-    """
-    Registry for Obscura-specific MCP tools.
+    """Registry for Obscura-specific MCP tools.
 
     These tools expose Obscura functionality via the MCP protocol.
     """
 
     def __init__(self) -> None:
         self._tools: dict[
-            str, Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]]
+            str,
+            Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]],
         ] = {}
         self._schemas: dict[str, dict[str, Any]] = {}
 
@@ -208,14 +209,14 @@ class ObscuraMCPToolRegistry:
         parameters: dict[str, Any],
         handler: Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]],
     ) -> None:
-        """
-        Register an Obscura MCP tool.
+        """Register an Obscura MCP tool.
 
         Args:
             name: Tool name
             description: Tool description
             parameters: JSON Schema for parameters
             handler: Async function to handle tool calls
+
         """
         self._tools[name] = handler
         self._schemas[name] = {
@@ -230,7 +231,8 @@ class ObscuraMCPToolRegistry:
         logger.debug(f"Registered Obscura MCP tool: {name}")
 
     def get_tool(
-        self, name: str
+        self,
+        name: str,
     ) -> Callable[[ObscuraMCPToolContext, dict[str, Any]], Awaitable[Any]] | None:
         """Get a tool handler by name."""
         return self._tools.get(name)
@@ -252,8 +254,7 @@ class ObscuraMCPToolRegistry:
         context: ObscuraMCPToolContext,
         arguments: dict[str, Any],
     ) -> MCPToolResult:
-        """
-        Execute a tool by name.
+        """Execute a tool by name.
 
         Args:
             name: Tool name
@@ -262,6 +263,7 @@ class ObscuraMCPToolRegistry:
 
         Returns:
             MCP ToolResult
+
         """
         handler = self._tools.get(name)
         if handler is None:
@@ -277,7 +279,7 @@ class ObscuraMCPToolRegistry:
             logger.exception(f"Tool execution failed: {name}")
             raise MCPError(
                 code=MCPErrorCode.TOOL_EXECUTION_ERROR.value,
-                message=f"Tool execution failed: {str(e)}",
+                message=f"Tool execution failed: {e!s}",
                 data={"tool": name, "error": str(e)},
             )
 
@@ -302,8 +304,7 @@ def create_tool_context(
     session_id: str | None = None,
     request_id: str | None = None,
 ) -> ObscuraMCPToolContext:
-    """
-    Create a tool execution context.
+    """Create a tool execution context.
 
     Args:
         user_id: User ID
@@ -313,6 +314,7 @@ def create_tool_context(
 
     Returns:
         Tool execution context
+
     """
     return ObscuraMCPToolContext(
         user_id=user_id,

@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.plugins.models import PluginSpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,8 @@ def _make_cli_handler(handler_template: str, tool_name: str):
         output = stdout.decode() if stdout else ""
         if proc.returncode != 0:
             err = stderr.decode() if stderr else ""
-            raise RuntimeError(f"CLI tool {tool_name} failed (rc={proc.returncode}): {err}")
+            msg = f"CLI tool {tool_name} failed (rc={proc.returncode}): {err}"
+            raise RuntimeError(msg)
         return output
 
     _handler.__name__ = f"cli_{tool_name}"

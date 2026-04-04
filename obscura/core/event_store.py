@@ -1,5 +1,4 @@
-"""
-obscura.core.event_store — Durable event-sourced session persistence.
+"""obscura.core.event_store — Durable event-sourced session persistence.
 
 Every event emitted by the agent loop is appended to an immutable log.
 Sessions are recovered by replaying events.  The store is the single
@@ -29,7 +28,6 @@ from typing import Any, Protocol, runtime_checkable
 
 from obscura.core.types import AgentEvent, AgentEventKind
 
-
 # ---------------------------------------------------------------------------
 # Session status machine
 # ---------------------------------------------------------------------------
@@ -54,27 +52,27 @@ VALID_TRANSITIONS: dict[SessionStatus, frozenset[SessionStatus]] = {
             SessionStatus.PAUSED,
             SessionStatus.COMPLETED,
             SessionStatus.FAILED,
-        }
+        },
     ),
     SessionStatus.WAITING_FOR_TOOL: frozenset(
         {
             SessionStatus.RUNNING,
             SessionStatus.PAUSED,
             SessionStatus.FAILED,
-        }
+        },
     ),
     SessionStatus.WAITING_FOR_USER: frozenset(
         {
             SessionStatus.RUNNING,
             SessionStatus.PAUSED,
             SessionStatus.FAILED,
-        }
+        },
     ),
     SessionStatus.PAUSED: frozenset(
         {
             SessionStatus.RUNNING,
             SessionStatus.FAILED,
-        }
+        },
     ),
     SessionStatus.COMPLETED: frozenset(),
     SessionStatus.FAILED: frozenset(),
@@ -211,7 +209,7 @@ def _deserialize_payload(raw: str) -> dict[str, Any]:
     result: object = json.loads(raw)
     if not isinstance(result, dict):
         return {}
-    return cast(dict[str, Any], result)
+    return cast("dict[str, Any]", result)
 
 
 _SESSION_COLS = (
@@ -295,7 +293,7 @@ class SQLiteEventStore:
 
             CREATE INDEX IF NOT EXISTS idx_events_session
                 ON events(session_id, seq);
-            """
+            """,
         )
         conn.commit()
 
@@ -312,7 +310,7 @@ class SQLiteEventStore:
         for col_name, col_def in _migrations:
             try:
                 conn.execute(
-                    f"ALTER TABLE sessions ADD COLUMN {col_name} {col_def}"
+                    f"ALTER TABLE sessions ADD COLUMN {col_name} {col_def}",
                 )
             except sqlite3.OperationalError:
                 pass  # column already exists
@@ -380,10 +378,14 @@ class SQLiteEventStore:
         )
 
     def _get_session_sync(self, session_id: str) -> SessionRecord | None:
-        row = self._conn().execute(
-            f"SELECT {_SESSION_COLS} FROM sessions WHERE id = ?",
-            (session_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                f"SELECT {_SESSION_COLS} FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return _row_to_session(row)
@@ -399,12 +401,14 @@ class SQLiteEventStore:
             (session_id,),
         ).fetchone()
         if row is None:
-            raise ValueError(f"Session not found: {session_id}")
+            msg = f"Session not found: {session_id}"
+            raise ValueError(msg)
 
         current = SessionStatus(row["status"])
         if status not in VALID_TRANSITIONS[current]:
+            msg = f"Invalid transition: {current.value} -> {status.value}"
             raise ValueError(
-                f"Invalid transition: {current.value} -> {status.value}"
+                msg,
             )
 
         now = datetime.now(UTC).isoformat()
@@ -490,11 +494,15 @@ class SQLiteEventStore:
         session_id: str,
         after_seq: int = 0,
     ) -> list[EventRecord]:
-        rows = self._conn().execute(
-            "SELECT session_id, seq, kind, payload, timestamp "
-            "FROM events WHERE session_id = ? AND seq > ? ORDER BY seq",
-            (session_id, after_seq),
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT session_id, seq, kind, payload, timestamp "
+                "FROM events WHERE session_id = ? AND seq > ? ORDER BY seq",
+                (session_id, after_seq),
+            )
+            .fetchall()
+        )
         return [
             EventRecord(
                 session_id=row["session_id"],
@@ -608,7 +616,10 @@ class SQLiteEventStore:
         source: str | None = None,
     ) -> list[SessionRecord]:
         return await asyncio.to_thread(
-            self._list_sessions_sync, status, backend, source,
+            self._list_sessions_sync,
+            status,
+            backend,
+            source,
         )
 
     def close(self) -> None:

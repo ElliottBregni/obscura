@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from obscura.core.agent_loop import AgentLoop
-from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.hooks import HookRegistry
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -27,6 +26,9 @@ from obscura.core.types import (
     ToolSpec,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as existing test_agent_loop.py)
@@ -51,7 +53,7 @@ def _make_tool_call_chunks(
         StreamChunk(
             kind=ChunkKind.TOOL_USE_DELTA,
             tool_input_delta=json.dumps(tool_input),
-        )
+        ),
     )
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
     return chunks
@@ -206,7 +208,10 @@ class TestAgentLoopHooks:
             tool_events.append(("after_result", event.kind))
 
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
         turn1 = _make_tool_call_chunks("ping", {})
         turn2 = _make_text_chunks("done")
@@ -235,9 +240,7 @@ class TestAgentLoopEventStore:
         stored = await store.get_events("sess-1")
 
         assert len(stored) == len(events)
-        assert [e.kind.value for e in stored] == [
-            e.kind.value for e in events
-        ]
+        assert [e.kind.value for e in stored] == [e.kind.value for e in events]
 
     @pytest.mark.asyncio
     async def test_session_created_automatically(self, tmp_path: Path) -> None:
@@ -253,7 +256,8 @@ class TestAgentLoopEventStore:
 
     @pytest.mark.asyncio
     async def test_session_marked_completed_on_success(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         store = SQLiteEventStore(tmp_path / "test.db")
         backend = MockBackend([_make_text_chunks("done")])
@@ -267,14 +271,18 @@ class TestAgentLoopEventStore:
 
     @pytest.mark.asyncio
     async def test_session_marked_failed_on_error(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         class FailBackend(MockBackend):
             async def stream(
-                self, prompt: str, **kw: Any
+                self,
+                prompt: str,
+                **kw: Any,
             ) -> AsyncIterator[StreamChunk]:
-                raise ConnectionError("boom")
-                yield  # type: ignore[misc]  # noqa: E501
+                msg = "boom"
+                raise ConnectionError(msg)
+                yield  # type: ignore[misc]
 
         store = SQLiteEventStore(tmp_path / "test.db")
         backend = FailBackend([])
@@ -288,7 +296,8 @@ class TestAgentLoopEventStore:
 
     @pytest.mark.asyncio
     async def test_no_persistence_without_session_id(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         store = SQLiteEventStore(tmp_path / "test.db")
         backend = MockBackend([_make_text_chunks("hi")])
@@ -342,7 +351,10 @@ class TestAgentLoopHooksAndStore:
 
         backend = MockBackend([_make_text_chunks("hi")])
         loop = AgentLoop(
-            backend, _make_registry(), hooks=hooks, event_store=store
+            backend,
+            _make_registry(),
+            hooks=hooks,
+            event_store=store,
         )
 
         events = [e async for e in loop.run("go", session_id="s")]
@@ -354,7 +366,8 @@ class TestAgentLoopHooksAndStore:
 
     @pytest.mark.asyncio
     async def test_modified_event_is_what_gets_stored(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         hooks = HookRegistry()
         store = SQLiteEventStore(tmp_path / "test.db")
@@ -369,7 +382,10 @@ class TestAgentLoopHooksAndStore:
 
         backend = MockBackend([_make_text_chunks("raw")])
         loop = AgentLoop(
-            backend, _make_registry(), hooks=hooks, event_store=store
+            backend,
+            _make_registry(),
+            hooks=hooks,
+            event_store=store,
         )
 
         [e async for e in loop.run("go", session_id="s")]

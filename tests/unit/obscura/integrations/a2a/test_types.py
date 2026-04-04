@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 
 from obscura.integrations.a2a.types import (
+    TERMINAL_STATES,
+    VALID_TRANSITIONS,
     A2AMessage,
     A2AMethod,
     AgentCapabilities,
@@ -26,8 +28,6 @@ from obscura.integrations.a2a.types import (
     TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
-    TERMINAL_STATES,
-    VALID_TRANSITIONS,
     VersionNotSupportedError,
 )
 
@@ -85,7 +85,7 @@ class TestParts:
                 name="report.pdf",
                 mimeType="application/pdf",
                 uri="https://example.com/report.pdf",
-            )
+            ),
         )
         d = part.model_dump()
         assert d["kind"] == "file"
@@ -93,7 +93,11 @@ class TestParts:
 
     def test_file_part_with_bytes(self) -> None:
         part = FilePart(
-            file=FileContent(name="img.png", mimeType="image/png", bytes="iVBORw0KGgo=")
+            file=FileContent(
+                name="img.png",
+                mimeType="image/png",
+                bytes="iVBORw0KGgo=",
+            ),
         )
         d = part.model_dump()
         assert d["file"]["bytes"] == "iVBORw0KGgo="
@@ -186,7 +190,7 @@ class TestTask:
             contextId="ctx-002",
             status=TaskStatus(state=TaskState.WORKING),
             history=[
-                A2AMessage(role="user", messageId="m1", parts=[TextPart(text="go")])
+                A2AMessage(role="user", messageId="m1", parts=[TextPart(text="go")]),
             ],
         )
         json_str = task.model_dump_json()
@@ -242,10 +246,14 @@ class TestAgentCard:
             url="https://support.example.com/a2a",
             skills=[
                 AgentSkill(
-                    id="triage", name="Ticket Triage", description="Classify tickets"
+                    id="triage",
+                    name="Ticket Triage",
+                    description="Classify tickets",
                 ),
                 AgentSkill(
-                    id="resolve", name="Issue Resolution", tags=["billing", "tech"]
+                    id="resolve",
+                    name="Issue Resolution",
+                    tags=["billing", "tech"],
                 ),
             ],
             capabilities=AgentCapabilities(streaming=True, pushNotifications=True),

@@ -36,7 +36,7 @@ class IMessageAdapter:
             message_id = msg.guid.strip() if msg.guid else ""
             if not message_id:
                 message_id = hashlib.sha1(
-                    f"{sender_id}|{msg.date.isoformat()}|{msg.text}".encode("utf-8")
+                    f"{sender_id}|{msg.date.isoformat()}|{msg.text}".encode(),
                 ).hexdigest()
 
             out.append(
@@ -55,7 +55,7 @@ class IMessageAdapter:
                         "rowid": msg.rowid,
                         "guid": msg.guid,
                     },
-                )
+                ),
             )
             self._state.update(msg.rowid)
         if out:

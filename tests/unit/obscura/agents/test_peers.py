@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +11,9 @@ import pytest
 from obscura.agent.agents import Agent, AgentRuntime
 from obscura.agent.peers import AgentRef, RemoteAgentRef
 from obscura.auth.models import AuthenticatedUser
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @pytest.fixture
@@ -48,7 +50,8 @@ class TestPeerRegistry:
 
     @pytest.mark.asyncio
     async def test_runtime_discover_peers_merges_local_and_remote(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         source = _spawn(runtime, "source")
         target = _spawn(runtime, "target")
@@ -65,7 +68,7 @@ class TestPeerRegistry:
                 return_value=[
                     RemoteAgentRef(url="https://a2a.one"),
                     RemoteAgentRef(url="https://a2a.two"),
-                ]
+                ],
             ),
         ) as mocked_remote:
             catalog = await runtime.discover_peers_for_agent(
@@ -84,7 +87,8 @@ class TestPeerRegistry:
 class TestPeerInvoke:
     @pytest.mark.asyncio
     async def test_invoke_peer_requires_feature_flag(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         target = _spawn(runtime, "target")
         with pytest.raises(RuntimeError, match="OBSCURA_PEER_CALLS_ENABLED"):
@@ -92,7 +96,8 @@ class TestPeerInvoke:
 
     @pytest.mark.asyncio
     async def test_invoke_peer_blocking_with_envelope(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         source = _spawn(runtime, "source")
         target = _spawn(runtime, "target")

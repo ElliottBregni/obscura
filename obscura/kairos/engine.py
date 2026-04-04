@@ -1,5 +1,4 @@
-"""
-obscura.kairos.engine — KAIROS daemon engine.
+"""obscura.kairos.engine — KAIROS daemon engine.
 
 The main orchestrator for KAIROS mode: combines daily logging,
 proactive ticks, dream consolidation, and background monitoring
@@ -8,10 +7,10 @@ into a single daemon lifecycle.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
-import json
 from pathlib import Path
 
 from obscura.kairos.daily_log import DailyLog
@@ -127,8 +126,12 @@ class KairosEngine:
         )
 
         self._daily_log = DailyLog()
+        self._active_loop: object | None = None
         self._proactive: ProactiveMode | None = (
-            ProactiveMode(tick_interval=tick_interval)
+            ProactiveMode(
+                on_tick=self._on_proactive_tick,
+                tick_interval=tick_interval,
+            )
             if self._proactive_enabled
             else None
         )
@@ -199,6 +202,32 @@ class KairosEngine:
         """Log an agent event to the daily log."""
         self.log(f"event:{event_kind} {detail}".strip(), source="agent")
 
+    def register_agent_loop(self, loop: object) -> None:
+        """Attach the active AgentLoop for proactive tick injection.
+
+        Call this after the ObscuraClient/AgentLoop has started. The loop's
+        ``inject_user_input()`` will receive ``<tick>`` messages on each
+        proactive tick so the model can act within the 15s blocking budget.
+        """
+        self._active_loop = loop
+        logger.debug("KairosEngine: AgentLoop registered for tick injection")
+
+    def _on_proactive_tick(self, tick_count: int) -> None:
+        """Callback fired by ProactiveMode on each tick.
+
+        Injects a ``<tick>`` prompt into the active AgentLoop so the model
+        can take a proactive action without waiting for user input.
+        """
+        loop = self._active_loop
+        if loop is None:
+            return
+        try:
+            inject = getattr(loop, "inject_user_input", None)
+            if callable(inject):
+                inject(f"<tick>#{tick_count}</tick>")
+        except Exception:
+            logger.debug("Proactive tick injection failed", exc_info=True)
+
     async def _maybe_dream(self) -> None:
         """Check if dream consolidation should run."""
         if not self._dream_enabled:
@@ -235,6 +264,7 @@ class KairosEngine:
         # Inject undercover instructions if active.
         try:
             from obscura.kairos.undercover import UndercoverMode
+
             uc_prompt = UndercoverMode().get_system_prompt_addition()
             if uc_prompt:
                 parts.append("")

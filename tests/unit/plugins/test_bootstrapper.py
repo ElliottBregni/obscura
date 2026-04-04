@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import fields
+from typing import Never
 from unittest.mock import MagicMock, patch
-
 
 from obscura.plugins import bootstrapper as bootstrapper_mod
 from obscura.plugins.bootstrapper import (
@@ -29,10 +29,10 @@ from obscura.plugins.bootstrapper import (
 )
 from obscura.plugins.models import BootstrapDep, BootstrapSpec, PluginSpec
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_spec(
     plugin_id: str = "test-plugin",
@@ -55,32 +55,52 @@ def _dep(
     version: str = "",
     optional: bool = False,
 ) -> BootstrapDep:
-    return BootstrapDep(type=dep_type, package=package, version=version, optional=optional)
+    return BootstrapDep(
+        type=dep_type,
+        package=package,
+        version=version,
+        optional=optional,
+    )
 
 
-def _proc(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+def _proc(
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(
+        args=[],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
 
 
 # ===================================================================
 # 1. _is_pip_installed
 # ===================================================================
 
+
 class TestIsPipInstalled:
     """Tests for _is_pip_installed."""
 
-    def test_importable_package_returns_true(self):
+    def test_importable_package_returns_true(self) -> None:
         """If __import__ succeeds, package is considered installed."""
         with patch("builtins.__import__", return_value=MagicMock()):
             assert _is_pip_installed("requests") is True
 
-    def test_import_fails_but_pip_show_succeeds(self):
+    def test_import_fails_but_pip_show_succeeds(self) -> None:
         """Falls back to `pip show` when import fails."""
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def fake_import(name, *args, **kwargs):
             if name == "some_pkg":
-                raise ImportError("no module")
+                msg = "no module"
+                raise ImportError(msg)
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=fake_import):
@@ -92,17 +112,20 @@ class TestIsPipInstalled:
                 assert "show" in cmd
                 assert "some-pkg" in cmd
 
-    def test_import_fails_and_pip_show_fails(self):
+    def test_import_fails_and_pip_show_fails(self) -> None:
         """Both import and pip show fail → False."""
-        def fake_import(name, *args, **kwargs):
-            raise ImportError("nope")
+
+        def fake_import(name, *args, **kwargs) -> Never:
+            msg = "nope"
+            raise ImportError(msg)
 
         with patch("builtins.__import__", side_effect=fake_import):
             with patch("subprocess.run", return_value=_proc(returncode=1)):
                 assert _is_pip_installed("nonexistent") is False
 
-    def test_strips_version_specifiers(self):
+    def test_strips_version_specifiers(self) -> None:
         """Handles packages like 'pkg>=1.0' or 'pkg[extra]'."""
+
         def fake_import(name, *args, **kwargs):
             if name == "my_pkg":
                 return MagicMock()
@@ -113,9 +136,10 @@ class TestIsPipInstalled:
             assert _is_pip_installed("my-pkg[extra]") is True
             assert _is_pip_installed("my-pkg==2.0") is True
 
-    def test_subprocess_exception_returns_false(self):
+    def test_subprocess_exception_returns_false(self) -> None:
         """If subprocess.run itself raises, return False."""
-        def fake_import(name, *args, **kwargs):
+
+        def fake_import(name, *args, **kwargs) -> Never:
             raise ImportError
 
         with patch("builtins.__import__", side_effect=fake_import):
@@ -127,13 +151,16 @@ class TestIsPipInstalled:
 # 2. _is_binary_available
 # ===================================================================
 
-class TestIsBinaryAvailable:
 
-    def test_binary_found(self):
-        with patch("obscura.plugins.bootstrapper.shutil.which", return_value="/usr/bin/foo"):
+class TestIsBinaryAvailable:
+    def test_binary_found(self) -> None:
+        with patch(
+            "obscura.plugins.bootstrapper.shutil.which",
+            return_value="/usr/bin/foo",
+        ):
             assert _is_binary_available("foo") is True
 
-    def test_binary_not_found(self):
+    def test_binary_not_found(self) -> None:
         with patch("obscura.plugins.bootstrapper.shutil.which", return_value=None):
             assert _is_binary_available("foo") is False
 
@@ -142,17 +169,17 @@ class TestIsBinaryAvailable:
 # 3. _is_npm_installed
 # ===================================================================
 
-class TestIsNpmInstalled:
 
-    def test_installed(self):
+class TestIsNpmInstalled:
+    def test_installed(self) -> None:
         with patch("subprocess.run", return_value=_proc(returncode=0)):
             assert _is_npm_installed("prettier") is True
 
-    def test_not_installed(self):
+    def test_not_installed(self) -> None:
         with patch("subprocess.run", return_value=_proc(returncode=1)):
             assert _is_npm_installed("prettier") is False
 
-    def test_subprocess_error(self):
+    def test_subprocess_error(self) -> None:
         with patch("subprocess.run", side_effect=FileNotFoundError("npm not found")):
             assert _is_npm_installed("prettier") is False
 
@@ -161,32 +188,38 @@ class TestIsNpmInstalled:
 # 4. _install_pip
 # ===================================================================
 
-class TestInstallPip:
 
-    def test_success(self):
+class TestInstallPip:
+    def test_success(self) -> None:
         dep = _dep("pip", "requests")
         with patch("subprocess.run", return_value=_proc(returncode=0)):
             ok, err = _install_pip(dep)
         assert ok is True
         assert err == ""
 
-    def test_failure(self):
+    def test_failure(self) -> None:
         dep = _dep("pip", "bad-pkg")
-        with patch("subprocess.run", return_value=_proc(returncode=1, stderr="ERROR: No matching")):
+        with patch(
+            "subprocess.run",
+            return_value=_proc(returncode=1, stderr="ERROR: No matching"),
+        ):
             ok, err = _install_pip(dep)
         assert ok is False
         assert "No matching" in err
 
-    def test_with_version(self):
+    def test_with_version(self) -> None:
         dep = _dep("pip", "requests", version=">=2.0")
         with patch("subprocess.run", return_value=_proc(returncode=0)) as mock_run:
             _install_pip(dep)
             cmd = mock_run.call_args[0][0]
             assert "requests>=2.0" in cmd
 
-    def test_exception(self):
+    def test_exception(self) -> None:
         dep = _dep("pip", "pkg")
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="pip", timeout=120)):
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="pip", timeout=120),
+        ):
             ok, err = _install_pip(dep)
         assert ok is False
         assert err  # some error message
@@ -196,11 +229,11 @@ class TestInstallPip:
 # 5. _install_uv
 # ===================================================================
 
-class TestInstallUv:
 
+class TestInstallUv:
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_uv_available_success(self, mock_run, mock_binary):
+    def test_uv_available_success(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.return_value = _proc(returncode=0)
         dep = _dep("uv", "ruff")
@@ -212,17 +245,24 @@ class TestInstallUv:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_uv_already_installed_stderr(self, mock_run, mock_binary):
+    def test_uv_already_installed_stderr(self, mock_run, mock_binary) -> None:
         """'already installed' in stderr → still True."""
         mock_binary.return_value = True
-        mock_run.return_value = _proc(returncode=1, stderr="error: ruff is already installed")
+        mock_run.return_value = _proc(
+            returncode=1,
+            stderr="error: ruff is already installed",
+        )
         dep = _dep("uv", "ruff")
-        ok, err = _install_uv(dep)
+        ok, _err = _install_uv(dep)
         assert ok is True
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_uv_executable_already_exists_retries_force(self, mock_run, mock_binary):
+    def test_uv_executable_already_exists_retries_force(
+        self,
+        mock_run,
+        mock_binary,
+    ) -> None:
         """'Executable already exists' → retry with --force."""
         mock_binary.return_value = True
         first_call = _proc(
@@ -241,7 +281,7 @@ class TestInstallUv:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_uv_executable_exists_force_also_fails(self, mock_run, mock_binary):
+    def test_uv_executable_exists_force_also_fails(self, mock_run, mock_binary) -> None:
         """'Executable already exists' + --force retry also fails → error."""
         mock_binary.return_value = True
         first_call = _proc(
@@ -257,7 +297,7 @@ class TestInstallUv:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_uv_failure(self, mock_run, mock_binary):
+    def test_uv_failure(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.return_value = _proc(returncode=1, stderr="unknown package")
         dep = _dep("uv", "bad-tool")
@@ -267,12 +307,12 @@ class TestInstallUv:
 
     @patch("obscura.plugins.bootstrapper._install_pip")
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_fallback_to_pip(self, mock_binary, mock_pip):
+    def test_fallback_to_pip(self, mock_binary, mock_pip) -> None:
         """When uv is not available, falls back to pip."""
         mock_binary.return_value = False
         mock_pip.return_value = (True, "")
         dep = _dep("uv", "ruff")
-        ok, err = _install_uv(dep)
+        ok, _err = _install_uv(dep)
         assert ok is True
         mock_pip.assert_called_once_with(dep)
 
@@ -281,17 +321,17 @@ class TestInstallUv:
 # 6. _install_npx
 # ===================================================================
 
-class TestInstallNpx:
 
+class TestInstallNpx:
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_npx_available(self, mock_binary):
+    def test_npx_available(self, mock_binary) -> None:
         mock_binary.return_value = True
         ok, err = _install_npx(_dep("npx", "prettier"))
         assert ok is True
         assert err == ""
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_npx_not_available(self, mock_binary):
+    def test_npx_not_available(self, mock_binary) -> None:
         mock_binary.return_value = False
         ok, err = _install_npx(_dep("npx", "prettier"))
         assert ok is False
@@ -302,25 +342,28 @@ class TestInstallNpx:
 # 7. _install_npm
 # ===================================================================
 
-class TestInstallNpm:
 
-    def test_success(self):
+class TestInstallNpm:
+    def test_success(self) -> None:
         dep = _dep("npm", "prettier")
         with patch("subprocess.run", return_value=_proc(returncode=0)):
-            ok, err = _install_npm(dep)
+            ok, _err = _install_npm(dep)
         assert ok is True
 
-    def test_failure(self):
+    def test_failure(self) -> None:
         dep = _dep("npm", "bad-pkg")
-        with patch("subprocess.run", return_value=_proc(returncode=1, stderr="npm ERR!")):
+        with patch(
+            "subprocess.run",
+            return_value=_proc(returncode=1, stderr="npm ERR!"),
+        ):
             ok, err = _install_npm(dep)
         assert ok is False
         assert "npm ERR!" in err
 
-    def test_exception(self):
+    def test_exception(self) -> None:
         dep = _dep("npm", "pkg")
         with patch("subprocess.run", side_effect=FileNotFoundError("npm not found")):
-            ok, err = _install_npm(dep)
+            ok, _err = _install_npm(dep)
         assert ok is False
 
 
@@ -328,18 +371,18 @@ class TestInstallNpm:
 # 8. _install_cargo
 # ===================================================================
 
-class TestInstallCargo:
 
+class TestInstallCargo:
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_success(self, mock_run, mock_binary):
+    def test_success(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.return_value = _proc(returncode=0)
-        ok, err = _install_cargo(_dep("cargo", "ripgrep"))
+        ok, _err = _install_cargo(_dep("cargo", "ripgrep"))
         assert ok is True
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_cargo_not_available(self, mock_binary):
+    def test_cargo_not_available(self, mock_binary) -> None:
         mock_binary.return_value = False
         ok, err = _install_cargo(_dep("cargo", "ripgrep"))
         assert ok is False
@@ -347,7 +390,7 @@ class TestInstallCargo:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_install_failure(self, mock_run, mock_binary):
+    def test_install_failure(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.return_value = _proc(returncode=1, stderr="error[E0463]")
         ok, err = _install_cargo(_dep("cargo", "bad-crate"))
@@ -359,16 +402,16 @@ class TestInstallCargo:
 # 9. _check_binary
 # ===================================================================
 
-class TestCheckBinary:
 
+class TestCheckBinary:
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_binary_present(self, mock_binary):
+    def test_binary_present(self, mock_binary) -> None:
         mock_binary.return_value = True
-        ok, err = _check_binary(_dep("binary", "git"))
+        ok, _err = _check_binary(_dep("binary", "git"))
         assert ok is True
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_binary_missing(self, mock_binary):
+    def test_binary_missing(self, mock_binary) -> None:
         mock_binary.return_value = False
         ok, err = _check_binary(_dep("binary", "missing-tool"))
         assert ok is False
@@ -379,10 +422,11 @@ class TestCheckBinary:
 # 10. run_bootstrap
 # ===================================================================
 
+
 class TestRunBootstrap:
     """Integration-level tests for run_bootstrap."""
 
-    def test_no_bootstrap_spec(self):
+    def test_no_bootstrap_spec(self) -> None:
         """No bootstrap → ok=True, empty lists."""
         spec = _make_spec(bootstrap=None)
         result = run_bootstrap(spec)
@@ -394,12 +438,14 @@ class TestRunBootstrap:
         assert result.plugin_id == "test-plugin"
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=True)
-    def test_all_deps_already_installed(self, _mock_check):
+    def test_all_deps_already_installed(self, _mock_check) -> None:
         """All deps present → ok=True, all in skipped."""
-        bs = BootstrapSpec(deps=(
-            _dep("pip", "requests"),
-            _dep("pip", "click"),
-        ))
+        bs = BootstrapSpec(
+            deps=(
+                _dep("pip", "requests"),
+                _dep("pip", "click"),
+            ),
+        )
         spec = _make_spec(bootstrap=bs)
         result = run_bootstrap(spec)
         assert result.ok is True
@@ -409,7 +455,7 @@ class TestRunBootstrap:
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run", return_value=_proc(returncode=1, stderr="install failed"))
-    def test_required_dep_fails(self, _mock_run, _mock_check):
+    def test_required_dep_fails(self, _mock_run, _mock_check) -> None:
         """Required dep fails → ok=False, error recorded."""
         bs = BootstrapSpec(deps=(_dep("pip", "bad-pkg"),))
         spec = _make_spec(bootstrap=bs)
@@ -420,7 +466,7 @@ class TestRunBootstrap:
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run", return_value=_proc(returncode=1, stderr="install failed"))
-    def test_optional_dep_fails(self, _mock_run, _mock_check):
+    def test_optional_dep_fails(self, _mock_run, _mock_check) -> None:
         """Optional dep fails → ok=True, warning recorded."""
         bs = BootstrapSpec(deps=(_dep("pip", "opt-pkg", optional=True),))
         spec = _make_spec(bootstrap=bs)
@@ -430,13 +476,15 @@ class TestRunBootstrap:
         assert "opt-pkg" in result.warnings[0]
         assert result.errors == []
 
-    def test_mix_of_installed_missing_optional(self):
+    def test_mix_of_installed_missing_optional(self) -> None:
         """Mix: one installed, one required fails, one optional fails."""
-        bs = BootstrapSpec(deps=(
-            _dep("pip", "present-pkg"),
-            _dep("pip", "missing-required"),
-            _dep("pip", "missing-optional", optional=True),
-        ))
+        bs = BootstrapSpec(
+            deps=(
+                _dep("pip", "present-pkg"),
+                _dep("pip", "missing-required"),
+                _dep("pip", "missing-optional", optional=True),
+            ),
+        )
         spec = _make_spec(bootstrap=bs)
 
         def fake_check(pkg):
@@ -446,7 +494,10 @@ class TestRunBootstrap:
         original = bootstrapper_mod._INSTALLERS["pip"]
         bootstrapper_mod._INSTALLERS["pip"] = (fake_check, original[1])
         try:
-            with patch("subprocess.run", return_value=_proc(returncode=1, stderr="fail")):
+            with patch(
+                "subprocess.run",
+                return_value=_proc(returncode=1, stderr="fail"),
+            ):
                 result = run_bootstrap(spec)
         finally:
             bootstrapper_mod._INSTALLERS["pip"] = original
@@ -458,7 +509,7 @@ class TestRunBootstrap:
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run")
-    def test_post_install_runs_on_success(self, mock_run, _mock_check):
+    def test_post_install_runs_on_success(self, mock_run, _mock_check) -> None:
         """post_install command runs when all required deps succeed."""
         # First call: pip install succeeds. Second call: post_install.
         mock_run.return_value = _proc(returncode=0)
@@ -471,12 +522,17 @@ class TestRunBootstrap:
         assert result.ok is True
         # post_install should have been called (shell=True)
         calls = mock_run.call_args_list
-        assert any(c.kwargs.get("shell") is True or (len(c.args) > 0 and c.args[0] == "echo done") for c in calls)
+        assert any(
+            c.kwargs.get("shell") is True
+            or (len(c.args) > 0 and c.args[0] == "echo done")
+            for c in calls
+        )
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run")
-    def test_post_install_failure_adds_warning(self, mock_run, _mock_check):
+    def test_post_install_failure_adds_warning(self, mock_run, _mock_check) -> None:
         """post_install failure adds a warning but ok stays True."""
+
         def side_effect(*args, **kwargs):
             if kwargs.get("shell"):
                 return _proc(returncode=1, stderr="post fail")
@@ -494,7 +550,7 @@ class TestRunBootstrap:
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run")
-    def test_check_command_runs_on_success(self, mock_run, _mock_check):
+    def test_check_command_runs_on_success(self, mock_run, _mock_check) -> None:
         mock_run.return_value = _proc(returncode=0)
         bs = BootstrapSpec(
             deps=(_dep("pip", "pkg"),),
@@ -506,7 +562,7 @@ class TestRunBootstrap:
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run")
-    def test_check_command_failure_adds_warning(self, mock_run, _mock_check):
+    def test_check_command_failure_adds_warning(self, mock_run, _mock_check) -> None:
         call_count = 0
 
         def side_effect(*args, **kwargs):
@@ -529,23 +585,31 @@ class TestRunBootstrap:
         assert result.ok is True
         assert any("check_command failed" in w for w in result.warnings)
 
-    def test_post_install_skipped_on_failure(self):
+    def test_post_install_skipped_on_failure(self) -> None:
         """post_install does NOT run when a required dep fails."""
         bs = BootstrapSpec(
             deps=(_dep("pip", "bad"),),
             post_install="echo should-not-run",
         )
         spec = _make_spec(bootstrap=bs)
-        with patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False):
-            with patch("subprocess.run", return_value=_proc(returncode=1, stderr="fail")) as mock_run:
-                result = run_bootstrap(spec)
+        with (
+            patch(
+                "obscura.plugins.bootstrapper._is_pip_installed",
+                return_value=False,
+            ),
+            patch(
+                "subprocess.run",
+                return_value=_proc(returncode=1, stderr="fail"),
+            ) as mock_run,
+        ):
+            result = run_bootstrap(spec)
         assert result.ok is False
         # post_install should not have been called with shell=True
         shell_calls = [c for c in mock_run.call_args_list if c.kwargs.get("shell")]
         assert len(shell_calls) == 0
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_binary_dep_type(self, mock_binary):
+    def test_binary_dep_type(self, mock_binary) -> None:
         """Binary dep type uses _is_binary_available checker."""
         mock_binary.return_value = True
         bs = BootstrapSpec(deps=(_dep("binary", "git"),))
@@ -554,7 +618,7 @@ class TestRunBootstrap:
         assert result.ok is True
         assert "binary:git" in result.skipped
 
-    def test_unknown_dep_type_errors(self):
+    def test_unknown_dep_type_errors(self) -> None:
         """An unknown dep type results in an error."""
         # BootstrapDep validates types, so we need to bypass validation
         dep = object.__new__(BootstrapDep)
@@ -563,7 +627,7 @@ class TestRunBootstrap:
         object.__setattr__(dep, "version", "")
         object.__setattr__(dep, "optional", False)
 
-        action, ok, err = _bootstrap_dep(dep)
+        _action, ok, err = _bootstrap_dep(dep)
         assert ok is False
         assert "Unknown dep type" in err
 
@@ -572,10 +636,11 @@ class TestRunBootstrap:
 # 11. BootstrapResult
 # ===================================================================
 
+
 class TestBootstrapResult:
     """Verify BootstrapResult dataclass structure."""
 
-    def test_default_values(self):
+    def test_default_values(self) -> None:
         r = BootstrapResult(plugin_id="test")
         assert r.plugin_id == "test"
         assert r.ok is True
@@ -584,11 +649,18 @@ class TestBootstrapResult:
         assert r.errors == []
         assert r.warnings == []
 
-    def test_all_fields_present(self):
+    def test_all_fields_present(self) -> None:
         names = {f.name for f in fields(BootstrapResult)}
-        assert names == {"plugin_id", "ok", "installed", "skipped", "errors", "warnings"}
+        assert names == {
+            "plugin_id",
+            "ok",
+            "installed",
+            "skipped",
+            "errors",
+            "warnings",
+        }
 
-    def test_mutable_lists(self):
+    def test_mutable_lists(self) -> None:
         """Lists are independent between instances."""
         r1 = BootstrapResult(plugin_id="a")
         r2 = BootstrapResult(plugin_id="b")
@@ -602,10 +674,9 @@ class TestBootstrapResult:
 
 
 class TestInstallBrew:
-
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_brew_available_success(self, mock_run, mock_binary):
+    def test_brew_available_success(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.return_value = _proc(returncode=0)
         ok, err = _install_brew(_dep("brew", "jq"))
@@ -616,7 +687,7 @@ class TestInstallBrew:
         assert "jq" in cmd
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_brew_not_available(self, mock_binary):
+    def test_brew_not_available(self, mock_binary) -> None:
         mock_binary.return_value = False
         ok, err = _install_brew(_dep("brew", "jq"))
         assert ok is False
@@ -624,7 +695,7 @@ class TestInstallBrew:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_brew_install_failure(self, mock_run, mock_binary):
+    def test_brew_install_failure(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.return_value = _proc(returncode=1, stderr="Error: No formulae found")
         ok, err = _install_brew(_dep("brew", "nonexistent-formula"))
@@ -633,7 +704,7 @@ class TestInstallBrew:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_brew_exception(self, mock_run, mock_binary):
+    def test_brew_exception(self, mock_run, mock_binary) -> None:
         mock_binary.return_value = True
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="brew", timeout=300)
         ok, err = _install_brew(_dep("brew", "jq"))
@@ -647,10 +718,9 @@ class TestInstallBrew:
 
 
 class TestInstallPipx:
-
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_pipx_available_success(self, mock_run, mock_binary):
+    def test_pipx_available_success(self, mock_run, mock_binary) -> None:
         mock_binary.side_effect = lambda name: name == "pipx"
         mock_run.return_value = _proc(returncode=0)
         ok, err = _install_pipx(_dep("pipx", "black"))
@@ -659,38 +729,38 @@ class TestInstallPipx:
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_pipx_already_installed(self, mock_run, mock_binary):
+    def test_pipx_already_installed(self, mock_run, mock_binary) -> None:
         """'already' in stderr → still True."""
         mock_binary.side_effect = lambda name: name == "pipx"
         mock_run.return_value = _proc(returncode=1, stderr="black is already installed")
-        ok, err = _install_pipx(_dep("pipx", "black"))
+        ok, _err = _install_pipx(_dep("pipx", "black"))
         assert ok is True
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_pipx_missing_falls_to_uv(self, mock_run, mock_binary):
-        """pipx missing, uv found → uv tool install succeeds."""
+    def test_pipx_missing_falls_to_uv(self, mock_run, mock_binary) -> None:
+        """Pipx missing, uv found → uv tool install succeeds."""
         mock_binary.side_effect = lambda name: name == "uv"
         mock_run.return_value = _proc(returncode=0)
-        ok, err = _install_pipx(_dep("pipx", "ruff"))
+        ok, _err = _install_pipx(_dep("pipx", "ruff"))
         assert ok is True
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "uv"
 
     @patch("obscura.plugins.bootstrapper._install_pip")
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_both_missing_falls_to_pip(self, mock_binary, mock_pip):
-        """pipx + uv missing → falls back to pip."""
+    def test_both_missing_falls_to_pip(self, mock_binary, mock_pip) -> None:
+        """Pipx + uv missing → falls back to pip."""
         mock_binary.return_value = False
         mock_pip.return_value = (True, "")
-        ok, err = _install_pipx(_dep("pipx", "black"))
+        ok, _err = _install_pipx(_dep("pipx", "black"))
         assert ok is True
         mock_pip.assert_called_once()
 
     @patch("obscura.plugins.bootstrapper._install_pip")
     @patch("obscura.plugins.bootstrapper._is_binary_available")
-    def test_all_fallbacks_fail(self, mock_binary, mock_pip):
-        """pipx + uv missing, pip also fails."""
+    def test_all_fallbacks_fail(self, mock_binary, mock_pip) -> None:
+        """Pipx + uv missing, pip also fails."""
         mock_binary.return_value = False
         mock_pip.return_value = (False, "pip install failed")
         ok, err = _install_pipx(_dep("pipx", "bad-tool"))

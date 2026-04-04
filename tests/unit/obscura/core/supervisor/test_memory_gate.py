@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -13,6 +13,9 @@ from obscura.core.supervisor.memory_gate import (
     recency_decay,
 )
 from obscura.core.supervisor.types import MemoryCandidate
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -38,8 +41,22 @@ class TestMemoryCommitGate:
 
     def test_deduplication_within_batch(self, gate: MemoryCommitGate) -> None:
         h = content_hash("same content")
-        gate.queue(MemoryCandidate(key="a", content="same content", content_hash=h, importance=0.8))
-        gate.queue(MemoryCandidate(key="b", content="same content", content_hash=h, importance=0.8))
+        gate.queue(
+            MemoryCandidate(
+                key="a",
+                content="same content",
+                content_hash=h,
+                importance=0.8,
+            ),
+        )
+        gate.queue(
+            MemoryCandidate(
+                key="b",
+                content="same content",
+                content_hash=h,
+                importance=0.8,
+            ),
+        )
         result = gate.commit_sync()
         assert result.committed == 1
         assert result.deduplicated == 1

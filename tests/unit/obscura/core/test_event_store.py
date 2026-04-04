@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.core.event_store import (
-    SQLiteEventStore,
-    SessionStatus,
     VALID_TRANSITIONS,
+    SessionStatus,
+    SQLiteEventStore,
 )
 from obscura.core.types import AgentEvent, AgentEventKind
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -54,7 +57,8 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_list_sessions_filter_by_status(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("a", agent="x")
         await store.create_session("b", agent="y")
@@ -65,7 +69,8 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_create_session_with_metadata(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         rec = await store.create_session(
             "sess-m",
@@ -86,10 +91,14 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_get_session_returns_new_fields(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session(
-            "s", agent="a", backend="copilot", model="gpt-4o",
+            "s",
+            agent="a",
+            backend="copilot",
+            model="gpt-4o",
         )
         rec = await store.get_session("s")
         assert rec is not None
@@ -99,7 +108,8 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_list_sessions_filter_by_backend(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("a", agent="x", backend="claude")
         await store.create_session("b", agent="y", backend="copilot")
@@ -109,7 +119,8 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_list_sessions_filter_by_source(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("a", agent="x", source="live")
         await store.create_session("b", agent="y", source="ingested")
@@ -119,7 +130,8 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_update_session_metadata(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("s", agent="a")
         await store.update_session(
@@ -136,7 +148,8 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_old_sessions_get_defaults(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         """Sessions created without new fields should have sensible defaults."""
         rec = await store.create_session("old", agent="a")
@@ -179,7 +192,8 @@ class TestStatusTransitions:
 
     @pytest.mark.asyncio
     async def test_running_to_waiting_for_tool(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("s", agent="a")
         await store.update_status("s", SessionStatus.WAITING_FOR_TOOL)
@@ -189,7 +203,8 @@ class TestStatusTransitions:
 
     @pytest.mark.asyncio
     async def test_waiting_for_tool_to_running(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("s", agent="a")
         await store.update_status("s", SessionStatus.WAITING_FOR_TOOL)
@@ -225,10 +240,12 @@ class TestEventLog:
         await store.create_session("s", agent="a")
         await store.append("s", AgentEvent(kind=AgentEventKind.TURN_START, turn=1))
         await store.append(
-            "s", AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="hi", turn=1)
+            "s",
+            AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="hi", turn=1),
         )
         await store.append(
-            "s", AgentEvent(kind=AgentEventKind.TURN_COMPLETE, turn=1)
+            "s",
+            AgentEvent(kind=AgentEventKind.TURN_COMPLETE, turn=1),
         )
 
         events = await store.get_events("s")
@@ -270,7 +287,8 @@ class TestEventLog:
 
     @pytest.mark.asyncio
     async def test_empty_session_returns_no_events(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("s", agent="a")
         events = await store.get_events("s")
@@ -278,15 +296,18 @@ class TestEventLog:
 
     @pytest.mark.asyncio
     async def test_events_isolated_between_sessions(
-        self, store: SQLiteEventStore
+        self,
+        store: SQLiteEventStore,
     ) -> None:
         await store.create_session("a", agent="x")
         await store.create_session("b", agent="y")
         await store.append(
-            "a", AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="a", turn=1)
+            "a",
+            AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="a", turn=1),
         )
         await store.append(
-            "b", AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="b", turn=1)
+            "b",
+            AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="b", turn=1),
         )
 
         a_events = await store.get_events("a")

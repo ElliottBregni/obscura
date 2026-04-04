@@ -1,5 +1,4 @@
-"""
-obscura.cli.app.modes -- CLI mode system.
+"""obscura.cli.app.modes -- CLI mode system.
 
 Defines the TUIMode enum and ModeManager state machine that governs
 mode transitions and mode-specific behavior (system prompts, allowed
@@ -10,9 +9,10 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Mode enum
@@ -60,7 +60,7 @@ class Plan:
     """A structured plan with numbered steps."""
 
     title: str
-    steps: list[PlanStep] = field(default_factory=lambda: cast(list[PlanStep], []))
+    steps: list[PlanStep] = field(default_factory=lambda: cast("list[PlanStep]", []))
     raw_text: str = ""
 
     @property
@@ -121,7 +121,7 @@ class Plan:
                         PlanStep(
                             number=current_step_num,
                             description=current_step_text.strip(),
-                        )
+                        ),
                     )
                 current_step_num = int(match.group(1))
                 current_step_text = match.group(2)
@@ -135,7 +135,7 @@ class Plan:
                 PlanStep(
                     number=current_step_num,
                     description=current_step_text.strip(),
-                )
+                ),
             )
 
         if not title:
@@ -178,30 +178,51 @@ _MODE_SYSTEM_PROMPTS: dict[TUIMode, str] = {
 # to customize what each mode can access.
 # ---------------------------------------------------------------------------
 
-_DIFF_MODE_TOOLS: frozenset[str] = frozenset({
-    # Filesystem (read-only)
-    "list_directory", "read_text_file", "grep_files",
-    "find_files", "file_info", "tree_directory", "diff_files",
-    # Git (inspection only)
-    "git_status", "git_diff", "git_log", "git_branch",
-    # Utilities
-    "context_window_status", "json_query", "clipboard_read", "clipboard_write",
-})
+_DIFF_MODE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Filesystem (read-only)
+        "list_directory",
+        "read_text_file",
+        "grep_files",
+        "find_files",
+        "file_info",
+        "tree_directory",
+        "diff_files",
+        # Git (inspection only)
+        "git_status",
+        "git_diff",
+        "git_log",
+        "git_branch",
+        # Utilities
+        "context_window_status",
+        "json_query",
+        "clipboard_read",
+        "clipboard_write",
+    },
+)
 
-_PLAN_MODE_TOOLS: frozenset[str] = frozenset({
-    # Filesystem (read-only)
-    "list_directory", "read_text_file", "grep_files",
-    "find_files", "file_info", "tree_directory",
-    # Web research
-    "web_fetch", "web_search",
-    # System info
-    "context_window_status", "get_system_info",
-})
+_PLAN_MODE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Filesystem (read-only)
+        "list_directory",
+        "read_text_file",
+        "grep_files",
+        "find_files",
+        "file_info",
+        "tree_directory",
+        # Web research
+        "web_fetch",
+        "web_search",
+        # System info
+        "context_window_status",
+        "get_system_info",
+    },
+)
 
-MODE_TOOL_GROUPS: dict[TUIMode, "frozenset[str] | None"] = {
-    TUIMode.ASK:  frozenset(),       # conversational only — no tools
+MODE_TOOL_GROUPS: dict[TUIMode, frozenset[str] | None] = {
+    TUIMode.ASK: frozenset(),  # conversational only — no tools
     TUIMode.PLAN: _PLAN_MODE_TOOLS,  # read + research — no writes/exec
-    TUIMode.CODE: None,              # full access — all registered tools
+    TUIMode.CODE: None,  # full access — all registered tools
     TUIMode.DIFF: _DIFF_MODE_TOOLS,  # read + git inspection — no writes
 }
 
@@ -219,49 +240,53 @@ MODE_TOOL_GROUPS: dict[TUIMode, "frozenset[str] | None"] = {
 # ---------------------------------------------------------------------------
 
 # DIFF mode: read-only filesystem + git inspection — no writes
-_DIFF_MODE_TOOLS: frozenset[str] = frozenset({
-    # Filesystem (read-only)
-    "list_directory",
-    "read_text_file",
-    "grep_files",
-    "find_files",
-    "file_info",
-    "tree_directory",
-    "diff_files",
-    # Git (inspection only)
-    "git_status",
-    "git_diff",
-    "git_log",
-    "git_branch",
-    # Utilities
-    "context_window_status",
-    "json_query",
-    "clipboard_read",
-    "clipboard_write",
-})
+_DIFF_MODE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Filesystem (read-only)
+        "list_directory",
+        "read_text_file",
+        "grep_files",
+        "find_files",
+        "file_info",
+        "tree_directory",
+        "diff_files",
+        # Git (inspection only)
+        "git_status",
+        "git_diff",
+        "git_log",
+        "git_branch",
+        # Utilities
+        "context_window_status",
+        "json_query",
+        "clipboard_read",
+        "clipboard_write",
+    },
+)
 
 # PLAN mode: read-only filesystem + web research — no writes, no execution
-_PLAN_MODE_TOOLS: frozenset[str] = frozenset({
-    # Filesystem (read-only)
-    "list_directory",
-    "read_text_file",
-    "grep_files",
-    "find_files",
-    "file_info",
-    "tree_directory",
-    # Web research
-    "web_fetch",
-    "web_search",
-    # System info
-    "context_window_status",
-    "get_system_info",
-})
+_PLAN_MODE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Filesystem (read-only)
+        "list_directory",
+        "read_text_file",
+        "grep_files",
+        "find_files",
+        "file_info",
+        "tree_directory",
+        # Web research
+        "web_fetch",
+        "web_search",
+        # System info
+        "context_window_status",
+        "get_system_info",
+    },
+)
 
 # Single source of truth: mode -> allowed tool names (None = all tools)
 MODE_TOOL_GROUPS: dict[TUIMode, frozenset[str] | None] = {
-    TUIMode.ASK:  frozenset(),       # conversational only — no tools
+    TUIMode.ASK: frozenset(),  # conversational only — no tools
     TUIMode.PLAN: _PLAN_MODE_TOOLS,  # read + research — no writes/exec
-    TUIMode.CODE: None,              # full access — all registered tools
+    TUIMode.CODE: None,  # full access — all registered tools
     TUIMode.DIFF: _DIFF_MODE_TOOLS,  # read + git inspection — no writes
 }
 
@@ -338,13 +363,17 @@ class ModeManager:
 
     # -- Capability filtering -----------------------------------------------
 
-    def get_allowed_tool_names(self, mode: TUIMode | None = None) -> frozenset[str] | None:
+    def get_allowed_tool_names(
+        self,
+        mode: TUIMode | None = None,
+    ) -> frozenset[str] | None:
         """Return the set of tool names allowed in the given (or current) mode.
 
         Returns:
             None            — all tools allowed (CODE mode default)
             frozenset()     — no tools allowed  (ASK mode default)
             frozenset({...})— specific named tools only
+
         """
         m = mode if mode is not None else self._current
         if m in self._tool_overrides:
@@ -357,6 +386,7 @@ class ModeManager:
         Args:
             mode:  The mode to configure.
             names: frozenset of allowed tool names, or None for unrestricted.
+
         """
         self._tool_overrides[mode] = names
 

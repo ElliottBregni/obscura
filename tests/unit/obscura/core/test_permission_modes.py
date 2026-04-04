@@ -18,7 +18,8 @@ def test_default_mode_allows_all() -> None:
 def test_plan_mode_read_only() -> None:
     engine = PermissionModeEngine(PermissionMode.PLAN)
     d = engine.evaluate("read_text_file")
-    assert d.allowed and d.auto_approved
+    assert d.allowed
+    assert d.auto_approved
     d = engine.evaluate("write_text_file")
     assert not d.allowed
     d = engine.evaluate("run_shell", {"script": "ls"})
@@ -28,17 +29,21 @@ def test_plan_mode_read_only() -> None:
 def test_accept_edits_auto_approves_files() -> None:
     engine = PermissionModeEngine(PermissionMode.ACCEPT_EDITS)
     d = engine.evaluate("edit_text_file")
-    assert d.allowed and d.auto_approved
+    assert d.allowed
+    assert d.auto_approved
     d = engine.evaluate("read_text_file")
-    assert d.allowed and d.auto_approved
+    assert d.allowed
+    assert d.auto_approved
     d = engine.evaluate("run_shell", {"script": "ls"})
-    assert d.allowed and not d.auto_approved
+    assert d.allowed
+    assert not d.auto_approved
 
 
 def test_bypass_mode_auto_approves_all() -> None:
     engine = PermissionModeEngine(PermissionMode.BYPASS)
     d = engine.evaluate("run_shell", {"script": "ls"})
-    assert d.allowed and d.auto_approved
+    assert d.allowed
+    assert d.auto_approved
 
 
 def test_dangerous_patterns_always_denied() -> None:

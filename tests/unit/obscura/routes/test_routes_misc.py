@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
+
 from obscura.core.config import ObscuraConfig
 
 
@@ -237,7 +238,10 @@ class TestSendRoutes:
 
     @patch("obscura.routes.send.sync_session_turn")
     def test_send_syncs_session_turn_to_vector_memory(
-        self, mock_sync_turn: Any, app: Any, client: TestClient
+        self,
+        mock_sync_turn: Any,
+        app: Any,
+        client: TestClient,
     ) -> None:
         mock_client: Any = AsyncMock()
         mock_client.send.return_value = MagicMock(text="hello back")

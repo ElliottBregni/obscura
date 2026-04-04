@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from obscura.plugins.models import CapabilitySpec, ToolContribution
 from obscura.plugins.registries.capability_index import CapabilityIndex
-from obscura.plugins.registries.tool_index import ToolIndex
+
+if TYPE_CHECKING:
+    from obscura.plugins.models import CapabilitySpec, ToolContribution
+    from obscura.plugins.registries.tool_index import ToolIndex
 
 logger = logging.getLogger(__name__)
 
@@ -34,21 +36,30 @@ logger = logging.getLogger(__name__)
 def list_builtin_capabilities() -> list[str]:
     """Return a list of all built-in capability IDs."""
     try:
-        list: list[CapabilitySpec] = CapabilityIndex().list_all()  
-        return [cap.id for cap in list] 
-    except Exception:  
-        return ["shell.exec", "file.read", "file.write", "git.ops", "web.browse", "search.web", "security.scan"]
+        list: list[CapabilitySpec] = CapabilityIndex().list_all()
+        return [cap.id for cap in list]
+    except Exception:
+        return [
+            "shell.exec",
+            "file.read",
+            "file.write",
+            "git.ops",
+            "web.browse",
+            "search.web",
+            "security.scan",
+        ]
+
 
 @dataclass
 class CapabilityGrant:
     """A record of a capability granted to a grantee."""
 
     capability_id: str
-    grantee_type: str           # "agent" | "session" | "user"
+    grantee_type: str  # "agent" | "session" | "user"
     grantee_id: str
-    granted_by: str = "default" # "policy" | "user" | "plugin_default" | "admin"
+    granted_by: str = "default"  # "policy" | "user" | "plugin_default" | "admin"
     requires_approval: bool = False
-    granted_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    granted_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclass
@@ -107,8 +118,7 @@ class CapabilityResolver:
         # Remove any conflicting denial
         if grantee_id in self._denials:
             self._denials[grantee_id] = [
-                d for d in self._denials[grantee_id]
-                if d.capability_id != capability_id
+                d for d in self._denials[grantee_id] if d.capability_id != capability_id
             ]
         logger.debug("Granted %s to %s", capability_id, grantee_id)
         return grant
@@ -134,8 +144,7 @@ class CapabilityResolver:
         # Remove any conflicting grant
         if grantee_id in self._grants:
             self._grants[grantee_id] = [
-                g for g in self._grants[grantee_id]
-                if g.capability_id != capability_id
+                g for g in self._grants[grantee_id] if g.capability_id != capability_id
             ]
         logger.debug("Denied %s for %s", capability_id, grantee_id)
         return denial
@@ -146,10 +155,13 @@ class CapabilityResolver:
         denied_ids = {d.capability_id for d in self._denials.get(grantee_id, [])}
         for cap in self._cap_index.capabilities_with_default_grant():
             if cap.id not in denied_ids:
-                grants.append(self.grant(
-                    grantee_id, cap.id,
-                    granted_by="plugin_default",
-                ))
+                grants.append(
+                    self.grant(
+                        grantee_id,
+                        cap.id,
+                        granted_by="plugin_default",
+                    ),
+                )
         return grants
 
     # -- Resolution --------------------------------------------------------
@@ -157,12 +169,11 @@ class CapabilityResolver:
     def resolve_for_agent(self, agent_id: str) -> set[str]:
         """Return the set of capability IDs granted to an agent."""
         denied = {d.capability_id for d in self._denials.get(agent_id, [])}
-        granted = {
+        return {
             g.capability_id
             for g in self._grants.get(agent_id, [])
             if g.capability_id not in denied
         }
-        return granted
 
     def resolve_tools(self, agent_id: str) -> list[ToolContribution]:
         """Return tool contributions visible to an agent based on grants."""
@@ -246,7 +257,11 @@ def resolve_allowed_tools_from_config() -> set[str] | None:
     """
     try:
         from obscura.core.workspace import load_workspace_config
-        from obscura.plugins.loader import PluginLoader, get_capability_map, _load_plugin_config_flag
+        from obscura.plugins.loader import (
+            PluginLoader,
+            _load_plugin_config_flag,
+            get_capability_map,
+        )
 
         config = load_workspace_config()
         caps_cfg = config.get("defaults", {}).get("capabilities", {})
@@ -292,8 +307,8 @@ def resolve_allowed_tools_from_config() -> set[str] | None:
 
 
 __all__ = [
-    "CapabilityGrant",
     "CapabilityDenial",
+    "CapabilityGrant",
     "CapabilityResolver",
     "build_capability_map_section",
     "resolve_allowed_tools_from_config",

@@ -115,7 +115,7 @@ def load_settings_hooks(cwd: Path | None = None) -> list[HookDefinition]:
                     matcher=str(entry_dict.get("matcher", "")),
                     timeout_sec=int(entry_dict.get("timeout_sec", 10)),
                     comment=str(entry_dict.get("comment", "")),
-                )
+                ),
             )
 
     return definitions
@@ -174,7 +174,8 @@ def _load_hooks_json(hooks_dir: Path) -> list[HookDefinition]:
             script_path = hooks_dir / script_name
             if not script_path.is_file():
                 logger.warning(
-                    "hooks.json: script %s not found; skipping", script_name,
+                    "hooks.json: script %s not found; skipping",
+                    script_name,
                 )
                 continue
 
@@ -208,7 +209,7 @@ def _load_hooks_json(hooks_dir: Path) -> list[HookDefinition]:
                     bash=bash_cmd,
                     matcher=matcher,
                     comment=f"from hooks.json ({hook_name})",
-                )
+                ),
             )
             seen_scripts.add(script_name)
 
@@ -289,7 +290,7 @@ def load_directory_hooks(cwd: Path | None = None) -> list[HookDefinition]:
                 bash=bash_cmd,
                 matcher=matcher,
                 comment=f"from {path.name}",
-            )
+            ),
         )
 
     return manifest_defs + fallback_defs
@@ -327,25 +328,29 @@ def list_hook_sources(cwd: Path | None = None) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
 
     for defn in load_settings_hooks(cwd):
-        sources.append({
-            "source": "settings.json",
-            "event": defn.event,
-            "type": defn.type,
-            "bash": defn.bash,
-            "matcher": defn.matcher or "(all)",
-            "timeout_sec": defn.timeout_sec,
-            "comment": defn.comment,
-        })
+        sources.append(
+            {
+                "source": "settings.json",
+                "event": defn.event,
+                "type": defn.type,
+                "bash": defn.bash,
+                "matcher": defn.matcher or "(all)",
+                "timeout_sec": defn.timeout_sec,
+                "comment": defn.comment,
+            },
+        )
 
     for defn in load_directory_hooks(cwd):
-        sources.append({
-            "source": "hooks/",
-            "event": defn.event,
-            "type": defn.type,
-            "bash": defn.bash,
-            "matcher": defn.matcher or "(all)",
-            "timeout_sec": defn.timeout_sec,
-            "comment": defn.comment,
-        })
+        sources.append(
+            {
+                "source": "hooks/",
+                "event": defn.event,
+                "type": defn.type,
+                "bash": defn.bash,
+                "matcher": defn.matcher or "(all)",
+                "timeout_sec": defn.timeout_sec,
+                "comment": defn.comment,
+            },
+        )
 
     return sources

@@ -1,5 +1,4 @@
-"""
-Tests for sdk.telemetry.metrics — Lazy metric instruments and ObscuraMetrics.
+"""Tests for sdk.telemetry.metrics — Lazy metric instruments and ObscuraMetrics.
 
 Verifies that all defined metrics are lazily created, fall back to NoOp
 when OTel is unavailable, and record correctly with InMemoryMetricReader.
@@ -12,12 +11,11 @@ from unittest.mock import patch
 import pytest
 
 from obscura.telemetry.metrics import (
-    ObscuraMetrics,
     NoOpInstrument,
+    ObscuraMetrics,
     get_metrics,
     get_noop_instrument,
 )
-
 
 # ---------------------------------------------------------------------------
 # NoOp fallback

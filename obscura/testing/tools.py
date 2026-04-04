@@ -19,12 +19,12 @@ from obscura.core.tools import ToolRegistry
 from obscura.core.types import ToolSpec
 
 __all__ = [
-    "echo_handler",
     "async_echo_handler",
+    "echo_handler",
     "failing_handler",
-    "noop_handler",
-    "make_tool",
     "make_registry",
+    "make_tool",
+    "noop_handler",
 ]
 
 
@@ -45,7 +45,8 @@ async def async_echo_handler(**kwargs: Any) -> dict[str, Any]:
 
 def failing_handler(**kwargs: Any) -> str:
     """Always raises RuntimeError — useful for error-path tests."""
-    raise RuntimeError("boom")
+    msg = "boom"
+    raise RuntimeError(msg)
 
 
 def noop_handler(**kwargs: Any) -> str:
@@ -67,11 +68,13 @@ def make_tool(
 ) -> ToolSpec:
     """Create a :class:`ToolSpec` with sensible defaults.
 
-    Parameters:
+    Parameters
+    ----------
         name: Tool name.
         description: Tool description (defaults to ``"Test tool: {name}"``).
         handler: Callable handler. Defaults to :func:`echo_handler`.
         params: JSON-Schema properties dict.  Wrapped in ``{"type": "object", "properties": ...}``.
+
     """
     if handler is None:
         handler = echo_handler

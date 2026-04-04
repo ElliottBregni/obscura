@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit, get_runtime
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
@@ -23,7 +25,7 @@ _agent_groups: dict[str, dict[str, Any]] = {}
 @router.post("/agent-groups")
 async def agent_group_create(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create an agent group."""
     group_id = str(uuid.uuid4())
@@ -51,7 +53,7 @@ async def agent_group_create(
 
 @router.get("/agent-groups")
 async def agent_group_list(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List all agent groups."""
     groups: list[dict[str, Any]] = list(_agent_groups.values())
@@ -59,14 +61,14 @@ async def agent_group_list(
         content={
             "groups": groups,
             "count": len(groups),
-        }
+        },
     )
 
 
 @router.get("/agent-groups/{group_id}")
 async def agent_group_get(
     group_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a specific agent group."""
     group = _agent_groups.get(group_id)
@@ -78,7 +80,7 @@ async def agent_group_get(
 @router.delete("/agent-groups/{group_id}")
 async def agent_group_delete(
     group_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Delete an agent group."""
     if group_id not in _agent_groups:
@@ -95,7 +97,7 @@ async def agent_group_delete(
 async def agent_group_broadcast(
     group_id: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Broadcast a message to all agents in a group."""
     runtime = await get_runtime(user)
@@ -128,7 +130,7 @@ async def agent_group_broadcast(
             "message": message,
             "queued": results,
             "errors": errors,
-        }
+        },
     )
 
 
@@ -140,7 +142,7 @@ async def agent_send_message(
     from_agent: str,
     to_agent: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Send a message from one agent to another."""
     runtime = await get_runtime(user)
@@ -148,13 +150,15 @@ async def agent_send_message(
     source = runtime.get_agent(from_agent)
     if source is None:
         raise HTTPException(
-            status_code=404, detail=f"Source agent {from_agent} not found"
+            status_code=404,
+            detail=f"Source agent {from_agent} not found",
         )
 
     target = runtime.get_agent(to_agent)
     if target is None:
         raise HTTPException(
-            status_code=404, detail=f"Target agent {to_agent} not found"
+            status_code=404,
+            detail=f"Target agent {to_agent} not found",
         )
 
     message: str = body.get("message", "")
@@ -177,7 +181,7 @@ async def agent_send_message(
             "to_agent": to_agent,
             "message": message,
             "sent": True,
-        }
+        },
     )
 
 
@@ -201,5 +205,5 @@ async def agent_get_messages(
             "agent_id": agent_id,
             "messages": messages,
             "count": len(messages),
-        }
+        },
     )

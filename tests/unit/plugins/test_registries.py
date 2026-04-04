@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from obscura.plugins.models import (
     CapabilitySpec,
     InstructionSpec,
@@ -17,10 +16,10 @@ from obscura.plugins.registries.plugin_index import PluginIndex
 from obscura.plugins.registries.tool_index import ToolIndex
 from obscura.plugins.registries.workflow_index import WorkflowIndex
 
-
 # ---------------------------------------------------------------------------
 # Helpers — reusable model factories
 # ---------------------------------------------------------------------------
+
 
 def _plugin_spec(
     pid: str = "acme-scanner",
@@ -106,7 +105,11 @@ def _instr_spec(
     priority: int = 50,
 ) -> InstructionSpec:
     return InstructionSpec(
-        id=iid, version=version, scope=scope, content=content, priority=priority,
+        id=iid,
+        version=version,
+        scope=scope,
+        content=content,
+        priority=priority,
     )
 
 
@@ -114,24 +117,25 @@ def _instr_spec(
 # PluginIndex
 # ===================================================================
 
+
 class TestPluginIndex:
     """Tests for PluginIndex."""
 
-    def test_register_and_get(self):
+    def test_register_and_get(self) -> None:
         idx = PluginIndex()
         spec = _plugin_spec()
         idx.register(spec)
         assert idx.get("acme-scanner") is spec
         assert idx.get("nonexistent") is None
 
-    def test_register_with_status(self):
+    def test_register_with_status(self) -> None:
         idx = PluginIndex()
         spec = _plugin_spec()
         status = _plugin_status()
         idx.register(spec, status)
         assert idx.get_status("acme-scanner") is status
 
-    def test_list_all(self):
+    def test_list_all(self) -> None:
         idx = PluginIndex()
         s1 = _plugin_spec(pid="a-one", name="One")
         s2 = _plugin_spec(pid="b-two", name="Two")
@@ -139,7 +143,7 @@ class TestPluginIndex:
         idx.register(s2)
         assert len(idx.list_all()) == 2
 
-    def test_len_and_contains(self):
+    def test_len_and_contains(self) -> None:
         idx = PluginIndex()
         assert len(idx) == 0
         idx.register(_plugin_spec())
@@ -147,14 +151,14 @@ class TestPluginIndex:
         assert "acme-scanner" in idx
         assert "nope" not in idx
 
-    def test_set_status(self):
+    def test_set_status(self) -> None:
         idx = PluginIndex()
         idx.register(_plugin_spec())
         new_status = _plugin_status(state="active")
         idx.set_status("acme-scanner", new_status)
         assert idx.get_status("acme-scanner").state == "active"
 
-    def test_list_enabled(self):
+    def test_list_enabled(self) -> None:
         idx = PluginIndex()
         idx.register(_plugin_spec(pid="a"), _plugin_status(pid="a", enabled=True))
         idx.register(_plugin_spec(pid="b"), _plugin_status(pid="b", enabled=False))
@@ -163,7 +167,7 @@ class TestPluginIndex:
         assert len(enabled) == 1
         assert enabled[0].id == "a"
 
-    def test_filter_by_trust(self):
+    def test_filter_by_trust(self) -> None:
         idx = PluginIndex()
         idx.register(_plugin_spec(pid="a", trust_level="builtin"))
         idx.register(_plugin_spec(pid="b", trust_level="community"))
@@ -172,14 +176,14 @@ class TestPluginIndex:
         assert len(idx.filter_by_trust("community")) == 1
         assert len(idx.filter_by_trust("builtin", "community")) == 3
 
-    def test_filter_by_runtime(self):
+    def test_filter_by_runtime(self) -> None:
         idx = PluginIndex()
         idx.register(_plugin_spec(pid="a", runtime_type="native"))
         idx.register(_plugin_spec(pid="b", runtime_type="mcp"))
         assert len(idx.filter_by_runtime("native")) == 1
         assert len(idx.filter_by_runtime("native", "mcp")) == 2
 
-    def test_register_overwrites_same_id(self):
+    def test_register_overwrites_same_id(self) -> None:
         idx = PluginIndex()
         idx.register(_plugin_spec(pid="x", name="V1"))
         idx.register(_plugin_spec(pid="x", name="V2"))
@@ -191,43 +195,44 @@ class TestPluginIndex:
 # CapabilityIndex
 # ===================================================================
 
+
 class TestCapabilityIndex:
     """Tests for CapabilityIndex."""
 
-    def test_register_and_get(self):
+    def test_register_and_get(self) -> None:
         idx = CapabilityIndex()
         cap = _cap_spec()
         idx.register(cap, "acme.scanner")
         assert idx.get("repo.read") is cap
         assert idx.get("missing") is None
 
-    def test_len_and_contains(self):
+    def test_len_and_contains(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(), "p1")
         assert len(idx) == 1
         assert "repo.read" in idx
         assert "missing" not in idx
 
-    def test_list_all(self):
+    def test_list_all(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read"), "p1")
         idx.register(_cap_spec(cid="repo.write"), "p1")
         assert len(idx.list_all()) == 2
 
-    def test_tools_for_capability(self):
+    def test_tools_for_capability(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read", tools=("read_file", "list_dir")), "p1")
         assert idx.tools_for_capability("repo.read") == ("read_file", "list_dir")
         assert idx.tools_for_capability("nonexistent") == ()
 
-    def test_tools_for_capabilities_multiple(self):
+    def test_tools_for_capabilities_multiple(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read", tools=("read_file",)), "p1")
         idx.register(_cap_spec(cid="repo.write", tools=("write_file",)), "p1")
         result = idx.tools_for_capabilities({"repo.read", "repo.write"})
         assert result == {"read_file", "write_file"}
 
-    def test_capabilities_with_default_grant(self):
+    def test_capabilities_with_default_grant(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read", default_grant=True), "p1")
         idx.register(_cap_spec(cid="repo.write", default_grant=False), "p1")
@@ -235,7 +240,7 @@ class TestCapabilityIndex:
         assert len(granted) == 1
         assert granted[0].id == "repo.read"
 
-    def test_capabilities_requiring_approval(self):
+    def test_capabilities_requiring_approval(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read", requires_approval=False), "p1")
         idx.register(_cap_spec(cid="repo.write", requires_approval=True), "p1")
@@ -243,13 +248,13 @@ class TestCapabilityIndex:
         assert len(approval) == 1
         assert approval[0].id == "repo.write"
 
-    def test_get_owner(self):
+    def test_get_owner(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read"), "plugin.alpha")
         assert idx.get_owner("repo.read") == "plugin.alpha"
         assert idx.get_owner("missing") is None
 
-    def test_filter_by_plugin(self):
+    def test_filter_by_plugin(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read"), "p1")
         idx.register(_cap_spec(cid="repo.write"), "p2")
@@ -259,13 +264,13 @@ class TestCapabilityIndex:
         ids = {c.id for c in result}
         assert ids == {"repo.read", "repo.exec"}
 
-    def test_overwrite_warns_different_owner(self):
+    def test_overwrite_warns_different_owner(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read"), "p1")
         idx.register(_cap_spec(cid="repo.read"), "p2")
         assert idx.get_owner("repo.read") == "p2"
 
-    def test_re_register_same_owner_no_conflict(self):
+    def test_re_register_same_owner_no_conflict(self) -> None:
         idx = CapabilityIndex()
         idx.register(_cap_spec(cid="repo.read"), "p1")
         idx.register(_cap_spec(cid="repo.read"), "p1")
@@ -276,37 +281,38 @@ class TestCapabilityIndex:
 # ToolIndex
 # ===================================================================
 
+
 class TestToolIndex:
     """Tests for ToolIndex."""
 
-    def test_register_and_get(self):
+    def test_register_and_get(self) -> None:
         idx = ToolIndex()
         tool = _tool_contrib()
         idx.register(tool, "p1")
         assert idx.get("read_file") is tool
         assert idx.get("missing") is None
 
-    def test_len_and_contains(self):
+    def test_len_and_contains(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="a"), "p1")
         assert len(idx) == 1
         assert "a" in idx
         assert "z" not in idx
 
-    def test_list_all_and_names(self):
+    def test_list_all_and_names(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="a"), "p1")
         idx.register(_tool_contrib(name="b"), "p1")
         assert len(idx.list_all()) == 2
         assert sorted(idx.names()) == ["a", "b"]
 
-    def test_get_owner(self):
+    def test_get_owner(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="t1"), "plugin.alpha")
         assert idx.get_owner("t1") == "plugin.alpha"
         assert idx.get_owner("missing") is None
 
-    def test_filter_by_capability(self):
+    def test_filter_by_capability(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="rf", capability="repo.read"), "p1")
         idx.register(_tool_contrib(name="wf", capability="repo.write"), "p1")
@@ -315,7 +321,7 @@ class TestToolIndex:
         assert len(result) == 2
         assert {t.name for t in result} == {"rf", "ef"}
 
-    def test_filter_by_side_effects(self):
+    def test_filter_by_side_effects(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="a", side_effects="none"), "p1")
         idx.register(_tool_contrib(name="b", side_effects="read"), "p1")
@@ -323,7 +329,7 @@ class TestToolIndex:
         assert len(idx.filter_by_side_effects("read")) == 1
         assert len(idx.filter_by_side_effects("none", "write")) == 2
 
-    def test_visible_for_capabilities_granted(self):
+    def test_visible_for_capabilities_granted(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="rf", capability="repo.read"), "p1")
         idx.register(_tool_contrib(name="wf", capability="repo.write"), "p1")
@@ -334,7 +340,7 @@ class TestToolIndex:
         assert "free" in names
         assert "wf" not in names
 
-    def test_visible_for_capabilities_empty_grants_only_uncapped(self):
+    def test_visible_for_capabilities_empty_grants_only_uncapped(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="rf", capability="repo.read"), "p1")
         idx.register(_tool_contrib(name="free", capability=""), "p1")
@@ -342,19 +348,19 @@ class TestToolIndex:
         assert len(visible) == 1
         assert visible[0].name == "free"
 
-    def test_filter_by_plugin(self):
+    def test_filter_by_plugin(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="a"), "p1")
         idx.register(_tool_contrib(name="b"), "p2")
         assert len(idx.filter_by_plugin("p1")) == 1
 
-    def test_overwrite_warns_different_owner(self):
+    def test_overwrite_warns_different_owner(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="a"), "p1")
         idx.register(_tool_contrib(name="a"), "p2")
         assert idx.get_owner("a") == "p2"
 
-    def test_re_register_same_owner(self):
+    def test_re_register_same_owner(self) -> None:
         idx = ToolIndex()
         idx.register(_tool_contrib(name="a"), "p1")
         idx.register(_tool_contrib(name="a"), "p1")
@@ -365,39 +371,43 @@ class TestToolIndex:
 # WorkflowIndex
 # ===================================================================
 
+
 class TestWorkflowIndex:
     """Tests for WorkflowIndex."""
 
-    def test_register_and_get(self):
+    def test_register_and_get(self) -> None:
         idx = WorkflowIndex()
         wf = _workflow_spec()
         idx.register(wf, "p1")
         assert idx.get("wf.scan") is wf
         assert idx.get("missing") is None
 
-    def test_list_all(self):
+    def test_list_all(self) -> None:
         idx = WorkflowIndex()
         idx.register(_workflow_spec(wid="wf.a"), "p1")
         idx.register(_workflow_spec(wid="wf.b"), "p1")
         assert len(idx.list_all()) == 2
 
-    def test_len_and_contains(self):
+    def test_len_and_contains(self) -> None:
         idx = WorkflowIndex()
         idx.register(_workflow_spec(), "p1")
         assert len(idx) == 1
         assert "wf.scan" in idx
         assert "nope" not in idx
 
-    def test_get_owner(self):
+    def test_get_owner(self) -> None:
         idx = WorkflowIndex()
         idx.register(_workflow_spec(wid="wf.a"), "plugin.alpha")
         assert idx.get_owner("wf.a") == "plugin.alpha"
         assert idx.get_owner("missing") is None
 
-    def test_executable_with_all_caps_granted(self):
+    def test_executable_with_all_caps_granted(self) -> None:
         idx = WorkflowIndex()
         idx.register(
-            _workflow_spec(wid="wf.full", required_capabilities=("repo.read", "repo.write")),
+            _workflow_spec(
+                wid="wf.full",
+                required_capabilities=("repo.read", "repo.write"),
+            ),
             "p1",
         )
         idx.register(
@@ -408,7 +418,7 @@ class TestWorkflowIndex:
         assert len(result) == 1
         assert result[0].id == "wf.readonly"
 
-    def test_executable_with_superset_grants(self):
+    def test_executable_with_superset_grants(self) -> None:
         idx = WorkflowIndex()
         idx.register(
             _workflow_spec(wid="wf.a", required_capabilities=("repo.read",)),
@@ -417,7 +427,7 @@ class TestWorkflowIndex:
         result = idx.executable_with({"repo.read", "repo.write", "net.access"})
         assert len(result) == 1
 
-    def test_executable_with_no_required_caps(self):
+    def test_executable_with_no_required_caps(self) -> None:
         idx = WorkflowIndex()
         idx.register(
             _workflow_spec(wid="wf.free", required_capabilities=()),
@@ -426,7 +436,7 @@ class TestWorkflowIndex:
         result = idx.executable_with(set())
         assert len(result) == 1
 
-    def test_executable_with_empty_grants_filters_out_requiring(self):
+    def test_executable_with_empty_grants_filters_out_requiring(self) -> None:
         idx = WorkflowIndex()
         idx.register(
             _workflow_spec(wid="wf.need", required_capabilities=("repo.read",)),
@@ -434,7 +444,7 @@ class TestWorkflowIndex:
         )
         assert idx.executable_with(set()) == []
 
-    def test_filter_by_plugin(self):
+    def test_filter_by_plugin(self) -> None:
         idx = WorkflowIndex()
         idx.register(_workflow_spec(wid="wf.a"), "p1")
         idx.register(_workflow_spec(wid="wf.b"), "p2")
@@ -445,29 +455,30 @@ class TestWorkflowIndex:
 # InstructionIndex
 # ===================================================================
 
+
 class TestInstructionIndex:
     """Tests for InstructionIndex."""
 
-    def test_register_and_get(self):
+    def test_register_and_get(self) -> None:
         idx = InstructionIndex()
         instr = _instr_spec()
         idx.register(instr, "p1")
         assert idx.get("instr.safety") is instr
         assert idx.get("missing") is None
 
-    def test_list_all(self):
+    def test_list_all(self) -> None:
         idx = InstructionIndex()
         idx.register(_instr_spec(iid="i.a"), "p1")
         idx.register(_instr_spec(iid="i.b"), "p1")
         assert len(idx.list_all()) == 2
 
-    def test_len(self):
+    def test_len(self) -> None:
         idx = InstructionIndex()
         assert len(idx) == 0
         idx.register(_instr_spec(), "p1")
         assert len(idx) == 1
 
-    def test_for_scope(self):
+    def test_for_scope(self) -> None:
         idx = InstructionIndex()
         idx.register(_instr_spec(iid="i.g1", scope="global"), "p1")
         idx.register(_instr_spec(iid="i.a1", scope="agent"), "p1")
@@ -476,43 +487,67 @@ class TestInstructionIndex:
         assert len(result) == 2
         assert all(i.scope == "global" for i in result)
 
-    def test_for_scope_sorted_by_priority(self):
+    def test_for_scope_sorted_by_priority(self) -> None:
         idx = InstructionIndex()
-        idx.register(_instr_spec(iid="i.low", scope="global", priority=100, content="low"), "p1")
-        idx.register(_instr_spec(iid="i.high", scope="global", priority=10, content="high"), "p1")
-        idx.register(_instr_spec(iid="i.mid", scope="global", priority=50, content="mid"), "p1")
+        idx.register(
+            _instr_spec(iid="i.low", scope="global", priority=100, content="low"),
+            "p1",
+        )
+        idx.register(
+            _instr_spec(iid="i.high", scope="global", priority=10, content="high"),
+            "p1",
+        )
+        idx.register(
+            _instr_spec(iid="i.mid", scope="global", priority=50, content="mid"),
+            "p1",
+        )
         result = idx.for_scope("global")
         priorities = [i.priority for i in result]
         assert priorities == [10, 50, 100]
 
-    def test_assemble_concatenates_in_priority_order(self):
+    def test_assemble_concatenates_in_priority_order(self) -> None:
         idx = InstructionIndex()
-        idx.register(_instr_spec(iid="i.b", scope="global", priority=20, content="Second"), "p1")
-        idx.register(_instr_spec(iid="i.a", scope="global", priority=10, content="First"), "p1")
-        idx.register(_instr_spec(iid="i.c", scope="global", priority=30, content="Third"), "p1")
+        idx.register(
+            _instr_spec(iid="i.b", scope="global", priority=20, content="Second"),
+            "p1",
+        )
+        idx.register(
+            _instr_spec(iid="i.a", scope="global", priority=10, content="First"),
+            "p1",
+        )
+        idx.register(
+            _instr_spec(iid="i.c", scope="global", priority=30, content="Third"),
+            "p1",
+        )
         assembled = idx.assemble("global")
         assert assembled == "First\n\nSecond\n\nThird"
 
-    def test_assemble_empty_scope(self):
+    def test_assemble_empty_scope(self) -> None:
         idx = InstructionIndex()
         idx.register(_instr_spec(iid="i.a", scope="agent"), "p1")
         assert idx.assemble("global") == ""
 
-    def test_assemble_default_scope_is_global(self):
+    def test_assemble_default_scope_is_global(self) -> None:
         idx = InstructionIndex()
         idx.register(_instr_spec(iid="i.a", scope="global", content="Hello"), "p1")
         assert idx.assemble() == "Hello"
 
-    def test_filter_by_plugin(self):
+    def test_filter_by_plugin(self) -> None:
         idx = InstructionIndex()
         idx.register(_instr_spec(iid="i.a"), "p1")
         idx.register(_instr_spec(iid="i.b"), "p2")
         assert len(idx.filter_by_plugin("p1")) == 1
 
-    def test_for_scope_session(self):
+    def test_for_scope_session(self) -> None:
         idx = InstructionIndex()
-        idx.register(_instr_spec(iid="i.s1", scope="session", content="session rule"), "p1")
-        idx.register(_instr_spec(iid="i.g1", scope="global", content="global rule"), "p1")
+        idx.register(
+            _instr_spec(iid="i.s1", scope="session", content="session rule"),
+            "p1",
+        )
+        idx.register(
+            _instr_spec(iid="i.g1", scope="global", content="global rule"),
+            "p1",
+        )
         result = idx.for_scope("session")
         assert len(result) == 1
         assert result[0].id == "i.s1"

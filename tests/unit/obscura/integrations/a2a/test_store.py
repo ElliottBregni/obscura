@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+from typing import Literal
+
 import pytest
 
 from obscura.integrations.a2a.store import InMemoryTaskStore, TaskStore
@@ -21,16 +26,10 @@ from obscura.integrations.a2a.types import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-from typing import Literal
-
-
 def _msg(
-    text: str = "hello", role: Literal["user", "agent"] = "user", msg_id: str = "m1"
+    text: str = "hello",
+    role: Literal["user", "agent"] = "user",
+    msg_id: str = "m1",
 ) -> A2AMessage:
     return A2AMessage(role=role, messageId=msg_id, parts=[TextPart(text=text)])
 
@@ -327,13 +326,17 @@ class TestListTasks:
         assert cursor is not None
 
         page2, cursor2 = await store.list_tasks(
-            context_id="ctx-1", limit=2, cursor=cursor
+            context_id="ctx-1",
+            limit=2,
+            cursor=cursor,
         )
         assert len(page2) == 2
         assert cursor2 is not None
 
         page3, cursor3 = await store.list_tasks(
-            context_id="ctx-1", limit=2, cursor=cursor2
+            context_id="ctx-1",
+            limit=2,
+            cursor=cursor2,
         )
         assert len(page3) == 1
         assert cursor3 is None

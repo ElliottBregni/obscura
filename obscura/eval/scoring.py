@@ -242,7 +242,7 @@ def score_deterministic(
                     assertion_kind=assertion.kind,
                     result=AssertionResult.SKIP,
                     message=f"Unknown assertion kind: {assertion.kind}",
-                )
+                ),
             )
             continue
 
@@ -282,7 +282,7 @@ def score_deterministic(
                 result=AssertionResult.PASS if found else AssertionResult.FAIL,
                 message=f"Expected tool '{etc.name}'"
                 + (" found" if found else " not found"),
-            )
+            ),
         )
 
     total = len(outcomes)
@@ -332,7 +332,7 @@ def _format_tool_calls(tool_calls: tuple[ToolCallRecord, ...]) -> str:
         result_preview = tc.tool_result[:200] if tc.tool_result else "(no result)"
         lines.append(
             f"Turn {tc.turn}: {tc.tool_name}({args_str})"
-            f"\n  → {'ERROR: ' if tc.is_error else ''}{result_preview}"
+            f"\n  → {'ERROR: ' if tc.is_error else ''}{result_preview}",
         )
     return "\n".join(lines)
 

@@ -29,6 +29,7 @@ def _env_flag(name: str, default: bool = False) -> bool:
 VERBOSE: bool = _env_flag("OBSCURA_VERBOSE", True)
 OUTPUT_MODE: str = os.environ.get("OBSCURA_OUTPUT_MODE", "cli")
 CAPTURE_PRINTS: bool = _env_flag("OBSCURA_CAPTURE_PRINTS", False)
+RENDERER: str = os.environ.get("OBSCURA_RENDERER", "modern")
 
 
-__all__ = ["VERBOSE", "OUTPUT_MODE", "CAPTURE_PRINTS"]
+__all__ = ["CAPTURE_PRINTS", "OUTPUT_MODE", "RENDERER", "VERBOSE"]

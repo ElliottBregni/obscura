@@ -190,7 +190,9 @@ class PreflightValidator:
         try:
             result = subprocess.run(
                 [_obscura_venv_python(), "--version"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             version = result.stdout.strip().replace("Python ", "")
             if version.startswith(expected):
@@ -214,11 +216,19 @@ class PreflightValidator:
     @staticmethod
     def _check_package(package: str) -> PreflightCheck:
         """Check that a pip package is installed in the obscura venv."""
-        name = package.split("[")[0].split(">=")[0].split("==")[0].split("<")[0].strip()
+        name = (
+            package.split("[", maxsplit=1)[0]
+            .split(">=", maxsplit=1)[0]
+            .split("==", maxsplit=1)[0]
+            .split("<", maxsplit=1)[0]
+            .strip()
+        )
         try:
             result = subprocess.run(
                 [_obscura_venv_python(), "-m", "pip", "show", name],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             if result.returncode == 0:
                 return PreflightCheck(

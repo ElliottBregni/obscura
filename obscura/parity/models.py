@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from obscura.core.types import Backend
 
 
-class FeatureStatus(str, Enum):
+class FeatureStatus(StrEnum):
     """Parity status for one backend feature."""
 
     SUPPORTED = "supported"
@@ -44,7 +44,7 @@ class BackendParityProfile:
     supports: tuple[FeatureSupport, ...]
 
 
-class ScenarioStepKind(str, Enum):
+class ScenarioStepKind(StrEnum):
     """Kind of scenario step."""
 
     USER_PROMPT = "user_prompt"
@@ -61,7 +61,7 @@ class ScenarioStep:
     kind: ScenarioStepKind
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    tool_input: dict[str, Any] = field(default_factory=dict[str, Any])
     tool_result: str = ""
     expected_event: str = ""
 

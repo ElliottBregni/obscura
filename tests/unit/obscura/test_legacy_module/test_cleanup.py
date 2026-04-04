@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from scripts.sync import VaultSync
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from scripts.sync import VaultSync
 
 
 class TestCleanup:
@@ -20,7 +23,7 @@ class TestCleanup:
         """Remove links cleans up repo agent directories."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        root = [t for t in targets if t.repo_path == mock_repo][0]
+        root = next(t for t in targets if t.repo_path == mock_repo)
 
         sync_instance.sync_target("copilot", root, vault_repo, mock_repo)
         assert (mock_repo / ".github").exists()
@@ -31,7 +34,9 @@ class TestCleanup:
         assert not (mock_repo / ".claude").exists(), ".claude should be removed"
 
     def test_remove_system_links(
-        self, sync_instance: VaultSync, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_home: Path,
     ) -> None:
         """remove_system_links cleans vault-managed content from system dirs."""
         sync_instance.sync_system()
@@ -50,7 +55,10 @@ class TestCleanup:
         )
 
     def test_remove_all_cleans_everything(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """remove_all cleans repos + subdirs + system-level agent dirs."""
         sync_instance.sync_all()

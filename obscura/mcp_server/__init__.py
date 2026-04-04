@@ -1,5 +1,4 @@
-"""
-obscura.mcp_server -- Standalone FastMCP server for the Obscura API.
+"""obscura.mcp_server -- Standalone FastMCP server for the Obscura API.
 
 Proxies Obscura FastAPI endpoints as MCP tools, enabling connection
 from Claude Desktop, Cursor, or any MCP client.

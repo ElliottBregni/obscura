@@ -13,16 +13,18 @@ the suppression is robust.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Callable, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 
+from obscura.core.agent_loop import AgentLoop
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     AgentEvent,
     AgentEventKind,
     Backend,
     BackendCapabilities,
+    BackendProtocol,
     ChunkKind,
     HookPoint,
     Message,
@@ -32,9 +34,9 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.core.agent_loop import AgentLoop
-from obscura.core.types import BackendProtocol
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
 
 # ---------------------------------------------------------------------------
 # Mock infrastructure
@@ -160,7 +162,7 @@ def _make_tool_chunks_with_hallucination(
         StreamChunk(
             kind=ChunkKind.TOOL_USE_DELTA,
             tool_input_delta=json.dumps(tool_input),
-        )
+        ),
     )
     if use_tool_use_end:
         chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_END))
@@ -186,7 +188,7 @@ def _make_clean_tool_chunks(
         StreamChunk(
             kind=ChunkKind.TOOL_USE_DELTA,
             tool_input_delta=json.dumps(tool_input),
-        )
+        ),
     )
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
     return chunks
@@ -617,7 +619,9 @@ class TestHallucinationEdgeCases:
             StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="write_text_file"),
             StreamChunk(
                 kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"path": "/tmp/output.txt", "text": "data"}),
+                tool_input_delta=json.dumps(
+                    {"path": "/tmp/output.txt", "text": "data"},
+                ),
             ),
             StreamChunk(kind=ChunkKind.TOOL_USE_END),
             # Hallucinated text after second tool
@@ -940,7 +944,7 @@ class TestHallucinationEdgeCases:
                     "run_shell",
                     {"command": f"step {i}"},
                     f"Step {i} completed successfully.",
-                )
+                ),
             )
         backend = MockBackend(turns)
         loop = AgentLoop(backend, _make_registry(spec), max_turns=3)

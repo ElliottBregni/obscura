@@ -50,7 +50,7 @@ class SQLiteBackend:
         config: BackendConfig,
         db_path: Path | None = None,
         decay_config: Any | None = None,
-    ):
+    ) -> None:
         """Initialize SQLite backend."""
         self.config = config
         self._decay_config = decay_config
@@ -229,15 +229,11 @@ class SQLiteBackend:
 
             created_at = datetime.fromisoformat(row["created_at"])
             updated_at = (
-                datetime.fromisoformat(row["updated_at"])
-                if row["updated_at"]
-                else None
+                datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None
             )
-            accessed_at_raw = row["accessed_at"] if "accessed_at" in row.keys() else None
+            accessed_at_raw = row.get("accessed_at", None)
             accessed_at = (
-                datetime.fromisoformat(accessed_at_raw)
-                if accessed_at_raw
-                else None
+                datetime.fromisoformat(accessed_at_raw) if accessed_at_raw else None
             )
 
             # Per-type decay via centralized compute_decay
@@ -245,7 +241,10 @@ class SQLiteBackend:
 
             if self._decay_config is not None:
                 decay = _compute_decay(
-                    row["memory_type"], created_at, accessed_at, self._decay_config,
+                    row["memory_type"],
+                    created_at,
+                    accessed_at,
+                    self._decay_config,
                 )
             elif getattr(self.config, "decay_half_life_seconds", None):
                 # Legacy single half-life fallback
@@ -354,7 +353,7 @@ class SQLiteBackend:
         rows = conn.execute(query, params).fetchall()
         entries: list[VectorEntry] = []
         for row in rows:
-            accessed_at_raw = row["accessed_at"] if "accessed_at" in row.keys() else None
+            accessed_at_raw = row.get("accessed_at", None)
             entries.append(
                 VectorEntry(
                     key=MemoryKey(namespace=row["namespace"], key=row["key"]),

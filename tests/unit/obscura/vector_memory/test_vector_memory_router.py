@@ -1,11 +1,15 @@
 """Tests for sdk.vector_memory."""
 
-from unittest.mock import MagicMock
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
-from obscura.vector_memory import MemoryRouter, MemoryTypeQuery, RoutedResult
-from obscura.vector_memory import VectorMemoryEntry
 from obscura.memory import MemoryKey
+from obscura.vector_memory import (
+    MemoryRouter,
+    MemoryTypeQuery,
+    RoutedResult,
+    VectorMemoryEntry,
+)
 
 
 def _make_entry(
@@ -27,7 +31,7 @@ def _make_entry(
 
 
 class TestMemoryTypeQuery:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         q = MemoryTypeQuery(memory_type="fact")
         assert q.weight == 1.0
         assert q.top_k == 10
@@ -35,7 +39,7 @@ class TestMemoryTypeQuery:
 
 
 class TestRoutedResult:
-    def test_construction(self):
+    def test_construction(self) -> None:
         r = RoutedResult(entries=[], sources={"fact": 0})
         assert r.entries == []
         assert r.sources == {"fact": 0}

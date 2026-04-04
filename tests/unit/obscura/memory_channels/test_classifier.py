@@ -8,12 +8,13 @@ from obscura.memory_channels.models import ChannelTriggers, MemoryChannel
 
 def _ch(name, namespace, **trigger_kwargs):
     return MemoryChannel(
-        name=name, namespace=namespace,
+        name=name,
+        namespace=namespace,
         triggers=ChannelTriggers(**trigger_kwargs),
     )
 
 
-def test_classify_jira_keywords():
+def test_classify_jira_keywords() -> None:
     channels = [_ch("jira", "project:jira", keywords=("jira", "ticket", "PROJ-"))]
     classifier = TurnClassifier(channels)
     namespaces = classifier.classify("Check the PROJ-123 ticket", "Looking into it.")
@@ -21,46 +22,49 @@ def test_classify_jira_keywords():
     assert "cli:conversation" in namespaces  # default always present
 
 
-def test_classify_file_path():
+def test_classify_file_path() -> None:
     channels = [_ch("arch", "workspace:arch", file_globs=("obscura/**/*.py",))]
     classifier = TurnClassifier(channels)
     namespaces = classifier.classify(
-        "Edit obscura/providers/copilot.py", "Done, updated the streaming logic."
+        "Edit obscura/providers/copilot.py",
+        "Done, updated the streaming logic.",
     )
     assert "workspace:arch" in namespaces
 
 
-def test_classify_no_match_falls_back():
+def test_classify_no_match_falls_back() -> None:
     channels = [_ch("jira", "project:jira", keywords=("jira",))]
     classifier = TurnClassifier(channels)
     namespaces = classifier.classify("Hello world", "Hi there!")
     assert namespaces == ["cli:conversation"]
 
 
-def test_classify_multiple_namespaces():
+def test_classify_multiple_namespaces() -> None:
     channels = [
         _ch("jira", "project:jira", keywords=("jira",)),
         _ch("git", "git:workflow", keywords=("commit", "branch")),
     ]
     classifier = TurnClassifier(channels)
     namespaces = classifier.classify(
-        "Commit the jira fix to a new branch", "Created branch fix/PROJ-123."
+        "Commit the jira fix to a new branch",
+        "Created branch fix/PROJ-123.",
     )
     assert "project:jira" in namespaces
     assert "git:workflow" in namespaces
     assert "cli:conversation" in namespaces
 
 
-def test_classify_always_channel():
+def test_classify_always_channel() -> None:
     channels = [_ch("prefs", "user:prefs", always=True)]
     classifier = TurnClassifier(channels)
     namespaces = classifier.classify("random text", "response")
     assert "user:prefs" in namespaces
 
 
-def test_classify_disabled_channel_skipped():
+def test_classify_disabled_channel_skipped() -> None:
     channel = MemoryChannel(
-        name="disabled", namespace="ns:disabled",
+        name="disabled",
+        namespace="ns:disabled",
         triggers=ChannelTriggers(keywords=("match",)),
         enabled=False,
     )

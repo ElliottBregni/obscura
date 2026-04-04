@@ -159,8 +159,7 @@ class AgentLoopScenarioExecutor:
             for step in spec.steps:
                 if step.kind.value == "assert_event":
                     found = any(
-                        e.kind.value == step.expected_event
-                        for e in collected_events
+                        e.kind.value == step.expected_event for e in collected_events
                     )
                     if not found:
                         passed = False

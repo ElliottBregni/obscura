@@ -1,5 +1,4 @@
-"""
-obscura.cli.tips — Contextual tips and feature suggestions.
+"""obscura.cli.tips — Contextual tips and feature suggestions.
 
 Shows helpful tips based on user behavior to aid feature discovery.
 Tips have conditions, cooldowns, and priority ordering.
@@ -17,33 +16,110 @@ class Tip:
 
     id: str
     message: str
-    condition: str  # "after_edit" | "after_search" | "long_session" | "first_use" | "always"
+    condition: (
+        str  # "after_edit" | "after_search" | "long_session" | "first_use" | "always"
+    )
     cooldown_hours: float = 24.0
     priority: int = 0  # Higher = shown first
 
 
 # Built-in tips.
 TIPS: list[Tip] = [
-    Tip("commit", "Use `/commit` to create AI-generated commit messages from your changes.", "after_edit", 48),
-    Tip("review", "Use `/review` for AI-powered code review of pending changes.", "after_edit", 48),
-    Tip("compact", "Context getting large? Use `/compact` to compress conversation history.", "long_session", 4),
-    Tip("effort", "Adjust response depth with `/effort low|medium|high|max`.", "first_use", 168),
+    Tip(
+        "commit",
+        "Use `/commit` to create AI-generated commit messages from your changes.",
+        "after_edit",
+        48,
+    ),
+    Tip(
+        "review",
+        "Use `/review` for AI-powered code review of pending changes.",
+        "after_edit",
+        48,
+    ),
+    Tip(
+        "compact",
+        "Context getting large? Use `/compact` to compress conversation history.",
+        "long_session",
+        4,
+    ),
+    Tip(
+        "effort",
+        "Adjust response depth with `/effort low|medium|high|max`.",
+        "first_use",
+        168,
+    ),
     Tip("fast", "Toggle terse mode with `/fast` for quick answers.", "first_use", 168),
-    Tip("resume", "Resume previous sessions with `/resume [search]`.", "first_use", 168),
-    Tip("agent", "Spawn specialized agents with `/agent spawn <name>`.", "first_use", 168),
+    Tip(
+        "resume",
+        "Resume previous sessions with `/resume [search]`.",
+        "first_use",
+        168,
+    ),
+    Tip(
+        "agent",
+        "Spawn specialized agents with `/agent spawn <name>`.",
+        "first_use",
+        168,
+    ),
     Tip("vim", "Toggle vim keybindings with `/vim`.", "first_use", 336),
     Tip("cost", "Check token usage and costs with `/cost`.", "long_session", 12),
     Tip("doctor", "Run `/doctor` to check your environment setup.", "first_use", 336),
-    Tip("permissions", "Switch permission modes with `/permissions plan|accept_edits`.", "first_use", 168),
-    Tip("export", "Export conversation with `/export md|txt|json`.", "long_session", 24),
-    Tip("security", "Run `/security-review` before merging security-sensitive changes.", "after_edit", 72),
+    Tip(
+        "permissions",
+        "Switch permission modes with `/permissions plan|accept_edits`.",
+        "first_use",
+        168,
+    ),
+    Tip(
+        "export",
+        "Export conversation with `/export md|txt|json`.",
+        "long_session",
+        24,
+    ),
+    Tip(
+        "security",
+        "Run `/security-review` before merging security-sensitive changes.",
+        "after_edit",
+        72,
+    ),
     Tip("worktree", "Use worktree tools for isolated git work.", "after_search", 72),
-    Tip("voice", "Enable voice input with `/voice on` (requires SoX).", "first_use", 336),
-    Tip("init", "Run `/init` to generate an OBSCURA.md for this repository.", "first_use", 336),
-    Tip("kairos", "Background monitoring is active. Disable with `OBSCURA_KAIROS=false` or `/kairos off`.", "first_use", 336),
-    Tip("undercover", "AI attribution is hidden from commits by default. Set `OBSCURA_UNDERCOVER=false` to show it.", "first_use", 336),
-    Tip("coordinator", "Use `/coordinator on` for multi-worker agent orchestration.", "first_use", 336),
-    Tip("search_tools", "Use `/search-tools <query>` to find available tools.", "after_search", 48),
+    Tip(
+        "voice",
+        "Enable voice input with `/voice on` (requires SoX).",
+        "first_use",
+        336,
+    ),
+    Tip(
+        "init",
+        "Run `/init` to generate an OBSCURA.md for this repository.",
+        "first_use",
+        336,
+    ),
+    Tip(
+        "kairos",
+        "Background monitoring is active. Disable with `OBSCURA_KAIROS=false` or `/kairos off`.",
+        "first_use",
+        336,
+    ),
+    Tip(
+        "undercover",
+        "AI attribution is hidden from commits by default. Set `OBSCURA_UNDERCOVER=false` to show it.",
+        "first_use",
+        336,
+    ),
+    Tip(
+        "coordinator",
+        "Use `/coordinator on` for multi-worker agent orchestration.",
+        "first_use",
+        336,
+    ),
+    Tip(
+        "search_tools",
+        "Use `/search-tools <query>` to find available tools.",
+        "after_search",
+        48,
+    ),
     Tip("skills", "Use `/skill list` to see available skills.", "first_use", 168),
 ]
 
@@ -71,13 +147,11 @@ class TipScheduler:
         now = time.time()
         condition = self._current_condition()
 
-        candidates = [
-            t for t in TIPS
-            if t.condition == condition or t.condition == "always"
-        ]
+        candidates = [t for t in TIPS if t.condition in (condition, "always")]
         # Filter by cooldown.
         candidates = [
-            t for t in candidates
+            t
+            for t in candidates
             if t.id not in self._shown
             or (now - self._shown[t.id]) > t.cooldown_hours * 3600
         ]

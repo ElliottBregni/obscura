@@ -6,7 +6,6 @@ from typing import Any
 
 from obscura.core.tools import ToolRegistry, infer_schema_from_hints, tool
 
-
 # ---------------------------------------------------------------------------
 # Schema inference
 # ---------------------------------------------------------------------------
@@ -42,7 +41,7 @@ class TestSchemaInference:
         assert schema["required"] == []
 
     def test_skips_self(self) -> None:
-        def fn(self: Any, x: str) -> str:  # noqa: N805
+        def fn(self: Any, x: str) -> str:
             return x
 
         schema: dict[str, Any] = infer_schema_from_hints(fn)
@@ -70,7 +69,7 @@ class TestToolDecorator:
             return f"Hello, {name}!"
 
         assert hasattr(greet, "spec")
-        spec: Any = getattr(greet, "spec")
+        spec: Any = greet.spec
         assert spec.name == "greet"
         assert spec.description == "Greet a user"
         assert spec.parameters["required"] == ["name"]
@@ -87,7 +86,7 @@ class TestToolDecorator:
         def echo(text: str) -> str:
             return text
 
-        spec: Any = getattr(echo, "spec")
+        spec: Any = echo.spec
         assert spec.parameters["properties"]["text"] == {"type": "string"}
         assert "text" in spec.parameters["required"]
 
@@ -100,7 +99,7 @@ class TestToolDecorator:
         def custom(x: str) -> str:  # type hint says str, but schema says number
             return x
 
-        spec: Any = getattr(custom, "spec")
+        spec: Any = custom.spec
         assert spec.parameters["properties"]["x"]["type"] == "number"
 
     def test_handler_reference(self) -> None:
@@ -109,7 +108,7 @@ class TestToolDecorator:
 
         decorated = tool("t", "d")(my_fn)
         # Handler points to the original function
-        spec: Any = getattr(decorated, "spec")
+        spec: Any = decorated.spec
         assert spec.handler is my_fn
 
 
@@ -126,7 +125,7 @@ class TestToolRegistry:
         def fn(x: str) -> str:
             return x
 
-        spec: Any = getattr(fn, "spec")
+        spec: Any = fn.spec
         reg.register(spec)
         assert reg.get("test_tool") is spec
         assert reg.get("nonexistent") is None
@@ -142,8 +141,8 @@ class TestToolRegistry:
         def b() -> None:
             pass
 
-        reg.register(getattr(a, "spec"))
-        reg.register(getattr(b, "spec"))
+        reg.register(a.spec)
+        reg.register(b.spec)
         assert len(reg.all()) == 2
 
     def test_names(self) -> None:
@@ -153,7 +152,7 @@ class TestToolRegistry:
         def alpha() -> None:
             pass
 
-        reg.register(getattr(alpha, "spec"))
+        reg.register(alpha.spec)
         assert reg.names() == ["alpha"]
 
     def test_contains(self) -> None:
@@ -163,7 +162,7 @@ class TestToolRegistry:
         def t() -> None:
             pass
 
-        reg.register(getattr(t, "spec"))
+        reg.register(t.spec)
         assert "t" in reg
         assert "missing" not in reg
 
@@ -175,7 +174,7 @@ class TestToolRegistry:
         def t() -> None:
             pass
 
-        reg.register(getattr(t, "spec"))
+        reg.register(t.spec)
         assert len(reg) == 1
 
     def test_alias_lookup_resolves_native_names(self) -> None:
@@ -197,10 +196,10 @@ class TestToolRegistry:
         def browser_navigate_tool(url: str) -> str:
             return url
 
-        reg.register(getattr(run_shell_tool, "spec"))
-        reg.register(getattr(web_search_tool, "spec"))
-        reg.register(getattr(task_tool, "spec"))
-        reg.register(getattr(browser_navigate_tool, "spec"))
+        reg.register(run_shell_tool.spec)
+        reg.register(web_search_tool.spec)
+        reg.register(task_tool.spec)
+        reg.register(browser_navigate_tool.spec)
 
         assert reg.get("Bash") is reg.get("run_shell")
         assert reg.get("WebSearch") is reg.get("web_search")

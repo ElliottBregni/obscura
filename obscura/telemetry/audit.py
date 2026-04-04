@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-"""
-obscura.telemetry.audit — Compliance audit logger.
+"""obscura.telemetry.audit — Compliance audit logger.
 
 Writes append-only JSONL audit events for every significant action:
 agent sends, tool executions, sync triggers, session lifecycle. Each
@@ -28,10 +27,9 @@ import json
 import os
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Audit event dataclass
@@ -53,7 +51,7 @@ class AuditEvent:
     resource: str  # "backend:copilot", "tool:read_file", "sync:vault"
     action: str  # "read", "write", "execute", "delete"
     outcome: str  # "success", "denied", "error"
-    details: dict[str, object] = field(default_factory=lambda: {})
+    details: dict[str, object] = field(default_factory=dict)
     timestamp: str = ""
     trace_id: str = ""
 
@@ -63,7 +61,7 @@ class AuditEvent:
             object.__setattr__(
                 self,
                 "timestamp",
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             )
         if not self.trace_id:
             object.__setattr__(self, "trace_id", _current_trace_id())

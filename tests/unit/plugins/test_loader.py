@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from obscura.plugins.loader import (
     PluginLoader,
@@ -16,14 +13,18 @@ from obscura.plugins.loader import (
     _resolve_handler,
 )
 from obscura.plugins.models import (
+    BootstrapDep,
+    BootstrapSpec,
     ConfigRequirement,
     PluginSpec,
     PluginStatus,
     ToolContribution,
-    BootstrapSpec,
-    BootstrapDep,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,19 +41,19 @@ def _make_spec(
     **kwargs: Any,
 ) -> PluginSpec:
     """Build a minimal valid PluginSpec for testing."""
-    defaults: dict[str, Any] = dict(
-        id=plugin_id,
-        name=name,
-        version=version,
-        source_type="builtin",
-        runtime_type="native",
-        trust_level="builtin",
-        author="test-author",
-        description="A test plugin",
-        config_requirements=config_requirements,
-        tools=tools,
-        bootstrap=bootstrap,
-    )
+    defaults: dict[str, Any] = {
+        "id": plugin_id,
+        "name": name,
+        "version": version,
+        "source_type": "builtin",
+        "runtime_type": "native",
+        "trust_level": "builtin",
+        "author": "test-author",
+        "description": "A test plugin",
+        "config_requirements": config_requirements,
+        "tools": tools,
+        "bootstrap": bootstrap,
+    }
     defaults.update(kwargs)
     return PluginSpec(**defaults)
 
@@ -84,9 +85,7 @@ class TestCheckConfig:
     def test_required_key_present_in_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MY_API_KEY", "secret123")
         spec = _make_spec(
-            config_requirements=(
-                ConfigRequirement(key="MY_API_KEY", required=True),
-            ),
+            config_requirements=(ConfigRequirement(key="MY_API_KEY", required=True),),
         )
         ok, missing = _check_config(spec)
         assert ok is True
@@ -95,9 +94,7 @@ class TestCheckConfig:
     def test_required_key_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MISSING_KEY", raising=False)
         spec = _make_spec(
-            config_requirements=(
-                ConfigRequirement(key="MISSING_KEY", required=True),
-            ),
+            config_requirements=(ConfigRequirement(key="MISSING_KEY", required=True),),
         )
         ok, missing = _check_config(spec)
         assert ok is False
@@ -109,26 +106,28 @@ class TestCheckConfig:
                 ConfigRequirement(key="OPT_KEY", required=True, default="fallback"),
             ),
         )
-        ok, missing = _check_config(spec)
+        ok, _missing = _check_config(spec)
         assert ok is True
 
-    def test_optional_key_missing_is_satisfied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_optional_key_missing_is_satisfied(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         monkeypatch.delenv("OPT_KEY", raising=False)
         spec = _make_spec(
-            config_requirements=(
-                ConfigRequirement(key="OPT_KEY", required=False),
-            ),
+            config_requirements=(ConfigRequirement(key="OPT_KEY", required=False),),
         )
         ok, missing = _check_config(spec)
         assert ok is True
         assert missing == []
 
-    def test_whitespace_only_env_var_counts_as_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_whitespace_only_env_var_counts_as_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         monkeypatch.setenv("BLANK_KEY", "   ")
         spec = _make_spec(
-            config_requirements=(
-                ConfigRequirement(key="BLANK_KEY", required=True),
-            ),
+            config_requirements=(ConfigRequirement(key="BLANK_KEY", required=True),),
         )
         ok, missing = _check_config(spec)
         assert ok is False
@@ -163,6 +162,7 @@ class TestResolveHandler:
         assert result is not None
         assert callable(result)
         import os.path
+
         assert result is os.path.join
 
     def test_dot_notation(self) -> None:
@@ -186,6 +186,7 @@ class TestResolveHandler:
         result = _resolve_handler("json:dumps")
         assert result is not None
         import json
+
         assert result is json.dumps
 
 
@@ -225,7 +226,8 @@ class TestDiscoverLocal:
         plugin_dir = tmp_path / "my-plugin"
         plugin_dir.mkdir()
         manifest = plugin_dir / "plugin.yaml"
-        manifest.write_text(textwrap.dedent("""\
+        manifest.write_text(
+            textwrap.dedent("""\
             id: my-local-plugin
             name: My Local Plugin
             version: "0.1.0"
@@ -234,7 +236,8 @@ class TestDiscoverLocal:
             trust_level: community
             author: tester
             description: A local test plugin
-        """))
+        """),
+        )
         loader = PluginLoader(plugin_dir=tmp_path)
         specs = loader.discover_local()
         assert len(specs) == 1
@@ -242,19 +245,24 @@ class TestDiscoverLocal:
 
     def test_discovers_json_manifest(self, tmp_path: Path) -> None:
         import json
+
         plugin_dir = tmp_path / "json-plugin"
         plugin_dir.mkdir()
         manifest = plugin_dir / "plugin.json"
-        manifest.write_text(json.dumps({
-            "id": "json-plugin",
-            "name": "JSON Plugin",
-            "version": "1.0.0",
-            "source_type": "local",
-            "runtime_type": "native",
-            "trust_level": "community",
-            "author": "tester",
-            "description": "A JSON-based plugin",
-        }))
+        manifest.write_text(
+            json.dumps(
+                {
+                    "id": "json-plugin",
+                    "name": "JSON Plugin",
+                    "version": "1.0.0",
+                    "source_type": "local",
+                    "runtime_type": "native",
+                    "trust_level": "community",
+                    "author": "tester",
+                    "description": "A JSON-based plugin",
+                },
+            ),
+        )
         loader = PluginLoader(plugin_dir=tmp_path)
         specs = loader.discover_local()
         assert len(specs) == 1
@@ -294,14 +302,16 @@ class TestLoadSpec:
         assert status.enabled is True
 
     def test_valid_spec_with_tools_registers_on_broker(self, tmp_path: Path) -> None:
-        spec = _make_spec(tools=(
-            ToolContribution(
-                name="my_tool",
-                description="A tool",
-                handler_ref="json:dumps",
-                parameters={"type": "object"},
+        spec = _make_spec(
+            tools=(
+                ToolContribution(
+                    name="my_tool",
+                    description="A tool",
+                    handler_ref="json:dumps",
+                    parameters={"type": "object"},
+                ),
             ),
-        ))
+        )
         loader = PluginLoader(plugin_dir=tmp_path)
         broker = _FakeBroker()
         status = loader._load_spec(spec, broker)
@@ -311,10 +321,22 @@ class TestLoadSpec:
 
     def test_invalid_spec_becomes_failed(self, tmp_path: Path) -> None:
         # Duplicate tool names produce a hard validation error
-        spec = _make_spec(tools=(
-            ToolContribution(name="dup", description="a", handler_ref="os:getcwd", parameters={}),
-            ToolContribution(name="dup", description="b", handler_ref="os:getcwd", parameters={}),
-        ))
+        spec = _make_spec(
+            tools=(
+                ToolContribution(
+                    name="dup",
+                    description="a",
+                    handler_ref="os:getcwd",
+                    parameters={},
+                ),
+                ToolContribution(
+                    name="dup",
+                    description="b",
+                    handler_ref="os:getcwd",
+                    parameters={},
+                ),
+            ),
+        )
         loader = PluginLoader(plugin_dir=tmp_path)
         broker = _FakeBroker()
         status = loader._load_spec(spec, broker)
@@ -322,7 +344,9 @@ class TestLoadSpec:
         assert status.error is not None
 
     def test_missing_config_becomes_disabled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("REQUIRED_SECRET", raising=False)
         spec = _make_spec(
@@ -456,7 +480,10 @@ class TestStatusQueries:
         loader = PluginLoader(plugin_dir=tmp_path)
         broker = _FakeBroker()
         loader._load_spec(spec, broker)
-        loader._loaded["status-test"] = PluginStatus(plugin_id="status-test", state="enabled")
+        loader._loaded["status-test"] = PluginStatus(
+            plugin_id="status-test",
+            state="enabled",
+        )
         status = loader.get_status("status-test")
         assert status is not None
         assert status.state == "enabled"

@@ -1,5 +1,4 @@
-"""
-obscura.voice.session — Push-to-talk voice session.
+"""obscura.voice.session — Push-to-talk voice session.
 
 Ties ``AudioCapture`` and ``STTClient`` together into a simple
 push-to-talk workflow: start recording → stop → get transcript.
@@ -23,12 +22,13 @@ class VoiceSession:
         session = VoiceSession()
         if not session.is_available:
             print("Install SoX: brew install sox")
-            return
 
+    Return:
         await session.start_recording()
         # ... user speaks ...
         transcript = await session.stop_and_transcribe()
         print(f"You said: {transcript}")
+
     """
 
     def __init__(
@@ -64,7 +64,8 @@ class VoiceSession:
     async def start_recording(self) -> None:
         """Start recording from the microphone."""
         if not self._deps.available:
-            raise RuntimeError(f"No audio backend. {self._deps.install_hint}")
+            msg = f"No audio backend. {self._deps.install_hint}"
+            raise RuntimeError(msg)
         if self._capture.is_recording:
             logger.warning("Already recording — ignoring start_recording()")
             return

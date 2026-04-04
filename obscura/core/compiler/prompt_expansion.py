@@ -1,4 +1,4 @@
-"""obscura.core.compiler.prompt_expansion — Expand $skill and @command references.
+r"""obscura.core.compiler.prompt_expansion — Expand $skill and @command references.
 
 Scans instruction text for ``$skillname`` and ``@commandname [args]`` tokens
 and replaces them with the resolved skill body or command body.  This runs

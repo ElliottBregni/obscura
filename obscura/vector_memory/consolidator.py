@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from obscura.vector_memory.backends.base import VectorEntry
     from obscura.vector_memory.decay import DecayConfig
     from obscura.vector_memory.vector_memory import VectorMemoryStore
@@ -56,6 +57,7 @@ class MemoryConsolidator:
         Optional callable ``(texts: list[str]) -> str``.  When ``None``
         the consolidator tries to use the active LLM backend, falling
         back to simple concatenation.
+
     """
 
     def __init__(
@@ -82,12 +84,15 @@ class MemoryConsolidator:
             ``None`` consolidates across all namespaces.
 
         Returns ``(episodes_deleted, summaries_created)``.
+
         """
         cutoff = datetime.now(UTC) - timedelta(days=self.config.consolidation_age_days)
         limit = self.config.consolidation_batch_size * _MIN_GROUP_SIZE
 
         episodes = self.store.backend.list_by_type(
-            "episode", older_than=cutoff, limit=limit,
+            "episode",
+            older_than=cutoff,
+            limit=limit,
         )
         # Filter by namespace if specified
         if namespace is not None:
@@ -107,7 +112,11 @@ class MemoryConsolidator:
             try:
                 summary_text = self.summarize_fn(texts)
             except Exception:
-                _log.debug("summarize_fn failed for session %s, using fallback", session_id, exc_info=True)
+                _log.debug(
+                    "summarize_fn failed for session %s, using fallback",
+                    session_id,
+                    exc_info=True,
+                )
                 summary_text = self._fallback_summarize(texts)
 
             # Store the summary
@@ -156,6 +165,7 @@ class MemoryConsolidator:
 
     def _make_llm_summarizer(self) -> Callable[[list[str]], str]:
         """Try to build an LLM-based summarizer.  Falls back to simple concat."""
+
         def _summarize(texts: list[str]) -> str:
             combined = "\n---\n".join(texts)
             prompt = _SUMMARIZE_PROMPT.format(text=combined[:4000])
@@ -203,7 +213,8 @@ class MemoryConsolidator:
             has_loop = False
 
         if has_loop:
-            raise RuntimeError("Cannot summarize from async context")
+            msg = "Cannot summarize from async context"
+            raise RuntimeError(msg)
         return asyncio.run(_run())
 
     @staticmethod

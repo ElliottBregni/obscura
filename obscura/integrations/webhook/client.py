@@ -10,7 +10,7 @@ import logging
 import time
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class WebhookDelivery:
     payload: dict[str, Any]
     status_code: int
     success: bool
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class WebhookClient:
@@ -58,25 +58,40 @@ class WebhookClient:
 
     async def check_access(self) -> bool:
         if not self._urls:
-            raise RuntimeError("No webhook URLs configured.")
+            msg = "No webhook URLs configured."
+            raise RuntimeError(msg)
         return True
 
     async def deliver(
-        self, recipient: str, text: str, extra: dict[str, Any] | None = None
+        self,
+        recipient: str,
+        text: str,
+        extra: dict[str, Any] | None = None,
     ) -> WebhookDelivery:
         loop = asyncio.get_event_loop()
         targets = [recipient] if recipient else self._urls
         url = targets[0] if targets else ""
-        return await loop.run_in_executor(None, self._deliver_sync, url, text, extra or {})
+        return await loop.run_in_executor(
+            None,
+            self._deliver_sync,
+            url,
+            text,
+            extra or {},
+        )
 
-    def _deliver_sync(self, url: str, text: str, extra: dict[str, Any]) -> WebhookDelivery:
+    def _deliver_sync(
+        self,
+        url: str,
+        text: str,
+        extra: dict[str, Any],
+    ) -> WebhookDelivery:
         delivery_id = hashlib.sha1(
-            f"{url}|{text}|{time.time()}".encode()
+            f"{url}|{text}|{time.time()}".encode(),
         ).hexdigest()[:16]
         payload: dict[str, Any] = {
             "event": "message",
             "text": text,
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "timestamp": datetime.now(tz=UTC).isoformat(),
             **extra,
         }
         body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
@@ -93,7 +108,12 @@ class WebhookClient:
         backoffs = (*_RETRY_BACKOFF_S, None)
         for attempt, backoff in enumerate(backoffs):
             try:
-                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+                req = urllib.request.Request(
+                    url,
+                    data=body,
+                    headers=headers,
+                    method="POST",
+                )
                 with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
                     status_code = resp.status
                 if 200 <= status_code < 300:
@@ -105,7 +125,11 @@ class WebhookClient:
                         success=True,
                     )
             except Exception as exc:
-                logger.warning("Webhook delivery attempt %d failed: %s", attempt + 1, exc)
+                logger.warning(
+                    "Webhook delivery attempt %d failed: %s",
+                    attempt + 1,
+                    exc,
+                )
             if backoff is not None:
                 time.sleep(backoff)
         return WebhookDelivery(

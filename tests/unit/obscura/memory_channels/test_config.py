@@ -9,7 +9,7 @@ from obscura.memory_channels.config import (
 from obscura.memory_channels.models import ChannelTriggers, MemoryChannel
 
 
-def test_parse_channel_from_dict():
+def test_parse_channel_from_dict() -> None:
     raw = {
         "workspace-arch": {
             "namespace": "workspace:architecture",
@@ -30,7 +30,7 @@ def test_parse_channel_from_dict():
     assert ch.priority == 80
 
 
-def test_parse_channel_with_keywords():
+def test_parse_channel_with_keywords() -> None:
     raw = {
         "jira": {
             "namespace": "project:jira",
@@ -42,7 +42,7 @@ def test_parse_channel_with_keywords():
     assert channels[0].triggers.keywords == ("jira", "ticket")
 
 
-def test_parse_channel_with_always():
+def test_parse_channel_with_always() -> None:
     raw = {
         "prefs": {
             "namespace": "user:prefs",
@@ -56,7 +56,7 @@ def test_parse_channel_with_always():
     assert channels[0].injection == "system"
 
 
-def test_parse_channel_with_nested_triggers():
+def test_parse_channel_with_nested_triggers() -> None:
     raw = {
         "git": {
             "namespace": "git:workflow",
@@ -72,7 +72,7 @@ def test_parse_channel_with_nested_triggers():
     assert channels[0].triggers.keywords == ("branch",)
 
 
-def test_parse_defaults_when_missing():
+def test_parse_defaults_when_missing() -> None:
     raw = {"minimal": {"namespace": "ns:min"}}
     channels = _parse_channels(raw)
     assert len(channels) == 1
@@ -84,14 +84,26 @@ def test_parse_defaults_when_missing():
     assert ch.enabled is True
 
 
-def test_merge_agent_overrides():
+def test_merge_agent_overrides() -> None:
     global_ch = [
-        MemoryChannel(name="jira", namespace="project:jira", triggers=ChannelTriggers()),
+        MemoryChannel(
+            name="jira",
+            namespace="project:jira",
+            triggers=ChannelTriggers(),
+        ),
         MemoryChannel(name="git", namespace="git:workflow", triggers=ChannelTriggers()),
     ]
     agent_ch = [
-        MemoryChannel(name="jira", namespace="project:jira-custom", triggers=ChannelTriggers()),
-        MemoryChannel(name="review", namespace="review:patterns", triggers=ChannelTriggers()),
+        MemoryChannel(
+            name="jira",
+            namespace="project:jira-custom",
+            triggers=ChannelTriggers(),
+        ),
+        MemoryChannel(
+            name="review",
+            namespace="review:patterns",
+            triggers=ChannelTriggers(),
+        ),
     ]
     merged = merge_channels(global_ch, agent_ch)
     by_name = {c.name: c for c in merged}
@@ -100,7 +112,7 @@ def test_merge_agent_overrides():
     assert by_name["review"].namespace == "review:patterns"  # agent addition
 
 
-def test_parse_malformed_channel_skipped():
+def test_parse_malformed_channel_skipped() -> None:
     raw = {
         "good": {"namespace": "ns:good"},
         "bad": "not a dict",

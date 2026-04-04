@@ -1,5 +1,4 @@
-"""
-obscura.telemetry.hooks — Auto-instrumentation via HookPoint.
+"""obscura.telemetry.hooks — Auto-instrumentation via HookPoint.
 
 Registers OTel hooks with :class:`~obscura.agent.BaseAgent` instances to
 automatically create spans for each APER phase, record tool call metrics,
@@ -17,7 +16,7 @@ Usage::
 from __future__ import annotations
 
 import time
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from obscura.agent.agent import BaseAgent
@@ -48,20 +47,29 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
     def _on_post_plan(ctx: AgentContext) -> None:
         # End analyze span (covers analyze + plan)
         _end_phase_span(
-            "analyze", agent_name, _phase_starts.pop("analyze", None), _context_tokens
+            "analyze",
+            agent_name,
+            _phase_starts.pop("analyze", None),
+            _context_tokens,
         )
         _phase_starts["plan"] = time.monotonic()
 
     def _on_pre_execute(ctx: AgentContext) -> None:
         _end_phase_span(
-            "plan", agent_name, _phase_starts.pop("plan", None), _context_tokens
+            "plan",
+            agent_name,
+            _phase_starts.pop("plan", None),
+            _context_tokens,
         )
         _phase_starts["execute"] = time.monotonic()
         _start_phase_span("execute", agent_name, _context_tokens)
 
     def _on_post_respond(ctx: AgentContext) -> None:
         _end_phase_span(
-            "execute", agent_name, _phase_starts.pop("execute", None), _context_tokens
+            "execute",
+            agent_name,
+            _phase_starts.pop("execute", None),
+            _context_tokens,
         )
         # Record the full run as a metric
         try:
@@ -108,12 +116,13 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
 
 
 def _start_phase_span(
-    phase: str, agent_name: str, tokens: dict[str, Any] | None = None
+    phase: str,
+    agent_name: str,
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     """Start an OTel span for an agent phase."""
     try:
-        from opentelemetry import trace
-        from opentelemetry import context
+        from opentelemetry import context, trace
 
         tracer = trace.get_tracer("obscura.agent")
         span = tracer.start_span(
@@ -139,7 +148,7 @@ def _end_phase_span(
 ) -> None:
     """End the current phase span and record duration metric."""
     try:
-        from opentelemetry import trace, context
+        from opentelemetry import context, trace
 
         span = trace.get_current_span()
         if span and span.is_recording():
@@ -186,11 +195,13 @@ def _start_tool_span(tool_name: str, tokens: dict[str, Any] | None = None) -> No
 
 
 def _end_tool_span(
-    tool_name: str, start_time: float | None, tokens: dict[str, Any] | None = None
+    tool_name: str,
+    start_time: float | None,
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     """End the current tool span and record metrics."""
     try:
-        from opentelemetry import trace, context
+        from opentelemetry import context, trace
 
         span = trace.get_current_span()
         if span and span.is_recording():
@@ -205,7 +216,9 @@ def _end_tool_span(
 
 # Public wrappers for testing/observability
 def start_phase_span(
-    phase: str, agent_name: str, tokens: dict[str, Any] | None = None
+    phase: str,
+    agent_name: str,
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     _start_phase_span(phase, agent_name, tokens)
 
@@ -224,7 +237,9 @@ def start_tool_span(tool_name: str, tokens: dict[str, Any] | None = None) -> Non
 
 
 def end_tool_span(
-    tool_name: str, start_time: float | None, tokens: dict[str, Any] | None = None
+    tool_name: str,
+    start_time: float | None,
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     _end_tool_span(tool_name, start_time, tokens)
     status = "success"

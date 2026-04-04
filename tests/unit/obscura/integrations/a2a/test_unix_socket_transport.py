@@ -15,7 +15,6 @@ from obscura.integrations.a2a.transports.unix_socket import (
     stop_unix_socket_server,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -33,26 +32,28 @@ def _make_mock_service() -> MagicMock:
 
     # Mock message_send to return a task-like object
     mock_task = MagicMock()
-    mock_task.model_dump_json.return_value = json.dumps({
-        "id": "task-123",
-        "contextId": "ctx-1",
-        "status": {
-            "state": "completed",
-            "message": {
-                "role": "agent",
-                "messageId": "msg-1",
-                "parts": [{"kind": "text", "text": "Hello from agent"}],
+    mock_task.model_dump_json.return_value = json.dumps(
+        {
+            "id": "task-123",
+            "contextId": "ctx-1",
+            "status": {
+                "state": "completed",
+                "message": {
+                    "role": "agent",
+                    "messageId": "msg-1",
+                    "parts": [{"kind": "text", "text": "Hello from agent"}],
+                },
             },
+            "artifacts": [
+                {
+                    "artifactId": "art-1",
+                    "parts": [{"kind": "text", "text": "Task result"}],
+                },
+            ],
+            "history": [],
+            "kind": "task",
         },
-        "artifacts": [
-            {
-                "artifactId": "art-1",
-                "parts": [{"kind": "text", "text": "Task result"}],
-            }
-        ],
-        "history": [],
-        "kind": "task",
-    })
+    )
     service.message_send = AsyncMock(return_value=mock_task)
 
     # Mock tasks_get
@@ -66,11 +67,13 @@ def _make_mock_service() -> MagicMock:
 
     # Mock get_agent_card
     mock_card = MagicMock()
-    mock_card.model_dump_json.return_value = json.dumps({
-        "name": "Test Agent",
-        "url": "unix:///tmp/test.sock",
-        "version": "1.0",
-    })
+    mock_card.model_dump_json.return_value = json.dumps(
+        {
+            "name": "Test Agent",
+            "url": "unix:///tmp/test.sock",
+            "version": "1.0",
+        },
+    )
     service.get_agent_card = MagicMock(return_value=mock_card)
 
     return service
@@ -132,7 +135,8 @@ class TestUnixSocketClient:
 
     @pytest.mark.asyncio
     async def test_raw_request_get_agent_card(
-        self, socket_path: str
+        self,
+        socket_path: str,
     ) -> None:
         service = _make_mock_service()
         server = await start_unix_socket_server(service, socket_path)
@@ -151,7 +155,8 @@ class TestUnixSocketClient:
 
     @pytest.mark.asyncio
     async def test_unknown_method_returns_error(
-        self, socket_path: str
+        self,
+        socket_path: str,
     ) -> None:
         service = _make_mock_service()
         server = await start_unix_socket_server(service, socket_path)

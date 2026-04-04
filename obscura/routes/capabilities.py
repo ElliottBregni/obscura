@@ -1,11 +1,12 @@
-"""
-Routes: capability tier introspection and token management.
+"""Routes: capability tier introspection and token management.
 
 Provides endpoints for resolving the caller's capability tier,
 generating capability tokens, and validating tokens (admin diagnostic).
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -18,9 +19,11 @@ from obscura.auth.capability import (
     resolve_tier,
     validate_capability_token,
 )
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import get_current_user, require_role
 from obscura.deps import audit
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["capabilities"])
 
@@ -55,7 +58,7 @@ class TokenValidateRequest(BaseModel):
 
 @router.get("/capabilities/tier")
 async def get_tier(
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: Annotated[AuthenticatedUser, Depends(get_current_user)],
 ) -> JSONResponse:
     """Return the caller's resolved capability tier."""
     tier = resolve_tier(user)
@@ -72,14 +75,14 @@ async def get_tier(
             "tier": tier.value,
             "user_id": user.user_id,
             "roles": list(user.roles),
-        }
+        },
     )
 
 
 @router.post("/capabilities/token")
 async def create_capability_token(
     body: TokenRequest,
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: Annotated[AuthenticatedUser, Depends(get_current_user)],
 ) -> JSONResponse:
     """Generate a capability token for the current session."""
     token = generate_capability_token(user, body.session_id)
@@ -100,14 +103,14 @@ async def create_capability_token(
             "session_id": body.session_id,
             "expires_at": token.expires_at,
             "token": token.to_dict(),
-        }
+        },
     )
 
 
 @router.post("/capabilities/validate")
 async def validate_token(
     body: TokenValidateRequest,
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Validate a capability token (admin diagnostic endpoint)."""
     try:
@@ -140,5 +143,5 @@ async def validate_token(
             "valid": valid,
             "tier": token.tier.value,
             "expired": token.is_expired(),
-        }
+        },
     )

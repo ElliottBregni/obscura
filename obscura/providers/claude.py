@@ -1,5 +1,4 @@
-"""
-obscura.claude_backend — BackendProtocol implementation for Claude Agent SDK.
+"""obscura.claude_backend — BackendProtocol implementation for Claude Agent SDK.
 
 Wraps ``claude-agent-sdk`` (``ClaudeSDKClient``, ``query()``) behind the
 unified interface. Claude's async-iterator model maps naturally to our
@@ -8,14 +7,13 @@ unified interface. Claude's async-iterator model maps naturally to our
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable, cast
 import re
+from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
-from obscura.core.tools import ToolRegistry
 from obscura.core.tool_policy import ToolPolicy
+from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -33,6 +31,11 @@ from obscura.core.types import (
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from obscura.core.auth import AuthConfig
+    from obscura.core.tool_router import RoutingResult
 
 # ---------------------------------------------------------------------------
 # Backend implementation
@@ -51,7 +54,7 @@ class ClaudeBackend:
         mcp_servers: list[dict[str, Any]] | None = None,
         permission_mode: str = "default",
         cwd: str | None = None,
-    tool_policy: ToolPolicy | None = None,
+        tool_policy: ToolPolicy | None = None,
     ) -> None:
         self._auth = auth
         self._model = model or "claude-sonnet-4-6"
@@ -159,7 +162,8 @@ class ClaudeBackend:
     # -- Confirmation gate (PreToolUse hook) ----------------------------------
 
     def enable_confirmation(
-        self, confirm_fn: Callable[[str, dict[str, Any]], bool]
+        self,
+        confirm_fn: Callable[[str, dict[str, Any]], bool],
     ) -> None:
         """Register a PreToolUse hook that gates tool calls on user approval.
 
@@ -172,6 +176,7 @@ class ClaudeBackend:
         ----------
         confirm_fn:
             ``(tool_name, tool_input) -> bool``.  Return True to allow.
+
         """
 
         def _pre_tool_hook(
@@ -269,7 +274,8 @@ class ClaudeBackend:
             self._session_store.add(ref)
             return ref
 
-        raise RuntimeError("Failed to obtain session ID from Claude.")
+        msg_0 = "Failed to obtain session ID from Claude."
+        raise RuntimeError(msg_0)
 
     async def resume_session(self, ref: SessionRef) -> None:
         """Resume a previous session by reconnecting with the session ID."""
@@ -325,7 +331,6 @@ class ClaudeBackend:
 
         # The new session ID will come from the next ResultMessage
         return ref  # Caller should send a message to get the new session ID
-
 
     # -- Provider Registry (model discovery) ---------------------------------
 
@@ -387,7 +392,7 @@ class ClaudeBackend:
 
     def validate_model(self, model_id: str) -> bool:
         """Check if a model ID is valid for Claude."""
-        return model_id.startswith('claude-')
+        return model_id.startswith("claude-")
 
     # -- Agent loop ----------------------------------------------------------
 
@@ -418,7 +423,8 @@ class ClaudeBackend:
 
     def _ensure_client(self) -> None:
         if self._client is None:
-            raise RuntimeError("ClaudeBackend not started. Call start() first.")
+            msg = "ClaudeBackend not started. Call start() first."
+            raise RuntimeError(msg)
 
     async def _query(self, prompt: str, kwargs: dict[str, Any]) -> None:
         """Issue a Claude query with optional per-request tool policy."""
@@ -476,7 +482,7 @@ class ClaudeBackend:
                 return {"allowed_tools": tool_names} if tool_names else {}
             if choice.mode == "function" and choice.function_name:
                 return {
-                    "allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"]
+                    "allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"],
                 }
             return {}
 
@@ -488,12 +494,12 @@ class ClaudeBackend:
             return {}
 
         if isinstance(choice, dict):
-            return cast(dict[str, Any], choice)
+            return cast("dict[str, Any]", choice)
         return {}
 
     def _sanitize_system_prompt(self, prompt: str) -> str:
         """Strip Claude identity claims from system prompt.
-        
+
         Removes phrases that inject Claude-specific identity to allow
         Obscura agents to run without claiming to be Claude/Anthropic.
         """
@@ -507,16 +513,13 @@ class ClaudeBackend:
             r"assistant (made |created |built )?by Anthropic",
             r"with access to specialized skills\.?\s*",
         ]
-        
+
         sanitized = prompt
         for pattern in patterns:
             sanitized = re.sub(pattern, "", sanitized, flags=re.IGNORECASE)
-        
-        # Clean up extra whitespace
-        sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-        
-        return sanitized
 
+        # Clean up extra whitespace
+        return re.sub(r"\s+", " ", sanitized).strip()
 
     def _build_options(self, **overrides: Any) -> Any:
         """Build ClaudeAgentOptions for the SDK."""
@@ -573,10 +576,9 @@ class ClaudeBackend:
 
             # Apply eval-driven tool routing if a router is configured.
             if self._tool_router is not None:
-                from obscura.core.tool_router import RoutingResult
-
                 result: RoutingResult = self._tool_router.select(
-                    opts.get("system_prompt", ""), filtered
+                    opts.get("system_prompt", ""),
+                    filtered,
                 )
                 filtered = result.tools
 
@@ -593,7 +595,9 @@ class ClaudeBackend:
     def _build_tool_listing(self) -> str:
         """Build a human-readable tool listing for the system prompt."""
         lines = ["## Available Tools", ""]
-        lines.append("You have the following tools. Use these EXACT names when calling tools:")
+        lines.append(
+            "You have the following tools. Use these EXACT names when calling tools:",
+        )
         lines.append("")
         for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
@@ -604,10 +608,11 @@ class ClaudeBackend:
             "IMPORTANT: Do NOT use tool names from other systems. "
             "Names like Bash, Read, Edit, Write, Glob, Grep, WebSearch, "
             "WebFetch, Agent, TodoWrite, NotebookEdit are NOT valid here. "
-            "Use ONLY the exact names listed above."
+            "Use ONLY the exact names listed above.",
         )
         try:
             from obscura.plugins.capabilities import build_capability_map_section
+
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -618,8 +623,8 @@ class ClaudeBackend:
 
     def _build_mcp_tools(self) -> dict[str, Any]:
         """Convert registered ToolSpecs to a Claude in-process MCP server."""
-        from claude_agent_sdk import tool as claude_tool
         from claude_agent_sdk import create_sdk_mcp_server
+        from claude_agent_sdk import tool as claude_tool
 
         claude_tools: list[Any] = []
         for spec in self._tools:
@@ -682,7 +687,7 @@ class ClaudeBackend:
                         blocks.append(ContentBlock(kind="text", text=block.text))
                     elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
                         blocks.append(
-                            ContentBlock(kind="thinking", text=block.thinking)
+                            ContentBlock(kind="thinking", text=block.thinking),
                         )
                     elif block_type == "ToolUseBlock":
                         blocks.append(
@@ -691,7 +696,7 @@ class ClaudeBackend:
                                 tool_name=getattr(block, "name", ""),
                                 tool_input=getattr(block, "input", {}),
                                 tool_use_id=getattr(block, "id", ""),
-                            )
+                            ),
                         )
                     elif block_type == "ToolResultBlock":
                         content = getattr(block, "content", "")
@@ -703,7 +708,7 @@ class ClaudeBackend:
                                 text=content,
                                 tool_use_id=getattr(block, "tool_use_id", ""),
                                 is_error=getattr(block, "is_error", False),
-                            )
+                            ),
                         )
 
             elif type_name == "ResultMessage":

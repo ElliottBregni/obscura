@@ -1,5 +1,4 @@
-"""
-obscura.core.context_suggestions — Smart file context recommendations.
+"""obscura.core.context_suggestions — Smart file context recommendations.
 
 Recommends files the agent should read based on recent edits and
 import relationships.
@@ -37,29 +36,35 @@ def suggest_files(
         # 1. Suggest test file for modified source.
         test_path = _find_test_file(p)
         if test_path and str(test_path) not in already_seen:
-            suggestions.append({
-                "path": str(test_path),
-                "reason": f"Test file for {p.name}",
-            })
+            suggestions.append(
+                {
+                    "path": str(test_path),
+                    "reason": f"Test file for {p.name}",
+                },
+            )
             already_seen.add(str(test_path))
 
         # 2. Suggest __init__.py if editing a module file.
         init_path = p.parent / "__init__.py"
         if init_path.exists() and str(init_path) not in already_seen and init_path != p:
-            suggestions.append({
-                "path": str(init_path),
-                "reason": f"Package init for {p.parent.name}/",
-            })
+            suggestions.append(
+                {
+                    "path": str(init_path),
+                    "reason": f"Package init for {p.parent.name}/",
+                },
+            )
             already_seen.add(str(init_path))
 
         # 3. Suggest files that import the modified file.
         importers = _find_importers(p, max_results=2)
         for imp_path in importers:
             if str(imp_path) not in already_seen:
-                suggestions.append({
-                    "path": str(imp_path),
-                    "reason": f"Imports {p.name}",
-                })
+                suggestions.append(
+                    {
+                        "path": str(imp_path),
+                        "reason": f"Imports {p.name}",
+                    },
+                )
                 already_seen.add(str(imp_path))
 
         if len(suggestions) >= max_suggestions:
@@ -108,7 +113,7 @@ def _find_importers(target: Path, max_results: int = 3) -> list[Path]:
         search_dirs.append(target.parent.parent)
 
     pattern = re.compile(
-        rf"\b(?:from\s+\S*{re.escape(module_name)}\s+import|import\s+\S*{re.escape(module_name)})\b"
+        rf"\b(?:from\s+\S*{re.escape(module_name)}\s+import|import\s+\S*{re.escape(module_name)})\b",
     )
 
     for search_dir in search_dirs:

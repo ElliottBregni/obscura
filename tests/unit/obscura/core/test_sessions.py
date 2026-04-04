@@ -4,39 +4,39 @@ import json
 import tempfile
 from pathlib import Path
 
-from obscura.core.sessions import SessionStore, PersistentSessionStore
+from obscura.core.sessions import PersistentSessionStore, SessionStore
 from obscura.core.types import Backend, SessionRef
 
 
 class TestSessionStore:
-    def test_add_and_get(self):
+    def test_add_and_get(self) -> None:
         store = SessionStore()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         store.add(ref)
         assert store.get("s1") is ref
 
-    def test_get_missing(self):
+    def test_get_missing(self) -> None:
         store = SessionStore()
         assert store.get("missing") is None
 
-    def test_remove(self):
+    def test_remove(self) -> None:
         store = SessionStore()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
         store.add(ref)
         store.remove("s1")
         assert store.get("s1") is None
 
-    def test_remove_missing(self):
+    def test_remove_missing(self) -> None:
         store = SessionStore()
         store.remove("missing")  # Should not raise
 
-    def test_list_all(self):
+    def test_list_all(self) -> None:
         store = SessionStore()
         store.add(SessionRef(session_id="s1", backend=Backend.COPILOT))
         store.add(SessionRef(session_id="s2", backend=Backend.CLAUDE))
         assert len(store.list_all()) == 2
 
-    def test_list_all_filter_by_backend(self):
+    def test_list_all_filter_by_backend(self) -> None:
         store = SessionStore()
         store.add(SessionRef(session_id="s1", backend=Backend.COPILOT))
         store.add(SessionRef(session_id="s2", backend=Backend.CLAUDE))
@@ -46,13 +46,13 @@ class TestSessionStore:
         claude = store.list_all(backend=Backend.CLAUDE)
         assert len(claude) == 1
 
-    def test_len(self):
+    def test_len(self) -> None:
         store = SessionStore()
         assert len(store) == 0
         store.add(SessionRef(session_id="s1", backend=Backend.COPILOT))
         assert len(store) == 1
 
-    def test_contains(self):
+    def test_contains(self) -> None:
         store = SessionStore()
         store.add(SessionRef(session_id="s1", backend=Backend.COPILOT))
         assert "s1" in store
@@ -60,7 +60,7 @@ class TestSessionStore:
 
 
 class TestPersistentSessionStore:
-    def test_save_and_load(self):
+    def test_save_and_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sessions.json"
             store = PersistentSessionStore(path)
@@ -80,14 +80,14 @@ class TestPersistentSessionStore:
             assert s1 is not None
             assert s1.backend == Backend.COPILOT
 
-    def test_load_no_file(self):
+    def test_load_no_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sessions.json"
             store = PersistentSessionStore(path)
             store.load()  # Should not raise
             assert len(store) == 0
 
-    def test_load_empty_file(self):
+    def test_load_empty_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sessions.json"
             path.write_text("")
@@ -95,7 +95,7 @@ class TestPersistentSessionStore:
             store.load()  # Should not raise
             assert len(store) == 0
 
-    def test_save_creates_parent_dirs(self):
+    def test_save_creates_parent_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sub" / "dir" / "sessions.json"
             store = PersistentSessionStore(path)

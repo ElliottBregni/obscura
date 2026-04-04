@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import pytest
 
 from obscura.plugins.policy import (
@@ -14,19 +13,18 @@ from obscura.plugins.policy import (
     _glob_match,
 )
 
-
 # ---------------------------------------------------------------------------
 # 1. PolicyAction enum
 # ---------------------------------------------------------------------------
 
 
 class TestPolicyAction:
-    def test_values(self):
+    def test_values(self) -> None:
         assert PolicyAction.ALLOW.value == "allow"
         assert PolicyAction.DENY.value == "deny"
         assert PolicyAction.APPROVE.value == "approve"
 
-    def test_is_str_subclass(self):
+    def test_is_str_subclass(self) -> None:
         assert isinstance(PolicyAction.ALLOW, str)
 
 
@@ -36,27 +34,27 @@ class TestPolicyAction:
 
 
 class TestPolicyDecision:
-    def test_allow_is_allowed(self):
+    def test_allow_is_allowed(self) -> None:
         d = PolicyDecision(action=PolicyAction.ALLOW)
         assert d.allowed is True
         assert d.requires_approval is False
 
-    def test_deny_is_not_allowed(self):
+    def test_deny_is_not_allowed(self) -> None:
         d = PolicyDecision(action=PolicyAction.DENY)
         assert d.allowed is False
         assert d.requires_approval is False
 
-    def test_approve_is_allowed_and_requires_approval(self):
+    def test_approve_is_allowed_and_requires_approval(self) -> None:
         d = PolicyDecision(action=PolicyAction.APPROVE)
         assert d.allowed is True
         assert d.requires_approval is True
 
-    def test_reason_and_matched_rule(self):
+    def test_reason_and_matched_rule(self) -> None:
         d = PolicyDecision(action=PolicyAction.ALLOW, reason="ok", matched_rule="r1")
         assert d.reason == "ok"
         assert d.matched_rule == "r1"
 
-    def test_frozen(self):
+    def test_frozen(self) -> None:
         d = PolicyDecision(action=PolicyAction.ALLOW)
         with pytest.raises(AttributeError):
             d.action = PolicyAction.DENY  # type: ignore[misc]
@@ -68,7 +66,7 @@ class TestPolicyDecision:
 
 
 class TestPolicyRule:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         r = PolicyRule()
         assert r.id == ""
         assert r.plugin is None
@@ -81,7 +79,7 @@ class TestPolicyRule:
         assert r.reason == ""
         assert r.priority == 0
 
-    def test_all_matchers(self):
+    def test_all_matchers(self) -> None:
         r = PolicyRule(
             id="test",
             plugin="myplugin",
@@ -112,25 +110,25 @@ class TestPolicyRule:
 
 
 class TestDefaultRules:
-    def test_builtin_allowed(self):
+    def test_builtin_allowed(self) -> None:
         engine = PluginPolicyEngine()
         d = engine.can_load_plugin("anything", trust_level="builtin")
         assert d.allowed is True
         assert d.matched_rule == "default-allow-builtin"
 
-    def test_verified_allowed(self):
+    def test_verified_allowed(self) -> None:
         engine = PluginPolicyEngine()
         d = engine.can_load_plugin("anything", trust_level="verified")
         assert d.allowed is True
         assert d.matched_rule == "default-allow-verified"
 
-    def test_community_allowed(self):
+    def test_community_allowed(self) -> None:
         engine = PluginPolicyEngine()
         d = engine.can_load_plugin("anything", trust_level="community")
         assert d.allowed is True
         assert d.matched_rule == "default-allow-community"
 
-    def test_untrusted_denied(self):
+    def test_untrusted_denied(self) -> None:
         engine = PluginPolicyEngine()
         d = engine.can_load_plugin("anything", trust_level="untrusted")
         assert d.allowed is False
@@ -143,15 +141,15 @@ class TestDefaultRules:
 
 
 class TestCanLoadPlugin:
-    def test_builtin_trusted(self):
+    def test_builtin_trusted(self) -> None:
         engine = PluginPolicyEngine()
         assert engine.can_load_plugin("core-tools", trust_level="builtin").allowed
 
-    def test_untrusted_denied(self):
+    def test_untrusted_denied(self) -> None:
         engine = PluginPolicyEngine()
         assert not engine.can_load_plugin("shady-pkg", trust_level="untrusted").allowed
 
-    def test_community_allowed_default(self):
+    def test_community_allowed_default(self) -> None:
         engine = PluginPolicyEngine()
         assert engine.can_load_plugin("community-pkg", trust_level="community").allowed
 
@@ -162,13 +160,13 @@ class TestCanLoadPlugin:
 
 
 class TestCanExecuteTool:
-    def test_no_matching_rule_default_allow(self):
+    def test_no_matching_rule_default_allow(self) -> None:
         engine = PluginPolicyEngine()
         d = engine.can_execute_tool("some_tool")
         assert d.allowed is True
         assert d.matched_rule == ""
 
-    def test_matching_deny_rule(self):
+    def test_matching_deny_rule(self) -> None:
         deny_rule = PolicyRule(
             id="deny-shell",
             tool="shell_exec",
@@ -188,7 +186,7 @@ class TestCanExecuteTool:
 
 
 class TestCanGrantCapability:
-    def test_agent_matching(self):
+    def test_agent_matching(self) -> None:
         rule = PolicyRule(
             id="deny-reviewer-write",
             capability="write",
@@ -201,7 +199,7 @@ class TestCanGrantCapability:
         d = engine.can_grant_capability("write", agent_id="reviewer")
         assert d.allowed is False
 
-    def test_agent_not_matching(self):
+    def test_agent_not_matching(self) -> None:
         rule = PolicyRule(
             id="deny-reviewer-write",
             capability="write",
@@ -221,25 +219,25 @@ class TestCanGrantCapability:
 
 
 class TestGlobMatch:
-    def test_none_pattern_matches_anything(self):
+    def test_none_pattern_matches_anything(self) -> None:
         assert _glob_match(None, "anything") is True
 
-    def test_exact_match(self):
+    def test_exact_match(self) -> None:
         assert _glob_match("foo", "foo") is True
         assert _glob_match("foo", "bar") is False
 
-    def test_full_wildcard(self):
+    def test_full_wildcard(self) -> None:
         assert _glob_match("*", "anything") is True
 
-    def test_prefix_wildcard(self):
+    def test_prefix_wildcard(self) -> None:
         assert _glob_match("shell_*", "shell_exec") is True
         assert _glob_match("shell_*", "git_clone") is False
 
-    def test_suffix_wildcard(self):
+    def test_suffix_wildcard(self) -> None:
         assert _glob_match("*_exec", "shell_exec") is True
         assert _glob_match("*_exec", "shell_run") is False
 
-    def test_middle_wildcard(self):
+    def test_middle_wildcard(self) -> None:
         assert _glob_match("a*z", "abcz") is True
         assert _glob_match("a*z", "abcx") is False
 
@@ -250,7 +248,7 @@ class TestGlobMatch:
 
 
 class TestPriorityOrdering:
-    def test_higher_priority_wins(self):
+    def test_higher_priority_wins(self) -> None:
         deny_rule = PolicyRule(
             id="deny-all-tools",
             tool="*",
@@ -270,7 +268,7 @@ class TestPriorityOrdering:
         assert d.allowed is True
         assert d.matched_rule == "allow-shell"
 
-    def test_lower_priority_loses(self):
+    def test_lower_priority_loses(self) -> None:
         deny_rule = PolicyRule(
             id="deny-all-tools",
             tool="*",
@@ -297,7 +295,7 @@ class TestPriorityOrdering:
 
 
 class TestEnvironmentFiltering:
-    def test_rule_skipped_when_env_mismatch(self, monkeypatch):
+    def test_rule_skipped_when_env_mismatch(self, monkeypatch) -> None:
         monkeypatch.setenv("OBSCURA_ENV", "dev")
         rule = PolicyRule(
             id="prod-deny",
@@ -311,7 +309,7 @@ class TestEnvironmentFiltering:
         d = engine.can_execute_tool("deploy")
         assert d.allowed is True  # rule skipped because env is dev
 
-    def test_rule_applied_when_env_matches(self, monkeypatch):
+    def test_rule_applied_when_env_matches(self, monkeypatch) -> None:
         monkeypatch.setenv("OBSCURA_ENV", "prod")
         rule = PolicyRule(
             id="prod-deny",
@@ -332,15 +330,17 @@ class TestEnvironmentFiltering:
 
 
 class TestAddRule:
-    def test_add_and_evaluate(self):
+    def test_add_and_evaluate(self) -> None:
         engine = PluginPolicyEngine()
-        engine.add_rule(PolicyRule(
-            id="custom-deny",
-            tool="dangerous_tool",
-            action=PolicyAction.DENY,
-            reason="too dangerous",
-            priority=10,
-        ))
+        engine.add_rule(
+            PolicyRule(
+                id="custom-deny",
+                tool="dangerous_tool",
+                action=PolicyAction.DENY,
+                reason="too dangerous",
+                priority=10,
+            ),
+        )
         d = engine.can_execute_tool("dangerous_tool")
         assert d.allowed is False
         assert d.matched_rule == "custom-deny"
@@ -352,7 +352,7 @@ class TestAddRule:
 
 
 class TestRequiresApproval:
-    def test_approve_action(self):
+    def test_approve_action(self) -> None:
         rule = PolicyRule(
             id="approve-deploy",
             tool="deploy",
@@ -363,7 +363,7 @@ class TestRequiresApproval:
         engine = PluginPolicyEngine(PolicyRuleSet([rule]))
         assert engine.requires_approval("deploy") is True
 
-    def test_allow_action(self):
+    def test_allow_action(self) -> None:
         engine = PluginPolicyEngine()
         assert engine.requires_approval("some_safe_tool") is False
 
@@ -374,7 +374,7 @@ class TestRequiresApproval:
 
 
 class TestYAMLLoading:
-    def test_load_from_yaml(self, tmp_path):
+    def test_load_from_yaml(self, tmp_path) -> None:
         toml_content = """\
 [[rules]]
 id = "deny-exec"
@@ -401,16 +401,16 @@ priority = 40
         assert d.allowed is True
         assert d.matched_rule == "allow-git"
 
-    def test_load_empty_dir(self, tmp_path):
+    def test_load_empty_dir(self, tmp_path) -> None:
         engine = PluginPolicyEngine.load(policies_dir=tmp_path)
         # Should still have default rules
         assert len(engine.list_rules()) == len(PluginPolicyEngine._DEFAULT_RULES)
 
-    def test_load_nonexistent_dir(self, tmp_path):
+    def test_load_nonexistent_dir(self, tmp_path) -> None:
         engine = PluginPolicyEngine.load(policies_dir=tmp_path / "nope")
         assert len(engine.list_rules()) == len(PluginPolicyEngine._DEFAULT_RULES)
 
-    def test_load_malformed_yaml(self, tmp_path):
+    def test_load_malformed_yaml(self, tmp_path) -> None:
         (tmp_path / "bad.toml").write_text("not valid toml [[[{{{")
         engine = PluginPolicyEngine.load(policies_dir=tmp_path)
         # Should gracefully skip bad file and still have defaults
@@ -423,7 +423,7 @@ priority = 40
 
 
 class TestListRules:
-    def test_sorted_by_priority_desc(self):
+    def test_sorted_by_priority_desc(self) -> None:
         rules = [
             PolicyRule(id="low", priority=1),
             PolicyRule(id="high", priority=100),
@@ -434,7 +434,7 @@ class TestListRules:
         priorities = [r.priority for r in listed]
         assert priorities == sorted(priorities, reverse=True)
 
-    def test_includes_defaults(self):
+    def test_includes_defaults(self) -> None:
         engine = PluginPolicyEngine()
         ids = {r.id for r in engine.list_rules()}
         assert "default-allow-builtin" in ids
@@ -447,9 +447,11 @@ class TestListRules:
 
 
 class TestPolicyRuleSet:
-    def test_sorted_rules(self):
-        rs = PolicyRuleSet([
-            PolicyRule(id="a", priority=5),
-            PolicyRule(id="b", priority=10),
-        ])
+    def test_sorted_rules(self) -> None:
+        rs = PolicyRuleSet(
+            [
+                PolicyRule(id="a", priority=5),
+                PolicyRule(id="b", priority=10),
+            ],
+        )
         assert rs.sorted_rules()[0].id == "b"

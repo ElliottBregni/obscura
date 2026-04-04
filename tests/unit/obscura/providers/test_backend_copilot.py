@@ -1,9 +1,11 @@
 """Tests for sdk.backends.copilot — CopilotBackend."""
 
-import pytest
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from obscura.core.auth import AuthConfig
 from obscura.core.types import (
     Backend,
@@ -15,8 +17,8 @@ from obscura.core.types import (
 )
 from obscura.providers.copilot import (
     CopilotBackend,
-    public_make_handler,
     public_get_backend_tracer,
+    public_make_handler,
     public_set_span_attr,
 )
 
@@ -26,19 +28,19 @@ def _make_auth(github_token: str = "gh-tok") -> AuthConfig:
 
 
 class TestCopilotBackendInit:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         b = CopilotBackend(_make_auth())
         assert b.model is None
         assert b.system_prompt == ""
         assert b.streaming is True
         assert b.client is None
 
-    def test_with_model_and_prompt(self):
+    def test_with_model_and_prompt(self) -> None:
         b = CopilotBackend(_make_auth(), model="gpt-4o", system_prompt="Be helpful")
         assert b.model == "gpt-4o"
         assert b.system_prompt == "Be helpful"
 
-    def test_capabilities_include_native_features(self):
+    def test_capabilities_include_native_features(self) -> None:
         b = CopilotBackend(_make_auth())
         caps = b.capabilities()
         assert caps.supports_native_mode is True
@@ -47,7 +49,7 @@ class TestCopilotBackendInit:
 
 class TestCopilotBackendLifecycle:
     @pytest.mark.asyncio
-    async def test_start(self):
+    async def test_start(self) -> None:
         b = CopilotBackend(_make_auth())
         mock_client = AsyncMock()
         mock_session = MagicMock()
@@ -60,7 +62,7 @@ class TestCopilotBackendLifecycle:
             assert b.session is mock_session
 
     @pytest.mark.asyncio
-    async def test_stop(self):
+    async def test_stop(self) -> None:
         b = CopilotBackend(_make_auth())
         mock_client = AsyncMock()
         b.set_client_for_testing(mock_client)
@@ -71,14 +73,14 @@ class TestCopilotBackendLifecycle:
         assert b.session is None
 
     @pytest.mark.asyncio
-    async def test_stop_when_not_started(self):
+    async def test_stop_when_not_started(self) -> None:
         b = CopilotBackend(_make_auth())
         await b.stop()  # Should not raise
 
 
 class TestCopilotBackendSend:
     @pytest.mark.asyncio
-    async def test_send(self):
+    async def test_send(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
 
@@ -93,13 +95,13 @@ class TestCopilotBackendSend:
         assert msg.role.value == "assistant"
 
     @pytest.mark.asyncio
-    async def test_send_not_started(self):
+    async def test_send_not_started(self) -> None:
         b = CopilotBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             await b.send("test")
 
     @pytest.mark.asyncio
-    async def test_send_passes_structured_tool_choice(self):
+    async def test_send_passes_structured_tool_choice(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
         mock_response = MagicMock()
@@ -116,7 +118,7 @@ class TestCopilotBackendSend:
         assert sent_opts["tool_choice"] == {"mode": "function", "name": "read_file"}
 
     @pytest.mark.asyncio
-    async def test_stream_event_lifecycle(self):
+    async def test_stream_event_lifecycle(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
 
@@ -148,7 +150,7 @@ class TestCopilotBackendSend:
                     SimpleNamespace(type="session.idle", data=SimpleNamespace()),
                 ]
                 for event in events:
-                    for h in list(handlers):
+                    for h in handlers:
                         h(event)
 
         b.set_session_for_testing(FakeSession())
@@ -170,7 +172,7 @@ class TestCopilotBackendSend:
         assert text_chunks[0].native_event is not None
 
     @pytest.mark.asyncio
-    async def test_stream_passes_structured_tool_choice(self):
+    async def test_stream_passes_structured_tool_choice(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
         handlers: list[Any] = []
@@ -184,7 +186,7 @@ class TestCopilotBackendSend:
             async def send(self, options: Any) -> None:
                 captured_options.append(options)
                 idle = SimpleNamespace(type="session.idle", data=SimpleNamespace())
-                for h in list(handlers):
+                for h in handlers:
                     h(idle)
 
         b.set_session_for_testing(FakeSession())
@@ -198,7 +200,7 @@ class TestCopilotBackendSend:
 
 class TestCopilotBackendSessions:
     @pytest.mark.asyncio
-    async def test_create_session(self):
+    async def test_create_session(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         mock_session = MagicMock()
@@ -210,7 +212,7 @@ class TestCopilotBackendSessions:
         assert ref.backend == Backend.COPILOT
 
     @pytest.mark.asyncio
-    async def test_resume_session(self):
+    async def test_resume_session(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         from obscura.core.types import SessionRef
@@ -220,7 +222,7 @@ class TestCopilotBackendSessions:
         b.client.resume_session.assert_awaited_once_with("s1")
 
     @pytest.mark.asyncio
-    async def test_list_sessions(self):
+    async def test_list_sessions(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         mock_sess = MagicMock()
@@ -232,7 +234,7 @@ class TestCopilotBackendSessions:
         assert refs[0].session_id == "s1"
 
     @pytest.mark.asyncio
-    async def test_delete_session(self):
+    async def test_delete_session(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         from obscura.core.types import SessionRef
@@ -242,7 +244,7 @@ class TestCopilotBackendSessions:
         b.client.delete_session.assert_awaited_once_with("s1")
 
     @pytest.mark.asyncio
-    async def test_fork_session_uses_sdk_when_available(self):
+    async def test_fork_session_uses_sdk_when_available(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         from obscura.core.types import SessionRef
@@ -257,7 +259,7 @@ class TestCopilotBackendSessions:
         b.client.fork_session.assert_awaited_once_with("s1")
 
     @pytest.mark.asyncio
-    async def test_fork_session_falls_back_to_create(self):
+    async def test_fork_session_falls_back_to_create(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
         from obscura.core.types import SessionRef
@@ -274,7 +276,7 @@ class TestCopilotBackendSessions:
 
 
 class TestCopilotBackendTools:
-    def test_register_tool(self):
+    def test_register_tool(self) -> None:
         b = CopilotBackend(_make_auth())
         spec = ToolSpec(
             name="test_tool",
@@ -288,7 +290,7 @@ class TestCopilotBackendTools:
 
 
 class TestCopilotBackendHooks:
-    def test_register_hook(self):
+    def test_register_hook(self) -> None:
         b = CopilotBackend(_make_auth())
         cb = MagicMock()
         b.register_hook(HookPoint.PRE_TOOL_USE, cb)
@@ -296,29 +298,29 @@ class TestCopilotBackendHooks:
 
 
 class TestCopilotBackendInternals:
-    def test_ensure_client_raises(self):
+    def test_ensure_client_raises(self) -> None:
         b = CopilotBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             b.ensure_client_started()
 
-    def test_ensure_session_raises(self):
+    def test_ensure_session_raises(self) -> None:
         b = CopilotBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
         with pytest.raises(RuntimeError, match="No active session"):
             b.ensure_session_started()
 
-    def test_build_session_config(self):
+    def test_build_session_config(self) -> None:
         b = CopilotBackend(_make_auth(), model="gpt-4o", system_prompt="test")
         config = b.build_session_config()
         assert config["model"] == "gpt-4o"
         assert config["system_message"]["content"] == "test"
         assert config["streaming"] is True
 
-    def test_build_hooks_config_empty(self):
+    def test_build_hooks_config_empty(self) -> None:
         b = CopilotBackend(_make_auth())
         assert b.build_hooks_config() is None
 
-    def test_build_hooks_config_single(self):
+    def test_build_hooks_config_single(self) -> None:
         b = CopilotBackend(_make_auth())
         cb = MagicMock()
         b.register_hook(HookPoint.PRE_TOOL_USE, cb)
@@ -326,21 +328,21 @@ class TestCopilotBackendInternals:
         assert config is not None
         assert "on_pre_tool_use" in config
 
-    def test_to_message_from_data_content(self):
+    def test_to_message_from_data_content(self) -> None:
         b = CopilotBackend(_make_auth())
         raw = MagicMock()
         raw.data.content = "hello"
         msg = b.to_message(raw)
         assert msg.content[0].text == "hello"
 
-    def test_to_message_from_str(self):
+    def test_to_message_from_str(self) -> None:
         b = CopilotBackend(_make_auth())
         msg = b.to_message("plain text")
         assert msg.content[0].text == "plain text"
 
 
 class TestHelpers:
-    def test_make_handler_filters_type(self):
+    def test_make_handler_filters_type(self) -> None:
         cb = MagicMock()
         handler = public_make_handler("assistant.message_delta", cb)
 
@@ -349,7 +351,7 @@ class TestHelpers:
         handler(event)
         cb.assert_called_once()
 
-    def test_make_handler_ignores_wrong_type(self):
+    def test_make_handler_ignores_wrong_type(self) -> None:
         cb = MagicMock()
         handler = public_make_handler("assistant.message_delta", cb)
 
@@ -358,15 +360,15 @@ class TestHelpers:
         handler(event)
         cb.assert_not_called()
 
-    def test_get_backend_tracer_fallback(self):
+    def test_get_backend_tracer_fallback(self) -> None:
         tracer = public_get_backend_tracer()
         assert tracer is not None
 
-    def test_set_span_attr_no_op(self):
+    def test_set_span_attr_no_op(self) -> None:
         span = MagicMock(spec=[])
         public_set_span_attr(span, "key", "val")  # Should not raise
 
-    def test_set_span_attr_works(self):
+    def test_set_span_attr_works(self) -> None:
         span = MagicMock()
         public_set_span_attr(span, "key", "val")
         span.set_attribute.assert_called_once_with("key", "val")

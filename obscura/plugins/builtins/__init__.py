@@ -31,4 +31,4 @@ def list_builtin_plugin_ids() -> list[str]:
     return sorted(ids)
 
 
-__all__ = ["list_builtin_manifests", "list_builtin_plugin_ids", "BUILTINS_DIR"]
+__all__ = ["BUILTINS_DIR", "list_builtin_manifests", "list_builtin_plugin_ids"]

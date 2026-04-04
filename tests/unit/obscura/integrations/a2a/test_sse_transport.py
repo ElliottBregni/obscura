@@ -8,7 +8,7 @@ and validate the EventSourceResponse wiring.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
@@ -19,6 +19,8 @@ from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.transports.sse import create_sse_router
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -37,7 +39,7 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

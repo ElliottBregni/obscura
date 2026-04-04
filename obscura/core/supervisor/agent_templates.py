@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.agent_templates — Agent templating + versioning.
+"""obscura.core.supervisor.agent_templates — Agent templating + versioning.
 
 Templates are mutable (you can update them).
 Versions are immutable (never edited, always create a new one).
@@ -20,8 +19,8 @@ import re
 import sqlite3
 import threading
 import uuid
-from datetime import UTC, datetime
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -177,29 +176,41 @@ class AgentTemplateStore:
 
     def get_template(self, template_id: str) -> AgentTemplate | None:
         """Get a template by ID."""
-        row = self._conn().execute(
-            "SELECT * FROM agent_templates WHERE template_id = ?",
-            (template_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM agent_templates WHERE template_id = ?",
+                (template_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return self._row_to_template(row)
 
     def get_template_by_name(self, name: str) -> AgentTemplate | None:
         """Get a template by name."""
-        row = self._conn().execute(
-            "SELECT * FROM agent_templates WHERE name = ?",
-            (name,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM agent_templates WHERE name = ?",
+                (name,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return self._row_to_template(row)
 
     def list_templates(self) -> list[AgentTemplate]:
         """List all templates."""
-        rows = self._conn().execute(
-            "SELECT * FROM agent_templates ORDER BY name"
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT * FROM agent_templates ORDER BY name",
+            )
+            .fetchall()
+        )
         return [self._row_to_template(r) for r in rows]
 
     def update_template(
@@ -243,7 +254,8 @@ class AgentTemplateStore:
         """
         tmpl = self.get_template(template_id)
         if tmpl is None:
-            raise ValueError(f"Template not found: {template_id}")
+            msg = f"Template not found: {template_id}"
+            raise ValueError(msg)
 
         vars_ = variables or {}
         conn = self._conn()
@@ -292,32 +304,44 @@ class AgentTemplateStore:
 
     def get_version(self, agent_id: str) -> AgentVersion | None:
         """Get a version by agent_id."""
-        row = self._conn().execute(
-            "SELECT * FROM agent_versions WHERE agent_id = ?",
-            (agent_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM agent_versions WHERE agent_id = ?",
+                (agent_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return self._row_to_version(row)
 
     def get_latest_version(self, template_id: str) -> AgentVersion | None:
         """Get the latest version for a template."""
-        row = self._conn().execute(
-            "SELECT * FROM agent_versions WHERE template_id = ? "
-            "ORDER BY version DESC LIMIT 1",
-            (template_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM agent_versions WHERE template_id = ? "
+                "ORDER BY version DESC LIMIT 1",
+                (template_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return self._row_to_version(row)
 
     def list_versions(self, template_id: str) -> list[AgentVersion]:
         """List all versions for a template."""
-        rows = self._conn().execute(
-            "SELECT * FROM agent_versions WHERE template_id = ? "
-            "ORDER BY version DESC",
-            (template_id,),
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT * FROM agent_versions WHERE template_id = ? "
+                "ORDER BY version DESC",
+                (template_id,),
+            )
+            .fetchall()
+        )
         return [self._row_to_version(r) for r in rows]
 
     # -- internal ------------------------------------------------------------

@@ -1,5 +1,4 @@
-"""
-obscura.a2a.server — ObscuraA2AServer: lifecycle and component wiring.
+"""obscura.a2a.server — ObscuraA2AServer: lifecycle and component wiring.
 
 Holds references to the A2AService, TaskStore, and transport routers.
 Used by the main ``create_app()`` to register A2A endpoints.
@@ -7,14 +6,17 @@ Used by the main ``create_app()`` to register A2A endpoints.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.integrations.a2a.agent_card import AgentCardGenerator
 from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore, TaskStore
-from obscura.integrations.a2a.types import AgentCard
+
+if TYPE_CHECKING:
+    import asyncio
+
+    from obscura.integrations.a2a.types import AgentCard
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class ObscuraA2AServer:
     unix_socket_path:
         Optional path for a Unix domain socket transport. If set, a socket
         server is started alongside HTTP transports.
+
     """
 
     def __init__(
@@ -126,6 +129,7 @@ class ObscuraA2AServer:
         -------
         asyncio.Server
             The running Unix socket server.
+
         """
         from obscura.integrations.a2a.transports.unix_socket import (
             start_unix_socket_server,
@@ -134,7 +138,8 @@ class ObscuraA2AServer:
         path = socket_path or self._unix_socket_path or "/tmp/obscura-a2a.sock"
         self._unix_socket_path = path
         self._unix_socket_server = await start_unix_socket_server(
-            self._service, path
+            self._service,
+            path,
         )
         return self._unix_socket_server
 

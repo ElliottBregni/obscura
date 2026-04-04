@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from starlette.testclient import TestClient
+
+if TYPE_CHECKING:
+    from starlette.testclient import TestClient
 
 
 @pytest.mark.e2e
@@ -64,7 +66,8 @@ class TestAgentGroups:
         """Can delete a group."""
         # Create group
         create_resp = client.post(
-            "/api/v1/agent-groups", json={"name": "delete-test-group"}
+            "/api/v1/agent-groups",
+            json={"name": "delete-test-group"},
         )
         create_data: Any = create_resp.json()
         group_id: str = create_data["group_id"]
@@ -137,7 +140,8 @@ class TestAgentMessaging:
     def test_send_message_source_not_found(self, client: TestClient) -> None:
         """Sending from non-existent agent returns 404."""
         resp = client.post(
-            "/api/v1/agents/non-existent/send/agent-2", json={"message": "test"}
+            "/api/v1/agents/non-existent/send/agent-2",
+            json={"message": "test"},
         )
 
         assert resp.status_code == 404

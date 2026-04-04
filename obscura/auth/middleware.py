@@ -1,5 +1,4 @@
-"""
-obscura.auth.middleware -- API key authentication middleware.
+"""obscura.auth.middleware -- API key authentication middleware.
 
 Validates API keys on ``/api/*`` routes and populates ``request.state.user``
 with an :class:`~obscura.auth.models.AuthenticatedUser`.
@@ -11,13 +10,15 @@ API keys are loaded from the ``OBSCURA_API_KEYS`` environment variable
 from __future__ import annotations
 
 import logging
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from obscura.auth.rbac import user_from_api_key
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
     @override
     async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
     ) -> Response:
         # Skip auth for non-API routes
         if not request.url.path.startswith("/api/"):
@@ -49,7 +52,11 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
         # No valid API key — reject
         _emit_auth_audit(
-            request.url.path, "anonymous", "", "denied", reason="missing_api_key"
+            request.url.path,
+            "anonymous",
+            "",
+            "denied",
+            reason="missing_api_key",
         )
         return JSONResponse(
             status_code=401,
@@ -82,7 +89,7 @@ def _emit_auth_audit(
                 action="authenticate",
                 outcome=outcome,
                 details=details,
-            )
+            ),
         )
     except Exception:
         pass

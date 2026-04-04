@@ -1,5 +1,4 @@
-"""
-obscura.core.commit_attribution — Track AI vs human contribution per file.
+"""obscura.core.commit_attribution — Track AI vs human contribution per file.
 
 Records which files were created or modified by the AI agent during
 a session, enabling attribution tracking for compliance and auditing.
@@ -73,7 +72,10 @@ class CommitAttributionTracker:
                 "last_modified_by": attr.last_modified_by,
                 "last_modified_at": attr.last_modified_at,
             }
-        _ATTRIBUTION_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        _ATTRIBUTION_PATH.write_text(
+            json.dumps(data, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def record_agent_edit(
         self,

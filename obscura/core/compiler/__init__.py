@@ -38,8 +38,12 @@ from obscura.core.compiler.errors import (
     SpecLoadError,
     SpecValidationError,
 )
-from obscura.core.compiler.loader import SpecRegistry, load_spec_file, load_specs_dir, load_specs_dirs
-from obscura.core.compiler.validator import VALID_AGENT_TYPES, validate_pack_references
+from obscura.core.compiler.loader import (
+    SpecRegistry,
+    load_spec_file,
+    load_specs_dir,
+    load_specs_dirs,
+)
 from obscura.core.compiler.migrate import MigrationResult, migrate_agents_yaml
 from obscura.core.compiler.specs import (
     AgentInstanceSpec,
@@ -57,50 +61,51 @@ from obscura.core.compiler.specs import (
     WorkspaceAgentRef,
     WorkspaceSpec,
 )
+from obscura.core.compiler.validator import VALID_AGENT_TYPES, validate_pack_references
 
 __all__ = [
-    # Compile functions
-    "compile_workspace",
-    "compile_workspace_from_dir",
-    "compile_workspace_from_registry",
-    "synthesize_implicit_workspace",
+    # Validator
+    "VALID_AGENT_TYPES",
+    # Specs
+    "AgentInstanceSpec",
+    "AnySpec",
+    "CapabilityGrantSpec",
+    # Errors
+    "CompileError",
     # Compiled output
     "CompiledAgent",
     "CompiledMCPServer",
     "CompiledMemory",
     "CompiledPolicy",
     "CompiledWorkspace",
-    # Errors
-    "CompileError",
-    "MergeError",
-    "PluginFilterError",
-    "ResolutionError",
-    "SpecLoadError",
-    "SpecValidationError",
-    # Loader
-    "SpecRegistry",
-    "load_spec_file",
-    "load_specs_dir",
-    "load_specs_dirs",
-    # Validator
-    "VALID_AGENT_TYPES",
-    "validate_pack_references",
-    # Migration
-    "MigrationResult",
-    "migrate_agents_yaml",
-    # Specs
-    "AgentInstanceSpec",
-    "AnySpec",
-    "CapabilityGrantSpec",
     "MCPServerSpec",
     "MemoryBindingSpec",
+    "MergeError",
+    # Migration
+    "MigrationResult",
     "PackSpec",
     "PackSpecBody",
+    "PluginFilterError",
     "PluginFilterSpec",
     "PolicySpec",
+    "ResolutionError",
+    "SpecLoadError",
     "SpecMetadata",
+    # Loader
+    "SpecRegistry",
+    "SpecValidationError",
     "StartupSpec",
     "TemplateSpec",
     "WorkspaceAgentRef",
     "WorkspaceSpec",
+    # Compile functions
+    "compile_workspace",
+    "compile_workspace_from_dir",
+    "compile_workspace_from_registry",
+    "load_spec_file",
+    "load_specs_dir",
+    "load_specs_dirs",
+    "migrate_agents_yaml",
+    "synthesize_implicit_workspace",
+    "validate_pack_references",
 ]

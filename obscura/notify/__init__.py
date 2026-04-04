@@ -1,4 +1,4 @@
-from .storage import Storage, Message
 from .sqlite_impl import SQLiteStorage
+from .storage import Message, Storage
 
-__all__ = ["Storage", "Message", "SQLiteStorage"]
+__all__ = ["Message", "SQLiteStorage", "Storage"]

@@ -1,6 +1,6 @@
+import builtins
 import importlib
 import sys
-import builtins
 
 
 def _reload_render():
@@ -10,7 +10,7 @@ def _reload_render():
     return importlib.import_module("obscura.cli.render")
 
 
-def test_defaults(monkeypatch):
+def test_defaults(monkeypatch) -> None:
     # Ensure env defaults (no capture prints)
     monkeypatch.delenv("OBSCURA_CAPTURE_PRINTS", raising=False)
     monkeypatch.delenv("OBSCURA_OUTPUT_MODE", raising=False)
@@ -25,7 +25,7 @@ def test_defaults(monkeypatch):
     assert r.output.verbose is True
 
 
-def test_capture_prints_wraps(monkeypatch):
+def test_capture_prints_wraps(monkeypatch) -> None:
     monkeypatch.setenv("OBSCURA_CAPTURE_PRINTS", "true")
     monkeypatch.setenv("OBSCURA_OUTPUT_MODE", "test-mode")
     # reload config and render to pick up env changes
@@ -33,7 +33,8 @@ def test_capture_prints_wraps(monkeypatch):
         del sys.modules["obscura.config"]
     if "obscura.cli.render" in sys.modules:
         del sys.modules["obscura.cli.render"]
-    import obscura.config as config
+    from obscura import config
+
     orig_print = builtins.print
     r = importlib.import_module("obscura.cli.render")
     try:

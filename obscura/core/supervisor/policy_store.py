@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.policy_store — Immutable policy versioning.
+"""obscura.core.supervisor.policy_store — Immutable policy versioning.
 
 Policies define budgets, confirmations, allowlists, tool restrictions, etc.
 Once a version is created, it is never mutated. Runs reference a specific
@@ -166,10 +165,14 @@ class PolicyStore:
 
     def get_version(self, policy_id: str) -> PolicyVersion | None:
         """Get a policy version by ID."""
-        row = self._conn().execute(
-            "SELECT * FROM policy_versions WHERE policy_id = ?",
-            (policy_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM policy_versions WHERE policy_id = ?",
+                (policy_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return self._row_to_version(row)
@@ -180,12 +183,16 @@ class PolicyStore:
         scope_id: str = "",
     ) -> PolicyVersion | None:
         """Get the latest policy version for a scope."""
-        row = self._conn().execute(
-            "SELECT * FROM policy_versions "
-            "WHERE scope = ? AND scope_id = ? "
-            "ORDER BY version DESC LIMIT 1",
-            (scope, scope_id),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM policy_versions "
+                "WHERE scope = ? AND scope_id = ? "
+                "ORDER BY version DESC LIMIT 1",
+                (scope, scope_id),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return self._row_to_version(row)
@@ -196,12 +203,16 @@ class PolicyStore:
         scope_id: str = "",
     ) -> list[PolicyVersion]:
         """List all policy versions for a scope."""
-        rows = self._conn().execute(
-            "SELECT * FROM policy_versions "
-            "WHERE scope = ? AND scope_id = ? "
-            "ORDER BY version DESC",
-            (scope, scope_id),
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT * FROM policy_versions "
+                "WHERE scope = ? AND scope_id = ? "
+                "ORDER BY version DESC",
+                (scope, scope_id),
+            )
+            .fetchall()
+        )
         return [self._row_to_version(r) for r in rows]
 
     # -- internal ------------------------------------------------------------

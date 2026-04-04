@@ -58,12 +58,21 @@ class TestSkillSpecSchema:
 
 class TestMCPServerSpecSchema:
     def test_stdio(self) -> None:
-        s = MCPServerSpecSchema(name="pw", transport="stdio", command="npx", args=["-y", "@playwright/mcp"])
+        s = MCPServerSpecSchema(
+            name="pw",
+            transport="stdio",
+            command="npx",
+            args=["-y", "@playwright/mcp"],
+        )
         assert s.transport == "stdio"
         assert s.url == ""
 
     def test_sse(self) -> None:
-        s = MCPServerSpecSchema(name="remote", transport="sse", url="http://localhost:3000")
+        s = MCPServerSpecSchema(
+            name="remote",
+            transport="sse",
+            url="http://localhost:3000",
+        )
         assert s.transport == "sse"
         assert s.command == ""
 
@@ -100,7 +109,9 @@ class TestTemplateCreateRequest:
             model="claude",
             aper_profile=APERProfileSchema(max_turns=5),
             skills=[SkillSpecSchema(name="s1", content="c1")],
-            mcp_servers=[MCPServerSpecSchema(name="pw", transport="stdio", command="npx")],
+            mcp_servers=[
+                MCPServerSpecSchema(name="pw", transport="stdio", command="npx"),
+            ],
             a2a_remote_tools=A2ARemoteToolsSpecSchema(urls=["http://peer"]),
             persist=True,
         )

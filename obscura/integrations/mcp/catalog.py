@@ -83,12 +83,12 @@ class MCPSoCatalogProvider:
                         continue
                     payload = json.loads(r.read().decode("utf-8", errors="replace"))
                     if isinstance(payload, list):
-                        return cast(list[dict[str, Any]], payload)
+                        return cast("list[dict[str, Any]]", payload)
                     if isinstance(payload, dict):
                         for key in ("servers", "data", "items", "results", "plugins"):
                             val = payload.get(key)
                             if isinstance(val, list):
-                                return cast(list[dict[str, Any]], val)
+                                return cast("list[dict[str, Any]]", val)
             except Exception:
                 continue
         return None
@@ -100,7 +100,8 @@ class MCPSoCatalogProvider:
     def _fetch_html_page(self, page: int) -> str:
         url = self.base_url if page <= 1 else f"{self.base_url}?page={page}"
         req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0 obscura/1.0"}
+            url,
+            headers={"User-Agent": "Mozilla/5.0 obscura/1.0"},
         )
         with urllib.request.urlopen(req, timeout=self.timeout_seconds) as r:
             return r.read().decode("utf-8", errors="replace")
@@ -111,7 +112,7 @@ class MCPSoCatalogProvider:
         results: list[tuple[str, str, str]] = []
         seen: set[str] = set()
         _SKIP = frozenset(
-            {"all", "search", "browse", "category", "tags", "new", "top", "about"}
+            {"all", "search", "browse", "category", "tags", "new", "top", "about"},
         )
         pattern = re.compile(
             r'href="(?P<path>/(?:servers?|mcp)/(?P<slug>[^"/?#]+))"[^>]*>(?P<label>.*?)</a>',
@@ -152,12 +153,12 @@ class MCPSoCatalogProvider:
                 for item in raw_items:
                     if not isinstance(item, dict):
                         continue
-                    item_d = cast(dict[str, Any], item)
+                    item_d = cast("dict[str, Any]", item)
                     slug = str(
                         item_d.get("slug")
                         or item_d.get("name")
                         or item_d.get("id")
-                        or ""
+                        or "",
                     ).strip()
                     if not slug:
                         continue
@@ -165,13 +166,13 @@ class MCPSoCatalogProvider:
                         item_d.get("title")
                         or item_d.get("displayName")
                         or item_d.get("name")
-                        or slug
+                        or slug,
                     ).strip()
                     url = str(
                         item_d.get("url")
                         or item_d.get("homepage")
                         or item_d.get("repository")
-                        or ""
+                        or "",
                     )
                     if not url:
                         url = f"{self.base_url}/servers/{slug}"
@@ -181,7 +182,7 @@ class MCPSoCatalogProvider:
                             slug=slug,
                             url=url,
                             rank=len(entries) + 1,
-                        )
+                        ),
                     )
                     if len(entries) >= limit:
                         break
@@ -199,7 +200,7 @@ class MCPSoCatalogProvider:
                                 slug=slug,
                                 url=url,
                                 rank=len(entries) + 1,
-                            )
+                            ),
                         )
                         if len(entries) >= limit:
                             break
@@ -274,7 +275,7 @@ class MCPServersOrgCatalogProvider:
                         slug=slug,
                         url=urllib.parse.urljoin(self.base_url, f"/servers/{slug}"),
                         rank=len(entries) + 1,
-                    )
+                    ),
                 )
                 if len(entries) >= limit:
                     break
@@ -307,7 +308,7 @@ class MCPRegistryAPICatalogProvider:
             return {"servers": data, "nextCursor": None}
         if not isinstance(data, dict):
             return {"servers": [], "nextCursor": None}
-        return cast(dict[str, Any], data)
+        return cast("dict[str, Any]", data)
 
     @staticmethod
     def _parse_name(item: dict[str, Any]) -> tuple[str, str]:
@@ -316,7 +317,7 @@ class MCPRegistryAPICatalogProvider:
             or item.get("serverName")
             or item.get("id")
             or item.get("qualifiedName")
-            or ""
+            or "",
         )
         label = str(item.get("title") or item.get("displayName") or slug)
         return slug, label
@@ -331,13 +332,13 @@ class MCPRegistryAPICatalogProvider:
             raw_servers = page.get("servers", [])
             if not isinstance(raw_servers, list):
                 break
-            raw_servers_list = cast(list[Any], raw_servers)
+            raw_servers_list = cast("list[Any]", raw_servers)
             if not raw_servers_list:
                 break
             for raw_item in raw_servers_list:
                 if not isinstance(raw_item, dict):
                     continue
-                item = cast(dict[str, Any], raw_item)
+                item = cast("dict[str, Any]", raw_item)
                 slug, label = self._parse_name(item)
                 if not slug:
                     continue
@@ -345,7 +346,7 @@ class MCPRegistryAPICatalogProvider:
                     item.get("url")
                     or item.get("repository")
                     or item.get("homepage")
-                    or ""
+                    or "",
                 )
                 if not url:
                     safe_slug = urllib.parse.quote(slug, safe="")
@@ -356,7 +357,7 @@ class MCPRegistryAPICatalogProvider:
                         slug=slug,
                         url=url,
                         rank=len(entries) + 1,
-                    )
+                    ),
                 )
                 if len(entries) >= limit:
                     break
@@ -369,7 +370,9 @@ class MCPRegistryAPICatalogProvider:
 
 def get_provider_for_registry(
     registry: str,
-) -> MCPSoCatalogProvider | MCPServersOrgCatalogProvider | MCPRegistryAPICatalogProvider:
+) -> (
+    MCPSoCatalogProvider | MCPServersOrgCatalogProvider | MCPRegistryAPICatalogProvider
+):
     """Return the appropriate catalog provider for a registry name/alias/URL."""
     alias = REGISTRY_ALIASES.get(registry.lower(), registry.lower())
     if alias == "mcpso":

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +13,8 @@ from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.transports.jsonrpc import create_jsonrpc_router
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,14 +34,16 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 def _rpc(
-    method: str, params: dict[str, Any] | None = None, req_id: int = 1
+    method: str,
+    params: dict[str, Any] | None = None,
+    req_id: int = 1,
 ) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
@@ -226,7 +229,8 @@ class TestAgentCard:
     @pytest.mark.asyncio
     async def test_get_card(self, client: AsyncClient) -> None:
         resp = await client.post(
-            "/a2a/rpc", json=_rpc("agent/authenticatedExtendedCard")
+            "/a2a/rpc",
+            json=_rpc("agent/authenticatedExtendedCard"),
         )
         result = resp.json()["result"]
         assert result["name"] == "TestAgent"

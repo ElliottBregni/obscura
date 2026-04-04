@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from obscura.plugins.models import PluginSpec
-
+if TYPE_CHECKING:
+    from obscura.plugins.models import PluginSpec
 
 # ---------------------------------------------------------------------------
 # Error types
@@ -39,7 +40,7 @@ class ValidationError:
 
     field: str
     message: str
-    severity: str = "error"   # "error" | "warning"
+    severity: str = "error"  # "error" | "warning"
 
     def __str__(self) -> str:
         return f"[{self.severity}] {self.field}: {self.message}"
@@ -61,10 +62,12 @@ def _validate_tool_names(spec: PluginSpec) -> list[ValidationError]:
             errors.append(ValidationError("tools", "Tool has empty name"))
             continue
         if tool.name in seen:
-            errors.append(ValidationError(
-                f"tools.{tool.name}",
-                f"Duplicate tool name: {tool.name!r}",
-            ))
+            errors.append(
+                ValidationError(
+                    f"tools.{tool.name}",
+                    f"Duplicate tool name: {tool.name!r}",
+                ),
+            )
         seen.add(tool.name)
     return errors
 
@@ -74,11 +77,13 @@ def _validate_tool_capabilities(spec: PluginSpec) -> list[ValidationError]:
     declared_caps = {c.id for c in spec.capabilities}
     for tool in spec.tools:
         if tool.capability and tool.capability not in declared_caps:
-            errors.append(ValidationError(
-                f"tools.{tool.name}.capability",
-                f"References undeclared capability {tool.capability!r} — "
-                f"declared: {sorted(declared_caps)}",
-            ))
+            errors.append(
+                ValidationError(
+                    f"tools.{tool.name}.capability",
+                    f"References undeclared capability {tool.capability!r} — "
+                    f"declared: {sorted(declared_caps)}",
+                ),
+            )
     return errors
 
 
@@ -89,11 +94,13 @@ def _validate_capability_tools(spec: PluginSpec) -> list[ValidationError]:
     for cap in spec.capabilities:
         for tool_name in cap.tools:
             if tool_name not in declared_tools:
-                errors.append(ValidationError(
-                    f"capabilities.{cap.id}.tools",
-                    f"References undeclared tool {tool_name!r}",
-                    severity="warning",
-                ))
+                errors.append(
+                    ValidationError(
+                        f"capabilities.{cap.id}.tools",
+                        f"References undeclared tool {tool_name!r}",
+                        severity="warning",
+                    ),
+                )
     return errors
 
 
@@ -101,11 +108,13 @@ def _validate_handler_refs(spec: PluginSpec) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for tool in spec.tools:
         if tool.handler_ref and not _HANDLER_RE.match(tool.handler_ref):
-            errors.append(ValidationError(
-                f"tools.{tool.name}.handler",
-                f"Invalid handler reference {tool.handler_ref!r} — "
-                f"expected 'module.path:function' or 'module.path'",
-            ))
+            errors.append(
+                ValidationError(
+                    f"tools.{tool.name}.handler",
+                    f"Invalid handler reference {tool.handler_ref!r} — "
+                    f"expected 'module.path:function' or 'module.path'",
+                ),
+            )
     return errors
 
 
@@ -115,11 +124,13 @@ def _validate_config_requirements(spec: PluginSpec) -> list[ValidationError]:
         if not cfg.key:
             errors.append(ValidationError("config", "Config requirement has empty key"))
         if cfg.type not in _CONFIG_TYPES:
-            errors.append(ValidationError(
-                f"config.{cfg.key}",
-                f"Unknown config type {cfg.type!r} — valid: {sorted(_CONFIG_TYPES)}",
-                severity="warning",
-            ))
+            errors.append(
+                ValidationError(
+                    f"config.{cfg.key}",
+                    f"Unknown config type {cfg.type!r} — valid: {sorted(_CONFIG_TYPES)}",
+                    severity="warning",
+                ),
+            )
     return errors
 
 
@@ -129,11 +140,13 @@ def _validate_workflow_capabilities(spec: PluginSpec) -> list[ValidationError]:
     for wf in spec.workflows:
         for cap_id in wf.required_capabilities:
             if cap_id not in declared_caps:
-                errors.append(ValidationError(
-                    f"workflows.{wf.id}.required_capabilities",
-                    f"References undeclared capability {cap_id!r}",
-                    severity="warning",
-                ))
+                errors.append(
+                    ValidationError(
+                        f"workflows.{wf.id}.required_capabilities",
+                        f"References undeclared capability {cap_id!r}",
+                        severity="warning",
+                    ),
+                )
     return errors
 
 
@@ -144,10 +157,12 @@ def _validate_hooks(spec: PluginSpec) -> list[ValidationError]:
         ("bootstrap_hook", spec.bootstrap_hook),
     ]:
         if hook_ref and not _HANDLER_RE.match(hook_ref):
-            errors.append(ValidationError(
-                hook_name,
-                f"Invalid hook reference {hook_ref!r}",
-            ))
+            errors.append(
+                ValidationError(
+                    hook_name,
+                    f"Invalid hook reference {hook_ref!r}",
+                ),
+            )
     return errors
 
 
@@ -156,11 +171,13 @@ def _validate_policy_hints(spec: PluginSpec) -> list[ValidationError]:
     declared_caps = {c.id for c in spec.capabilities}
     for hint in spec.policy_hints:
         if hint.capability_id not in declared_caps:
-            errors.append(ValidationError(
-                f"policy_hints.{hint.capability_id}",
-                f"Policy hint references undeclared capability {hint.capability_id!r}",
-                severity="warning",
-            ))
+            errors.append(
+                ValidationError(
+                    f"policy_hints.{hint.capability_id}",
+                    f"Policy hint references undeclared capability {hint.capability_id!r}",
+                    severity="warning",
+                ),
+            )
     return errors
 
 
@@ -206,4 +223,4 @@ def is_valid(spec: PluginSpec, *, strict: bool = False) -> bool:
     return not any(e.severity == "error" for e in errors)
 
 
-__all__ = ["validate_plugin_spec", "is_valid", "ValidationError"]
+__all__ = ["ValidationError", "is_valid", "validate_plugin_spec"]

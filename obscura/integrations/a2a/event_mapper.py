@@ -1,5 +1,4 @@
-"""
-obscura.a2a.event_mapper — Bidirectional AgentEvent ↔ A2A event mapping.
+"""obscura.a2a.event_mapper — Bidirectional AgentEvent ↔ A2A event mapping.
 
 Converts Obscura's ``AgentEvent`` stream into A2A protocol events
 (``TaskStatusUpdateEvent``, ``TaskArtifactUpdateEvent``) and vice versa.
@@ -17,6 +16,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from obscura.core.types import AgentEvent, AgentEventKind
 from obscura.integrations.a2a.types import (
     Artifact,
     StreamEvent,
@@ -26,7 +26,6 @@ from obscura.integrations.a2a.types import (
     TaskStatusUpdateEvent,
     TextPart,
 )
-from obscura.core.types import AgentEvent, AgentEventKind
 
 
 class EventMapper:

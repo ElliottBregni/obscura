@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.tool_snapshot — Frozen tool registry per run.
+"""obscura.core.supervisor.tool_snapshot — Frozen tool registry per run.
 
 Creates an immutable, ordered snapshot of tools at BUILDING_CONTEXT time.
 Prevents tool list flickering by freezing the exact set of tools, their
@@ -38,13 +37,13 @@ class FrozenToolEntry:
     """
 
     __slots__ = (
-        "name",
         "description",
-        "parameters",
-        "order_index",
-        "tool_id",
         "is_dynamic",
+        "name",
+        "order_index",
+        "parameters",
         "schema_hash",
+        "tool_id",
     )
 
     def __init__(
@@ -165,7 +164,7 @@ class FrozenToolRegistry:
                         "parameters": tool.parameters,
                     },
                     sort_keys=True,
-                )
+                ),
             )
         combined = "\n".join(entries)
         return hashlib.sha256(combined.encode()).hexdigest()
@@ -198,6 +197,7 @@ class FrozenToolRegistry:
             specs: List of ToolSpec objects (from ToolRegistry.all())
             allowlist: If set, only include these tool names
             denylist: If set, exclude these tool names
+
         """
         filtered = []
         for spec in specs:
@@ -264,6 +264,7 @@ class FrozenToolRegistry:
         Args:
             broker: A :class:`~obscura.plugins.broker.ToolBroker` instance.
             allowlist: If provided, only include tools whose names are in this set.
+
         """
         names: list[str] = broker.registered_tools
         schemas: dict[str, dict[str, Any]] = broker.schemas
@@ -331,28 +332,38 @@ class ToolSnapshotStore:
 
     def load(self, snapshot_id: str) -> FrozenToolRegistry | None:
         """Load a tool snapshot by ID (sync)."""
-        row = self._conn().execute(
-            "SELECT snapshot_id, tools_json FROM tool_snapshots "
-            "WHERE snapshot_id = ?",
-            (snapshot_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT snapshot_id, tools_json FROM tool_snapshots "
+                "WHERE snapshot_id = ?",
+                (snapshot_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return FrozenToolRegistry.from_json(
-            row["tools_json"], snapshot_id=row["snapshot_id"]
+            row["tools_json"],
+            snapshot_id=row["snapshot_id"],
         )
 
     def load_for_run(self, run_id: str) -> FrozenToolRegistry | None:
         """Load the tool snapshot used in a specific run (sync)."""
-        row = self._conn().execute(
-            "SELECT snapshot_id, tools_json FROM tool_snapshots "
-            "WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
-            (run_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT snapshot_id, tools_json FROM tool_snapshots "
+                "WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
+                (run_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return FrozenToolRegistry.from_json(
-            row["tools_json"], snapshot_id=row["snapshot_id"]
+            row["tools_json"],
+            snapshot_id=row["snapshot_id"],
         )
 
     def close(self) -> None:

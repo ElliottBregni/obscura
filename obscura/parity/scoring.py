@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from obscura.core.types import Backend
+from typing import TYPE_CHECKING
+
 from obscura.parity.features import feature_map
 from obscura.parity.models import (
     BackendConformance,
@@ -11,6 +12,9 @@ from obscura.parity.models import (
     FeatureStatus,
     ParityReport,
 )
+
+if TYPE_CHECKING:
+    from obscura.core.types import Backend
 
 
 def _status_multiplier(status: FeatureStatus) -> float:
@@ -61,13 +65,13 @@ def score_report_with_conformance(
                 partial_or_worse += 1
     if partial_or_worse:
         risks.append(
-            f"{partial_or_worse} feature declarations are partial or unsupported across backends."
+            f"{partial_or_worse} feature declarations are partial or unsupported across backends.",
         )
 
     for item in conformance:
         if item.percent < 100.0:
             risks.append(
-                f"{item.backend.value} method conformance is {item.percent:.1f}% ({item.passed}/{item.total})."
+                f"{item.backend.value} method conformance is {item.percent:.1f}% ({item.passed}/{item.total}).",
             )
 
     return ParityReport(

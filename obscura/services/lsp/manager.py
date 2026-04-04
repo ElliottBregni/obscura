@@ -1,5 +1,4 @@
-"""
-obscura.services.lsp.manager — Language server lifecycle management.
+"""obscura.services.lsp.manager — Language server lifecycle management.
 
 Manages spawning, health-checking, and shutting down language servers
 per language. Servers are started on first use and cached.

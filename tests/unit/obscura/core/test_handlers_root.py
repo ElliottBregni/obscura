@@ -6,9 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from obscura.core.types import Backend, ContentBlock, Message, Role
 from obscura.core.handlers import RequestHandler, SimpleHandler
-
+from obscura.core.types import Backend, ContentBlock, Message, Role
 
 # ---------------------------------------------------------------------------
 # RequestHandler protocol
@@ -16,7 +15,7 @@ from obscura.core.handlers import RequestHandler, SimpleHandler
 
 
 class TestRequestHandlerProtocol:
-    def test_simple_handler_is_request_handler(self):
+    def test_simple_handler_is_request_handler(self) -> None:
         client = MagicMock()
         handler = SimpleHandler(client)
         assert isinstance(handler, RequestHandler)
@@ -28,7 +27,7 @@ class TestRequestHandlerProtocol:
 
         assert isinstance(MyHandler(), RequestHandler)
 
-    def test_non_handler_fails_protocol(self):
+    def test_non_handler_fails_protocol(self) -> None:
         class NotAHandler:
             pass
 
@@ -42,7 +41,7 @@ class TestRequestHandlerProtocol:
 
 class TestSimpleHandler:
     @pytest.mark.asyncio
-    async def test_sends_prompt_to_client(self):
+    async def test_sends_prompt_to_client(self) -> None:
         mock_message = Message(
             role=Role.ASSISTANT,
             content=[ContentBlock(kind="text", text="Response here")],
@@ -58,7 +57,7 @@ class TestSimpleHandler:
         assert result.text == "Response here"
 
     @pytest.mark.asyncio
-    async def test_prepends_system_prompt(self):
+    async def test_prepends_system_prompt(self) -> None:
         mock_message = Message(
             role=Role.ASSISTANT,
             content=[ContentBlock(kind="text", text="4")],
@@ -75,7 +74,7 @@ class TestSimpleHandler:
         assert "What is 2+2?" in call_args
 
     @pytest.mark.asyncio
-    async def test_converts_input_to_string(self):
+    async def test_converts_input_to_string(self) -> None:
         mock_message = Message(
             role=Role.ASSISTANT,
             content=[ContentBlock(kind="text", text="ok")],

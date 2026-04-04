@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.heartbeat — Session-scoped heartbeat (first-class citizen).
+"""obscura.core.supervisor.heartbeat — Session-scoped heartbeat (first-class citizen).
 
 Heartbeats are:
 1. Persisted to ``session_heartbeats`` table (durable history)
@@ -13,14 +12,16 @@ ticking at a configurable interval.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 import sqlite3
-import json
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 from obscura.core.supervisor.schema import init_supervisor_schema
 from obscura.core.supervisor.types import (
@@ -133,10 +134,8 @@ class SessionHeartbeatManager:
         self._running = False
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
 
         # Final heartbeat
@@ -286,6 +285,6 @@ def get_heartbeats_for_run(
                 elapsed_ms=row["elapsed_ms"],
                 timestamp=datetime.fromisoformat(row["timestamp"]),
                 metadata=meta,
-            )
+            ),
         )
     return result

@@ -6,7 +6,9 @@ from obscura.parity.models import ParityFeature
 
 FEATURES: tuple[ParityFeature, ...] = (
     ParityFeature(
-        "session_create", "Session Create", "Create provider-backed session."
+        "session_create",
+        "Session Create",
+        "Create provider-backed session.",
     ),
     ParityFeature("session_resume", "Session Resume", "Resume an existing session."),
     ParityFeature(
@@ -16,10 +18,14 @@ FEATURES: tuple[ParityFeature, ...] = (
         weight=1.5,
     ),
     ParityFeature(
-        "stream_text", "Stream Text", "Emit text deltas in stream lifecycle."
+        "stream_text",
+        "Stream Text",
+        "Emit text deltas in stream lifecycle.",
     ),
     ParityFeature(
-        "stream_thinking", "Stream Thinking", "Emit reasoning/thinking deltas."
+        "stream_thinking",
+        "Stream Thinking",
+        "Emit reasoning/thinking deltas.",
     ),
     ParityFeature(
         "stream_tool_lifecycle",
@@ -32,13 +38,19 @@ FEATURES: tuple[ParityFeature, ...] = (
         "Expose raw provider events.",
     ),
     ParityFeature(
-        "tool_choice", "Tool Choice", "Support tool choice policy for requests."
+        "tool_choice",
+        "Tool Choice",
+        "Support tool choice policy for requests.",
     ),
     ParityFeature(
-        "hooks", "Hooks", "Support provider hook registration and callback flow."
+        "hooks",
+        "Hooks",
+        "Support provider hook registration and callback flow.",
     ),
     ParityFeature(
-        "openai_responses", "OpenAI Responses", "Support native Responses API lane."
+        "openai_responses",
+        "OpenAI Responses",
+        "Support native Responses API lane.",
     ),
     ParityFeature(
         "claude_permission_modes",

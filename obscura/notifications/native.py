@@ -21,9 +21,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from obscura.agent.interaction import AttentionPriority
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = ["NativeNotifier"]
 
@@ -160,8 +163,6 @@ class NativeNotifier:
         priority: AttentionPriority,
     ) -> None:
         """Terminal bell + styled print for non-macOS."""
-        bell = "\a" if priority in (AttentionPriority.HIGH, AttentionPriority.CRITICAL) else ""
-        print(f"{bell}\033[1m[{title}]\033[0m {message}", flush=True)
 
     @staticmethod
     def _terminal_dialog(
@@ -170,7 +171,6 @@ class NativeNotifier:
         buttons: list[str],
     ) -> str:
         """Blocking terminal prompt.  Returns the chosen button."""
-        print(f"\033[1m[{title}]\033[0m {message}", flush=True)
         if len(buttons) == 1:
             input(f"Press Enter to continue [{buttons[0]}]: ")
             return buttons[0]

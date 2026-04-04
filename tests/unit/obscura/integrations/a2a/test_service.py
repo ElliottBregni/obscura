@@ -5,6 +5,11 @@
 from __future__ import annotations
 
 import asyncio
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,16 +27,10 @@ from obscura.integrations.a2a.types import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-from typing import Literal
-
-
 def _msg(
-    text: str = "hello", role: Literal["user", "agent"] = "user", msg_id: str = "m1"
+    text: str = "hello",
+    role: Literal["user", "agent"] = "user",
+    msg_id: str = "m1",
 ) -> A2AMessage:
     return A2AMessage(role=role, messageId=msg_id, parts=[TextPart(text=text)])
 
@@ -246,7 +245,7 @@ class TestTasksSubscribe:
 
         events_received: list[object] = []
 
-        async def subscriber():
+        async def subscriber() -> None:
             async for event in svc.tasks_subscribe(task.id):
                 events_received.append(event)
 

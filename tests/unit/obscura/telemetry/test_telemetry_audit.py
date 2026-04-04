@@ -1,5 +1,4 @@
-"""
-Tests for sdk.telemetry.audit — Compliance audit logger.
+"""Tests for sdk.telemetry.audit — Compliance audit logger.
 
 Verifies AuditEvent creation, JSONL file append-only behavior,
 and integration with OTel span events.
@@ -18,7 +17,6 @@ from obscura.telemetry.audit import (
     get_audit_log_path,
     set_audit_log_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # AuditEvent dataclass
@@ -125,7 +123,9 @@ class TestAuditLogPath:
         set_audit_log_path(Path("audit.jsonl"))
 
     def test_env_var_override(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """OBSCURA_AUDIT_LOG env var should override default."""
         custom = str(tmp_path / "env-audit.jsonl")
@@ -194,7 +194,7 @@ class TestEmitAuditEvent:
                         resource="r",
                         action="a",
                         outcome="o",
-                    )
+                    ),
                 )
 
             lines = log_file.read_text().strip().split("\n")
@@ -220,7 +220,7 @@ class TestEmitAuditEvent:
                     resource="r",
                     action="a",
                     outcome="o",
-                )
+                ),
             )
 
             assert log_file.exists()
@@ -243,7 +243,7 @@ class TestEmitAuditEvent:
                         action="a",
                         outcome="o",
                         details={"key": "value", "nested": {"a": 1}},
-                    )
+                    ),
                 )
 
             for line in log_file.read_text().strip().split("\n"):

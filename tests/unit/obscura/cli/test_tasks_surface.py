@@ -56,10 +56,10 @@ def test_track_task_surface_python_exec_lifecycle() -> None:
 async def test_cmd_tasks_clear() -> None:
     ctx = _ctx()
     ctx.background_tasks.append(
-        {"id": "bg-1", "status": "done", "kind": "chat", "preview": "hi"}
+        {"id": "bg-1", "status": "done", "kind": "chat", "preview": "hi"},
     )
     ctx.python_tasks.append(
-        {"id": "py-1", "status": "done", "tool": "run_shell", "command": "python"}
+        {"id": "py-1", "status": "done", "tool": "run_shell", "command": "python"},
     )
     await cmd_tasks("clear", ctx)
     assert not ctx.background_tasks
@@ -84,7 +84,7 @@ async def test_cmd_tasks_interrupt_all() -> None:
             "kind": "chat",
             "preview": "long task",
             "started_at": "0.0",
-        }
+        },
     )
     ctx._background_task_refs["bg-1"] = t
     await cmd_tasks("interrupt all", ctx)

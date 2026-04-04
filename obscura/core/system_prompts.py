@@ -1,5 +1,4 @@
-"""
-obscura.core.system_prompts — Default system prompts for Obscura agents.
+"""obscura.core.system_prompts — Default system prompts for Obscura agents.
 
 Prompts are stored as plain .txt files in obscura/prompts/ and loaded at
 runtime. Do not hardcode prompt text in this file.
@@ -17,7 +16,8 @@ def _load(name: str) -> str:
     """Load a prompt file by name (without .txt extension)."""
     path = _PROMPTS_DIR / f"{name}.txt"
     if not path.exists():
-        raise FileNotFoundError(f"Prompt file not found: {path}")
+        msg = f"Prompt file not found: {path}"
+        raise FileNotFoundError(msg)
     return path.read_text(encoding="utf-8")
 
 
@@ -29,7 +29,8 @@ def __getattr__(name: str) -> str:
         return _load("default_agent")
     if name == "SUBAGENT_SYSTEM_PROMPT":
         return _load("subagent")
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
 
 
 def get_default_system_prompt() -> str:
@@ -46,7 +47,8 @@ def load_custom_system_prompt(path: Path | str) -> str:
     """Load a custom system prompt from an arbitrary file path."""
     path_obj = Path(path).expanduser()
     if not path_obj.exists():
-        raise FileNotFoundError(f"System prompt file not found: {path}")
+        msg = f"System prompt file not found: {path}"
+        raise FileNotFoundError(msg)
     return path_obj.read_text(encoding="utf-8")
 
 
@@ -65,6 +67,7 @@ def compose_system_prompt(
 
     Returns:
         Composed system prompt
+
     """
     parts: list[str] = []
 

@@ -67,7 +67,10 @@ class TestCircuitBreakerRecovery:
 
     def test_half_open_allows_limited_requests(self) -> None:
         cb = CircuitBreaker(
-            "test", failure_threshold=1, recovery_timeout=0.01, half_open_max=1
+            "test",
+            failure_threshold=1,
+            recovery_timeout=0.01,
+            half_open_max=1,
         )
         cb.record_failure()
         time.sleep(0.02)
@@ -149,7 +152,8 @@ class TestCircuitBreakerRegistry:
 
     def test_custom_defaults(self) -> None:
         registry = CircuitBreakerRegistry(
-            failure_threshold=10, recovery_timeout=60.0
+            failure_threshold=10,
+            recovery_timeout=60.0,
         )
         cb = registry.get("test")
         # Trip it to verify threshold

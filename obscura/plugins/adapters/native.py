@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import importlib
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.plugins.models import PluginSpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,12 @@ class NativeAdapter:
                 handlers[tool.name] = handler
                 logger.debug("Resolved handler %s → %s", tool.name, tool.handler)
             except Exception as exc:
-                logger.warning("Cannot resolve handler %s for tool %s: %s", tool.handler, tool.name, exc)
+                logger.warning(
+                    "Cannot resolve handler %s for tool %s: %s",
+                    tool.handler,
+                    tool.name,
+                    exc,
+                )
         return {"handlers": handlers}
 
     async def healthcheck(self, spec: PluginSpec) -> bool:

@@ -1,5 +1,4 @@
-"""
-obscura.voice — Push-to-talk voice input with speech-to-text.
+"""obscura.voice — Push-to-talk voice input with speech-to-text.
 
 Provides audio capture (via SoX ``rec`` or ALSA ``arecord``) and
 streaming speech-to-text transcription.
@@ -19,7 +18,7 @@ Usage::
 """
 
 from obscura.voice.capture import AudioCapture, check_voice_dependencies
-from obscura.voice.stt import STTClient
 from obscura.voice.session import VoiceSession
+from obscura.voice.stt import STTClient
 
 __all__ = ["AudioCapture", "STTClient", "VoiceSession", "check_voice_dependencies"]

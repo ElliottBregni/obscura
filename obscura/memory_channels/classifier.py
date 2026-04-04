@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from typing import TYPE_CHECKING
 
-from obscura.memory_channels.models import MemoryChannel
+if TYPE_CHECKING:
+    from obscura.memory_channels.models import MemoryChannel
 
 # Same regex as router.py
-_FILE_PATH_RE = re.compile(r"[\w/.~-]+\.(?:py|toml|yaml|yml|json|md|ts|tsx|js|jsx|rs|go|sh)")
+_FILE_PATH_RE = re.compile(
+    r"[\w/.~-]+\.(?:py|toml|yaml|yml|json|md|ts|tsx|js|jsx|rs|go|sh)",
+)
 
 # Default namespace when no channels match
 _DEFAULT_NAMESPACE = "cli:conversation"
@@ -26,6 +30,7 @@ class TurnClassifier:
     ----------
     channels:
         List of :class:`MemoryChannel` definitions to match against.
+
     """
 
     def __init__(self, channels: list[MemoryChannel]) -> None:
@@ -61,14 +66,13 @@ class TurnClassifier:
                     continue
 
             # File glob match
-            if triggers.file_globs:
-                if any(
-                    fnmatch.fnmatch(fp, pat)
-                    for pat in triggers.file_globs
-                    for fp in file_paths
-                ):
-                    namespaces.append(channel.namespace)
-                    continue
+            if triggers.file_globs and any(
+                fnmatch.fnmatch(fp, pat)
+                for pat in triggers.file_globs
+                for fp in file_paths
+            ):
+                namespaces.append(channel.namespace)
+                continue
 
             # Tool name match (check if tool names appear in text)
             if triggers.tool_names:

@@ -8,13 +8,15 @@ checks the per-user rate limiter, and returns HTTP 429 with
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from obscura.core.rate_limiter import RateLimiter
+if TYPE_CHECKING:
+    from starlette.requests import Request
+
+    from obscura.core.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._limiter = limiter
 
     async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
     ) -> Response:
         # Skip exempt paths
         path = request.url.path
@@ -87,7 +91,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             from obscura.telemetry.metrics import get_metrics
 
             get_metrics().rate_limit_rejections.add(
-                1, {"user_id": user_id}
+                1,
+                {"user_id": user_id},
             )
         except Exception:
             pass

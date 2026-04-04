@@ -23,7 +23,7 @@ Usage::
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable, override
+from typing import TYPE_CHECKING, Any, override
 
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -39,6 +39,9 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
 
 __all__ = ["MockBackend", "MockBackendBuilder"]
 
@@ -58,17 +61,22 @@ class MockBackend(BackendProtocol):
     Attributes:
         call_count: Number of ``stream()`` invocations so far.
         prompts: List of prompts received (for assertions).
+
     """
 
     def __init__(
         self,
         turn_responses: list[list[StreamChunk]] | None = None,
     ) -> None:
-        self._turns: list[list[StreamChunk]] = list(turn_responses) if turn_responses else []
+        self._turns: list[list[StreamChunk]] = (
+            list(turn_responses) if turn_responses else []
+        )
         self.call_count: int = 0
         self.prompts: list[str] = []
         self._registry = ToolRegistry()
-        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {hp: [] for hp in HookPoint}
+        self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
+            hp: [] for hp in HookPoint
+        }
 
     # -- BackendProtocol implementation ------------------------------------
 
@@ -193,7 +201,7 @@ class MockBackendBuilder:
         from obscura.testing.chunks import tool_call_chunks
 
         self._turns.append(
-            tool_call_chunks(tool_name, tool_input, preceding_text=preceding_text)
+            tool_call_chunks(tool_name, tool_input, preceding_text=preceding_text),
         )
         return self
 

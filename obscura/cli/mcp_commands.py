@@ -5,22 +5,24 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
 from rich.table import Table
 
 from obscura.cli.render import console, print_error, print_info, print_ok
+from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.integrations.mcp.catalog import (
-    MCPSoCatalogProvider,
     REGISTRY_ALIASES,
+    MCPSoCatalogProvider,
     get_provider_for_registry,
 )
 from obscura.integrations.mcp.config_loader import (
     discover_mcp_servers,
     select_servers_for_task,
 )
-from obscura.core.paths import resolve_obscura_mcp_dir
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _DEFAULT_REGISTRY = "mcp.so"
 
@@ -48,6 +50,7 @@ def cmd_mcp_discover(args: list[str]) -> None:
         /mcp discover --page 2
         /mcp discover --search github
         /mcp discover --registry mcpservers.org --limit 30
+
     """
     limit = 20
     page = 1
@@ -60,14 +63,14 @@ def cmd_mcp_discover(args: list[str]) -> None:
             try:
                 limit = int(args[i + 1])
             except ValueError:
-                print_error(f"Invalid --limit value: {args[i+1]}")
+                print_error(f"Invalid --limit value: {args[i + 1]}")
                 return
             i += 2
         elif args[i] == "--page" and i + 1 < len(args):
             try:
                 page = int(args[i + 1])
             except ValueError:
-                print_error(f"Invalid --page value: {args[i+1]}")
+                print_error(f"Invalid --page value: {args[i + 1]}")
                 return
             i += 2
         elif args[i] == "--search" and i + 1 < len(args):
@@ -82,7 +85,7 @@ def cmd_mcp_discover(args: list[str]) -> None:
     provider = get_provider_for_registry(registry)
     console.print(
         f"\n\U0001f50d [bold cyan]MCP Servers[/bold cyan] "
-        f"[dim]via {registry} \u2014 page {page}, limit {limit}[/dim]\n"
+        f"[dim]via {registry} \u2014 page {page}, limit {limit}[/dim]\n",
     )
 
     try:
@@ -96,14 +99,15 @@ def cmd_mcp_discover(args: list[str]) -> None:
 
         if search_term:
             entries = [
-                e for e in entries
+                e
+                for e in entries
                 if search_term in e.name.lower() or search_term in e.slug.lower()
             ]
 
         if not entries:
             print_info(
                 f"No servers found"
-                f"{f' matching \"{search_term}\"' if search_term else ''}"
+                f"{f' matching "{search_term}"' if search_term else ''}",
             )
             return
 
@@ -127,7 +131,7 @@ def cmd_mcp_discover(args: list[str]) -> None:
         console.print(
             f"\n\U0001f4a1 [dim]Next:[/dim] [cyan]/mcp discover --page {next_pg}[/cyan]  "
             f"[dim]More:[/dim] [cyan]/mcp discover --limit {limit * 2}[/cyan]  "
-            f"[dim]Install:[/dim] [cyan]/mcp install <slug>[/cyan]\n"
+            f"[dim]Install:[/dim] [cyan]/mcp install <slug>[/cyan]\n",
         )
         registry_list = ", ".join(sorted(set(REGISTRY_ALIASES.keys())))
         console.print(f"[dim]Registries: {registry_list}[/dim]\n")
@@ -151,7 +155,9 @@ def cmd_mcp_list(args: list[str]) -> None:
             print_info(f"Config location: {resolve_obscura_mcp_dir()}")
             return
 
-        console.print(f"\n\U0001f4e6 [bold cyan]Configured MCP Servers ({len(servers)})[/bold cyan]\n")
+        console.print(
+            f"\n\U0001f4e6 [bold cyan]Configured MCP Servers ({len(servers)})[/bold cyan]\n",
+        )
 
         table = Table(show_header=True)
         table.add_column("Name", style="cyan", width=20)
@@ -162,7 +168,9 @@ def cmd_mcp_list(args: list[str]) -> None:
         for server in servers:
             status_parts = []
             if server.missing_env:
-                status_parts.append(f"\u26a0\ufe0f  Missing: {', '.join(server.missing_env)}")
+                status_parts.append(
+                    f"\u26a0\ufe0f  Missing: {', '.join(server.missing_env)}",
+                )
             else:
                 status_parts.append("\u2705 Ready")
 
@@ -183,8 +191,12 @@ def cmd_mcp_list(args: list[str]) -> None:
 
         missing_count = sum(1 for s in servers if s.missing_env)
         if missing_count > 0:
-            console.print(f"\n\u26a0\ufe0f  [yellow]{missing_count} server(s) need environment variables[/yellow]")
-            console.print("\U0001f4a1 Use [cyan]/mcp env[/cyan] to set up missing variables\n")
+            console.print(
+                f"\n\u26a0\ufe0f  [yellow]{missing_count} server(s) need environment variables[/yellow]",
+            )
+            console.print(
+                "\U0001f4a1 Use [cyan]/mcp env[/cyan] to set up missing variables\n",
+            )
         else:
             console.print("\n\u2705 [green]All servers ready to use![/green]\n")
 
@@ -202,6 +214,7 @@ def cmd_mcp_select(args: list[str]) -> None:
         /mcp select create a github PR
         /mcp select query postgres database
         /mcp select scrape website with playwright
+
     """
     if not args:
         print_error("Usage: /mcp select <task description>")
@@ -216,7 +229,9 @@ def cmd_mcp_select(args: list[str]) -> None:
         console.print(f"\n\U0001f3af [bold cyan]Task:[/bold cyan] {task_text}\n")
 
         if selected:
-            console.print(f"\u2705 [green]Selected {len(selected)} server(s):[/green]\n")
+            console.print(
+                f"\u2705 [green]Selected {len(selected)} server(s):[/green]\n",
+            )
 
             table = Table(show_header=True)
             table.add_column("Server", style="cyan")
@@ -232,7 +247,11 @@ def cmd_mcp_select(args: list[str]) -> None:
 
                 keywords = _SERVER_KEYWORDS.get(name, (name,))
                 matched_kws = [kw for kw in keywords if kw.lower() in task_text.lower()]
-                status = "\u26a0\ufe0f  Missing env" if server.missing_env else "\u2705 Ready"
+                status = (
+                    "\u26a0\ufe0f  Missing env"
+                    if server.missing_env
+                    else "\u2705 Ready"
+                )
 
                 table.add_row(name, ", ".join(matched_kws[:3]), status)
 
@@ -267,7 +286,9 @@ def cmd_mcp_env(args: list[str]) -> None:
             print_ok("\u2705 All environment variables are set!")
             return
 
-        console.print("\n\u26a0\ufe0f  [yellow]Missing Environment Variables[/yellow]\n")
+        console.print(
+            "\n\u26a0\ufe0f  [yellow]Missing Environment Variables[/yellow]\n",
+        )
 
         if export_format:
             console.print("[dim]# Add these to your ~/.zshrc or ~/.bashrc:[/dim]\n")
@@ -290,7 +311,9 @@ def cmd_mcp_env(args: list[str]) -> None:
                     table.add_row(server_name, var, display_value)
 
             console.print(table)
-            console.print("\n\U0001f4a1 Use [cyan]/mcp env --export[/cyan] to get export commands\n")
+            console.print(
+                "\n\U0001f4a1 Use [cyan]/mcp env --export[/cyan] to get export commands\n",
+            )
 
     except Exception as e:
         print_error(f"Failed to check environment: {e}")
@@ -305,6 +328,7 @@ def cmd_mcp_install(args: list[str]) -> None:
     Examples:
         /mcp install github-mcp
         /mcp install playwright-mcp --name browser
+
     """
     if not args:
         print_error("Usage: /mcp install <slug>")
@@ -349,7 +373,9 @@ def cmd_mcp_install(args: list[str]) -> None:
 
         print_ok(f"\u2705 Installed '{name}' \u2192 {slug}")
         print_info(f"Config: {config_file}")
-        console.print("\n\U0001f4a1 Run [cyan]/mcp list[/cyan] to see all configured servers\n")
+        console.print(
+            "\n\U0001f4a1 Run [cyan]/mcp list[/cyan] to see all configured servers\n",
+        )
 
     except Exception as e:
         print_error(f"Installation failed: {e}")
@@ -360,7 +386,10 @@ def cmd_mcp_install(args: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 MCP_COMMANDS: dict[str, tuple[Callable[[list[str]], None], str]] = {
-    "discover": (cmd_mcp_discover, "Discover MCP servers from a registry (default: mcp.so)"),
+    "discover": (
+        cmd_mcp_discover,
+        "Discover MCP servers from a registry (default: mcp.so)",
+    ),
     "list": (cmd_mcp_list, "List currently configured MCP servers"),
     "select": (cmd_mcp_select, "Auto-select servers based on task keywords"),
     "env": (cmd_mcp_env, "Check and set up environment variables"),
@@ -382,9 +411,11 @@ def handle_mcp_command(args: list[str]) -> None:
         console.print(table)
         console.print(
             "\n[dim]Default registry:[/dim] [cyan]mcp.so[/cyan]  "
-            "[dim]|  Switch:[/dim] [cyan]/mcp discover --registry mcpservers.org[/cyan]"
+            "[dim]|  Switch:[/dim] [cyan]/mcp discover --registry mcpservers.org[/cyan]",
         )
-        console.print("\U0001f4a1 Use [cyan]/mcp discover --page N[/cyan] for pagination\n")
+        console.print(
+            "\U0001f4a1 Use [cyan]/mcp discover --page N[/cyan] for pagination\n",
+        )
         return
 
     subcommand = args[0]

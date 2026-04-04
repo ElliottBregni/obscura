@@ -8,14 +8,14 @@ def make_provider(*args, **kwargs):
     """
 
     class SampleProvider:
-        def __init__(self):
+        def __init__(self) -> None:
             self.name = "sample_provider"
 
         def provide(self, data=None):
             """Example provide method that echoes input with a message."""
             return {"provider": self.name, "echo": data}
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return f"<SampleProvider name={self.name}>"
 
     return SampleProvider()

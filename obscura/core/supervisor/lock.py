@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.lock — Cross-process session locking via SQLite.
+"""obscura.core.supervisor.lock — Cross-process session locking via SQLite.
 
 Uses SQLite's own serialization (BEGIN IMMEDIATE) to implement advisory
 locks. No file locks needed — works on any filesystem including NFS/PVC.
@@ -213,11 +212,15 @@ class SessionLock:
 
     def _get_lock_sync(self, session_id: str) -> LockInfo | None:
         """Get current lock info for a session."""
-        row = self._conn().execute(
-            "SELECT session_id, holder_id, acquired_at, heartbeat_at, expires_at "
-            "FROM session_locks WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT session_id, holder_id, acquired_at, heartbeat_at, expires_at "
+                "FROM session_locks WHERE session_id = ?",
+                (session_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return LockInfo(
@@ -233,7 +236,8 @@ class SessionLock:
         conn = self._conn()
         now = datetime.now(UTC).isoformat()
         cursor = conn.execute(
-            "DELETE FROM session_locks WHERE expires_at < ?", (now,)
+            "DELETE FROM session_locks WHERE expires_at < ?",
+            (now,),
         )
         conn.commit()
         count = cursor.rowcount
@@ -256,13 +260,17 @@ class SessionLock:
 
         Raises:
             LockAcquisitionError: If lock cannot be acquired within timeout.
+
         """
         deadline = time.monotonic() + timeout
         wait_start = time.monotonic()
 
         while True:
             info = await asyncio.to_thread(
-                self._acquire_sync, session_id, holder_id, ttl=ttl
+                self._acquire_sync,
+                session_id,
+                holder_id,
+                ttl=ttl,
             )
             if info is not None:
                 wait_ms = (time.monotonic() - wait_start) * 1000
@@ -297,7 +305,10 @@ class SessionLock:
     ) -> bool:
         """Refresh the lock TTL (heartbeat)."""
         return await asyncio.to_thread(
-            self._heartbeat_sync, session_id, holder_id, ttl=ttl
+            self._heartbeat_sync,
+            session_id,
+            holder_id,
+            ttl=ttl,
         )
 
     async def get_lock(self, session_id: str) -> LockInfo | None:

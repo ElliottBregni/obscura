@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.agent.definitions import (
     AgentDefinition,
@@ -11,6 +11,9 @@ from obscura.agent.definitions import (
     load_definitions_dir,
     resolve_all_definitions,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_load_toml_frontmatter(tmp_path: Path) -> None:
@@ -32,10 +35,12 @@ def test_load_toml_frontmatter(tmp_path: Path) -> None:
 
 def test_load_definitions_dir(tmp_path: Path) -> None:
     (tmp_path / "agent-a.md").write_text(
-        '+++\nname = "alpha"\n+++\nAlpha prompt.\n', encoding="utf-8"
+        '+++\nname = "alpha"\n+++\nAlpha prompt.\n',
+        encoding="utf-8",
     )
     (tmp_path / "agent-b.md").write_text(
-        '+++\nname = "beta"\n+++\nBeta prompt.\n', encoding="utf-8"
+        '+++\nname = "beta"\n+++\nBeta prompt.\n',
+        encoding="utf-8",
     )
     defs = load_definitions_dir(tmp_path, source="test")
     assert "alpha" in defs

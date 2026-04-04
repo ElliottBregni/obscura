@@ -1,5 +1,4 @@
-"""
-obscura.tools.task_tools — Background task management tools.
+"""obscura.tools.task_tools — Background task management tools.
 
 Provides six tools for creating, tracking, and managing background tasks:
   - task_create: Create a new task
@@ -20,10 +19,12 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.tools import tool
-from obscura.core.types import ToolSpec
+
+if TYPE_CHECKING:
+    from obscura.core.types import ToolSpec
 
 
 def _get_db() -> sqlite3.Connection:
@@ -73,7 +74,10 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         "properties": {
             "subject": {"type": "string", "description": "Brief task title."},
             "description": {"type": "string", "description": "Detailed description."},
-            "active_form": {"type": "string", "description": "Present continuous form (e.g. 'Running tests')."},
+            "active_form": {
+                "type": "string",
+                "description": "Present continuous form (e.g. 'Running tests').",
+            },
             "metadata": {"type": "object", "description": "Arbitrary metadata."},
         },
         "required": ["subject"],
@@ -93,7 +97,15 @@ async def task_create(
             """INSERT INTO tasks
                (task_id, subject, description, status, active_form, metadata, created_at, updated_at)
                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
-            (task_id, subject, description, active_form, json.dumps(metadata or {}), now, now),
+            (
+                task_id,
+                subject,
+                description,
+                active_form,
+                json.dumps(metadata or {}),
+                now,
+                now,
+            ),
         )
         db.commit()
     finally:
@@ -135,7 +147,7 @@ async def task_list() -> str:
     db = _get_db()
     try:
         rows = db.execute(
-            "SELECT * FROM tasks WHERE status != 'deleted' ORDER BY created_at DESC"
+            "SELECT * FROM tasks WHERE status != 'deleted' ORDER BY created_at DESC",
         ).fetchall()
     finally:
         db.close()
@@ -193,48 +205,74 @@ async def task_update(
                 db.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
                 db.commit()
                 return json.dumps({"ok": True, "task_id": task_id, "deleted": True})
-            db.execute("UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?", (status, now, task_id))
+            db.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
+                (status, now, task_id),
+            )
             updated_fields.append("status")
 
         if subject and subject != current["subject"]:
-            db.execute("UPDATE tasks SET subject = ?, updated_at = ? WHERE task_id = ?", (subject, now, task_id))
+            db.execute(
+                "UPDATE tasks SET subject = ?, updated_at = ? WHERE task_id = ?",
+                (subject, now, task_id),
+            )
             updated_fields.append("subject")
 
         if description:
-            db.execute("UPDATE tasks SET description = ?, updated_at = ? WHERE task_id = ?", (description, now, task_id))
+            db.execute(
+                "UPDATE tasks SET description = ?, updated_at = ? WHERE task_id = ?",
+                (description, now, task_id),
+            )
             updated_fields.append("description")
 
         if active_form:
-            db.execute("UPDATE tasks SET active_form = ?, updated_at = ? WHERE task_id = ?", (active_form, now, task_id))
+            db.execute(
+                "UPDATE tasks SET active_form = ?, updated_at = ? WHERE task_id = ?",
+                (active_form, now, task_id),
+            )
             updated_fields.append("active_form")
 
         if owner:
-            db.execute("UPDATE tasks SET owner = ?, updated_at = ? WHERE task_id = ?", (owner, now, task_id))
+            db.execute(
+                "UPDATE tasks SET owner = ?, updated_at = ? WHERE task_id = ?",
+                (owner, now, task_id),
+            )
             updated_fields.append("owner")
 
         if add_blocks:
             blocks = current["blocks"]
             blocks.extend(b for b in add_blocks if b not in blocks)
-            db.execute("UPDATE tasks SET blocks = ?, updated_at = ? WHERE task_id = ?", (json.dumps(blocks), now, task_id))
+            db.execute(
+                "UPDATE tasks SET blocks = ?, updated_at = ? WHERE task_id = ?",
+                (json.dumps(blocks), now, task_id),
+            )
             updated_fields.append("blocks")
 
         if add_blocked_by:
             blocked_by = current["blocked_by"]
             blocked_by.extend(b for b in add_blocked_by if b not in blocked_by)
-            db.execute("UPDATE tasks SET blocked_by = ?, updated_at = ? WHERE task_id = ?", (json.dumps(blocked_by), now, task_id))
+            db.execute(
+                "UPDATE tasks SET blocked_by = ?, updated_at = ? WHERE task_id = ?",
+                (json.dumps(blocked_by), now, task_id),
+            )
             updated_fields.append("blocked_by")
 
         if metadata:
             merged = current["metadata"]
             merged.update(metadata)
-            db.execute("UPDATE tasks SET metadata = ?, updated_at = ? WHERE task_id = ?", (json.dumps(merged), now, task_id))
+            db.execute(
+                "UPDATE tasks SET metadata = ?, updated_at = ? WHERE task_id = ?",
+                (json.dumps(merged), now, task_id),
+            )
             updated_fields.append("metadata")
 
         db.commit()
     finally:
         db.close()
 
-    return json.dumps({"ok": True, "task_id": task_id, "updated_fields": updated_fields})
+    return json.dumps(
+        {"ok": True, "task_id": task_id, "updated_fields": updated_fields},
+    )
 
 
 @tool(
@@ -243,28 +281,34 @@ async def task_update(
     {
         "type": "object",
         "properties": {
-            "task_id": {"type": "string", "description": "Background task ID from run_shell."},
+            "task_id": {
+                "type": "string",
+                "description": "Background task ID from run_shell.",
+            },
         },
         "required": ["task_id"],
     },
 )
 async def task_output(task_id: str) -> str:
     from obscura.core.background_tasks import get_background_task_manager
+
     mgr = get_background_task_manager()
     bg_task = mgr.get(task_id)
     if bg_task is None:
         return _json_error("task_not_found", task_id=task_id)
-    return json.dumps({
-        "ok": True,
-        "task_id": bg_task.task_id,
-        "status": bg_task.status,
-        "command": bg_task.command,
-        "stdout": bg_task.stdout[-50_000:] if bg_task.stdout else "",
-        "stderr": bg_task.stderr[-10_000:] if bg_task.stderr else "",
-        "exit_code": bg_task.exit_code,
-        "started_at": bg_task.started_at,
-        "completed_at": bg_task.completed_at,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": bg_task.task_id,
+            "status": bg_task.status,
+            "command": bg_task.command,
+            "stdout": bg_task.stdout[-50_000:] if bg_task.stdout else "",
+            "stderr": bg_task.stderr[-10_000:] if bg_task.stderr else "",
+            "exit_code": bg_task.exit_code,
+            "started_at": bg_task.started_at,
+            "completed_at": bg_task.completed_at,
+        },
+    )
 
 
 @tool(
@@ -280,6 +324,7 @@ async def task_output(task_id: str) -> str:
 )
 async def task_stop(task_id: str) -> str:
     from obscura.core.background_tasks import get_background_task_manager
+
     mgr = get_background_task_manager()
     stopped = await mgr.stop(task_id)
     if not stopped:
@@ -290,10 +335,10 @@ async def task_stop(task_id: str) -> str:
 def get_task_tool_specs() -> list[ToolSpec]:
     """Return task management tool specs for registration."""
     return [
-        cast(ToolSpec, getattr(task_create, "spec")),
-        cast(ToolSpec, getattr(task_get, "spec")),
-        cast(ToolSpec, getattr(task_list, "spec")),
-        cast(ToolSpec, getattr(task_update, "spec")),
-        cast(ToolSpec, getattr(task_output, "spec")),
-        cast(ToolSpec, getattr(task_stop, "spec")),
+        cast("ToolSpec", task_create.spec),
+        cast("ToolSpec", task_get.spec),
+        cast("ToolSpec", task_list.spec),
+        cast("ToolSpec", task_update.spec),
+        cast("ToolSpec", task_output.spec),
+        cast("ToolSpec", task_stop.spec),
     ]

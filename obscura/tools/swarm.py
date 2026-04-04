@@ -20,6 +20,8 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -51,7 +53,7 @@ def load_agent_configs(include_disabled: bool = False) -> dict[str, dict[str, An
     configs: dict[str, dict[str, Any]] = {}
     try:
         configs.update(
-            load_merged_agents(global_home, include_disabled=include_disabled)
+            load_merged_agents(global_home, include_disabled=include_disabled),
         )
     except Exception:
         logger.warning("Failed to load agents from %s", global_home, exc_info=True)
@@ -92,6 +94,35 @@ class SwarmToolContext:
     parent_agent_id: str = ""
     agent_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
     backend: str = "copilot"
+    delegate_allowlist: list[str] = field(default_factory=list)
+
+
+# Background agent tracking — maps agent_id to progress info.
+# Shared across all tool instances in the same process.
+_background_agents: dict[str, dict[str, Any]] = {}
+
+
+async def _run_background_agent(
+    ctx: SwarmToolContext,
+    agent_type: str,
+    prompt: str,
+    model: str = "",
+) -> None:
+    """Run an agent in the background, updating _background_agents with progress."""
+    agent_id = f"bg-{agent_type}-{id(prompt) % 10000:04d}"
+    _background_agents[agent_id] = {
+        "agent_type": agent_type,
+        "status": "starting",
+        "output_lines": [],
+        "error": None,
+    }
+    try:
+        result = await _run_one_agent(ctx, agent_type, prompt, model)
+        _background_agents[agent_id]["status"] = "completed" if result.get("ok") else "failed"
+        _background_agents[agent_id]["result"] = result
+    except Exception as exc:
+        _background_agents[agent_id]["status"] = "failed"
+        _background_agents[agent_id]["error"] = str(exc)
 
 
 def _build_agent_type_list(agent_configs: dict[str, dict[str, Any]]) -> str:
@@ -119,18 +150,75 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
         agent_type: str,
         prompt: str,
         model: str = "",
+        background: bool = False,
     ) -> str:
-        from obscura.manifest.models import AgentManifest, CapabilityConfig, PluginDepsConfig
+        # Background mode: fire off the agent as an asyncio task and return
+        # immediately with an agent_id handle for check_agent.
+        if background:
+            agent_id = f"bg-{agent_type}-{id(prompt) % 10000:04d}"
+            _background_agents[agent_id] = {
+                "agent_type": agent_type,
+                "status": "running",
+                "result": None,
+                "error": None,
+            }
+
+            async def _bg_run() -> None:
+                try:
+                    result = await _run_one_agent(ctx, agent_type, prompt, model)
+                    _background_agents[agent_id]["status"] = (
+                        "completed" if result.get("ok") else "failed"
+                    )
+                    _background_agents[agent_id]["result"] = result
+                except Exception as exc:
+                    _background_agents[agent_id]["status"] = "failed"
+                    _background_agents[agent_id]["error"] = str(exc)
+
+            asyncio.create_task(_bg_run())
+            return json.dumps({
+                "ok": True,
+                "background": True,
+                "agent_id": agent_id,
+                "agent_name": agent_type,
+                "message": (
+                    f"Agent '{agent_type}' launched in background. "
+                    f"Use check_agent(agent_id='{agent_id}') to check progress."
+                ),
+            })
+
+        from obscura.manifest.models import (
+            AgentManifest,
+            CapabilityConfig,
+            PluginDepsConfig,
+        )
 
         runtime = ctx.runtime
         if runtime is None:
             return json.dumps({"ok": False, "error": "no_runtime"})
 
+        # Enforce delegation allowlist from parent agent
+        if ctx.delegate_allowlist and agent_type not in ctx.delegate_allowlist:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "agent_not_allowed",
+                    "agent_name": agent_type,
+                    "message": (
+                        f"Agent type '{agent_type}' is not in your delegation allowlist. "
+                        f"Allowed agents: {ctx.delegate_allowlist}"
+                    ),
+                },
+            )
+
         # Resolve agent config — try markdown definitions first, then YAML.
         cfg = None
         _definition_match = False
         try:
-            from obscura.agent.definitions import resolve_all_definitions, definition_to_config_dict
+            from obscura.agent.definitions import (
+                definition_to_config_dict,
+                resolve_all_definitions,
+            )
+
             defs = resolve_all_definitions()
             if agent_type in defs:
                 defn = defs[agent_type]
@@ -152,15 +240,23 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                 if not isinstance(s_cfg, dict):
                     s_cfg = {}
                 raw_caps = cfg.get("capabilities", {})
-                cap_cfg = CapabilityConfig(
-                    grant=list(raw_caps.get("grant", [])),
-                    deny=list(raw_caps.get("deny", [])),
-                ) if isinstance(raw_caps, dict) else CapabilityConfig()
+                cap_cfg = (
+                    CapabilityConfig(
+                        grant=list(raw_caps.get("grant", [])),
+                        deny=list(raw_caps.get("deny", [])),
+                    )
+                    if isinstance(raw_caps, dict)
+                    else CapabilityConfig()
+                )
                 plugins_cfg = cfg.get("plugins", {})
-                plugin_deps = PluginDepsConfig(
-                    require=list(plugins_cfg.get("require", [])),
-                    optional=list(plugins_cfg.get("optional", [])),
-                ) if isinstance(plugins_cfg, dict) else PluginDepsConfig()
+                plugin_deps = (
+                    PluginDepsConfig(
+                        require=list(plugins_cfg.get("require", [])),
+                        optional=list(plugins_cfg.get("optional", [])),
+                    )
+                    if isinstance(plugins_cfg, dict)
+                    else PluginDepsConfig()
+                )
                 manifest = AgentManifest(
                     name=cfg["name"],
                     provider=model or cfg.get("model", ctx.backend),
@@ -196,31 +292,35 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     output_lines.append(event.text)
 
             result_text = "".join(output_lines)
-            return json.dumps({
-                "ok": True,
-                "agent_name": agent_type,
-                "agent_id": agent.id,
-                "result": result_text,
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "agent_name": agent_type,
+                    "agent_id": agent.id,
+                    "result": result_text,
+                },
+            )
 
         except Exception as exc:
             logger.warning(
-                "spawn_subagent failed for '%s': %s", agent_type, exc,
+                "spawn_subagent failed for '%s': %s",
+                agent_type,
+                exc,
                 exc_info=True,
             )
-            return json.dumps({
-                "ok": False,
-                "error": "spawn_failed",
-                "agent_name": agent_type,
-                "message": str(exc),
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "spawn_failed",
+                    "agent_name": agent_type,
+                    "message": str(exc),
+                },
+            )
 
         finally:
             if agent is not None:
-                try:
+                with contextlib.suppress(Exception):
                     await agent.stop()
-                except Exception:
-                    pass
 
     agent_types = _build_agent_type_list(ctx.agent_configs)
 
@@ -250,8 +350,391 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     "type": "string",
                     "description": "Optional model override (copilot, claude, openai). Defaults to agent config.",
                 },
+                "background": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Run in background. Returns immediately with an agent_id handle. "
+                        "Use check_agent to poll for results."
+                    ),
+                },
             },
             "required": ["agent_type", "prompt"],
+        },
+        handler=_handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# spawn_agents — batch concurrent dispatch
+# ---------------------------------------------------------------------------
+
+
+async def _run_one_agent(
+    ctx: SwarmToolContext,
+    agent_type: str,
+    prompt: str,
+    model: str = "",
+) -> dict[str, Any]:
+    """Spawn a single agent, run to completion, return result dict."""
+    from obscura.manifest.models import (
+        AgentManifest,
+        CapabilityConfig,
+        PluginDepsConfig,
+    )
+
+    runtime = ctx.runtime
+    if runtime is None:
+        return {"ok": False, "error": "no_runtime", "agent_name": agent_type}
+
+    if ctx.delegate_allowlist and agent_type not in ctx.delegate_allowlist:
+        return {
+            "ok": False,
+            "error": "agent_not_allowed",
+            "agent_name": agent_type,
+            "message": f"Not in allowlist. Allowed: {ctx.delegate_allowlist}",
+        }
+
+    cfg = None
+    try:
+        from obscura.agent.definitions import (
+            definition_to_config_dict,
+            resolve_all_definitions,
+        )
+
+        defs = resolve_all_definitions()
+        if agent_type in defs:
+            defn = defs[agent_type]
+            cfg = definition_to_config_dict(defn, parent_model=model or ctx.backend)
+            cfg["name"] = defn.name
+            cfg["system_prompt"] = defn.system_prompt
+            cfg["tools"] = list(defn.tools)
+            cfg["max_turns"] = defn.max_turns
+    except Exception:
+        pass
+    if cfg is None:
+        cfg = ctx.agent_configs.get(agent_type)
+
+    agent = None
+    try:
+        if cfg is not None:
+            s_cfg = cfg.get("skills", {})
+            if not isinstance(s_cfg, dict):
+                s_cfg = {}
+            raw_caps = cfg.get("capabilities", {})
+            cap_cfg = (
+                CapabilityConfig(
+                    grant=list(raw_caps.get("grant", [])),
+                    deny=list(raw_caps.get("deny", [])),
+                )
+                if isinstance(raw_caps, dict)
+                else CapabilityConfig()
+            )
+            plugins_cfg = cfg.get("plugins", {})
+            plugin_deps = (
+                PluginDepsConfig(
+                    require=list(plugins_cfg.get("require", [])),
+                    optional=list(plugins_cfg.get("optional", [])),
+                )
+                if isinstance(plugins_cfg, dict)
+                else PluginDepsConfig()
+            )
+            manifest = AgentManifest(
+                name=cfg["name"],
+                provider=model or cfg.get("model", ctx.backend),
+                system_prompt=cfg.get("system_prompt", ""),
+                max_turns=cfg.get("max_turns", 25),
+                tools=cfg.get("tools", []),
+                tags=cfg.get("tags", []),
+                mcp_servers=(
+                    cfg.get("mcp_servers", [])
+                    if isinstance(cfg.get("mcp_servers"), list)
+                    else []
+                ),
+                skills_config=s_cfg,
+                capabilities=cap_cfg,
+                plugins=plugin_deps,
+            )
+            agent = runtime.spawn_from_manifest(manifest)
+        else:
+            agent = runtime.spawn(
+                agent_type,
+                model=model or ctx.backend,
+                system_prompt=f"You are a {agent_type} specialist. Complete the task thoroughly.",
+                parent_agent_id=ctx.parent_agent_id,
+            )
+
+        await agent.start()
+        output_lines: list[str] = []
+        async for event in agent.stream_loop(prompt):
+            if hasattr(event, "text") and event.text:
+                output_lines.append(event.text)
+
+        return {
+            "ok": True,
+            "agent_name": agent_type,
+            "agent_id": agent.id,
+            "result": "".join(output_lines),
+        }
+    except Exception as exc:
+        logger.warning("Agent '%s' failed: %s", agent_type, exc, exc_info=True)
+        return {
+            "ok": False,
+            "error": "spawn_failed",
+            "agent_name": agent_type,
+            "message": str(exc),
+        }
+    finally:
+        if agent is not None:
+            with contextlib.suppress(Exception):
+                await agent.stop()
+
+
+def make_spawn_agents_tool(ctx: SwarmToolContext) -> ToolSpec:
+    """Build a ``spawn_agents`` ToolSpec for concurrent multi-agent dispatch.
+
+    Accepts a JSON array of ``{agent_type, prompt, model?}`` and runs
+    **all** concurrently via ``asyncio.gather``.
+    """
+
+    async def _handler(agents: list[dict[str, str]]) -> str:
+        if not agents:
+            return json.dumps({"ok": False, "error": "empty_agent_list"})
+
+        coros = [
+            _run_one_agent(
+                ctx,
+                agent_type=spec.get("agent_type", "general-purpose"),
+                prompt=spec.get("prompt", ""),
+                model=spec.get("model", ""),
+            )
+            for spec in agents
+        ]
+        results = await asyncio.gather(*coros)
+        return json.dumps({"ok": True, "results": list(results)})
+
+    agent_types = _build_agent_type_list(ctx.agent_configs)
+
+    return ToolSpec(
+        name="spawn_agents",
+        description=(
+            "Spawn MULTIPLE sub-agents concurrently and wait for all results. "
+            "Much faster than calling spawn_subagent multiple times — "
+            "all agents run in parallel. "
+            f"Available agent types: {agent_types}"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "description": "List of agent tasks to run concurrently.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent_type": {
+                                "type": "string",
+                                "description": "Agent type to spawn.",
+                            },
+                            "prompt": {
+                                "type": "string",
+                                "description": "Task for this agent.",
+                            },
+                            "model": {
+                                "type": "string",
+                                "description": "Optional model override.",
+                            },
+                        },
+                        "required": ["agent_type", "prompt"],
+                    },
+                },
+            },
+            "required": ["agents"],
+        },
+        handler=_handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# send_message — lightweight teammate addressing
+# ---------------------------------------------------------------------------
+
+
+def make_send_message_tool(ctx: SwarmToolContext) -> ToolSpec:
+    """Build a ``send_message`` ToolSpec for agent-to-agent communication.
+
+    Lighter than ``delegate_to_agent`` — sends a message to an already
+    running peer, avoiding a full agent spawn cycle.
+    """
+
+    async def _handler(
+        to: str,
+        message: str,
+        mode: str = "request",
+    ) -> str:
+        from obscura.agent.agents import AgentMessage, AgentStatus
+
+        runtime = ctx.runtime
+        if runtime is None:
+            return json.dumps({"ok": False, "error": "no_runtime"})
+
+        # Resolve target by name or ID
+        target_agent = None
+        for agent in runtime.agents.values():
+            if agent.config.name == to or agent.id == to:
+                target_agent = agent
+                break
+
+        if target_agent is None:
+            available = [
+                a.config.name
+                for a in runtime.agents.values()
+                if a.status in (AgentStatus.RUNNING, AgentStatus.WAITING)
+            ]
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "agent_not_found",
+                    "message": f"No running agent named '{to}'. Available: {available}",
+                },
+            )
+
+        if mode == "fire_and_forget":
+            msg = AgentMessage(
+                source=ctx.parent_agent_id or "coordinator",
+                target=target_agent.id,
+                content=message,
+                message_type="text",
+            )
+            target_agent.enqueue_message(msg)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "mode": "fire_and_forget",
+                    "target": to,
+                    "status": "enqueued",
+                },
+            )
+
+        # Request mode: invoke peer loop
+        try:
+            result = await runtime.invoke_peer(
+                runtime.peer_registry.resolve(target_agent.id),
+                message,
+                use_loop=True,
+            )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "mode": "request",
+                    "target": to,
+                    "result": result,
+                },
+            )
+        except Exception as exc:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": type(exc).__name__,
+                    "target": to,
+                    "message": str(exc),
+                },
+            )
+
+    agent_names = sorted(
+        name
+        for name, cfg in ctx.agent_configs.items()
+        if cfg.get("type", "loop") != "daemon"
+    )
+
+    return ToolSpec(
+        name="send_message",
+        description=(
+            "Send a message to a running teammate agent by name or ID. "
+            "Use mode='request' (default) to wait for a response, or "
+            "'fire_and_forget' to send without waiting. "
+            f"Known agents: {', '.join(agent_names[:10])}"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "to": {
+                    "type": "string",
+                    "description": "Name or ID of the target agent.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The message to send.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["request", "fire_and_forget"],
+                    "default": "request",
+                    "description": "Delivery mode.",
+                },
+            },
+            "required": ["to", "message"],
+        },
+        handler=_handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# check_agent — poll background agent status
+# ---------------------------------------------------------------------------
+
+
+def make_check_agent_tool() -> ToolSpec:
+    """Build a ``check_agent`` ToolSpec for polling background agent status.
+
+    Returns the current status of a backgrounded agent launched via
+    ``spawn_subagent(background=true)``.  If the agent is done, returns
+    the full result.
+    """
+
+    async def _handler(agent_id: str) -> str:
+        info = _background_agents.get(agent_id)
+        if info is None:
+            return json.dumps({
+                "ok": False,
+                "error": "not_found",
+                "message": (
+                    f"No background agent with id '{agent_id}'. "
+                    f"Active: {list(_background_agents.keys())}"
+                ),
+            })
+
+        status = info["status"]
+        response: dict[str, Any] = {
+            "ok": True,
+            "agent_id": agent_id,
+            "agent_type": info["agent_type"],
+            "status": status,
+        }
+
+        if status == "completed" and info.get("result"):
+            response["result"] = info["result"]
+        elif status == "failed":
+            response["error"] = info.get("error") or info.get("result", {}).get("message")
+
+        return json.dumps(response)
+
+    return ToolSpec(
+        name="check_agent",
+        description=(
+            "Check the status of a background agent launched via "
+            "spawn_subagent(background=true). Returns status and result "
+            "if the agent has completed."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "The agent_id returned by spawn_subagent in background mode.",
+                },
+            },
+            "required": ["agent_id"],
         },
         handler=_handler,
     )

@@ -7,9 +7,9 @@ import pytest
 from obscura.core.supervisor.errors import StateTransitionError
 from obscura.core.supervisor.state_machine import SessionStateMachine
 from obscura.core.supervisor.types import (
+    VALID_SUPERVISOR_TRANSITIONS,
     SupervisorEventKind,
     SupervisorState,
-    VALID_SUPERVISOR_TRANSITIONS,
 )
 
 

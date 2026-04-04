@@ -1,5 +1,4 @@
-"""
-obscura.heartbeat — Heartbeat monitoring system for Obscura agents.
+"""obscura.heartbeat — Heartbeat monitoring system for Obscura agents.
 
 This module provides:
 - HeartbeatMonitor: Service that tracks agent health
@@ -25,73 +24,73 @@ Usage:
 
 from __future__ import annotations
 
-from obscura.heartbeat.types import (
-    HealthStatus,
-    Heartbeat,
-    HealthCheck,
-    HealthRecord,
-    Alert,
-    SystemMetrics,
-    HealthStatusTransition,
-)
-from obscura.heartbeat.store import (
-    HeartbeatStore,
-    InMemoryHeartbeatStore,
-    FileHeartbeatStore,
-    get_default_store,
-    set_default_store,
-)
 from obscura.heartbeat.alerts import (
-    AlertManager,
     AlertChannel,
+    AlertManager,
     AlertRule,
     LoggingAlertChannel,
-    WebhookAlertChannel,
     SlackAlertChannel,
+    WebhookAlertChannel,
     get_default_alert_manager,
     set_default_alert_manager,
-)
-from obscura.heartbeat.monitor import (
-    HeartbeatMonitor,
-    get_default_monitor,
-    set_default_monitor,
 )
 from obscura.heartbeat.client import (
     AgentHeartbeatClient,
     HeartbeatClientConfig,
     HeartbeatClientPool,
 )
+from obscura.heartbeat.monitor import (
+    HeartbeatMonitor,
+    get_default_monitor,
+    set_default_monitor,
+)
+from obscura.heartbeat.store import (
+    FileHeartbeatStore,
+    HeartbeatStore,
+    InMemoryHeartbeatStore,
+    get_default_store,
+    set_default_store,
+)
+from obscura.heartbeat.types import (
+    Alert,
+    HealthCheck,
+    HealthRecord,
+    HealthStatus,
+    HealthStatusTransition,
+    Heartbeat,
+    SystemMetrics,
+)
 
 __all__ = [
-    # Types
-    "HealthStatus",
-    "Heartbeat",
+    # Client
+    "AgentHeartbeatClient",
+    "Alert",
+    "AlertChannel",
+    # Alerts
+    "AlertManager",
+    "AlertRule",
+    "FileHeartbeatStore",
     "HealthCheck",
     "HealthRecord",
-    "Alert",
-    "SystemMetrics",
+    # Types
+    "HealthStatus",
     "HealthStatusTransition",
+    "Heartbeat",
+    "HeartbeatClientConfig",
+    "HeartbeatClientPool",
+    # Monitor
+    "HeartbeatMonitor",
     # Storage
     "HeartbeatStore",
     "InMemoryHeartbeatStore",
-    "FileHeartbeatStore",
-    "get_default_store",
-    "set_default_store",
-    # Alerts
-    "AlertManager",
-    "AlertChannel",
-    "AlertRule",
     "LoggingAlertChannel",
-    "WebhookAlertChannel",
     "SlackAlertChannel",
+    "SystemMetrics",
+    "WebhookAlertChannel",
     "get_default_alert_manager",
-    "set_default_alert_manager",
-    # Monitor
-    "HeartbeatMonitor",
     "get_default_monitor",
+    "get_default_store",
+    "set_default_alert_manager",
     "set_default_monitor",
-    # Client
-    "AgentHeartbeatClient",
-    "HeartbeatClientConfig",
-    "HeartbeatClientPool",
+    "set_default_store",
 ]

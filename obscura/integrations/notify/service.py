@@ -1,16 +1,20 @@
 from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from obscura.notify.factory import create_storage
-from obscura.notify.storage import Storage
+
+if TYPE_CHECKING:
+    from obscura.notify.storage import Storage
 
 logger = logging.getLogger(__name__)
 
-_storage: Optional[Storage] = None
+_storage: Storage | None = None
 
-async def init_storage(db_url: Optional[str] = None) -> Storage:
+
+async def init_storage(db_url: str | None = None) -> Storage:
     global _storage
     if _storage is not None:
         return _storage
@@ -24,6 +28,7 @@ async def init_storage(db_url: Optional[str] = None) -> Storage:
         raise
     return _storage
 
+
 async def shutdown_storage() -> None:
     global _storage
     if _storage is None:
@@ -35,7 +40,8 @@ async def shutdown_storage() -> None:
     finally:
         _storage = None
 
-def get_storage_sync(db_url: Optional[str] = None) -> Storage:
+
+def get_storage_sync(db_url: str | None = None) -> Storage:
     """Synchronous accessor for scripts/tests that want a Storage instance without async runtime.
 
     It will create an event loop to run init_storage once.

@@ -1,12 +1,12 @@
-"""
-obscura.tools.policy.models — Policy dataclasses for tool access control.
-"""
+"""obscura.tools.policy.models — Policy dataclasses for tool access control."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _empty_frozenset() -> frozenset[str]:
@@ -82,5 +82,4 @@ class PolicyResult:
 
     allowed: bool
     reason: str
-    matched_rule: str = ""
     matched_rule: str = ""

@@ -1,5 +1,4 @@
-"""
-obscura.auth -- Authentication and authorization for the Obscura platform.
+"""obscura.auth -- Authentication and authorization for the Obscura platform.
 
 Re-exports the public API so consumers can write::
 
@@ -22,22 +21,22 @@ from obscura.auth.rbac import get_current_user, require_any_role, require_role
 from obscura.auth.system_prompts import get_tier_system_prompt
 
 __all__ = [
+    "VALID_ROLES",
+    # Middleware
+    "APIKeyAuthMiddleware",
     # Models
     "AuthenticatedUser",
-    "VALID_ROLES",
     # Capability system
     "CapabilityTier",
     "CapabilityToken",
-    "generate_capability_token",
-    "validate_capability_token",
-    "resolve_tier",
-    "filter_prompt",
     "FilterResult",
-    "get_tier_system_prompt",
-    # Middleware
-    "APIKeyAuthMiddleware",
+    "filter_prompt",
+    "generate_capability_token",
     # RBAC
     "get_current_user",
-    "require_role",
+    "get_tier_system_prompt",
     "require_any_role",
+    "require_role",
+    "resolve_tier",
+    "validate_capability_token",
 ]

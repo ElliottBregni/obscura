@@ -35,14 +35,14 @@ def _make_channel(name="test", namespace="test:ns", **trigger_kwargs):
 # ---------------------------------------------------------------------------
 
 
-def test_extract_file_paths_from_text():
+def test_extract_file_paths_from_text() -> None:
     store = _make_store()
     router = ContextRouter([], store)
     router.update_signals_from_text("Edit obscura/providers/copilot.py to fix the bug")
     assert "obscura/providers/copilot.py" in router.signals.file_paths
 
 
-def test_extract_tool_name_from_tool_call():
+def test_extract_tool_name_from_tool_call() -> None:
     store = _make_store()
     router = ContextRouter([], store)
     router.update_signals_from_tool_call("git_status", {"path": "/repo"})
@@ -50,7 +50,7 @@ def test_extract_tool_name_from_tool_call():
     assert "/repo" in router.signals.file_paths
 
 
-def test_signals_persist_across_turns():
+def test_signals_persist_across_turns() -> None:
     store = _make_store()
     router = ContextRouter([], store)
     router.update_signals_from_tool_call("git_status", {})
@@ -59,7 +59,7 @@ def test_signals_persist_across_turns():
     assert "git_status" in router.signals.tool_names
 
 
-def test_keywords_reset_per_turn():
+def test_keywords_reset_per_turn() -> None:
     store = _make_store()
     router = ContextRouter([], store)
     router.update_signals_from_text("jira ticket PROJ-123")
@@ -73,8 +73,12 @@ def test_keywords_reset_per_turn():
 # ---------------------------------------------------------------------------
 
 
-def test_file_glob_trigger():
-    channel = _make_channel("arch", "workspace:arch", file_globs=("obscura/providers/*.py",))
+def test_file_glob_trigger() -> None:
+    channel = _make_channel(
+        "arch",
+        "workspace:arch",
+        file_globs=("obscura/providers/*.py",),
+    )
     results = [_make_entry("copilot uses streaming API")]
     store = _make_store(results)
     router = ContextRouter([channel], store)
@@ -84,7 +88,7 @@ def test_file_glob_trigger():
     assert "[arch]" in ctx
 
 
-def test_keyword_trigger():
+def test_keyword_trigger() -> None:
     channel = _make_channel("jira", "project:jira", keywords=("jira", "ticket"))
     results = [_make_entry("PROJ-123: Fix login bug")]
     store = _make_store(results)
@@ -94,8 +98,12 @@ def test_keyword_trigger():
     assert "PROJ-123" in ctx
 
 
-def test_tool_name_trigger():
-    channel = _make_channel("git", "git:workflow", tool_names=("git_status", "git_diff"))
+def test_tool_name_trigger() -> None:
+    channel = _make_channel(
+        "git",
+        "git:workflow",
+        tool_names=("git_status", "git_diff"),
+    )
     results = [_make_entry("always rebase before merging")]
     store = _make_store(results)
     router = ContextRouter([channel], store)
@@ -105,11 +113,13 @@ def test_tool_name_trigger():
     assert "always rebase" in ctx
 
 
-def test_always_trigger():
+def test_always_trigger() -> None:
     channel = _make_channel("prefs", "user:prefs", always=True)
     channel = MemoryChannel(
-        name="prefs", namespace="user:prefs",
-        triggers=ChannelTriggers(always=True), injection="turn",
+        name="prefs",
+        namespace="user:prefs",
+        triggers=ChannelTriggers(always=True),
+        injection="turn",
     )
     results = [_make_entry("user prefers concise responses")]
     store = _make_store(results)
@@ -119,7 +129,7 @@ def test_always_trigger():
     assert "concise responses" in ctx
 
 
-def test_no_match_returns_empty():
+def test_no_match_returns_empty() -> None:
     channel = _make_channel("jira", "project:jira", keywords=("jira",))
     store = _make_store([_make_entry("some data")])
     router = ContextRouter([channel], store)
@@ -133,14 +143,20 @@ def test_no_match_returns_empty():
 # ---------------------------------------------------------------------------
 
 
-def test_priority_ordering():
+def test_priority_ordering() -> None:
     ch_low = MemoryChannel(
-        name="low", namespace="ns:low",
-        triggers=ChannelTriggers(always=True), priority=10, injection="turn",
+        name="low",
+        namespace="ns:low",
+        triggers=ChannelTriggers(always=True),
+        priority=10,
+        injection="turn",
     )
     ch_high = MemoryChannel(
-        name="high", namespace="ns:high",
-        triggers=ChannelTriggers(always=True), priority=90, injection="turn",
+        name="high",
+        namespace="ns:high",
+        triggers=ChannelTriggers(always=True),
+        priority=90,
+        injection="turn",
     )
     store = MagicMock()
 
@@ -157,11 +173,13 @@ def test_priority_ordering():
     assert high_pos < low_pos
 
 
-def test_token_budget_respected():
+def test_token_budget_respected() -> None:
     channel = MemoryChannel(
-        name="small", namespace="ns:small",
+        name="small",
+        namespace="ns:small",
         triggers=ChannelTriggers(always=True),
-        max_tokens=10, injection="turn",  # very small budget
+        max_tokens=10,
+        injection="turn",  # very small budget
     )
     long_text = "x" * 5000
     store = _make_store([_make_entry(long_text)])
@@ -177,9 +195,10 @@ def test_token_budget_respected():
 # ---------------------------------------------------------------------------
 
 
-def test_template_rendering():
+def test_template_rendering() -> None:
     channel = MemoryChannel(
-        name="arch", namespace="ws:arch",
+        name="arch",
+        namespace="ws:arch",
         triggers=ChannelTriggers(file_globs=("*.py",)),
         query_template="architecture for {file_stem}",
         injection="turn",
@@ -193,9 +212,10 @@ def test_template_rendering():
     assert "copilot" in call_args.kwargs.get("query", call_args[1].get("query", ""))
 
 
-def test_missing_template_var_graceful():
+def test_missing_template_var_graceful() -> None:
     channel = MemoryChannel(
-        name="test", namespace="ns:test",
+        name="test",
+        namespace="ns:test",
         triggers=ChannelTriggers(always=True),
         query_template="context for {nonexistent_var}",
         injection="turn",
@@ -213,14 +233,18 @@ def test_missing_template_var_graceful():
 # ---------------------------------------------------------------------------
 
 
-def test_system_channels_only_system_injection():
+def test_system_channels_only_system_injection() -> None:
     ch_system = MemoryChannel(
-        name="sys", namespace="ns:sys",
-        triggers=ChannelTriggers(always=True), injection="system",
+        name="sys",
+        namespace="ns:sys",
+        triggers=ChannelTriggers(always=True),
+        injection="system",
     )
     ch_turn = MemoryChannel(
-        name="turn", namespace="ns:turn",
-        triggers=ChannelTriggers(always=True), injection="turn",
+        name="turn",
+        namespace="ns:turn",
+        triggers=ChannelTriggers(always=True),
+        injection="turn",
     )
     store = _make_store([_make_entry("system data")])
     router = ContextRouter([ch_system, ch_turn], store)

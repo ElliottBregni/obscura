@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,9 +54,9 @@ class PluginEntry:
     trust_level: str
     author: str
     description: str
-    source: str                              # install source (path, URL, package name)
+    source: str  # install source (path, URL, package name)
     enabled: bool = False
-    state: str = "installed"                 # lifecycle state
+    state: str = "installed"  # lifecycle state
     error: str | None = None
     installed_at: str = ""
     updated_at: str = ""
@@ -75,7 +75,7 @@ class PluginEntry:
 
     @classmethod
     def from_spec(cls, spec: PluginSpec, source: str = "") -> PluginEntry:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         return cls(
             id=spec.id,
             name=spec.name,
@@ -176,7 +176,12 @@ class PluginRegistryService:
             entries.append(entry)
 
         self._save_entries(entries)
-        logger.info("Plugin %s %s registered (source=%s)", spec.id, spec.version, source)
+        logger.info(
+            "Plugin %s %s registered (source=%s)",
+            spec.id,
+            spec.version,
+            source,
+        )
         return entry
 
     def install_from_source(self, source: str) -> dict[str, Any]:
@@ -203,6 +208,7 @@ class PluginRegistryService:
             if manifest_path.exists():
                 try:
                     from obscura.plugins.manifest import parse_manifest_file
+
                     spec = parse_manifest_file(manifest_path)
                     # Copy plugin to plugins dir
                     dest = self._plugin_dir / spec.id
@@ -214,7 +220,11 @@ class PluginRegistryService:
                         dest.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(p, dest / p.name)
                     entry = self.install(spec, source=str(p))
-                    return {"ok": True, "message": f"Installed {spec.id} v{spec.version}", "entry": entry}
+                    return {
+                        "ok": True,
+                        "message": f"Installed {spec.id} v{spec.version}",
+                        "entry": entry,
+                    }
                 except Exception as exc:
                     return {"ok": False, "message": f"Manifest install failed: {exc}"}
             else:
@@ -234,7 +244,7 @@ class PluginRegistryService:
 
         # Git URL
         if src.startswith("git+") or src.endswith(".git") or "github.com" in src:
-            clone_url = src[4:] if src.startswith("git+") else src
+            clone_url = src.removeprefix("git+")
             name = Path(clone_url.rstrip("/ ")).stem
             dest = self._plugin_dir / name
             if dest.exists():
@@ -242,17 +252,26 @@ class PluginRegistryService:
             try:
                 proc = subprocess.run(
                     ["git", "clone", clone_url, str(dest)],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 )
                 if proc.returncode != 0:
-                    return {"ok": False, "message": f"git clone failed: {proc.stderr.strip()}"}
+                    return {
+                        "ok": False,
+                        "message": f"git clone failed: {proc.stderr.strip()}",
+                    }
                 # Try to parse manifest
                 manifest_path = dest / "plugin.yaml"
                 if manifest_path.exists():
                     from obscura.plugins.manifest import parse_manifest_file
+
                     spec = parse_manifest_file(manifest_path)
                     entry = self.install(spec, source=clone_url)
-                    return {"ok": True, "message": f"Installed {spec.id} from git", "entry": entry}
+                    return {
+                        "ok": True,
+                        "message": f"Installed {spec.id} from git",
+                        "entry": entry,
+                    }
                 return {"ok": True, "message": f"Cloned to {dest} (no manifest found)"}
             except Exception as exc:
                 return {"ok": False, "message": f"Git install failed: {exc}"}
@@ -261,13 +280,17 @@ class PluginRegistryService:
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "pip", "install", src],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if proc.returncode != 0:
-                return {"ok": False, "message": f"pip install failed: {proc.stderr.strip()}"}
+                return {
+                    "ok": False,
+                    "message": f"pip install failed: {proc.stderr.strip()}",
+                }
             # Record in registry (no manifest — entry-point discovery will find it)
             entries = self._load_entries()
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             entry = PluginEntry(
                 id=src.replace("[", "-").replace("]", "").replace(">=", "-"),
                 name=src,
@@ -285,7 +308,11 @@ class PluginRegistryService:
             )
             entries.append(entry)
             self._save_entries(entries)
-            return {"ok": True, "message": f"Installed pip package: {src}", "entry": entry}
+            return {
+                "ok": True,
+                "message": f"Installed pip package: {src}",
+                "entry": entry,
+            }
         except Exception as exc:
             return {"ok": False, "message": f"pip install failed: {exc}"}
 
@@ -314,7 +341,8 @@ class PluginRegistryService:
             try:
                 subprocess.run(
                     [sys.executable, "-m", "pip", "uninstall", "-y", target.source],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 )
             except Exception as exc:
                 logger.warning("pip uninstall failed for %s: %s", plugin_id, exc)
@@ -337,7 +365,7 @@ class PluginRegistryService:
             if entry.id == plugin_id:
                 entry.enabled = enabled
                 entry.state = "enabled" if enabled else "disabled"
-                entry.updated_at = datetime.now(timezone.utc).isoformat()
+                entry.updated_at = datetime.now(UTC).isoformat()
                 self._save_entries(entries)
                 return True
         return False
@@ -376,4 +404,4 @@ class PluginRegistryService:
         return self._plugin_dir
 
 
-__all__ = ["PluginRegistryService", "PluginEntry"]
+__all__ = ["PluginEntry", "PluginRegistryService"]

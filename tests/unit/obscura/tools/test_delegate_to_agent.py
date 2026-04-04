@@ -19,7 +19,6 @@ from obscura.tools.system.delegation import (
     build_delegate_tool_spec,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -75,7 +74,9 @@ class TestBuildDelegateToolSpec:
         remote = [RemoteAgentRef(url="http://remote:8080", name="remote-agent")]
         runtime = _make_mock_runtime(local)
         spec = build_delegate_tool_spec(
-            runtime, runtime.peer_registry, remote_refs=remote
+            runtime,
+            runtime.peer_registry,
+            remote_refs=remote,
         )
 
         enum = spec.parameters["properties"]["agent"]["enum"]
@@ -98,7 +99,9 @@ class TestBuildDelegateToolSpec:
         ]
         runtime = _make_mock_runtime(local)
         spec = build_delegate_tool_spec(
-            runtime, runtime.peer_registry, unix_socket_refs=sockets
+            runtime,
+            runtime.peer_registry,
+            unix_socket_refs=sockets,
         )
 
         enum = spec.parameters["properties"]["agent"]["enum"]
@@ -128,7 +131,7 @@ class TestDelegateHandler:
         spec = build_delegate_tool_spec(runtime, runtime.peer_registry)
 
         result = json.loads(
-            await spec.handler(agent="helper", prompt="do something")
+            await spec.handler(agent="helper", prompt="do something"),
         )
         assert result["ok"] is True
         assert result["transport"] == "local"
@@ -141,7 +144,7 @@ class TestDelegateHandler:
         spec = build_delegate_tool_spec(runtime, runtime.peer_registry)
 
         result = json.loads(
-            await spec.handler(agent="ghost", prompt="hello")
+            await spec.handler(agent="ghost", prompt="hello"),
         )
         assert result["ok"] is False
         assert result["error"] == "agent_not_found"
@@ -152,12 +155,12 @@ class TestDelegateHandler:
         agents = [_make_local_ref("crasher")]
         runtime = _make_mock_runtime(agents)
         runtime.invoke_peer = AsyncMock(
-            side_effect=RuntimeError("backend exploded")
+            side_effect=RuntimeError("backend exploded"),
         )
         spec = build_delegate_tool_spec(runtime, runtime.peer_registry)
 
         result = json.loads(
-            await spec.handler(agent="crasher", prompt="crash")
+            await spec.handler(agent="crasher", prompt="crash"),
         )
         assert result["ok"] is False
         assert result["error"] == "RuntimeError"
@@ -192,11 +195,12 @@ class TestAgentCardsSection:
                 url="http://remote:8080",
                 name="analyst",
                 description="data analysis",
-            )
+            ),
         ]
 
         section = build_agent_cards_section(
-            runtime.peer_registry, remote_refs=remote
+            runtime.peer_registry,
+            remote_refs=remote,
         )
         assert "**analyst**" in section
         assert "data analysis" in section
@@ -209,11 +213,12 @@ class TestAgentCardsSection:
                 name="socket-bot",
                 status="available",
                 description="local socket agent",
-            )
+            ),
         ]
 
         section = build_agent_cards_section(
-            runtime.peer_registry, unix_socket_refs=sockets
+            runtime.peer_registry,
+            unix_socket_refs=sockets,
         )
         assert "**socket-bot**" in section
 
@@ -248,6 +253,5 @@ class TestAliasMapping:
         for alias in aliases:
             target = registry._alias_targets.get(alias)
             assert target == "delegate_to_agent", (
-                f"Alias '{alias}' should map to 'delegate_to_agent', "
-                f"got '{target}'"
+                f"Alias '{alias}' should map to 'delegate_to_agent', got '{target}'"
             )

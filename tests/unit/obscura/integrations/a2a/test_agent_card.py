@@ -20,7 +20,9 @@ class TestAgentCardGenerator:
 
     def test_with_description(self) -> None:
         card = AgentCardGenerator(
-            "Bot", "https://bot.dev", description="A helpful bot"
+            "Bot",
+            "https://bot.dev",
+            description="A helpful bot",
         ).build()
         assert card.description == "A helpful bot"
 
@@ -53,7 +55,9 @@ class TestAgentCardGenerator:
         card = (
             AgentCardGenerator("Agent", "https://x.com")
             .with_capabilities(
-                streaming=False, push_notifications=True, extended_card=True
+                streaming=False,
+                push_notifications=True,
+                extended_card=True,
             )
             .build()
         )
@@ -74,7 +78,7 @@ class TestAgentCardGenerator:
             .with_auth_scheme(
                 "apiKey",
                 AuthScheme.model_validate(
-                    {"type": "apiKey", "name": "X-API-Key", "in": "header"}
+                    {"type": "apiKey", "name": "X-API-Key", "in": "header"},
                 ),
             )
             .build()

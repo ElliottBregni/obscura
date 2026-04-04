@@ -26,9 +26,9 @@ __all__ = [
     "thinking_chunk",
     "thinking_chunks",
     "tool_call_chunks",
+    "tool_delta_chunk",
     "tool_end_chunk",
     "tool_start_chunk",
-    "tool_delta_chunk",
 ]
 
 
@@ -125,6 +125,8 @@ def tool_call_chunks(
         chunks.append(StreamChunk(kind=ChunkKind.TEXT_DELTA, text=preceding_text))
     chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name=tool_name))
     input_json = json.dumps(tool_input or {})
-    chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta=input_json))
+    chunks.append(
+        StreamChunk(kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta=input_json),
+    )
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
     return chunks

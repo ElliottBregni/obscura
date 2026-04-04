@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from starlette.testclient import TestClient
+
 from obscura.core.config import ObscuraConfig
 
 

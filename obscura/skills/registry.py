@@ -1,5 +1,4 @@
-"""
-obscura.skills.registry -- Skill registry for discovery and management.
+"""obscura.skills.registry -- Skill registry for discovery and management.
 
 The SkillRegistry manages all available skills and provides:
 - Skill registration and lookup
@@ -44,9 +43,10 @@ class SkillRegistry:
 
         # Discover capabilities
         caps = registry.discover("search")  # Find all search-related capabilities
+
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._skills: dict[str, Skill] = {}
         self._capabilities: dict[str, str] = {}  # capability_path -> skill_name
         self._initialized: dict[str, bool] = {}
@@ -61,9 +61,11 @@ class SkillRegistry:
 
         Raises:
             SkillError: If skill with same name already registered
+
         """
         if skill.name in self._skills:
-            raise SkillError(f"Skill '{skill.name}' is already registered")
+            msg = f"Skill '{skill.name}' is already registered"
+            raise SkillError(msg)
 
         self._skills[skill.name] = skill
         self._initialized[skill.name] = False
@@ -83,9 +85,11 @@ class SkillRegistry:
 
         Raises:
             SkillNotFoundError: If skill not found
+
         """
         if skill_name not in self._skills:
-            raise SkillNotFoundError(f"Skill '{skill_name}' not found")
+            msg = f"Skill '{skill_name}' not found"
+            raise SkillNotFoundError(msg)
 
         # Remove capability indices
         skill = self._skills[skill_name]
@@ -109,10 +113,12 @@ class SkillRegistry:
 
         Raises:
             SkillNotFoundError: If skill not found
+
         """
         async with self._lock:
             if skill_name not in self._skills:
-                raise SkillNotFoundError(f"Skill '{skill_name}' not found")
+                msg = f"Skill '{skill_name}' not found"
+                raise SkillNotFoundError(msg)
 
             skill = self._skills[skill_name]
 
@@ -126,16 +132,18 @@ class SkillRegistry:
                 self._configs[skill_name] = config
                 logger.info(f"Initialized skill: {skill_name}")
             except Exception as e:
-                logger.error(f"Failed to initialize skill '{skill_name}': {e}")
+                logger.exception(f"Failed to initialize skill '{skill_name}': {e}")
                 raise
 
     async def initialize_all(
-        self, configs: dict[str, dict[str, Any]] | None = None
+        self,
+        configs: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Initialize all registered skills.
 
         Args:
             configs: Optional mapping of skill_name -> config
+
         """
         configs = configs or {}
 
@@ -144,7 +152,7 @@ class SkillRegistry:
             try:
                 await self.initialize_skill(skill_name, config)
             except Exception as e:
-                logger.error(f"Failed to initialize skill '{skill_name}': {e}")
+                logger.exception(f"Failed to initialize skill '{skill_name}': {e}")
                 # Continue with other skills
 
     async def shutdown_skill(self, skill_name: str) -> None:
@@ -152,10 +160,12 @@ class SkillRegistry:
 
         Args:
             skill_name: Name of skill to shutdown
+
         """
         async with self._lock:
             if skill_name not in self._skills:
-                raise SkillNotFoundError(f"Skill '{skill_name}' not found")
+                msg = f"Skill '{skill_name}' not found"
+                raise SkillNotFoundError(msg)
 
             skill = self._skills[skill_name]
 
@@ -167,7 +177,7 @@ class SkillRegistry:
                 self._initialized[skill_name] = False
                 logger.info(f"Shutdown skill: {skill_name}")
             except Exception as e:
-                logger.error(f"Error shutting down skill '{skill_name}': {e}")
+                logger.exception(f"Error shutting down skill '{skill_name}': {e}")
                 raise
 
     async def shutdown_all(self) -> None:
@@ -177,7 +187,7 @@ class SkillRegistry:
                 try:
                     await self.shutdown_skill(skill_name)
                 except Exception as e:
-                    logger.error(f"Error shutting down skill '{skill_name}': {e}")
+                    logger.exception(f"Error shutting down skill '{skill_name}': {e}")
 
     def get_skill(self, skill_name: str) -> Skill | None:
         """Get a skill by name.
@@ -187,6 +197,7 @@ class SkillRegistry:
 
         Returns:
             Skill instance or None if not found
+
         """
         return self._skills.get(skill_name)
 
@@ -198,6 +209,7 @@ class SkillRegistry:
 
         Returns:
             SkillHealth or None if skill not found
+
         """
         skill = self._skills.get(skill_name)
         if not skill:
@@ -224,6 +236,7 @@ class SkillRegistry:
 
         Returns:
             SkillHealth status
+
         """
         skill = self._skills.get(skill_name)
         if not skill:
@@ -258,6 +271,7 @@ class SkillRegistry:
 
         Returns:
             List of capability dictionaries with skill info
+
         """
         results: list[dict[str, Any]] = []
 
@@ -273,7 +287,7 @@ class SkillRegistry:
                         "skill_version": skill.version,
                         "skill_description": skill.description,
                         **cap.to_dict(),
-                    }
+                    },
                 )
 
         return results
@@ -289,6 +303,7 @@ class SkillRegistry:
 
         Returns:
             List of matching capabilities
+
         """
         query = query.lower()
         results: list[dict[str, Any]] = []
@@ -312,14 +327,14 @@ class SkillRegistry:
                             "skill": skill.name,
                             "skill_version": skill.version,
                             **cap.to_dict(),
-                        }
+                        },
                     )
 
         # Sort by relevance (exact matches first)
         def relevance(item: dict[str, Any]) -> int:
             cap_name = item.get("name", "").lower()
             skill_name = item.get("skill", "").lower()
-            if query == cap_name or query == skill_name:
+            if query in (cap_name, skill_name):
                 return 0
             if query in cap_name or query in skill_name:
                 return 1
@@ -342,33 +357,39 @@ class SkillRegistry:
             SkillNotFoundError: If skill not found
             CapabilityNotFoundError: If capability not found
             SkillError: If execution fails
+
         """
         # Parse capability path
         if "." not in capability_path:
+            msg = f"Invalid capability path: {capability_path}. Expected format: skill.capability"
             raise ValueError(
-                f"Invalid capability path: {capability_path}. Expected format: skill.capability"
+                msg,
             )
 
         skill_name, cap_name = capability_path.rsplit(".", 1)
 
         skill = self._skills.get(skill_name)
         if not skill:
-            raise SkillNotFoundError(f"Skill '{skill_name}' not found")
+            msg = f"Skill '{skill_name}' not found"
+            raise SkillNotFoundError(msg)
 
         if not self._initialized.get(skill_name, False):
-            raise SkillError(f"Skill '{skill_name}' is not initialized")
+            msg = f"Skill '{skill_name}' is not initialized"
+            raise SkillError(msg)
 
         # Validate parameters
         errors = skill.validate_params(cap_name, params)
         if errors:
-            raise SkillError(f"Parameter validation failed: {'; '.join(errors)}")
+            msg = f"Parameter validation failed: {'; '.join(errors)}"
+            raise SkillError(msg)
 
         # Execute
         try:
             return await skill.execute(cap_name, params)
         except Exception as e:
-            logger.error(f"Error executing capability '{capability_path}': {e}")
-            raise SkillError(f"Execution failed: {e}") from e
+            logger.exception(f"Error executing capability '{capability_path}': {e}")
+            msg = f"Execution failed: {e}"
+            raise SkillError(msg) from e
 
     def is_initialized(self, skill_name: str) -> bool:
         """Check if a skill is initialized."""

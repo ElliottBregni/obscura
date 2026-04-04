@@ -1,9 +1,10 @@
 """Tests for sdk.heartbeat.alerts — AlertManager, channels, and rules."""
 
-import pytest
+from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
+
+import pytest
 
 from obscura.heartbeat.alerts import (
     AlertManager,
@@ -186,7 +187,10 @@ class TestAlertManager:
     def test_create_alert(self) -> None:
         mgr = AlertManager()
         alert = mgr.create_alert(
-            "a1", HealthStatus.WARNING, HealthStatus.WARNING, "test msg"
+            "a1",
+            HealthStatus.WARNING,
+            HealthStatus.WARNING,
+            "test msg",
         )
         assert alert.agent_id == "a1"
         assert alert.message == "test msg"
@@ -235,7 +239,10 @@ class TestAlertManager:
     async def test_acknowledge_alert(self) -> None:
         mgr = AlertManager()
         alert = mgr.create_alert(
-            "a1", HealthStatus.WARNING, HealthStatus.WARNING, "test"
+            "a1",
+            HealthStatus.WARNING,
+            HealthStatus.WARNING,
+            "test",
         )
         ack = await mgr.acknowledge_alert(alert.alert_id, "admin")
         assert ack is not None

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-
 
 from obscura.core.supervisor.tool_snapshot import (
     FrozenToolEntry,
@@ -12,13 +11,19 @@ from obscura.core.supervisor.tool_snapshot import (
     ToolSnapshotStore,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 class TestFrozenToolEntry:
     def test_creation(self) -> None:
         entry = FrozenToolEntry(
             name="bash",
             description="Run a shell command",
-            parameters={"type": "object", "properties": {"command": {"type": "string"}}},
+            parameters={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+            },
             order_index=0,
         )
         assert entry.name == "bash"

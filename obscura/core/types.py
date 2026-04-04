@@ -1,5 +1,4 @@
-"""
-obscura.internal.types — Shared data types for the unified SDK wrapper.
+"""obscura.internal.types — Shared data types for the unified SDK wrapper.
 
 Provides the normalized message format, streaming chunk type, tool specification,
 session references, hook definitions, and the BackendProtocol that each backend
@@ -9,13 +8,11 @@ must implement.
 from __future__ import annotations
 
 import enum
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncIterator,
-    Callable,
-    Mapping,
     Protocol,
     runtime_checkable,
 )
@@ -80,7 +77,7 @@ class UnifiedRequest:
     messages: list[Message] | None = None
     tool_choice: ToolChoice | None = None
     session: SessionRef | None = None
-    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    metadata: dict[str, Any] = field(default_factory=dict)
     native: ProviderNativeRequest | None = None
 
 
@@ -108,7 +105,7 @@ class ContentBlock:
     kind: str  # "text", "thinking", "tool_use", "tool_result"
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=lambda: {})
+    tool_input: dict[str, Any] = field(default_factory=dict)
     tool_use_id: str = ""
     is_error: bool = False
 
@@ -207,7 +204,7 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., Any]
-    output_schema: dict[str, Any] = field(default_factory=lambda: {})
+    output_schema: dict[str, Any] = field(default_factory=dict)
     _pydantic_model: type | None = None
     required_tier: str = "public"
     side_effects: str = "none"
@@ -347,7 +344,7 @@ class HookContext:
 
     hook: HookPoint
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=lambda: {})
+    tool_input: dict[str, Any] = field(default_factory=dict)
     tool_output: Any = None
     message: Message | None = None
     prompt: str = ""
@@ -379,9 +376,9 @@ class AgentContext:
     input_data: Any = None
     analysis: Any = None
     plan: Any = None
-    results: list[Any] = field(default_factory=lambda: [])
+    results: list[Any] = field(default_factory=list)
     response: Any = None
-    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +417,7 @@ class BackendProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 
-class EffortLevel(str, enum.Enum):
+class EffortLevel(enum.StrEnum):
     """Effort level controlling thinking budget and response verbosity."""
 
     LOW = "low"
@@ -472,8 +469,9 @@ class ToolCallInfo:
 
     tool_use_id: str
     name: str
-    input: dict[str, Any] = field(default_factory=lambda: {})
+    input: dict[str, Any] = field(default_factory=dict)
     raw: Any = None
+    classification: Any = None
 
 
 class ToolErrorType(enum.Enum):
@@ -505,7 +503,7 @@ class ToolCallEnvelope:
     call_id: str
     agent_id: str
     tool: str
-    args: dict[str, Any] = field(default_factory=lambda: {})
+    args: dict[str, Any] = field(default_factory=dict)
     context: ToolCallContext = field(default_factory=ToolCallContext)
 
 
@@ -542,12 +540,13 @@ class ToolResultEnvelope:
         """
         is_error = self.status == "error"
         if not is_error:
-            result_text = self.result if isinstance(self.result, str) else str(self.result)
+            result_text = (
+                self.result if isinstance(self.result, str) else str(self.result)
+            )
+        elif self.error is not None:
+            result_text = self.error.message
         else:
-            if self.error is not None:
-                result_text = self.error.message
-            else:
-                result_text = "Tool error"
+            result_text = "Tool error"
         yield self.call_id
         yield result_text
         yield is_error
@@ -561,12 +560,13 @@ class ToolResultEnvelope:
         """
         is_error = self.status == "error"
         if not is_error:
-            result_text = self.result if isinstance(self.result, str) else str(self.result)
+            result_text = (
+                self.result if isinstance(self.result, str) else str(self.result)
+            )
+        elif self.error is not None:
+            result_text = self.error.message
         else:
-            if self.error is not None:
-                result_text = self.error.message
-            else:
-                result_text = "Tool error"
+            result_text = "Tool error"
         yield self.call_id
         yield result_text
         yield is_error
@@ -583,7 +583,7 @@ class AgentEvent:
     kind: AgentEventKind
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=lambda: {})
+    tool_input: dict[str, Any] = field(default_factory=dict)
     tool_result: str = ""
     tool_use_id: str = ""
     is_error: bool = False

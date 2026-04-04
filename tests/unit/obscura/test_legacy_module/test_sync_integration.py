@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from scripts.sync import VaultSync
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from scripts.sync import VaultSync
 
 
 class TestDomain1InRepoSync:
     """Domain 1: sync_all() creates agent dirs with per-file symlinks in repo targets."""
 
     def test_sync_creates_real_dirs(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """sync_all creates real directories at all discovered targets."""
         sync_instance.sync_all()
@@ -36,7 +42,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_sync_agent_filtering(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """Copilot sees copilot-instructions.md, Claude does not."""
         sync_instance.sync_all()
@@ -49,7 +58,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_sync_universal_files(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """Both agents see universal files."""
         sync_instance.sync_all()
@@ -79,7 +91,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_repo_no_vault_content(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """Repo agent dirs do NOT contain vault-wide content."""
         sync_instance.sync_all()
@@ -96,7 +111,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_repo_has_repo_skills(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """Repo agent dirs DO contain repo-specific skills."""
         sync_instance.sync_all()
@@ -110,7 +128,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_root_excludes_platform_content(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """Root .github should NOT contain platform/ subdirectory content."""
         sync_instance.sync_all()
@@ -121,7 +142,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_platform_has_scoped_skills(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """platform/.github has scoped skills + inherited root files."""
         sync_instance.sync_all()
@@ -149,7 +173,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_platform_excludes_partview_content(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """platform/.github should NOT contain partview_core/ content."""
         sync_instance.sync_all()
@@ -160,7 +187,10 @@ class TestDomain1InRepoSync:
         )
 
     def test_partview_has_own_skills(
-        self, sync_instance: VaultSync, mock_repo: Path, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_repo: Path,
+        mock_home: Path,
     ) -> None:
         """platform/partview_core/.github has its own skills + inherited root files."""
         sync_instance.sync_all()
@@ -216,7 +246,7 @@ class TestDomain1InRepoSync:
         """Running sync twice produces same result."""
         vault_repo = vault_root / "repos" / "TestRepo"
         targets = sync_instance.discover_sync_targets(vault_repo, mock_repo)
-        root = [t for t in targets if t.repo_path == mock_repo][0]
+        root = next(t for t in targets if t.repo_path == mock_repo)
 
         sync_instance.sync_target("copilot", root, vault_repo, mock_repo)
         count1 = sum(1 for _ in (mock_repo / ".github").rglob("*") if _.is_symlink())

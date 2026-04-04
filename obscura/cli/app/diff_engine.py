@@ -1,5 +1,4 @@
-"""
-obscura.cli.app.diff_engine -- Diff computation, hunk parsing, and patch application.
+"""obscura.cli.app.diff_engine -- Diff computation, hunk parsing, and patch application.
 
 Uses Python's built-in ``difflib`` to compute unified diffs, then parses
 them into structured hunks that can be selectively accepted or rejected.
@@ -9,9 +8,10 @@ from __future__ import annotations
 
 import difflib
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -36,7 +36,7 @@ class DiffHunk:
     old_count: int
     new_start: int
     new_count: int
-    lines: list[DiffLine] = field(default_factory=lambda: cast(list[DiffLine], []))
+    lines: list[DiffLine] = field(default_factory=lambda: cast("list[DiffLine]", []))
     status: str = "pending"  # "pending" | "accepted" | "rejected"
     header: str = ""  # The @@ line
 
@@ -54,7 +54,7 @@ class FileChange:
     path: Path
     original: str
     modified: str
-    hunks: list[DiffHunk] = field(default_factory=lambda: cast(list[DiffHunk], []))
+    hunks: list[DiffHunk] = field(default_factory=lambda: cast("list[DiffHunk]", []))
     status: str = "pending"  # "pending" | "accepted" | "rejected"
 
     def accept_all(self) -> None:
@@ -108,6 +108,7 @@ class DiffEngine:
 
         Returns:
             A list of DiffHunk objects representing the changes.
+
         """
         old_lines = original.splitlines(keepends=True)
         new_lines = modified.splitlines(keepends=True)
@@ -125,7 +126,7 @@ class DiffEngine:
                 fromfile="original",
                 tofile="modified",
                 n=self._context,
-            )
+            ),
         )
 
         return self._parse_unified(diff)
@@ -140,6 +141,7 @@ class DiffEngine:
 
         Returns:
             A FileChange with parsed hunks.
+
         """
         hunks = self.compute(original, modified)
         return FileChange(
@@ -160,7 +162,7 @@ class DiffEngine:
 
         for line in diff_lines:
             # Skip file headers
-            if line.startswith("---") or line.startswith("+++"):
+            if line.startswith(("---", "+++")):
                 continue
 
             # Hunk header
@@ -201,7 +203,7 @@ class DiffEngine:
                         content=content,
                         old_lineno=None,
                         new_lineno=new_lineno,
-                    )
+                    ),
                 )
                 new_lineno += 1
             elif line.startswith("-"):
@@ -211,7 +213,7 @@ class DiffEngine:
                         content=content,
                         old_lineno=old_lineno,
                         new_lineno=None,
-                    )
+                    ),
                 )
                 old_lineno += 1
             elif line.startswith(" "):
@@ -221,7 +223,7 @@ class DiffEngine:
                         content=content,
                         old_lineno=old_lineno,
                         new_lineno=new_lineno,
-                    )
+                    ),
                 )
                 old_lineno += 1
                 new_lineno += 1
@@ -254,6 +256,7 @@ class DiffEngine:
 
         Returns:
             The patched content with accepted hunks applied.
+
         """
         if not hunks:
             return original
@@ -304,6 +307,7 @@ class DiffEngine:
 
         Returns:
             A unified diff string with +/- line markers.
+
         """
         old_lines = change.original.splitlines(keepends=True)
         new_lines = change.modified.splitlines(keepends=True)
@@ -330,6 +334,7 @@ class DiffEngine:
 
         Returns:
             A side-by-side diff string.
+
         """
         half = (width - 3) // 2  # 3 for " | " separator
         gutter_w = 5
@@ -363,7 +368,7 @@ class DiffEngine:
                     while len(new_lines) < max_len:
                         new_lines.append((None, ""))
 
-                    for (oln, oc), (nln, nc) in zip(old_lines, new_lines):
+                    for (oln, oc), (nln, nc) in zip(old_lines, new_lines, strict=False):
                         o_gutter = f"{oln:>{gutter_w}}" if oln else " " * gutter_w
                         n_gutter = f"{nln:>{gutter_w}}" if nln else " " * gutter_w
                         o_text = oc[:content_w].ljust(content_w)
@@ -388,7 +393,7 @@ class DiffEngine:
             while len(new_lines) < max_len:
                 new_lines.append((None, ""))
 
-            for (oln, oc), (nln, nc) in zip(old_lines, new_lines):
+            for (oln, oc), (nln, nc) in zip(old_lines, new_lines, strict=False):
                 o_gutter = f"{oln:>{gutter_w}}" if oln else " " * gutter_w
                 n_gutter = f"{nln:>{gutter_w}}" if nln else " " * gutter_w
                 o_text = oc[:content_w].ljust(content_w)

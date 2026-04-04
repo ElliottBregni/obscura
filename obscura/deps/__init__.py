@@ -1,20 +1,19 @@
-"""
-obscura.deps -- Shared FastAPI dependencies and helpers for route modules.
-"""
+"""obscura.deps -- Shared FastAPI dependencies and helpers for route modules."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from fastapi import WebSocket
 from obscura.auth.models import AuthenticatedUser
 from obscura.core.client import ObscuraClient
-from obscura.core.config import ObscuraConfig
 
 if TYPE_CHECKING:
+    from fastapi import WebSocket
+
     from obscura.agent.agents import AgentRuntime
+    from obscura.core.config import ObscuraConfig
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +52,11 @@ class ClientFactory:
 # Global agent runtime registry (keyed by user_id)
 # ---------------------------------------------------------------------------
 
-_runtimes: dict[str, "AgentRuntime"] = {}
+_runtimes: dict[str, AgentRuntime] = {}
 _runtimes_lock = asyncio.Lock()
 
 
-async def get_runtime(user: AuthenticatedUser) -> "AgentRuntime":
+async def get_runtime(user: AuthenticatedUser) -> AgentRuntime:
     """Get or create a persistent AgentRuntime for the given user."""
     from obscura.agent.agents import AgentRuntime  # load at call-time for test patching
 
@@ -107,7 +106,7 @@ def audit(
                 action=action,
                 outcome=outcome,
                 details=details,
-            )
+            ),
         )
     except Exception:
         pass
@@ -147,7 +146,7 @@ def audit(
                     "action": action,
                     "outcome": outcome,
                 },
-            )
+            ),
         )
 
 

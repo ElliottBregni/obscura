@@ -1,5 +1,4 @@
-"""
-obscura.cli.tool_collapse — Collapse consecutive tool calls into summaries.
+"""obscura.cli.tool_collapse — Collapse consecutive tool calls into summaries.
 
 Bundles consecutive read/grep/glob/search tool calls into single
 collapsible summary lines to reduce output noise.
@@ -19,21 +18,23 @@ from __future__ import annotations
 from typing import Any
 
 # Tools that can be collapsed into summary groups.
-COLLAPSIBLE_TOOLS: frozenset[str] = frozenset({
-    "read_text_file",
-    "grep_files",
-    "find_files",
-    "list_directory",
-    "tree_directory",
-    "file_info",
-    "git_status",
-    "git_log",
-    "git_diff",
-    "web_search",
-    "web_fetch",
-    "tool_search",
-    "which_command",
-})
+COLLAPSIBLE_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_text_file",
+        "grep_files",
+        "find_files",
+        "list_directory",
+        "tree_directory",
+        "file_info",
+        "git_status",
+        "git_log",
+        "git_diff",
+        "web_search",
+        "web_fetch",
+        "tool_search",
+        "which_command",
+    },
+)
 
 # How to categorize tools for the summary line.
 TOOL_CATEGORIES: dict[str, str] = {

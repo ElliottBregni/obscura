@@ -7,16 +7,16 @@ from unittest.mock import patch
 
 import pytest
 
+import scripts.copilot_models as _cm
 from scripts.copilot_models import (
     AUTOMATION,
     ModelConfig,
-    guard_automation,
     get_model_id,
+    guard_automation,
     list_aliases,
     require_automation_safe,
     resolve,
 )
-import scripts.copilot_models as _cm
 
 # Explicitly expose private registries used in tests
 _ALIAS_REGISTRY = _cm._ALIAS_REGISTRY  # pyright: ignore[reportPrivateUsage]
@@ -116,7 +116,8 @@ class TestGuardAutomation:
 class TestEnvOverride:
     def test_env_override_automation_safe_model(self) -> None:
         with patch.dict(
-            os.environ, {"COPILOT_MODEL_COPILOT_BATCH_DIAGRAMMER": "gpt-4o-mini"}
+            os.environ,
+            {"COPILOT_MODEL_COPILOT_BATCH_DIAGRAMMER": "gpt-4o-mini"},
         ):
             config = resolve("copilot_batch_diagrammer")
             assert config.model_id == "gpt-4o-mini"

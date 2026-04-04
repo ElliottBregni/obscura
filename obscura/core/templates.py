@@ -1,5 +1,4 @@
-"""
-obscura.core.templates — Reusable job/task templates.
+"""obscura.core.templates — Reusable job/task templates.
 
 Templates are markdown files stored in ``~/.obscura/templates/``
 with TOML frontmatter defining the template metadata.

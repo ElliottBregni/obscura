@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.eval.compiler import compile_suite, compile_suite_from_path
 from obscura.eval.specs import (
@@ -14,12 +14,17 @@ from obscura.eval.specs import (
     EvalSuiteSpec,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def _make_suite() -> EvalSuiteSpec:
     return EvalSuiteSpec(
         meta=EvalSuiteMeta(
-            id="test-suite", title="Test Suite",
-            backend="claude", model="sonnet",
+            id="test-suite",
+            title="Test Suite",
+            backend="claude",
+            model="sonnet",
         ),
         cases=[
             EvalCaseSpec(
@@ -30,9 +35,15 @@ def _make_suite() -> EvalSuiteSpec:
                     EvalAssertion(kind="tool_name_match", expected="read_file"),
                 ],
                 expect_tool_calls=[
-                    EvalExpectedToolCall(name="read_file", args_contain={"path": "/tmp/x"}),
+                    EvalExpectedToolCall(
+                        name="read_file",
+                        args_contain={"path": "/tmp/x"},
+                    ),
                 ],
-                judge=EvalJudgeSpec(criteria="Was it correct?", rubric="5=perfect, 1=fail"),
+                judge=EvalJudgeSpec(
+                    criteria="Was it correct?",
+                    rubric="5=perfect, 1=fail",
+                ),
             ),
             EvalCaseSpec(
                 id="case-2",
@@ -103,7 +114,9 @@ class TestCompileSuite:
             meta=EvalSuiteMeta(id="s", title="T"),
             cases=[
                 EvalCaseSpec(
-                    id="c", title="C", prompt="P",
+                    id="c",
+                    title="C",
+                    prompt="P",
                     tags=["fast", "tools"],
                 ),
             ],

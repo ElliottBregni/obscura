@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from obscura.plugins.models import ToolContribution
+if TYPE_CHECKING:
+    from obscura.plugins.models import ToolContribution
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,9 @@ class ToolIndex:
         if contrib.name in self._tools and self._owner.get(contrib.name) != plugin_id:
             logger.warning(
                 "Tool %s already registered by plugin %s, overwritten by %s",
-                contrib.name, self._owner.get(contrib.name), plugin_id,
+                contrib.name,
+                self._owner.get(contrib.name),
+                plugin_id,
             )
         self._tools[contrib.name] = contrib
         self._owner[contrib.name] = plugin_id
@@ -44,8 +48,7 @@ class ToolIndex:
 
     def filter_by_plugin(self, plugin_id: str) -> list[ToolContribution]:
         return [
-            t for name, t in self._tools.items()
-            if self._owner.get(name) == plugin_id
+            t for name, t in self._tools.items() if self._owner.get(name) == plugin_id
         ]
 
     def filter_by_capability(self, capability_id: str) -> list[ToolContribution]:
@@ -57,7 +60,8 @@ class ToolIndex:
     def visible_for_capabilities(self, granted: set[str]) -> list[ToolContribution]:
         """Return tools whose capability is in the granted set, or tools with no capability."""
         return [
-            t for t in self._tools.values()
+            t
+            for t in self._tools.values()
             if not t.capability or t.capability in granted
         ]
 

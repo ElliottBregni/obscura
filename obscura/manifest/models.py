@@ -7,10 +7,12 @@ logic lives here.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _empty_str_list() -> list[str]:
@@ -114,7 +116,10 @@ class AgentManifest(BaseModel):
     system_prompt: str = ""
     tools: list[str] = Field(default_factory=_empty_str_list)
     tool_allowlist: list[str] | None = None
-    mcp_servers: list[Any] = Field(default_factory=_empty_mcp_refs, alias="mcp_server_refs")
+    mcp_servers: list[Any] = Field(
+        default_factory=_empty_mcp_refs,
+        alias="mcp_server_refs",
+    )
     permissions: PermissionConfig = Field(default_factory=PermissionConfig)
     hooks: list[HookDefinition] = Field(default_factory=list)
 
@@ -132,7 +137,6 @@ class AgentManifest(BaseModel):
     skills: list[SkillManifest] = Field(default_factory=list)
 
     # Inline skill manifests (when constructed programmatically)
-    skills: list[SkillManifest] = Field(default_factory=list)
 
     # Delegation
     can_delegate: bool = False
@@ -248,7 +252,8 @@ def agent_manifest_from_frontmatter(
         if isinstance(raw_filter, list):
             skill_caps = [f"skill.{str(name).replace('-', '_')}" for name in raw_filter]
             existing_caps: CapabilityConfig = kwargs.get(
-                "capabilities", CapabilityConfig()
+                "capabilities",
+                CapabilityConfig(),
             )
             merged_grant = list(existing_caps.grant) + skill_caps
             kwargs["capabilities"] = CapabilityConfig(

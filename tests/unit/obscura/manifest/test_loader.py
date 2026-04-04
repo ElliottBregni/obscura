@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.manifest.loader import ManifestLoader
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestLoadAgentManifest:
@@ -58,10 +61,12 @@ class TestLoadAgentManifest:
 class TestLoadAgentManifests:
     def test_scans_directory(self, tmp_path: Path) -> None:
         (tmp_path / "dev.agent.md").write_text(
-            "---\nname: dev\n---\nDev prompt.", encoding="utf-8"
+            "---\nname: dev\n---\nDev prompt.",
+            encoding="utf-8",
         )
         (tmp_path / "research.agent.md").write_text(
-            "---\nname: research\n---\nResearch prompt.", encoding="utf-8"
+            "---\nname: research\n---\nResearch prompt.",
+            encoding="utf-8",
         )
         (tmp_path / "not-agent.md").write_text("ignored", encoding="utf-8")
         loader = ManifestLoader(base_dir=tmp_path)
@@ -104,12 +109,16 @@ class TestLoadSkillManifest:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         (skills_dir / "a.md").write_text(
-            "---\nname: alpha\n---\nAlpha.", encoding="utf-8"
+            "---\nname: alpha\n---\nAlpha.",
+            encoding="utf-8",
         )
         (skills_dir / "b.md").write_text(
-            "---\nname: beta\n---\nBeta.", encoding="utf-8"
+            "---\nname: beta\n---\nBeta.",
+            encoding="utf-8",
         )
-        skills = ManifestLoader(base_dir=tmp_path).load_skills_from_directory(skills_dir)
+        skills = ManifestLoader(base_dir=tmp_path).load_skills_from_directory(
+            skills_dir,
+        )
         assert len(skills) == 2
 
 
@@ -117,7 +126,7 @@ class TestLoadInstructionManifest:
     def test_with_apply_to(self, tmp_path: Path) -> None:
         f = tmp_path / "python.instructions.md"
         f.write_text(
-            "---\napplyTo: \"**/*.py\"\n---\nUse type hints everywhere.",
+            '---\napplyTo: "**/*.py"\n---\nUse type hints everywhere.',
             encoding="utf-8",
         )
         inst = ManifestLoader(base_dir=tmp_path).load_instruction_manifest(f)
@@ -127,7 +136,7 @@ class TestLoadInstructionManifest:
     def test_apply_to_list(self, tmp_path: Path) -> None:
         f = tmp_path / "web.instructions.md"
         f.write_text(
-            "---\napplyTo:\n  - \"**/*.ts\"\n  - \"**/*.tsx\"\n---\nUse React.",
+            '---\napplyTo:\n  - "**/*.ts"\n  - "**/*.tsx"\n---\nUse React.',
             encoding="utf-8",
         )
         inst = ManifestLoader(base_dir=tmp_path).load_instruction_manifest(f)
@@ -143,16 +152,21 @@ class TestLoadInstructionManifest:
 class TestLoadHooksFromJson:
     def test_basic_hooks(self, tmp_path: Path) -> None:
         f = tmp_path / "hooks.json"
-        f.write_text(json.dumps({
-            "hooks": {
-                "preToolUse": [
-                    {"type": "command", "command": "echo pre"},
-                ],
-                "postToolUse": [
-                    {"type": "command", "command": "echo post"},
-                ],
-            }
-        }), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "preToolUse": [
+                            {"type": "command", "command": "echo pre"},
+                        ],
+                        "postToolUse": [
+                            {"type": "command", "command": "echo post"},
+                        ],
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
         hooks = ManifestLoader(base_dir=tmp_path).load_hooks_from_json(f)
         assert len(hooks) == 2
         assert hooks[0].event == "preToolUse"
@@ -162,9 +176,14 @@ class TestLoadHooksFromJson:
     def test_flat_format(self, tmp_path: Path) -> None:
         """Also supports flat {event: entries} without wrapping 'hooks' key."""
         f = tmp_path / "hooks.json"
-        f.write_text(json.dumps({
-            "preToolUse": [{"command": "echo hi"}],
-        }), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "preToolUse": [{"command": "echo hi"}],
+                },
+            ),
+            encoding="utf-8",
+        )
         hooks = ManifestLoader(base_dir=tmp_path).load_hooks_from_json(f)
         assert len(hooks) == 1
 
@@ -175,12 +194,17 @@ class TestLoadHooksFromJson:
 class TestLoadPermissions:
     def test_settings_json(self, tmp_path: Path) -> None:
         f = tmp_path / "settings.json"
-        f.write_text(json.dumps({
-            "permissions": {
-                "allow": ["Read", "Bash(git *)"],
-                "deny": ["Bash(rm -rf /)"],
-            }
-        }), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "permissions": {
+                        "allow": ["Read", "Bash(git *)"],
+                        "deny": ["Bash(rm -rf /)"],
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
         perms = ManifestLoader(base_dir=tmp_path).load_permissions(f)
         assert "Read" in perms.allow
         assert "Bash(rm -rf /)" in perms.deny
@@ -194,15 +218,20 @@ class TestLoadPermissions:
 class TestLoadMCPServerRefs:
     def test_mcp_json_format(self, tmp_path: Path) -> None:
         f = tmp_path / ".mcp.json"
-        f.write_text(json.dumps({
-            "mcpServers": {
-                "github": {
-                    "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-github"],
-                    "env": {"GITHUB_TOKEN": "tok"},
+        f.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "github": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-github"],
+                            "env": {"GITHUB_TOKEN": "tok"},
+                        },
+                    },
                 },
-            }
-        }), encoding="utf-8")
+            ),
+            encoding="utf-8",
+        )
         refs = ManifestLoader(base_dir=tmp_path).load_mcp_server_refs(f)
         assert len(refs) == 1
         assert refs[0].name == "github"
@@ -211,11 +240,20 @@ class TestLoadMCPServerRefs:
 
     def test_list_format(self, tmp_path: Path) -> None:
         f = tmp_path / "servers.json"
-        f.write_text(json.dumps({
-            "servers": [
-                {"name": "mem", "command": "npx", "args": ["-y", "memory-server"]},
-            ]
-        }), encoding="utf-8")
+        f.write_text(
+            json.dumps(
+                {
+                    "servers": [
+                        {
+                            "name": "mem",
+                            "command": "npx",
+                            "args": ["-y", "memory-server"],
+                        },
+                    ],
+                },
+            ),
+            encoding="utf-8",
+        )
         refs = ManifestLoader(base_dir=tmp_path).load_mcp_server_refs(f)
         assert len(refs) == 1
         assert refs[0].name == "mem"

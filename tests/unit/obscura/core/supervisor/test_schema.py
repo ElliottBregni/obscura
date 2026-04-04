@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
-
+from typing import TYPE_CHECKING
 
 from obscura.core.supervisor.schema import (
     REQUIRED_TABLES,
     init_supervisor_schema,
     verify_supervisor_schema,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestSupervisorSchema:
@@ -76,18 +78,20 @@ class TestSupervisorSchema:
         conn.execute(
             "INSERT INTO agent_templates "
             "(template_id, name, template_json, created_at, updated_at) "
-            "VALUES ('t1', 'test', '{}', '2024-01-01', '2024-01-01')"
+            "VALUES ('t1', 'test', '{}', '2024-01-01', '2024-01-01')",
         )
 
         # Create a version (child)
         conn.execute(
             "INSERT INTO agent_versions "
             "(agent_id, template_id, version, render_json, hash, created_at) "
-            "VALUES ('v1', 't1', 1, '{}', 'abc', '2024-01-01')"
+            "VALUES ('v1', 't1', 1, '{}', 'abc', '2024-01-01')",
         )
         conn.commit()
 
         # Verify it was inserted
-        row = conn.execute("SELECT * FROM agent_versions WHERE agent_id = 'v1'").fetchone()
+        row = conn.execute(
+            "SELECT * FROM agent_versions WHERE agent_id = 'v1'",
+        ).fetchone()
         assert row is not None
         conn.close()

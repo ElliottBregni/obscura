@@ -1,5 +1,4 @@
-"""
-obscura.tools.system.team_prompt — Read the team-level system prompt.
+"""obscura.tools.system.team_prompt — Read the team-level system prompt.
 
 Looks for a ``team_prompt.md`` (or ``team_prompt.txt``) file in the active
 Obscura home directory (``~/.obscura/`` by default).  Returns the raw text so
@@ -62,7 +61,7 @@ async def read_team_prompt(path: str = "") -> str:
                     "error": "team_prompt_not_found",
                     "searched": str(resolve_obscura_home()),
                     "filenames_tried": list(_TEAM_PROMPT_FILENAMES),
-                }
+                },
             )
         target = target_or_none
 

@@ -1,5 +1,4 @@
-"""
-Tests for obscura.auth.rbac -- role-based access control dependencies.
+"""Tests for obscura.auth.rbac -- role-based access control dependencies.
 
 Verifies role hierarchy, admin override, and proper 401/403 behaviour
 when wired into a FastAPI application using API key authentication.
@@ -7,7 +6,7 @@ when wired into a FastAPI application using API key authentication.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -21,7 +20,6 @@ from obscura.auth.rbac import (
     require_role,
     user_from_api_key,
 )
-
 
 # ---------------------------------------------------------------------------
 # AuthenticatedUser model tests
@@ -77,27 +75,30 @@ def _create_test_app() -> FastAPI:
 
     @app.get("/api/v1/me")
     async def me(  # pyright: ignore[reportUnusedFunction]
-        user: AuthenticatedUser = Depends(get_current_user),
+        user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     ) -> dict[str, Any]:
         return {"user_id": user.user_id, "roles": user.roles}
 
     @app.get("/api/v1/admin-only")
     async def admin_only(  # pyright: ignore[reportUnusedFunction]
-        user: AuthenticatedUser = Depends(require_role("admin")),
+        user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
     ) -> dict[str, Any]:
         return {"ok": True}
 
     @app.post("/api/v1/sync")
     async def sync(  # pyright: ignore[reportUnusedFunction]
-        user: AuthenticatedUser = Depends(require_role("sync:write")),
+        user: Annotated[AuthenticatedUser, Depends(require_role("sync:write"))],
     ) -> dict[str, Any]:
         return {"synced": True}
 
     @app.post("/api/v1/agent")
     async def agent(  # pyright: ignore[reportUnusedFunction]
-        user: AuthenticatedUser = Depends(
-            require_any_role("agent:copilot", "agent:claude", "agent:read"),
-        ),
+        user: Annotated[
+            AuthenticatedUser,
+            Depends(
+                require_any_role("agent:copilot", "agent:claude", "agent:read"),
+            ),
+        ],
     ) -> dict[str, Any]:
         return {"agent": True, "user_id": user.user_id}
 

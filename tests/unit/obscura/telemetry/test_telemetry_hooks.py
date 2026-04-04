@@ -2,18 +2,18 @@
 
 from unittest.mock import MagicMock, patch
 
+from obscura.core.types import HookPoint
 from obscura.telemetry.hooks import (
+    end_phase_span,
+    end_tool_span,
     register_telemetry_hooks,
     start_phase_span,
-    end_phase_span,
     start_tool_span,
-    end_tool_span,
 )
-from obscura.core.types import HookPoint
 
 
 class TestRegisterTelemetryHooks:
-    def test_registers_all_hooks(self):
+    def test_registers_all_hooks(self) -> None:
         agent = MagicMock()
         agent._name = "test-agent"
         register_telemetry_hooks(agent)
@@ -28,7 +28,7 @@ class TestRegisterTelemetryHooks:
         assert HookPoint.PRE_TOOL_USE in hook_points
         assert HookPoint.POST_TOOL_USE in hook_points
 
-    def test_hooks_callable(self):
+    def test_hooks_callable(self) -> None:
         agent = MagicMock()
         agent._name = "test-agent"
         register_telemetry_hooks(agent)
@@ -40,43 +40,43 @@ class TestRegisterTelemetryHooks:
 
 
 class TestPhaseSpanHelpers:
-    def test_start_phase_span_no_otel(self):
+    def test_start_phase_span_no_otel(self) -> None:
         with patch.dict("sys.modules", {"opentelemetry": None}):
             start_phase_span("analyze", "agent1")  # Should not raise
 
-    def test_end_phase_span_no_otel(self):
+    def test_end_phase_span_no_otel(self) -> None:
         with patch.dict("sys.modules", {"opentelemetry": None}):
             end_phase_span("analyze", "agent1", 100.0)  # Should not raise
 
-    def test_end_phase_span_no_start_time(self):
+    def test_end_phase_span_no_start_time(self) -> None:
         end_phase_span("analyze", "agent1", None)  # Should not raise
 
-    def test_end_phase_span_with_tokens(self):
+    def test_end_phase_span_with_tokens(self) -> None:
         tokens: dict[str, object] = {"phase.test": "fake_token"}
         with patch.dict("sys.modules", {"opentelemetry": None}):
             end_phase_span("test", "agent1", 100.0, tokens)
 
 
 class TestToolSpanHelpers:
-    def test_start_tool_span_no_otel(self):
+    def test_start_tool_span_no_otel(self) -> None:
         with patch.dict("sys.modules", {"opentelemetry": None}):
             start_tool_span("my_tool")  # Should not raise
 
-    def test_end_tool_span_no_otel(self):
+    def test_end_tool_span_no_otel(self) -> None:
         with patch.dict("sys.modules", {"opentelemetry": None}):
             end_tool_span("my_tool", 100.0)  # Should not raise
 
-    def test_end_tool_span_no_start_time(self):
+    def test_end_tool_span_no_start_time(self) -> None:
         end_tool_span("my_tool", None)
 
-    def test_end_tool_span_with_tokens(self):
+    def test_end_tool_span_with_tokens(self) -> None:
         tokens: dict[str, object] = {"tool.test": "fake_token"}
         with patch.dict("sys.modules", {"opentelemetry": None}):
             end_tool_span("test", 100.0, tokens)
 
 
 class TestHookCallbacks:
-    def test_pre_analyze_callback(self):
+    def test_pre_analyze_callback(self) -> None:
         agent = MagicMock()
         agent._name = "agent1"
         register_telemetry_hooks(agent)
@@ -92,7 +92,7 @@ class TestHookCallbacks:
         assert pre_analyze is not None
         pre_analyze(ctx)  # Should not raise
 
-    def test_pre_tool_use_with_tool_name(self):
+    def test_pre_tool_use_with_tool_name(self) -> None:
         agent = MagicMock()
         agent._name = "agent1"
         register_telemetry_hooks(agent)
@@ -108,7 +108,7 @@ class TestHookCallbacks:
         assert pre_tool is not None
         pre_tool(ctx)  # Should not raise
 
-    def test_pre_tool_use_with_metadata(self):
+    def test_pre_tool_use_with_metadata(self) -> None:
         agent = MagicMock()
         agent._name = "agent1"
         register_telemetry_hooks(agent)
@@ -124,7 +124,7 @@ class TestHookCallbacks:
         assert pre_tool is not None
         pre_tool(ctx)  # Should not raise
 
-    def test_post_respond_callback(self):
+    def test_post_respond_callback(self) -> None:
         agent = MagicMock()
         agent._name = "agent1"
         register_telemetry_hooks(agent)

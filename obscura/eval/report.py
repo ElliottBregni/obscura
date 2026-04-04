@@ -11,7 +11,6 @@ from rich.table import Table
 
 from obscura.eval.models import EvalCaseResult, EvalRunSummary, EvalVerdict
 
-
 # ---------------------------------------------------------------------------
 # Terminal table (rich)
 # ---------------------------------------------------------------------------
@@ -63,7 +62,9 @@ def render_table(summary: EvalRunSummary, *, console: Console | None = None) -> 
         "TOTAL",
         f"{summary.passed}P/{summary.failed}F/{summary.regressions}R/{summary.errors}E",
         f"{summary.avg_deterministic_score:.2f}",
-        f"{summary.avg_judge_score:.1f}" if summary.avg_judge_score is not None else "-",
+        f"{summary.avg_judge_score:.1f}"
+        if summary.avg_judge_score is not None
+        else "-",
         f"{summary.avg_composite_score:.2f}",
         "",
         "",
@@ -160,7 +161,7 @@ def render_markdown(summary: EvalRunSummary) -> str:
         lines.append(
             f"| {cr.case_id} | {cr.verdict.value.upper()} | "
             f"{cr.deterministic_score:.2f} | {judge_str} | "
-            f"{cr.composite_score:.2f} | {cr.turns_used} | {cr.latency_ms} |"
+            f"{cr.composite_score:.2f} | {cr.turns_used} | {cr.latency_ms} |",
         )
 
     lines.append("")

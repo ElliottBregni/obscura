@@ -1,5 +1,4 @@
-"""
-obscura.backends.mcp_backend — Backend that uses MCP tools/resources.
+"""obscura.backends.mcp_backend — Backend that uses MCP tools/resources.
 
 Allows agents to use tools from external MCP servers.
 
@@ -30,9 +29,11 @@ import asyncio
 import inspect
 import logging
 import os
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
     from obscura.core.tools import ToolRegistry
 
 from obscura.core.types import (
@@ -51,8 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 class MCPBackend:
-    """
-    BackendProtocol implementation that uses MCP servers for tools.
+    """BackendProtocol implementation that uses MCP servers for tools.
 
     This backend doesn't have its own LLM - it expects to be used
     as a tool provider for other backends, or for direct tool calls.
@@ -62,7 +62,7 @@ class MCPBackend:
         self,
         mcp_servers: list[MCPConnectionConfig] | None = None,
         name: str = "mcp",
-    ):
+    ) -> None:
         from obscura.core.tools import ToolRegistry
 
         self.name = name
@@ -76,7 +76,8 @@ class MCPBackend:
         self._initialized = False
         self._connection_errors: dict[str, Exception] = {}
         self._connect_timeout_seconds = max(
-            1.0, float(os.environ.get("OBSCURA_MCP_CONNECT_TIMEOUT_SECONDS", "90"))
+            1.0,
+            float(os.environ.get("OBSCURA_MCP_CONNECT_TIMEOUT_SECONDS", "90")),
         )
 
     # -- Testing/observability accessors ------------------------------------
@@ -115,14 +116,14 @@ class MCPBackend:
 
         # Connect to all MCP servers
         for i, config in enumerate(self.mcp_servers):
-            session_name = config.name if config.name else f"mcp_server_{i}"
+            session_name = config.name or f"mcp_server_{i}"
             try:
                 await asyncio.wait_for(
                     self._session_manager.add_session(session_name, config),
                     timeout=self._connect_timeout_seconds,
                 )
                 logger.info(f"Connected to MCP server: {session_name}")
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 logger.debug(
                     "Timed out connecting to MCP server %s after %.1fs",
                     session_name,
@@ -210,36 +211,42 @@ class MCPBackend:
     # -- BackendProtocol Implementation --------------------------------------
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
-        """
-        Send a prompt - not supported directly.
+        """Send a prompt - not supported directly.
 
         This backend is for tools only, not direct LLM calls.
         """
-        raise NotImplementedError(
+        msg = (
             "MCPBackend does not support direct LLM calls. "
             "Use it as a tool provider for other backends."
         )
+        raise NotImplementedError(
+            msg,
+        )
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        """
-        Stream a response - not supported directly.
+        """Stream a response - not supported directly.
 
         This backend is for tools only, not direct LLM calls.
         """
-        raise NotImplementedError(
+        msg = (
             "MCPBackend does not support direct LLM calls. "
             "Use it as a tool provider for other backends."
+        )
+        raise NotImplementedError(
+            msg,
         )
 
     # -- Sessions (not supported) --------------------------------------------
 
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a session - not supported by MCP backend."""
-        raise NotImplementedError("MCPBackend does not support sessions")
+        msg = "MCPBackend does not support sessions"
+        raise NotImplementedError(msg)
 
     async def resume_session(self, ref: SessionRef) -> None:
         """Resume a session - not supported by MCP backend."""
-        raise NotImplementedError("MCPBackend does not support sessions")
+        msg = "MCPBackend does not support sessions"
+        raise NotImplementedError(msg)
 
     async def list_sessions(self) -> list[SessionRef]:
         """List sessions - not supported by MCP backend."""
@@ -247,7 +254,8 @@ class MCPBackend:
 
     async def delete_session(self, ref: SessionRef) -> None:
         """Delete a session - not supported by MCP backend."""
-        raise NotImplementedError("MCPBackend does not support sessions")
+        msg = "MCPBackend does not support sessions"
+        raise NotImplementedError(msg)
 
     # -- Tools ---------------------------------------------------------------
 
@@ -331,14 +339,14 @@ class MCPBackend:
     # -- Additional Methods --------------------------------------------------
 
     async def add_server(self, config: MCPConnectionConfig) -> str:
-        """
-        Add a new MCP server dynamically.
+        """Add a new MCP server dynamically.
 
         Args:
             config: Connection configuration for the server
 
         Returns:
             Session name for the new server
+
         """
         session_name = f"mcp_server_{len(self._session_manager.list_sessions())}"
         await self._session_manager.add_session(session_name, config)
@@ -349,11 +357,11 @@ class MCPBackend:
         return session_name
 
     async def remove_server(self, session_name: str) -> None:
-        """
-        Remove an MCP server.
+        """Remove an MCP server.
 
         Args:
             session_name: Name of the session to remove
+
         """
         await self._session_manager.remove_session(session_name)
 
@@ -365,11 +373,11 @@ class MCPBackend:
         return self._session_manager.list_sessions()
 
     async def health_check(self) -> dict[str, Any]:
-        """
-        Check health of all MCP connections.
+        """Check health of all MCP connections.
 
         Returns:
             Health status for each server
+
         """
         health: dict[str, dict[str, str]] = {}
 
@@ -390,8 +398,7 @@ class MCPBackend:
 
 
 class MCPBackendMixin:
-    """
-    Mixin to add MCP capabilities to any backend.
+    """Mixin to add MCP capabilities to any backend.
 
     This allows existing backends (Copilot, Claude) to use MCP tools
     alongside their native capabilities.
@@ -411,7 +418,7 @@ class MCPBackendMixin:
     def _parent_register_tool(self, spec: ToolSpec) -> None:
         """Call register_tool on the next class in MRO (the concrete backend)."""
         # super() resolves at runtime via MRO to the concrete backend's register_tool.
-        register: Any = getattr(super(), "register_tool")
+        register: Any = super().register_tool
         register(spec)
 
     async def start(self) -> None:

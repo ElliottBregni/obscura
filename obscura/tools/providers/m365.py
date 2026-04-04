@@ -1,4 +1,5 @@
 """M365 CLI provider — wraps @pnp/cli-microsoft365 binary."""
+
 from __future__ import annotations
 
 import asyncio
@@ -50,7 +51,10 @@ async def M365Provider(**kwargs: Any) -> dict[str, Any]:
         err = stderr.decode() if stderr else ""
 
         if proc.returncode != 0:
-            return {"error": err or f"m365 exited with code {proc.returncode}", "output": output}
+            return {
+                "error": err or f"m365 exited with code {proc.returncode}",
+                "output": output,
+            }
 
         try:
             return json.loads(output)  # type: ignore[no-any-return]

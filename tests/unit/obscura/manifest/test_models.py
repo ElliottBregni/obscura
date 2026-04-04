@@ -152,7 +152,10 @@ class TestAgentManifestFromFrontmatter:
 
     def test_source_path(self) -> None:
         from pathlib import Path
+
         m = agent_manifest_from_frontmatter(
-            {"name": "x"}, "body", source_path=Path("/tmp/x.md")
+            {"name": "x"},
+            "body",
+            source_path=Path("/tmp/x.md"),
         )
         assert m.source_path == Path("/tmp/x.md")

@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-
 ApprovalStatus = Literal["pending", "approved", "denied", "expired"]
 
 

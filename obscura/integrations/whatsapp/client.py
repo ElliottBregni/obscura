@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,7 @@ def _str_any_dict() -> dict[str, Any]:
 
 
 _POLL_WINDOW_S = 60.0  # seconds of history to fetch on each poll
+
 
 @dataclass(frozen=True)
 class WhatsAppMessage:
@@ -63,9 +64,12 @@ class WhatsAppClient:
 
                 self._client = Client(self._account_sid, self._auth_token)
             except ImportError as e:
-                raise RuntimeError(
+                msg = (
                     "twilio package is required for WhatsApp integration. "
                     "Install with: pip install twilio"
+                )
+                raise RuntimeError(
+                    msg,
                 ) from e
         return self._client  # type: ignore[return-value]
 
@@ -76,8 +80,9 @@ class WhatsAppClient:
 
     def _check_access_sync(self) -> bool:
         if not self._account_sid or not self._auth_token:
+            msg = "TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set for WhatsApp integration."
             raise RuntimeError(
-                "TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set for WhatsApp integration."
+                msg,
             )
         client = self._get_client()
         client.api.accounts(self._account_sid).fetch()
@@ -91,7 +96,8 @@ class WhatsAppClient:
     def _poll_inbound_sync(self, since_epoch_s: float) -> list[WhatsAppMessage]:
         client = self._get_client()
         from_dt = datetime.fromtimestamp(
-            max(since_epoch_s, time.time() - _POLL_WINDOW_S), tz=timezone.utc
+            max(since_epoch_s, time.time() - _POLL_WINDOW_S),
+            tz=UTC,
         )
         messages = client.messages.list(
             to=self._from_number,
@@ -111,9 +117,9 @@ class WhatsAppClient:
                     to_number=str(m.to),
                     body=str(m.body or ""),
                     date_created=(
-                        m.date_created.replace(tzinfo=timezone.utc)
+                        m.date_created.replace(tzinfo=UTC)
                         if m.date_created
-                        else datetime.now(tz=timezone.utc)
+                        else datetime.now(tz=UTC)
                     ),
                     status=str(m.status),
                     raw={
@@ -121,7 +127,7 @@ class WhatsAppClient:
                         "status": str(m.status),
                         "direction": str(getattr(m, "direction", "")),
                     },
-                )
+                ),
             )
         return out
 

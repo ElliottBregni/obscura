@@ -1,5 +1,4 @@
-"""
-obscura.voice.stt — Speech-to-text client.
+"""obscura.voice.stt — Speech-to-text client.
 
 Streams raw PCM audio to an STT service and returns the transcript.
 Supports two backends:
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 # STT configuration.
 DEFAULT_LANGUAGE = "en"
 KEEPALIVE_INTERVAL = 8.0  # seconds
-FINALIZE_TIMEOUT = 5.0    # seconds after CloseStream
+FINALIZE_TIMEOUT = 5.0  # seconds after CloseStream
 
 
 class STTClient:
@@ -62,7 +61,10 @@ class STTClient:
             try:
                 return await self._transcribe_websocket(audio_pcm)
             except Exception:
-                logger.warning("WebSocket STT failed, trying whisper fallback", exc_info=True)
+                logger.warning(
+                    "WebSocket STT failed, trying whisper fallback",
+                    exc_info=True,
+                )
 
         # Try whisper via Python module.
         try:
@@ -77,7 +79,8 @@ class STTClient:
         try:
             import websockets
         except ImportError:
-            raise RuntimeError("WebSocket STT requires: uv pip install websockets")
+            msg = "WebSocket STT requires: uv pip install websockets"
+            raise RuntimeError(msg)
 
         url = (
             "wss://api.anthropic.com/api/ws/speech_to_text/voice_stream"
@@ -97,7 +100,7 @@ class STTClient:
             # Send audio in chunks.
             chunk_size = 4096
             for i in range(0, len(audio_pcm), chunk_size):
-                await ws.send(audio_pcm[i:i + chunk_size])
+                await ws.send(audio_pcm[i : i + chunk_size])
                 await asyncio.sleep(0.01)  # pace to avoid overwhelming
 
             # Signal end of audio.
@@ -120,7 +123,7 @@ class STTClient:
                                 break
                             elif msg_type == "TranscriptEndpoint":
                                 break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
         return " ".join(transcript_parts).strip()
@@ -138,11 +141,16 @@ class STTClient:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                whisper_path, tmp_path,
-                "--language", self._language,
-                "--model", "base",
-                "--output_format", "txt",
-                "--output_dir", str(Path(tmp_path).parent),
+                whisper_path,
+                tmp_path,
+                "--language",
+                self._language,
+                "--model",
+                "base",
+                "--output_format",
+                "txt",
+                "--output_dir",
+                str(Path(tmp_path).parent),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -160,6 +168,7 @@ class STTClient:
     async def _transcribe_whisper_python(self, audio_pcm: bytes) -> str:
         """Transcribe using whisper Python package."""
         import importlib
+
         whisper_mod = importlib.import_module("whisper")
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -175,7 +184,8 @@ class STTClient:
             loop = asyncio.get_event_loop()
             model = await loop.run_in_executor(None, whisper_mod.load_model, "base")
             result = await loop.run_in_executor(
-                None, lambda: model.transcribe(tmp_path, language=self._language)
+                None,
+                lambda: model.transcribe(tmp_path, language=self._language),
             )
             return result.get("text", "").strip()
         finally:

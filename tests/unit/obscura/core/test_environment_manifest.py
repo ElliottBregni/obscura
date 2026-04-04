@@ -11,7 +11,6 @@ from obscura.core.compiler.compiled import (
     EnvironmentManifest,
 )
 
-
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -129,13 +128,13 @@ class TestEnvironmentManifestCustom:
 
 
 def _minimal_agent(**overrides) -> CompiledAgent:
-    defaults = dict(
-        name="test-agent",
-        template_name="base",
-        mode="code",
-        agent_type="loop",
-        provider="claude",
-    )
+    defaults = {
+        "name": "test-agent",
+        "template_name": "base",
+        "mode": "code",
+        "agent_type": "loop",
+        "provider": "claude",
+    }
     defaults.update(overrides)
     return CompiledAgent(**defaults)
 

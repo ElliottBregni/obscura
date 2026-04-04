@@ -1,4 +1,5 @@
 """X (Twitter) API v2 provider handlers."""
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,9 @@ def _headers_write() -> dict[str, str]:
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(
-            base_url=_BASE, headers=_headers_read(), timeout=15
+            base_url=_BASE,
+            headers=_headers_read(),
+            timeout=15,
         ) as c:
             r = await c.get(path, params=params)
             r.raise_for_status()
@@ -41,7 +44,9 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
 async def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(
-            base_url=_BASE, headers=_headers_write(), timeout=15
+            base_url=_BASE,
+            headers=_headers_write(),
+            timeout=15,
         ) as c:
             r = await c.post(path, json=body)
             r.raise_for_status()

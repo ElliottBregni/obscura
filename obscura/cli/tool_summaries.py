@@ -14,6 +14,7 @@ def summarize_tool_call(tool_name: str, tool_input: dict[str, Any]) -> str:
         grep_files {"pattern": "TODO", "path": "."}  ->  "Searching for 'TODO'"
         run_shell {"script": "ls -la"}  ->  "$ ls -la"
         edit_text_file {"path": "x.py", ...}  ->  "Editing x.py"
+
     """
     fn = _SUMMARIES.get(tool_name)
     if fn is not None:
@@ -61,7 +62,11 @@ def _edit(a: dict[str, Any]) -> str:
 
 
 def _append(a: dict[str, Any]) -> str:
-    return f"Appending to {_path_basename(a)}" if _path_basename(a) else "Appending to file"
+    return (
+        f"Appending to {_path_basename(a)}"
+        if _path_basename(a)
+        else "Appending to file"
+    )
 
 
 def _list_dir(a: dict[str, Any]) -> str:
@@ -157,7 +162,11 @@ def _remove(a: dict[str, Any]) -> str:
 
 
 def _mkdir(a: dict[str, Any]) -> str:
-    return f"Creating directory {_path_basename(a)}" if _path_basename(a) else "Creating directory"
+    return (
+        f"Creating directory {_path_basename(a)}"
+        if _path_basename(a)
+        else "Creating directory"
+    )
 
 
 def _file_info(a: dict[str, Any]) -> str:

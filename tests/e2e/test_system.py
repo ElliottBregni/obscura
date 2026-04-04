@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from scripts.sync import VaultSync
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from scripts.sync import VaultSync
 
 
 class TestDomain2SystemSync:
     """Domain 2: sync_system() creates vault-wide content in ~/{agent_target}/."""
 
     def test_sync_system_creates_symlinks(
-        self, sync_instance: VaultSync, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_home: Path,
     ) -> None:
         """sync_system creates vault-wide content in system agent dirs."""
         sync_instance.sync_system()
@@ -29,7 +34,9 @@ class TestDomain2SystemSync:
         )
 
     def test_sync_system_nested_override(
-        self, sync_instance: VaultSync, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_home: Path,
     ) -> None:
         """Nested override: setup.copilot.md appears as setup.md in ~/.github/."""
         sync_instance.sync_system()
@@ -43,9 +50,11 @@ class TestDomain2SystemSync:
         )
 
     def test_sync_system_agent_dir_content(
-        self, sync_instance: VaultSync, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_home: Path,
     ) -> None:
-        """Agent dir: skills.copilot/python.md -> ~/.github/skills/python.md"""
+        """Agent dir: skills.copilot/python.md -> ~/.github/skills/python.md."""
         sync_instance.sync_system()
 
         link = mock_home / ".github" / "skills" / "python.md"
@@ -56,7 +65,9 @@ class TestDomain2SystemSync:
         )
 
     def test_sync_system_agent_filtering(
-        self, sync_instance: VaultSync, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_home: Path,
     ) -> None:
         """Each agent gets its own filtered content at system level."""
         sync_instance.sync_system()
@@ -76,7 +87,9 @@ class TestDomain2SystemSync:
         )
 
     def test_sync_system_preserves_non_managed_files(
-        self, sync_instance: VaultSync, mock_home: Path
+        self,
+        sync_instance: VaultSync,
+        mock_home: Path,
     ) -> None:
         """Sync and cleanup preserve non-managed files in ~/.claude/."""
         claude = mock_home / ".claude"

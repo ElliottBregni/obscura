@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.paths import resolve_obscura_state_dir
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,10 @@ class WhatsAppState:
                 self._seen_sids = set(data.get("seen_sids", []))
                 self._last_fetch_epoch_s = float(data.get("last_fetch_epoch_s", 0.0))
         except Exception:
-            logger.warning("Failed to load WhatsApp state from %s; starting fresh", self._path)
+            logger.warning(
+                "Failed to load WhatsApp state from %s; starting fresh",
+                self._path,
+            )
             self._seen_sids = set()
             self._last_fetch_epoch_s = 0.0
 

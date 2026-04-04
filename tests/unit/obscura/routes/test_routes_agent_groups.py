@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
+
 from obscura.core.config import ObscuraConfig
 
 
@@ -72,7 +73,9 @@ class TestAgentGroupCRUD:
 class TestAgentGroupBroadcast:
     @patch("obscura.routes.agent_groups.get_runtime")
     def test_broadcast_to_group(
-        self, mock_get_runtime: Any, client: TestClient
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
     ) -> None:
         mock_agent: Any = MagicMock()
         mock_agent.run = AsyncMock()
@@ -102,7 +105,9 @@ class TestAgentGroupBroadcast:
 
     @patch("obscura.routes.agent_groups.get_runtime")
     def test_broadcast_group_not_found(
-        self, mock_get_runtime: Any, client: TestClient
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
     ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_get_runtime.return_value = mock_runtime
@@ -116,7 +121,9 @@ class TestAgentGroupBroadcast:
 
     @patch("obscura.routes.agent_groups.get_runtime")
     def test_broadcast_agent_not_found(
-        self, mock_get_runtime: Any, client: TestClient
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
     ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_runtime.get_agent = MagicMock(return_value=None)
@@ -161,7 +168,9 @@ class TestAgentMessaging:
 
     @patch("obscura.routes.agent_groups.get_runtime")
     def test_send_message_source_not_found(
-        self, mock_get_runtime: Any, client: TestClient
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
     ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_runtime.get_agent = MagicMock(return_value=None)
@@ -188,7 +197,9 @@ class TestAgentMessaging:
 
     @patch("obscura.routes.agent_groups.get_runtime")
     def test_get_messages_not_found(
-        self, mock_get_runtime: Any, client: TestClient
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
     ) -> None:
         mock_runtime: Any = AsyncMock()
         mock_runtime.get_agent = MagicMock(return_value=None)

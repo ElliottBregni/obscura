@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, AsyncIterator, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 
 from obscura.core.agent_loop import AgentLoop
-from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     AgentEvent,
@@ -25,6 +24,10 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,7 +52,7 @@ def _make_tool_call_chunks(
         StreamChunk(
             kind=ChunkKind.TOOL_USE_DELTA,
             tool_input_delta=json.dumps(tool_input),
-        )
+        ),
     )
     chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_END))
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
@@ -133,10 +136,12 @@ class TestPause:
         """Pause after first turn emits SESSION_PAUSED and sets session PAUSED."""
         store = SQLiteEventStore(tmp_path / "test.db")
         # Two turns of text (but pause should stop after first)
-        backend = MockBackend([
-            _make_text_chunks("hello"),
-            _make_text_chunks("world"),
-        ])
+        backend = MockBackend(
+            [
+                _make_text_chunks("hello"),
+                _make_text_chunks("world"),
+            ],
+        )
         loop = AgentLoop(backend, _make_registry(), event_store=store, max_turns=5)
 
         events: list[AgentEvent] = []
@@ -163,15 +168,23 @@ class TestPause:
         """Pause during a multi-turn tool loop stops at turn boundary."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
         # Turn 1: tool call → Turn 2: text
-        backend = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("done"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=5
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=5,
         )
 
         events: list[AgentEvent] = []
@@ -196,16 +209,24 @@ class TestPause:
         """Pause requested mid-stream still completes the current turn."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="slow", description="Slow", parameters={}, handler=lambda: "result"
+            name="slow",
+            description="Slow",
+            parameters={},
+            handler=lambda: "result",
         )
         # Turn 1: tool call → Turn 2: text → Turn 3: text (unreachable)
-        backend = MockBackend([
-            _make_tool_call_chunks("slow", {}),
-            _make_text_chunks("second"),
-            _make_text_chunks("third"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("slow", {}),
+                _make_text_chunks("second"),
+                _make_text_chunks("third"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=10
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         events: list[AgentEvent] = []
@@ -238,15 +259,23 @@ class TestResume:
         """Resume a paused session continues from where it left off."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
         # First run: tool call (turn 1) → paused
-        backend1 = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("unreachable"),
-        ])
+        backend1 = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("unreachable"),
+            ],
+        )
         loop1 = AgentLoop(
-            backend1, _make_registry(spec), event_store=store, max_turns=5
+            backend1,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=5,
         )
 
         events1: list[AgentEvent] = []
@@ -260,7 +289,10 @@ class TestResume:
         # Now resume with a new backend that produces text
         backend2 = MockBackend([_make_text_chunks("resumed")])
         loop2 = AgentLoop(
-            backend2, _make_registry(spec), event_store=store, max_turns=5
+            backend2,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=5,
         )
 
         events2: list[AgentEvent] = []
@@ -280,14 +312,22 @@ class TestResume:
         """Resume starts at the correct turn number."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
-        backend1 = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("not reached"),
-        ])
+        backend1 = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop1 = AgentLoop(
-            backend1, _make_registry(spec), event_store=store, max_turns=10
+            backend1,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         async for event in loop1.run("go", session_id="s1"):
@@ -297,7 +337,10 @@ class TestResume:
         # Resume
         backend2 = MockBackend([_make_text_chunks("done")])
         loop2 = AgentLoop(
-            backend2, _make_registry(spec), event_store=store, max_turns=10
+            backend2,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         events2: list[AgentEvent] = []
@@ -350,14 +393,22 @@ class TestResume:
         """Resume with an explicit prompt uses it instead of reconstructed."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
-        backend1 = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("not reached"),
-        ])
+        backend1 = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop1 = AgentLoop(
-            backend1, _make_registry(spec), event_store=store, max_turns=10
+            backend1,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
         async for event in loop1.run("original", session_id="s1"):
             if event.kind == AgentEventKind.TURN_COMPLETE and event.turn == 1:
@@ -369,7 +420,9 @@ class TestResume:
         class CapturingBackend(MockBackend):
             @override
             async def stream(
-                self, prompt: str, **kwargs: Any
+                self,
+                prompt: str,
+                **kwargs: Any,
             ) -> AsyncIterator[StreamChunk]:
                 prompts_received.append(prompt)
                 async for chunk in super().stream(prompt, **kwargs):
@@ -377,7 +430,10 @@ class TestResume:
 
         backend2 = CapturingBackend([_make_text_chunks("done")])
         loop2 = AgentLoop(
-            backend2, _make_registry(spec), event_store=store, max_turns=10
+            backend2,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
         async for _ in loop2.resume("s1", prompt="new direction"):
             pass
@@ -389,16 +445,24 @@ class TestResume:
         """Multiple pause/resume cycles work correctly."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
 
         # Cycle 1: tool call → pause
-        backend1 = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("not reached"),
-        ])
+        backend1 = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop1 = AgentLoop(
-            backend1, _make_registry(spec), event_store=store, max_turns=10
+            backend1,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
         async for event in loop1.run("start", session_id="s1"):
             if event.kind == AgentEventKind.TURN_COMPLETE and event.turn == 1:
@@ -409,12 +473,17 @@ class TestResume:
         assert session.status == SessionStatus.PAUSED
 
         # Cycle 2: resume → tool call → pause again
-        backend2 = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("not reached"),
-        ])
+        backend2 = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop2 = AgentLoop(
-            backend2, _make_registry(spec), event_store=store, max_turns=10
+            backend2,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         events2: list[AgentEvent] = []
@@ -431,7 +500,10 @@ class TestResume:
         # Cycle 3: resume → complete
         backend3 = MockBackend([_make_text_chunks("final")])
         loop3 = AgentLoop(
-            backend3, _make_registry(spec), event_store=store, max_turns=10
+            backend3,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         events3: list[AgentEvent] = []
@@ -455,7 +527,10 @@ class TestUserInput:
         """Injected user input becomes a USER_INPUT event and next prompt."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
 
         prompts_received: list[str] = []
@@ -463,20 +538,27 @@ class TestUserInput:
         class CapturingBackend(MockBackend):
             @override
             async def stream(
-                self, prompt: str, **kwargs: Any
+                self,
+                prompt: str,
+                **kwargs: Any,
             ) -> AsyncIterator[StreamChunk]:
                 prompts_received.append(prompt)
                 async for chunk in super().stream(prompt, **kwargs):
                     yield chunk
 
         # Turn 1: tool call → Turn 2 (user input injected) → Turn 3: text done
-        backend = CapturingBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("after injection"),
-            _make_text_chunks("not reached"),
-        ])
+        backend = CapturingBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("after injection"),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=10
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         events: list[AgentEvent] = []
@@ -500,14 +582,22 @@ class TestUserInput:
         """USER_INPUT events are persisted to the event store."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
-        backend = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("done"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=10
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
 
         async for event in loop.run("go", session_id="s1"):
@@ -515,9 +605,7 @@ class TestUserInput:
                 loop.inject_user_input("injected")
 
         stored = await store.get_events("s1")
-        user_inputs = [
-            e for e in stored if e.kind == AgentEventKind.USER_INPUT
-        ]
+        user_inputs = [e for e in stored if e.kind == AgentEventKind.USER_INPUT]
         assert len(user_inputs) == 1
         assert user_inputs[0].payload.get("text") == "injected"
 
@@ -533,16 +621,24 @@ class TestReconstructState:
         """State reconstruction recovers turn number and text from tool turns."""
         store = SQLiteEventStore(tmp_path / "test.db")
         spec = ToolSpec(
-            name="ping", description="Ping", parameters={}, handler=lambda: "pong"
+            name="ping",
+            description="Ping",
+            parameters={},
+            handler=lambda: "pong",
         )
         # Turn 1: tool call → tool executed → turn 2 text → pause
-        backend = MockBackend([
-            _make_tool_call_chunks("ping", {}),
-            _make_text_chunks("hello world"),
-            _make_text_chunks("not reached"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("ping", {}),
+                _make_text_chunks("hello world"),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=10
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
         async for event in loop.run("go", session_id="s1"):
             # Pause after turn 2 (text turn) so we have tool results + text
@@ -569,13 +665,18 @@ class TestReconstructState:
         )
         # Turn 1: tool call → tool executed → Turn 2: text → pause
         # Pausing after turn 2 ensures turn 1's TOOL_RESULT is in the store.
-        backend = MockBackend([
-            _make_tool_call_chunks("echo", {"msg": "test"}),
-            _make_text_chunks("after tools"),
-            _make_text_chunks("not reached"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("echo", {"msg": "test"}),
+                _make_text_chunks("after tools"),
+                _make_text_chunks("not reached"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=10
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=10,
         )
         async for event in loop.run("go", session_id="s1"):
             if event.kind == AgentEventKind.TURN_COMPLETE and event.turn == 2:
@@ -606,12 +707,17 @@ class TestToolCallTiming:
             parameters={"type": "object", "properties": {"msg": {"type": "string"}}},
             handler=_echo_handler,
         )
-        backend = MockBackend([
-            _make_tool_call_chunks("echo", {"msg": "hello"}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("echo", {"msg": "hello"}),
+                _make_text_chunks("done"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=5
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=5,
         )
 
         events: list[AgentEvent] = []
@@ -633,12 +739,17 @@ class TestToolCallTiming:
             parameters={"type": "object", "properties": {"msg": {"type": "string"}}},
             handler=_echo_handler,
         )
-        backend = MockBackend([
-            _make_tool_call_chunks("echo", {"msg": "world"}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("echo", {"msg": "world"}),
+                _make_text_chunks("done"),
+            ],
+        )
         loop = AgentLoop(
-            backend, _make_registry(spec), event_store=store, max_turns=5
+            backend,
+            _make_registry(spec),
+            event_store=store,
+            max_turns=5,
         )
         async for _ in loop.run("go", session_id="s1"):
             pass

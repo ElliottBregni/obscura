@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
 import pytest
 
-from pathlib import Path
-
-from obscura.core.types import Backend
 from obscura.core.context import ContextLoader
+from obscura.core.types import Backend
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -31,7 +32,7 @@ def vault(tmp_path: Path) -> Path:
     (gh / "skills" / "python.md").write_text("# Python\nUse type hints.")
     (gh / "skills" / "api-design.md").write_text("# API Design\nREST first.")
     (gh / "skills" / "roles" / "architect" / "travelers.opus.md").write_text(
-        "# Architect Role\nAnalyze deeply."
+        "# Architect Role\nAnalyze deeply.",
     )
 
     # Claude dirs
@@ -48,11 +49,11 @@ def vault(tmp_path: Path) -> Path:
 
 
 class TestAgentDir:
-    def test_copilot_agent_dir(self, vault: Path):
+    def test_copilot_agent_dir(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         assert loader.agent_dir == vault / ".github"
 
-    def test_claude_agent_dir(self, vault: Path):
+    def test_claude_agent_dir(self, vault: Path) -> None:
         loader = ContextLoader(Backend.CLAUDE, vault_path=vault)
         assert loader.agent_dir == vault / ".claude"
 
@@ -63,18 +64,18 @@ class TestAgentDir:
 
 
 class TestLoadInstructions:
-    def test_loads_all_instruction_files(self, vault: Path):
+    def test_loads_all_instruction_files(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         instructions = loader.load_instructions()
         assert "# Setup" in instructions
         assert "# Code Style" in instructions
         assert "---" in instructions  # separator
 
-    def test_returns_empty_for_missing_dir(self, tmp_path: Path):
+    def test_returns_empty_for_missing_dir(self, tmp_path: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=tmp_path)
         assert loader.load_instructions() == ""
 
-    def test_claude_instructions(self, vault: Path):
+    def test_claude_instructions(self, vault: Path) -> None:
         loader = ContextLoader(Backend.CLAUDE, vault_path=vault)
         instructions = loader.load_instructions()
         assert "# Claude Setup" in instructions
@@ -86,18 +87,18 @@ class TestLoadInstructions:
 
 
 class TestLoadSkills:
-    def test_loads_skill_files(self, vault: Path):
+    def test_loads_skill_files(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         skills = loader.load_skills()
         texts = "\n".join(skills)
         assert "# Python" in texts
         assert "# API Design" in texts
 
-    def test_returns_empty_list_for_missing_dir(self, tmp_path: Path):
+    def test_returns_empty_list_for_missing_dir(self, tmp_path: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=tmp_path)
         assert loader.load_skills() == []
 
-    def test_skips_empty_files(self, vault: Path):
+    def test_skips_empty_files(self, vault: Path) -> None:
         # Create an empty skill file
         (vault / ".github" / "skills" / "empty.md").write_text("")
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
@@ -112,13 +113,13 @@ class TestLoadSkills:
 
 
 class TestLoadRole:
-    def test_loads_role_context(self, vault: Path):
+    def test_loads_role_context(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         role = loader.load_role("architect")
         assert "# Architect Role" in role
         assert "Analyze deeply" in role
 
-    def test_returns_empty_for_missing_role(self, vault: Path):
+    def test_returns_empty_for_missing_role(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         assert loader.load_role("nonexistent") == ""
 
@@ -129,18 +130,18 @@ class TestLoadRole:
 
 
 class TestLoadSystemPrompt:
-    def test_combines_instructions_and_skills(self, vault: Path):
+    def test_combines_instructions_and_skills(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         prompt = loader.load_system_prompt()
         assert "# Setup" in prompt
         assert "## Skills" in prompt
         assert "# Python" in prompt
 
-    def test_additional_content(self, vault: Path):
+    def test_additional_content(self, vault: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=vault)
         prompt = loader.load_system_prompt(additional="Extra context here.")
         assert "Extra context here." in prompt
 
-    def test_empty_vault(self, tmp_path: Path):
+    def test_empty_vault(self, tmp_path: Path) -> None:
         loader = ContextLoader(Backend.COPILOT, vault_path=tmp_path)
         assert loader.load_system_prompt() == ""

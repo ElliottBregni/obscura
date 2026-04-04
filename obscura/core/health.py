@@ -20,10 +20,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -74,14 +71,19 @@ def _check_skipped_tools(
     groups: dict[str, list[str]] = {}
     for tool_name, handler_ref in skipped_tools:
         # Extract provider prefix from handler_ref (e.g. "obscura.tools.providers.msgraph" → "msgraph")
-        provider = handler_ref.rsplit(":", 1)[0].rsplit(".", 1)[-1] if handler_ref else "unknown"
+        provider = (
+            handler_ref.rsplit(":", 1)[0].rsplit(".", 1)[-1]
+            if handler_ref
+            else "unknown"
+        )
         groups.setdefault(provider, []).append(tool_name)
 
     checks: list[HealthCheck] = []
     for provider, tools in sorted(groups.items()):
         # Try to find the missing module from the handler ref
         sample_ref = next(
-            (ref for _, ref in skipped_tools if provider in ref), ""
+            (ref for _, ref in skipped_tools if provider in ref),
+            "",
         )
         # Attempt import to get the actual error message
         reason = _probe_import_error(sample_ref)
@@ -92,7 +94,7 @@ def _check_skipped_tools(
         if reason:
             msg += f" (missing: {reason})"
         checks.append(
-            HealthCheck(name=f"tools:{provider}", status="degraded", message=msg)
+            HealthCheck(name=f"tools:{provider}", status="degraded", message=msg),
         )
     return checks
 
@@ -101,7 +103,11 @@ def _probe_import_error(handler_ref: str) -> str:
     """Try to import a handler's module and return the missing dependency name."""
     if not handler_ref:
         return ""
-    module_path = handler_ref.rsplit(":", 1)[0] if ":" in handler_ref else handler_ref.rsplit(".", 1)[0]
+    module_path = (
+        handler_ref.rsplit(":", 1)[0]
+        if ":" in handler_ref
+        else handler_ref.rsplit(".", 1)[0]
+    )
     try:
         __import__(module_path)
         return ""

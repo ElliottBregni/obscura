@@ -10,7 +10,7 @@ import os
 import time
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class PushReceipt:
     success: bool
     status_code: int = 0
     error: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class PushClient:
@@ -61,9 +61,11 @@ class PushClient:
 
     def _check_access_sync(self) -> bool:
         if self._provider == "apns" and not self._apns_key_id:
-            raise RuntimeError("APNS_KEY_ID must be set for APNs push notifications.")
+            msg = "APNS_KEY_ID must be set for APNs push notifications."
+            raise RuntimeError(msg)
         if self._provider == "fcm" and not self._fcm_server_key:
-            raise RuntimeError("FCM_SERVER_KEY must be set for FCM push notifications.")
+            msg = "FCM_SERVER_KEY must be set for FCM push notifications."
+            raise RuntimeError(msg)
         return True
 
     async def poll_inbound(self, since_epoch_s: float) -> list[Any]:
@@ -71,26 +73,41 @@ class PushClient:
         return []
 
     async def send(
-        self, token: str, title: str, body: str, data: dict[str, Any] | None = None
+        self,
+        token: str,
+        title: str,
+        body: str,
+        data: dict[str, Any] | None = None,
     ) -> PushReceipt:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._send_sync, token, title, body, data or {})
+        return await loop.run_in_executor(
+            None,
+            self._send_sync,
+            token,
+            title,
+            body,
+            data or {},
+        )
 
     def _send_sync(
-        self, token: str, title: str, body_text: str, data: dict[str, Any]
+        self,
+        token: str,
+        title: str,
+        body_text: str,
+        data: dict[str, Any],
     ) -> PushReceipt:
         notification_id = hashlib.sha1(
-            f"{token}|{title}|{body_text}|{time.time()}".encode()
+            f"{token}|{title}|{body_text}|{time.time()}".encode(),
         ).hexdigest()[:16]
         try:
             if self._provider == "expo":
                 return self._send_expo(notification_id, token, title, body_text, data)
-            elif self._provider == "fcm":
+            if self._provider == "fcm":
                 return self._send_fcm(notification_id, token, title, body_text, data)
-            elif self._provider == "apns":
+            if self._provider == "apns":
                 return self._send_apns(notification_id, token, title, body_text, data)
-            else:
-                raise ValueError(f"Unknown push provider: {self._provider}")
+            msg = f"Unknown push provider: {self._provider}"
+            raise ValueError(msg)
         except Exception as exc:
             logger.exception("Push send failed to token %s...", token[:10])
             return PushReceipt(
@@ -102,10 +119,15 @@ class PushClient:
             )
 
     def _send_expo(
-        self, nid: str, token: str, title: str, body: str, data: dict[str, Any]
+        self,
+        nid: str,
+        token: str,
+        title: str,
+        body: str,
+        data: dict[str, Any],
     ) -> PushReceipt:
         payload = json.dumps(
-            {"to": token, "title": title, "body": body, "data": data}
+            {"to": token, "title": title, "body": body, "data": data},
         ).encode("utf-8")
         req = urllib.request.Request(
             "https://exp.host/--/api/v2/push/send",
@@ -132,14 +154,19 @@ class PushClient:
         )
 
     def _send_fcm(
-        self, nid: str, token: str, title: str, body: str, data: dict[str, Any]
+        self,
+        nid: str,
+        token: str,
+        title: str,
+        body: str,
+        data: dict[str, Any],
     ) -> PushReceipt:
         payload = json.dumps(
             {
                 "to": token,
                 "notification": {"title": title, "body": body},
                 "data": data,
-            }
+            },
         ).encode("utf-8")
         req = urllib.request.Request(
             "https://fcm.googleapis.com/fcm/send",
@@ -168,10 +195,18 @@ class PushClient:
         )
 
     def _send_apns(
-        self, nid: str, token: str, title: str, body: str, data: dict[str, Any]
+        self,
+        nid: str,
+        token: str,
+        title: str,
+        body: str,
+        data: dict[str, Any],
     ) -> PushReceipt:
         try:
-            from apns2.client import APNsClient, Notification  # type: ignore[import-untyped]
+            from apns2.client import (  # type: ignore[import-untyped]
+                APNsClient,
+                Notification,
+            )
             from apns2.payload import Payload  # type: ignore[import-untyped]
 
             client: Any = APNsClient(credentials=self._apns_key_path, use_sandbox=False)
@@ -179,9 +214,13 @@ class PushClient:
             notif: Any = Notification(token=token, payload=payload)
             client.send_notification(notif, self._apns_bundle_id)  # type: ignore[no-untyped-call]
             return PushReceipt(
-                notification_id=nid, provider="apns", token=token, success=True
+                notification_id=nid,
+                provider="apns",
+                token=token,
+                success=True,
             )
         except ImportError as e:
+            msg = "apns2 package required for APNs. Install: pip install apns2"
             raise RuntimeError(
-                "apns2 package required for APNs. Install: pip install apns2"
+                msg,
             ) from e

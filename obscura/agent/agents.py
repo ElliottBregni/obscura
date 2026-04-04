@@ -1,5 +1,4 @@
-"""
-sdk/agents — Agent runtime and lifecycle management for Obscura.
+"""sdk/agents — Agent runtime and lifecycle management for Obscura.
 
 Spawn agents, manage their state, coordinate via shared memory.
 Think of it as a "process manager for AI agents."
@@ -31,35 +30,38 @@ import asyncio
 import logging
 import os
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-from obscura.core.types import AgentEvent, AgentEventKind
-from obscura.core.types import ToolSpec
-from obscura.core.paths import resolve_obscura_mcp_dir
-from obscura.auth.models import AuthenticatedUser
-from obscura.core.client import ObscuraClient
+import contextlib
+
 from obscura.agent.peers import (
     AgentRef,
     PeerCatalog,
     PeerInvocationEnvelope,
     PeerRegistry,
 )
+from obscura.core.client import ObscuraClient
+from obscura.core.paths import resolve_obscura_mcp_dir
+from obscura.core.types import AgentEvent, AgentEventKind, ToolSpec
 from obscura.memory import MemoryStore
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import InteractionBus
+    from obscura.auth.models import AuthenticatedUser
+    from obscura.heartbeat.client import AgentHeartbeatClient
     from obscura.manifest.lazy import LazyManifestProxy
     from obscura.manifest.models import AgentManifest
     from obscura.providers.mcp_backend import MCPBackend
-    from obscura.heartbeat.client import AgentHeartbeatClient
     from obscura.tools.providers import BrokerContext
+    from obscura.vector_memory import VectorMemoryEntry
 
 
 def _default_mcp_servers() -> list[dict[str, Any]]:
@@ -267,8 +269,7 @@ class AgentMessage(BaseModel):
 
 
 class Agent:
-    """
-    A single agent instance with its own memory and lifecycle.
+    """A single agent instance with its own memory and lifecycle.
 
     Agents can:
     - Run tasks and maintain conversation state
@@ -284,7 +285,7 @@ class Agent:
         user: AuthenticatedUser,
         runtime: AgentRuntime,
         manifest_proxy: LazyManifestProxy | None = None,
-    ):
+    ) -> None:
         self.id = agent_id
         self.config = config
         self.user = user
@@ -492,6 +493,7 @@ class Agent:
         _perm_engine = None
         try:
             from obscura.core.permission_modes import PermissionModeEngine
+
             _perm_engine = PermissionModeEngine()
         except Exception:
             pass
@@ -526,9 +528,7 @@ class Agent:
                 self.config.mcp.config_path,
                 resolve_env=self.config.mcp.resolve_env,
             )
-            selected_names = (
-                self.config.mcp.server_names if self.config.mcp.server_names else None
-            )
+            selected_names = self.config.mcp.server_names or None
             server_configs = build_runtime_server_configs(
                 discovered,
                 selected_names=selected_names,
@@ -616,10 +616,14 @@ class Agent:
                         and self._compiled_workspace
                     ):
                         _ws_include = getattr(
-                            self._compiled_workspace, "plugin_include", None
+                            self._compiled_workspace,
+                            "plugin_include",
+                            None,
                         )
                         _ws_exclude = getattr(
-                            self._compiled_workspace, "plugin_exclude", None
+                            self._compiled_workspace,
+                            "plugin_exclude",
+                            None,
                         )
                     _eager_cfg = self.config.plugins.get("eager", [])
                     if isinstance(_eager_cfg, list):
@@ -640,7 +644,7 @@ class Agent:
         if bool(a2a_remote_config.get("enabled", False)):
             raw_urls = a2a_remote_config.get("urls", [])
             urls = (
-                [str(url) for url in cast(list[Any], raw_urls)]
+                [str(url) for url in cast("list[Any]", raw_urls)]
                 if isinstance(raw_urls, list)
                 else []
             )
@@ -657,11 +661,14 @@ class Agent:
                 await a2a_provider.install(ctx)
                 providers.append(a2a_provider)
 
-        # Swarm tool
+        # Swarm tools (spawn_subagent, spawn_agents, send_message)
         try:
             from obscura.tools.swarm import (
                 SwarmToolContext,
                 load_agent_configs,
+                make_check_agent_tool,
+                make_send_message_tool,
+                make_spawn_agents_tool,
                 make_spawn_subagent_tool,
             )
 
@@ -670,11 +677,14 @@ class Agent:
                 parent_agent_id=self.id,
                 agent_configs=load_agent_configs(),
                 backend=self.config.provider,
+                delegate_allowlist=list(self.config.delegate_allowlist),
             )
-            swarm_tool = make_spawn_subagent_tool(swarm_ctx)
-            broker.register_tool_spec(swarm_tool)
+            broker.register_tool_spec(make_spawn_subagent_tool(swarm_ctx))
+            broker.register_tool_spec(make_spawn_agents_tool(swarm_ctx))
+            broker.register_tool_spec(make_send_message_tool(swarm_ctx))
+            broker.register_tool_spec(make_check_agent_tool())
         except Exception as exc:
-            logger.debug("Could not register spawn_subagent tool: %s", exc)
+            logger.debug("Could not register swarm tools: %s", exc)
 
         # Delegation tool — enum-constrained agent invocation
         if self.config.can_delegate:
@@ -711,7 +721,7 @@ class Agent:
             if backend_obj is not None and hasattr(backend_obj, "set_tool_router"):
                 # Load persisted scores from previous sessions
                 scores_db = str(
-                    Path.home() / ".obscura" / "tool_scores.db"
+                    Path.home() / ".obscura" / "tool_scores.db",
                 )
                 score_index = ToolScoreIndex.from_db(scores_db)
                 broker.set_score_index(score_index)
@@ -754,7 +764,7 @@ class Agent:
                 if existing is not None:
                     existing.merge(manifest_hooks)
                 else:
-                    setattr(self._client, "hooks", manifest_hooks)
+                    self._client.hooks = manifest_hooks
 
         # Register eval hooks (tool checks + past-failure memory injection)
         if self.config.eval_tools:
@@ -769,7 +779,7 @@ class Agent:
                 hook_reg: HookRegistry | None = getattr(self._client, "hooks", None)
                 if hook_reg is None:
                     hook_reg = HookRegistry()
-                    setattr(self._client, "hooks", hook_reg)
+                    self._client.hooks = hook_reg
                 import inspect
 
                 # Defer factory execution until the hook is actually run. Some
@@ -790,10 +800,17 @@ class Agent:
 
                     return _deferred
 
-                hook_reg.add_before(_defer_factory(make_tool_eval_hook), _AEK.TOOL_RESULT)
-                hook_reg.add_before(_defer_factory(make_eval_memory_inject_hook), _AEK.TURN_START)
+                hook_reg.add_before(
+                    _defer_factory(make_tool_eval_hook),
+                    _AEK.TOOL_RESULT,
+                )
+                hook_reg.add_before(
+                    _defer_factory(make_eval_memory_inject_hook),
+                    _AEK.TURN_START,
+                )
                 logger.info(
-                    "Eval hooks registered for agent %s (tool checks + memory)", self.id
+                    "Eval hooks registered for agent %s (tool checks + memory)",
+                    self.id,
                 )
             except Exception as exc:
                 logger.debug("Could not register eval hooks: %s", exc)
@@ -808,7 +825,7 @@ class Agent:
                 hook_reg_: HookRegistry | None = getattr(self._client, "hooks", None)
                 if hook_reg_ is None:
                     hook_reg_ = HookRegistry()
-                    setattr(self._client, "hooks", hook_reg_)
+                    self._client.hooks = hook_reg_
 
                 count_hook, remind_hook, text_reset_hook = make_tool_pace_hook(
                     max_consecutive=self.config.max_consecutive_tools,
@@ -837,8 +854,7 @@ class Agent:
         )
 
     async def run(self, prompt: str, **context: Any) -> Any:
-        """
-        Execute the agent on a task.
+        """Execute the agent on a task.
 
         Stores context in memory, runs the agent, captures result.
         """
@@ -887,9 +903,9 @@ class Agent:
 
             return self._result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._error = TimeoutError(
-                f"Agent '{self.config.name}' timed out after {self.config.timeout_seconds}s"
+                f"Agent '{self.config.name}' timed out after {self.config.timeout_seconds}s",
             )
             self.status = AgentStatus.FAILED
             raise self._error
@@ -1001,9 +1017,9 @@ class Agent:
             self.iteration_count += 1
             return self._result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._error = TimeoutError(
-                f"Agent '{self.config.name}' timed out after {self.config.timeout_seconds}s"
+                f"Agent '{self.config.name}' timed out after {self.config.timeout_seconds}s",
             )
             self.status = AgentStatus.FAILED
             raise self._error
@@ -1091,11 +1107,7 @@ class Agent:
         # Use vector search with reranking if available
         if hasattr(self, "vector_memory"):
             try:
-                from obscura.vector_memory import VectorMemoryEntry
-
-                recall_fn: Callable[..., list[VectorMemoryEntry]] = getattr(
-                    self, "recall"
-                )
+                recall_fn: Callable[..., list[VectorMemoryEntry]] = self.recall
                 memories = recall_fn(
                     prompt,
                     top_k=5,
@@ -1118,7 +1130,7 @@ class Agent:
         for key in sorted(keys, key=lambda k: k.key, reverse=True)[:3]:
             value = self.memory.get(key.key, namespace=key.namespace)
             if value:
-                relevant[f"task:{str(key)}"] = value
+                relevant[f"task:{key!s}"] = value
 
         # Fallback text search if no vector results
         if not any(k.startswith("semantic:") for k in relevant):
@@ -1129,7 +1141,10 @@ class Agent:
         return relevant
 
     def _build_prompt(
-        self, prompt: str, memory: dict[str, Any], context: dict[str, Any]
+        self,
+        prompt: str,
+        memory: dict[str, Any],
+        context: dict[str, Any],
     ) -> str:
         """Build the full prompt with memory and context."""
         parts: list[str] = []
@@ -1156,7 +1171,10 @@ class Agent:
     async def send_message(self, target: str, content: str) -> None:
         """Send a message to another agent or broadcast."""
         message = AgentMessage(
-            source=self.id, target=target, content=content, message_type="text"
+            source=self.id,
+            target=target,
+            content=content,
+            message_type="text",
         )
         await self.runtime.route_message(message)
 
@@ -1222,7 +1240,7 @@ class Agent:
             try:
                 message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
                 yield message
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self.status in (
                     AgentStatus.COMPLETED,
                     AgentStatus.FAILED,
@@ -1306,7 +1324,9 @@ class Agent:
             try:
                 score_index.save(scores_db)
                 logger.debug(
-                    "Persisted %d tool scores to %s", len(score_index), scores_db
+                    "Persisted %d tool scores to %s",
+                    len(score_index),
+                    scores_db,
                 )
             except Exception as exc:
                 logger.debug("Failed to persist tool scores: %s", exc)
@@ -1345,7 +1365,7 @@ class Agent:
         """Stop the agent gracefully with a timeout."""
         try:
             await asyncio.wait_for(self.stop(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Force stop
             if self._task and not self._task.done():
                 self._task.cancel()
@@ -1371,7 +1391,10 @@ class Agent:
 
     # Public wrappers for internal helpers (used in tests/observability)
     def build_prompt(
-        self, prompt: str, relevant_memory: dict[str, Any], context: dict[str, Any]
+        self,
+        prompt: str,
+        relevant_memory: dict[str, Any],
+        context: dict[str, Any],
     ) -> str:
         """Public wrapper around _build_prompt."""
         return self._build_prompt(prompt, relevant_memory, context)
@@ -1382,8 +1405,7 @@ class Agent:
 
 
 class AgentRuntime:
-    """
-    Runtime environment for managing multiple agents.
+    """Runtime environment for managing multiple agents.
 
     Think of this as a "process manager" for AI agents:
     - Spawn new agents
@@ -1397,7 +1419,7 @@ class AgentRuntime:
         user: AuthenticatedUser | None = None,
         lifecycle_hook: RuntimeLifecycleHook | None = None,
         interaction_bus: InteractionBus | None = None,
-    ):
+    ) -> None:
         from obscura.agent.interaction import InteractionBus as _IB
 
         self.user = user
@@ -1534,7 +1556,8 @@ class AgentRuntime:
         """Return a unified local+remote peer catalog for one agent."""
         agent = self.get_agent(agent_id)
         if agent is None:
-            raise ValueError(f"Agent {agent_id} not found")
+            msg = f"Agent {agent_id} not found"
+            raise ValueError(msg)
 
         local_refs = self.peer_registry.discover()
         if not include_self:
@@ -1547,7 +1570,7 @@ class AgentRuntime:
             raw_urls = remote_cfg.get("urls", [])
             if isinstance(raw_urls, list):
                 remote_urls = [
-                    str(url) for url in cast(list[Any], raw_urls) if str(url).strip()
+                    str(url) for url in cast("list[Any]", raw_urls) if str(url).strip()
                 ]
             if "auth_token" in remote_cfg and remote_cfg["auth_token"] is not None:
                 auth_token = str(remote_cfg["auth_token"])
@@ -1576,10 +1599,8 @@ class AgentRuntime:
         )
         if self._bus_task:
             self._bus_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._bus_task
-            except asyncio.CancelledError:
-                pass
 
         async with self._lock:
             for agent in list(self._agents.values()):
@@ -1600,8 +1621,7 @@ class AgentRuntime:
         manifest_proxy: LazyManifestProxy | None = None,
         **config_kwargs: Any,
     ) -> Agent:
-        """
-        Spawn a new agent with the given configuration.
+        """Spawn a new agent with the given configuration.
 
         Returns the agent instance immediately (not started yet).
         Call agent.start() then agent.run() to execute.
@@ -1618,7 +1638,8 @@ class AgentRuntime:
         )
 
         if self.user is None:
-            raise RuntimeError("AgentRuntime requires a user to spawn agents")
+            msg = "AgentRuntime requires a user to spawn agents"
+            raise RuntimeError(msg)
         agent = Agent(agent_id, config, self.user, self, manifest_proxy=manifest_proxy)
 
         # Store reference
@@ -1643,7 +1664,7 @@ class AgentRuntime:
                 logger.debug(f"Registered agent {agent_id} with heartbeat monitor")
             except Exception as e:
                 logger.warning(
-                    f"Failed to register agent {agent_id} with heartbeat monitor: {e}"
+                    f"Failed to register agent {agent_id} with heartbeat monitor: {e}",
                 )
 
         return agent
@@ -1666,6 +1687,7 @@ class AgentRuntime:
                 the manifest.  Agents with ``provider: auto`` in their
                 manifest always resolve to this value (or ``"copilot"`` if
                 no override is supplied).
+
         """
         from obscura.manifest.lazy import LazyManifestProxy
 
@@ -1683,7 +1705,8 @@ class AgentRuntime:
 
         agent_id = f"agent-{uuid.uuid4().hex[:8]}"
         if self.user is None:
-            raise RuntimeError("AgentRuntime requires a user to spawn agents")
+            msg = "AgentRuntime requires a user to spawn agents"
+            raise RuntimeError(msg)
         agent = Agent(agent_id, config, self.user, self, manifest_proxy=proxy)
 
         self._agents[agent_id] = agent
@@ -1713,7 +1736,9 @@ class AgentRuntime:
         return self._agents.get(agent_id)
 
     def list_agents(
-        self, status: AgentStatus | None = None, name: str | None = None
+        self,
+        status: AgentStatus | None = None,
+        name: str | None = None,
     ) -> list[Agent]:
         """List all agents, optionally filtered."""
         agents = list(self._agents.values())
@@ -1736,7 +1761,8 @@ class AgentRuntime:
         if self.user:
             memory = MemoryStore.for_user(self.user)
             state_data = memory.get(
-                f"agent_state_{agent_id}", namespace="agent:runtime"
+                f"agent_state_{agent_id}",
+                namespace="agent:runtime",
             )
             if state_data:
                 return AgentState(
@@ -1772,7 +1798,7 @@ class AgentRuntime:
         envelope = PeerInvocationEnvelope(
             caller_agent_id=caller_agent_id,
             target_agent_id=target_agent_id,
-            mode=cast(Any, mode),
+            mode=cast("Any", mode),
         )
         out["_peer_request"] = envelope.model_dump(mode="json")
         return out
@@ -1790,12 +1816,14 @@ class AgentRuntime:
     ) -> str:
         """Invoke a local peer in blocking mode and return text."""
         if not self._peer_calls_enabled():
+            msg = "Peer calls are disabled. Set OBSCURA_PEER_CALLS_ENABLED=true."
             raise RuntimeError(
-                "Peer calls are disabled. Set OBSCURA_PEER_CALLS_ENABLED=true."
+                msg,
             )
         agent = self.peer_registry.resolve(target)
         if agent is None:
-            raise ValueError(f"Peer target not found: {target}")
+            msg = f"Peer target not found: {target}"
+            raise ValueError(msg)
         mode = "loop" if use_loop else "blocking"
         merged_context = self._inject_peer_envelope(
             context,
@@ -1828,12 +1856,14 @@ class AgentRuntime:
     ) -> AsyncIterator[str]:
         """Invoke a local peer in streaming mode."""
         if not self._peer_calls_enabled():
+            msg = "Peer calls are disabled. Set OBSCURA_PEER_CALLS_ENABLED=true."
             raise RuntimeError(
-                "Peer calls are disabled. Set OBSCURA_PEER_CALLS_ENABLED=true."
+                msg,
             )
         agent = self.peer_registry.resolve(target)
         if agent is None:
-            raise ValueError(f"Peer target not found: {target}")
+            msg = f"Peer target not found: {target}"
+            raise ValueError(msg)
         mode = "stream_loop" if use_loop else "streaming"
         merged_context = self._inject_peer_envelope(
             context,
@@ -1897,7 +1927,9 @@ class AgentRuntime:
                 logger.exception("Error in message bus loop")
 
     async def wait_for_agents(
-        self, agent_ids: list[str], timeout: float | None = None
+        self,
+        agent_ids: list[str],
+        timeout: float | None = None,
     ) -> list[AgentState]:
         """Wait for multiple agents to complete."""
 
@@ -1916,16 +1948,17 @@ class AgentRuntime:
 
         if timeout:
             done, pending = await asyncio.wait(
-                tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED
+                tasks,
+                timeout=timeout,
+                return_when=asyncio.ALL_COMPLETED,
             )
             for task in pending:
                 task.cancel()
             return [
                 task.result() for task in done if task.done() and not task.cancelled()
             ]
-        else:
-            results = await asyncio.gather(*tasks)
-            return list(results)
+        results = await asyncio.gather(*tasks)
+        return list(results)
 
 
 async def _stream_with_timeout(

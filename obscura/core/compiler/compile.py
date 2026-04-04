@@ -17,10 +17,9 @@ Usage::
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.compiler.compiled import CompiledAgent, CompiledWorkspace
-from obscura.core.paths import resolve_obscura_specs_dir
 from obscura.core.compiler.errors import ResolutionError, SpecValidationError
 from obscura.core.compiler.loader import SpecRegistry, load_specs_dir
 from obscura.core.compiler.merger import (
@@ -44,6 +43,10 @@ from obscura.core.compiler.specs import (
     WorkspaceSpecBody,
 )
 from obscura.core.compiler.validator import validate_pack_references, validate_workspace
+from obscura.core.paths import resolve_obscura_specs_dir
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +80,16 @@ def compile_workspace_from_dir(
     ------
     CompileError
         If loading, resolution, or validation fails.
+
     """
     # Phase 1: Load
     registry = load_specs_dir(specs_dir)
 
     workspace_spec = registry.get_workspace(workspace_name)
     if workspace_spec is None:
+        msg = f"Workspace '{workspace_name}' not found in {specs_dir}"
         raise ResolutionError(
-            f"Workspace '{workspace_name}' not found in {specs_dir}",
+            msg,
             source=str(specs_dir),
         )
 
@@ -117,7 +122,10 @@ def compile_workspace_from_registry(
     # Phase 1.6: Validate pack references early (before resolution proceeds)
     if pack_names:
         pack_errors = validate_pack_references(
-            pack_names, ws_name, registry, available_plugins=available_plugins,
+            pack_names,
+            ws_name,
+            registry,
+            available_plugins=available_plugins,
         )
         if pack_errors:
             if strict:
@@ -143,7 +151,9 @@ def compile_workspace_from_registry(
     for agent_ref in workspace_spec.spec.agents:
         # Resolve template
         raw_template = resolve_workspace_agent_template(
-            agent_ref, registry, ws_name,
+            agent_ref,
+            registry,
+            ws_name,
         )
 
         # Resolve inheritance chain
@@ -182,7 +192,8 @@ def compile_workspace_from_registry(
 
     # Phase 4: Validate
     errors = validate_workspace(
-        workspace, available_plugins=available_plugins,
+        workspace,
+        available_plugins=available_plugins,
     )
     if errors:
         if strict:
@@ -259,8 +270,9 @@ def compile_workspace(
     registry = load_specs_dirs(dirs)
     workspace_spec = registry.get_workspace(name)
     if workspace_spec is None:
+        msg = f"Workspace '{name}' not found in specs directories: {dirs}"
         raise ResolutionError(
-            f"Workspace '{name}' not found in specs directories: {dirs}",
+            msg,
             source=str(dirs),
         )
 

@@ -1,15 +1,15 @@
 """Tests for sdk.routes.agents -- Agent CRUD, bulk ops, templates, tags, streaming."""
 
 import asyncio
-import pytest
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from starlette.testclient import TestClient
+
+import pytest
 from fastapi import FastAPI
+from starlette.testclient import TestClient
 
 from obscura.core.config import ObscuraConfig
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -17,7 +17,7 @@ from obscura.core.config import ObscuraConfig
 
 
 @pytest.fixture(autouse=True)
-def _clear_templates() -> Generator[None, None, None]:  # pyright: ignore[reportUnusedFunction]
+def _clear_templates() -> Generator[None]:  # pyright: ignore[reportUnusedFunction]
     """Reset the in-memory template store between tests."""
     from obscura.routes.agents import clear_agent_templates
 
@@ -71,7 +71,7 @@ def _make_mock_runtime(agents: list[MagicMock] | None = None) -> AsyncMock:
     agents = agents or []
     # spawn returns an agent
     runtime.spawn = MagicMock(
-        return_value=(agents[0] if agents else _make_mock_agent())
+        return_value=(agents[0] if agents else _make_mock_agent()),
     )
     # get_agent looks up by id
     _agents_by_id: dict[str, MagicMock] = {a.id: a for a in agents}
@@ -95,7 +95,9 @@ def _make_mock_runtime(agents: list[MagicMock] | None = None) -> AsyncMock:
 class TestAgentSpawn:
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_defaults(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -112,7 +114,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_with_model(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent(model="claude")
         runtime = _make_mock_runtime([agent])
@@ -129,7 +133,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_invalid_model(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Line 35: invalid model raises 400."""
         runtime = _make_mock_runtime()
@@ -147,7 +153,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_with_mcp(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -183,7 +191,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_with_system_tools_disabled(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -198,7 +208,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_with_a2a_remote_tools(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -221,7 +233,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_with_builder_payload(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent(model="claude")
         runtime = _make_mock_runtime([agent])
@@ -249,7 +263,7 @@ class TestAgentSpawn:
                     "urls": ["https://a2a.example.local"],
                     "auth_token": "token-1",
                 },
-            }
+            },
         }
         resp = client.post("/api/v1/agents", json=payload)
         assert resp.status_code == 200
@@ -271,7 +285,9 @@ class TestAgentSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_agent_top_level_overrides_builder(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent(model="openai")
         runtime = _make_mock_runtime([agent])
@@ -309,7 +325,9 @@ class TestAgentSpawn:
 class TestAgentGet:
     @patch("obscura.routes.agents.get_runtime")
     def test_get_agent_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 73-86: happy path."""
         state = MagicMock()
@@ -334,7 +352,9 @@ class TestAgentGet:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_get_agent_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 76-77: 404 path."""
         runtime = AsyncMock()
@@ -349,7 +369,9 @@ class TestAgentGet:
 class TestAgentRunLoop:
     @patch("obscura.routes.agents.get_runtime")
     def test_run_loop_with_tool_approval_sets_on_confirm(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         captured_on_confirm: object | None = None
@@ -380,7 +402,9 @@ class TestAgentRunLoop:
 class TestAgentListTools:
     @patch("obscura.routes.agents.get_runtime")
     def test_list_tools_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         fake_tool = MagicMock()
@@ -403,7 +427,9 @@ class TestAgentListTools:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_tools_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         runtime = AsyncMock()
         runtime.get_agent = MagicMock(return_value=None)
@@ -417,7 +443,9 @@ class TestAgentListTools:
 class TestAgentListPeers:
     @patch("obscura.routes.agents.get_runtime")
     def test_list_peers_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         local_ref = MagicMock()
@@ -438,7 +466,7 @@ class TestAgentListPeers:
         mock_get_runtime.return_value = runtime
 
         resp = client.get(
-            "/api/v1/agents/agent-1/peers?include_self=false&discover_remote=false"
+            "/api/v1/agents/agent-1/peers?include_self=false&discover_remote=false",
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -450,7 +478,9 @@ class TestAgentListPeers:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_peers_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         runtime = AsyncMock()
         runtime.get_agent = MagicMock(return_value=None)
@@ -469,7 +499,9 @@ class TestAgentListPeers:
 class TestAgentRun:
     @patch("obscura.routes.agents.get_runtime")
     def test_run_agent_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 97-112: happy path."""
         agent = _make_mock_agent()
@@ -491,7 +523,9 @@ class TestAgentRun:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_run_agent_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 100-101: 404."""
         runtime = _make_mock_runtime()
@@ -503,7 +537,9 @@ class TestAgentRun:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_run_agent_exception(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 113-114: 500 on agent.run error."""
         agent = _make_mock_agent()
@@ -517,7 +553,9 @@ class TestAgentRun:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_run_agent_timeout(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
 
@@ -538,7 +576,9 @@ class TestAgentRun:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_run_agent_timeout_invalid(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime([agent])
@@ -560,7 +600,9 @@ class TestAgentRun:
 class TestAgentStop:
     @patch("obscura.routes.agents.get_runtime")
     def test_stop_agent_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 123-135."""
         agent = _make_mock_agent()
@@ -574,7 +616,9 @@ class TestAgentStop:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_stop_agent_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 126-127: 404."""
         runtime = _make_mock_runtime()
@@ -593,7 +637,9 @@ class TestAgentStop:
 class TestAgentList:
     @patch("obscura.routes.agents.get_runtime")
     def test_list_agents_empty(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         runtime = _make_mock_runtime()
         runtime.list_agents = MagicMock(return_value=[])
@@ -607,7 +653,9 @@ class TestAgentList:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_agents_with_results(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         a1 = _make_mock_agent("a1", "first", "copilot", tags=["prod"])
         a2 = _make_mock_agent("a2", "second", "claude", tags=["dev"])
@@ -620,7 +668,9 @@ class TestAgentList:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_agents_filter_by_invalid_status(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 152-155: invalid status => 400."""
         runtime = _make_mock_runtime()
@@ -633,7 +683,9 @@ class TestAgentList:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_agents_filter_by_valid_status(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 152-153: valid status passes through."""
         a1 = _make_mock_agent("a1", "first")
@@ -645,7 +697,9 @@ class TestAgentList:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_agents_filter_by_tags(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 160-164: tag filter."""
         a1 = _make_mock_agent("a1", "first", tags=["prod", "ml"])
@@ -659,7 +713,9 @@ class TestAgentList:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_list_agents_filter_by_name(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Line 167: name filter (case-insensitive substring)."""
         a1 = _make_mock_agent("a1", "ReviewerBot")
@@ -681,7 +737,9 @@ class TestAgentList:
 class TestBulkSpawn:
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_spawn_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 197-229: happy path."""
         agent = _make_mock_agent()
@@ -694,7 +752,7 @@ class TestBulkSpawn:
                 "agents": [
                     {"name": "a1", "model": "claude"},
                     {"name": "a2", "model": "copilot"},
-                ]
+                ],
             },
         )
         assert resp.status_code == 200
@@ -704,7 +762,9 @@ class TestBulkSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_spawn_empty(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 200-201: empty list => 400."""
         runtime = _make_mock_runtime()
@@ -716,7 +776,9 @@ class TestBulkSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_spawn_too_many(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 202-203: >100 agents => 400."""
         runtime = _make_mock_runtime()
@@ -731,7 +793,9 @@ class TestBulkSpawn:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_spawn_partial_failure(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 226-227: one agent fails, others succeed."""
         call_count = 0
@@ -740,7 +804,8 @@ class TestBulkSpawn:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
-                raise RuntimeError("spawn failed")
+                msg = "spawn failed"
+                raise RuntimeError(msg)
             return _make_mock_agent(agent_id=f"agent-{call_count}")
 
         runtime = AsyncMock()
@@ -754,7 +819,7 @@ class TestBulkSpawn:
                     {"name": "a1"},
                     {"name": "a2"},
                     {"name": "a3"},
-                ]
+                ],
             },
         )
         assert resp.status_code == 200
@@ -772,7 +837,9 @@ class TestBulkSpawn:
 class TestBulkStop:
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_stop_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 243-264."""
         a1 = _make_mock_agent("a1")
@@ -788,7 +855,9 @@ class TestBulkStop:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_stop_empty(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 246-247: empty list => 400."""
         runtime = _make_mock_runtime()
@@ -799,7 +868,9 @@ class TestBulkStop:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_stop_agent_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 255-256: agent not found goes to errors."""
         runtime = _make_mock_runtime()
@@ -807,7 +878,8 @@ class TestBulkStop:
         mock_get_runtime.return_value = runtime
 
         resp = client.post(
-            "/api/v1/agents/bulk/stop", json={"agent_ids": ["nonexistent"]}
+            "/api/v1/agents/bulk/stop",
+            json={"agent_ids": ["nonexistent"]},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -816,7 +888,9 @@ class TestBulkStop:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_stop_with_exception(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 261-262: stop raises exception."""
         agent = _make_mock_agent("a1")
@@ -839,7 +913,9 @@ class TestBulkStop:
 class TestBulkTag:
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_tag_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 278-303."""
         a1 = _make_mock_agent("a1", tags=["existing"])
@@ -861,7 +937,9 @@ class TestBulkTag:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_tag_no_agent_ids(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 282-283: empty agent_ids => 400."""
         runtime = _make_mock_runtime()
@@ -878,7 +956,9 @@ class TestBulkTag:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_tag_no_tags(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 284-285: empty tags => 400."""
         runtime = _make_mock_runtime()
@@ -895,7 +975,9 @@ class TestBulkTag:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_bulk_tag_agent_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 293-294: agent not found goes to errors."""
         runtime = _make_mock_runtime()
@@ -944,7 +1026,8 @@ class TestAgentTemplates:
 
     def test_get_template(self, client: TestClient) -> None:
         create_resp = client.post(
-            "/api/v1/agent-templates", json={"name": "t2", "model": "claude"}
+            "/api/v1/agent-templates",
+            json={"name": "t2", "model": "claude"},
         )
         tid = create_resp.json()["template_id"]
         resp = client.get(f"/api/v1/agent-templates/{tid}")
@@ -957,7 +1040,8 @@ class TestAgentTemplates:
 
     def test_delete_template(self, client: TestClient) -> None:
         create_resp = client.post(
-            "/api/v1/agent-templates", json={"name": "t3", "model": "copilot"}
+            "/api/v1/agent-templates",
+            json={"name": "t3", "model": "copilot"},
         )
         tid = create_resp.json()["template_id"]
         resp = client.delete(f"/api/v1/agent-templates/{tid}")
@@ -978,7 +1062,9 @@ class TestAgentTemplates:
 class TestSpawnFromTemplate:
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_from_template_success(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 387-411."""
         # Create a template first
@@ -1008,7 +1094,9 @@ class TestSpawnFromTemplate:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_from_template_no_id(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 390-391: missing template_id => 400."""
         runtime = _make_mock_runtime()
@@ -1019,7 +1107,9 @@ class TestSpawnFromTemplate:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_spawn_from_template_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 394-395: template not found => 404."""
         runtime = _make_mock_runtime()
@@ -1061,7 +1151,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_add_tags_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 433-434: 404."""
         runtime = _make_mock_runtime()
@@ -1073,7 +1165,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_add_tags_empty(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 437-438: empty tags => 400."""
         agent = _make_mock_agent()
@@ -1085,7 +1179,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_add_tags_no_existing(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 440-441: agent.config has no tags attr."""
         agent = _make_mock_agent()
@@ -1116,7 +1212,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_remove_tags_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 464-465: 404."""
         runtime = _make_mock_runtime()
@@ -1128,7 +1226,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_remove_tags_empty_list(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 468-469: empty tags => 400."""
         agent = _make_mock_agent()
@@ -1140,7 +1240,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_remove_tags_no_existing(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 471-472: agent has no tags attr => returns empty."""
         agent = _make_mock_agent()
@@ -1167,7 +1269,9 @@ class TestAgentTags:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_get_tags_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 494-495: 404."""
         runtime = _make_mock_runtime()
@@ -1186,7 +1290,9 @@ class TestAgentTags:
 class TestAgentStream:
     @patch("obscura.routes.agents.get_runtime")
     def test_stream_agent_not_found(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 518-519: 404."""
         runtime = _make_mock_runtime()
@@ -1198,7 +1304,9 @@ class TestAgentStream:
 
     @patch("obscura.routes.agents.get_runtime")
     def test_stream_agent_returns_sse(
-        self, mock_get_runtime: MagicMock, client: TestClient
+        self,
+        mock_get_runtime: MagicMock,
+        client: TestClient,
     ) -> None:
         """Lines 515-532: SSE event source response."""
         agent = _make_mock_agent()

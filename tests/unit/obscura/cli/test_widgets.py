@@ -12,12 +12,11 @@ from obscura.cli.widgets import (
     ToolConfirmRequest,
     WidgetResult,
     _format_arg_value,
+    ask_model_question,
     confirm_attention,
     confirm_tool,
-    ask_model_question,
     detect_question_choices,
 )
-
 
 # ---------------------------------------------------------------------------
 # _format_arg_value unit tests
@@ -59,11 +58,17 @@ class TestFormatArgValue:
 @pytest.mark.asyncio
 async def test_confirm_tool_allow() -> None:
     """Pressing 'y' returns allow."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=True), \
-         patch("obscura.cli.widgets._render_tool_panel"), \
-         patch("obscura.cli.widgets._run_action_bar", new_callable=AsyncMock, return_value="allow"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=True),
+        patch("obscura.cli.widgets._render_tool_panel"),
+        patch(
+            "obscura.cli.widgets._run_action_bar",
+            new_callable=AsyncMock,
+            return_value="allow",
+        ),
+    ):
         result = await confirm_tool(
-            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"})
+            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"}),
         )
     assert result.action == "allow"
 
@@ -71,11 +76,17 @@ async def test_confirm_tool_allow() -> None:
 @pytest.mark.asyncio
 async def test_confirm_tool_deny() -> None:
     """Pressing 'n' returns deny."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=True), \
-         patch("obscura.cli.widgets._render_tool_panel"), \
-         patch("obscura.cli.widgets._run_action_bar", new_callable=AsyncMock, return_value="deny"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=True),
+        patch("obscura.cli.widgets._render_tool_panel"),
+        patch(
+            "obscura.cli.widgets._run_action_bar",
+            new_callable=AsyncMock,
+            return_value="deny",
+        ),
+    ):
         result = await confirm_tool(
-            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"})
+            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"}),
         )
     assert result.action == "deny"
 
@@ -83,11 +94,17 @@ async def test_confirm_tool_deny() -> None:
 @pytest.mark.asyncio
 async def test_confirm_tool_always_allow() -> None:
     """Pressing 'a' returns always_allow."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=True), \
-         patch("obscura.cli.widgets._render_tool_panel"), \
-         patch("obscura.cli.widgets._run_action_bar", new_callable=AsyncMock, return_value="always_allow"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=True),
+        patch("obscura.cli.widgets._render_tool_panel"),
+        patch(
+            "obscura.cli.widgets._run_action_bar",
+            new_callable=AsyncMock,
+            return_value="always_allow",
+        ),
+    ):
         result = await confirm_tool(
-            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"})
+            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"}),
         )
     assert result.action == "always_allow"
 
@@ -95,10 +112,16 @@ async def test_confirm_tool_always_allow() -> None:
 @pytest.mark.asyncio
 async def test_confirm_tool_nontty_fallback_yes() -> None:
     """Non-TTY falls back to text prompt, 'y' → allow."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=False), \
-         patch("obscura.cli.widgets._fallback_confirm", new_callable=AsyncMock, return_value="y"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=False),
+        patch(
+            "obscura.cli.widgets._fallback_confirm",
+            new_callable=AsyncMock,
+            return_value="y",
+        ),
+    ):
         result = await confirm_tool(
-            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"})
+            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"}),
         )
     assert result.action == "allow"
 
@@ -106,10 +129,16 @@ async def test_confirm_tool_nontty_fallback_yes() -> None:
 @pytest.mark.asyncio
 async def test_confirm_tool_nontty_fallback_always() -> None:
     """Non-TTY falls back to text prompt, 'always' → always_allow."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=False), \
-         patch("obscura.cli.widgets._fallback_confirm", new_callable=AsyncMock, return_value="always"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=False),
+        patch(
+            "obscura.cli.widgets._fallback_confirm",
+            new_callable=AsyncMock,
+            return_value="always",
+        ),
+    ):
         result = await confirm_tool(
-            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"})
+            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"}),
         )
     assert result.action == "always_allow"
 
@@ -117,10 +146,16 @@ async def test_confirm_tool_nontty_fallback_always() -> None:
 @pytest.mark.asyncio
 async def test_confirm_tool_nontty_fallback_deny() -> None:
     """Non-TTY falls back to text prompt, 'n' → deny."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=False), \
-         patch("obscura.cli.widgets._fallback_confirm", new_callable=AsyncMock, return_value="n"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=False),
+        patch(
+            "obscura.cli.widgets._fallback_confirm",
+            new_callable=AsyncMock,
+            return_value="n",
+        ),
+    ):
         result = await confirm_tool(
-            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"})
+            ToolConfirmRequest(tool_name="edit_file", tool_input={"path": "x.py"}),
         )
     assert result.action == "deny"
 
@@ -133,16 +168,22 @@ async def test_confirm_tool_nontty_fallback_deny() -> None:
 @pytest.mark.asyncio
 async def test_confirm_attention_custom_actions() -> None:
     """Selecting a custom action from attention request."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=True), \
-         patch("obscura.cli.widgets._render_attention_panel"), \
-         patch("obscura.cli.widgets._run_action_bar", new_callable=AsyncMock, return_value="source_a"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=True),
+        patch("obscura.cli.widgets._render_attention_panel"),
+        patch(
+            "obscura.cli.widgets._run_action_bar",
+            new_callable=AsyncMock,
+            return_value="source_a",
+        ),
+    ):
         result = await confirm_attention(
             AttentionWidgetRequest(
                 request_id="abc123",
                 agent_name="researcher",
                 message="Which source?",
                 actions=("source_a", "source_b", "skip"),
-            )
+            ),
         )
     assert result.action == "source_a"
 
@@ -150,15 +191,21 @@ async def test_confirm_attention_custom_actions() -> None:
 @pytest.mark.asyncio
 async def test_confirm_attention_ok_default() -> None:
     """Single 'ok' action with default selection."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=True), \
-         patch("obscura.cli.widgets._render_attention_panel"), \
-         patch("obscura.cli.widgets._run_action_bar", new_callable=AsyncMock, return_value="ok"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=True),
+        patch("obscura.cli.widgets._render_attention_panel"),
+        patch(
+            "obscura.cli.widgets._run_action_bar",
+            new_callable=AsyncMock,
+            return_value="ok",
+        ),
+    ):
         result = await confirm_attention(
             AttentionWidgetRequest(
                 request_id="abc123",
                 agent_name="monitor",
                 message="Task complete.",
-            )
+            ),
         )
     assert result.action == "ok"
 
@@ -166,15 +213,21 @@ async def test_confirm_attention_ok_default() -> None:
 @pytest.mark.asyncio
 async def test_confirm_attention_nontty_fallback() -> None:
     """Non-TTY attention falls back to text prompt."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=False), \
-         patch("obscura.cli.widgets._fallback_confirm", new_callable=AsyncMock, return_value="skip"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=False),
+        patch(
+            "obscura.cli.widgets._fallback_confirm",
+            new_callable=AsyncMock,
+            return_value="skip",
+        ),
+    ):
         result = await confirm_attention(
             AttentionWidgetRequest(
                 request_id="abc123",
                 agent_name="researcher",
                 message="Which source?",
                 actions=("source_a", "source_b", "skip"),
-            )
+            ),
         )
     assert result.action == "skip"
 
@@ -187,11 +240,17 @@ async def test_confirm_attention_nontty_fallback() -> None:
 @pytest.mark.asyncio
 async def test_ask_model_question() -> None:
     """User types a response to a model question."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=True), \
-         patch("obscura.cli.widgets._render_question_panel"), \
-         patch("obscura.cli.widgets._run_text_input", new_callable=AsyncMock, return_value="use option B"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=True),
+        patch("obscura.cli.widgets._render_question_panel"),
+        patch(
+            "obscura.cli.widgets._run_text_input",
+            new_callable=AsyncMock,
+            return_value="use option B",
+        ),
+    ):
         result = await ask_model_question(
-            ModelQuestionRequest(question="Which approach?", source="assistant")
+            ModelQuestionRequest(question="Which approach?", source="assistant"),
         )
     assert result.action == "respond"
     assert result.text == "use option B"
@@ -200,11 +259,17 @@ async def test_ask_model_question() -> None:
 @pytest.mark.asyncio
 async def test_ask_model_question_nontty() -> None:
     """Non-TTY model question falls back."""
-    with patch("obscura.cli.widgets._is_interactive", return_value=False), \
-         patch("obscura.cli.widgets._render_question_panel"), \
-         patch("obscura.cli.widgets._fallback_confirm", new_callable=AsyncMock, return_value="option A"):
+    with (
+        patch("obscura.cli.widgets._is_interactive", return_value=False),
+        patch("obscura.cli.widgets._render_question_panel"),
+        patch(
+            "obscura.cli.widgets._fallback_confirm",
+            new_callable=AsyncMock,
+            return_value="option A",
+        ),
+    ):
         result = await ask_model_question(
-            ModelQuestionRequest(question="Which approach?")
+            ModelQuestionRequest(question="Which approach?"),
         )
     assert result.action == "respond"
     assert result.text == "option A"
@@ -300,11 +365,7 @@ class TestDetectQuestionChoices:
 
     def test_question_mark_trigger(self) -> None:
         """Should trigger if preamble ends with '?'."""
-        text = (
-            "How should we proceed?\n"
-            "1. Refactor first\n"
-            "2. Write tests first\n"
-        )
+        text = "How should we proceed?\n1. Refactor first\n2. Write tests first\n"
         detected = detect_question_choices(text)
         assert detected is not None
 
@@ -338,16 +399,19 @@ class TestDetectQuestionChoices:
 @pytest.mark.asyncio
 async def test_ask_user_tool_with_choices() -> None:
     """ask_user tool with choices calls the callback and returns selection."""
-    from obscura.tools.system import set_ask_user_callback, ask_user
+    from obscura.tools.system import ask_user, set_ask_user_callback
 
     async def _mock_callback(
-        question: str, choices: list[str], allow_custom: bool = False
+        question: str,
+        choices: list[str],
+        allow_custom: bool = False,
     ) -> str:
         return choices[1]
 
     set_ask_user_callback(_mock_callback)
     try:
         import json
+
         result = await ask_user("Pick one", ["A", "B", "C"])
         parsed = json.loads(result)
         assert parsed["ok"] is True
@@ -359,10 +423,11 @@ async def test_ask_user_tool_with_choices() -> None:
 @pytest.mark.asyncio
 async def test_ask_user_tool_no_callback() -> None:
     """ask_user tool without callback returns error."""
-    from obscura.tools.system import set_ask_user_callback, ask_user
+    from obscura.tools.system import ask_user, set_ask_user_callback
 
     set_ask_user_callback(None)
     import json
+
     result = await ask_user("Pick one", ["A", "B"])
     parsed = json.loads(result)
     assert parsed["ok"] is False

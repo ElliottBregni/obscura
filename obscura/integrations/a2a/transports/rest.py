@@ -1,5 +1,4 @@
-"""
-obscura.a2a.transports.rest — REST transport for A2A.
+"""obscura.a2a.transports.rest — REST transport for A2A.
 
 Mounts at ``/a2a/v1`` with conventional REST endpoints:
 
@@ -15,17 +14,19 @@ Mounts at ``/a2a/v1`` with conventional REST endpoints:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
     TaskState,
 )
+
+if TYPE_CHECKING:
+    from obscura.integrations.a2a.service import A2AService
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
     ----------
     service:
         The A2AService instance that handles all business logic.
+
     """
     router = APIRouter(prefix="/a2a/v1", tags=["A2A REST"])
 
@@ -84,10 +86,10 @@ def create_rest_router(service: A2AService) -> APIRouter:
 
     @router.get("/tasks")
     async def list_tasks(
-        contextId: str | None = Query(default=None),
-        state: str | None = Query(default=None),
-        cursor: str | None = Query(default=None),
-        limit: int = Query(default=20, ge=1, le=100),
+        contextId: Annotated[str | None, Query()] = None,
+        state: Annotated[str | None, Query()] = None,
+        cursor: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> dict[str, Any]:
         """List tasks with optional filtering."""
         task_state = TaskState(state) if state else None

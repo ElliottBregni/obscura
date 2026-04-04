@@ -9,10 +9,13 @@ import shutil
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.integrations.mcp.types import MCPTransportType
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -52,8 +55,9 @@ def _load_config_root(path: Path) -> dict[str, Any]:
     else:
         data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("MCP config must be a JSON object")
-    root = cast(dict[str, Any], data)
+        msg = "MCP config must be a JSON object"
+        raise ValueError(msg)
+    root = cast("dict[str, Any]", data)
     mcp_servers = root.get("mcpServers")
     if not isinstance(mcp_servers, dict):
         root["mcpServers"] = {}
@@ -62,12 +66,12 @@ def _load_config_root(path: Path) -> dict[str, Any]:
 
 def _merge_roots(roots: Sequence[dict[str, Any]]) -> dict[str, Any]:
     merged: dict[str, Any] = {"mcpServers": {}}
-    target = cast(dict[str, Any], merged["mcpServers"])
+    target = cast("dict[str, Any]", merged["mcpServers"])
     for root in roots:
         raw_servers = root.get("mcpServers")
         if not isinstance(raw_servers, dict):
             continue
-        servers_dict = cast(dict[str, Any], raw_servers)
+        servers_dict = cast("dict[str, Any]", raw_servers)
         for name, raw in servers_dict.items():
             target[str(name)] = raw
     return merged
@@ -120,14 +124,14 @@ def _load_roots(path: Path) -> dict[str, Any]:
 def _tuple_of_str(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    values = cast(list[Any], value)
+    values = cast("list[Any]", value)
     return tuple(str(item) for item in values)
 
 
 def _dict_of_any(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         return {}
-    return cast(dict[str, Any], value)
+    return cast("dict[str, Any]", value)
 
 
 def _resolve_command_binary(command: str) -> str:
@@ -181,26 +185,27 @@ def discover_mcp_servers(
         for path in paths:
             all_roots.append(_load_roots(path))
         root = _merge_roots(all_roots)
-    raw_servers = cast(dict[str, Any], root["mcpServers"])
+    raw_servers = cast("dict[str, Any]", root["mcpServers"])
     discovered: list[DiscoveredMCPServer] = []
 
     for raw_name, raw_entry in raw_servers.items():
         if not isinstance(raw_entry, dict):
             continue
         name = str(raw_name)
-        entry = cast(dict[str, Any], raw_entry)
+        entry = cast("dict[str, Any]", raw_entry)
 
         # Support both "transport" (Obscura native) and "type" (Claude synced format)
         raw_transport = str(
-            entry.get("transport", entry.get("type", "stdio"))
+            entry.get("transport", entry.get("type", "stdio")),
         ).lower()
         if raw_transport == "stdio":
             transport = MCPTransportType.STDIO
         elif raw_transport in ("sse", "http"):
             transport = MCPTransportType.SSE
         else:
+            msg = f"Unsupported MCP transport '{raw_transport}' for '{name}'"
             raise ValueError(
-                f"Unsupported MCP transport '{raw_transport}' for '{name}'"
+                msg,
             )
 
         args = _tuple_of_str(entry.get("args", []))
@@ -211,7 +216,8 @@ def discover_mcp_servers(
         missing_env: list[str] = []
         for key, raw_value in env_map.items():
             value, missing_key = _resolve_env_value(
-                str(raw_value), resolve_env=resolve_env
+                str(raw_value),
+                resolve_env=resolve_env,
             )
             resolved_env[key] = value
             if missing_key is not None:
@@ -227,7 +233,7 @@ def discover_mcp_servers(
                 env=resolved_env,
                 tools=tools,
                 missing_env=tuple(missing_env),
-            )
+            ),
         )
 
     return discovered
@@ -247,7 +253,8 @@ def build_runtime_server_configs(
         missing = sorted(selected.difference(available_names))
         if missing:
             missing_text = ", ".join(missing)
-            raise ValueError(f"Unknown MCP server(s): {missing_text}")
+            msg = f"Unknown MCP server(s): {missing_text}"
+            raise ValueError(msg)
 
     ordered_servers: list[DiscoveredMCPServer]
     if selected_names is not None:
@@ -287,7 +294,15 @@ def build_runtime_server_configs(
 # ---------------------------------------------------------------------------
 
 _SERVER_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "github": ("github", "git", "repo", "pull request", "commit", "issue", "repository"),
+    "github": (
+        "github",
+        "git",
+        "repo",
+        "pull request",
+        "commit",
+        "issue",
+        "repository",
+    ),
     "gitlab": ("gitlab", "merge request", "pipeline"),
     "slack": ("slack", "message", "channel"),
     "linear": ("linear", "sprint", "roadmap"),

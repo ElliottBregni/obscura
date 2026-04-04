@@ -25,22 +25,25 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from obscura.core.types import AgentEventKind
+if TYPE_CHECKING:
+    from obscura.core.types import AgentEventKind
 
 __all__ = [
+    "AgentInput",
+    "AgentOutput",
     "AttentionPriority",
     "AttentionRequest",
-    "UserResponse",
-    "AgentOutput",
-    "AgentInput",
     "InteractionBus",
+    "UserResponse",
 ]
 
 logger = logging.getLogger(__name__)
@@ -75,7 +78,7 @@ class AttentionRequest:
     message: str
     priority: AttentionPriority = AttentionPriority.NORMAL
     actions: tuple[str, ...] = ("ok",)
-    context: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    context: dict[str, Any] = field(default_factory=dict[str, Any])
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -106,7 +109,7 @@ class AgentInput:
 
     content: str
     source: str = "user"  # "user", agent_id, "system", "trigger"
-    metadata: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -158,6 +161,7 @@ class InteractionBus:
         ----------
         timeout:
             Maximum seconds to wait.  ``None`` waits forever.
+
         """
         resolved_actions = tuple(actions) if actions else ("ok",)
         request = AttentionRequest(
@@ -185,7 +189,7 @@ class InteractionBus:
             if timeout is not None:
                 return await asyncio.wait_for(future, timeout=timeout)
             return await future
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._response_waiters.pop(request.request_id, None)
             return UserResponse(
                 request_id=request.request_id,
@@ -209,10 +213,8 @@ class InteractionBus:
 
     def remove_attention_handler(self, callback: AttentionHandler) -> None:
         """Unsubscribe an attention handler."""
-        try:
+        with contextlib.suppress(ValueError):
             self._attention_subscribers.remove(callback)
-        except ValueError:
-            pass
 
     def on_output(self, callback: OutputHandler) -> None:
         """Register a handler called when an agent emits output."""
@@ -220,10 +222,8 @@ class InteractionBus:
 
     def remove_output_handler(self, callback: OutputHandler) -> None:
         """Unsubscribe an output handler."""
-        try:
+        with contextlib.suppress(ValueError):
             self._output_subscribers.remove(callback)
-        except ValueError:
-            pass
 
     async def respond(self, request_id: str, action: str, text: str = "") -> None:
         """Route a user response back to the requesting agent."""

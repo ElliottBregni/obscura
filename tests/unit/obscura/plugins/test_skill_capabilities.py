@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-
-from obscura.plugins.builtins import BUILTINS_DIR
-from obscura.plugins.manifest import parse_manifest_file
 from obscura.core.context import ContextLoader
 from obscura.core.types import Backend
-
+from obscura.plugins.builtins import BUILTINS_DIR
+from obscura.plugins.manifest import parse_manifest_file
 
 # Collect all skill-*.yaml paths once for parametrized tests
 _SKILL_YAMLS = sorted(BUILTINS_DIR.glob("skill-*.yaml"))
@@ -16,7 +14,9 @@ _SKILL_IDS = [p.stem for p in _SKILL_YAMLS]
 
 def test_skill_manifests_parse() -> None:
     """All 7 skill-*.yaml files parse successfully via parse_manifest_file."""
-    assert len(_SKILL_YAMLS) == 7, f"Expected 7 skill manifests, found {len(_SKILL_YAMLS)}"
+    assert len(_SKILL_YAMLS) == 7, (
+        f"Expected 7 skill manifests, found {len(_SKILL_YAMLS)}"
+    )
     for path in _SKILL_YAMLS:
         spec = parse_manifest_file(path)
         assert spec.id == path.stem

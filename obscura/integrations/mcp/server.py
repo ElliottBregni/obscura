@@ -1,5 +1,4 @@
-"""
-obscura.mcp.server — FastMCP-based MCP server for Obscura.
+"""obscura.mcp.server — FastMCP-based MCP server for Obscura.
 
 Exposes Obscura functionality as MCP tools, resources, and prompts.
 Can run alongside the main FastAPI server.
@@ -24,13 +23,11 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.agent.agents import AgentConfig, AgentRuntime
-from obscura.auth.models import AuthenticatedUser
 from obscura.core.sessions import SessionStore
 from obscura.core.types import Backend, SessionRef
-from obscura.memory import MemoryStore
 from obscura.integrations.mcp.file_tools import read_file, search_files
 from obscura.integrations.mcp.tools import (
     create_array_property,
@@ -42,16 +39,19 @@ from obscura.integrations.mcp.types import (
     MCPError,
     MCPErrorCode,
     MCPToolResult,
-    ObscuraMCPToolContext,
     ObscuraMCPConfig,
+    ObscuraMCPToolContext,
 )
+from obscura.memory import MemoryStore
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
 
 
 class ObscuraMCPServer:
-    """
-    MCP server for Obscura.
+    """MCP server for Obscura.
 
     Exposes Obscura functionality via the Model Context Protocol.
     Supports stdio and SSE transports.
@@ -61,7 +61,7 @@ class ObscuraMCPServer:
         self,
         config: ObscuraMCPConfig | None = None,
         user: AuthenticatedUser | None = None,
-    ):
+    ) -> None:
         self.config = config or ObscuraMCPConfig()
         self.user = user
         self._runtime: AgentRuntime | None = None
@@ -290,7 +290,7 @@ class ObscuraMCPServer:
             parameters={
                 "properties": {
                     "query": create_string_property(
-                        "Text to search for in file contents"
+                        "Text to search for in file contents",
                     ),
                     "glob": create_string_property(
                         "Glob pattern to filter files (e.g. '*.py')",
@@ -349,7 +349,7 @@ class ObscuraMCPServer:
             parameters={
                 "properties": {
                     "entity_type": create_string_property(
-                        "Entity type (e.g. 'project', 'task', 'note')"
+                        "Entity type (e.g. 'project', 'task', 'note')",
                     ),
                     "entity_id": create_string_property("Unique entity ID"),
                     "data": create_string_property("Entity data as JSON string"),
@@ -562,7 +562,7 @@ class ObscuraMCPServer:
                             "key": mk.key,
                             "namespace": mk.namespace,
                             "value": value,
-                        }
+                        },
                     )
         else:
             # Search all namespaces
@@ -737,14 +737,14 @@ class ObscuraMCPServer:
 
         entries: list[dict[str, Any]] = []
         if isinstance(raw, list):
-            entries = cast(list[dict[str, Any]], raw)
+            entries = cast("list[dict[str, Any]]", raw)
 
         entries.append(
             {
                 "role": role,
                 "content": content,
                 "index": len(entries),
-            }
+            },
         )
 
         memory.set(transcript_key, entries, namespace="transcript")
@@ -773,7 +773,7 @@ class ObscuraMCPServer:
 
         messages: list[dict[str, Any]] = []
         if isinstance(raw, list):
-            messages = cast(list[dict[str, Any]], raw)
+            messages = cast("list[dict[str, Any]]", raw)
 
         if not messages:
             return {
@@ -854,7 +854,9 @@ class ObscuraMCPServer:
         """Shutdown the MCP server."""
         if self._runtime:
             stop_fn = getattr(self._runtime, "shutdown", None) or getattr(
-                self._runtime, "stop", None
+                self._runtime,
+                "stop",
+                None,
             )
             if stop_fn:
                 stop_result = stop_fn()
@@ -932,7 +934,7 @@ class ObscuraMCPServer:
                         "uri": f"memory://{ns}",
                         "name": f"Memory namespace: {ns}",
                         "mimeType": "application/json",
-                    }
+                    },
                 )
 
         return resources
@@ -966,26 +968,25 @@ class ObscuraMCPServer:
                             "uri": uri,
                             "mimeType": "application/json",
                             "text": json.dumps(value, default=str),
-                        }
-                    ]
+                        },
+                    ],
                 }
-            else:
-                # List all keys in namespace
-                keys = memory.list_keys(namespace=namespace)
-                return {
-                    "contents": [
-                        {
-                            "uri": uri,
-                            "mimeType": "application/json",
-                            "text": json.dumps(
-                                {
-                                    "namespace": namespace,
-                                    "keys": [k.key for k in keys],
-                                }
-                            ),
-                        }
-                    ]
-                }
+            # List all keys in namespace
+            keys = memory.list_keys(namespace=namespace)
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps(
+                            {
+                                "namespace": namespace,
+                                "keys": [k.key for k in keys],
+                            },
+                        ),
+                    },
+                ],
+            }
 
         raise MCPError(
             code=MCPErrorCode.RESOURCE_NOT_FOUND.value,
@@ -1003,7 +1004,7 @@ class ObscuraMCPServer:
                         "name": "task",
                         "description": "The task to execute",
                         "required": True,
-                    }
+                    },
                 ],
             },
             {
@@ -1014,7 +1015,7 @@ class ObscuraMCPServer:
                         "name": "query",
                         "description": "The query to search for in memory",
                         "required": True,
-                    }
+                    },
                 ],
             },
         ]
@@ -1039,10 +1040,10 @@ class ObscuraMCPServer:
                             "type": "text",
                             "text": f"Please execute this task: {task}",
                         },
-                    }
+                    },
                 ],
             }
-        elif name == "memory_query":
+        if name == "memory_query":
             query = arguments.get("query", "")
             return {
                 "description": f"Memory query: {query}",
@@ -1053,7 +1054,7 @@ class ObscuraMCPServer:
                             "type": "text",
                             "text": f"Search memory for information about: {query}",
                         },
-                    }
+                    },
                 ],
             }
 
@@ -1069,14 +1070,14 @@ class ObscuraMCPServer:
 
 
 def create_mcp_router(server: ObscuraMCPServer) -> Any:
-    """
-    Create a FastAPI router for MCP endpoints.
+    """Create a FastAPI router for MCP endpoints.
 
     Args:
         server: ObscuraMCPServer instance
 
     Returns:
         FastAPI router with MCP endpoints
+
     """
     from fastapi import APIRouter, Request
     from sse_starlette.sse import EventSourceResponse

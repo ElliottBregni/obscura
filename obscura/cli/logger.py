@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from obscura.cli import render
 
 
-def configure_logger(output_manager: Optional[object] = None) -> logging.Logger:
+def configure_logger(output_manager: object | None = None) -> logging.Logger:
     """Configure a central 'obscura' logger that routes INFO+ to the user-facing
     console (or output manager when not in CLI) and routes DEBUG messages into
     the OutputManager.capture_internal buffer.

@@ -46,7 +46,10 @@ class EvalMemory:
         # In-memory cache of resolved file+tool pairs to suppress stale failures
         self._resolved: dict[str, float] = {}  # "tool:file" → resolved_at timestamp
         # Criteria feedback: track pass/fail per command for false-positive detection
-        self._criteria_stats: dict[str, dict[str, int]] = {}  # cmd → {criterion → fail_count}
+        self._criteria_stats: dict[
+            str,
+            dict[str, int],
+        ] = {}  # cmd → {criterion → fail_count}
         self._init_store()
 
     def _init_store(self) -> None:
@@ -438,15 +441,15 @@ class EvalMemory:
         seen: set[str] = set()
 
         # Recall per tool+file
-        for tool in (tool_names or []):
-            for fp in (file_paths or [""]):
+        for tool in tool_names or []:
+            for fp in file_paths or [""]:
                 for w in self.recall_for_tool(tool, file_path=fp, top_k=2):
                     if w not in seen:
                         seen.add(w)
                         warnings.append(w)
 
         # Recall per file (cross-tool)
-        for fp in (file_paths or []):
+        for fp in file_paths or []:
             if fp:
                 for w in self.recall_for_file(fp, top_k=2):
                     if w not in seen:

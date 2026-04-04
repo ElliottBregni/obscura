@@ -12,7 +12,6 @@ import pytest
 from obscura.plugins.models import PluginSpec, PluginStatus
 from obscura.plugins.registry import PluginEntry, PluginRegistryService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -39,11 +38,15 @@ def _make_spec(
         CapabilitySpec(id="test.read", version="1.0.0", description="read stuff"),
         CapabilitySpec(id="test.write", version="1.0.0", description="write stuff"),
     )
-    tool_list = tools or (
-        ToolContribution(name="test_tool", description="a tool"),
-    )
+    tool_list = tools or (ToolContribution(name="test_tool", description="a tool"),)
     wf_list = workflows or (
-        WorkflowSpec(id="test-wf", version="1.0.0", name="Test Workflow", description="a wf", steps=()),
+        WorkflowSpec(
+            id="test-wf",
+            version="1.0.0",
+            name="Test Workflow",
+            description="a wf",
+            steps=(),
+        ),
     )
     return PluginSpec(
         id=plugin_id,
@@ -60,12 +63,12 @@ def _make_spec(
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def spec() -> PluginSpec:
     return _make_spec()
 
 
-@pytest.fixture()
+@pytest.fixture
 def svc(tmp_path: Path) -> PluginRegistryService:
     return PluginRegistryService(plugin_dir=tmp_path)
 
@@ -103,8 +106,15 @@ class TestPluginEntryToDict:
 
     def test_to_dict_returns_dict_type(self) -> None:
         entry = PluginEntry(
-            id="a", name="A", version="1.0.0", source_type="local",
-            runtime_type="native", trust_level="community", author="", description="", source="",
+            id="a",
+            name="A",
+            version="1.0.0",
+            source_type="local",
+            runtime_type="native",
+            trust_level="community",
+            author="",
+            description="",
+            source="",
         )
         assert isinstance(entry.to_dict(), dict)
 
@@ -114,10 +124,17 @@ class TestPluginEntryFromDict:
 
     def test_filters_unknown_keys(self) -> None:
         data = {
-            "id": "x", "name": "X", "version": "0.1.0",
-            "source_type": "local", "runtime_type": "native",
-            "trust_level": "community", "author": "", "description": "",
-            "source": "", "unknown_field": 42, "extra_junk": "hi",
+            "id": "x",
+            "name": "X",
+            "version": "0.1.0",
+            "source_type": "local",
+            "runtime_type": "native",
+            "trust_level": "community",
+            "author": "",
+            "description": "",
+            "source": "",
+            "unknown_field": 42,
+            "extra_junk": "hi",
         }
         entry = PluginEntry.from_dict(data)
         assert entry.id == "x"
@@ -126,12 +143,20 @@ class TestPluginEntryFromDict:
 
     def test_accepts_all_known_keys(self) -> None:
         data = {
-            "id": "full", "name": "Full", "version": "2.0.0",
-            "source_type": "git", "runtime_type": "cli",
-            "trust_level": "verified", "author": "alice",
-            "description": "full entry", "source": "git+https://x",
-            "enabled": True, "state": "enabled", "error": "some error",
-            "installed_at": "2024-01-01T00:00:00", "updated_at": "2024-06-01T00:00:00",
+            "id": "full",
+            "name": "Full",
+            "version": "2.0.0",
+            "source_type": "git",
+            "runtime_type": "cli",
+            "trust_level": "verified",
+            "author": "alice",
+            "description": "full entry",
+            "source": "git+https://x",
+            "enabled": True,
+            "state": "enabled",
+            "error": "some error",
+            "installed_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-06-01T00:00:00",
             "contributed_capabilities": ["cap.one"],
             "contributed_tools": ["my_tool"],
             "contributed_workflows": ["wf-1"],
@@ -148,9 +173,14 @@ class TestPluginEntryFromDict:
 
     def test_defaults_applied_for_missing_optional_keys(self) -> None:
         data = {
-            "id": "min", "name": "Min", "version": "1.0.0",
-            "source_type": "local", "runtime_type": "native",
-            "trust_level": "community", "author": "", "description": "",
+            "id": "min",
+            "name": "Min",
+            "version": "1.0.0",
+            "source_type": "local",
+            "runtime_type": "native",
+            "trust_level": "community",
+            "author": "",
+            "description": "",
             "source": "",
         }
         entry = PluginEntry.from_dict(data)
@@ -163,7 +193,10 @@ class TestPluginEntryFromDict:
 class TestPluginEntryFromSpec:
     """from_spec creates entry with timestamps and contributed resources."""
 
-    def test_creates_entry_with_all_contributed_resources(self, spec: PluginSpec) -> None:
+    def test_creates_entry_with_all_contributed_resources(
+        self,
+        spec: PluginSpec,
+    ) -> None:
         entry = PluginEntry.from_spec(spec, source="/some/path")
         assert entry.id == spec.id
         assert entry.name == spec.name
@@ -183,8 +216,11 @@ class TestPluginEntryFromSpec:
 
     def test_empty_contributions_when_spec_has_none(self) -> None:
         bare = PluginSpec(
-            id="bare-plugin", name="Bare", version="1.0.0",
-            source_type="local", runtime_type="native",
+            id="bare-plugin",
+            name="Bare",
+            version="1.0.0",
+            source_type="local",
+            runtime_type="native",
         )
         entry = PluginEntry.from_spec(bare)
         assert entry.contributed_capabilities == []
@@ -205,7 +241,7 @@ class TestServiceInit:
     def test_creates_plugin_dir_and_registry_file(self, tmp_path: Path) -> None:
         d = tmp_path / "fresh"
         assert not d.exists()
-        svc = PluginRegistryService(plugin_dir=d)
+        PluginRegistryService(plugin_dir=d)
         assert d.exists()
         reg = d / "registry.json"
         assert reg.exists()
@@ -213,10 +249,23 @@ class TestServiceInit:
 
     def test_does_not_overwrite_existing_registry(self, tmp_path: Path) -> None:
         reg = tmp_path / "registry.json"
-        reg.write_text(json.dumps([{"id": "existing", "name": "E", "version": "1.0.0",
-                                     "source_type": "local", "runtime_type": "native",
-                                     "trust_level": "community", "author": "", "description": "",
-                                     "source": ""}]))
+        reg.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "existing",
+                        "name": "E",
+                        "version": "1.0.0",
+                        "source_type": "local",
+                        "runtime_type": "native",
+                        "trust_level": "community",
+                        "author": "",
+                        "description": "",
+                        "source": "",
+                    },
+                ],
+            ),
+        )
         svc = PluginRegistryService(plugin_dir=tmp_path)
         plugins = svc.list_plugins()
         assert len(plugins) == 1
@@ -233,7 +282,10 @@ class TestServiceInit:
 
 
 class TestListPlugins:
-    def test_empty_registry_returns_empty_list(self, svc: PluginRegistryService) -> None:
+    def test_empty_registry_returns_empty_list(
+        self,
+        svc: PluginRegistryService,
+    ) -> None:
         assert svc.list_plugins() == []
 
     def test_returns_all_entries(self, svc: PluginRegistryService) -> None:
@@ -249,7 +301,12 @@ class TestListPlugins:
 
 
 class TestInstall:
-    def test_adds_entry_and_persists(self, svc: PluginRegistryService, spec: PluginSpec, tmp_path: Path) -> None:
+    def test_adds_entry_and_persists(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+        tmp_path: Path,
+    ) -> None:
         entry = svc.install(spec, source="/src")
         assert entry.id == spec.id
 
@@ -259,7 +316,9 @@ class TestInstall:
         assert raw[0]["source"] == "/src"
 
     def test_reinstall_updates_entry_preserves_installed_at(
-        self, svc: PluginRegistryService, spec: PluginSpec,
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
     ) -> None:
         first = svc.install(spec)
         original_installed_at = first.installed_at
@@ -278,12 +337,20 @@ class TestInstall:
         second = svc.install(_make_spec(version="2.0.0"))
         assert second.updated_at >= first.updated_at
 
-    def test_auto_enable_sets_enabled_and_state(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_auto_enable_sets_enabled_and_state(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         entry = svc.install(spec, auto_enable=True)
         assert entry.enabled is True
         assert entry.state == "enabled"
 
-    def test_auto_enable_false_by_default(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_auto_enable_false_by_default(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         entry = svc.install(spec)
         assert entry.enabled is False
         assert entry.state == "installed"
@@ -295,7 +362,11 @@ class TestInstall:
 
 
 class TestGetPlugin:
-    def test_returns_entry_by_id(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_returns_entry_by_id(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec)
         entry = svc.get_plugin(spec.id)
         assert entry is not None
@@ -319,7 +390,11 @@ class TestGetPlugin:
 
 
 class TestEnableDisable:
-    def test_enable_sets_flag_and_state(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_enable_sets_flag_and_state(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec)
         assert svc.enable(spec.id) is True
         entry = svc.get_plugin(spec.id)
@@ -327,7 +402,11 @@ class TestEnableDisable:
         assert entry.enabled is True
         assert entry.state == "enabled"
 
-    def test_disable_clears_flag_and_state(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_disable_clears_flag_and_state(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec, auto_enable=True)
         assert svc.disable(spec.id) is True
         entry = svc.get_plugin(spec.id)
@@ -335,7 +414,11 @@ class TestEnableDisable:
         assert entry.enabled is False
         assert entry.state == "disabled"
 
-    def test_enable_updates_updated_at(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_enable_updates_updated_at(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         entry = svc.install(spec)
         old_updated = entry.updated_at
         time.sleep(0.01)
@@ -344,7 +427,11 @@ class TestEnableDisable:
         assert new_entry is not None
         assert new_entry.updated_at >= old_updated
 
-    def test_disable_updates_updated_at(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_disable_updates_updated_at(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         entry = svc.install(spec, auto_enable=True)
         old_updated = entry.updated_at
         time.sleep(0.01)
@@ -356,7 +443,10 @@ class TestEnableDisable:
     def test_enable_nonexistent_returns_false(self, svc: PluginRegistryService) -> None:
         assert svc.enable("nope") is False
 
-    def test_disable_nonexistent_returns_false(self, svc: PluginRegistryService) -> None:
+    def test_disable_nonexistent_returns_false(
+        self,
+        svc: PluginRegistryService,
+    ) -> None:
         assert svc.disable("nope") is False
 
 
@@ -366,7 +456,11 @@ class TestEnableDisable:
 
 
 class TestUninstall:
-    def test_removes_from_registry(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_removes_from_registry(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec)
         assert svc.uninstall(spec.id) is True
         assert svc.get_plugin(spec.id) is None
@@ -375,7 +469,12 @@ class TestUninstall:
     def test_returns_false_for_missing(self, svc: PluginRegistryService) -> None:
         assert svc.uninstall("does-not-exist") is False
 
-    def test_deletes_local_directory(self, svc: PluginRegistryService, spec: PluginSpec, tmp_path: Path) -> None:
+    def test_deletes_local_directory(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+        tmp_path: Path,
+    ) -> None:
         svc.install(spec)
         local = tmp_path / spec.id
         local.mkdir()
@@ -384,7 +483,11 @@ class TestUninstall:
         assert svc.uninstall(spec.id) is True
         assert not local.exists()
 
-    def test_pip_uninstall_called_for_pip_source(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_pip_uninstall_called_for_pip_source(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         spec = _make_spec("pip-pkg", source_type="pip")
         svc.install(spec, source="some-pip-package")
         # The spec's source_type is already "pip"; verify it was stored correctly
@@ -434,7 +537,11 @@ class TestListEnabled:
 
 
 class TestGetStatus:
-    def test_returns_plugin_status(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_returns_plugin_status(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec)
         status = svc.get_status(spec.id)
         assert status is not None
@@ -446,14 +553,22 @@ class TestGetStatus:
     def test_returns_none_for_missing(self, svc: PluginRegistryService) -> None:
         assert svc.get_status("nope") is None
 
-    def test_reflects_enabled_state(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_reflects_enabled_state(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec, auto_enable=True)
         status = svc.get_status(spec.id)
         assert status is not None
         assert status.enabled is True
         assert status.state == "enabled"
 
-    def test_status_has_timestamps(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_status_has_timestamps(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec)
         status = svc.get_status(spec.id)
         assert status is not None
@@ -467,7 +582,11 @@ class TestGetStatus:
 
 
 class TestGetContributions:
-    def test_returns_contributed_resources(self, svc: PluginRegistryService, spec: PluginSpec) -> None:
+    def test_returns_contributed_resources(
+        self,
+        svc: PluginRegistryService,
+        spec: PluginSpec,
+    ) -> None:
         svc.install(spec)
         contrib = svc.get_contributions(spec.id)
         assert contrib == {
@@ -481,8 +600,11 @@ class TestGetContributions:
 
     def test_empty_contributions(self, svc: PluginRegistryService) -> None:
         bare = PluginSpec(
-            id="bare-plugin", name="Bare", version="1.0.0",
-            source_type="local", runtime_type="native",
+            id="bare-plugin",
+            name="Bare",
+            version="1.0.0",
+            source_type="local",
+            runtime_type="native",
         )
         svc.install(bare)
         contrib = svc.get_contributions("bare-plugin")
@@ -495,7 +617,11 @@ class TestGetContributions:
 
 
 class TestPersistence:
-    def test_data_survives_new_service_instance(self, tmp_path: Path, spec: PluginSpec) -> None:
+    def test_data_survives_new_service_instance(
+        self,
+        tmp_path: Path,
+        spec: PluginSpec,
+    ) -> None:
         svc1 = PluginRegistryService(plugin_dir=tmp_path)
         svc1.install(spec, auto_enable=True)
 
@@ -506,7 +632,11 @@ class TestPersistence:
         assert plugins[0].enabled is True
         assert plugins[0].contributed_capabilities == ["test.read", "test.write"]
 
-    def test_enable_persists_across_instances(self, tmp_path: Path, spec: PluginSpec) -> None:
+    def test_enable_persists_across_instances(
+        self,
+        tmp_path: Path,
+        spec: PluginSpec,
+    ) -> None:
         svc1 = PluginRegistryService(plugin_dir=tmp_path)
         svc1.install(spec)
         svc1.enable(spec.id)
@@ -564,14 +694,23 @@ class TestInstallFromSourceEmpty:
 
 
 class TestInstallFromSourceLocalManifest:
-    def test_installs_from_local_dir_with_manifest(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_installs_from_local_dir_with_manifest(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         src_dir = tmp_path / "src_plugin"
         src_dir.mkdir()
-        (src_dir / "plugin.yaml").write_text("id: local-plugin\nname: Local\nversion: 0.5.0\n")
+        (src_dir / "plugin.yaml").write_text(
+            "id: local-plugin\nname: Local\nversion: 0.5.0\n",
+        )
         (src_dir / "code.py").write_text("print('hello')")
 
         mock_spec = _make_spec("local-plugin", "Local Plugin", "0.5.0")
-        with patch("obscura.plugins.manifest.parse_manifest_file", return_value=mock_spec):
+        with patch(
+            "obscura.plugins.manifest.parse_manifest_file",
+            return_value=mock_spec,
+        ):
             result = svc.install_from_source(str(src_dir))
 
         assert result["ok"] is True
@@ -580,12 +719,19 @@ class TestInstallFromSourceLocalManifest:
         assert dest.exists()
         assert (dest / "code.py").exists()
 
-    def test_manifest_parse_failure_returns_error(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_manifest_parse_failure_returns_error(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         src_dir = tmp_path / "bad_plugin"
         src_dir.mkdir()
         (src_dir / "plugin.yaml").write_text("bad: yaml: content")
 
-        with patch("obscura.plugins.manifest.parse_manifest_file", side_effect=ValueError("bad manifest")):
+        with patch(
+            "obscura.plugins.manifest.parse_manifest_file",
+            side_effect=ValueError("bad manifest"),
+        ):
             result = svc.install_from_source(str(src_dir))
 
         assert result["ok"] is False
@@ -598,7 +744,11 @@ class TestInstallFromSourceLocalManifest:
 
 
 class TestInstallFromSourceLegacyLocal:
-    def test_copies_local_dir_without_manifest(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_copies_local_dir_without_manifest(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         src_dir = tmp_path / "external" / "legacy_plugin"
         src_dir.mkdir(parents=True)
         (src_dir / "main.py").write_text("# legacy")
@@ -608,7 +758,11 @@ class TestInstallFromSourceLegacyLocal:
         assert "Copied" in result["message"]
         assert (tmp_path / "legacy_plugin").exists()
 
-    def test_legacy_already_exists_returns_error(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_legacy_already_exists_returns_error(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         src_dir = tmp_path / "external" / "myplugin"
         src_dir.mkdir(parents=True)
         (src_dir / "code.py").write_text("# v1")
@@ -627,7 +781,11 @@ class TestInstallFromSourceLegacyLocal:
 
 
 class TestInstallFromSourceGit:
-    def test_git_clone_success_with_manifest(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_git_clone_success_with_manifest(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         mock_spec = _make_spec("git-plugin", "Git Plugin", "1.0.0")
 
         def fake_clone(cmd, **kwargs):
@@ -636,8 +794,13 @@ class TestInstallFromSourceGit:
             (dest / "plugin.yaml").write_text("id: git-plugin")
             return MagicMock(returncode=0, stderr="")
 
-        with patch("obscura.plugins.registry.subprocess.run", side_effect=fake_clone), \
-             patch("obscura.plugins.manifest.parse_manifest_file", return_value=mock_spec):
+        with (
+            patch("obscura.plugins.registry.subprocess.run", side_effect=fake_clone),
+            patch(
+                "obscura.plugins.manifest.parse_manifest_file",
+                return_value=mock_spec,
+            ),
+        ):
             result = svc.install_from_source("https://github.com/user/git-plugin.git")
 
         assert result["ok"] is True
@@ -651,18 +814,28 @@ class TestInstallFromSourceGit:
         assert result["ok"] is False
         assert "git clone failed" in result["message"]
 
-    def test_git_url_with_git_plus_prefix(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_git_url_with_git_plus_prefix(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         def fake_clone(cmd, **kwargs):
             dest = Path(cmd[3])
             dest.mkdir(parents=True, exist_ok=True)
             return MagicMock(returncode=0, stderr="")
 
         with patch("obscura.plugins.registry.subprocess.run", side_effect=fake_clone):
-            result = svc.install_from_source("git+https://github.com/user/my-plugin.git")
+            result = svc.install_from_source(
+                "git+https://github.com/user/my-plugin.git",
+            )
 
         assert result["ok"] is True
 
-    def test_git_already_exists(self, svc: PluginRegistryService, tmp_path: Path) -> None:
+    def test_git_already_exists(
+        self,
+        svc: PluginRegistryService,
+        tmp_path: Path,
+    ) -> None:
         (tmp_path / "existing-repo").mkdir()
         result = svc.install_from_source("https://github.com/user/existing-repo.git")
         assert result["ok"] is False

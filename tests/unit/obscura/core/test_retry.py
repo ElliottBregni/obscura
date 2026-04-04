@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -98,9 +97,15 @@ class TestWithRetryCircuitBreaker:
 class TestWithRetryBackoff:
     async def test_backoff_called(self) -> None:
         fn = AsyncMock(side_effect=[ValueError("1"), ValueError("2"), "ok"])
-        with patch("obscura.core.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch(
+            "obscura.core.retry.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
             result = await with_retry(
-                fn, max_retries=2, initial_backoff=1.0, jitter=False
+                fn,
+                max_retries=2,
+                initial_backoff=1.0,
+                jitter=False,
             )
         assert result == "ok"
         # Two sleeps: after attempt 0 and attempt 1
@@ -114,9 +119,16 @@ class TestWithRetryBackoff:
 
     async def test_max_backoff_capped(self) -> None:
         fn = AsyncMock(side_effect=[ValueError("1"), ValueError("2"), "ok"])
-        with patch("obscura.core.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch(
+            "obscura.core.retry.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
             result = await with_retry(
-                fn, max_retries=2, initial_backoff=5.0, max_backoff=3.0, jitter=False
+                fn,
+                max_retries=2,
+                initial_backoff=5.0,
+                max_backoff=3.0,
+                jitter=False,
             )
         assert result == "ok"
         for call in mock_sleep.call_args_list:
@@ -125,14 +137,16 @@ class TestWithRetryBackoff:
     async def test_jitter_varies_backoff(self) -> None:
         fn = AsyncMock(side_effect=[ValueError("1"), ValueError("2"), "ok"])
         backoffs: list[float] = []
-        original_sleep = asyncio.sleep
 
         async def capture_sleep(t: float) -> None:
             backoffs.append(t)
 
         with patch("obscura.core.retry.asyncio.sleep", side_effect=capture_sleep):
             await with_retry(
-                fn, max_retries=2, initial_backoff=1.0, jitter=True
+                fn,
+                max_retries=2,
+                initial_backoff=1.0,
+                jitter=True,
             )
         # With jitter, backoff should be in range [0.75, 1.25] * base
         assert 0.5 <= backoffs[0] <= 1.5

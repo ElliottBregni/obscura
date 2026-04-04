@@ -1,8 +1,10 @@
 """Tests for sdk.telemetry.middleware."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from fastapi import FastAPI
 from starlette.testclient import TestClient
+
 from obscura.telemetry.middleware import (
     ObscuraTelemetryMiddleware,
     enrich_request_span,
@@ -31,7 +33,7 @@ def _make_app() -> FastAPI:
 
 
 class TestTelemetryMiddleware:
-    def test_generates_request_id(self):
+    def test_generates_request_id(self) -> None:
         client = TestClient(_make_app())
         resp = client.get("/test")
         assert resp.status_code == 200
@@ -39,19 +41,20 @@ class TestTelemetryMiddleware:
         rid = resp.headers["X-Request-ID"]
         assert len(rid) == 36  # UUID format
 
-    def test_propagates_provided_request_id(self):
+    def test_propagates_provided_request_id(self) -> None:
         client = TestClient(_make_app())
         resp = client.get("/test", headers={"X-Request-ID": "my-custom-id"})
         assert resp.headers["X-Request-ID"] == "my-custom-id"
 
-    def test_response_success(self):
+    def test_response_success(self) -> None:
         client = TestClient(_make_app())
         resp = client.get("/test")
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
     @patch(
-        "obscura.telemetry.middleware._get_traceparent", return_value="00-abc-def-01"
+        "obscura.telemetry.middleware._get_traceparent",
+        return_value="00-abc-def-01",
     )
     def test_traceparent_header(self, mock_tp: MagicMock) -> None:  # noqa: ARG002
         client = TestClient(_make_app())
@@ -73,13 +76,13 @@ class TestTelemetryMiddleware:
             ids.add(resp.headers["X-Request-ID"])
         assert len(ids) == 5
 
-    def test_post_request(self):
+    def test_post_request(self) -> None:
         client = TestClient(_make_app())
         resp = client.post("/echo")
         assert resp.status_code == 200
         assert "X-Request-ID" in resp.headers
 
-    def test_404_still_has_request_id(self):
+    def test_404_still_has_request_id(self) -> None:
         client = TestClient(_make_app())
         resp = client.get("/nonexistent")
         assert resp.status_code == 404
@@ -92,12 +95,12 @@ class TestTelemetryMiddleware:
 
 
 class TestEnrichRequestSpan:
-    def test_no_otel_import(self):
+    def test_no_otel_import(self) -> None:
         """When opentelemetry is not available, should not raise."""
         request = MagicMock()
         enrich_request_span(request, "req-1")
 
-    def test_with_recording_span(self):
+    def test_with_recording_span(self) -> None:
         """When OTel is available and span is recording, should set attributes."""
         mock_span = MagicMock()
         mock_span.is_recording.return_value = True
@@ -120,7 +123,7 @@ class TestEnrichRequestSpan:
 
         mock_span.set_attribute.assert_called_with("http.request_id", "req-123")
 
-    def test_span_not_recording(self):
+    def test_span_not_recording(self) -> None:
         """When span is not recording, should return early."""
         mock_span = MagicMock()
         mock_span.is_recording.return_value = False
@@ -138,7 +141,7 @@ class TestEnrichRequestSpan:
 
         mock_span.set_attribute.assert_not_called()
 
-    def test_no_span(self):
+    def test_no_span(self) -> None:
         """When get_current_span returns None, should return early."""
         mock_trace_mod = MagicMock()
         mock_trace_mod.get_current_span.return_value = None
@@ -151,7 +154,7 @@ class TestEnrichRequestSpan:
         ):
             enrich_request_span(MagicMock(), "req-1")
 
-    def test_with_user_enrichment(self):
+    def test_with_user_enrichment(self) -> None:
         """When request has a user, should call enrich_span_with_user."""
         mock_span = MagicMock()
         mock_span.is_recording.return_value = True
@@ -165,17 +168,19 @@ class TestEnrichRequestSpan:
         mock_otel = MagicMock()
         mock_otel.trace = mock_trace_mod
 
-        with patch.dict(
-            "sys.modules",
-            {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+        with (
+            patch.dict(
+                "sys.modules",
+                {"opentelemetry": mock_otel, "opentelemetry.trace": mock_trace_mod},
+            ),
+            patch(
+                "obscura.telemetry.context.enrich_span_with_user",
+            ) as mock_enrich,
         ):
-            with patch(
-                "obscura.telemetry.context.enrich_span_with_user"
-            ) as mock_enrich:
-                enrich_request_span(mock_request, "req-1")
-                mock_enrich.assert_called_once_with(mock_span, mock_user)
+            enrich_request_span(mock_request, "req-1")
+            mock_enrich.assert_called_once_with(mock_span, mock_user)
 
-    def test_request_without_state(self):
+    def test_request_without_state(self) -> None:
         """When request has no state attribute, should not raise."""
         mock_request = MagicMock(spec=[])  # No attributes
         enrich_request_span(mock_request, "req-1")
@@ -187,13 +192,13 @@ class TestEnrichRequestSpan:
 
 
 class TestGetTraceparent:
-    def test_no_otel(self):
+    def test_no_otel(self) -> None:
         """When opentelemetry is not available, returns None."""
         result = get_traceparent()
         # If OTel is not configured, should return None
         assert result is None or isinstance(result, str)
 
-    def test_with_valid_span_context(self):
+    def test_with_valid_span_context(self) -> None:
         """When OTel span has a valid context, returns traceparent."""
 
         # Use a simple namespace object with real int values for format()
@@ -222,7 +227,7 @@ class TestGetTraceparent:
         assert len(parts) == 4
         assert parts[0] == "00"
 
-    def test_with_no_trace_id(self):
+    def test_with_no_trace_id(self) -> None:
         """When trace_id is 0, returns None."""
 
         class FakeCtx:
@@ -246,7 +251,7 @@ class TestGetTraceparent:
 
         assert result is None
 
-    def test_import_error_returns_none(self):
+    def test_import_error_returns_none(self) -> None:
         """When opentelemetry is not installed, returns None."""
         # Remove opentelemetry from sys.modules to simulate ImportError
         import sys
@@ -257,7 +262,8 @@ class TestGetTraceparent:
                 saved[key] = sys.modules.pop(key)
         try:
             with patch.dict(
-                "sys.modules", {"opentelemetry": None, "opentelemetry.trace": None}
+                "sys.modules",
+                {"opentelemetry": None, "opentelemetry.trace": None},
             ):
                 result = get_traceparent()
             assert result is None

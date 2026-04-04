@@ -21,11 +21,11 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import logging
 import os
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.paths import resolve_obscura_global_home
 from obscura.plugins.manifest import ManifestError, parse_manifest_file
@@ -35,6 +35,9 @@ from obscura.plugins.models import (
 )
 from obscura.plugins.registry import PluginRegistryService
 from obscura.plugins.validator import validate_plugin_spec
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -226,10 +229,8 @@ def _resolve_handler_from_plugin_module(
             sys.modules.pop(key, None)
         sys.modules.update(evicted)
         if added:
-            try:
+            with contextlib.suppress(ValueError):
                 sys.path.remove(source_str)
-            except ValueError:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +317,9 @@ class PluginLoader:
                         specs.append(spec)
                     except ManifestError as exc:
                         logger.warning(
-                            "Skipping invalid manifest %s: %s", manifest, exc
+                            "Skipping invalid manifest %s: %s",
+                            manifest,
+                            exc,
                         )
             elif entry.suffix in (".toml", ".yaml") and entry.name != "registry.json":
                 # Flat layout: *.toml or *.yaml
@@ -436,7 +439,8 @@ class PluginLoader:
                 handler = _resolve_handler(tool_contrib.handler_ref)
                 if handler is None:
                     handler = _resolve_handler_from_plugin_module(
-                        tool_contrib.name, spec
+                        tool_contrib.name,
+                        spec,
                     )
                 if handler is None:
                     logger.warning(
@@ -566,6 +570,7 @@ class PluginLoader:
             Pack-level filtering (same semantics as workspace filters).
         eager_plugins :
             Plugin IDs to initialize immediately (prewarm set).
+
         """
         from obscura.core.types import ToolSpec
         from obscura.plugins.lazy import LazyPluginManager
@@ -699,7 +704,8 @@ class PluginLoader:
             details = "; ".join(
                 f"{pid}: {results[pid].error}" for pid in failed_required
             )
-            raise RuntimeError(f"Required plugins failed to load: {details}")
+            msg = f"Required plugins failed to load: {details}"
+            raise RuntimeError(msg)
 
         return results
 
@@ -764,7 +770,7 @@ def get_all_builtin_tool_specs() -> list[Any]:
                     timeout_seconds=tool.timeout_seconds,
                     retries=tool.retries,
                     capability=tool.capability,
-                )
+                ),
             )
     return specs
 
@@ -827,7 +833,7 @@ def get_filtered_builtin_tool_specs(
                     timeout_seconds=tool.timeout_seconds,
                     retries=tool.retries,
                     capability=tool.capability,
-                )
+                ),
             )
 
     logger.info(
@@ -887,7 +893,7 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
                     timeout_seconds=tool.timeout_seconds,
                     retries=tool.retries,
                     capability=tool.capability,
-                )
+                ),
             )
     return specs, skipped
 
@@ -921,7 +927,7 @@ def get_capability_map() -> dict[str, str]:
 __all__ = [
     "PluginLoader",
     "get_all_builtin_tool_specs",
-    "get_filtered_builtin_tool_specs",
     "get_all_builtin_tool_specs_with_report",
     "get_capability_map",
+    "get_filtered_builtin_tool_specs",
 ]

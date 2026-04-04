@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +15,9 @@ from obscura.core.supervisor.types import (
     SupervisorEvent,
     SupervisorEventKind,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -95,6 +98,7 @@ class TestSupervisor:
     async def test_memory_commit_gating(self, supervisor: Supervisor) -> None:
         """Memory items are queued and committed during COMMITTING_MEMORY."""
         import hashlib
+
         content = "The sky is blue"
         h = hashlib.sha256(content.encode()).hexdigest()
         items = [
@@ -143,9 +147,7 @@ class TestSupervisor:
         ):
             events.append(event)
 
-        completed = [
-            e for e in events if e.kind == SupervisorEventKind.RUN_COMPLETED
-        ]
+        completed = [e for e in events if e.kind == SupervisorEventKind.RUN_COMPLETED]
         assert len(completed) == 1
         payload = completed[0].payload
         assert "duration_ms" in payload

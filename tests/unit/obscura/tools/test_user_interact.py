@@ -37,7 +37,12 @@ def _make_callback(return_value: dict[str, Any]) -> AsyncMock:
 @pytest.mark.asyncio
 async def test_permission_approved() -> None:
     _make_callback({"approved": True})
-    raw = await user_interact(mode="permission", action="delete file", reason="cleanup", risk="high")
+    raw = await user_interact(
+        mode="permission",
+        action="delete file",
+        reason="cleanup",
+        risk="high",
+    )
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["approved"] is True
@@ -47,7 +52,12 @@ async def test_permission_approved() -> None:
 @pytest.mark.asyncio
 async def test_permission_denied() -> None:
     _make_callback({"approved": False})
-    raw = await user_interact(mode="permission", action="drop table", reason="migration", risk="critical")
+    raw = await user_interact(
+        mode="permission",
+        action="drop table",
+        reason="migration",
+        risk="critical",
+    )
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["approved"] is False
@@ -71,8 +81,11 @@ async def test_permission_no_callback() -> None:
 async def test_notify_tui_channel() -> None:
     cb = _make_callback({})
     raw = await user_interact(
-        mode="notify", title="Done", message="Task complete",
-        priority="normal", channels=["tui"],
+        mode="notify",
+        title="Done",
+        message="Task complete",
+        priority="normal",
+        channels=["tui"],
     )
     result = json.loads(raw)
     assert result["ok"] is True
@@ -83,10 +96,14 @@ async def test_notify_tui_channel() -> None:
 
 @pytest.mark.asyncio
 async def test_notify_bell_channel() -> None:
-    with patch.object(sys.stdout, "write") as mock_write, \
-         patch.object(sys.stdout, "flush"):
+    with (
+        patch.object(sys.stdout, "write") as mock_write,
+        patch.object(sys.stdout, "flush"),
+    ):
         raw = await user_interact(
-            mode="notify", title="Alert", message="Check this",
+            mode="notify",
+            title="Alert",
+            message="Check this",
             channels=["bell"],
         )
         result = json.loads(raw)
@@ -105,12 +122,17 @@ async def test_notify_os_channel() -> None:
     # Also need the parent package in sys.modules for the import to resolve
     mock_notifications_pkg = type(sys)("obscura.notifications")
 
-    with patch.dict("sys.modules", {
-        "obscura.notifications": mock_notifications_pkg,
-        "obscura.notifications.native": mock_native_mod,
-    }):
+    with patch.dict(
+        "sys.modules",
+        {
+            "obscura.notifications": mock_notifications_pkg,
+            "obscura.notifications.native": mock_native_mod,
+        },
+    ):
         raw = await user_interact(
-            mode="notify", title="OS Alert", message="Check this",
+            mode="notify",
+            title="OS Alert",
+            message="Check this",
             channels=["os"],
         )
         result = json.loads(raw)
@@ -123,7 +145,9 @@ async def test_notify_no_callback_still_delivers_bell() -> None:
     """Notify non-TUI channels work even without a callback."""
     with patch.object(sys.stdout, "write"), patch.object(sys.stdout, "flush"):
         raw = await user_interact(
-            mode="notify", title="Alert", message="Check",
+            mode="notify",
+            title="Alert",
+            message="Check",
             channels=["bell"],
         )
         result = json.loads(raw)
@@ -134,10 +158,12 @@ async def test_notify_no_callback_still_delivers_bell() -> None:
 @pytest.mark.asyncio
 async def test_notify_default_channels() -> None:
     """Default channels are tui + bell."""
-    cb = _make_callback({})
+    _make_callback({})
     with patch.object(sys.stdout, "write"), patch.object(sys.stdout, "flush"):
         raw = await user_interact(
-            mode="notify", title="Alert", message="Check",
+            mode="notify",
+            title="Alert",
+            message="Check",
         )
         result = json.loads(raw)
         assert result["ok"] is True
@@ -154,7 +180,9 @@ async def test_notify_default_channels() -> None:
 async def test_question_with_choices() -> None:
     _make_callback({"selected": "Option B"})
     raw = await user_interact(
-        mode="question", question="Pick one", choices=["Option A", "Option B"],
+        mode="question",
+        question="Pick one",
+        choices=["Option A", "Option B"],
     )
     result = json.loads(raw)
     assert result["ok"] is True

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from obscura.core.compiler.migrate import migrate_agents_yaml
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_agents_yaml(path: Path, agents: list[dict]) -> None:
@@ -23,17 +26,20 @@ class TestMigrateAgentsYaml:
         agents_yaml = tmp_path / "agents.yaml"
         output_dir = tmp_path / "templates"
 
-        _write_agents_yaml(agents_yaml, [
-            {
-                "name": "dev",
-                "type": "loop",
-                "provider": "claude",
-                "max_turns": 30,
-                "system_prompt": "You are a developer.",
-                "capabilities": {"grant": ["shell.exec", "file.read"], "deny": []},
-                "plugins": {"require": ["git"], "optional": ["shell"]},
-            },
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {
+                    "name": "dev",
+                    "type": "loop",
+                    "provider": "claude",
+                    "max_turns": 30,
+                    "system_prompt": "You are a developer.",
+                    "capabilities": {"grant": ["shell.exec", "file.read"], "deny": []},
+                    "plugins": {"require": ["git"], "optional": ["shell"]},
+                },
+            ],
+        )
 
         result = migrate_agents_yaml(agents_yaml, output_dir)
 
@@ -62,10 +68,18 @@ class TestMigrateAgentsYaml:
 
     def test_disabled_agents_skipped(self, tmp_path: Path) -> None:
         agents_yaml = tmp_path / "agents.yaml"
-        _write_agents_yaml(agents_yaml, [
-            {"name": "active", "type": "loop", "provider": "copilot"},
-            {"name": "disabled", "type": "loop", "provider": "copilot", "enabled": False},
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {"name": "active", "type": "loop", "provider": "copilot"},
+                {
+                    "name": "disabled",
+                    "type": "loop",
+                    "provider": "copilot",
+                    "enabled": False,
+                },
+            ],
+        )
 
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert "active" in result.templates_written
@@ -76,9 +90,12 @@ class TestMigrateAgentsYaml:
         output_dir = tmp_path / "out"
         output_dir.mkdir()
 
-        _write_agents_yaml(agents_yaml, [
-            {"name": "existing", "type": "loop", "provider": "copilot"},
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {"name": "existing", "type": "loop", "provider": "copilot"},
+            ],
+        )
 
         # Create pre-existing file with the .toml extension
         (output_dir / "existing.toml").write_text("# existing", encoding="utf-8")
@@ -93,9 +110,12 @@ class TestMigrateAgentsYaml:
         output_dir = tmp_path / "out"
         output_dir.mkdir()
 
-        _write_agents_yaml(agents_yaml, [
-            {"name": "overme", "type": "loop", "provider": "copilot"},
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {"name": "overme", "type": "loop", "provider": "copilot"},
+            ],
+        )
 
         (output_dir / "overme.toml").write_text("# old", encoding="utf-8")
 
@@ -107,9 +127,17 @@ class TestMigrateAgentsYaml:
 
     def test_tags_preserved(self, tmp_path: Path) -> None:
         agents_yaml = tmp_path / "agents.yaml"
-        _write_agents_yaml(agents_yaml, [
-            {"name": "tagged", "type": "loop", "provider": "copilot", "tags": ["dev", "qa"]},
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {
+                    "name": "tagged",
+                    "type": "loop",
+                    "provider": "copilot",
+                    "tags": ["dev", "qa"],
+                },
+            ],
+        )
 
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert "tagged" in result.templates_written
@@ -119,19 +147,22 @@ class TestMigrateAgentsYaml:
 
     def test_config_fields_mapped(self, tmp_path: Path) -> None:
         agents_yaml = tmp_path / "agents.yaml"
-        _write_agents_yaml(agents_yaml, [
-            {
-                "name": "full",
-                "type": "loop",
-                "provider": "claude",
-                "model_id": "sonnet-4",
-                "timeout_seconds": 300,
-                "memory_namespace": "test",
-                "can_delegate": True,
-                "delegate_allowlist": ["other"],
-                "max_delegation_depth": 2,
-            },
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {
+                    "name": "full",
+                    "type": "loop",
+                    "provider": "claude",
+                    "model_id": "sonnet-4",
+                    "timeout_seconds": 300,
+                    "memory_namespace": "test",
+                    "can_delegate": True,
+                    "delegate_allowlist": ["other"],
+                    "max_delegation_depth": 2,
+                },
+            ],
+        )
 
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert "full" in result.templates_written
@@ -144,19 +175,22 @@ class TestMigrateAgentsYaml:
 
     def test_permissions_mapped_to_tools(self, tmp_path: Path) -> None:
         agents_yaml = tmp_path / "agents.yaml"
-        _write_agents_yaml(agents_yaml, [
-            {
-                "name": "perms",
-                "type": "loop",
-                "provider": "copilot",
-                "permissions": {
-                    "allow": ["read_file", "write_file"],
-                    "deny": ["delete_file"],
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {
+                    "name": "perms",
+                    "type": "loop",
+                    "provider": "copilot",
+                    "permissions": {
+                        "allow": ["read_file", "write_file"],
+                        "deny": ["delete_file"],
+                    },
                 },
-            },
-        ])
+            ],
+        )
 
-        result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
+        migrate_agents_yaml(agents_yaml, tmp_path / "out")
         doc = tomllib.loads((tmp_path / "out" / "perms.toml").read_text())
         assert doc["spec"]["tool_allowlist"] == ["read_file", "write_file"]
         assert doc["spec"]["tool_denylist"] == ["delete_file"]
@@ -178,11 +212,14 @@ class TestMigrateAgentsYaml:
 
     def test_multiple_agents(self, tmp_path: Path) -> None:
         agents_yaml = tmp_path / "agents.yaml"
-        _write_agents_yaml(agents_yaml, [
-            {"name": "a1", "type": "loop", "provider": "copilot"},
-            {"name": "a2", "type": "loop", "provider": "claude"},
-            {"name": "a3", "type": "loop", "provider": "copilot"},
-        ])
+        _write_agents_yaml(
+            agents_yaml,
+            [
+                {"name": "a1", "type": "loop", "provider": "copilot"},
+                {"name": "a2", "type": "loop", "provider": "claude"},
+                {"name": "a3", "type": "loop", "provider": "copilot"},
+            ],
+        )
 
         result = migrate_agents_yaml(agents_yaml, tmp_path / "out")
         assert len(result.templates_written) == 3

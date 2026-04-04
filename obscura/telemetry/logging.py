@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-"""
-obscura.telemetry.logging — Structured logging via structlog.
+"""obscura.telemetry.logging — Structured logging via structlog.
 
 Configures structlog with a JSON renderer (production) or console renderer
 (development). Automatically binds ``trace_id`` and ``span_id`` from the
@@ -19,9 +18,11 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
-from typing import Any, TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from obscura.core.config import ObscuraConfig
 
 _configured = False

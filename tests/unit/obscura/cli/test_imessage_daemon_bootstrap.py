@@ -11,7 +11,8 @@ import obscura.cli as cli_mod
 
 @pytest.mark.asyncio
 async def test_start_imessage_daemon_preserves_trigger_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg_path = tmp_path / ".obscura"
     cfg_path.mkdir(parents=True, exist_ok=True)
@@ -66,4 +67,4 @@ async def test_start_imessage_daemon_preserves_trigger_data(
     assert isinstance(triggers, list)
     assert len(triggers) == 1
     trigger0 = triggers[0]
-    assert getattr(trigger0, "data").get("forced_recipient") == "+12316333624"
+    assert trigger0.data.get("forced_recipient") == "+12316333624"

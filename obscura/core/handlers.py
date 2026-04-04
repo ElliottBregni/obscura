@@ -1,5 +1,4 @@
-"""
-obscura.handlers — Lightweight request handler protocol.
+"""obscura.handlers — Lightweight request handler protocol.
 
 For single-purpose handlers that don't need the full APER loop,
 :class:`RequestHandler` defines a minimal interface and
@@ -8,12 +7,11 @@ For single-purpose handlers that don't need the full APER loop,
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
-
-from obscura.core.types import Message
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from obscura.core.client import ObscuraClient
+    from obscura.core.types import Message
 
 
 @runtime_checkable

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.auth.models import AuthenticatedUser
-from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.event_store import SessionStatus, SQLiteEventStore
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 _INDEX_FILE = Path.home() / ".obscura" / "agents" / "sessions" / "INDEX.jsonl"
 _OBSCURA_HOME = Path.home() / ".obscura"
@@ -46,7 +49,7 @@ def preflight_system_session_ingest() -> dict[str, Any]:
         "cwd": str(Path.cwd()),
     }
     checks["ready"] = bool(
-        script_exists and source_exists and source_readable and sessions_writable
+        script_exists and source_exists and source_readable and sessions_writable,
     )
     return checks
 
@@ -57,9 +60,11 @@ def copy_obscura_to_pwd(*, overwrite: bool = True) -> dict[str, Any]:
     dst = Path.cwd() / ".obscura"
 
     if not src.exists():
-        raise RuntimeError(f"Source does not exist: {src}")
+        msg = f"Source does not exist: {src}"
+        raise RuntimeError(msg)
     if dst.exists() and not overwrite:
-        raise RuntimeError(f"Destination already exists: {dst}")
+        msg = f"Destination already exists: {dst}"
+        raise RuntimeError(msg)
 
     shutil.copytree(src, dst, dirs_exist_ok=overwrite)
     return {
@@ -120,8 +125,14 @@ def _ingest_entries(
         # Build metadata from all extra INDEX fields
         metadata: dict[str, Any] = {}
         for key in (
-            "turns", "cwds", "git_branch", "git_repo", "tools_used",
-            "agent_version", "source_path", "synced_path",
+            "turns",
+            "cwds",
+            "git_branch",
+            "git_repo",
+            "tools_used",
+            "agent_version",
+            "source_path",
+            "synced_path",
         ):
             if key in entry:
                 metadata[key] = entry[key]
@@ -152,10 +163,8 @@ def _ingest_entries(
                 metadata=metadata,
             )
             # Mark completed (ingested sessions aren't running)
-            try:
+            with contextlib.suppress(ValueError):
                 store._update_status_sync(session_id, SessionStatus.COMPLETED)
-            except ValueError:
-                pass
 
         # Index into VectorMemoryStore for semantic search
         if user is not None:
@@ -260,7 +269,10 @@ def sync_and_ingest_system_sessions(
 
     entries = _load_index_entries(agent=agent)
     ingested, skipped = _ingest_entries(
-        store, entries, force=force, user=user,
+        store,
+        entries,
+        force=force,
+        user=user,
     )
 
     return {

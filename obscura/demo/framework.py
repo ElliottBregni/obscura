@@ -36,13 +36,7 @@ ToolConfirmGuard = Callable[[ToolCallInfo], bool | Awaitable[bool]]
 
 def default_lifecycle_logger(event: RuntimeLifecycleEvent) -> None:
     """Print concise lifecycle progress for demo sessions."""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    name = event.agent_name or "-"
-    model = event.model or "-"
-    print(
-        f"[{timestamp}] [{event.kind}] agent={name} model={model} {event.message}",
-        flush=True,
-    )
+    datetime.now().strftime("%H:%M:%S")
 
 
 def make_demo_user(role: str) -> AuthenticatedUser:
@@ -77,14 +71,15 @@ async def demo_agent_session(
     except TypeError:
         runtime = runtime_cls(user=runtime_user)
         if lifecycle_hook is not None and hasattr(runtime, "set_lifecycle_hook"):
-            setter = getattr(runtime, "set_lifecycle_hook")
+            setter = runtime.set_lifecycle_hook
             setter(lifecycle_hook)
     try:
         try:
             await asyncio.wait_for(runtime.start(), timeout=start_timeout_seconds)
         except TimeoutError as exc:
+            msg = f"Timed out starting runtime after {start_timeout_seconds}s."
             raise TimeoutError(
-                f"Timed out starting runtime after {start_timeout_seconds}s."
+                msg,
             ) from exc
 
         agent = runtime.spawn(
@@ -99,9 +94,12 @@ async def demo_agent_session(
         try:
             await asyncio.wait_for(agent.start(), timeout=start_timeout_seconds)
         except TimeoutError as exc:
-            raise TimeoutError(
+            msg = (
                 "Timed out starting backend agent. "
                 f"backend={config.model} timeout={start_timeout_seconds}s"
+            )
+            raise TimeoutError(
+                msg,
             ) from exc
         yield agent
     finally:
@@ -150,9 +148,12 @@ async def run_demo_prompt(
                     timeout=run_timeout_seconds,
                 )
             except TimeoutError as exc:
-                raise TimeoutError(
+                msg = (
                     "Timed out waiting for loop response. "
                     f"backend={config.model} timeout={run_timeout_seconds}s"
+                )
+                raise TimeoutError(
+                    msg,
                 ) from exc
 
         if stream:
@@ -162,9 +163,12 @@ async def run_demo_prompt(
                     timeout=run_timeout_seconds,
                 )
             except TimeoutError as exc:
-                raise TimeoutError(
+                msg = (
                     "Timed out waiting for streaming response. "
                     f"backend={config.model} timeout={run_timeout_seconds}s"
+                )
+                raise TimeoutError(
+                    msg,
                 ) from exc
 
         try:
@@ -173,9 +177,12 @@ async def run_demo_prompt(
                 timeout=run_timeout_seconds,
             )
         except TimeoutError as exc:
-            raise TimeoutError(
+            msg = (
                 "Timed out waiting for response. "
                 f"backend={config.model} timeout={run_timeout_seconds}s"
+            )
+            raise TimeoutError(
+                msg,
             ) from exc
         return str(result)
 

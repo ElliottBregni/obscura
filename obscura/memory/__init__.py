@@ -1,5 +1,4 @@
-"""
-sdk/memory — Shared memory database for AI agents.
+"""sdk/memory — Shared memory database for AI agents.
 
 Multi-tenant memory storage scoped by auth token.
 Agents can read/write key-value pairs, search semantically, and maintain
@@ -17,16 +16,17 @@ Usage::
 from __future__ import annotations
 
 import hashlib
-import os
 import json
+import os
 import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
 
-from obscura.auth.models import AuthenticatedUser
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 
 @dataclass(frozen=True)
@@ -59,8 +59,7 @@ class MemoryEntry:
 
 
 class MemoryStore:
-    """
-    Per-user memory store scoped by auth token.
+    """Per-user memory store scoped by auth token.
 
     Each user gets an isolated SQLite database identified by their user_id.
     Supports namespaces for organizing memory (session, project, user, global).
@@ -69,7 +68,7 @@ class MemoryStore:
     _instances: dict[str, MemoryStore] = {}
     _lock = threading.Lock()
 
-    def __init__(self, user: AuthenticatedUser, db_path: Path | None = None):
+    def __init__(self, user: AuthenticatedUser, db_path: Path | None = None) -> None:
         self.user = user
         self.user_id = user.user_id
 
@@ -80,8 +79,9 @@ class MemoryStore:
             # Default: ~/.obscura/memory/<user_hash>.db, overrideable for tests
             base_dir = Path(
                 os.environ.get(
-                    "OBSCURA_MEMORY_DIR", Path.home() / ".obscura" / "memory"
-                )
+                    "OBSCURA_MEMORY_DIR",
+                    Path.home() / ".obscura" / "memory",
+                ),
             )
             db_path = base_dir / f"{self._db_id}.db"
 
@@ -142,14 +142,14 @@ class MemoryStore:
         namespace: str = "default",
         ttl: timedelta | None = None,
     ) -> None:
-        """
-        Store a value in memory.
+        """Store a value in memory.
 
         Args:
             key: The memory key (or MemoryKey)
             value: Any JSON-serializable value
             namespace: Logical grouping (session, project, user, etc.)
             ttl: Optional time-to-live
+
         """
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
@@ -173,10 +173,12 @@ class MemoryStore:
         conn.commit()
 
     def get(
-        self, key: str | MemoryKey, namespace: str = "default", default: Any = None
+        self,
+        key: str | MemoryKey,
+        namespace: str = "default",
+        default: Any = None,
     ) -> Any:
-        """
-        Retrieve a value from memory.
+        """Retrieve a value from memory.
 
         Returns default if key not found or expired.
         """
@@ -220,7 +222,8 @@ class MemoryStore:
 
         if namespace:
             rows = conn.execute(
-                "SELECT namespace, key FROM memory WHERE namespace = ?", (namespace,)
+                "SELECT namespace, key FROM memory WHERE namespace = ?",
+                (namespace,),
             ).fetchall()
         else:
             rows = conn.execute("SELECT namespace, key FROM memory").fetchall()
@@ -228,8 +231,7 @@ class MemoryStore:
         return [MemoryKey(namespace=r["namespace"], key=r["key"]) for r in rows]
 
     def search(self, query: str) -> list[tuple[MemoryKey, Any]]:
-        """
-        Simple text search over keys and string values.
+        """Simple text search over keys and string values.
 
         For semantic search, use the vector memory extension.
         """
@@ -282,7 +284,7 @@ class MemoryStore:
         ).fetchone()["count"]
 
         namespaces = conn.execute(
-            "SELECT namespace, COUNT(*) as count FROM memory GROUP BY namespace"
+            "SELECT namespace, COUNT(*) as count FROM memory GROUP BY namespace",
         ).fetchall()
 
         return {
@@ -300,8 +302,7 @@ class MemoryStore:
 
 
 class GlobalMemoryStore(MemoryStore):
-    """
-    Shared global memory accessible to all users (read-only for most).
+    """Shared global memory accessible to all users (read-only for most).
 
     Useful for storing organization-wide knowledge, shared skills, etc.
     """

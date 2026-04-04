@@ -5,7 +5,6 @@ from __future__ import annotations
 from obscura.core.types import Backend
 from obscura.parity.models import MethodContract
 
-
 CONTRACTS: tuple[MethodContract, ...] = (
     MethodContract(
         id="core.lifecycle",

@@ -18,7 +18,11 @@ def test_renderer_replay_message_flow_captures_hidden_deltas(tmp_path) -> None:
         AgentEvent(kind=AgentEventKind.TURN_START),
         AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="planning"),
         AgentEvent(kind=AgentEventKind.THINKING_DELTA, text=" edits"),
-        AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="read_file", tool_input={"path": "x.py"}),
+        AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            tool_name="read_file",
+            tool_input={"path": "x.py"},
+        ),
         AgentEvent(kind=AgentEventKind.TOOL_RESULT, tool_result="ok", is_error=False),
         AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="Applied changes."),
         AgentEvent(kind=AgentEventKind.TURN_COMPLETE),
@@ -30,7 +34,11 @@ def test_renderer_replay_message_flow_captures_hidden_deltas(tmp_path) -> None:
     # Hidden deltas are persisted even though token deltas are not mirrored to the prompt.
     hidden = tmp_path / "hidden_deltas.log"
     assert hidden.exists()
-    rows = [json.loads(ln) for ln in hidden.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    rows = [
+        json.loads(ln)
+        for ln in hidden.read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
     assert len(rows) == 2
     assert rows[0]["kind"] == "REASONING_DELTA"
     assert rows[0]["text"] == "planning"

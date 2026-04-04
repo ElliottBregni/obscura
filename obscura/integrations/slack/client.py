@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -49,9 +49,12 @@ class SlackClient:
 
                 self._client = WebClient(token=self._token)
             except ImportError as e:
-                raise RuntimeError(
+                msg = (
                     "slack_sdk is required for Slack integration. "
                     "Install with: pip install slack_sdk"
+                )
+                raise RuntimeError(
+                    msg,
                 ) from e
         return self._client  # type: ignore[return-value]
 
@@ -61,19 +64,32 @@ class SlackClient:
 
     def _check_access_sync(self) -> bool:
         if not self._token:
-            raise RuntimeError("SLACK_BOT_TOKEN must be set for Slack integration.")
+            msg = "SLACK_BOT_TOKEN must be set for Slack integration."
+            raise RuntimeError(msg)
         resp = self._get_client().auth_test()
         if not resp["ok"]:
-            raise RuntimeError(f"Slack auth_test failed: {resp.get('error', 'unknown')}")
+            msg = f"Slack auth_test failed: {resp.get('error', 'unknown')}"
+            raise RuntimeError(msg)
         return True
 
     async def poll_channel(
-        self, channel_id: str, oldest: str | None = None
+        self,
+        channel_id: str,
+        oldest: str | None = None,
     ) -> list[SlackMessage]:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._poll_channel_sync, channel_id, oldest)
+        return await loop.run_in_executor(
+            None,
+            self._poll_channel_sync,
+            channel_id,
+            oldest,
+        )
 
-    def _poll_channel_sync(self, channel_id: str, oldest: str | None) -> list[SlackMessage]:
+    def _poll_channel_sync(
+        self,
+        channel_id: str,
+        oldest: str | None,
+    ) -> list[SlackMessage]:
         kwargs: dict[str, Any] = {"channel": channel_id, "limit": 100}
         if oldest:
             kwargs["oldest"] = oldest
@@ -95,9 +111,9 @@ class SlackClient:
             thread_ts = m.get("thread_ts")
             try:
                 epoch = float(ts)
-                timestamp = datetime.fromtimestamp(epoch, tz=timezone.utc)
+                timestamp = datetime.fromtimestamp(epoch, tz=UTC)
             except (ValueError, TypeError):
-                timestamp = datetime.now(tz=timezone.utc)
+                timestamp = datetime.now(tz=UTC)
             out.append(
                 SlackMessage(
                     ts=ts,
@@ -107,15 +123,24 @@ class SlackClient:
                     thread_ts=thread_ts,
                     timestamp=timestamp,
                     raw=dict(m),
-                )
+                ),
             )
         return out
 
     async def send_message(
-        self, channel: str, text: str, thread_ts: str | None = None
+        self,
+        channel: str,
+        text: str,
+        thread_ts: str | None = None,
     ) -> bool:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._send_sync, channel, text, thread_ts)
+        return await loop.run_in_executor(
+            None,
+            self._send_sync,
+            channel,
+            text,
+            thread_ts,
+        )
 
     def _send_sync(self, channel: str, text: str, thread_ts: str | None) -> bool:
         try:

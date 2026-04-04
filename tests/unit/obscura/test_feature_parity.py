@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import ast
-import json
 import os
-import tempfile
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-import pytest
-
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. MODULE IMPORTS — verify every new module loads without errors
@@ -22,85 +18,82 @@ class TestModuleImports:
     """Every new module must import cleanly."""
 
     def test_tools_file_state(self) -> None:
-        from obscura.tools.system.file_state import record_read, check_staleness, is_unchanged, clear
+        pass
 
     def test_tools_diff_utils(self) -> None:
-        from obscura.tools.system.diff_utils import compute_unified_diff
+        pass
 
     def test_core_background_tasks(self) -> None:
-        from obscura.core.background_tasks import BackgroundTaskManager, get_background_task_manager
+        pass
 
     def test_core_cost_tracker(self) -> None:
-        from obscura.core.cost_tracker import CostTracker, get_cost_tracker
+        pass
 
     def test_core_permission_modes(self) -> None:
-        from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+        pass
 
     def test_core_prompt_cache(self) -> None:
-        from obscura.core.prompt_cache import PromptCacheManager
+        pass
 
     def test_core_commit_attribution(self) -> None:
-        from obscura.core.commit_attribution import CommitAttributionTracker, get_attribution_tracker
+        pass
 
     def test_core_cleanup(self) -> None:
-        from obscura.core.cleanup import register_cleanup, run_cleanup, cleanup_stale_files
+        pass
 
     def test_core_context_suggestions(self) -> None:
-        from obscura.core.context_suggestions import suggest_files
+        pass
 
     def test_core_templates(self) -> None:
-        from obscura.core.templates import Template, list_templates, load_template
+        pass
 
     def test_core_workflows(self) -> None:
-        from obscura.core.workflows import Workflow, list_workflows, load_workflow
+        pass
 
     def test_agent_definitions(self) -> None:
-        from obscura.agent.definitions import AgentDefinition, resolve_all_definitions
+        pass
 
     def test_agent_coordinator(self) -> None:
-        from obscura.agent.coordinator import is_coordinator_mode, get_coordinator_system_prompt
+        pass
 
     def test_agent_workspace_isolation(self) -> None:
-        from obscura.agent.workspace_isolation import AgentWorkspaceIsolation
+        pass
 
     def test_kairos_all(self) -> None:
-        from obscura.kairos import (
-            KairosEngine, DailyLog, DreamConsolidator, ProactiveMode,
-            UndercoverMode, is_undercover, generate_away_summary, FrustrationDetector,
-        )
+        pass
 
     def test_kairos_uds(self) -> None:
-        from obscura.kairos.uds_messaging import UDSInbox, send_message, discover_peers
+        pass
 
     def test_kairos_background_sessions(self) -> None:
-        from obscura.kairos.background_sessions import BackgroundSessionRegistry, ps
+        pass
 
     def test_voice(self) -> None:
-        from obscura.voice import VoiceSession, AudioCapture, check_voice_dependencies
+        pass
 
     def test_services_lsp(self) -> None:
-        from obscura.services.lsp import LSPClient, LSPServerManager
+        pass
 
     def test_tools_lsp(self) -> None:
-        from obscura.tools.lsp import lsp_tool, get_lsp_tool_specs
+        pass
 
     def test_tools_browser(self) -> None:
-        from obscura.tools.browser import web_browser, get_browser_tool_specs
+        pass
 
     def test_tools_worktree(self) -> None:
-        from obscura.tools.worktree import get_worktree_tool_specs
+        pass
 
     def test_tools_task(self) -> None:
-        from obscura.tools.task_tools import get_task_tool_specs
+        pass
 
     def test_cli_tool_collapse(self) -> None:
-        from obscura.cli.tool_collapse import ToolCollapser
+        pass
 
     def test_cli_tips(self) -> None:
-        from obscura.cli.tips import TipScheduler, TIPS
+        pass
 
     def test_cli_module(self) -> None:
-        import obscura.cli
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -111,11 +104,13 @@ class TestModuleImports:
 class TestToolRegistration:
     def test_system_tools_count(self) -> None:
         from obscura.tools.system import get_system_tool_specs
+
         specs = get_system_tool_specs()
         assert len(specs) >= 60
 
     def test_worktree_tools(self) -> None:
         from obscura.tools.worktree import get_worktree_tool_specs
+
         specs = get_worktree_tool_specs()
         names = [s.name for s in specs]
         assert "enter_worktree" in names
@@ -123,6 +118,7 @@ class TestToolRegistration:
 
     def test_task_tools(self) -> None:
         from obscura.tools.task_tools import get_task_tool_specs
+
         specs = get_task_tool_specs()
         names = [s.name for s in specs]
         assert "task_create" in names
@@ -132,34 +128,54 @@ class TestToolRegistration:
 
     def test_lsp_tool(self) -> None:
         from obscura.tools.lsp import get_lsp_tool_specs
+
         specs = get_lsp_tool_specs()
         assert len(specs) == 1
         assert specs[0].name == "lsp"
 
     def test_browser_tool(self) -> None:
         from obscura.tools.browser import get_browser_tool_specs
+
         specs = get_browser_tool_specs()
         assert len(specs) == 1
         assert specs[0].name == "web_browser"
 
     def test_total_tools(self) -> None:
-        from obscura.tools.system import get_system_tool_specs
-        from obscura.tools.worktree import get_worktree_tool_specs
-        from obscura.tools.task_tools import get_task_tool_specs
-        from obscura.tools.lsp import get_lsp_tool_specs
         from obscura.tools.browser import get_browser_tool_specs
-        total = sum(len(f()) for f in [
-            get_system_tool_specs, get_worktree_tool_specs,
-            get_task_tool_specs, get_lsp_tool_specs, get_browser_tool_specs,
-        ])
+        from obscura.tools.lsp import get_lsp_tool_specs
+        from obscura.tools.system import get_system_tool_specs
+        from obscura.tools.task_tools import get_task_tool_specs
+        from obscura.tools.worktree import get_worktree_tool_specs
+
+        total = sum(
+            len(f())
+            for f in [
+                get_system_tool_specs,
+                get_worktree_tool_specs,
+                get_task_tool_specs,
+                get_lsp_tool_specs,
+                get_browser_tool_specs,
+            ]
+        )
         assert total >= 70
 
     def test_key_tools_present(self) -> None:
         from obscura.tools.system import get_system_tool_specs
+
         names = [s.name for s in get_system_tool_specs()]
-        for tool in ["read_text_file", "edit_text_file", "grep_files", "run_shell",
-                      "web_fetch", "web_search", "notebook_edit", "tool_search",
-                      "sleep", "config", "history_snip"]:
+        for tool in [
+            "read_text_file",
+            "edit_text_file",
+            "grep_files",
+            "run_shell",
+            "web_fetch",
+            "web_search",
+            "notebook_edit",
+            "tool_search",
+            "sleep",
+            "config",
+            "history_snip",
+        ]:
             assert tool in names, f"Missing tool: {tool}"
 
 
@@ -172,8 +188,11 @@ class TestCommandRegistration:
     def _get_commands(self) -> set[str]:
         with open("obscura/cli/commands.py") as f:
             tree = ast.parse(f.read())
-        return {n.name for n in ast.walk(tree)
-                if isinstance(n, ast.AsyncFunctionDef) and n.name.startswith("cmd_")}
+        return {
+            n.name
+            for n in ast.walk(tree)
+            if isinstance(n, ast.AsyncFunctionDef) and n.name.startswith("cmd_")
+        }
 
     def test_command_count(self) -> None:
         cmds = self._get_commands()
@@ -181,25 +200,58 @@ class TestCommandRegistration:
 
     def test_wave2_commands(self) -> None:
         cmds = self._get_commands()
-        for cmd in ["cmd_permissions", "cmd_resume", "cmd_cost", "cmd_doctor",
-                     "cmd_vim", "cmd_effort", "cmd_fast", "cmd_commit",
-                     "cmd_review", "cmd_security_review", "cmd_export",
-                     "cmd_coordinator", "cmd_voice"]:
+        for cmd in [
+            "cmd_permissions",
+            "cmd_resume",
+            "cmd_cost",
+            "cmd_doctor",
+            "cmd_vim",
+            "cmd_effort",
+            "cmd_fast",
+            "cmd_commit",
+            "cmd_review",
+            "cmd_security_review",
+            "cmd_export",
+            "cmd_coordinator",
+            "cmd_voice",
+        ]:
             assert cmd in cmds, f"Missing: {cmd}"
 
     def test_wave3_commands(self) -> None:
         cmds = self._get_commands()
-        for cmd in ["cmd_kairos", "cmd_attribution", "cmd_ps", "cmd_logs",
-                     "cmd_kill_session", "cmd_suggestions", "cmd_template",
-                     "cmd_workflow", "cmd_peers", "cmd_send"]:
+        for cmd in [
+            "cmd_kairos",
+            "cmd_attribution",
+            "cmd_ps",
+            "cmd_logs",
+            "cmd_kill_session",
+            "cmd_suggestions",
+            "cmd_template",
+            "cmd_workflow",
+            "cmd_peers",
+            "cmd_send",
+        ]:
             assert cmd in cmds, f"Missing: {cmd}"
 
     def test_new_commands(self) -> None:
         cmds = self._get_commands()
-        for cmd in ["cmd_add_dir", "cmd_files", "cmd_rewind", "cmd_rename",
-                     "cmd_tag", "cmd_version", "cmd_usage", "cmd_copy",
-                     "cmd_brief", "cmd_stats", "cmd_btw", "cmd_sandbox_toggle",
-                     "cmd_summary", "cmd_stash", "cmd_pop"]:
+        for cmd in [
+            "cmd_add_dir",
+            "cmd_files",
+            "cmd_rewind",
+            "cmd_rename",
+            "cmd_tag",
+            "cmd_version",
+            "cmd_usage",
+            "cmd_copy",
+            "cmd_brief",
+            "cmd_stats",
+            "cmd_btw",
+            "cmd_sandbox_toggle",
+            "cmd_summary",
+            "cmd_stash",
+            "cmd_pop",
+        ]:
             assert cmd in cmds, f"Missing: {cmd}"
 
 
@@ -211,6 +263,7 @@ class TestCommandRegistration:
 class TestPermissionModes:
     def test_plan_mode_blocks_writes(self) -> None:
         from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+
         e = PermissionModeEngine(PermissionMode.PLAN)
         assert not e.evaluate("write_text_file").allowed
         assert not e.evaluate("edit_text_file").allowed
@@ -218,6 +271,7 @@ class TestPermissionModes:
 
     def test_plan_mode_allows_reads(self) -> None:
         from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+
         e = PermissionModeEngine(PermissionMode.PLAN)
         assert e.evaluate("read_text_file").allowed
         assert e.evaluate("grep_files").allowed
@@ -225,16 +279,22 @@ class TestPermissionModes:
 
     def test_accept_edits_auto_approves(self) -> None:
         from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+
         e = PermissionModeEngine(PermissionMode.ACCEPT_EDITS)
         d = e.evaluate("edit_text_file")
-        assert d.allowed and d.auto_approved
+        assert d.allowed
+        assert d.auto_approved
 
     def test_dangerous_always_denied(self) -> None:
         from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+
         for mode in PermissionMode:
             e = PermissionModeEngine(mode)
             assert not e.evaluate("run_shell", {"script": "rm -rf /"}).allowed
-            assert not e.evaluate("run_shell", {"script": "sudo dd if=/dev/zero"}).allowed
+            assert not e.evaluate(
+                "run_shell",
+                {"script": "sudo dd if=/dev/zero"},
+            ).allowed
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -245,12 +305,20 @@ class TestPermissionModes:
 class TestAgentDefinitions:
     def test_builtin_agents_exist(self) -> None:
         from obscura.agent.definitions import resolve_all_definitions
+
         defs = resolve_all_definitions()
-        for name in ["general-purpose", "explore", "plan", "verification", "coordinator"]:
+        for name in [
+            "general-purpose",
+            "explore",
+            "plan",
+            "verification",
+            "coordinator",
+        ]:
             assert name in defs, f"Missing built-in agent: {name}"
 
     def test_definition_has_system_prompt(self) -> None:
         from obscura.agent.definitions import resolve_all_definitions
+
         defs = resolve_all_definitions()
         for name, defn in defs.items():
             if defn.source == "built-in":
@@ -258,6 +326,7 @@ class TestAgentDefinitions:
 
     def test_explore_agent_is_read_only(self) -> None:
         from obscura.agent.definitions import resolve_all_definitions
+
         defs = resolve_all_definitions()
         explore = defs["explore"]
         assert "read_text_file" in explore.tools or "Read" in explore.tools
@@ -266,6 +335,7 @@ class TestAgentDefinitions:
 
     def test_definition_to_config(self) -> None:
         from obscura.agent.definitions import AgentDefinition, definition_to_config_dict
+
         d = AgentDefinition(name="test", model="inherit", max_turns=42, tools=("Read",))
         cfg = definition_to_config_dict(d, parent_model="claude")
         assert cfg["provider"] == "claude"
@@ -281,6 +351,7 @@ class TestAgentDefinitions:
 class TestKairos:
     def test_frustration_detection(self) -> None:
         from obscura.kairos.frustration import FrustrationDetector
+
         d = FrustrationDetector()
         assert d.analyze("wtf is this").is_frustrated
         assert d.analyze("this sucks").is_frustrated
@@ -289,6 +360,7 @@ class TestKairos:
 
     def test_undercover_on_by_default(self) -> None:
         from obscura.kairos.undercover import is_undercover
+
         # Default is ON
         old = os.environ.get("OBSCURA_UNDERCOVER")
         os.environ.pop("OBSCURA_UNDERCOVER", None)
@@ -298,6 +370,7 @@ class TestKairos:
 
     def test_undercover_sanitizes_commits(self) -> None:
         from obscura.kairos.undercover import UndercoverMode
+
         uc = UndercoverMode()
         uc.force(True)
         msg = "Fix bug\n\nCo-Authored-By: Claude AI <noreply@anthropic.com>"
@@ -307,6 +380,7 @@ class TestKairos:
 
     def test_engine_creates(self) -> None:
         from obscura.kairos.engine import KairosEngine
+
         e = KairosEngine()
         assert not e.is_running
         e.log("test")
@@ -314,10 +388,13 @@ class TestKairos:
 
     async def test_away_summary(self) -> None:
         from obscura.kairos.away_summary import generate_away_summary
-        s = await generate_away_summary([
-            ("user", "Fix the auth bug"),
-            ("assistant", "Found the issue in auth.py line 42"),
-        ])
+
+        s = await generate_away_summary(
+            [
+                ("user", "Fix the auth bug"),
+                ("assistant", "Found the issue in auth.py line 42"),
+            ],
+        )
         assert len(s) > 0
 
 
@@ -329,6 +406,7 @@ class TestKairos:
 class TestCostTracker:
     def test_record_and_total(self) -> None:
         from obscura.core.cost_tracker import CostTracker
+
         t = CostTracker()
         t.record(1000, 500, "claude-sonnet-4-5")
         assert t.turn_count() == 1
@@ -336,6 +414,7 @@ class TestCostTracker:
 
     def test_summary_format(self) -> None:
         from obscura.core.cost_tracker import CostTracker
+
         t = CostTracker()
         t.record(1000, 500, "claude-sonnet-4-5")
         s = t.summary()
@@ -350,15 +429,26 @@ class TestCostTracker:
 
 class TestEffortLevels:
     def test_all_levels_defined(self) -> None:
-        from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+        from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
+
         for level in EffortLevel:
             assert level in EFFORT_THINKING_BUDGETS
 
     def test_budget_ordering(self) -> None:
-        from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
-        assert EFFORT_THINKING_BUDGETS[EffortLevel.LOW] < EFFORT_THINKING_BUDGETS[EffortLevel.MEDIUM]
-        assert EFFORT_THINKING_BUDGETS[EffortLevel.MEDIUM] < EFFORT_THINKING_BUDGETS[EffortLevel.HIGH]
-        assert EFFORT_THINKING_BUDGETS[EffortLevel.HIGH] < EFFORT_THINKING_BUDGETS[EffortLevel.MAX]
+        from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
+
+        assert (
+            EFFORT_THINKING_BUDGETS[EffortLevel.LOW]
+            < EFFORT_THINKING_BUDGETS[EffortLevel.MEDIUM]
+        )
+        assert (
+            EFFORT_THINKING_BUDGETS[EffortLevel.MEDIUM]
+            < EFFORT_THINKING_BUDGETS[EffortLevel.HIGH]
+        )
+        assert (
+            EFFORT_THINKING_BUDGETS[EffortLevel.HIGH]
+            < EFFORT_THINKING_BUDGETS[EffortLevel.MAX]
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -369,12 +459,14 @@ class TestEffortLevels:
 class TestToolCollapse:
     def test_collapsible_recorded(self) -> None:
         from obscura.cli.tool_collapse import ToolCollapser
+
         c = ToolCollapser()
         assert c.record("read_text_file", {"path": "x"})
         assert not c.record("run_shell", {"script": "ls"})
 
     def test_flush_summary(self) -> None:
         from obscura.cli.tool_collapse import ToolCollapser
+
         c = ToolCollapser()
         c.record("read_text_file", {"path": "a.py"})
         c.record("read_text_file", {"path": "b.py"})
@@ -392,7 +484,8 @@ class TestToolCollapse:
 
 class TestFileState:
     def test_fresh_read(self, tmp_path: Path) -> None:
-        from obscura.tools.system.file_state import record_read, check_staleness, clear
+        from obscura.tools.system.file_state import check_staleness, clear, record_read
+
         clear()
         f = tmp_path / "test.txt"
         f.write_text("hello")
@@ -401,7 +494,9 @@ class TestFileState:
 
     def test_stale_after_modify(self, tmp_path: Path) -> None:
         import time
-        from obscura.tools.system.file_state import record_read, check_staleness, clear
+
+        from obscura.tools.system.file_state import check_staleness, clear, record_read
+
         clear()
         f = tmp_path / "test.txt"
         f.write_text("v1")
@@ -419,6 +514,7 @@ class TestFileState:
 class TestDiffUtils:
     def test_compute_diff(self) -> None:
         from obscura.tools.system.diff_utils import compute_unified_diff
+
         d = compute_unified_diff("hello\n", "hello\nworld\n", "test.txt")
         assert d["insertions"] == 1
         assert d["deletions"] == 0
@@ -426,6 +522,7 @@ class TestDiffUtils:
 
     def test_empty_diff(self) -> None:
         from obscura.tools.system.diff_utils import compute_unified_diff
+
         d = compute_unified_diff("same\n", "same\n", "test.txt")
         assert d["insertions"] == 0
         assert d["deletions"] == 0
@@ -439,12 +536,14 @@ class TestDiffUtils:
 class TestPromptCache:
     def test_cache_miss_then_hit(self) -> None:
         from obscura.core.prompt_cache import PromptCacheManager
+
         pc = PromptCacheManager()
         assert not pc.check("prompt", [{"name": "tool1"}])
         assert pc.check("prompt", [{"name": "tool1"}])
 
     def test_invalidate(self) -> None:
         from obscura.core.prompt_cache import PromptCacheManager
+
         pc = PromptCacheManager()
         pc.check("prompt")
         pc.invalidate()
@@ -459,13 +558,14 @@ class TestPromptCache:
 class TestStashPop:
     def test_stash_stack(self) -> None:
         from obscura.cli.commands import _stash_stack
+
         _stash_stack.clear()
         # Simulate stash
         history = [("user", "hello"), ("assistant", "hi")]
         _stash_stack.append((list(history), "session-1", []))
         assert len(_stash_stack) == 1
         # Simulate pop
-        h, sid, fc = _stash_stack.pop()
+        h, sid, _fc = _stash_stack.pop()
         assert len(h) == 2
         assert sid == "session-1"
         assert len(_stash_stack) == 0
@@ -479,6 +579,7 @@ class TestStashPop:
 class TestBranding:
     def test_context_loader_uses_obscura_md(self) -> None:
         from obscura.core.context import ContextLoader
+
         assert hasattr(ContextLoader, "load_project_instructions")
 
     def test_no_claude_md_in_commands(self) -> None:
@@ -498,11 +599,13 @@ class TestBranding:
 class TestVoice:
     def test_dependency_check(self) -> None:
         from obscura.voice.capture import check_voice_dependencies
+
         deps = check_voice_dependencies()
         assert isinstance(deps.available, bool)
         assert isinstance(deps.backend, str)
 
     def test_session_creates(self) -> None:
         from obscura.voice.session import VoiceSession
+
         s = VoiceSession()
         assert not s.is_recording

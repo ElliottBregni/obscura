@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from obscura.cli.commands import REPLContext, cmd_skill
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_ctx() -> REPLContext:
@@ -30,7 +33,8 @@ def _write_skill(path: Path, name: str, body: str) -> None:
 
 @pytest.mark.asyncio
 async def test_cmd_skill_load_and_clear(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     skills_dir = tmp_path / ".obscura" / "skills"
     skills_dir.mkdir(parents=True)
@@ -55,7 +59,8 @@ async def test_cmd_skill_load_and_clear(
 
 @pytest.mark.asyncio
 async def test_cmd_skill_load_missing_reports_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     skills_dir = tmp_path / ".obscura" / "skills"
     skills_dir.mkdir(parents=True)

@@ -9,10 +9,9 @@ which itself extends is rejected).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.compiler.errors import ResolutionError
-from obscura.core.compiler.loader import SpecRegistry
 from obscura.core.compiler.specs import (
     PluginFilterSpec,
     PolicySpec,
@@ -21,6 +20,9 @@ from obscura.core.compiler.specs import (
     WorkspaceSpec,
     WorkspaceSpecBody,
 )
+
+if TYPE_CHECKING:
+    from obscura.core.compiler.loader import SpecRegistry
 
 
 def resolve_template_chain(
@@ -41,6 +43,7 @@ def resolve_template_chain(
     ------
     ResolutionError
         If the parent template is not found or the chain is too deep.
+
     """
     parent_name = template.spec.extends
     if parent_name is None:
@@ -48,17 +51,23 @@ def resolve_template_chain(
 
     parent = registry.get_template(parent_name)
     if parent is None:
-        raise ResolutionError(
+        msg = (
             f"Template '{template.metadata.name}' extends '{parent_name}' "
-            f"which was not found in the registry",
+            f"which was not found in the registry"
+        )
+        raise ResolutionError(
+            msg,
             source=template.metadata.name,
         )
 
     if parent.spec.extends is not None:
-        raise ResolutionError(
+        msg = (
             f"Template '{template.metadata.name}' extends '{parent_name}' "
             f"which itself extends '{parent.spec.extends}'. "
-            f"Max inheritance depth is 1.",
+            f"Max inheritance depth is 1."
+        )
+        raise ResolutionError(
+            msg,
             source=template.metadata.name,
         )
 
@@ -75,14 +84,18 @@ def resolve_workspace_policies(
     ------
     ResolutionError
         If a referenced policy is not found.
+
     """
     policies: list[PolicySpec] = []
     for name in workspace.spec.policies:
         policy = registry.get_policy(name)
         if policy is None:
-            raise ResolutionError(
+            msg = (
                 f"Workspace '{workspace.metadata.name}' references policy "
-                f"'{name}' which was not found",
+                f"'{name}' which was not found"
+            )
+            raise ResolutionError(
+                msg,
                 source=workspace.metadata.name,
             )
         policies.append(policy)
@@ -100,12 +113,16 @@ def resolve_workspace_agent_template(
     ------
     ResolutionError
         If the template is not found.
+
     """
     template = registry.get_template(agent_ref.template)
     if template is None:
-        raise ResolutionError(
+        msg = (
             f"Agent '{agent_ref.name}' in workspace '{workspace_name}' "
-            f"references template '{agent_ref.template}' which was not found",
+            f"references template '{agent_ref.template}' which was not found"
+        )
+        raise ResolutionError(
+            msg,
             source=workspace_name,
         )
     return template
@@ -133,6 +150,7 @@ def expand_workspace_packs(
     ------
     ResolutionError
         If a referenced pack is not found.
+
     """
     pack_names = workspace.spec.packs
     if not pack_names:
@@ -149,9 +167,12 @@ def expand_workspace_packs(
     for pack_name in pack_names:
         pack = registry.get_pack(pack_name)
         if pack is None:
-            raise ResolutionError(
+            msg = (
                 f"Workspace '{workspace.metadata.name}' references pack "
-                f"'{pack_name}' which was not found",
+                f"'{pack_name}' which was not found"
+            )
+            raise ResolutionError(
+                msg,
                 source=workspace.metadata.name,
             )
 

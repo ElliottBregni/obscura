@@ -55,7 +55,9 @@ def persist_template(template_id: str, data: dict[str, Any]) -> None:
         store.set(template_id, data, namespace=TEMPLATE_NAMESPACE)
     except Exception:
         logger.warning(
-            "Could not persist template %s to SQLite", template_id, exc_info=True
+            "Could not persist template %s to SQLite",
+            template_id,
+            exc_info=True,
         )
 
 
@@ -68,7 +70,9 @@ def delete_persisted(template_id: str) -> None:
         store.delete(template_id, namespace=TEMPLATE_NAMESPACE)
     except Exception:
         logger.warning(
-            "Could not delete persisted template %s", template_id, exc_info=True
+            "Could not delete persisted template %s",
+            template_id,
+            exc_info=True,
         )
 
 
@@ -87,6 +91,7 @@ def load_persisted_templates() -> dict[str, dict[str, Any]]:
         return loaded
     except Exception:
         logger.warning(
-            "Could not load persisted templates from SQLite", exc_info=True
+            "Could not load persisted templates from SQLite",
+            exc_info=True,
         )
         return {}

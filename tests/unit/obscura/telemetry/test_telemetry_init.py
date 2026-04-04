@@ -1,24 +1,25 @@
 """Tests for sdk.telemetry — init_telemetry and helpers."""
 
 from unittest.mock import patch
+
 from obscura.core.config import ObscuraConfig
 
 
 class TestInitTelemetry:
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Reset telemetry state before each test."""
         from obscura.telemetry import reset_telemetry
 
         reset_telemetry()
 
-    def test_init_telemetry_disabled(self):
+    def test_init_telemetry_disabled(self) -> None:
         from obscura.telemetry import init_telemetry, is_initialized
 
         config = ObscuraConfig(otel_enabled=False)
         init_telemetry(config)
         assert is_initialized() is True
 
-    def test_init_telemetry_idempotent(self):
+    def test_init_telemetry_idempotent(self) -> None:
         from obscura.telemetry import init_telemetry, is_initialized
 
         config = ObscuraConfig(otel_enabled=False)
@@ -26,7 +27,7 @@ class TestInitTelemetry:
         init_telemetry(config)  # Should not raise
         assert is_initialized() is True
 
-    def test_reset(self):
+    def test_reset(self) -> None:
         from obscura.telemetry import init_telemetry, is_initialized, reset_telemetry
 
         config = ObscuraConfig(otel_enabled=False)
@@ -37,17 +38,18 @@ class TestInitTelemetry:
 
 
 class TestSetupLogging:
-    def test_setup_logging_import_error(self):
+    def test_setup_logging_import_error(self) -> None:
         from obscura.telemetry import setup_logging
 
         config = ObscuraConfig(otel_enabled=False)
         with patch(
-            "obscura.telemetry.logging.configure_logging", side_effect=ImportError
+            "obscura.telemetry.logging.configure_logging",
+            side_effect=ImportError,
         ):
             # Should not raise
             setup_logging(config)
 
-    def test_setup_logging_success(self):
+    def test_setup_logging_success(self) -> None:
         from obscura.telemetry import setup_logging
 
         config = ObscuraConfig(otel_enabled=False)
@@ -57,7 +59,7 @@ class TestSetupLogging:
 
 
 class TestSetupTracing:
-    def test_setup_tracing_disabled(self):
+    def test_setup_tracing_disabled(self) -> None:
         from obscura.telemetry import setup_tracing
 
         config = ObscuraConfig(otel_enabled=False)
@@ -66,7 +68,7 @@ class TestSetupTracing:
         except ImportError:
             pass  # OTel may not be installed
 
-    def test_setup_tracing_import_error(self):
+    def test_setup_tracing_import_error(self) -> None:
         from obscura.telemetry import setup_tracing
 
         config = ObscuraConfig(otel_enabled=False)
@@ -76,7 +78,7 @@ class TestSetupTracing:
 
 
 class TestSetupMetrics:
-    def test_setup_metrics_disabled(self):
+    def test_setup_metrics_disabled(self) -> None:
         from obscura.telemetry import setup_metrics
 
         config = ObscuraConfig(otel_enabled=False)
@@ -87,14 +89,14 @@ class TestSetupMetrics:
 
 
 class TestSetupFastAPIInstrumentation:
-    def test_fastapi_instrumentation_disabled(self):
+    def test_fastapi_instrumentation_disabled(self) -> None:
         from obscura.telemetry import setup_fastapi_instrumentation
 
         config = ObscuraConfig(otel_enabled=False)
         # Should return early without error
         setup_fastapi_instrumentation(config)
 
-    def test_fastapi_instrumentation_import_error(self):
+    def test_fastapi_instrumentation_import_error(self) -> None:
         from obscura.telemetry import setup_fastapi_instrumentation
 
         config = ObscuraConfig(otel_enabled=True)

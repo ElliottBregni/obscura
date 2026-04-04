@@ -1,5 +1,4 @@
-"""
-obscura.a2a.transports.sse — Server-Sent Events transport for A2A.
+"""obscura.a2a.transports.sse — Server-Sent Events transport for A2A.
 
 Provides streaming endpoints:
 
@@ -14,17 +13,21 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
     TaskArtifactUpdateEvent,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from obscura.integrations.a2a.service import A2AService
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
     ----------
     service:
         The A2AService instance that handles all business logic.
+
     """
     router = APIRouter(prefix="/a2a/v1", tags=["A2A SSE"])
 
@@ -53,10 +57,11 @@ def create_sse_router(service: A2AService) -> APIRouter:
 
         message = A2AMessage.model_validate(body.message)
 
-        async def event_generator() -> AsyncGenerator[dict[str, str], None]:
+        async def event_generator() -> AsyncGenerator[dict[str, str]]:
             try:
                 async for event in service.message_stream(
-                    message, context_id=body.contextId
+                    message,
+                    context_id=body.contextId,
                 ):
                     event_type = "status-update"
                     if isinstance(event, TaskArtifactUpdateEvent):
@@ -85,7 +90,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
         """Subscribe to real-time updates for an existing task."""
         from sse_starlette.sse import EventSourceResponse
 
-        async def event_generator() -> AsyncGenerator[dict[str, str], None]:
+        async def event_generator() -> AsyncGenerator[dict[str, str]]:
             try:
                 async for event in service.tasks_subscribe(task_id):
                     event_type = "status-update"

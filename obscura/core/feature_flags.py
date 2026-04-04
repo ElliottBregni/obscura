@@ -15,26 +15,30 @@ NONE                   No banner at all
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class BannerTheme(str, Enum):
-    OBSCURA_DEFAULT     = "obscura_default"      # original purple/blue wave -- OBSCURA
-    OVERHAUL_GREEN_BLUE = "overhaul_green_blue"  # oscillating green <-> blue block letters
-    OVERHAUL_ORANGE     = "overhaul_orange"      # solid orange block letters
-    OBSCURA_BY_OVERHAUL = "obscura_by_overhaul"  # OBSCURA (cyan/teal) + "by OVERHAUL" (green/blue)
-    NONE                = "none"                 # suppress banner entirely
+class BannerTheme(StrEnum):
+    OBSCURA_DEFAULT = "obscura_default"  # original purple/blue wave -- OBSCURA
+    OVERHAUL_GREEN_BLUE = (
+        "overhaul_green_blue"  # oscillating green <-> blue block letters
+    )
+    OVERHAUL_ORANGE = "overhaul_orange"  # solid orange block letters
+    OBSCURA_BY_OVERHAUL = (
+        "obscura_by_overhaul"  # OBSCURA (cyan/teal) + "by OVERHAUL" (green/blue)
+    )
+    NONE = "none"  # suppress banner entirely
 
 
 @dataclass(frozen=True)
 class FeatureFlags:
     # -- Banner ---------------------------------------------------------------
-    banner_enabled: bool      = True
-    banner_theme: BannerTheme = BannerTheme.OVERHAUL_GREEN_BLUE# <- change this
+    banner_enabled: bool = True
+    banner_theme: BannerTheme = BannerTheme.OVERHAUL_GREEN_BLUE  # <- change this
 
     # -- Debug / dev flags ----------------------------------------------------
-    debug_tool_calls: bool    = False
-    stream_thinking: bool     = False
+    debug_tool_calls: bool = False
+    stream_thinking: bool = False
 
 
 # ----------------------------------------------------------------
@@ -48,6 +52,6 @@ class FeatureFlags:
 #    BannerTheme.NONE                 (no banner)
 # ----------------------------------------------------------------
 FLAGS = FeatureFlags(
-    banner_enabled = True,
-    banner_theme   = BannerTheme.NONE,  # dark blue + Irish green + cat
+    banner_enabled=True,
+    banner_theme=BannerTheme.NONE,  # dark blue + Irish green + cat
 )

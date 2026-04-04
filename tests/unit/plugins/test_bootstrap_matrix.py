@@ -24,14 +24,23 @@ from obscura.plugins.models import BootstrapDep, BootstrapSpec, PluginSpec
 
 ALL_DEP_TYPES = ["pip", "uv", "npx", "npm", "cargo", "binary", "brew", "pipx"]
 ALL_RUNTIME_TYPES = [
-    "native", "cli", "sdk", "mcp", "service",
-    "content", "npx", "wasm", "docker", "grpc",
+    "native",
+    "cli",
+    "sdk",
+    "mcp",
+    "service",
+    "content",
+    "npx",
+    "wasm",
+    "docker",
+    "grpc",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_matrix_spec(
     dep_type: str,
@@ -57,11 +66,11 @@ def _make_matrix_spec(
 
 
 @pytest.mark.parametrize(
-    "dep_type,runtime_type",
+    ("dep_type", "runtime_type"),
     list(itertools.product(ALL_DEP_TYPES, ALL_RUNTIME_TYPES)),
     ids=lambda combo: f"{combo}" if isinstance(combo, str) else None,
 )
-def test_dep_already_installed_skipped(dep_type: str, runtime_type: str):
+def test_dep_already_installed_skipped(dep_type: str, runtime_type: str) -> None:
     """When checker returns True, dep should be skipped regardless of runtime_type."""
     spec = _make_matrix_spec(dep_type, runtime_type)
 
@@ -88,11 +97,11 @@ def test_dep_already_installed_skipped(dep_type: str, runtime_type: str):
 
 
 @pytest.mark.parametrize(
-    "dep_type,runtime_type",
+    ("dep_type", "runtime_type"),
     list(itertools.product(ALL_DEP_TYPES, ALL_RUNTIME_TYPES)),
     ids=lambda combo: f"{combo}" if isinstance(combo, str) else None,
 )
-def test_dep_installed_successfully(dep_type: str, runtime_type: str):
+def test_dep_installed_successfully(dep_type: str, runtime_type: str) -> None:
     """When checker returns False and installer succeeds, dep is installed."""
     spec = _make_matrix_spec(dep_type, runtime_type)
 
@@ -116,7 +125,7 @@ def test_dep_installed_successfully(dep_type: str, runtime_type: str):
 
 
 @pytest.mark.parametrize("dep_type", ALL_DEP_TYPES)
-def test_required_dep_fails(dep_type: str):
+def test_required_dep_fails(dep_type: str) -> None:
     """Required dep failure -> ok=False, error recorded."""
     spec = _make_matrix_spec(dep_type, "native", optional=False)
 
@@ -140,7 +149,7 @@ def test_required_dep_fails(dep_type: str):
 
 
 @pytest.mark.parametrize("dep_type", ALL_DEP_TYPES)
-def test_optional_dep_fails(dep_type: str):
+def test_optional_dep_fails(dep_type: str) -> None:
     """Optional dep failure -> ok=True, warning recorded."""
     spec = _make_matrix_spec(dep_type, "native", optional=True)
 
@@ -167,7 +176,11 @@ def test_optional_dep_fails(dep_type: str):
 class TestGlobalLocalBootstrap:
     """Verify _load_spec() handles bootstrap identically for all source_types."""
 
-    def _make_failing_spec(self, source_type: str, trust_level: str = "community") -> PluginSpec:
+    def _make_failing_spec(
+        self,
+        source_type: str,
+        trust_level: str = "community",
+    ) -> PluginSpec:
         dep = BootstrapDep(type="pip", package="bad-pkg")
         return PluginSpec(
             id=f"test-{source_type}",
@@ -181,6 +194,7 @@ class TestGlobalLocalBootstrap:
 
     def _make_loader(self, *, lenient_builtins: bool = True):
         from obscura.plugins.loader import PluginLoader
+
         loader = PluginLoader.__new__(PluginLoader)
         loader._registry = MagicMock()
         loader._plugin_dir = MagicMock()
@@ -192,9 +206,18 @@ class TestGlobalLocalBootstrap:
     @patch("obscura.plugins.loader.validate_plugin_spec", return_value=[])
     @patch("obscura.plugins.loader._check_config", return_value=(True, []))
     @patch("obscura.plugins.bootstrapper.run_bootstrap")
-    def test_builtin_bootstrap_lenient(self, mock_bootstrap, _mock_config, _mock_validate):
+    def test_builtin_bootstrap_lenient(
+        self,
+        mock_bootstrap,
+        _mock_config,
+        _mock_validate,
+    ) -> None:
         """Builtin + lenient -> enabled even when bootstrap fails."""
-        mock_bootstrap.return_value = BootstrapResult(plugin_id="test-builtin", ok=False, errors=["pip:bad-pkg: fail"])
+        mock_bootstrap.return_value = BootstrapResult(
+            plugin_id="test-builtin",
+            ok=False,
+            errors=["pip:bad-pkg: fail"],
+        )
         loader = self._make_loader(lenient_builtins=True)
         spec = self._make_failing_spec("builtin")
         registry = MagicMock()
@@ -205,9 +228,18 @@ class TestGlobalLocalBootstrap:
     @patch("obscura.plugins.loader.validate_plugin_spec", return_value=[])
     @patch("obscura.plugins.loader._check_config", return_value=(True, []))
     @patch("obscura.plugins.bootstrapper.run_bootstrap")
-    def test_local_bootstrap_strict(self, mock_bootstrap, _mock_config, _mock_validate):
+    def test_local_bootstrap_strict(
+        self,
+        mock_bootstrap,
+        _mock_config,
+        _mock_validate,
+    ) -> None:
         """Local source -> failed when bootstrap fails."""
-        mock_bootstrap.return_value = BootstrapResult(plugin_id="test-local", ok=False, errors=["pip:bad-pkg: fail"])
+        mock_bootstrap.return_value = BootstrapResult(
+            plugin_id="test-local",
+            ok=False,
+            errors=["pip:bad-pkg: fail"],
+        )
         loader = self._make_loader(lenient_builtins=True)
         spec = self._make_failing_spec("local")
         registry = MagicMock()
@@ -218,9 +250,18 @@ class TestGlobalLocalBootstrap:
     @patch("obscura.plugins.loader.validate_plugin_spec", return_value=[])
     @patch("obscura.plugins.loader._check_config", return_value=(True, []))
     @patch("obscura.plugins.bootstrapper.run_bootstrap")
-    def test_global_user_bootstrap_strict(self, mock_bootstrap, _mock_config, _mock_validate):
+    def test_global_user_bootstrap_strict(
+        self,
+        mock_bootstrap,
+        _mock_config,
+        _mock_validate,
+    ) -> None:
         """Global user plugin (source_type=git) -> failed when bootstrap fails."""
-        mock_bootstrap.return_value = BootstrapResult(plugin_id="test-git", ok=False, errors=["pip:bad-pkg: fail"])
+        mock_bootstrap.return_value = BootstrapResult(
+            plugin_id="test-git",
+            ok=False,
+            errors=["pip:bad-pkg: fail"],
+        )
         loader = self._make_loader(lenient_builtins=True)
         spec = self._make_failing_spec("git")
         registry = MagicMock()
@@ -231,9 +272,18 @@ class TestGlobalLocalBootstrap:
     @patch("obscura.plugins.loader.validate_plugin_spec", return_value=[])
     @patch("obscura.plugins.loader._check_config", return_value=(True, []))
     @patch("obscura.plugins.bootstrapper.run_bootstrap")
-    def test_builtin_non_lenient_strict(self, mock_bootstrap, _mock_config, _mock_validate):
+    def test_builtin_non_lenient_strict(
+        self,
+        mock_bootstrap,
+        _mock_config,
+        _mock_validate,
+    ) -> None:
         """Builtin + lenient_builtins=False -> failed when bootstrap fails."""
-        mock_bootstrap.return_value = BootstrapResult(plugin_id="test-builtin", ok=False, errors=["pip:bad-pkg: fail"])
+        mock_bootstrap.return_value = BootstrapResult(
+            plugin_id="test-builtin",
+            ok=False,
+            errors=["pip:bad-pkg: fail"],
+        )
         loader = self._make_loader(lenient_builtins=False)
         spec = self._make_failing_spec("builtin")
         registry = MagicMock()

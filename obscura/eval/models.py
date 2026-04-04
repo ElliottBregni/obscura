@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class AssertionResult(str, Enum):
+class AssertionResult(StrEnum):
     """Outcome of one deterministic assertion."""
 
     PASS = "pass"
@@ -16,7 +16,7 @@ class AssertionResult(str, Enum):
     SKIP = "skip"
 
 
-class EvalVerdict(str, Enum):
+class EvalVerdict(StrEnum):
     """Overall verdict for an eval case."""
 
     PASS = "pass"
@@ -103,7 +103,7 @@ class ToolCallRecord:
 
     turn: int
     tool_name: str
-    tool_input: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    tool_input: dict[str, Any] = field(default_factory=dict[str, Any])
     tool_result: str = ""
     is_error: bool = False
     latency_ms: int = 0

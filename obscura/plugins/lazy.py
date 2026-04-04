@@ -21,26 +21,30 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Callable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
-from obscura.plugins.models import PluginSpec
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
 
 
-class LazyState(str, Enum):
-    DISCOVERED = "discovered"     # manifest read, metadata registered
-    READY = "ready"               # config resolved, can initialize
-    INITIALIZING = "initializing" # bootstrap/loading in progress
-    ACTIVE = "active"             # fully loaded, tools available
-    SUSPENDED = "suspended"       # was active, now suspended (e.g. healthcheck fail)
-    FAILED = "failed"             # init failed
+class LazyState(StrEnum):
+    DISCOVERED = "discovered"  # manifest read, metadata registered
+    READY = "ready"  # config resolved, can initialize
+    INITIALIZING = "initializing"  # bootstrap/loading in progress
+    ACTIVE = "active"  # fully loaded, tools available
+    SUSPENDED = "suspended"  # was active, now suspended (e.g. healthcheck fail)
+    FAILED = "failed"  # init failed
 
 
 @dataclass
 class LazyPluginEntry:
     """Tracks lazy state for a single plugin."""
+
     spec: PluginSpec
     state: LazyState = LazyState.DISCOVERED
     init_callback: Callable[[], Any] | None = None
@@ -64,6 +68,7 @@ class LazyPluginManager:
         (loading handlers, registering tools, etc.). Called only on first use.
     prewarm : set[str] | None
         Plugin IDs to eagerly initialize at discover time.
+
     """
 
     def __init__(
@@ -78,9 +83,17 @@ class LazyPluginManager:
 
     # -- Discovery ---------------------------------------------------------
 
-    def register(self, spec: PluginSpec, init_callback: Callable[[], Any] | None = None) -> None:
+    def register(
+        self,
+        spec: PluginSpec,
+        init_callback: Callable[[], Any] | None = None,
+    ) -> None:
         """Register a discovered plugin without initializing it."""
-        entry = LazyPluginEntry(spec=spec, state=LazyState.DISCOVERED, init_callback=init_callback)
+        entry = LazyPluginEntry(
+            spec=spec,
+            state=LazyState.DISCOVERED,
+            init_callback=init_callback,
+        )
 
         # Map tools to plugin for on-demand init
         for t in spec.tools:
@@ -116,7 +129,7 @@ class LazyPluginManager:
         except Exception as exc:
             entry.state = LazyState.FAILED
             entry.error = str(exc)
-            logger.error("Failed to initialize plugin %s: %s", plugin_id, exc)
+            logger.exception("Failed to initialize plugin %s: %s", plugin_id, exc)
             return False
 
     def ensure_tool_ready(self, tool_name: str) -> bool:
@@ -170,7 +183,7 @@ class LazyPluginManager:
 
 
 __all__ = [
-    "LazyState",
     "LazyPluginEntry",
     "LazyPluginManager",
+    "LazyState",
 ]

@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor — Deterministic single-writer supervisor architecture.
+"""obscura.core.supervisor — Deterministic single-writer supervisor architecture.
 
 Provides serialized session runs, frozen snapshots, event-sourced storage,
 memory commit gating, and first-class hooks and heartbeats.
@@ -88,6 +87,7 @@ from obscura.core.supervisor.tool_snapshot import (
     ToolSnapshotStore,
 )
 from obscura.core.supervisor.types import (
+    VALID_SUPERVISOR_TRANSITIONS,
     LockInfo,
     MemoryCandidate,
     MemoryCommitResult,
@@ -100,72 +100,71 @@ from obscura.core.supervisor.types import (
     SupervisorEventKind,
     SupervisorHookPoint,
     SupervisorState,
-    VALID_SUPERVISOR_TRANSITIONS,
 )
 
 __all__ = [
-    # Main coordinator
-    "Supervisor",
-    "SupervisorConfig",
-    # State machine
-    "SessionStateMachine",
-    "SupervisorState",
-    "VALID_SUPERVISOR_TRANSITIONS",
-    # Events
-    "SupervisorEvent",
-    "SupervisorEventKind",
-    # Lock
-    "SessionLock",
-    "LockInfo",
-    # Heartbeat
-    "SessionHeartbeatManager",
-    "SessionHeartbeat",
-    "get_heartbeats_for_run",
-    # Hooks
-    "SessionHookManager",
-    "SupervisorHookPoint",
-    # Tools
-    "FrozenToolEntry",
-    "FrozenToolRegistry",
-    "ToolSnapshotStore",
-    # Prompt
-    "PromptAssembler",
-    "PromptSection",
-    "PromptSnapshot",
+    "REQUIRED_TABLES",
     "SECTION_ORDER",
-    "format_tool_definitions",
-    # Memory
-    "MemoryCommitGate",
-    "MemoryCandidate",
-    "MemoryCommitResult",
-    "compute_memory_score",
-    "content_hash",
-    "recency_decay",
+    "VALID_SUPERVISOR_TRANSITIONS",
     # Agent templates
     "AgentTemplate",
     "AgentTemplateStore",
     "AgentVersion",
+    "DriftDetectedError",
+    "ErrorCategory",
+    # Tools
+    "FrozenToolEntry",
+    "FrozenToolRegistry",
+    "LockAcquisitionError",
+    "LockExpiredError",
+    "LockInfo",
+    "MemoryCandidate",
+    "MemoryCommitError",
+    # Memory
+    "MemoryCommitGate",
+    "MemoryCommitResult",
     # Policy
     "PolicyStore",
     "PolicyVersion",
-    # Observability
-    "RunObserver",
-    "RunMetrics",
+    # Prompt
+    "PromptAssembler",
+    "PromptAssemblyError",
+    "PromptSection",
+    "PromptSnapshot",
     # Context
     "RunContext",
+    "RunMetrics",
+    # Observability
+    "RunObserver",
+    "RunTimeoutError",
+    "SessionHeartbeat",
+    # Heartbeat
+    "SessionHeartbeatManager",
+    # Hooks
+    "SessionHookManager",
+    # Lock
+    "SessionLock",
+    # State machine
+    "SessionStateMachine",
+    "StateTransitionError",
+    # Main coordinator
+    "Supervisor",
+    "SupervisorConfig",
     # Errors
     "SupervisorError",
-    "StateTransitionError",
-    "LockAcquisitionError",
-    "LockExpiredError",
-    "RunTimeoutError",
+    # Events
+    "SupervisorEvent",
+    "SupervisorEventKind",
+    "SupervisorHookPoint",
+    "SupervisorState",
     "ToolExecutionError",
-    "MemoryCommitError",
-    "PromptAssemblyError",
-    "DriftDetectedError",
-    "ErrorCategory",
+    "ToolSnapshotStore",
+    "compute_memory_score",
+    "content_hash",
+    "format_tool_definitions",
+    "get_heartbeats_for_run",
     # Schema
     "init_supervisor_schema",
+    "recency_decay",
     "verify_supervisor_schema",
-    "REQUIRED_TABLES",
 ]

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.core.supervisor.agent_templates import AgentTemplateStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -31,7 +34,10 @@ class TestAgentTemplateStore:
         assert "{{role}}" in tmpl.system_prompt_template
 
     def test_get_template(self, store: AgentTemplateStore) -> None:
-        created = store.create_template(name="test", template_json={"system_prompt": "hi"})
+        created = store.create_template(
+            name="test",
+            template_json={"system_prompt": "hi"},
+        )
         loaded = store.get_template(created.template_id)
         assert loaded is not None
         assert loaded.name == "test"
@@ -82,7 +88,10 @@ class TestAgentVersions:
         assert ver.hash  # non-empty
 
     def test_versions_are_immutable(self, store: AgentTemplateStore) -> None:
-        tmpl = store.create_template(name="test", template_json={"system_prompt": "{{x}}"})
+        tmpl = store.create_template(
+            name="test",
+            template_json={"system_prompt": "{{x}}"},
+        )
         v1 = store.render_version(tmpl.template_id, variables={"x": "first"})
         v2 = store.render_version(tmpl.template_id, variables={"x": "second"})
 
@@ -99,7 +108,10 @@ class TestAgentVersions:
         assert loaded.hash == ver.hash
 
     def test_get_latest_version(self, store: AgentTemplateStore) -> None:
-        tmpl = store.create_template(name="test", template_json={"system_prompt": "{{x}}"})
+        tmpl = store.create_template(
+            name="test",
+            template_json={"system_prompt": "{{x}}"},
+        )
         store.render_version(tmpl.template_id, variables={"x": "v1"})
         store.render_version(tmpl.template_id, variables={"x": "v2"})
         latest = store.get_latest_version(tmpl.template_id)
@@ -107,7 +119,10 @@ class TestAgentVersions:
         assert latest.version == 2
 
     def test_list_versions(self, store: AgentTemplateStore) -> None:
-        tmpl = store.create_template(name="test", template_json={"system_prompt": "{{x}}"})
+        tmpl = store.create_template(
+            name="test",
+            template_json={"system_prompt": "{{x}}"},
+        )
         store.render_version(tmpl.template_id, variables={"x": "v1"})
         store.render_version(tmpl.template_id, variables={"x": "v2"})
         store.render_version(tmpl.template_id, variables={"x": "v3"})
@@ -116,13 +131,19 @@ class TestAgentVersions:
         # Newest first
         assert versions[0].version == 3
 
-    def test_render_nonexistent_template_raises(self, store: AgentTemplateStore) -> None:
+    def test_render_nonexistent_template_raises(
+        self,
+        store: AgentTemplateStore,
+    ) -> None:
         with pytest.raises(ValueError, match="not found"):
             store.render_version("nonexistent-id")
 
     def test_deterministic_hash(self, store: AgentTemplateStore) -> None:
         """Same variables → same hash."""
-        tmpl = store.create_template(name="test", template_json={"system_prompt": "{{x}}"})
+        tmpl = store.create_template(
+            name="test",
+            template_json={"system_prompt": "{{x}}"},
+        )
         v1 = store.render_version(tmpl.template_id, variables={"x": "same"})
         v2 = store.render_version(tmpl.template_id, variables={"x": "same"})
         assert v1.hash == v2.hash

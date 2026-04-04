@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -39,12 +40,12 @@ def _raise_tool_error(e: Exception) -> None:
 
     if isinstance(e, _httpx.HTTPStatusError):
         detail = e.response.text
-        try:
+        with contextlib.suppress(Exception):
             detail = e.response.json().get("detail", detail)
-        except Exception:
-            pass
-        raise ToolError(f"Obscura API error ({e.response.status_code}): {detail}")
-    raise ToolError(f"Connection error: {e}")
+        msg = f"Obscura API error ({e.response.status_code}): {detail}"
+        raise ToolError(msg)
+    msg = f"Connection error: {e}"
+    raise ToolError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,7 @@ async def send_prompt(
         model: Optional model ID override.
         session_id: Optional session ID to resume a conversation.
         system_prompt: Optional system prompt.
+
     """
     try:
         payload: dict[str, Any] = {"prompt": prompt, "backend": backend}
@@ -95,6 +97,7 @@ async def list_sessions(backend: str | None = None) -> str:
 
     Args:
         backend: Optional backend filter (copilot, claude, openai, etc.).
+
     """
     try:
         params: dict[str, Any] = {}
@@ -113,6 +116,7 @@ async def create_session(backend: str = "copilot") -> str:
 
     Args:
         backend: LLM backend for the session.
+
     """
     try:
         result = await _api.post("/api/v1/sessions", json={"backend": backend})
@@ -139,6 +143,7 @@ async def list_agents(
         status: Filter by status (RUNNING, IDLE, STOPPED, etc.).
         tags: Comma-separated tags to filter by.
         name: Filter by agent name (partial match).
+
     """
     try:
         params: dict[str, Any] = {}
@@ -171,6 +176,7 @@ async def spawn_agent(
         system_prompt: System prompt for the agent.
         memory_namespace: Memory namespace for this agent.
         max_iterations: Maximum loop iterations.
+
     """
     try:
         payload: dict[str, Any] = {
@@ -193,6 +199,7 @@ async def get_agent(agent_id: str) -> str:
 
     Args:
         agent_id: The agent's unique ID.
+
     """
     try:
         result = await _api.get(f"/api/v1/agents/{agent_id}")
@@ -208,6 +215,7 @@ async def stop_agent(agent_id: str) -> str:
 
     Args:
         agent_id: The agent's unique ID.
+
     """
     try:
         result = await _api.delete(f"/api/v1/agents/{agent_id}")
@@ -231,6 +239,7 @@ async def run_agent(
         prompt: The prompt/task to execute.
         mode: Execution mode ('run' for single turn, 'loop' for iterative).
         timeout_seconds: Optional timeout in seconds.
+
     """
     try:
         payload: dict[str, Any] = {"prompt": prompt, "mode": mode}
@@ -249,6 +258,7 @@ async def list_agent_tools(agent_id: str) -> str:
 
     Args:
         agent_id: The agent's unique ID.
+
     """
     try:
         result = await _api.get(f"/api/v1/agents/{agent_id}/tools")
@@ -270,6 +280,7 @@ async def get_memory(namespace: str, key: str) -> str:
     Args:
         namespace: Memory namespace.
         key: Memory key.
+
     """
     try:
         result = await _api.get(f"/api/v1/memory/{namespace}/{key}")
@@ -287,6 +298,7 @@ async def set_memory(namespace: str, key: str, value: str) -> str:
         namespace: Memory namespace.
         key: Memory key.
         value: Value to store (string or JSON string).
+
     """
     try:
         result = await _api.post(
@@ -306,6 +318,7 @@ async def delete_memory(namespace: str, key: str) -> str:
     Args:
         namespace: Memory namespace.
         key: Memory key.
+
     """
     try:
         result = await _api.delete(f"/api/v1/memory/{namespace}/{key}")
@@ -321,6 +334,7 @@ async def list_memory_keys(namespace: str | None = None) -> str:
 
     Args:
         namespace: Optional namespace filter.
+
     """
     try:
         params: dict[str, Any] = {}
@@ -339,6 +353,7 @@ async def search_memory(query: str) -> str:
 
     Args:
         query: Search query string.
+
     """
     try:
         result = await _api.get("/api/v1/memory/search", q=query)
@@ -360,6 +375,7 @@ async def search_vector_memory(
         query: Natural language search query.
         namespace: Optional namespace filter.
         top_k: Maximum number of results to return.
+
     """
     try:
         params: dict[str, Any] = {"q": query, "top_k": top_k}

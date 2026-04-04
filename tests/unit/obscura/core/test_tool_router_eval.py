@@ -23,7 +23,6 @@ from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import ToolSpec
 from obscura.plugins.broker import BrokerAuditEntry
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -152,7 +151,16 @@ CAPABILITY_DESCRIPTIONS = {
 }
 
 CAPABILITY_TOOL_MAP = {
-    "git.ops": ["git_diff", "git_log", "git_commit", "git_branch", "git_checkout", "git_push", "git_pull", "git_stash"],
+    "git.ops": [
+        "git_diff",
+        "git_log",
+        "git_commit",
+        "git_branch",
+        "git_checkout",
+        "git_push",
+        "git_pull",
+        "git_stash",
+    ],
     "web.browse": ["web_fetch", "web_search", "web_screenshot"],
     "m365.teams": ["m365.teams.message.send", "m365.teams.channel.list"],
     "m365.sharepoint": ["m365.sharepoint.search", "m365.sharepoint.download"],
@@ -166,14 +174,23 @@ CAPABILITY_TOOL_MAP = {
     "gws.calendar": ["gws.calendar.list", "gws.calendar.create"],
     "gws.chat": ["gws.chat.send"],
     "db.ops": ["db.query", "db.schema", "db.tables"],
-    "docker.ops": ["docker.ps", "docker.logs", "docker.exec", "docker.build", "docker.compose.up"],
+    "docker.ops": [
+        "docker.ps",
+        "docker.logs",
+        "docker.exec",
+        "docker.build",
+        "docker.compose.up",
+    ],
     "k8s.ops": ["k8s.get_pods", "k8s.get_services", "k8s.logs", "k8s.apply"],
     "memory.ops": ["memory.store", "memory.recall", "memory.search"],
     "eval.ops": ["eval.run_check", "eval.lint", "eval.typecheck"],
 }
 
 
-def _make_router(max_tools: int = 30, score_index: ToolScoreIndex | None = None) -> ToolRouter:
+def _make_router(
+    max_tools: int = 30,
+    score_index: ToolScoreIndex | None = None,
+) -> ToolRouter:
     return ToolRouter(
         config=ToolRoutingConfig(max_tools=max_tools),
         score_index=score_index or ToolScoreIndex(),
@@ -238,7 +255,9 @@ def _eval_route(
     result = r.select(prompt, TOOL_CATALOGUE)
     selected = {t.name for t in result.tools}
     # Always include pinned tools in expected (they're always selected)
-    expected_with_pinned = expected_tools | (DEFAULT_PINNED_TOOLS & {t.name for t in TOOL_CATALOGUE})
+    expected_with_pinned = expected_tools | (
+        DEFAULT_PINNED_TOOLS & {t.name for t in TOOL_CATALOGUE}
+    )
     return EvalMetrics(
         prompt=prompt,
         selected=selected,
@@ -337,21 +356,34 @@ class TestRouterQualityScoring:
 
         # Give git_diff a perfect record
         for _ in range(20):
-            index.record(BrokerAuditEntry(
-                call_id="c", tool="git_diff", agent_id="a",
-                action="executed", latency_ms=50, timestamp=now,
-            ))
+            index.record(
+                BrokerAuditEntry(
+                    call_id="c",
+                    tool="git_diff",
+                    agent_id="a",
+                    action="executed",
+                    latency_ms=50,
+                    timestamp=now,
+                ),
+            )
 
         # Give git_log a terrible record
         for _ in range(20):
-            index.record(BrokerAuditEntry(
-                call_id="c", tool="git_log", agent_id="a",
-                action="error", error="fail", latency_ms=8000, timestamp=now - 86400,
-            ))
+            index.record(
+                BrokerAuditEntry(
+                    call_id="c",
+                    tool="git_log",
+                    agent_id="a",
+                    action="error",
+                    error="fail",
+                    latency_ms=8000,
+                    timestamp=now - 86400,
+                ),
+            )
 
         router = _make_router(max_tools=25, score_index=index)
         result = router.select("show me recent changes", TOOL_CATALOGUE)
-        names = {t.name for t in result.tools}
+        {t.name for t in result.tools}
 
         git_diff_score = index.get_score("git_diff").quality_score
         git_log_score = index.get_score("git_log").quality_score
@@ -375,13 +407,16 @@ class TestRouterQualityScoring:
 class TestRouterPinnedStability:
     """Verify pinned tools are always present regardless of prompt."""
 
-    @pytest.mark.parametrize("prompt", [
-        "send an email",
-        "deploy to kubernetes",
-        "what is the meaning of life",
-        "",
-        "docker build and push",
-    ])
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "send an email",
+            "deploy to kubernetes",
+            "what is the meaning of life",
+            "",
+            "docker build and push",
+        ],
+    )
     def test_pinned_always_present(self, prompt: str) -> None:
         router = _make_router(max_tools=30)
         result = router.select(prompt, TOOL_CATALOGUE)
@@ -389,7 +424,9 @@ class TestRouterPinnedStability:
         # All default pinned tools that exist in the catalogue should be present
         for pinned in DEFAULT_PINNED_TOOLS:
             if any(t.name == pinned for t in TOOL_CATALOGUE):
-                assert pinned in names, f"Pinned tool {pinned} missing for prompt: {prompt!r}"
+                assert pinned in names, (
+                    f"Pinned tool {pinned} missing for prompt: {prompt!r}"
+                )
 
 
 class TestRouterBenchmarkSummary:
@@ -420,9 +457,10 @@ class TestRouterBenchmarkSummary:
 
         # Print summary for visibility
         for m in metrics:
-            print(f"  {m.prompt[:50]:50s} {m.summary()}")
-        print(f"\n  AVG recall={avg_recall:.2f} compression={avg_compression:.0%}")
+            pass
 
         # Assertions
         assert avg_recall >= 0.4, f"Average recall too low: {avg_recall:.2f}"
-        assert avg_compression >= 0.4, f"Average compression too low: {avg_compression:.0%}"
+        assert avg_compression >= 0.4, (
+            f"Average compression too low: {avg_compression:.0%}"
+        )

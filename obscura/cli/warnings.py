@@ -16,8 +16,7 @@ def get_copilot_budget_pct(tokens: int, context_window: int) -> int:
     if context_window <= 0:
         return 0
     pct = (tokens / context_window) * 100
-    budget_pct = int(min(100, round(pct * 2)))
-    return budget_pct
+    return int(min(100, round(pct * 2)))
 
 
 def emit_context_warnings(ctx: Any, tokens: int, context_window: int) -> None:
@@ -51,8 +50,13 @@ def emit_context_warnings(ctx: Any, tokens: int, context_window: int) -> None:
         budget_msg = ""
         if getattr(ctx, "backend", "") == "copilot":
             budget_pct = get_copilot_budget_pct(tokens, context_window)
-            budget_msg = f" Copilot budget: {budget_pct}% of {SOFT_BUDGET:,} token soft budget."
+            budget_msg = (
+                f" Copilot budget: {budget_pct}% of {SOFT_BUDGET:,} token soft budget."
+            )
 
-        msg = f"Context usage has crossed {current_level}%. ({int(pct)}% used)." + budget_msg
+        msg = (
+            f"Context usage has crossed {current_level}%. ({int(pct)}% used)."
+            + budget_msg
+        )
         console.print(msg)
         ctx._last_context_warning_level = current_level

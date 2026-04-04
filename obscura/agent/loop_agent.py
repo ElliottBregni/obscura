@@ -22,8 +22,9 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from obscura.agent.interaction import (
@@ -141,7 +142,9 @@ class LoopAgent:
 
                         elif event.kind == AgentEventKind.TOOL_CALL:
                             logger.debug(
-                                "[%s] tool call: %s", self._name, event.tool_name
+                                "[%s] tool call: %s",
+                                self._name,
+                                event.tool_name,
                             )
 
                         elif event.kind == AgentEventKind.TOOL_RESULT:
@@ -194,12 +197,10 @@ class LoopAgent:
         """Signal the agent to stop after the current iteration."""
         self._stopped = True
         # Unblock _get_next_input if it's waiting
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             self._input_queue.put_nowait(
                 AgentInput(content="", source="__stop__"),
             )
-        except asyncio.QueueFull:
-            pass
 
     # -- Internal helpers ----------------------------------------------------
 
@@ -208,12 +209,13 @@ class LoopAgent:
         while not self._stopped:
             try:
                 msg = await asyncio.wait_for(
-                    self._input_queue.get(), timeout=1.0,
+                    self._input_queue.get(),
+                    timeout=1.0,
                 )
                 if msg.source == "__stop__":
                     return None
                 return msg
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
         return None
 
@@ -254,7 +256,8 @@ class LoopAgent:
         """
         if self._bus is None:
             logger.debug(
-                "[%s] no interaction bus — skipping attention request", self._name
+                "[%s] no interaction bus — skipping attention request",
+                self._name,
             )
             return None
 

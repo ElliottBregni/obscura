@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from obscura.deps import authenticate_websocket, get_runtime
+
+if TYPE_CHECKING:
+    from obscura.agent.interaction import AttentionRequest
 
 router = APIRouter()
 
@@ -76,18 +80,17 @@ async def agent_websocket(
 
         if agent is None:
             await websocket.send_json(
-                {"type": "error", "message": f"Agent {agent_id} not found"}
+                {"type": "error", "message": f"Agent {agent_id} not found"},
             )
             await websocket.close()
             return
 
         # Subscribe to attention requests for this agent
-        from obscura.agent.interaction import AttentionRequest
 
         async def _on_attention(request: AttentionRequest) -> None:
             if request.agent_id != agent_id:
                 return
-            try:
+            with contextlib.suppress(Exception):
                 await websocket.send_json(
                     {
                         "type": "attention_request",
@@ -96,10 +99,8 @@ async def agent_websocket(
                         "message": request.message,
                         "priority": request.priority.value,
                         "actions": list(request.actions),
-                    }
+                    },
                 )
-            except Exception:
-                pass
 
         bus = runtime.interaction_bus
         bus.on_attention(_on_attention)
@@ -117,7 +118,7 @@ async def agent_websocket(
                                 {
                                     "type": "chunk",
                                     "text": chunk,
-                                }
+                                },
                             )
                         await websocket.send_json({"type": "done"})
                     except Exception as e:
@@ -125,7 +126,7 @@ async def agent_websocket(
                             {
                                 "type": "error",
                                 "message": str(e),
-                            }
+                            },
                         )
 
                 elif message.get("type") == "status":
@@ -135,7 +136,7 @@ async def agent_websocket(
                             "type": "status",
                             "status": state.status.name,
                             "iteration_count": state.iteration_count,
-                        }
+                        },
                     )
 
                 elif message.get("type") == "attention_response":
@@ -150,7 +151,7 @@ async def agent_websocket(
                         {
                             "type": "status",
                             "status": "STOPPED",
-                        }
+                        },
                     )
                     break
 
@@ -160,15 +161,13 @@ async def agent_websocket(
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json(
                 {
                     "type": "error",
                     "message": str(e),
-                }
+                },
             )
-        except Exception:
-            pass
 
 
 # -- monitor websocket -----------------------------------------------------
@@ -200,7 +199,7 @@ async def monitor_websocket(websocket: WebSocket) -> None:
                     }
                     for a in agents
                 ],
-            }
+            },
         )
 
         while True:
@@ -218,7 +217,7 @@ async def monitor_websocket(websocket: WebSocket) -> None:
                         }
                         for a in agents
                     ],
-                }
+                },
             )
 
     except WebSocketDisconnect:
@@ -305,7 +304,7 @@ async def memory_watch_websocket(
                 "type": "init",
                 "namespace": namespace,
                 "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
-            }
+            },
         )
 
         while True:

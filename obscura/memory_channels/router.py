@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Regex for extracting file paths from text (same pattern as lifecycle.py)
-_FILE_PATH_RE = re.compile(r"[\w/.~-]+\.(?:py|toml|yaml|yml|json|md|ts|tsx|js|jsx|rs|go|sh)")
+_FILE_PATH_RE = re.compile(
+    r"[\w/.~-]+\.(?:py|toml|yaml|yml|json|md|ts|tsx|js|jsx|rs|go|sh)",
+)
 
 # Global token budget across all channels per turn (chars ≈ tokens * 4)
 _GLOBAL_BUDGET_TOKENS = 2000
@@ -37,6 +39,7 @@ class ContextRouter:
         List of :class:`MemoryChannel` definitions.
     store:
         :class:`VectorMemoryStore` for querying memories.
+
     """
 
     def __init__(
@@ -116,6 +119,7 @@ class ContextRouter:
         -------
         str
             Formatted context block, or ``""`` if no channels matched.
+
         """
         if query is not None:
             self._signals.current_query = query
@@ -231,7 +235,8 @@ class ContextRouter:
         reasons: list[str] = []
         if triggers.file_globs:
             matched = [
-                fp for glob_pat in triggers.file_globs
+                fp
+                for glob_pat in triggers.file_globs
                 for fp in self._signals.file_paths
                 if fnmatch.fnmatch(fp, glob_pat)
             ]
@@ -245,7 +250,9 @@ class ContextRouter:
                 reasons.append(f"keyword: {matched_kw[0]}")
 
         if triggers.tool_names:
-            matched_tools = [tn for tn in triggers.tool_names if tn in self._signals.tool_names]
+            matched_tools = [
+                tn for tn in triggers.tool_names if tn in self._signals.tool_names
+            ]
             if matched_tools:
                 reasons.append(f"tool: {matched_tools[0]}")
 

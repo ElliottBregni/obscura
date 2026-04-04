@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from obscura.integrations.messaging.models import PlatformMessage
+if TYPE_CHECKING:
+    from obscura.integrations.messaging.models import PlatformMessage
 
 
 class MessagePlatformAdapter(Protocol):

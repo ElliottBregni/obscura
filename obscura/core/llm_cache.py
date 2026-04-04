@@ -56,6 +56,7 @@ class LLMCache:
         Maximum number of cached responses.
     default_ttl:
         Default time-to-live in seconds for cache entries.
+
     """
 
     def __init__(
@@ -148,7 +149,10 @@ class LLMCache:
 
     @staticmethod
     def make_key(
-        backend: str, model: str, system_prompt: str, prompt: str
+        backend: str,
+        model: str,
+        system_prompt: str,
+        prompt: str,
     ) -> str:
         """Deterministic cache key from request parameters.
 

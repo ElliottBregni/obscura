@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.session_hooks — Session-scoped hooks (first-class).
+"""obscura.core.supervisor.session_hooks — Session-scoped hooks (first-class).
 
 Hooks are persisted per session, replayed on resume, and recorded as
 events in the supervisor log. This makes hooks observable, debuggable,
@@ -19,9 +18,10 @@ import inspect
 import logging
 import sqlite3
 import threading
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from obscura.core.supervisor.schema import init_supervisor_schema
 from obscura.core.supervisor.types import (
@@ -41,12 +41,12 @@ class SessionHookEntry:
     """A registered hook for a session."""
 
     __slots__ = (
+        "active",
+        "handler",
+        "handler_ref",
         "hook_point",
         "hook_type",
-        "handler_ref",
-        "handler",
         "priority",
-        "active",
     )
 
     def __init__(
@@ -147,6 +147,7 @@ class SessionHookManager:
 
         Returns:
             The created hook entry.
+
         """
         entry = SessionHookEntry(
             hook_point=hook_point,
@@ -222,6 +223,7 @@ class SessionHookManager:
 
         Returns:
             Modified context, or None if suppressed.
+
         """
         ctx = dict(context or {})
         entries = self._get_hooks(hook_point, "before")
@@ -265,7 +267,8 @@ class SessionHookManager:
 
             except Exception:
                 logger.exception(
-                    "Before hook %s failed", entry.handler_ref
+                    "Before hook %s failed",
+                    entry.handler_ref,
                 )
                 self._emit_event(
                     SupervisorEventKind.HOOK_FIRED,
@@ -311,7 +314,8 @@ class SessionHookManager:
 
             except Exception:
                 logger.exception(
-                    "After hook %s failed", entry.handler_ref
+                    "After hook %s failed",
+                    entry.handler_ref,
                 )
 
     # -- persistence ---------------------------------------------------------
@@ -389,9 +393,7 @@ class SessionHookManager:
         matching = [
             h
             for h in self._hooks
-            if h.hook_point == hook_point
-            and h.hook_type == hook_type
-            and h.active
+            if h.hook_point == hook_point and h.hook_type == hook_type and h.active
         ]
         matching.sort(key=lambda h: h.priority)
         return matching
@@ -415,7 +417,7 @@ class SessionHookManager:
                 run_id=self._run_id,
                 session_id=self._session_id,
                 payload=payload,
-            )
+            ),
         )
 
     def close(self) -> None:

@@ -16,8 +16,7 @@ import json
 import logging
 import shutil
 import uuid
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -34,6 +33,9 @@ from obscura.core.types import (
     StreamMetadata,
     ToolSpec,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -155,12 +157,14 @@ class AnthropicEvalBackend:
                 if block.type == "text":
                     assistant_content.append({"type": "text", "text": block.text})
                 elif block.type == "tool_use":
-                    assistant_content.append({
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
-                    })
+                    assistant_content.append(
+                        {
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                        },
+                    )
                     yield StreamChunk(
                         kind=ChunkKind.TOOL_USE_END,
                         tool_name=block.name,
@@ -193,11 +197,14 @@ class AnthropicEvalBackend:
                         kind="tool_use",
                         tool_name=chunk.tool_name,
                         tool_use_id=chunk.tool_use_id,
-                    )
+                    ),
                 )
 
         if text_parts:
-            content_blocks.insert(0, ContentBlock(kind="text", text="".join(text_parts)))
+            content_blocks.insert(
+                0,
+                ContentBlock(kind="text", text="".join(text_parts)),
+            )
 
         return Message(role=Role.ASSISTANT, content=content_blocks, model=self._model)
 
@@ -251,11 +258,13 @@ class AnthropicEvalBackend:
     def _build_tools(self) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
         for spec in self._registry.all():
-            tools.append({
-                "name": spec.name,
-                "description": spec.description,
-                "input_schema": spec.parameters,
-            })
+            tools.append(
+                {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "input_schema": spec.parameters,
+                },
+            )
         return tools
 
 
@@ -285,8 +294,9 @@ class ClaudeCliEvalBackend:
     async def start(self) -> None:
         self._cli_path = shutil.which("claude")
         if not self._cli_path:
+            msg = "claude CLI not found on PATH. Install Claude Code to use OAuth eval."
             raise RuntimeError(
-                "claude CLI not found on PATH. Install Claude Code to use OAuth eval."
+                msg,
             )
 
     async def stop(self) -> None:
@@ -306,10 +316,13 @@ class ClaudeCliEvalBackend:
 
         cmd = [
             self._cli_path or "claude",
-            "-p", prompt,
-            "--output-format", "stream-json",
+            "-p",
+            prompt,
+            "--output-format",
+            "stream-json",
             "--verbose",
-            "--max-turns", str(max_turns),
+            "--max-turns",
+            str(max_turns),
             "--dangerously-skip-permissions",
         ]
         if self._model:
@@ -433,18 +446,28 @@ class ClaudeCliEvalBackend:
                         kind="tool_use",
                         tool_name=chunk.tool_name,
                         tool_use_id=chunk.tool_use_id,
-                    )
+                    ),
                 )
 
         if text_parts:
-            content_blocks.insert(0, ContentBlock(kind="text", text="".join(text_parts)))
+            content_blocks.insert(
+                0,
+                ContentBlock(kind="text", text="".join(text_parts)),
+            )
 
-        return Message(role=Role.ASSISTANT, content=content_blocks, model=self._model or "")
+        return Message(
+            role=Role.ASSISTANT,
+            content=content_blocks,
+            model=self._model or "",
+        )
 
     # -- sessions (stub) -----------------------------------------------------
 
     async def create_session(self, **kwargs: Any) -> SessionRef:
-        return SessionRef(session_id=f"cli-{uuid.uuid4().hex[:12]}", backend=Backend.CLAUDE)
+        return SessionRef(
+            session_id=f"cli-{uuid.uuid4().hex[:12]}",
+            backend=Backend.CLAUDE,
+        )
 
     async def resume_session(self, ref: SessionRef) -> None:
         pass

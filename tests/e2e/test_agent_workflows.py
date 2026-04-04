@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from starlette.testclient import TestClient
+
+if TYPE_CHECKING:
+    from starlette.testclient import TestClient
 
 
 @pytest.mark.e2e

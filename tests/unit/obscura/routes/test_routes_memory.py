@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from starlette.testclient import TestClient
+
 from obscura.core.config import ObscuraConfig
 
 
@@ -92,7 +93,7 @@ class TestMemoryBulk:
             json={
                 "operations": [
                     {"op": "set", "namespace": "tx-ns", "key": "tk1", "value": "tv1"},
-                ]
+                ],
             },
         )
         assert resp.status_code == 200

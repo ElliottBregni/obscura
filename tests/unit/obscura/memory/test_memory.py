@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.memory import MemoryKey, MemoryStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -42,14 +45,18 @@ class TestMemoryStore:
         assert value == {"foo": "bar"}
 
     def test_get_missing_returns_default(
-        self, test_user: AuthenticatedUser, temp_db: Path
+        self,
+        test_user: AuthenticatedUser,
+        temp_db: Path,
     ) -> None:
         store = MemoryStore(test_user, db_path=temp_db)
         value = store.get("nonexistent", namespace="test", default="default")
         assert value == "default"
 
     def test_get_missing_returns_none(
-        self, test_user: AuthenticatedUser, temp_db: Path
+        self,
+        test_user: AuthenticatedUser,
+        temp_db: Path,
     ) -> None:
         store = MemoryStore(test_user, db_path=temp_db)
         value = store.get("nonexistent", namespace="test")
@@ -124,14 +131,18 @@ class TestMemoryStore:
         assert "ns2" in stats["namespaces"]
 
     def test_singleton_per_user(
-        self, test_user: AuthenticatedUser, temp_db: Path
+        self,
+        test_user: AuthenticatedUser,
+        temp_db: Path,
     ) -> None:
         store1 = MemoryStore.for_user(test_user)
         store2 = MemoryStore.for_user(test_user)
         assert store1 is store2
 
     def test_memory_key_usage(
-        self, test_user: AuthenticatedUser, temp_db: Path
+        self,
+        test_user: AuthenticatedUser,
+        temp_db: Path,
     ) -> None:
         store = MemoryStore(test_user, db_path=temp_db)
         key = MemoryKey(namespace="custom", key="mykey")

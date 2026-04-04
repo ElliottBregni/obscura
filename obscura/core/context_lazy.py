@@ -1,5 +1,4 @@
-"""
-obscura.core.context_lazy — Lazy-loading extensions for ContextLoader.
+"""obscura.core.context_lazy — Lazy-loading extensions for ContextLoader.
 
 Adds agent-specific skill loading with on-demand body loading to reduce
 initial context window bloat.
@@ -7,18 +6,22 @@ initial context window bloat.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.frontmatter import parse_frontmatter
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 class SkillMetadata:
     """Lightweight skill metadata for lazy loading."""
-    
+
     def __init__(
         self,
         name: str,
@@ -26,13 +29,13 @@ class SkillMetadata:
         path: Path,
         user_invocable: bool = True,
         allowed_tools: list[str] | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.description = description
         self.path = path
         self.user_invocable = user_invocable
         self.allowed_tools = allowed_tools or []
-    
+
     def to_stub(self) -> str:
         """Generate minimal skill stub for system prompt."""
         return f"""---
@@ -43,123 +46,131 @@ description: {self.description}
 
 class LazySkillLoader:
     """Lazy loader for agent skills - loads metadata first, body on-demand."""
-    
-    def __init__(self, skills_dir: Path):
+
+    def __init__(self, skills_dir: Path) -> None:
         self.skills_dir = skills_dir
         self._metadata_cache: dict[str, SkillMetadata] = {}
         self._body_cache: dict[str, str] = {}
-    
-    def discover_skills(self, filter_names: list[str] | None = None) -> list[SkillMetadata]:
+
+    def discover_skills(
+        self,
+        filter_names: list[str] | None = None,
+    ) -> list[SkillMetadata]:
         """Discover all skills and load their metadata.
-        
+
         Args:
             filter_names: If provided, only load skills with these names
-        
+
         Returns:
             List of skill metadata objects
+
         """
         if not self.skills_dir.is_dir():
             return []
-        
+
         skills: list[SkillMetadata] = []
-        
+
         for skill_file in sorted(self.skills_dir.rglob("*.md")):
             if not skill_file.is_file():
                 continue
-            
+
             try:
                 # Read file and parse frontmatter
                 raw = skill_file.read_text(encoding="utf-8").strip()
                 if not raw:
                     continue
-                
+
                 result = parse_frontmatter(raw, source_path=skill_file)
                 meta = result.metadata
-                
+
                 name = str(meta.get("name", skill_file.stem))
-                
+
                 # Apply name filter if provided
                 if filter_names and name not in filter_names:
                     continue
-                
+
                 skill_meta = SkillMetadata(
                     name=name,
                     description=str(meta.get("description", "")),
                     path=skill_file,
-                    user_invocable=bool(meta.get("user-invocable", meta.get("user_invocable", True))),
-                    allowed_tools=meta.get("allowed-tools", meta.get("allowed_tools", [])),
+                    user_invocable=bool(
+                        meta.get("user-invocable", meta.get("user_invocable", True)),
+                    ),
+                    allowed_tools=meta.get(
+                        "allowed-tools",
+                        meta.get("allowed_tools", []),
+                    ),
                 )
-                
+
                 # Cache metadata
                 self._metadata_cache[name] = skill_meta
                 skills.append(skill_meta)
-                
+
                 logger.debug(f"Discovered skill: {name} at {skill_file}")
-                
+
             except Exception as e:
                 logger.warning(f"Failed to load skill metadata from {skill_file}: {e}")
                 continue
-        
+
         return skills
-    
+
     def load_skill_body(self, skill_name: str) -> str | None:
         """Load full skill body on-demand.
-        
+
         Args:
             skill_name: Name of skill to load
-        
+
         Returns:
             Full skill content (frontmatter + body), or None if not found
+
         """
         # Check cache first
         if skill_name in self._body_cache:
             logger.debug(f"Skill '{skill_name}' loaded from cache")
             return self._body_cache[skill_name]
-        
+
         # Get metadata
         if skill_name not in self._metadata_cache:
             logger.warning(f"Skill '{skill_name}' not found in metadata cache")
             return None
-        
+
         skill_meta = self._metadata_cache[skill_name]
-        
+
         try:
             # Load full file
             full_content = skill_meta.path.read_text(encoding="utf-8").strip()
-            
+
             # Cache it
             self._body_cache[skill_name] = full_content
-            
+
             logger.info(f"Loaded skill body for: {skill_name}")
             return full_content
-            
+
         except Exception as e:
-            logger.error(f"Failed to load skill body for '{skill_name}': {e}")
+            logger.exception(f"Failed to load skill body for '{skill_name}': {e}")
             return None
-    
+
     def get_skill_stubs(self, skill_names: list[str] | None = None) -> str:
         """Get minimal skill stubs for system prompt.
-        
+
         Args:
             skill_names: If provided, only include these skills
-        
+
         Returns:
             Formatted string of skill stubs
+
         """
         skills_to_include = self._metadata_cache.values()
-        
+
         if skill_names:
-            skills_to_include = [
-                s for s in skills_to_include 
-                if s.name in skill_names
-            ]
-        
+            skills_to_include = [s for s in skills_to_include if s.name in skill_names]
+
         if not skills_to_include:
             return ""
-        
+
         stubs = [skill.to_stub() for skill in skills_to_include]
         return "\n\n".join(stubs)
-    
+
     def clear_cache(self) -> None:
         """Clear all caches."""
         self._metadata_cache.clear()
@@ -196,10 +207,8 @@ def _parse_eval_section(meta: dict[str, Any]) -> tuple[list[str] | None, int | N
     threshold: int | None = None
     raw_threshold = eval_section.get("pass_threshold")
     if raw_threshold is not None:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             threshold = int(raw_threshold)
-        except (ValueError, TypeError):
-            pass
     return criteria, threshold
 
 
@@ -219,7 +228,7 @@ class CommandMetadata:
         builtin_content: str | None = None,
         eval_criteria: list[str] | None = None,
         eval_pass_threshold: int | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.description = description
         self.path = path
@@ -240,7 +249,7 @@ class CommandMetadata:
 class ResolvedCommand:
     """A command resolved with arguments substituted into its body."""
 
-    def __init__(self, meta: CommandMetadata, body: str):
+    def __init__(self, meta: CommandMetadata, body: str) -> None:
         self.meta = meta
         self.name = meta.name
         self.description = meta.description
@@ -254,7 +263,7 @@ class LazyCommandLoader:
     First match by name wins (earlier directories take precedence).
     """
 
-    def __init__(self, command_dirs: list[Path]):
+    def __init__(self, command_dirs: list[Path]) -> None:
         self._command_dirs = command_dirs
         self._metadata_cache: dict[str, CommandMetadata] = {}
         self._discovered = False
@@ -287,9 +296,15 @@ class LazyCommandLoader:
                         name=name,
                         description=str(meta.get("description", "")),
                         path=cmd_file,
-                        argument_hint=str(meta.get("argument-hint", meta.get("argument_hint", ""))),
-                        allowed_tools=str(meta.get("allowed-tools", meta.get("allowed_tools", "*"))),
-                        denied_tools=_parse_tool_list(meta.get("denied-tools", meta.get("denied_tools"))),
+                        argument_hint=str(
+                            meta.get("argument-hint", meta.get("argument_hint", "")),
+                        ),
+                        allowed_tools=str(
+                            meta.get("allowed-tools", meta.get("allowed_tools", "*")),
+                        ),
+                        denied_tools=_parse_tool_list(
+                            meta.get("denied-tools", meta.get("denied_tools")),
+                        ),
                         model=meta.get("model"),
                         eval_criteria=eval_criteria,
                         eval_pass_threshold=eval_threshold,
@@ -297,7 +312,11 @@ class LazyCommandLoader:
                     self._metadata_cache[name] = cmd_meta
                     logger.debug("Discovered command: %s at %s", name, cmd_file)
                 except Exception as e:
-                    logger.warning("Failed to load command metadata from %s: %s", cmd_file, e)
+                    logger.warning(
+                        "Failed to load command metadata from %s: %s",
+                        cmd_file,
+                        e,
+                    )
 
         # 2. Built-in defaults (only if not already overridden by on-disk)
         try:
@@ -317,9 +336,15 @@ class LazyCommandLoader:
                 cmd_meta = CommandMetadata(
                     name=name,
                     description=str(meta.get("description", "")),
-                    argument_hint=str(meta.get("argument-hint", meta.get("argument_hint", ""))),
-                    allowed_tools=str(meta.get("allowed-tools", meta.get("allowed_tools", "*"))),
-                    denied_tools=_parse_tool_list(meta.get("denied-tools", meta.get("denied_tools"))),
+                    argument_hint=str(
+                        meta.get("argument-hint", meta.get("argument_hint", "")),
+                    ),
+                    allowed_tools=str(
+                        meta.get("allowed-tools", meta.get("allowed_tools", "*")),
+                    ),
+                    denied_tools=_parse_tool_list(
+                        meta.get("denied-tools", meta.get("denied_tools")),
+                    ),
                     model=meta.get("model"),
                     builtin_content=content.strip(),
                     eval_criteria=eval_criteria,
@@ -372,7 +397,7 @@ class LazyCommandLoader:
 
             return ResolvedCommand(meta=cmd, body=body)
         except Exception as e:
-            logger.error("Failed to resolve command '%s': %s", name, e)
+            logger.exception("Failed to resolve command '%s': %s", name, e)
             return None
 
     def command_names(self) -> list[str]:
@@ -396,7 +421,7 @@ class EvalCase:
         criteria: list[str],
         skills: list[str] | None = None,
         preferred_tools: list[str] | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.input_args = input_args
         self.criteria = criteria
@@ -412,7 +437,7 @@ class EvalSuite:
         command_name: str,
         cases: list[EvalCase],
         runs_per_case: int = 1,
-    ):
+    ) -> None:
         self.command_name = command_name
         self.cases = cases
         self.runs_per_case = runs_per_case
@@ -453,13 +478,15 @@ def parse_eval_file(content: str) -> list[EvalCase]:
 
     def _flush() -> None:
         if current_name and current_criteria:
-            cases.append(EvalCase(
-                name=current_name,
-                input_args=current_input,
-                criteria=list(current_criteria),
-                skills=list(current_skills),
-                preferred_tools=list(current_preferred_tools),
-            ))
+            cases.append(
+                EvalCase(
+                    name=current_name,
+                    input_args=current_input,
+                    criteria=list(current_criteria),
+                    skills=list(current_skills),
+                    preferred_tools=list(current_preferred_tools),
+                ),
+            )
 
     for line in body.splitlines():
         stripped = line.strip()

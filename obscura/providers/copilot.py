@@ -1,5 +1,4 @@
-"""
-obscura.copilot_backend — BackendProtocol implementation for GitHub Copilot SDK.
+"""obscura.copilot_backend — BackendProtocol implementation for GitHub Copilot SDK.
 
 Wraps ``github-copilot-sdk`` (``CopilotClient``, ``CopilotSession``) behind
 the unified interface. Copilot's event-push model is bridged to async iterators
@@ -10,16 +9,15 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, AsyncIterator, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
-from obscura.core.tools import ToolRegistry
 from obscura.core.tool_policy import ToolPolicy
+from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    AgentHookConfig,
     AgentEvent,
+    AgentHookConfig,
     Backend,
     BackendCapabilities,
     ChunkKind,
@@ -35,6 +33,13 @@ from obscura.core.types import (
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from copilot.generated.session_events import PermissionRequest
+
+    from obscura.core.auth import AuthConfig
+    from obscura.core.tool_router import RoutingResult
 
 # ---------------------------------------------------------------------------
 # Priority-aware tool truncation
@@ -42,16 +47,18 @@ from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 # Core tools that must never be dropped by naive truncation.
 # Mirrors DEFAULT_PINNED_TOOLS in tool_router.py.
-_CORE_TOOL_NAMES: frozenset[str] = frozenset({
-    "run_shell",
-    "read_text_file",
-    "write_text_file",
-    "edit_text_file",
-    "list_directory",
-    "grep_files",
-    "find_files",
-    "git_status",
-})
+_CORE_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "run_shell",
+        "read_text_file",
+        "write_text_file",
+        "edit_text_file",
+        "list_directory",
+        "grep_files",
+        "find_files",
+        "git_status",
+    },
+)
 
 
 def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
@@ -219,7 +226,9 @@ class CopilotBackend:
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient
-        from copilot.types import CopilotClientOptions  # pyright: ignore[reportAttributeAccessIssue,reportUnknownVariableType]
+        from copilot.types import (
+            CopilotClientOptions,  # pyright: ignore[reportAttributeAccessIssue,reportUnknownVariableType]
+        )
 
         client_opts: Any = None
         if self._auth.github_token:
@@ -231,7 +240,7 @@ class CopilotBackend:
         # Create default session
         session_config = self.build_session_config()
 
-        self._session = await self._client.create_session(**session_config)
+        self._session = await self._client.create_session(session_config)
 
     async def reset_session(self) -> None:
         """Create a fresh session, discarding prior conversation state.
@@ -241,7 +250,7 @@ class CopilotBackend:
         """
         self._ensure_client()
         config = self.build_session_config()
-        self._session = await self._client.create_session(**config)
+        self._session = await self._client.create_session(config)
 
     async def stop(self) -> None:
         """Gracefully shut down the client."""
@@ -264,7 +273,7 @@ class CopilotBackend:
         """Recreate the session after an expiry/idle timeout."""
         self._log.warning("Session expired after idle — recreating session")
         config = self.build_session_config()
-        self._session = await self._client.create_session(**config)
+        self._session = await self._client.create_session(config)
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
@@ -302,7 +311,9 @@ class CopilotBackend:
                 yield chunk
 
     async def _do_stream(
-        self, prompt: str, **kwargs: Any
+        self,
+        prompt: str,
+        **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Core streaming implementation."""
         bridge = EventToIteratorBridge()
@@ -326,8 +337,10 @@ class CopilotBackend:
             ):
                 bridge.push(
                     StreamChunk(
-                        kind=ChunkKind.TEXT_DELTA, text=event.data.content, raw=event
-                    )
+                        kind=ChunkKind.TEXT_DELTA,
+                        text=event.data.content,
+                        raw=event,
+                    ),
                 )
 
         def _on_thinking(event: Any) -> None:
@@ -359,19 +372,19 @@ class CopilotBackend:
 
         # Subscribe to session events
         unsub_fns.append(
-            self._session.on(_make_handler("assistant.message_delta", _on_delta))
+            self._session.on(_make_handler("assistant.message_delta", _on_delta)),
         )
         unsub_fns.append(
-            self._session.on(_make_handler("assistant.message", _on_message))
+            self._session.on(_make_handler("assistant.message", _on_message)),
         )
         unsub_fns.append(
-            self._session.on(_make_handler("assistant.reasoning_delta", _on_thinking))
+            self._session.on(_make_handler("assistant.reasoning_delta", _on_thinking)),
         )
         unsub_fns.append(
-            self._session.on(_make_handler("tool.execution_start", _on_tool_start))
+            self._session.on(_make_handler("tool.execution_start", _on_tool_start)),
         )
         unsub_fns.append(
-            self._session.on(_make_handler("tool.execution_end", _on_tool_end))
+            self._session.on(_make_handler("tool.execution_end", _on_tool_end)),
         )
         unsub_fns.append(self._session.on(_make_handler("session.idle", _on_idle)))
         unsub_fns.append(self._session.on(_make_handler("session.error", _on_error)))
@@ -405,7 +418,7 @@ class CopilotBackend:
         """Create a new named session."""
         self._ensure_client()
         config = self.build_session_config(**kwargs)
-        session = await self._client.create_session(**config)
+        session = await self._client.create_session(config)
         ref = SessionRef(
             session_id=session.session_id,
             backend=Backend.COPILOT,
@@ -454,7 +467,7 @@ class CopilotBackend:
         # Prefer explicit SDK fork support if present.
         fork_fn = getattr(self._client, "fork_session", None)
         if callable(fork_fn):
-            fork_fn_typed = cast(Callable[[str], Any], fork_fn)
+            fork_fn_typed = cast("Callable[[str], Any]", fork_fn)
             session = await fork_fn_typed(ref.session_id)
             fork_ref = SessionRef(
                 session_id=session.session_id,
@@ -467,7 +480,7 @@ class CopilotBackend:
 
         # Logical fork fallback: create a fresh session that records parent lineage.
         config = self.build_session_config()
-        session = await self._client.create_session(**config)
+        session = await self._client.create_session(config)
         fork_ref = SessionRef(
             session_id=session.session_id,
             backend=Backend.COPILOT,
@@ -494,7 +507,7 @@ class CopilotBackend:
         """Build a human-readable tool listing for the system prompt."""
         lines = ["## Available Tools", ""]
         lines.append(
-            "You have the following tools. Use these EXACT names when calling tools:"
+            "You have the following tools. Use these EXACT names when calling tools:",
         )
         lines.append("")
         for spec in self._tools:
@@ -503,10 +516,11 @@ class CopilotBackend:
             lines.append(f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
-            "Do NOT invent tool names. If none of these tools fit, tell the user."
+            "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
             from obscura.plugins.capabilities import build_capability_map_section
+
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -582,13 +596,15 @@ class CopilotBackend:
 
     def _ensure_client(self) -> None:
         if self._client is None:
-            raise RuntimeError("CopilotBackend not started. Call start() first.")
+            msg = "CopilotBackend not started. Call start() first."
+            raise RuntimeError(msg)
 
     def _ensure_session(self) -> None:
         self._ensure_client()
         if self._session is None:
+            msg = "No active session. Call start() or create_session() first."
             raise RuntimeError(
-                "No active session. Call start() or create_session() first."
+                msg,
             )
 
     @staticmethod
@@ -619,11 +635,12 @@ class CopilotBackend:
             def _wrapper_factory(handler: Callable[..., Any]) -> Callable[..., Any]:
                 async def wrapped(invocation: Any) -> Any:
                     import inspect as _inspect
+
                     from copilot.types import ToolResult as CopilotToolResult
 
                     try:
                         raw_args = invocation.arguments
-                        args = cast(dict[str, Any], raw_args) if raw_args else {}
+                        args = cast("dict[str, Any]", raw_args) if raw_args else {}
                         result: Any = handler(**args)
                         if _inspect.isawaitable(result):
                             result = await result
@@ -646,14 +663,10 @@ class CopilotBackend:
 
             # Ensure parameters is always a valid JSON Schema object —
             # the Copilot SDK crashes with .map() on undefined if None.
-            params: dict[str, Any] = (
-                spec.parameters
-                if spec.parameters
-                else {
-                    "type": "object",
-                    "properties": {},
-                }
-            )
+            params: dict[str, Any] = spec.parameters or {
+                "type": "object",
+                "properties": {},
+            }
             converted.append(
                 Tool(
                     name=self._sanitize_tool_name(spec.name),
@@ -661,7 +674,7 @@ class CopilotBackend:
                     handler=_wrapper_factory(_handler),
                     parameters=params,
                     overrides_built_in_tool=True,
-                )
+                ),
             )
         return converted
 
@@ -672,11 +685,11 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
-        from copilot.generated.session_events import PermissionRequest
         from copilot.types import PermissionRequestResult
 
         def _approve_all(
-            request: PermissionRequest, _context: dict[str, str]
+            request: PermissionRequest,
+            _context: dict[str, str],
         ) -> PermissionRequestResult:
             return PermissionRequestResult(kind="approved")
 
@@ -715,8 +728,6 @@ class CopilotBackend:
 
             # Apply eval-driven tool routing if a router is configured.
             if self._tool_router is not None:
-                from obscura.core.tool_router import RoutingResult
-
                 result: RoutingResult = self._tool_router.select(prompt, filtered)
                 filtered = result.tools
                 if result.dropped_count > 0:
@@ -786,7 +797,9 @@ class CopilotBackend:
     _SEND_AND_WAIT_ALLOWED_KEYS = {"prompt", "attachments", "mode", "timeout"}
 
     def _build_message_options(
-        self, prompt: str, kwargs: dict[str, Any]
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """Build per-message keyword args for session.send / send_and_wait.
 
@@ -797,7 +810,7 @@ class CopilotBackend:
         msg_options: dict[str, Any] = {"prompt": self._truncate_prompt(prompt)}
         options = kwargs.get("options")
         if isinstance(options, dict):
-            msg_options.update(cast(dict[str, Any], options))
+            msg_options.update(cast("dict[str, Any]", options))
         return msg_options
 
     @staticmethod
@@ -834,7 +847,9 @@ class CopilotBackend:
             else:
 
                 async def _chained(
-                    *args: Any, cbs: list[Callable[..., Any]] = callbacks, **kw: Any
+                    *args: Any,
+                    cbs: list[Callable[..., Any]] = callbacks,
+                    **kw: Any,
                 ) -> Any:
                     last_result: Any = None
                     for cb in cbs:
@@ -891,7 +906,7 @@ def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[...
         # If event has no type field, silently ignore (don't call through)
 
     # Tag the handler so the SDK can identify it
-    setattr(handler, "_event_type", event_type)
+    handler._event_type = event_type
     return handler
 
 

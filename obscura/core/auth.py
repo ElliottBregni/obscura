@@ -1,5 +1,4 @@
-"""
-obscura._auth — Authentication resolution for both backends.
+"""obscura._auth — Authentication resolution for both backends.
 
 Resolves credentials from explicit config, environment variables, or
 CLI-based fallbacks (``gh auth token`` for Copilot).
@@ -7,17 +6,16 @@ CLI-based fallbacks (``gh auth token`` for Copilot).
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
-import json
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from obscura.core.types import Backend
-
 
 # ---------------------------------------------------------------------------
 # Auth configuration
@@ -169,10 +167,13 @@ def _resolve_github_token(explicit: str | None) -> str:
             if token:
                 return token
 
-    raise ValueError(
+    msg = (
         "Copilot auth requires one of: "
         f"{', '.join(_COPILOT_ENV_VARS)} env var, "
         "OBSCURA_GITHUB_TOKEN_CMD, or `gh auth login`."
+    )
+    raise ValueError(
+        msg,
     )
 
 
@@ -201,10 +202,13 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    raise ValueError(
+    msg = (
         "Claude auth requires one of: "
         f"{', '.join(_CLAUDE_ENV_VARS)} env var, "
         "or OBSCURA_CLAUDE_TOKEN_CMD."
+    )
+    raise ValueError(
+        msg,
     )
 
 
@@ -288,10 +292,13 @@ def _resolve_openai_key(explicit: str | None) -> str:
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 pass
 
-    raise ValueError(
+    msg = (
         "OpenAI auth requires one of: "
         f"{', '.join(_OPENAI_KEY_ENV_VARS)} env var, "
         "OBSCURA_OPENAI_TOKEN_CMD, or Codex OAuth login (`codex login`)."
+    )
+    raise ValueError(
+        msg,
     )
 
 
@@ -324,11 +331,11 @@ def _resolve_codex_oauth_token() -> str | None:
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
 
-    tokens = cast(object, payload.get("tokens"))
+    tokens = cast("object", payload.get("tokens"))
     if not isinstance(tokens, dict):
         return None
 
-    token_map = cast(dict[str, object], tokens)
+    token_map = cast("dict[str, object]", tokens)
     access_token = token_map.get("access_token")
     if isinstance(access_token, str) and access_token.strip():
         return access_token.strip()
@@ -387,8 +394,9 @@ def _resolve_moonshot_key(explicit: str | None) -> str:
         key = os.environ.get(var)
         if key:
             return key
+    msg = f"Moonshot auth requires one of: {', '.join(_MOONSHOT_KEY_ENV_VARS)} env var."
     raise ValueError(
-        f"Moonshot auth requires one of: {', '.join(_MOONSHOT_KEY_ENV_VARS)} env var."
+        msg,
     )
 
 
@@ -514,6 +522,7 @@ def resolve_auth(
         can use the identity to select organisation-specific secrets.
         Currently unused but wired through so that the server can pass
         the authenticated user context into backend auth resolution.
+
     """
     config = explicit or AuthConfig()
 
@@ -535,7 +544,7 @@ def resolve_auth(
         try:
             key = _resolve_anthropic_key(config.anthropic_api_key)
             return AuthConfig(anthropic_api_key=key)
-        except ValueError as exc:
+        except ValueError:
             # env_first still allows OAuth as late fallback.
             if explicit is None and _is_env_first_mode() and _has_claude_cli_oauth():
                 return AuthConfig(anthropic_api_key=None)
@@ -543,8 +552,9 @@ def resolve_auth(
             # (e.g., HTTP route dispatch), treat missing creds as an
             # unsupported code path to satisfy routing tests.
             if explicit is not None:
-                raise ValueError("Unknown backend") from None
-            raise exc
+                msg = "Unknown backend"
+                raise ValueError(msg) from None
+            raise
 
     if backend == Backend.OPENAI:
         key = _resolve_openai_key(config.openai_api_key)
@@ -566,7 +576,7 @@ def resolve_auth(
     if backend == Backend.MOONSHOT:
         key = _resolve_moonshot_key(config.moonshot_api_key or config.openai_api_key)
         base_url = _resolve_moonshot_base_url(
-            config.moonshot_base_url or config.openai_base_url
+            config.moonshot_base_url or config.openai_base_url,
         )
         return AuthConfig(
             moonshot_api_key=key,
@@ -575,4 +585,5 @@ def resolve_auth(
             openai_base_url=base_url,
         )
 
-    raise ValueError(f"Unknown backend: {backend}")
+    msg = f"Unknown backend: {backend}"
+    raise ValueError(msg)

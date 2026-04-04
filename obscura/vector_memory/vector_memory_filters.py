@@ -1,5 +1,4 @@
-"""
-sdk/vector_memory_filters — Metadata filters for vector memory search.
+"""sdk/vector_memory_filters — Metadata filters for vector memory search.
 
 Generates SQL WHERE clauses to pre-filter candidates before vector comparison,
 reducing the scan size and improving search performance.
@@ -18,8 +17,10 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 @dataclass
@@ -59,7 +60,8 @@ MetadataFilter = DateRangeFilter | TagFilter | KeyValueFilter | MemoryTypeFilter
 
 
 def match_metadata_filters(
-    filters: list[MetadataFilter], metadata: dict[str, Any]
+    filters: list[MetadataFilter],
+    metadata: dict[str, Any],
 ) -> bool:
     """Lightweight in-memory filter matcher used in tests without SQL."""
     for f in filters:
@@ -112,12 +114,12 @@ class FilterBuilder:
 
     @classmethod
     def build_sql(cls, filters: list[MetadataFilter]) -> tuple[str, list[Any]]:
-        """
-        Convert filters into a SQL WHERE clause and parameter list.
+        """Convert filters into a SQL WHERE clause and parameter list.
 
         Returns:
             (clause, params) where clause is like "AND memory_type IN (?,?) AND ..."
             The leading "AND" is included so it can be appended directly.
+
         """
         clauses: list[str] = []
         params: list[Any] = []
@@ -143,8 +145,9 @@ class FilterBuilder:
 
         if isinstance(f, DateRangeFilter):
             if f.field not in cls._ALLOWED_DATE_FIELDS:
+                msg = f"DateRangeFilter field must be one of {cls._ALLOWED_DATE_FIELDS}"
                 raise ValueError(
-                    f"DateRangeFilter field must be one of {cls._ALLOWED_DATE_FIELDS}"
+                    msg,
                 )
             parts: list[str] = []
             params: list[Any] = []
@@ -170,13 +173,13 @@ class FilterBuilder:
                     conditions.append("metadata LIKE ?")
                     params_list.append(f'%"{tag}"%')
                 return "(" + " OR ".join(conditions) + ")", params_list
-            else:  # "all"
-                conditions_all: list[str] = []
-                params_all: list[Any] = []
-                for tag in f.tags:
-                    conditions_all.append("metadata LIKE ?")
-                    params_all.append(f'%"{tag}"%')
-                return "(" + " AND ".join(conditions_all) + ")", params_all
+            # "all"
+            conditions_all: list[str] = []
+            params_all: list[Any] = []
+            for tag in f.tags:
+                conditions_all.append("metadata LIKE ?")
+                params_all.append(f'%"{tag}"%')
+            return "(" + " AND ".join(conditions_all) + ")", params_all
 
         # Must be KeyValueFilter at this point (exhaustive union check)
         assert isinstance(f, KeyValueFilter)
@@ -185,5 +188,6 @@ class FilterBuilder:
             return "json_extract(metadata, ?) LIKE ?", [json_path, f"%{f.value}%"]
         op = cls._OP_MAP.get(f.operator)
         if op is None:
-            raise ValueError(f"Unknown operator: {f.operator}")
+            msg = f"Unknown operator: {f.operator}"
+            raise ValueError(msg)
         return f"json_extract(metadata, ?) {op} ?", [json_path, f.value]

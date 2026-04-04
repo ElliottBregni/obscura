@@ -1,5 +1,4 @@
-"""
-obscura.codex_backend -- BackendProtocol implementation for Python Codex SDK.
+"""obscura.codex_backend -- BackendProtocol implementation for Python Codex SDK.
 
 This backend uses the official OpenAI Codex SDK module:
 - ``openai_codex_sdk``
@@ -17,9 +16,8 @@ import re
 import shutil
 import sys
 import uuid
-from typing import Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 
-from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -38,6 +36,11 @@ from obscura.core.types import (
     ToolSpec,
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from obscura.core.auth import AuthConfig
 
 
 class CodexBackend:
@@ -134,7 +137,7 @@ class CodexBackend:
         """Send a prompt and wait for the full response."""
         self._ensure_started()
         await self._run_hooks(
-            HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+            HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
         )
 
         thread = self._resolve_thread()
@@ -150,7 +153,8 @@ class CodexBackend:
                     if text:
                         break
         if not text:
-            raise RuntimeError("Codex Python SDK returned an empty response")
+            msg = "Codex Python SDK returned an empty response"
+            raise RuntimeError(msg)
 
         # Track thread/session mapping
         thread_id = getattr(thread, "id", "") or ""
@@ -174,7 +178,7 @@ class CodexBackend:
         """Send a prompt and yield real-time streaming chunks."""
         self._ensure_started()
         await self._run_hooks(
-            HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+            HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
         )
 
         # Clear delta tracking for this stream call
@@ -212,7 +216,9 @@ class CodexBackend:
                             "input_tokens": getattr(u, "input_tokens", 0),
                             "output_tokens": getattr(u, "output_tokens", 0),
                             "cached_input_tokens": getattr(
-                                u, "cached_input_tokens", 0
+                                u,
+                                "cached_input_tokens",
+                                0,
                             ),
                         }
 
@@ -248,7 +254,8 @@ class CodexBackend:
     async def resume_session(self, ref: SessionRef) -> None:
         refs = self._session_store.list_all(Backend.CODEX)
         if not any(r.session_id == ref.session_id for r in refs):
-            raise RuntimeError(f"Session {ref.session_id} not found")
+            msg = f"Session {ref.session_id} not found"
+            raise RuntimeError(msg)
         self._active_session = ref.session_id
 
     async def list_sessions(self) -> list[SessionRef]:
@@ -280,7 +287,8 @@ class CodexBackend:
 
     def _ensure_started(self) -> None:
         if not self._started:
-            raise RuntimeError("CodexBackend not started. Call start() first.")
+            msg = "CodexBackend not started. Call start() first."
+            raise RuntimeError(msg)
 
     @staticmethod
     def _sanitize_tool_name(name: str) -> str:
@@ -291,8 +299,7 @@ class CodexBackend:
         """Build a human-readable tool listing for the system prompt."""
         lines = ["## Available Tools", ""]
         lines.append(
-            "You have the following tools. "
-            "Use these EXACT names when calling tools:"
+            "You have the following tools. Use these EXACT names when calling tools:",
         )
         lines.append("")
         for spec in self._tools:
@@ -301,11 +308,11 @@ class CodexBackend:
             lines.append(f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
-            "Do NOT invent tool names. "
-            "If none of these tools fit, tell the user."
+            "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
             from obscura.plugins.capabilities import build_capability_map_section
+
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -366,7 +373,7 @@ class CodexBackend:
                             text=delta,
                             raw=item,
                             native_event=event,
-                        )
+                        ),
                     )
 
         elif item_type == "reasoning":
@@ -383,7 +390,7 @@ class CodexBackend:
                             text=delta,
                             raw=item,
                             native_event=event,
-                        )
+                        ),
                     )
 
         elif item_type == "command_execution":
@@ -397,7 +404,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 if cmd:
                     chunks.append(
@@ -406,7 +413,7 @@ class CodexBackend:
                             tool_input_delta=json.dumps({"command": cmd}),
                             raw=item,
                             native_event=event,
-                        )
+                        ),
                     )
             elif event_type == "item.completed":
                 output = getattr(item, "aggregated_output", "")
@@ -421,7 +428,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 chunks.append(
                     StreamChunk(
@@ -430,7 +437,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
 
         elif item_type == "mcp_tool_call":
@@ -446,27 +453,27 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 args = getattr(item, "arguments", None)
                 if args:
-                    args_str = (
-                        json.dumps(args) if not isinstance(args, str) else args
-                    )
+                    args_str = json.dumps(args) if not isinstance(args, str) else args
                     chunks.append(
                         StreamChunk(
                             kind=ChunkKind.TOOL_USE_DELTA,
                             tool_input_delta=args_str,
                             raw=item,
                             native_event=event,
-                        )
+                        ),
                     )
             elif event_type == "item.completed":
                 result_text = ""
                 error_obj = getattr(item, "error", None)
                 result_obj = getattr(item, "result", None)
                 if error_obj:
-                    result_text = f"Error: {getattr(error_obj, 'message', str(error_obj))}"
+                    result_text = (
+                        f"Error: {getattr(error_obj, 'message', str(error_obj))}"
+                    )
                 elif result_obj:
                     content = getattr(result_obj, "content", [])
                     result_text = json.dumps(content) if content else ""
@@ -477,7 +484,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 chunks.append(
                     StreamChunk(
@@ -486,7 +493,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
 
         elif item_type == "file_change":
@@ -504,7 +511,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 chunks.append(
                     StreamChunk(
@@ -513,7 +520,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 chunks.append(
                     StreamChunk(
@@ -522,7 +529,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
 
         elif item_type == "web_search":
@@ -536,7 +543,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
                 if query:
                     chunks.append(
@@ -545,7 +552,7 @@ class CodexBackend:
                             tool_input_delta=json.dumps({"query": query}),
                             raw=item,
                             native_event=event,
-                        )
+                        ),
                     )
                 chunks.append(
                     StreamChunk(
@@ -554,7 +561,7 @@ class CodexBackend:
                         tool_use_id=item_id,
                         raw=item,
                         native_event=event,
-                    )
+                    ),
                 )
 
         elif item_type == "error":
@@ -565,7 +572,7 @@ class CodexBackend:
                     text=msg,
                     raw=item,
                     native_event=event,
-                )
+                ),
             )
 
         return chunks
@@ -573,7 +580,9 @@ class CodexBackend:
     # -- Content block helpers -----------------------------------------------
 
     def _items_to_content_blocks(
-        self, items: list[Any], final_text: str
+        self,
+        items: list[Any],
+        final_text: str,
     ) -> list[ContentBlock]:
         """Convert Codex Turn items into Obscura ContentBlocks."""
         blocks: list[ContentBlock] = []
@@ -584,13 +593,13 @@ class CodexBackend:
 
             if item_type == "agent_message":
                 blocks.append(
-                    ContentBlock(kind="text", text=getattr(item, "text", ""))
+                    ContentBlock(kind="text", text=getattr(item, "text", "")),
                 )
                 has_text = True
 
             elif item_type == "reasoning":
                 blocks.append(
-                    ContentBlock(kind="thinking", text=getattr(item, "text", ""))
+                    ContentBlock(kind="thinking", text=getattr(item, "text", "")),
                 )
 
             elif item_type == "command_execution":
@@ -600,7 +609,7 @@ class CodexBackend:
                         tool_name="shell_command",
                         tool_input={"command": getattr(item, "command", "")},
                         tool_use_id=getattr(item, "id", ""),
-                    )
+                    ),
                 )
 
             elif item_type == "mcp_tool_call":
@@ -612,7 +621,7 @@ class CodexBackend:
                         tool_name=self._sanitize_tool_name(f"{server}_{tool}"),
                         tool_input=getattr(item, "arguments", {}) or {},
                         tool_use_id=getattr(item, "id", ""),
-                    )
+                    ),
                 )
 
             elif item_type == "file_change":
@@ -627,7 +636,7 @@ class CodexBackend:
                         tool_name="file_change",
                         tool_input={"changes": summary},
                         tool_use_id=getattr(item, "id", ""),
-                    )
+                    ),
                 )
 
             elif item_type == "error":
@@ -636,7 +645,7 @@ class CodexBackend:
                         kind="text",
                         text=f"[Error] {getattr(item, 'message', '')}",
                         is_error=True,
-                    )
+                    ),
                 )
 
         # Ensure we have at least one text block
@@ -739,18 +748,21 @@ class CodexBackend:
                     return sdk_cls, mod_name
 
         py_exe = sys.executable
-        raise RuntimeError(
+        msg = (
             "Official OpenAI Codex SDK not found or invalid. Install with: "
             f"`{py_exe} -m pip install openai-codex-sdk` "
             "(or run via your project environment, e.g. `uv run obscura ...`). "
             f"Tried modules: {', '.join(module_candidates)}. "
             f"Import errors: {'; '.join(import_errors) or 'none'}."
         )
+        raise RuntimeError(
+            msg,
+        )
 
     def _build_sdk_client(self, sdk_cls: type[Any], module_name: str) -> Any:
         """Construct SDK client, forcing codex binary path when supported."""
         codex_path = os.environ.get("OBSCURA_CODEX_PATH", "").strip() or shutil.which(
-            "codex"
+            "codex",
         )
         try:
             mod = importlib.import_module(module_name)

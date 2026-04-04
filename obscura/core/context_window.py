@@ -1,22 +1,29 @@
-"""
-obscura.core.context_window — Token counting and context window management.
+"""obscura.core.context_window — Token counting and context window management.
 
-Port of openclaw's context-window-guard.ts.
+Port of openclaw's context-window-guard.ts, enhanced with Claude Code-style
+multi-strategy compaction thresholds.
 
 Provides:
 - get_context_window(model_id): model context window size lookup
 - estimate_tokens(text): tiktoken-based token estimation with fallback
 - evaluate_context_status(messages, model_id): warn/block evaluation
+- get_compact_thresholds(model_id): model-aware compaction trigger levels
+- CompactThresholds: snip / compact / critical token thresholds
 
 Constants mirror openclaw exactly:
   CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000   (block agent start)
   CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000  (warn user)
+
+Compaction thresholds (Claude Code-style):
+  snip_at      — snip verbose tool outputs (lightest)
+  compact_at   — full history compaction with LLM summarization
+  critical_at  — aggressive compaction, drop + summarize immediately
 """
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -27,8 +34,11 @@ _TOKENIZER: Any | None = None
 _TOKENIZER_READY = False
 
 # Mirrors openclaw's context-window-guard.ts constants
-CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000    # Block if available tokens < this
+CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000  # Block if available tokens < this
 CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000  # Warn if available tokens < this
+
+# Snip compact: truncate individual tool outputs above this token count
+SNIP_TOOL_OUTPUT_THRESHOLD = 10_000  # tokens
 
 # Model context windows
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
@@ -61,6 +71,90 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     # Fallback
     "default": 100_000,
 }
+
+
+# ---------------------------------------------------------------------------
+# CompactThresholds — model-aware multi-strategy compaction triggers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CompactThresholds:
+    """Token thresholds that trigger progressively aggressive compaction.
+
+    Mirrors Claude Code's tiered approach:
+    - snip_at:     Snip verbose tool outputs individually (lightest)
+    - compact_at:  Full history compaction with LLM summarization
+    - critical_at: Aggressive drop + summarize, reactive mid-turn
+    - preserve_recent: Number of recent message pairs to always keep
+    """
+
+    snip_at: int
+    """Token usage level that triggers snip compact on tool outputs."""
+
+    compact_at: int
+    """Token usage level that triggers full history compaction."""
+
+    critical_at: int
+    """Token usage level that triggers aggressive reactive compaction."""
+
+    preserve_recent: int
+    """Number of recent message pairs (assistant+user) to always preserve."""
+
+    context_window: int
+    """Total context window for reference."""
+
+    def usage_tier(self, used_tokens: int) -> str:
+        """Return the compaction tier for a given token usage level.
+
+        Returns one of: "ok", "snip", "compact", or "critical".
+        """
+        if used_tokens >= self.critical_at:
+            return "critical"
+        if used_tokens >= self.compact_at:
+            return "compact"
+        if used_tokens >= self.snip_at:
+            return "snip"
+        return "ok"
+
+
+# Default threshold ratios (fraction of context window)
+_THRESHOLD_PROFILES: dict[str, tuple[float, float, float, int]] = {
+    # (snip_ratio, compact_ratio, critical_ratio, preserve_pairs)
+    #
+    # Large-context models (200K+): more aggressive — lots of room to work
+    "large": (0.60, 0.75, 0.90, 6),
+    # Medium-context models (100K-200K)
+    "medium": (0.55, 0.70, 0.85, 4),
+    # Small-context models (<100K): conservative — less room
+    "small": (0.50, 0.65, 0.80, 3),
+}
+
+
+def get_compact_thresholds(model_id: str) -> CompactThresholds:
+    """Return model-aware compaction thresholds.
+
+    Selects a threshold profile based on the model's context window size,
+    then scales to absolute token counts.
+    """
+    cw = get_context_window(model_id)
+
+    if cw >= 200_000:
+        profile = "large"
+    elif cw >= 100_000:
+        profile = "medium"
+    else:
+        profile = "small"
+
+    snip_r, compact_r, critical_r, preserve = _THRESHOLD_PROFILES[profile]
+
+    return CompactThresholds(
+        snip_at=int(cw * snip_r),
+        compact_at=int(cw * compact_r),
+        critical_at=int(cw * critical_r),
+        preserve_recent=preserve,
+        context_window=cw,
+    )
 
 
 def get_context_window(model_id: str) -> int:
@@ -182,10 +276,14 @@ class ContextStatus:
     usage_pct: float
     """Fraction of context window used (0.0–1.0+)."""
 
+    compact_tier: str = "ok"
+    """Current compaction tier: 'ok', 'snip', 'compact', or 'critical'."""
+
     def __str__(self) -> str:
         s = "BLOCK" if self.should_block else ("WARN" if self.should_warn else "OK")
+        tier = f" tier={self.compact_tier}" if self.compact_tier != "ok" else ""
         return (
-            f"[{s}] {self.used_tokens:,}/{self.context_window:,} tokens "
+            f"[{s}{tier}] {self.used_tokens:,}/{self.context_window:,} tokens "
             f"({self.usage_pct:.1%} used, {self.available_tokens:,} available)"
         )
 
@@ -208,6 +306,7 @@ def evaluate_context_status(
 
     Returns:
         ContextStatus with should_warn and should_block flags set
+
     """
     cw = get_context_window(model_id)
     sys_tokens = estimate_tokens(system_prompt) if system_prompt else 0
@@ -216,6 +315,9 @@ def evaluate_context_status(
     available = cw - used - reserve_tokens
     pct = used / cw if cw > 0 else 0.0
 
+    thresholds = get_compact_thresholds(model_id)
+    tier = thresholds.usage_tier(used)
+
     status = ContextStatus(
         available_tokens=available,
         used_tokens=used,
@@ -223,6 +325,7 @@ def evaluate_context_status(
         should_warn=available < CONTEXT_WINDOW_WARN_BELOW_TOKENS,
         should_block=available < CONTEXT_WINDOW_HARD_MIN_TOKENS,
         usage_pct=pct,
+        compact_tier=tier,
     )
 
     if status.should_block:

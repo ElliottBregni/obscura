@@ -1,14 +1,15 @@
 """Tests for sdk.vector_memory_rerank."""
 
 from datetime import UTC, datetime, timedelta
-from obscura.vector_memory.vector_memory_rerank import (
-    BM25Reranker,
-    RecencyReranker,
-    MetadataReranker,
-    CompositeReranker,
-)
+
 from obscura.memory import MemoryKey
 from obscura.vector_memory import VectorMemoryEntry
+from obscura.vector_memory.vector_memory_rerank import (
+    BM25Reranker,
+    CompositeReranker,
+    MetadataReranker,
+    RecencyReranker,
+)
 
 
 def _make_entry(
@@ -27,29 +28,29 @@ def _make_entry(
 
 
 class TestBM25Reranker:
-    def test_exact_match(self):
+    def test_exact_match(self) -> None:
         r = BM25Reranker()
         entry = _make_entry(text="hello world foo bar")
         score = r.score("hello world", entry, [])
         assert score > 0
 
-    def test_no_match(self):
+    def test_no_match(self) -> None:
         r = BM25Reranker()
         entry = _make_entry(text="completely different text")
         score = r.score("hello world", entry, [])
         assert score == 0.0
 
-    def test_empty_query(self):
+    def test_empty_query(self) -> None:
         r = BM25Reranker()
         entry = _make_entry(text="hello world")
         assert r.score("", entry, []) == 0.0
 
-    def test_empty_doc(self):
+    def test_empty_doc(self) -> None:
         r = BM25Reranker()
         entry = _make_entry(text="")
         assert r.score("hello", entry, []) == 0.0
 
-    def test_partial_match(self):
+    def test_partial_match(self) -> None:
         r = BM25Reranker()
         entry = _make_entry(text="hello world foo bar")
         full = r.score("hello world", entry, [])
@@ -58,25 +59,25 @@ class TestBM25Reranker:
 
 
 class TestRecencyReranker:
-    def test_recent_entry(self):
+    def test_recent_entry(self) -> None:
         r = RecencyReranker(decay_days=30)
         entry = _make_entry(created_at=datetime.now(UTC))
         score = r.score("q", entry, [])
         assert score > 0.99  # very recent
 
-    def test_old_entry(self):
+    def test_old_entry(self) -> None:
         r = RecencyReranker(decay_days=30)
         entry = _make_entry(created_at=datetime.now(UTC) - timedelta(days=90))
         score = r.score("q", entry, [])
         assert score < 0.1  # exp(-90/30) ≈ 0.05
 
-    def test_weight(self):
+    def test_weight(self) -> None:
         r = RecencyReranker(decay_days=30, weight=2.0)
         entry = _make_entry(created_at=datetime.now(UTC))
         score = r.score("q", entry, [])
         assert score > 1.9
 
-    def test_naive_datetime(self):
+    def test_naive_datetime(self) -> None:
         r = RecencyReranker(decay_days=30)
         entry = _make_entry(created_at=datetime.now())  # naive
         score = r.score("q", entry, [])
@@ -84,46 +85,46 @@ class TestRecencyReranker:
 
 
 class TestMetadataReranker:
-    def test_boost_present(self):
+    def test_boost_present(self) -> None:
         r = MetadataReranker(boost_keys={"important": 0.5})
         entry = _make_entry(metadata={"important": True})
         assert r.score("q", entry, []) == 0.5
 
-    def test_boost_absent(self):
+    def test_boost_absent(self) -> None:
         r = MetadataReranker(boost_keys={"important": 0.5})
         entry = _make_entry(metadata={})
         assert r.score("q", entry, []) == 0.0
 
-    def test_boost_falsy(self):
+    def test_boost_falsy(self) -> None:
         r = MetadataReranker(boost_keys={"important": 0.5})
         entry = _make_entry(metadata={"important": False})
         assert r.score("q", entry, []) == 0.0
 
-    def test_multiple_keys(self):
+    def test_multiple_keys(self) -> None:
         r = MetadataReranker(boost_keys={"a": 0.3, "b": 0.2})
         entry = _make_entry(metadata={"a": True, "b": True})
         assert abs(r.score("q", entry, []) - 0.5) < 1e-9
 
 
 class TestCompositeReranker:
-    def test_weighted_combination(self):
+    def test_weighted_combination(self) -> None:
         r = CompositeReranker(
             rerankers=[
                 (BM25Reranker(), 0.5),
                 (RecencyReranker(decay_days=30), 0.5),
-            ]
+            ],
         )
         entry = _make_entry(text="hello world", created_at=datetime.now(UTC))
         score = r.score("hello world", entry, [])
         assert score > 0
 
-    def test_single_reranker(self):
+    def test_single_reranker(self) -> None:
         r = CompositeReranker(rerankers=[(RecencyReranker(decay_days=30), 1.0)])
         entry = _make_entry(created_at=datetime.now(UTC))
         score = r.score("q", entry, [])
         assert score > 0.99
 
-    def test_empty_rerankers(self):
+    def test_empty_rerankers(self) -> None:
         r = CompositeReranker(rerankers=[])
         entry = _make_entry()
         assert r.score("q", entry, []) == 0.0

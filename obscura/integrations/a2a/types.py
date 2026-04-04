@@ -1,5 +1,4 @@
-"""
-obscura.a2a.types — A2A protocol data model.
+"""obscura.a2a.types — A2A protocol data model.
 
 Pydantic models for the full A2A specification: Tasks, Messages, Parts,
 Artifacts, Agent Cards, streaming events, and JSON-RPC method routing.
@@ -15,13 +14,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Task state machine
 # ---------------------------------------------------------------------------
 
 
-class TaskState(str, enum.Enum):
+class TaskState(enum.StrEnum):
     """A2A task lifecycle states."""
 
     PENDING = "pending"
@@ -37,7 +35,7 @@ class TaskState(str, enum.Enum):
 # Valid state transitions enforced by the task store.
 VALID_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PENDING: frozenset(
-        {TaskState.WORKING, TaskState.REJECTED, TaskState.CANCELED}
+        {TaskState.WORKING, TaskState.REJECTED, TaskState.CANCELED},
     ),
     TaskState.WORKING: frozenset(
         {
@@ -46,21 +44,21 @@ VALID_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.CANCELED,
-        }
+        },
     ),
     TaskState.INPUT_REQUIRED: frozenset(
         {
             TaskState.WORKING,
             TaskState.CANCELED,
             TaskState.FAILED,
-        }
+        },
     ),
     TaskState.AUTH_REQUIRED: frozenset(
         {
             TaskState.WORKING,
             TaskState.CANCELED,
             TaskState.FAILED,
-        }
+        },
     ),
     TaskState.COMPLETED: frozenset(),
     TaskState.FAILED: frozenset(),
@@ -74,7 +72,7 @@ TERMINAL_STATES: frozenset[TaskState] = frozenset(
         TaskState.FAILED,
         TaskState.CANCELED,
         TaskState.REJECTED,
-    }
+    },
 )
 
 
@@ -171,8 +169,8 @@ class Task(BaseModel):
     id: str
     contextId: str
     status: TaskStatus
-    artifacts: list[Artifact] = Field(default_factory=lambda: list[Artifact]())
-    history: list[A2AMessage] = Field(default_factory=lambda: list[A2AMessage]())
+    artifacts: list[Artifact] = Field(default_factory=list[Artifact])
+    history: list[A2AMessage] = Field(default_factory=list[A2AMessage])
     kind: Literal["task"] = "task"
     metadata: dict[str, Any] | None = None
 
@@ -250,15 +248,15 @@ class AgentCard(BaseModel):
     url: str
     version: str = "1.0"
     protocolVersion: str = "0.3"
-    skills: list[AgentSkill] = Field(default_factory=lambda: list[AgentSkill]())
+    skills: list[AgentSkill] = Field(default_factory=list[AgentSkill])
     defaultInputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     defaultOutputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
     securitySchemes: dict[str, AuthScheme] = Field(
-        default_factory=lambda: dict[str, AuthScheme]()
+        default_factory=dict[str, AuthScheme],
     )
     security: list[dict[str, list[str]]] = Field(
-        default_factory=lambda: list[dict[str, list[str]]]()
+        default_factory=list[dict[str, list[str]]],
     )
     provider: dict[str, str] | None = None
     extensions: list[dict[str, Any]] | None = None
@@ -291,7 +289,7 @@ class SendMessageConfiguration(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class A2AMethod(str, enum.Enum):
+class A2AMethod(enum.StrEnum):
     """A2A JSON-RPC method names."""
 
     MESSAGE_SEND = "message/send"

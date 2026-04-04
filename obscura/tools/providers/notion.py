@@ -1,4 +1,5 @@
 """Notion API provider — search, get_page, query_database, healthcheck."""
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +25,11 @@ def _headers() -> dict[str, str]:
 async def _handler_search(**kwargs: Any) -> dict[str, Any]:
     query = kwargs.get("query", "")
     try:
-        async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=15) as c:
+        async with httpx.AsyncClient(
+            base_url=_BASE,
+            headers=_headers(),
+            timeout=15,
+        ) as c:
             r = await c.post("/v1/search", json={"query": query})
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
@@ -37,7 +42,11 @@ async def _handler_get_page(**kwargs: Any) -> dict[str, Any]:
     if not page_id:
         return {"error": "page_id is required"}
     try:
-        async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=15) as c:
+        async with httpx.AsyncClient(
+            base_url=_BASE,
+            headers=_headers(),
+            timeout=15,
+        ) as c:
             r = await c.get(f"/v1/pages/{page_id}")
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
@@ -55,7 +64,11 @@ async def _handler_query_database(**kwargs: Any) -> dict[str, Any]:
     if kwargs.get("sorts"):
         body["sorts"] = kwargs["sorts"]
     try:
-        async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=15) as c:
+        async with httpx.AsyncClient(
+            base_url=_BASE,
+            headers=_headers(),
+            timeout=15,
+        ) as c:
             r = await c.post(f"/v1/databases/{db_id}/query", json=body)
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
@@ -67,7 +80,11 @@ async def healthcheck() -> dict[str, Any]:
     if not os.environ.get("NOTION_API_KEY"):
         return {"status": "unhealthy", "error": "NOTION_API_KEY not set"}
     try:
-        async with httpx.AsyncClient(base_url=_BASE, headers=_headers(), timeout=10) as c:
+        async with httpx.AsyncClient(
+            base_url=_BASE,
+            headers=_headers(),
+            timeout=10,
+        ) as c:
             r = await c.get("/v1/users/me")
             r.raise_for_status()
             return {"status": "healthy"}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -12,8 +12,10 @@ from obscura.approvals import (
     list_tool_approval_requests,
     resolve_tool_approval_request,
 )
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["tool-approvals"])
 
@@ -29,14 +31,14 @@ async def tool_approvals_list(
             "count": len(approvals),
             "status": status,
             "approvals": [entry.to_dict() for entry in approvals],
-        }
+        },
     )
 
 
 @router.get("/tool-approvals/{approval_id}")
 async def tool_approvals_get(
     approval_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     approval = await get_tool_approval_request(approval_id, user_id=user.user_id)
     if approval is None:
@@ -48,7 +50,7 @@ async def tool_approvals_get(
 async def tool_approvals_resolve(
     approval_id: str,
     body: dict[str, object],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     approved_raw = body.get("approved")
     if not isinstance(approved_raw, bool):

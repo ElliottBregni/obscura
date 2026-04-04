@@ -1,4 +1,5 @@
 """Microsoft Graph provider — direct Graph API via OAuth (MSAL)."""
+
 from __future__ import annotations
 
 import json
@@ -13,12 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
-    """
-    Tools:
-      - msgraph.mail.send(to: list[str]|str, subject: str, body_html|body_text)
-      - msgraph.mail.list(folder='inbox', top=10)
-      - msgraph.calendar.events.list(start=None, end=None, timezone='UTC', top=50)
-      - msgraph.calendar.events.create(subject, start, end, attendees=[], body_html='', timezone='UTC')
+    """Tools:
+    - msgraph.mail.send(to: list[str]|str, subject: str, body_html|body_text)
+    - msgraph.mail.list(folder='inbox', top=10)
+    - msgraph.calendar.events.list(start=None, end=None, timezone='UTC', top=50)
+    - msgraph.calendar.events.create(subject, start, end, attendees=[], body_html='', timezone='UTC').
     """
     tool_name = kwargs.get("_tool_name", "")
 
@@ -48,7 +48,9 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                     "message": {
                         "subject": subject,
                         "body": body,
-                        "toRecipients": [{"emailAddress": {"address": addr}} for addr in (to or [])],
+                        "toRecipients": [
+                            {"emailAddress": {"address": addr}} for addr in (to or [])
+                        ],
                     },
                     "saveToSentItems": True,
                 }
@@ -58,7 +60,10 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                     content=json.dumps(payload),
                 )
                 if resp.status_code >= 300:
-                    return {"error": f"Graph error {resp.status_code}", "details": resp.text}
+                    return {
+                        "error": f"Graph error {resp.status_code}",
+                        "details": resp.text,
+                    }
                 return {"ok": True}
 
             if tool_name == "msgraph.mail.list":
@@ -67,7 +72,10 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                 url = f"https://graph.microsoft.com/v1.0/me/mailFolders/{folder}/messages?$top={top}"
                 resp = await client.get(url, headers=headers)
                 if resp.status_code >= 300:
-                    return {"error": f"Graph error {resp.status_code}", "details": resp.text}
+                    return {
+                        "error": f"Graph error {resp.status_code}",
+                        "details": resp.text,
+                    }
                 data = resp.json()
                 return {"messages": data.get("value", [])}
 
@@ -79,17 +87,22 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                     start = kwargs["start"]
                     end = kwargs["end"]
                     tz = kwargs.get("timezone", "UTC")
-                    params.extend([
-                        ("startDateTime", start),
-                        ("endDateTime", end),
-                        ("Prefer", f"outlook.timezone=\"{tz}\""),
-                    ])
+                    params.extend(
+                        [
+                            ("startDateTime", start),
+                            ("endDateTime", end),
+                            ("Prefer", f'outlook.timezone="{tz}"'),
+                        ],
+                    )
                     url = "https://graph.microsoft.com/v1.0/me/calendarView"
                 else:
                     url = "https://graph.microsoft.com/v1.0/me/events"
                 resp = await client.get(url, headers=headers, params=params)
                 if resp.status_code >= 300:
-                    return {"error": f"Graph error {resp.status_code}", "details": resp.text}
+                    return {
+                        "error": f"Graph error {resp.status_code}",
+                        "details": resp.text,
+                    }
                 return resp.json()
 
             if tool_name == "msgraph.calendar.events.create":
@@ -108,7 +121,11 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                     "end": {"dateTime": end, "timeZone": tz},
                     "attendees": [
                         {
-                            "emailAddress": {"address": a if isinstance(a, str) else a.get("address")},
+                            "emailAddress": {
+                                "address": a
+                                if isinstance(a, str)
+                                else a.get("address"),
+                            },
                             "type": "required",
                         }
                         for a in attendees
@@ -120,7 +137,10 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                     content=json.dumps(payload),
                 )
                 if resp.status_code >= 300:
-                    return {"error": f"Graph error {resp.status_code}", "details": resp.text}
+                    return {
+                        "error": f"Graph error {resp.status_code}",
+                        "details": resp.text,
+                    }
                 return resp.json()
 
             # Fallback: allow raw request

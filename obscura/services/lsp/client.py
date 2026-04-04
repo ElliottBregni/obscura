@@ -1,5 +1,4 @@
-"""
-obscura.services.lsp.client — JSON-RPC LSP client over stdio.
+"""obscura.services.lsp.client — JSON-RPC LSP client over stdio.
 
 Communicates with language servers using the Language Server Protocol
 (LSP) specification via stdin/stdout JSON-RPC 2.0.
@@ -28,18 +27,21 @@ class LSPClient:
     async def start(self, root_uri: str) -> None:
         """Send initialize + initialized handshake."""
         self._reader_task = asyncio.create_task(self._read_loop())
-        result = await self.request("initialize", {
-            "processId": None,
-            "rootUri": root_uri,
-            "capabilities": {
-                "textDocument": {
-                    "definition": {"dynamicRegistration": False},
-                    "references": {"dynamicRegistration": False},
-                    "hover": {"contentFormat": ["plaintext"]},
-                    "documentSymbol": {"dynamicRegistration": False},
+        result = await self.request(
+            "initialize",
+            {
+                "processId": None,
+                "rootUri": root_uri,
+                "capabilities": {
+                    "textDocument": {
+                        "definition": {"dynamicRegistration": False},
+                        "references": {"dynamicRegistration": False},
+                        "hover": {"contentFormat": ["plaintext"]},
+                        "documentSymbol": {"dynamicRegistration": False},
+                    },
                 },
             },
-        })
+        )
         await self.notify("initialized", {})
         self._initialized = True
         return result
@@ -96,7 +98,7 @@ class LSPClient:
                     if rid is not None and rid in self._pending:
                         if "error" in msg:
                             self._pending[rid].set_exception(
-                                RuntimeError(msg["error"].get("message", "LSP error"))
+                                RuntimeError(msg["error"].get("message", "LSP error")),
                             )
                         else:
                             self._pending[rid].set_result(msg.get("result"))
@@ -108,28 +110,40 @@ class LSPClient:
 
     async def goto_definition(self, file_path: str, line: int, character: int) -> Any:
         """Find definition of symbol at position."""
-        return await self.request("textDocument/definition", {
-            "textDocument": {"uri": f"file://{file_path}"},
-            "position": {"line": line - 1, "character": character - 1},
-        })
+        return await self.request(
+            "textDocument/definition",
+            {
+                "textDocument": {"uri": f"file://{file_path}"},
+                "position": {"line": line - 1, "character": character - 1},
+            },
+        )
 
     async def find_references(self, file_path: str, line: int, character: int) -> Any:
         """Find all references to symbol at position."""
-        return await self.request("textDocument/references", {
-            "textDocument": {"uri": f"file://{file_path}"},
-            "position": {"line": line - 1, "character": character - 1},
-            "context": {"includeDeclaration": True},
-        })
+        return await self.request(
+            "textDocument/references",
+            {
+                "textDocument": {"uri": f"file://{file_path}"},
+                "position": {"line": line - 1, "character": character - 1},
+                "context": {"includeDeclaration": True},
+            },
+        )
 
     async def hover(self, file_path: str, line: int, character: int) -> Any:
         """Get hover information for symbol at position."""
-        return await self.request("textDocument/hover", {
-            "textDocument": {"uri": f"file://{file_path}"},
-            "position": {"line": line - 1, "character": character - 1},
-        })
+        return await self.request(
+            "textDocument/hover",
+            {
+                "textDocument": {"uri": f"file://{file_path}"},
+                "position": {"line": line - 1, "character": character - 1},
+            },
+        )
 
     async def document_symbols(self, file_path: str) -> Any:
         """Get all symbols in a document."""
-        return await self.request("textDocument/documentSymbol", {
-            "textDocument": {"uri": f"file://{file_path}"},
-        })
+        return await self.request(
+            "textDocument/documentSymbol",
+            {
+                "textDocument": {"uri": f"file://{file_path}"},
+            },
+        )

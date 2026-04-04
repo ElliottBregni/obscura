@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from obscura.plugins.models import WorkflowSpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import WorkflowSpec
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +33,14 @@ class WorkflowIndex:
 
     def filter_by_plugin(self, plugin_id: str) -> list[WorkflowSpec]:
         return [
-            w for wid, w in self._workflows.items()
-            if self._owner.get(wid) == plugin_id
+            w for wid, w in self._workflows.items() if self._owner.get(wid) == plugin_id
         ]
 
     def executable_with(self, granted_capabilities: set[str]) -> list[WorkflowSpec]:
         """Return workflows whose required capabilities are all granted."""
         return [
-            w for w in self._workflows.values()
+            w
+            for w in self._workflows.values()
             if set(w.required_capabilities).issubset(granted_capabilities)
         ]
 

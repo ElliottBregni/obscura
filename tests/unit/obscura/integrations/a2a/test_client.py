@@ -24,7 +24,6 @@ from obscura.integrations.a2a.transports.rest import (
 from obscura.integrations.a2a.transports.sse import create_sse_router
 from obscura.integrations.a2a.types import A2AError, TaskState
 
-
 # ---------------------------------------------------------------------------
 # Test server fixture
 # ---------------------------------------------------------------------------

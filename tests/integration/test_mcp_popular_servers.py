@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import pytest
-
 from demos.mcp.run_generic_mcp_agent import add_server
+
 from obscura.integrations.mcp.config_loader import (
     build_runtime_server_configs,
     discover_mcp_servers,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,12 @@ POPULAR_SERVER_CASES: tuple[PopularServerCase, ...] = (
     ),
     PopularServerCase("jira", "stdio", "npx", ("-y", "jira-mcp"), "", "JIRA_API_TOKEN"),
     PopularServerCase(
-        "auth0", "stdio", "npx", ("-y", "@auth0/auth0-mcp-server", "run"), "", None
+        "auth0",
+        "stdio",
+        "npx",
+        ("-y", "@auth0/auth0-mcp-server", "run"),
+        "",
+        None,
     ),
     PopularServerCase(
         "postman",
@@ -48,7 +55,12 @@ POPULAR_SERVER_CASES: tuple[PopularServerCase, ...] = (
         "POSTMAN_API_KEY",
     ),
     PopularServerCase(
-        "playwright", "stdio", "npx", ("-y", "@playwright/mcp@latest"), "", None
+        "playwright",
+        "stdio",
+        "npx",
+        ("-y", "@playwright/mcp@latest"),
+        "",
+        None,
     ),
     PopularServerCase(
         "filesystem",
@@ -75,16 +87,36 @@ POPULAR_SERVER_CASES: tuple[PopularServerCase, ...] = (
         "NOTION_API_KEY",
     ),
     PopularServerCase(
-        "linear", "stdio", "npx", ("-y", "linear-mcp"), "", "LINEAR_API_KEY"
+        "linear",
+        "stdio",
+        "npx",
+        ("-y", "linear-mcp"),
+        "",
+        "LINEAR_API_KEY",
     ),
     PopularServerCase(
-        "stripe", "stdio", "npx", ("-y", "stripe-mcp"), "", "STRIPE_API_KEY"
+        "stripe",
+        "stdio",
+        "npx",
+        ("-y", "stripe-mcp"),
+        "",
+        "STRIPE_API_KEY",
     ),
     PopularServerCase(
-        "sentry", "stdio", "npx", ("-y", "sentry-mcp"), "", "SENTRY_AUTH_TOKEN"
+        "sentry",
+        "stdio",
+        "npx",
+        ("-y", "sentry-mcp"),
+        "",
+        "SENTRY_AUTH_TOKEN",
     ),
     PopularServerCase(
-        "gitlab", "stdio", "npx", ("-y", "gitlab-mcp"), "", "GITLAB_TOKEN"
+        "gitlab",
+        "stdio",
+        "npx",
+        ("-y", "gitlab-mcp"),
+        "",
+        "GITLAB_TOKEN",
     ),
     PopularServerCase(
         "confluence",
@@ -95,21 +127,46 @@ POPULAR_SERVER_CASES: tuple[PopularServerCase, ...] = (
         "CONFLUENCE_API_TOKEN",
     ),
     PopularServerCase(
-        "atlassian", "stdio", "npx", ("-y", "atlassian-mcp"), "", "ATLASSIAN_API_TOKEN"
+        "atlassian",
+        "stdio",
+        "npx",
+        ("-y", "atlassian-mcp"),
+        "",
+        "ATLASSIAN_API_TOKEN",
     ),
     PopularServerCase(
-        "jenkins", "stdio", "npx", ("-y", "jenkins-mcp"), "", "JENKINS_TOKEN"
+        "jenkins",
+        "stdio",
+        "npx",
+        ("-y", "jenkins-mcp"),
+        "",
+        "JENKINS_TOKEN",
     ),
     PopularServerCase("docker", "stdio", "npx", ("-y", "docker-mcp"), "", None),
     PopularServerCase("kubernetes", "stdio", "npx", ("-y", "kubernetes-mcp"), "", None),
     PopularServerCase(
-        "aws", "stdio", "npx", ("-y", "aws-mcp"), "", "AWS_ACCESS_KEY_ID"
+        "aws",
+        "stdio",
+        "npx",
+        ("-y", "aws-mcp"),
+        "",
+        "AWS_ACCESS_KEY_ID",
     ),
     PopularServerCase(
-        "gcp", "stdio", "npx", ("-y", "gcp-mcp"), "", "GOOGLE_APPLICATION_CREDENTIALS"
+        "gcp",
+        "stdio",
+        "npx",
+        ("-y", "gcp-mcp"),
+        "",
+        "GOOGLE_APPLICATION_CREDENTIALS",
     ),
     PopularServerCase(
-        "azure", "stdio", "npx", ("-y", "azure-mcp"), "", "AZURE_OPENAI_API_KEY"
+        "azure",
+        "stdio",
+        "npx",
+        ("-y", "azure-mcp"),
+        "",
+        "AZURE_OPENAI_API_KEY",
     ),
 )
 
@@ -288,8 +345,8 @@ def _write_single_server_config(path: Path, case: PopularServerCase) -> None:
                 "url": case.url,
                 "env": env,
                 "tools": [],
-            }
-        }
+            },
+        },
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -302,7 +359,7 @@ def _write_popular_config(path: Path) -> None:
                 "command": "npx",
                 "args": ["-y", "@modelcontextprotocol/server-github"],
                 "env": {
-                    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
                 },
                 "tools": [],
             },
@@ -349,14 +406,15 @@ def _write_popular_config(path: Path) -> None:
                 "env": {},
                 "tools": ["read_file", "write_file"],
             },
-        }
+        },
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 @pytest.mark.integration
 def test_popular_server_discovery_and_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "mcp-config.json"
     _write_popular_config(config_path)
@@ -450,7 +508,9 @@ def test_demo_add_server_round_trips_with_core_loader(tmp_path: Path) -> None:
     ids=[case.name for case in POPULAR_SERVER_CASES],
 )
 def test_popular_single_server_round_trip(
-    case: PopularServerCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    case: PopularServerCase,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / f"{case.name}-mcp-config.json"
     _write_single_server_config(config_path, case)
@@ -511,7 +571,8 @@ def test_top_100_github_mcp_catalog_round_trip(
     assert server.command == "npx"
 
     runtime_servers = build_runtime_server_configs(
-        discovered, selected_names=[case.name]
+        discovered,
+        selected_names=[case.name],
     )
     assert len(runtime_servers) == 1
     runtime_server = runtime_servers[0]

@@ -2,8 +2,9 @@
 
 from typing import TypedDict
 from unittest.mock import MagicMock
-from obscura.telemetry.context import enrich_span_with_user, get_user_id, get_user_email
+
 from obscura.auth.models import AuthenticatedUser
+from obscura.telemetry.context import enrich_span_with_user, get_user_email, get_user_id
 
 
 class _UserKw(TypedDict, total=False):
@@ -30,7 +31,7 @@ def _make_user(**overrides: object) -> AuthenticatedUser:
 
 
 class TestEnrichSpanWithUser:
-    def test_with_user(self):
+    def test_with_user(self) -> None:
         span = MagicMock()
         user = _make_user()
         enrich_span_with_user(span, user)
@@ -40,14 +41,14 @@ class TestEnrichSpanWithUser:
         span.set_attribute.assert_any_call("user.token_type", "user")
         span.set_attribute.assert_any_call("user.roles", "admin")
 
-    def test_with_none(self):
+    def test_with_none(self) -> None:
         span = MagicMock()
         enrich_span_with_user(span, None)
         span.set_attribute.assert_any_call("user.id", "system")
         span.set_attribute.assert_any_call("user.email", "system")
         span.set_attribute.assert_any_call("user.auth_type", "none")
 
-    def test_with_no_roles(self):
+    def test_with_no_roles(self) -> None:
         span = MagicMock()
         user = _make_user(roles=())
         enrich_span_with_user(span, user)
@@ -57,13 +58,13 @@ class TestEnrichSpanWithUser:
         ]
         assert len(role_calls) == 0
 
-    def test_with_multiple_roles(self):
+    def test_with_multiple_roles(self) -> None:
         span = MagicMock()
         user = _make_user(roles=("admin", "agent:copilot"))
         enrich_span_with_user(span, user)
         span.set_attribute.assert_any_call("user.roles", "admin,agent:copilot")
 
-    def test_with_none_org_id(self):
+    def test_with_none_org_id(self) -> None:
         span = MagicMock()
         user = _make_user(org_id=None)
         enrich_span_with_user(span, user)
@@ -71,20 +72,20 @@ class TestEnrichSpanWithUser:
 
 
 class TestGetUserId:
-    def test_with_user(self):
+    def test_with_user(self) -> None:
         assert get_user_id(_make_user()) == "u1"
 
-    def test_with_none(self):
+    def test_with_none(self) -> None:
         assert get_user_id(None) == "system"
 
-    def test_with_plain_object(self):
+    def test_with_plain_object(self) -> None:
         obj = MagicMock(spec=[])
         assert get_user_id(obj) == "system"
 
 
 class TestGetUserEmail:
-    def test_with_user(self):
+    def test_with_user(self) -> None:
         assert get_user_email(_make_user()) == "a@b.com"
 
-    def test_with_none(self):
+    def test_with_none(self) -> None:
         assert get_user_email(None) == "system"

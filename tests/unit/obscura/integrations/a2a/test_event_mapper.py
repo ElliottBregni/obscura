@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from obscura.core.types import AgentEvent, AgentEventKind
 from obscura.integrations.a2a.event_mapper import EventMapper
 from obscura.integrations.a2a.types import (
     StreamEvent,
@@ -11,8 +12,6 @@ from obscura.integrations.a2a.types import (
     TaskState,
     TaskStatusUpdateEvent,
 )
-from obscura.core.types import AgentEvent, AgentEventKind
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
-import datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+from obscura.kairos.away_summary import generate_away_summary
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.frustration import FrustrationDetector
 from obscura.kairos.undercover import UndercoverMode
-from obscura.kairos.away_summary import generate_away_summary
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_daily_log_append_and_read(tmp_path: Path, monkeypatch: object) -> None:
     # Monkey-patch log dir to tmp_path.
     import obscura.kairos.daily_log as dl
+
     monkeypatch.setattr(dl, "_log_dir", lambda: tmp_path)  # type: ignore[attr-defined]
 
     log = DailyLog()
@@ -72,7 +74,10 @@ def test_undercover_no_sanitize_when_off() -> None:
 async def test_away_summary() -> None:
     history = [
         ("user", "Fix the login bug in auth.py"),
-        ("assistant", "I found the issue in auth.py line 42. The token expiry check was missing."),
+        (
+            "assistant",
+            "I found the issue in auth.py line 42. The token expiry check was missing.",
+        ),
     ]
     summary = await generate_away_summary(history)
     assert len(summary) > 0

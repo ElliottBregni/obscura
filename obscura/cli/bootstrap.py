@@ -10,14 +10,17 @@ Canonical home for:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.cli.commands import REPLContext
 from obscura.cli.render import console, print_warning
 from obscura.core.client import ObscuraClient
+
+if TYPE_CHECKING:
+    from obscura.cli.commands import REPLContext
 
 
 def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
@@ -90,8 +93,8 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
         return None
     agent_name, prompt = parsed
     runtime = await ctx.get_runtime()
-    from obscura.manifest.models import AgentManifest
     from obscura.cli.render import LabeledStreamRenderer
+    from obscura.manifest.models import AgentManifest
 
     manifest: AgentManifest | None = None
     try:
@@ -102,7 +105,7 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
         if cfg is not None:
             if cfg.get("type") == "daemon":
                 print_warning(
-                    f"@{agent_name} is a daemon agent and cannot be invoked inline."
+                    f"@{agent_name} is a daemon agent and cannot be invoked inline.",
                 )
                 return ""
             skills_cfg = cfg.get("skills", {})
@@ -142,7 +145,7 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
         print_warning(f"Failed loading @{agent_name} manifest: {exc}")
     if manifest is None:
         print_warning(
-            f"No manifest found for @{agent_name}; running with SDK defaults."
+            f"No manifest found for @{agent_name}; running with SDK defaults.",
         )
         agent = runtime.spawn(agent_name, model=ctx.backend, system_prompt="")
     else:
@@ -166,18 +169,16 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
     else:
         renderer.finish()
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await agent.stop()
-        except Exception:
-            pass
     console.print()
     return "".join(output_chunks).strip()
 
 
 async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
-    from obscura.agent.supervisor import SupervisorConfig
     from obscura.agent.daemon_agent import DaemonAgent
     from obscura.agent.interaction import InteractionBus
+    from obscura.agent.supervisor import SupervisorConfig
     from obscura.cli.render import console as _console
 
     config_path = Path.home() / ".obscura" / "agents.yaml"
@@ -207,7 +208,7 @@ async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
                     notify_user=tdef.notify_user,
                     priority=tdef.priority,
                     data=im_data,
-                )
+                ),
             )
         bus = InteractionBus()
 
@@ -221,7 +222,8 @@ async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
 
         _logging.getLogger("obscura.agent.daemon_agent").setLevel(_logging.WARNING)
         daemon_client = ObscuraClient(
-            agent_def.model, system_prompt=agent_def.system_prompt
+            agent_def.model,
+            system_prompt=agent_def.system_prompt,
         )
         await daemon_client.__aenter__()
         daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
@@ -244,5 +246,3 @@ async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
         task._daemon_client = daemon_client  # type: ignore[attr-defined]
         return task
     return None
-
-

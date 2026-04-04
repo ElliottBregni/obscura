@@ -162,6 +162,7 @@ def check_python_imports(
 def _can_import(module_name: str) -> bool:
     """Check if a top-level module is importable (without actually importing)."""
     import importlib.util
+
     try:
         spec = importlib.util.find_spec(module_name)
         return spec is not None
@@ -186,6 +187,7 @@ def check_written_yaml_toml(
     if path.endswith((".yaml", ".yml")):
         try:
             import yaml  # type: ignore[import-untyped]
+
             with open(path) as f:
                 yaml.safe_load(f)
         except Exception as exc:
@@ -193,6 +195,7 @@ def check_written_yaml_toml(
     elif path.endswith(".toml"):
         try:
             import tomllib
+
             with open(path, "rb") as f:
                 tomllib.load(f)
         except Exception as exc:
@@ -330,6 +333,7 @@ def check_bash_error(
 
 def _chain_checks(*checkers: Any) -> Any:
     """Run multiple checkers, accumulate all errors (not just first)."""
+
     def _combined(
         tool_name: str,
         tool_input: dict[str, Any],
@@ -341,6 +345,7 @@ def _chain_checks(*checkers: Any) -> Any:
             if result is not None:
                 errors.append(result)
         return "".join(errors) if errors else None
+
     return _combined
 
 
@@ -374,7 +379,6 @@ TOOL_CHECKS: dict[str, Any] = {
     "Write": _write_check,
     "edit_file": _python_full_check,
     "Edit": _python_full_check,
-
     # Bash tool
     "bash": check_bash_error,
     "Bash": check_bash_error,

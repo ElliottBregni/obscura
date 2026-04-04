@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from obscura.mcp_server.config import ObscuraMCPServerConfig
+if TYPE_CHECKING:
+    from obscura.mcp_server.config import ObscuraMCPServerConfig
 
 
 class ObscuraAPIClient:

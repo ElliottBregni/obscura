@@ -1,5 +1,4 @@
-"""
-obscura.mcp.client — MCP client for connecting to external MCP servers.
+"""obscura.mcp.client — MCP client for connecting to external MCP servers.
 
 Supports stdio and SSE transports for connecting to MCP servers.
 
@@ -21,13 +20,14 @@ Usage::
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import subprocess
 import time
 import types
-from typing import Any, override
+from typing import Any, Self, override
 
 import httpx
 
@@ -49,8 +49,7 @@ logger = logging.getLogger(__name__)
 
 
 class MCPClient:
-    """
-    Client for connecting to MCP servers.
+    """Client for connecting to MCP servers.
 
     Supports stdio and SSE transports.
     """
@@ -62,7 +61,7 @@ class MCPClient:
         self._request_id = 0
         self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
-    async def __aenter__(self) -> "MCPClient":
+    async def __aenter__(self) -> Self:
         await self.connect()
         return self
 
@@ -200,7 +199,7 @@ class MCPClient:
                 elapsed = time.monotonic() - started
                 remaining = timeout - elapsed
                 if remaining <= 0:
-                    raise asyncio.TimeoutError
+                    raise TimeoutError
                 inbound = await asyncio.wait_for(
                     self._transport.receive(),
                     timeout=min(1.0, remaining),
@@ -263,7 +262,7 @@ class MCPClient:
                     name=tool_data["name"],
                     description=tool_data.get("description", ""),
                     inputSchema=tool_data.get("inputSchema", {}),
-                )
+                ),
             )
 
         return tools
@@ -299,7 +298,7 @@ class MCPClient:
                     name=res_data["name"],
                     description=res_data.get("description"),
                     mimeType=res_data.get("mimeType"),
-                )
+                ),
             )
 
         return resources
@@ -342,7 +341,7 @@ class MCPClient:
                     name=prompt_data["name"],
                     description=prompt_data.get("description"),
                     arguments=prompt_data.get("arguments"),
-                )
+                ),
             )
 
         return prompts
@@ -365,7 +364,7 @@ class MCPClient:
                 MCPPromptMessage(
                     role=msg_data["role"],
                     content=msg_data["content"],
-                )
+                ),
             )
 
         return MCPPromptResult(
@@ -452,17 +451,15 @@ class StdioTransport(MCPTransport):
         """Terminate the MCP server process."""
         if self._read_task:
             self._read_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._read_task
-            except asyncio.CancelledError:
-                pass
             self._read_task = None
 
         if self._process:
             self._process.terminate()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._process.kill()
                 await self._process.wait()
             self._process = None
@@ -488,7 +485,7 @@ class StdioTransport(MCPTransport):
                 self._message_queue.get(),
                 timeout=1.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     async def _read_loop(self) -> None:
@@ -510,7 +507,7 @@ class StdioTransport(MCPTransport):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Error reading from MCP server: {e}")
+            logger.exception(f"Error reading from MCP server: {e}")
 
 
 class SSETransport(MCPTransport):
@@ -585,10 +582,8 @@ class SSETransport(MCPTransport):
         """Disconnect from SSE endpoint."""
         if self._read_task:
             self._read_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._read_task
-            except asyncio.CancelledError:
-                pass
 
         if self._client:
             await self._client.aclose()
@@ -622,7 +617,7 @@ class SSETransport(MCPTransport):
                 self._message_queue.get(),
                 timeout=1.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
 

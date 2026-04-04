@@ -1,5 +1,4 @@
-"""
-sdk/vector_memory_rerank — Reranking functions for two-stage retrieval.
+"""sdk/vector_memory_rerank — Reranking functions for two-stage retrieval.
 
 Stage 2 rerankers score candidates from the initial vector search
 using additional signals like term overlap, recency, and metadata.
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class RerankRequest:
     query: str
-    entry: "VectorMemoryEntry"
+    entry: VectorMemoryEntry
     query_embedding: list[float]
 
 
@@ -61,8 +60,7 @@ def _tokenize(text: str) -> list[str]:
 
 @dataclass
 class BM25Reranker:
-    """
-    BM25-style term frequency reranker.
+    """BM25-style term frequency reranker.
 
     Scores based on query term overlap with the memory text.
     No external model required — pure term matching.
@@ -123,10 +121,17 @@ class RecencyReranker:
     ) -> float:
         if self.decay_config is not None:
             from obscura.vector_memory.decay import compute_decay
+
             accessed_at = getattr(entry, "accessed_at", None)
-            return compute_decay(
-                entry.memory_type, entry.created_at, accessed_at, self.decay_config,
-            ) * self.weight
+            return (
+                compute_decay(
+                    entry.memory_type,
+                    entry.created_at,
+                    accessed_at,
+                    self.decay_config,
+                )
+                * self.weight
+            )
 
         # Legacy fallback
         now = datetime.now(UTC)
@@ -140,13 +145,12 @@ class RecencyReranker:
 
 @dataclass
 class MetadataReranker:
-    """
-    Boost based on metadata signals.
+    """Boost based on metadata signals.
 
     Give bonus points when specific metadata keys are present and truthy.
     """
 
-    boost_keys: dict[str, float] = field(default_factory=lambda: dict[str, float]())
+    boost_keys: dict[str, float] = field(default_factory=dict[str, float])
 
     def score(
         self,
@@ -156,15 +160,14 @@ class MetadataReranker:
     ) -> float:
         total = 0.0
         for key, boost in self.boost_keys.items():
-            if key in entry.metadata and entry.metadata[key]:
+            if entry.metadata.get(key):
                 total += boost
         return total
 
 
 @dataclass
 class CompositeReranker:
-    """
-    Combine multiple rerankers with weights.
+    """Combine multiple rerankers with weights.
 
     Example::
 

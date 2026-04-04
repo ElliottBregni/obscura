@@ -1,5 +1,4 @@
-"""
-obscura.agent — BaseAgent with Analyze → Plan → Execute → Respond (APER) loop.
+"""obscura.agent — BaseAgent with Analyze → Plan → Execute → Respond (APER) loop.
 
 Provides a reusable agent abstraction. Subclasses override the four phase
 methods; each can be deterministic Python or call ``self._client.send()``
@@ -25,8 +24,11 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+import logging
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
+from obscura.agent.aper_loop_agent import APERMode, _should_use_aper
 from obscura.agent.interaction import AttentionPriority
 from obscura.core.types import AgentContext, AgentPhase, HookPoint
 
@@ -35,6 +37,8 @@ if TYPE_CHECKING:
     from obscura.core.client import ObscuraClient
     from obscura.core.context import ContextLoader
 
+
+_logger = logging.getLogger(__name__)
 
 HookCallback = Callable[[AgentContext], Awaitable[Any] | Any]
 
@@ -62,12 +66,14 @@ class BaseAgent:
         agent_id: str = "",
         context_loader: ContextLoader | None = None,
         interaction_bus: InteractionBus | None = None,
+        aper_mode: APERMode = APERMode.AUTO,
     ) -> None:
         self._client = client
         self._name = name
         self._agent_id = agent_id or f"agent-{name}"
         self._context_loader = context_loader
         self._interaction_bus = interaction_bus
+        self._aper_mode = aper_mode
         self._hooks: dict[HookPoint, list[HookCallback]] = {hp: [] for hp in HookPoint}
 
     @property
@@ -84,6 +90,11 @@ class BaseAgent:
     def interaction_bus(self) -> InteractionBus | None:
         """The interaction bus, if wired."""
         return self._interaction_bus
+
+    @property
+    def aper_mode(self) -> APERMode:
+        """Current APER mode."""
+        return self._aper_mode
 
     # -- Interaction helpers -------------------------------------------------
 
@@ -114,9 +125,7 @@ class BaseAgent:
                 timeout=timeout,
             )
         except Exception:
-            import logging as _logging
-
-            _logging.getLogger(__name__).exception("attention request failed")
+            _logger.exception("attention request failed")
             return None
 
     # -- Hook registration ---------------------------------------------------
@@ -150,17 +159,24 @@ class BaseAgent:
         """Format and return the final response. Sets ``ctx.response``."""
         raise NotImplementedError
 
+    # -- APER mode helpers ---------------------------------------------------
+
+    def _should_run_full_aper(self, input_data: Any) -> bool:
+        """Decide whether to run the full 4-phase APER cycle."""
+        if self._aper_mode is APERMode.ALWAYS:
+            return True
+        if self._aper_mode is APERMode.DISABLED:
+            return False
+        return _should_use_aper(input_data)
+
     # -- Orchestrator --------------------------------------------------------
 
     async def run(self, input_data: Any = None) -> Any:
-        """Execute the full APER loop and return ``ctx.response``.
+        """Execute the APER loop and return ``ctx.response``.
 
-        Hook firing order::
-
-            PRE_ANALYZE → analyze() → POST_ANALYZE →
-            PRE_PLAN → plan() → POST_PLAN →
-            PRE_EXECUTE → execute() → POST_EXECUTE →
-            PRE_RESPOND → respond() → POST_RESPOND
+        When ``aper_mode`` is ``AUTO`` or ``DISABLED``, simple inputs
+        skip the analyze/plan/respond phases and go straight to execute.
+        Simplified path fires only PRE_EXECUTE / POST_EXECUTE.
         """
         ctx = AgentContext(phase=AgentPhase.ANALYZE, input_data=input_data)
 
@@ -168,45 +184,63 @@ class BaseAgent:
         if self._context_loader is not None:
             ctx.metadata["system_prompt"] = self._context_loader.load_system_prompt()
 
-        # Get tracer lazily (no-op if OTel not installed)
         _tracer = _get_agent_tracer()
+        full_aper = self._should_run_full_aper(input_data)
 
         with _tracer.start_as_current_span(
             f"agent.run.{self._name}",
         ) as run_span:
             _set_span_attr(run_span, "agent.name", self._name)
+            _set_span_attr(run_span, "agent.aper_mode", self._aper_mode.value)
+            _set_span_attr(run_span, "agent.full_aper", full_aper)
 
-            # Analyze
-            ctx.phase = AgentPhase.ANALYZE
-            await self._fire_hook(HookPoint.PRE_ANALYZE, ctx)
-            with _tracer.start_as_current_span("agent.analyze") as span:
-                _set_span_attr(span, "agent.phase", "analyze")
-                await self.analyze(ctx)
-            await self._fire_hook(HookPoint.POST_ANALYZE, ctx)
+            if full_aper:
+                # Analyze
+                ctx.phase = AgentPhase.ANALYZE
+                await self._fire_hook(HookPoint.PRE_ANALYZE, ctx)
+                with _tracer.start_as_current_span("agent.analyze") as span:
+                    _set_span_attr(span, "agent.phase", "analyze")
+                    await self.analyze(ctx)
+                await self._fire_hook(HookPoint.POST_ANALYZE, ctx)
 
-            # Plan
-            ctx.phase = AgentPhase.PLAN
-            await self._fire_hook(HookPoint.PRE_PLAN, ctx)
-            with _tracer.start_as_current_span("agent.plan") as span:
-                _set_span_attr(span, "agent.phase", "plan")
-                await self.plan(ctx)
-            await self._fire_hook(HookPoint.POST_PLAN, ctx)
+                # Plan
+                ctx.phase = AgentPhase.PLAN
+                await self._fire_hook(HookPoint.PRE_PLAN, ctx)
+                with _tracer.start_as_current_span("agent.plan") as span:
+                    _set_span_attr(span, "agent.phase", "plan")
+                    await self.plan(ctx)
+                await self._fire_hook(HookPoint.POST_PLAN, ctx)
 
-            # Execute
-            ctx.phase = AgentPhase.EXECUTE
-            await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
-            with _tracer.start_as_current_span("agent.execute") as span:
-                _set_span_attr(span, "agent.phase", "execute")
-                await self.execute(ctx)
-            await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
+                # Execute
+                ctx.phase = AgentPhase.EXECUTE
+                await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
+                with _tracer.start_as_current_span("agent.execute") as span:
+                    _set_span_attr(span, "agent.phase", "execute")
+                    await self.execute(ctx)
+                await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
 
-            # Respond
-            ctx.phase = AgentPhase.RESPOND
-            await self._fire_hook(HookPoint.PRE_RESPOND, ctx)
-            with _tracer.start_as_current_span("agent.respond") as span:
-                _set_span_attr(span, "agent.phase", "respond")
-                await self.respond(ctx)
-            await self._fire_hook(HookPoint.POST_RESPOND, ctx)
+                # Respond
+                ctx.phase = AgentPhase.RESPOND
+                await self._fire_hook(HookPoint.PRE_RESPOND, ctx)
+                with _tracer.start_as_current_span("agent.respond") as span:
+                    _set_span_attr(span, "agent.phase", "respond")
+                    await self.respond(ctx)
+                await self._fire_hook(HookPoint.POST_RESPOND, ctx)
+            else:
+                _logger.debug(
+                    "[%s] APER skipped (mode=%s) — running execute only",
+                    self._name,
+                    self._aper_mode.value,
+                )
+                ctx.phase = AgentPhase.EXECUTE
+                if ctx.plan is None and ctx.input_data is not None:
+                    ctx.plan = str(ctx.input_data)
+
+                await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
+                with _tracer.start_as_current_span("agent.execute") as span:
+                    _set_span_attr(span, "agent.phase", "execute")
+                    await self.execute(ctx)
+                await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
 
         return ctx.response
 

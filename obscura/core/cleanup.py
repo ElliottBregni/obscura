@@ -1,5 +1,4 @@
-"""
-obscura.core.cleanup — Cleanup registry for graceful shutdown.
+"""obscura.core.cleanup — Cleanup registry for graceful shutdown.
 
 Registers cleanup tasks that run on process exit (SIGINT/SIGTERM)
 to remove stale files, close connections, and release resources.
@@ -21,7 +20,10 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

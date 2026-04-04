@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from obscura.core.tools import ToolRegistry, tool, infer_schema_from_hints
+from obscura.core.tools import ToolRegistry, infer_schema_from_hints, tool
 from obscura.core.types import ToolSpec
 
 
@@ -12,7 +12,10 @@ class TestToolRegistry:
     def test_register_and_get(self) -> None:
         reg = ToolRegistry()
         spec = ToolSpec(
-            name="t1", description="desc", parameters={}, handler=lambda: None
+            name="t1",
+            description="desc",
+            parameters={},
+            handler=lambda: None,
         )
         reg.register(spec)
         assert reg.get("t1") is spec
@@ -24,17 +27,17 @@ class TestToolRegistry:
     def test_all(self) -> None:
         reg = ToolRegistry()
         reg.register(
-            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None),
         )
         reg.register(
-            ToolSpec(name="t2", description="d2", parameters={}, handler=lambda: None)
+            ToolSpec(name="t2", description="d2", parameters={}, handler=lambda: None),
         )
         assert len(reg.all()) == 2
 
     def test_names(self) -> None:
         reg = ToolRegistry()
         reg.register(
-            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None),
         )
         assert "t1" in reg.names()
 
@@ -42,14 +45,14 @@ class TestToolRegistry:
         reg = ToolRegistry()
         assert len(reg) == 0
         reg.register(
-            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None),
         )
         assert len(reg) == 1
 
     def test_contains(self) -> None:
         reg = ToolRegistry()
         reg.register(
-            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None)
+            ToolSpec(name="t1", description="d1", parameters={}, handler=lambda: None),
         )
         assert "t1" in reg
         assert "t2" not in reg
@@ -107,7 +110,7 @@ class TestToolDecorator:
             return f"content of {path}"
 
         assert hasattr(read_file, "spec")
-        spec: Any = getattr(read_file, "spec")
+        spec: Any = read_file.spec
         assert spec.name == "read_file"
         assert spec.description == "Read a file"
 
@@ -116,7 +119,7 @@ class TestToolDecorator:
         def add(a: int, b: int) -> int:
             return a + b
 
-        spec: Any = getattr(add, "spec")
+        spec: Any = add.spec
         assert spec.parameters["properties"]["a"]["type"] == "integer"
         assert spec.parameters["properties"]["b"]["type"] == "integer"
 
@@ -149,5 +152,5 @@ class TestToolDecorator:
         def read(path: str, encoding: str = "utf-8") -> str:
             return ""
 
-        spec: Any = getattr(read, "spec")
+        spec: Any = read.spec
         assert "path" in spec.parameters["properties"]

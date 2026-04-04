@@ -1,5 +1,4 @@
-"""
-obscura.core.hooks — Event-driven hook registry for the agent loop.
+"""obscura.core.hooks — Event-driven hook registry for the agent loop.
 
 Hooks fire before and after every ``AgentEvent``.  A *before* hook can
 modify or suppress an event; an *after* hook observes it (side-effects
@@ -30,7 +29,8 @@ import asyncio
 import inspect
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.types import AgentEvent, AgentEventKind
 
@@ -67,6 +67,7 @@ class HookRegistry:
         # If fn is actually a coroutine object (already created), wrap it so
         # it's awaited when the hook runs.
         if inspect.iscoroutine(fn) or inspect.isawaitable(fn):
+
             async def _await_coroutine(event: AgentEvent) -> AgentEvent | None:
                 try:
                     result = fn
@@ -81,6 +82,7 @@ class HookRegistry:
 
         # If fn is not callable, provide a no-op pass-through hook.
         if not callable(fn):
+
             async def _noop(event: AgentEvent) -> AgentEvent | None:
                 return event
 
@@ -92,6 +94,7 @@ class HookRegistry:
     def _wrap_after_hook(self, fn: AfterHook) -> AfterHook:
         """Wrap after-hook similarly to before-hook wrapper."""
         if inspect.iscoroutine(fn) or inspect.isawaitable(fn):
+
             async def _await_coroutine(event: AgentEvent) -> None:
                 try:
                     result = fn
@@ -103,6 +106,7 @@ class HookRegistry:
             return _await_coroutine
 
         if not callable(fn):
+
             async def _noop(event: AgentEvent) -> None:
                 return None
 
@@ -305,13 +309,17 @@ def _make_command_before_hook(defn: HookDefinition) -> BeforeHook:
         if defn.matcher and event.tool_name != defn.matcher:
             return event  # pass through unmodified
         try:
-            payload = json.dumps({
-                "event": event.kind.value,
-                "tool_name": event.tool_name,
-                "tool_input": event.tool_input,
-            })
+            payload = json.dumps(
+                {
+                    "event": event.kind.value,
+                    "tool_name": event.tool_name,
+                    "tool_input": event.tool_input,
+                },
+            )
             proc = await asyncio.create_subprocess_exec(
-                "bash", "-c", defn.bash,
+                "bash",
+                "-c",
+                defn.bash,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -326,7 +334,7 @@ def _make_command_before_hook(defn: HookDefinition) -> BeforeHook:
                     res_dict = cast("dict[str, Any]", result)
                     if res_dict.get("permissionDecision") == "deny":
                         return None
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Hook command timed out: %s", defn.bash)
         except Exception:
             logger.warning("Hook command failed: %s", defn.bash, exc_info=True)
@@ -345,13 +353,19 @@ def _make_command_after_hook(defn: HookDefinition) -> AfterHook:
         if defn.matcher and event.tool_name != defn.matcher:
             return
         try:
-            payload = json.dumps({
-                "event": event.kind.value,
-                "tool_name": event.tool_name,
-                "tool_result": event.tool_result if hasattr(event, "tool_result") else "",
-            })
+            payload = json.dumps(
+                {
+                    "event": event.kind.value,
+                    "tool_name": event.tool_name,
+                    "tool_result": event.tool_result
+                    if hasattr(event, "tool_result")
+                    else "",
+                },
+            )
             proc = await asyncio.create_subprocess_exec(
-                "bash", "-c", defn.bash,
+                "bash",
+                "-c",
+                defn.bash,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -360,7 +374,7 @@ def _make_command_after_hook(defn: HookDefinition) -> AfterHook:
                 proc.communicate(payload.encode()),
                 timeout=defn.timeout_sec,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Hook command timed out: %s", defn.bash)
         except Exception:
             logger.warning("Hook command failed: %s", defn.bash, exc_info=True)

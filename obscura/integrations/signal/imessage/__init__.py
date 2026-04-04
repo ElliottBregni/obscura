@@ -6,4 +6,4 @@ from obscura.integrations.imessage.adapter import IMessageAdapter
 from obscura.integrations.imessage.client import IMessage, IMessageClient
 from obscura.integrations.imessage.state import IMessageState
 
-__all__ = ["IMessage", "IMessageClient", "IMessageState", "IMessageAdapter"]
+__all__ = ["IMessage", "IMessageAdapter", "IMessageClient", "IMessageState"]

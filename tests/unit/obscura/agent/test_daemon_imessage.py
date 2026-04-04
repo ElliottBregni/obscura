@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -17,6 +17,9 @@ from obscura.agent.daemon_agent import (
 )
 from obscura.agent.interaction import AttentionPriority
 from obscura.integrations.messaging.models import PlatformMessage
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestIMessageTrigger:
@@ -73,7 +76,7 @@ class TestDaemonIMessageHandling:
         )
 
         with patch(
-            "obscura.integrations.imessage.IMessageAdapter"
+            "obscura.integrations.imessage.IMessageAdapter",
         ) as MockAdapter:
             mock_adapter = AsyncMock()
             mock_adapter.send.return_value = True
@@ -105,12 +108,15 @@ class TestDaemonIMessageHandling:
 
         await daemon._handle_trigger(trigger)
         mock_client.run_loop_to_completion.assert_called_once_with(
-            "do something", max_turns=15,
+            "do something",
+            max_turns=15,
         )
 
     @pytest.mark.asyncio
     async def test_multi_turn_persists_for_same_conversation(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
@@ -164,7 +170,9 @@ class TestDaemonIMessageHandling:
 
     @pytest.mark.asyncio
     async def test_forced_recipient_overrides_sender_target(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
@@ -197,7 +205,9 @@ class TestDaemonIMessageHandling:
 
     @pytest.mark.asyncio
     async def test_send_timeout_records_failure_event(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
@@ -231,11 +241,11 @@ class TestDaemonIMessageHandling:
         con = sqlite3.connect(str(tmp_path / "messaging_state.db"))
         try:
             row = con.execute(
-                "SELECT success, error_text FROM messaging_send_events ORDER BY id DESC LIMIT 1"
+                "SELECT success, error_text FROM messaging_send_events ORDER BY id DESC LIMIT 1",
             ).fetchone()
             assert row == (0, "send_timeout")
             r2 = con.execute(
-                "SELECT event_type FROM messaging_runtime_events ORDER BY id DESC LIMIT 3"
+                "SELECT event_type FROM messaging_runtime_events ORDER BY id DESC LIMIT 3",
             ).fetchall()
             assert any(x[0] == "send_failed" for x in r2)
         finally:
@@ -243,14 +253,17 @@ class TestDaemonIMessageHandling:
 
     @pytest.mark.asyncio
     async def test_scheduler_crash_restarts_and_records_event(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
         daemon = DaemonAgent(mock_client, name="test", triggers=[])
 
         async def _boom() -> None:
-            raise RuntimeError("scheduler boom")
+            msg = "scheduler boom"
+            raise RuntimeError(msg)
 
         calls = {"n": 0}
 
@@ -271,7 +284,7 @@ class TestDaemonIMessageHandling:
         con = sqlite3.connect(str(tmp_path / "messaging_state.db"))
         try:
             rows = con.execute(
-                "SELECT event_type, details_json FROM messaging_runtime_events ORDER BY id DESC LIMIT 5"
+                "SELECT event_type, details_json FROM messaging_runtime_events ORDER BY id DESC LIMIT 5",
             ).fetchall()
             assert any(r[0] == "scheduler_restarted" for r in rows)
         finally:
@@ -279,7 +292,9 @@ class TestDaemonIMessageHandling:
 
     @pytest.mark.asyncio
     async def test_trigger_timeout_is_recorded(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
@@ -307,7 +322,7 @@ class TestDaemonIMessageHandling:
         con = sqlite3.connect(str(tmp_path / "messaging_state.db"))
         try:
             rows = con.execute(
-                "SELECT event_type FROM messaging_runtime_events ORDER BY id DESC LIMIT 20"
+                "SELECT event_type FROM messaging_runtime_events ORDER BY id DESC LIMIT 20",
             ).fetchall()
             evs = {r[0] for r in rows}
             assert "trigger_timeout" in evs
@@ -318,12 +333,19 @@ class TestDaemonIMessageHandling:
 
     @pytest.mark.asyncio
     async def test_message_trigger_uses_configured_max_turns(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
         mock_client.run_loop_to_completion.return_value = "ok"
-        daemon = DaemonAgent(mock_client, name="test", triggers=[], max_turns_per_trigger=7)
+        daemon = DaemonAgent(
+            mock_client,
+            name="test",
+            triggers=[],
+            max_turns_per_trigger=7,
+        )
         trig = Trigger(
             kind="imessage",
             data={
@@ -349,7 +371,9 @@ class TestDaemonIMessageHandling:
 
     @pytest.mark.asyncio
     async def test_poll_messages_dedupes_duplicate_message_ids_atomically(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OBSCURA_HOME", str(tmp_path))
         mock_client = AsyncMock()
@@ -363,7 +387,7 @@ class TestDaemonIMessageHandling:
             recipient_id="me",
             message_id="dup-1",
             text="hello",
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             metadata={"sender_raw": "+15551234567", "sender_target": "+15551234567"},
         )
         m2 = PlatformMessage(
@@ -374,7 +398,7 @@ class TestDaemonIMessageHandling:
             recipient_id="me",
             message_id="dup-1",
             text="hello again",
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             metadata={"sender_raw": "+15551234567", "sender_target": "+15551234567"},
         )
         trigger = MessageTrigger(

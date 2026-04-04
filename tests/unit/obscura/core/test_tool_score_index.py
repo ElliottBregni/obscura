@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-
 from typing import Any
 
 from obscura.core.tool_score_index import ToolScore, ToolScoreIndex
@@ -36,7 +35,12 @@ class TestToolScore:
         assert s.quality_score == 0.5
 
     def test_perfect_success(self) -> None:
-        s = ToolScore(name="t", invocation_count=10, success_count=10, last_used=time.time())
+        s = ToolScore(
+            name="t",
+            invocation_count=10,
+            success_count=10,
+            last_used=time.time(),
+        )
         assert s.success_rate == 1.0
         assert s.error_rate == 0.0
         assert s.quality_score > 0.5
@@ -110,7 +114,9 @@ class TestSQLitePersistence:
         db = str(tmp_path / "scores.db")
         index = ToolScoreIndex()
         for _ in range(5):
-            index.record(_make_entry(tool="persisted_tool", action="executed", latency_ms=100))
+            index.record(
+                _make_entry(tool="persisted_tool", action="executed", latency_ms=100),
+            )
         index.record(_make_entry(tool="persisted_tool", action="error", latency_ms=200))
         index.save(db)
 

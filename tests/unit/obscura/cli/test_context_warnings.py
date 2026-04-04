@@ -21,7 +21,7 @@ def _ctx(backend: str = "codex") -> REPLContext:
 
 def test_emit_context_warnings_on_threshold_cross(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("obscura.cli.__init__.console.print", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.__init__.console.print", calls.append)
     ctx = _ctx("codex")
 
     # 20% -> no warning
@@ -46,7 +46,7 @@ def test_emit_context_warnings_on_threshold_cross(monkeypatch) -> None:
 
 def test_emit_context_warnings_copilot_includes_budget(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("obscura.cli.__init__.console.print", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.__init__.console.print", calls.append)
     ctx = _ctx("copilot")
 
     _emit_context_warnings(ctx, tokens=30_000, context_window=100_000)
@@ -56,7 +56,7 @@ def test_emit_context_warnings_copilot_includes_budget(monkeypatch) -> None:
 
 def test_emit_context_warnings_retrigger_after_drop(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("obscura.cli.__init__.console.print", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.__init__.console.print", calls.append)
     ctx = _ctx("codex")
 
     _emit_context_warnings(ctx, tokens=30_000, context_window=100_000)  # cross 25

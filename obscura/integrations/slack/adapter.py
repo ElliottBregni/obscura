@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.slack.client import SlackClient
 from obscura.integrations.slack.state import SlackState
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 _PLATFORM = "slack"
@@ -52,7 +55,7 @@ class SlackAdapter:
                         text=msg.text,
                         timestamp=msg.timestamp,
                         metadata={"ts": msg.ts, "thread_ts": msg.thread_ts, **msg.raw},
-                    )
+                    ),
                 )
                 self._state.update(channel_id, msg.ts)
         return out

@@ -1,5 +1,4 @@
-"""
-obscura.heartbeat.store — Heartbeat data storage backends.
+"""obscura.heartbeat.store — Heartbeat data storage backends.
 
 Provides in-memory and persistent storage for heartbeat data.
 """
@@ -11,10 +10,13 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional, override
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, override
 
-from obscura.heartbeat.types import Heartbeat, HealthRecord, HealthStatus
+from obscura.heartbeat.types import HealthRecord, HealthStatus, Heartbeat
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -25,57 +27,46 @@ class HeartbeatStore(ABC):
     @abstractmethod
     async def register(self, agent_id: str, expected_interval: int = 30) -> None:
         """Register a new agent for monitoring."""
-        pass
 
     @abstractmethod
     async def unregister(self, agent_id: str) -> bool:
         """Unregister an agent from monitoring."""
-        pass
 
     @abstractmethod
     async def save(self, heartbeat: Heartbeat) -> None:
         """Save a heartbeat from an agent."""
-        pass
 
     @abstractmethod
-    async def get_last(self, agent_id: str) -> Optional[Heartbeat]:
+    async def get_last(self, agent_id: str) -> Heartbeat | None:
         """Get the last heartbeat for an agent."""
-        pass
 
     @abstractmethod
-    async def get_record(self, agent_id: str) -> Optional[HealthRecord]:
+    async def get_record(self, agent_id: str) -> HealthRecord | None:
         """Get the full health record for an agent."""
-        pass
 
     @abstractmethod
     async def list_agents(self) -> list[str]:
         """List all registered agent IDs."""
-        pass
 
     @abstractmethod
     async def list_records(self) -> list[HealthRecord]:
         """List all health records."""
-        pass
 
     @abstractmethod
     async def update_computed_status(self, agent_id: str, status: HealthStatus) -> None:
         """Update the computed health status for an agent."""
-        pass
 
     @abstractmethod
     async def increment_missed_count(self, agent_id: str) -> int:
         """Increment the missed heartbeat count for an agent."""
-        pass
 
     @abstractmethod
     async def reset_missed_count(self, agent_id: str) -> None:
         """Reset the missed heartbeat count for an agent."""
-        pass
 
 
 class InMemoryHeartbeatStore(HeartbeatStore):
-    """
-    In-memory storage for heartbeat data.
+    """In-memory storage for heartbeat data.
 
     Suitable for development and single-instance deployments.
     Data is lost on restart.
@@ -140,12 +131,12 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         logger.debug(f"Saved heartbeat from agent {agent_id}")
 
     @override
-    async def get_last(self, agent_id: str) -> Optional[Heartbeat]:
+    async def get_last(self, agent_id: str) -> Heartbeat | None:
         """Get the last heartbeat for an agent."""
         return self._heartbeats.get(agent_id)
 
     @override
-    async def get_record(self, agent_id: str) -> Optional[HealthRecord]:
+    async def get_record(self, agent_id: str) -> HealthRecord | None:
         """Get the full health record for an agent."""
         return self._records.get(agent_id)
 
@@ -166,7 +157,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
             self._records[agent_id].computed_status = status
             self._records[agent_id].last_updated = datetime.now()
             logger.debug(
-                f"Updated computed status for agent {agent_id} to {status.value}"
+                f"Updated computed status for agent {agent_id} to {status.value}",
             )
 
     @override
@@ -207,8 +198,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
 
 
 class FileHeartbeatStore(HeartbeatStore):
-    """
-    File-based storage for heartbeat data.
+    """File-based storage for heartbeat data.
 
     Persists data to disk for recovery across restarts.
     """
@@ -241,13 +231,13 @@ class FileHeartbeatStore(HeartbeatStore):
                         expected_interval=record_data.get("expected_interval", 30),
                         missed_count=record_data.get("missed_count", 0),
                         registered_at=datetime.fromisoformat(
-                            record_data["registered_at"]
+                            record_data["registered_at"],
                         ),
                         last_updated=datetime.fromisoformat(
-                            record_data["last_updated"]
+                            record_data["last_updated"],
                         ),
                         computed_status=HealthStatus(
-                            record_data.get("computed_status", "unknown")
+                            record_data.get("computed_status", "unknown"),
                         ),
                         alert_count=record_data.get("alert_count", 0),
                     )
@@ -258,7 +248,7 @@ class FileHeartbeatStore(HeartbeatStore):
                     self._memory_store.upsert_heartbeat(heartbeat)
 
                 logger.info(
-                    f"Loaded {len(self._memory_store.records)} records from disk"
+                    f"Loaded {len(self._memory_store.records)} records from disk",
                 )
             except Exception as e:
                 logger.warning(f"Failed to load data from disk: {e}")
@@ -304,11 +294,11 @@ class FileHeartbeatStore(HeartbeatStore):
         await self._persist_to_disk()
 
     @override
-    async def get_last(self, agent_id: str) -> Optional[Heartbeat]:
+    async def get_last(self, agent_id: str) -> Heartbeat | None:
         return await self._memory_store.get_last(agent_id)
 
     @override
-    async def get_record(self, agent_id: str) -> Optional[HealthRecord]:
+    async def get_record(self, agent_id: str) -> HealthRecord | None:
         return await self._memory_store.get_record(agent_id)
 
     @override
@@ -337,7 +327,7 @@ class FileHeartbeatStore(HeartbeatStore):
 
 
 # Default store instance (in-memory)
-_default_store: Optional[HeartbeatStore] = None
+_default_store: HeartbeatStore | None = None
 
 
 def get_default_store() -> HeartbeatStore:
@@ -348,7 +338,7 @@ def get_default_store() -> HeartbeatStore:
     return _default_store
 
 
-def set_default_store(store: Optional[HeartbeatStore]) -> None:
+def set_default_store(store: HeartbeatStore | None) -> None:
     """Set the default heartbeat store (pass None to clear for tests)."""
     global _default_store
     _default_store = store

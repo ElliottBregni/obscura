@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ def migrate_agents_yaml(
     -------
     MigrationResult
         Summary of what was migrated.
+
     """
     from obscura.core.config_io import load_config  # noqa: PLC0415
 

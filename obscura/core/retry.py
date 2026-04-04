@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from obscura.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 T = TypeVar("T")
 
 
-async def with_retry(
+async def with_retry[T](
     fn: Callable[..., Awaitable[T]],
     *args: Any,
     max_retries: int = 2,
@@ -52,6 +55,7 @@ async def with_retry(
         If the circuit breaker is open.
     Exception
         The last exception from *fn* after all retries are exhausted.
+
     """
     last_exc: Exception | None = None
     attempts = max_retries + 1  # total attempts = retries + 1
@@ -60,7 +64,8 @@ async def with_retry(
         # Check circuit breaker
         if circuit is not None and not circuit.allow_request():
             raise CircuitOpenError(
-                circuit.name, circuit.time_until_half_open()
+                circuit.name,
+                circuit.time_until_half_open(),
             )
 
         try:
@@ -88,7 +93,7 @@ async def with_retry(
             _record_retry(attempt + 1)
 
             # Exponential backoff
-            backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+            backoff = min(initial_backoff * (2**attempt), max_backoff)
             if jitter:
                 backoff *= 0.75 + random.random() * 0.5  # ±25%
 

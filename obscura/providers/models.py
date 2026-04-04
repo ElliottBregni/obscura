@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +19,7 @@ class MCPServerConfig:
     working_dir: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "MCPServerConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> MCPServerConfig:
         return cls(
             transport=str(data.get("transport", "")),
             command=list(data["command"])
@@ -70,7 +73,7 @@ class ModelInfo:
     object: str
 
     @classmethod
-    def from_openai(cls, obj: Any) -> "ModelInfo":
+    def from_openai(cls, obj: Any) -> ModelInfo:
         return cls(id=str(obj.id), object=str(getattr(obj, "object", "model")))
 
     def to_dict(self) -> dict[str, str]:
@@ -92,7 +95,7 @@ class CompletionParams:
     tool_choice: Any | None = None
 
     @classmethod
-    def from_kwargs(cls, kwargs: Mapping[str, Any]) -> "CompletionParams":
+    def from_kwargs(cls, kwargs: Mapping[str, Any]) -> CompletionParams:
         valid_keys = {
             "temperature",
             "top_p",
@@ -129,7 +132,7 @@ class AgentRequest:
     timeout_s: float | None = None
 
     @classmethod
-    def from_kwargs(cls, prompt: str, kwargs: Mapping[str, Any]) -> "AgentRequest":
+    def from_kwargs(cls, prompt: str, kwargs: Mapping[str, Any]) -> AgentRequest:
         """Extract an ``AgentRequest`` from the legacy ``prompt + **kwargs`` pattern."""
         return cls(
             prompt=prompt,

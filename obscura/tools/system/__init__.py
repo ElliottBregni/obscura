@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import difflib
 import fnmatch
 import html as _html
@@ -34,10 +35,16 @@ from obscura.tools.system.intelligence import (
 )
 from obscura.tools.system.team_prompt import read_team_prompt
 
+
 def _strip_html(raw: str) -> str:
     """Strip HTML tags and decode entities, returning plain text."""
     # Drop script/style blocks entirely
-    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(
+        r"<(script|style)[^>]*>.*?</\1>",
+        "",
+        raw,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
     # Replace block-level tags with newlines for readability
     text = re.sub(r"</(p|div|li|tr|h[1-6]|br)[^>]*>", "\n", text, flags=re.IGNORECASE)
     # Strip remaining tags
@@ -64,7 +71,7 @@ _DEFAULT_DENIED_COMMANDS: tuple[str, ...] = (
 def _string_key_dict(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    mapping = cast(dict[Any, Any], value)
+    mapping = cast("dict[Any, Any]", value)
     return {str(key): item for key, item in mapping.items()}
 
 
@@ -131,12 +138,16 @@ def _resolve_path(path: str) -> Path:
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
         import os
+
         if os.environ.get("OBSCURA_TOOLS_RELATIVE_TO_CWD", "").lower() in (
-            "1", "true", "yes",
+            "1",
+            "true",
+            "yes",
         ):
             candidate = Path.cwd() / candidate
         else:
             from obscura.core.paths import resolve_obscura_output_dir
+
             candidate = resolve_obscura_output_dir() / candidate
     return candidate.resolve()
 
@@ -200,9 +211,10 @@ async def run_python3(
     )
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
+            proc.communicate(),
+            timeout=timeout_seconds,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return _json_error("timeout")
@@ -212,7 +224,7 @@ async def run_python3(
             "exit_code": proc.returncode,
             "stdout": stdout.decode("utf-8", errors="replace"),
             "stderr": stderr.decode("utf-8", errors="replace"),
-        }
+        },
     )
 
 
@@ -244,9 +256,10 @@ async def run_npx(
     )
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
+            proc.communicate(),
+            timeout=timeout_seconds,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return _json_error("timeout")
@@ -256,7 +269,7 @@ async def run_npx(
             "exit_code": proc.returncode,
             "stdout": stdout.decode("utf-8", errors="replace"),
             "stderr": stderr.decode("utf-8", errors="replace"),
-        }
+        },
     )
 
 
@@ -309,9 +322,10 @@ async def run_command(
     )
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
+            proc.communicate(),
+            timeout=timeout_seconds,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return _json_error("timeout")
@@ -323,7 +337,7 @@ async def run_command(
             "stdout": stdout.decode("utf-8", errors="replace"),
             "stderr": stderr.decode("utf-8", errors="replace"),
             "command": normalized_command,
-        }
+        },
     )
 
 
@@ -338,11 +352,20 @@ async def run_command(
         "type": "object",
         "properties": {
             "script": {"type": "string", "description": "Shell script to execute."},
-            "command": {"type": "string", "description": "Alias for script (LLM compat)."},
+            "command": {
+                "type": "string",
+                "description": "Alias for script (LLM compat).",
+            },
             "cwd": {"type": "string"},
             "timeout_seconds": {"type": "number"},
-            "description": {"type": "string", "description": "User-facing description of what this command does."},
-            "run_in_background": {"type": "boolean", "description": "Run async and return a task_id immediately."},
+            "description": {
+                "type": "string",
+                "description": "User-facing description of what this command does.",
+            },
+            "run_in_background": {
+                "type": "boolean",
+                "description": "Run async and return a task_id immediately.",
+            },
         },
     },
 )
@@ -360,19 +383,22 @@ async def run_shell(
 
     if run_in_background:
         from obscura.core.background_tasks import get_background_task_manager
+
         mgr = get_background_task_manager()
         task_id = await mgr.start(
             f"/bin/zsh -lc {_shell_quote(actual_script)}",
             cwd=cwd,
             timeout=float(timeout_seconds),
         )
-        return json.dumps({
-            "ok": True,
-            "background": True,
-            "task_id": task_id,
-            "command": actual_script[:200],
-            "description": description,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "background": True,
+                "task_id": task_id,
+                "command": actual_script[:200],
+                "description": description,
+            },
+        )
 
     result_json = await run_command(
         "/bin/zsh",
@@ -391,6 +417,7 @@ async def run_shell(
             output_dir = Path.home() / ".obscura" / "output"
             output_dir.mkdir(parents=True, exist_ok=True)
             import hashlib
+
             h = hashlib.sha256(val.encode("utf-8")).hexdigest()[:12]
             output_path = output_dir / f"{key}_{h}.txt"
             output_path.write_text(val, encoding="utf-8")
@@ -471,19 +498,23 @@ async def web_fetch(
             truncated = len(raw) > max_bytes
             data = raw[:max_bytes]
             text = data.decode("utf-8", errors="replace")
-            response_headers = {k: v for k, v in response.headers.items()}
+            response_headers = dict(response.headers.items())
             content_type = response_headers.get("Content-Type", "").lower()
             is_html = "html" in content_type or text.lstrip().startswith("<")
 
             # Convert HTML to Markdown if available, else strip tags.
-            if is_html:
-                body_text = _html_to_markdown(text)
-            else:
-                body_text = text
+            body_text = _html_to_markdown(text) if is_html else text
 
             # Token budget truncation.
-            from obscura.core.context_window import truncate_to_token_budget, MAX_WEB_FETCH_TOKENS
-            body_text, token_truncated = truncate_to_token_budget(body_text, MAX_WEB_FETCH_TOKENS)
+            from obscura.core.context_window import (
+                MAX_WEB_FETCH_TOKENS,
+                truncate_to_token_budget,
+            )
+
+            body_text, token_truncated = truncate_to_token_budget(
+                body_text,
+                MAX_WEB_FETCH_TOKENS,
+            )
             truncated = truncated or token_truncated
 
             # Redirect detection.
@@ -491,6 +522,7 @@ async def web_fetch(
             redirect_info: dict[str, object] = {}
             if final_url != url:
                 from urllib.parse import urlparse
+
                 orig_host = urlparse(url).hostname
                 final_host = urlparse(final_url).hostname
                 if orig_host != final_host:
@@ -523,13 +555,15 @@ async def web_fetch(
             return result_json
     except url_error.HTTPError as exc:
         raw_error = exc.read(max_bytes)
-        return json.dumps({
-            "ok": False,
-            "url": url,
-            "status": exc.code,
-            "error": "http_error",
-            "body": raw_error.decode("utf-8", errors="replace"),
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "url": url,
+                "status": exc.code,
+                "error": "http_error",
+                "body": raw_error.decode("utf-8", errors="replace"),
+            },
+        )
     except Exception as exc:
         return _json_error("web_fetch_failed", url=url, detail=str(exc))
 
@@ -538,7 +572,12 @@ def _html_to_markdown(html_text: str) -> str:
     """Convert HTML to Markdown using markdownify if available, else strip tags."""
     try:
         import markdownify
-        return markdownify.markdownify(html_text, heading_style="ATX", strip=["img", "script", "style"])
+
+        return markdownify.markdownify(
+            html_text,
+            heading_style="ATX",
+            strip=["img", "script", "style"],
+        )
     except ImportError:
         return _strip_html(html_text)
 
@@ -618,12 +657,29 @@ async def web_search(
     except Exception as exc:
         return _json_error("web_search_fetch_failed", detail=str(exc))
 
-    clean = lambda s: re.sub(r"<[^>]+>", "", _html.unescape(s)).strip()
+    def clean(s):
+        return re.sub(r"<[^>]+>", "", _html.unescape(s)).strip()
 
-    titles   = [clean(t) for t in re.findall(r'class="result__a"[^>]*>(.*?)</a>', raw_html)]
-    snippets = [clean(s) for s in re.findall(r'class="result__snippet"[^>]*>(.*?)</span>', raw_html, re.DOTALL)]
-    hrefs    = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', raw_html)
-    urls_fb  = [clean(u) for u in re.findall(r'class="result__url"[^>]*>\s*(.*?)\s*</a>', raw_html, re.DOTALL)]
+    titles = [
+        clean(t) for t in re.findall(r'class="result__a"[^>]*>(.*?)</a>', raw_html)
+    ]
+    snippets = [
+        clean(s)
+        for s in re.findall(
+            r'class="result__snippet"[^>]*>(.*?)</span>',
+            raw_html,
+            re.DOTALL,
+        )
+    ]
+    hrefs = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', raw_html)
+    urls_fb = [
+        clean(u)
+        for u in re.findall(
+            r'class="result__url"[^>]*>\s*(.*?)\s*</a>',
+            raw_html,
+            re.DOTALL,
+        )
+    ]
 
     items: list[dict[str, str]] = []
     for i, title in enumerate(titles):
@@ -643,17 +699,24 @@ async def web_search(
         if url and (allowed_domains or blocked_domains):
             try:
                 from urllib.parse import urlparse as _urlparse
+
                 domain = (_urlparse(url).hostname or "").lower()
             except Exception:
                 domain = ""
-            if allowed_domains and not any(domain.endswith(d.lower()) for d in allowed_domains):
+            if allowed_domains and not any(
+                domain.endswith(d.lower()) for d in allowed_domains
+            ):
                 continue
-            if blocked_domains and any(domain.endswith(d.lower()) for d in blocked_domains):
+            if blocked_domains and any(
+                domain.endswith(d.lower()) for d in blocked_domains
+            ):
                 continue
 
         items.append({"title": title, "url": url, "snippet": snippet})
 
-    return json.dumps({"ok": True, "query": query, "count": len(items), "results": items})
+    return json.dumps(
+        {"ok": True, "query": query, "count": len(items), "results": items},
+    )
 
 
 @tool(
@@ -689,30 +752,35 @@ async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) ->
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_seconds
+                proc.communicate(),
+                timeout=timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return json.dumps({"ok": False, "error": "timeout", "prompt": prompt})
         output = stdout.decode("utf-8", errors="replace").strip()
         err = stderr.decode("utf-8", errors="replace").strip()
-        return json.dumps({
-            "ok": proc.returncode == 0,
-            "exit_code": proc.returncode,
-            "result": output,
-            "stderr": err,
-            "prompt": prompt,
-            "target": target,
-        })
+        return json.dumps(
+            {
+                "ok": proc.returncode == 0,
+                "exit_code": proc.returncode,
+                "result": output,
+                "stderr": err,
+                "prompt": prompt,
+                "target": target,
+            },
+        )
     except Exception as exc:
-        return json.dumps({
-            "ok": False,
-            "error": "delegation_failed",
-            "message": str(exc),
-            "prompt": prompt,
-            "target": target,
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "delegation_failed",
+                "message": str(exc),
+                "prompt": prompt,
+                "target": target,
+            },
+        )
 
 
 @tool(
@@ -738,7 +806,7 @@ async def which_command(command: str) -> str:
             "command": normalized,
             "path": discovered,
             "exists": True,
-        }
+        },
     )
 
 
@@ -767,14 +835,14 @@ async def discover_all_commands(
             "bash",
             args=["-lc", f"compgen {compgen_type} | sort -u"],
             timeout_seconds=30.0,
-        )
+        ),
     )
     if not payload.get("ok", False):
         fallback = json.loads(
             await run_shell(
                 "echo \"$PATH\" | tr ':' '\\n' | while read -r p; do ls -1 \"$p\" 2>/dev/null; done | sort -u",
                 timeout_seconds=30.0,
-            )
+            ),
         )
         if not fallback.get("ok", False):
             return json.dumps(payload)
@@ -793,7 +861,7 @@ async def discover_all_commands(
             "prefix": prefix,
             "include_builtins": include_builtins,
             "commands": commands,
-        }
+        },
     )
 
 
@@ -824,7 +892,7 @@ async def list_directory(path: str) -> str:
                 "is_dir": child.is_dir(),
                 "is_file": child.is_file(),
                 "size": child.stat().st_size if child.is_file() else 0,
-            }
+            },
         )
     return json.dumps({"ok": True, "path": str(target), "entries": entries})
 
@@ -840,10 +908,19 @@ async def list_directory(path: str) -> str:
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "max_bytes": {"type": "integer", "description": "Max bytes for text files (default 200K)."},
-            "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed)."},
+            "max_bytes": {
+                "type": "integer",
+                "description": "Max bytes for text files (default 200K).",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Line number to start reading from (1-indexed).",
+            },
             "limit": {"type": "integer", "description": "Number of lines to read."},
-            "pages": {"type": "string", "description": "Page range for PDFs (e.g. '1-5', '3', '10-20')."},
+            "pages": {
+                "type": "string",
+                "description": "Page range for PDFs (e.g. '1-5', '3', '10-20').",
+            },
         },
         "required": ["path"],
     },
@@ -855,7 +932,7 @@ async def read_text_file(
     limit: int = 0,
     pages: str = "",
 ) -> str:
-    from obscura.tools.system.file_state import record_read, is_unchanged
+    from obscura.tools.system.file_state import is_unchanged, record_read
 
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
@@ -879,20 +956,25 @@ async def read_text_file(
         import base64 as _b64
 
         media_map = {
-            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-            ".gif": "image/gif", ".webp": "image/webp",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
         }
         data = target.read_bytes()
         encoded = _b64.b64encode(data).decode("ascii")
         record_read(target, offset=read_offset, limit=read_limit)
-        return json.dumps({
-            "ok": True,
-            "kind": "image",
-            "path": str(target),
-            "media_type": media_map.get(suffix, "application/octet-stream"),
-            "base64": encoded,
-            "size_bytes": len(data),
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "kind": "image",
+                "path": str(target),
+                "media_type": media_map.get(suffix, "application/octet-stream"),
+                "base64": encoded,
+                "size_bytes": len(data),
+            },
+        )
 
     # --- PDF files ---
     if suffix == ".pdf":
@@ -919,14 +1001,16 @@ async def read_text_file(
         except Exception as exc:
             return _json_error("pdf_read_error", detail=str(exc))
         record_read(target, offset=read_offset, limit=read_limit)
-        return json.dumps({
-            "ok": True,
-            "kind": "pdf",
-            "path": str(target),
-            "text": text,
-            "pages_read": f"{start_page}-{end_page}",
-            "total_pages": total_pages,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "kind": "pdf",
+                "path": str(target),
+                "text": text,
+                "pages_read": f"{start_page}-{end_page}",
+                "total_pages": total_pages,
+            },
+        )
 
     # --- Jupyter notebooks ---
     if suffix == ".ipynb":
@@ -943,22 +1027,26 @@ async def read_text_file(
                         outputs.append("".join(out["text"]))
                     elif "data" in out and "text/plain" in out["data"]:
                         outputs.append("".join(out["data"]["text/plain"]))
-                parsed_cells.append({
-                    "index": idx,
-                    "cell_type": cell_type,
-                    "source": source,
-                    "outputs": outputs,
-                })
+                parsed_cells.append(
+                    {
+                        "index": idx,
+                        "cell_type": cell_type,
+                        "source": source,
+                        "outputs": outputs,
+                    },
+                )
         except Exception as exc:
             return _json_error("notebook_parse_error", detail=str(exc))
         record_read(target, offset=read_offset, limit=read_limit)
-        return json.dumps({
-            "ok": True,
-            "kind": "notebook",
-            "path": str(target),
-            "cell_count": len(parsed_cells),
-            "cells": parsed_cells,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "kind": "notebook",
+                "path": str(target),
+                "cell_count": len(parsed_cells),
+                "cells": parsed_cells,
+            },
+        )
 
     # --- Default: text files ---
     data = target.read_bytes()
@@ -976,27 +1064,31 @@ async def read_text_file(
         end = (start + limit) if limit > 0 else total_lines
         selected = all_lines[start:end]
         # Add line numbers.
-        numbered = "".join(
-            f"{start + i + 1:>6}\t{ln}" for i, ln in enumerate(selected)
-        )
+        numbered = "".join(f"{start + i + 1:>6}\t{ln}" for i, ln in enumerate(selected))
         text = numbered
         truncated = end < total_lines
 
     # Apply token budget.
-    from obscura.core.context_window import truncate_to_token_budget, MAX_FILE_READ_TOKENS
+    from obscura.core.context_window import (
+        MAX_FILE_READ_TOKENS,
+        truncate_to_token_budget,
+    )
+
     text, token_truncated = truncate_to_token_budget(text, MAX_FILE_READ_TOKENS)
     truncated = truncated or token_truncated
 
     record_read(target, offset=read_offset, limit=read_limit)
-    return json.dumps({
-        "ok": True,
-        "kind": "text",
-        "path": str(target),
-        "text": text,
-        "truncated": truncated,
-        "bytes_read": len(data),
-        "total_lines": total_lines,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "kind": "text",
+            "path": str(target),
+            "text": text,
+            "truncated": truncated,
+            "bytes_read": len(data),
+            "total_lines": total_lines,
+        },
+    )
 
 
 def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
@@ -1036,8 +1128,8 @@ async def write_text_file(
     overwrite: bool = True,
     create_dirs: bool = True,
 ) -> str:
-    from obscura.tools.system.file_state import check_staleness
     from obscura.tools.system.diff_utils import compute_unified_diff
+    from obscura.tools.system.file_state import check_staleness
 
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
@@ -1067,13 +1159,15 @@ async def write_text_file(
     # Generate diff.
     diff = compute_unified_diff(original, text, str(target))
 
-    return json.dumps({
-        "ok": True,
-        "path": str(target),
-        "bytes_written": len(text.encode("utf-8")),
-        "is_new": is_new,
-        "diff": diff,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(target),
+            "bytes_written": len(text.encode("utf-8")),
+            "is_new": is_new,
+            "diff": diff,
+        },
+    )
 
 
 @tool(
@@ -1104,7 +1198,7 @@ async def append_text_file(path: str, text: str, create_dirs: bool = True) -> st
             "ok": True,
             "path": str(target),
             "bytes_appended": len(text.encode("utf-8")),
-        }
+        },
     )
 
 
@@ -1247,7 +1341,9 @@ async def list_processes() -> str:
 )
 async def signal_process(pid: int, signal: str = "TERM") -> str:
     return await run_command(
-        "kill", args=[f"-{signal}", str(pid)], timeout_seconds=10.0
+        "kill",
+        args=[f"-{signal}", str(pid)],
+        timeout_seconds=10.0,
     )
 
 
@@ -1380,7 +1476,7 @@ async def manage_crontab(
         if not schedule.strip() or not command.strip():
             return _json_error("schedule_and_command_required")
         list_payload = json.loads(
-            await run_command("crontab", args=["-l"], timeout_seconds=20.0)
+            await run_command("crontab", args=["-l"], timeout_seconds=20.0),
         )
         existing = ""
         if list_payload.get("ok"):
@@ -1395,7 +1491,7 @@ async def manage_crontab(
 
     # remove
     list_payload = json.loads(
-        await run_command("crontab", args=["-l"], timeout_seconds=20.0)
+        await run_command("crontab", args=["-l"], timeout_seconds=20.0),
     )
     existing_lines: list[str] = []
     if list_payload.get("ok"):
@@ -1427,24 +1523,63 @@ async def manage_crontab(
     {
         "type": "object",
         "properties": {
-            "pattern": {"type": "string", "description": "Regex pattern to search for."},
-            "path": {"type": "string", "description": "File or directory to search in."},
-            "include": {"type": "string", "description": "Glob filter for filenames (e.g. '*.py')."},
-            "glob": {"type": "string", "description": "Glob pattern passed to rg --glob (e.g. '*.{ts,tsx}')."},
-            "type": {"type": "string", "description": "File type filter for rg --type (e.g. 'py', 'js')."},
+            "pattern": {
+                "type": "string",
+                "description": "Regex pattern to search for.",
+            },
+            "path": {
+                "type": "string",
+                "description": "File or directory to search in.",
+            },
+            "include": {
+                "type": "string",
+                "description": "Glob filter for filenames (e.g. '*.py').",
+            },
+            "glob": {
+                "type": "string",
+                "description": "Glob pattern passed to rg --glob (e.g. '*.{ts,tsx}').",
+            },
+            "type": {
+                "type": "string",
+                "description": "File type filter for rg --type (e.g. 'py', 'js').",
+            },
             "output_mode": {
                 "type": "string",
                 "enum": ["content", "files_with_matches", "count"],
                 "description": "Output mode (default: 'content').",
             },
-            "context": {"type": "integer", "description": "Context lines before and after each match (-C)."},
-            "before_context": {"type": "integer", "description": "Lines before each match (-B)."},
-            "after_context": {"type": "integer", "description": "Lines after each match (-A)."},
-            "case_sensitive": {"type": "boolean", "description": "Case-sensitive matching (default: true)."},
-            "multiline": {"type": "boolean", "description": "Enable multiline matching."},
-            "head_limit": {"type": "integer", "description": "Limit results (default: 250; 0=unlimited)."},
-            "offset": {"type": "integer", "description": "Skip first N results before applying head_limit."},
-            "max_results": {"type": "integer", "description": "Legacy alias for head_limit."},
+            "context": {
+                "type": "integer",
+                "description": "Context lines before and after each match (-C).",
+            },
+            "before_context": {
+                "type": "integer",
+                "description": "Lines before each match (-B).",
+            },
+            "after_context": {
+                "type": "integer",
+                "description": "Lines after each match (-A).",
+            },
+            "case_sensitive": {
+                "type": "boolean",
+                "description": "Case-sensitive matching (default: true).",
+            },
+            "multiline": {
+                "type": "boolean",
+                "description": "Enable multiline matching.",
+            },
+            "head_limit": {
+                "type": "integer",
+                "description": "Limit results (default: 250; 0=unlimited).",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Skip first N results before applying head_limit.",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Legacy alias for head_limit.",
+            },
         },
         "required": ["pattern", "path"],
     },
@@ -1560,8 +1695,11 @@ async def _grep_via_ripgrep(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-    except asyncio.TimeoutError:
+        stdout_bytes, _stderr_bytes = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=30.0,
+        )
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return _json_error("timeout", detail="ripgrep timed out after 30s")
@@ -1585,16 +1723,19 @@ async def _grep_via_ripgrep(
                 return Path(fp).stat().st_mtime
             except OSError:
                 return 0.0
+
         files = sorted(lines, key=_mtime, reverse=True)
-        return json.dumps({
-            "ok": True,
-            "mode": "files_with_matches",
-            "pattern": pattern,
-            "path": str(target),
-            "count": len(files),
-            "truncated": truncated,
-            "files": files,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "mode": "files_with_matches",
+                "pattern": pattern,
+                "path": str(target),
+                "count": len(files),
+                "truncated": truncated,
+                "files": files,
+            },
+        )
 
     if output_mode == "count":
         total_matches = 0
@@ -1608,16 +1749,18 @@ async def _grep_via_ripgrep(
                     c = 0
                 count_entries.append({"file": fp, "count": c})
                 total_matches += c
-        return json.dumps({
-            "ok": True,
-            "mode": "count",
-            "pattern": pattern,
-            "path": str(target),
-            "num_files": len(count_entries),
-            "total_matches": total_matches,
-            "truncated": truncated,
-            "counts": count_entries,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "mode": "count",
+                "pattern": pattern,
+                "path": str(target),
+                "num_files": len(count_entries),
+                "total_matches": total_matches,
+                "truncated": truncated,
+                "counts": count_entries,
+            },
+        )
 
     # Default: content mode.
     matches: list[dict[str, object]] = []
@@ -1629,15 +1772,17 @@ async def _grep_via_ripgrep(
         else:
             matches.append({"text": ln[:500]})
 
-    return json.dumps({
-        "ok": True,
-        "mode": "content",
-        "pattern": pattern,
-        "path": str(target),
-        "count": len(matches),
-        "truncated": truncated,
-        "matches": matches,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "mode": "content",
+            "pattern": pattern,
+            "path": str(target),
+            "count": len(matches),
+            "truncated": truncated,
+            "matches": matches,
+        },
+    )
 
 
 async def _grep_via_python(
@@ -1658,9 +1803,29 @@ async def _grep_via_python(
         return _json_error("invalid_regex", pattern=pattern, detail=str(exc))
 
     _BINARY_EXTS = {
-        ".pyc", ".pyo", ".so", ".dylib", ".bin", ".exe", ".o", ".a",
-        ".class", ".jar", ".whl", ".gz", ".zip", ".tar", ".png",
-        ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+        ".pyc",
+        ".pyo",
+        ".so",
+        ".dylib",
+        ".bin",
+        ".exe",
+        ".o",
+        ".a",
+        ".class",
+        ".jar",
+        ".whl",
+        ".gz",
+        ".zip",
+        ".tar",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
     }
 
     limit = max(1, head_limit) if head_limit > 0 else 10_000
@@ -1678,7 +1843,9 @@ async def _grep_via_python(
             if regex.search(line):
                 file_match_count += 1
                 if output_mode == "content":
-                    matches.append({"file": str(fp), "line": lineno, "text": line.rstrip()[:500]})
+                    matches.append(
+                        {"file": str(fp), "line": lineno, "text": line.rstrip()[:500]},
+                    )
         if file_match_count > 0:
             file_counts[str(fp)] = file_match_count
             matched_files.append(str(fp))
@@ -1699,45 +1866,51 @@ async def _grep_via_python(
         results = matched_files[offset:]
         truncated = len(results) > limit
         results = results[:limit]
-        return json.dumps({
-            "ok": True,
-            "mode": "files_with_matches",
-            "pattern": pattern,
-            "path": str(target),
-            "count": len(results),
-            "truncated": truncated,
-            "files": results,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "mode": "files_with_matches",
+                "pattern": pattern,
+                "path": str(target),
+                "count": len(results),
+                "truncated": truncated,
+                "files": results,
+            },
+        )
 
     if output_mode == "count":
         entries = [{"file": f, "count": c} for f, c in file_counts.items()]
         entries = entries[offset:]
         truncated = len(entries) > limit
         entries = entries[:limit]
-        return json.dumps({
-            "ok": True,
-            "mode": "count",
-            "pattern": pattern,
-            "path": str(target),
-            "num_files": len(entries),
-            "total_matches": sum(e["count"] for e in entries),
-            "truncated": truncated,
-            "counts": entries,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "mode": "count",
+                "pattern": pattern,
+                "path": str(target),
+                "num_files": len(entries),
+                "total_matches": sum(e["count"] for e in entries),
+                "truncated": truncated,
+                "counts": entries,
+            },
+        )
 
     # Content mode.
     paginated = matches[offset:]
     truncated = len(paginated) > limit
     paginated = paginated[:limit]
-    return json.dumps({
-        "ok": True,
-        "mode": "content",
-        "pattern": pattern,
-        "path": str(target),
-        "count": len(paginated),
-        "truncated": truncated,
-        "matches": paginated,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "mode": "content",
+            "pattern": pattern,
+            "path": str(target),
+            "count": len(paginated),
+            "truncated": truncated,
+            "matches": paginated,
+        },
+    )
 
 
 @tool(
@@ -1747,8 +1920,14 @@ async def _grep_via_python(
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Directory to search in."},
-            "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.py', '**/*.ts')."},
-            "name": {"type": "string", "description": "Exact or partial filename to match."},
+            "pattern": {
+                "type": "string",
+                "description": "Glob pattern (e.g. '*.py', '**/*.ts').",
+            },
+            "name": {
+                "type": "string",
+                "description": "Exact or partial filename to match.",
+            },
             "max_results": {"type": "integer"},
             "file_type": {"type": "string", "description": "'file', 'dir', or 'any'."},
         },
@@ -1784,23 +1963,29 @@ async def find_files(
             continue
         try:
             st = fp.stat()
-            results.append({
-                "path": str(fp),
-                "name": fp.name,
-                "is_dir": fp.is_dir(),
-                "size": st.st_size if fp.is_file() else 0,
-            })
+            results.append(
+                {
+                    "path": str(fp),
+                    "name": fp.name,
+                    "is_dir": fp.is_dir(),
+                    "size": st.st_size if fp.is_file() else 0,
+                },
+            )
         except OSError:
-            results.append({"path": str(fp), "name": fp.name, "is_dir": fp.is_dir(), "size": 0})
+            results.append(
+                {"path": str(fp), "name": fp.name, "is_dir": fp.is_dir(), "size": 0},
+            )
 
-    return json.dumps({
-        "ok": True,
-        "path": str(target),
-        "pattern": pattern,
-        "count": len(results),
-        "truncated": len(results) >= limit,
-        "results": results,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(target),
+            "pattern": pattern,
+            "count": len(results),
+            "truncated": len(results) >= limit,
+            "results": results,
+        },
+    )
 
 
 @tool(
@@ -1815,9 +2000,15 @@ async def find_files(
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "old_text": {"type": "string", "description": "Text to find (exact match)."},
+            "old_text": {
+                "type": "string",
+                "description": "Text to find (exact match).",
+            },
             "new_text": {"type": "string", "description": "Replacement text."},
-            "replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false)."},
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace all occurrences (default: false).",
+            },
         },
         "required": ["path", "old_text", "new_text"],
     },
@@ -1828,8 +2019,8 @@ async def edit_text_file(
     new_text: str,
     replace_all: bool = False,
 ) -> str:
-    from obscura.tools.system.file_state import check_staleness
     from obscura.tools.system.diff_utils import compute_unified_diff
+    from obscura.tools.system.file_state import check_staleness
 
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
@@ -1855,11 +2046,19 @@ async def edit_text_file(
         if normalized_old in normalized_content:
             # Find the actual substring in original content by position.
             pos = normalized_content.index(normalized_old)
-            actual_old = content[pos:pos + len(old_text)]
+            actual_old = content[pos : pos + len(old_text)]
             if actual_old not in content:
-                return _json_error("text_not_found", path=str(target), old_text=old_text[:200])
+                return _json_error(
+                    "text_not_found",
+                    path=str(target),
+                    old_text=old_text[:200],
+                )
         else:
-            return _json_error("text_not_found", path=str(target), old_text=old_text[:200])
+            return _json_error(
+                "text_not_found",
+                path=str(target),
+                old_text=old_text[:200],
+            )
 
     if replace_all:
         new_content = content.replace(actual_old, new_text)
@@ -1874,21 +2073,26 @@ async def edit_text_file(
     # Generate structured diff for the response.
     diff = compute_unified_diff(content, new_content, str(target))
 
-    return json.dumps({
-        "ok": True,
-        "path": str(target),
-        "replacements": count,
-        "bytes_written": len(new_content.encode("utf-8")),
-        "diff": diff,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(target),
+            "replacements": count,
+            "bytes_written": len(new_content.encode("utf-8")),
+            "diff": diff,
+        },
+    )
 
 
 def _normalize_quotes(text: str) -> str:
     """Normalize curly/smart quotes to straight ASCII quotes."""
     replacements = {
-        "\u2018": "'", "\u2019": "'",  # Single curly quotes
-        "\u201c": '"', "\u201d": '"',  # Double curly quotes
-        "\u2032": "'", "\u2033": '"',  # Prime marks
+        "\u2018": "'",
+        "\u2019": "'",  # Single curly quotes
+        "\u201c": '"',
+        "\u201d": '"',  # Double curly quotes
+        "\u2032": "'",
+        "\u2033": '"',  # Prime marks
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -2008,17 +2212,38 @@ async def file_info(path: str) -> str:
 
 def _guess_mime(path: Path) -> str:
     ext_map: dict[str, str] = {
-        ".py": "text/x-python", ".js": "text/javascript", ".ts": "text/typescript",
-        ".json": "application/json", ".yaml": "text/yaml", ".yml": "text/yaml",
-        ".md": "text/markdown", ".txt": "text/plain", ".html": "text/html",
-        ".css": "text/css", ".sh": "text/x-shellscript", ".toml": "text/toml",
-        ".xml": "text/xml", ".csv": "text/csv", ".sql": "text/x-sql",
-        ".rs": "text/x-rust", ".go": "text/x-go", ".java": "text/x-java",
-        ".c": "text/x-c", ".cpp": "text/x-c++", ".h": "text/x-c",
-        ".rb": "text/x-ruby", ".php": "text/x-php", ".swift": "text/x-swift",
-        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".gif": "image/gif", ".svg": "image/svg+xml", ".pdf": "application/pdf",
-        ".zip": "application/zip", ".gz": "application/gzip",
+        ".py": "text/x-python",
+        ".js": "text/javascript",
+        ".ts": "text/typescript",
+        ".json": "application/json",
+        ".yaml": "text/yaml",
+        ".yml": "text/yaml",
+        ".md": "text/markdown",
+        ".txt": "text/plain",
+        ".html": "text/html",
+        ".css": "text/css",
+        ".sh": "text/x-shellscript",
+        ".toml": "text/toml",
+        ".xml": "text/xml",
+        ".csv": "text/csv",
+        ".sql": "text/x-sql",
+        ".rs": "text/x-rust",
+        ".go": "text/x-go",
+        ".java": "text/x-java",
+        ".c": "text/x-c",
+        ".cpp": "text/x-c++",
+        ".h": "text/x-c",
+        ".rb": "text/x-ruby",
+        ".php": "text/x-php",
+        ".swift": "text/x-swift",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+        ".pdf": "application/pdf",
+        ".zip": "application/zip",
+        ".gz": "application/gzip",
     }
     return ext_map.get(path.suffix.lower(), "application/octet-stream")
 
@@ -2030,7 +2255,10 @@ def _guess_mime(path: Path) -> str:
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "max_depth": {"type": "integer", "description": "Max recursion depth (default 3)."},
+            "max_depth": {
+                "type": "integer",
+                "description": "Max recursion depth (default 3).",
+            },
             "include": {"type": "string", "description": "Glob filter for filenames."},
             "show_hidden": {"type": "boolean"},
             "max_entries": {"type": "integer"},
@@ -2063,7 +2291,10 @@ async def tree_directory(
         if current_depth > depth or count >= limit:
             return
         try:
-            children = sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+            children = sorted(
+                dir_path.iterdir(),
+                key=lambda p: (not p.is_dir(), p.name.lower()),
+            )
         except PermissionError:
             return
         visible = [c for c in children if show_hidden or not c.name.startswith(".")]
@@ -2082,13 +2313,15 @@ async def tree_directory(
                 _walk(child, prefix + extension, current_depth + 1)
 
     _walk(target, "", 1)
-    return json.dumps({
-        "ok": True,
-        "path": str(target),
-        "entries": count,
-        "truncated": count >= limit,
-        "tree": "\n".join(lines),
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(target),
+            "entries": count,
+            "truncated": count >= limit,
+            "tree": "\n".join(lines),
+        },
+    )
 
 
 @tool(
@@ -2099,7 +2332,10 @@ async def tree_directory(
         "properties": {
             "file_a": {"type": "string"},
             "file_b": {"type": "string"},
-            "context_lines": {"type": "integer", "description": "Lines of context (default 3)."},
+            "context_lines": {
+                "type": "integer",
+                "description": "Lines of context (default 3).",
+            },
         },
         "required": ["file_a", "file_b"],
     },
@@ -2118,21 +2354,35 @@ async def diff_files(file_a: str, file_b: str, context_lines: int = 3) -> str:
         return _json_error("path_not_found", path=str(path_b))
 
     try:
-        lines_a = path_a.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-        lines_b = path_b.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        lines_a = path_a.read_text(encoding="utf-8", errors="replace").splitlines(
+            keepends=True,
+        )
+        lines_b = path_b.read_text(encoding="utf-8", errors="replace").splitlines(
+            keepends=True,
+        )
     except OSError as exc:
         return _json_error("read_failed", detail=str(exc))
 
     ctx = max(0, min(context_lines, 20))
-    diff = list(difflib.unified_diff(lines_a, lines_b, fromfile=str(path_a), tofile=str(path_b), n=ctx))
+    diff = list(
+        difflib.unified_diff(
+            lines_a,
+            lines_b,
+            fromfile=str(path_a),
+            tofile=str(path_b),
+            n=ctx,
+        ),
+    )
     diff_text = "".join(diff)
-    return json.dumps({
-        "ok": True,
-        "file_a": str(path_a),
-        "file_b": str(path_b),
-        "identical": len(diff) == 0,
-        "diff": diff_text[:100_000],
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "file_a": str(path_a),
+            "file_b": str(path_b),
+            "identical": len(diff) == 0,
+            "diff": diff_text[:100_000],
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2147,14 +2397,15 @@ async def _git(args: list[str], cwd: str = "", timeout: float = 30.0) -> dict[st
         return {"ok": False, "error": "git_not_found"}
     work_dir = cwd or str(Path.cwd())
     proc = await asyncio.create_subprocess_exec(
-        git_cmd, *args,
+        git_cmd,
+        *args,
         cwd=work_dir,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return {"ok": False, "error": "timeout"}
@@ -2172,8 +2423,14 @@ async def _git(args: list[str], cwd: str = "", timeout: float = 30.0) -> dict[st
     {
         "type": "object",
         "properties": {
-            "cwd": {"type": "string", "description": "Repository path (default: current dir)."},
-            "short": {"type": "boolean", "description": "Use short format (default: true)."},
+            "cwd": {
+                "type": "string",
+                "description": "Repository path (default: current dir).",
+            },
+            "short": {
+                "type": "boolean",
+                "description": "Use short format (default: true).",
+            },
         },
     },
 )
@@ -2192,10 +2449,22 @@ async def git_status(cwd: str = "", short: bool = True) -> str:
     {
         "type": "object",
         "properties": {
-            "ref": {"type": "string", "description": "Ref to diff against (e.g. 'HEAD', 'main', commit hash)."},
-            "staged": {"type": "boolean", "description": "Show staged changes (--cached)."},
-            "path": {"type": "string", "description": "Limit diff to a specific file/dir."},
-            "stat_only": {"type": "boolean", "description": "Show diffstat only (--stat)."},
+            "ref": {
+                "type": "string",
+                "description": "Ref to diff against (e.g. 'HEAD', 'main', commit hash).",
+            },
+            "staged": {
+                "type": "boolean",
+                "description": "Show staged changes (--cached).",
+            },
+            "path": {
+                "type": "string",
+                "description": "Limit diff to a specific file/dir.",
+            },
+            "stat_only": {
+                "type": "boolean",
+                "description": "Show diffstat only (--stat).",
+            },
             "cwd": {"type": "string"},
         },
     },
@@ -2230,12 +2499,27 @@ async def git_diff(
     {
         "type": "object",
         "properties": {
-            "max_count": {"type": "integer", "description": "Number of commits (default 10)."},
-            "oneline": {"type": "boolean", "description": "One-line format (default true)."},
-            "path": {"type": "string", "description": "Limit to commits touching this path."},
+            "max_count": {
+                "type": "integer",
+                "description": "Number of commits (default 10).",
+            },
+            "oneline": {
+                "type": "boolean",
+                "description": "One-line format (default true).",
+            },
+            "path": {
+                "type": "string",
+                "description": "Limit to commits touching this path.",
+            },
             "author": {"type": "string", "description": "Filter by author."},
-            "since": {"type": "string", "description": "Show commits after date (e.g. '2024-01-01')."},
-            "ref": {"type": "string", "description": "Branch or ref to show (default: current)."},
+            "since": {
+                "type": "string",
+                "description": "Show commits after date (e.g. '2024-01-01').",
+            },
+            "ref": {
+                "type": "string",
+                "description": "Branch or ref to show (default: current).",
+            },
             "cwd": {"type": "string"},
         },
     },
@@ -2294,7 +2578,7 @@ async def git_commit(
 
     # Stage files
     stage_files = files or ["."]
-    add_result = await _git(["add"] + stage_files, cwd=cwd)
+    add_result = await _git(["add", *stage_files], cwd=cwd)
     if not add_result.get("ok"):
         return json.dumps(add_result)
 
@@ -2309,8 +2593,14 @@ async def git_commit(
     {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "description": "'list', 'create', or 'switch'."},
-            "name": {"type": "string", "description": "Branch name (for create/switch)."},
+            "action": {
+                "type": "string",
+                "description": "'list', 'create', or 'switch'.",
+            },
+            "name": {
+                "type": "string",
+                "description": "Branch name (for create/switch).",
+            },
             "cwd": {"type": "string"},
         },
         "required": ["action"],
@@ -2324,18 +2614,21 @@ async def git_branch(
     if action == "list":
         result = await _git(["branch", "-a", "--no-color"], cwd=cwd)
         return json.dumps(result)
-    elif action == "create":
+    if action == "create":
         if not name.strip():
             return _json_error("branch_name_required")
         result = await _git(["checkout", "-b", name], cwd=cwd)
         return json.dumps(result)
-    elif action == "switch":
+    if action == "switch":
         if not name.strip():
             return _json_error("branch_name_required")
         result = await _git(["checkout", name], cwd=cwd)
         return json.dumps(result)
-    else:
-        return _json_error("invalid_action", action=action, valid=["list", "create", "switch"])
+    return _json_error(
+        "invalid_action",
+        action=action,
+        valid=["list", "create", "switch"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2352,7 +2645,10 @@ async def git_branch(
             "url": {"type": "string"},
             "path": {"type": "string", "description": "Local path to save the file."},
             "timeout_seconds": {"type": "number"},
-            "max_bytes": {"type": "integer", "description": "Max download size in bytes (default 50MB)."},
+            "max_bytes": {
+                "type": "integer",
+                "description": "Max download size in bytes (default 50MB).",
+            },
         },
         "required": ["url", "path"],
     },
@@ -2368,9 +2664,12 @@ async def download_file(
         return _json_error("path_not_allowed", path=str(target))
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    req = url_request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (compatible; Obscura/1.0)",
-    })
+    req = url_request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; Obscura/1.0)",
+        },
+    )
 
     try:
         with url_request.urlopen(req, timeout=timeout_seconds) as resp:
@@ -2378,13 +2677,15 @@ async def download_file(
             if len(data) > max_bytes:
                 return _json_error("file_too_large", url=url, max_bytes=max_bytes)
             target.write_bytes(data[:max_bytes])
-            return json.dumps({
-                "ok": True,
-                "url": url,
-                "path": str(target),
-                "bytes_written": len(data),
-                "content_type": resp.headers.get("Content-Type", ""),
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "url": url,
+                    "path": str(target),
+                    "bytes_written": len(data),
+                    "content_type": resp.headers.get("Content-Type", ""),
+                },
+            )
     except url_error.HTTPError as exc:
         return _json_error("download_failed", url=url, status=exc.code)
     except Exception as exc:
@@ -2401,7 +2702,10 @@ async def download_file(
             "method": {"type": "string", "description": "HTTP method (default GET)."},
             "headers": {"type": "object", "additionalProperties": {"type": "string"}},
             "body": {"type": "string", "description": "Request body (string or JSON)."},
-            "json_body": {"type": "object", "description": "JSON body (auto-sets Content-Type)."},
+            "json_body": {
+                "type": "object",
+                "description": "JSON body (auto-sets Content-Type).",
+            },
             "timeout_seconds": {"type": "number"},
         },
         "required": ["url"],
@@ -2435,7 +2739,7 @@ async def http_request(
         with url_request.urlopen(req, timeout=timeout_seconds) as resp:
             raw = resp.read(500_000)
             text = raw.decode("utf-8", errors="replace")
-            response_headers = {k: v for k, v in resp.headers.items()}
+            response_headers = dict(resp.headers.items())
             content_type = response_headers.get("Content-Type", "")
 
             result: dict[str, object] = {
@@ -2451,25 +2755,30 @@ async def http_request(
 
             # Try to parse JSON response
             if "json" in content_type.lower():
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     result["json"] = json.loads(text)
-                except json.JSONDecodeError:
-                    pass
 
             return json.dumps(result)
     except url_error.HTTPError as exc:
         raw_error = exc.read(100_000)
-        return json.dumps({
-            "ok": False,
-            "status": exc.code,
-            "url": url,
-            "method": method.upper(),
-            "error": "http_error",
-            "body": raw_error.decode("utf-8", errors="replace"),
-            "headers": {k: v for k, v in exc.headers.items()} if exc.headers else {},
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "status": exc.code,
+                "url": url,
+                "method": method.upper(),
+                "error": "http_error",
+                "body": raw_error.decode("utf-8", errors="replace"),
+                "headers": dict(exc.headers.items()) if exc.headers else {},
+            },
+        )
     except Exception as exc:
-        return _json_error("request_failed", url=url, method=method.upper(), detail=str(exc))
+        return _json_error(
+            "request_failed",
+            url=url,
+            method=method.upper(),
+            detail=str(exc),
+        )
 
 
 @tool(
@@ -2486,11 +2795,13 @@ async def clipboard_read() -> str:
     result = await run_command("pbpaste", timeout_seconds=5.0)
     payload = json.loads(result)
     if payload.get("ok"):
-        return json.dumps({
-            "ok": True,
-            "text": payload.get("stdout", ""),
-            "bytes": len(payload.get("stdout", "").encode("utf-8")),
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "text": payload.get("stdout", ""),
+                "bytes": len(payload.get("stdout", "").encode("utf-8")),
+            },
+        )
     return result
 
 
@@ -2516,18 +2827,24 @@ async def clipboard_write(text: str) -> str:
     )
     try:
         _, stderr = await asyncio.wait_for(
-            proc.communicate(input=text.encode("utf-8")), timeout=5.0
+            proc.communicate(input=text.encode("utf-8")),
+            timeout=5.0,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return _json_error("timeout")
     if proc.returncode != 0:
-        return _json_error("clipboard_write_failed", stderr=stderr.decode("utf-8", errors="replace"))
-    return json.dumps({
-        "ok": True,
-        "bytes_written": len(text.encode("utf-8")),
-    })
+        return _json_error(
+            "clipboard_write_failed",
+            stderr=stderr.decode("utf-8", errors="replace"),
+        )
+    return json.dumps(
+        {
+            "ok": True,
+            "bytes_written": len(text.encode("utf-8")),
+        },
+    )
 
 
 @tool(
@@ -2536,10 +2853,19 @@ async def clipboard_write(text: str) -> str:
     {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to a JSON file (optional if data provided)."},
+            "path": {
+                "type": "string",
+                "description": "Path to a JSON file (optional if data provided).",
+            },
             "data": {"type": "string", "description": "Raw JSON string to query."},
-            "query": {"type": "string", "description": "Dot-notation path (e.g. 'users[0].name', 'config.database.host')."},
-            "keys_only": {"type": "boolean", "description": "Return only keys at the query path."},
+            "query": {
+                "type": "string",
+                "description": "Dot-notation path (e.g. 'users[0].name', 'config.database.host').",
+            },
+            "keys_only": {
+                "type": "boolean",
+                "description": "Return only keys at the query path.",
+            },
         },
         "required": ["query"],
     },
@@ -2575,16 +2901,19 @@ async def json_query(
     parts = _parse_json_path(query)
     for part in parts:
         try:
-            if isinstance(part, int):
-                current = current[part]
-            elif isinstance(current, dict):
+            if isinstance(part, int) or isinstance(current, dict):
                 current = current[part]
             elif isinstance(current, list):
                 current = current[int(part)]
             else:
                 return _json_error("invalid_path", query=query, at=part)
         except (KeyError, IndexError, ValueError, TypeError) as exc:
-            return _json_error("path_not_found_in_data", query=query, at=part, detail=str(exc))
+            return _json_error(
+                "path_not_found_in_data",
+                query=query,
+                at=part,
+                detail=str(exc),
+            )
 
     if keys_only and isinstance(current, dict):
         return json.dumps({"ok": True, "query": query, "keys": list(current.keys())})
@@ -2595,7 +2924,15 @@ async def json_query(
     except (TypeError, ValueError):
         result_str = str(current)
 
-    return json.dumps({"ok": True, "query": query, "result": current if isinstance(current, (str, int, float, bool, type(None), list, dict)) else result_str})
+    return json.dumps(
+        {
+            "ok": True,
+            "query": query,
+            "result": current
+            if isinstance(current, (str, int, float, bool, type(None), list, dict))
+            else result_str,
+        },
+    )
 
 
 def _parse_json_path(query: str) -> list[str | int]:
@@ -2634,7 +2971,10 @@ _dynamic_tools: dict[str, ToolSpec] = {}
     {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Tool name (lowercase, underscored)."},
+            "name": {
+                "type": "string",
+                "description": "Tool name (lowercase, underscored).",
+            },
             "description": {"type": "string", "description": "What the tool does."},
             "parameters": {
                 "type": "object",
@@ -2645,7 +2985,7 @@ _dynamic_tools: dict[str, ToolSpec] = {}
                 "description": (
                     "Python function body. Receives kwargs matching the parameters schema. "
                     "Must return a JSON string. Has access to: json, os, re, pathlib.Path, "
-                    "asyncio, subprocess, urllib. Example: 'return json.dumps({\"ok\": True, \"result\": kwargs[\"x\"] * 2})'"
+                    'asyncio, subprocess, urllib. Example: \'return json.dumps({"ok": True, "result": kwargs["x"] * 2})\''
                 ),
             },
         },
@@ -2705,12 +3045,14 @@ async def create_tool(
     )
     _dynamic_tools[clean_name] = spec
 
-    return json.dumps({
-        "ok": True,
-        "name": clean_name,
-        "description": description,
-        "message": f"Tool '{clean_name}' created. Call it with the tool name '{clean_name}'.",
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "name": clean_name,
+            "description": description,
+            "message": f"Tool '{clean_name}' created. Call it with the tool name '{clean_name}'.",
+        },
+    )
 
 
 @tool(
@@ -2730,7 +3072,11 @@ async def call_dynamic_tool(name: str, args: dict[str, Any] | None = None) -> st
     spec = _dynamic_tools.get(clean_name)
     if spec is None:
         available = list(_dynamic_tools.keys())
-        return _json_error("dynamic_tool_not_found", name=clean_name, available=available)
+        return _json_error(
+            "dynamic_tool_not_found",
+            name=clean_name,
+            available=available,
+        )
 
     kwargs = args or {}
     try:
@@ -2775,7 +3121,10 @@ async def list_dynamic_tools() -> str:
             },
             "code": {"type": "string", "description": "Source code to execute."},
             "timeout_seconds": {"type": "number"},
-            "cwd": {"type": "string", "description": "Working directory for execution."},
+            "cwd": {
+                "type": "string",
+                "description": "Working directory for execution.",
+            },
             "stdin": {"type": "string", "description": "Text to pipe to stdin."},
             "env": {
                 "type": "object",
@@ -2834,11 +3183,11 @@ async def code_sandbox(
         save_path.parent.mkdir(parents=True, exist_ok=True)
         save_path.write_text(code, encoding="utf-8")
         # Execute the file instead of -c
-        if lang in ("python", "python3"):
-            args = [str(save_path)]
-        elif lang in ("node", "nodejs", "javascript", "js"):
-            args = [str(save_path)]
-        elif lang in ("bash", "zsh", "sh", "shell"):
+        if (
+            lang in ("python", "python3")
+            or lang in ("node", "nodejs", "javascript", "js")
+            or lang in ("bash", "zsh", "sh", "shell")
+        ):
             args = [str(save_path)]
 
     # Build environment
@@ -2859,17 +3208,20 @@ async def code_sandbox(
     try:
         input_data = stdin.encode("utf-8") if stdin else None
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=input_data), timeout=timeout_seconds
+            proc.communicate(input=input_data),
+            timeout=timeout_seconds,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
-        return json.dumps({
-            "ok": False,
-            "error": "timeout",
-            "language": lang,
-            "timeout_seconds": timeout_seconds,
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "timeout",
+                "language": lang,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
 
     stdout_text = stdout.decode("utf-8", errors="replace")
     stderr_text = stderr.decode("utf-8", errors="replace")
@@ -2938,8 +3290,10 @@ async def copilot_query(
 
     proc = await asyncio.create_subprocess_exec(
         cmd,
-        "--model", "gpt-5-mini",
-        "-p", prompt,
+        "--model",
+        "gpt-5-mini",
+        "-p",
+        prompt,
         cwd=(cwd or None),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
@@ -2949,27 +3303,32 @@ async def copilot_query(
 
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
+            proc.communicate(),
+            timeout=timeout_seconds,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
-        return json.dumps({
-            "ok": False,
-            "error": "timeout",
-            "timeout_seconds": timeout_seconds,
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "timeout",
+                "timeout_seconds": timeout_seconds,
+            },
+        )
 
     stdout_text = stdout.decode("utf-8", errors="replace")
     stderr_text = stderr.decode("utf-8", errors="replace")
 
-    return json.dumps({
-        "ok": proc.returncode == 0,
-        "exit_code": proc.returncode,
-        "model": "gpt-5-mini",
-        "response": stdout_text[:100_000],
-        "stderr": stderr_text[:10_000] if stderr_text.strip() else "",
-    })
+    return json.dumps(
+        {
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "model": "gpt-5-mini",
+            "response": stdout_text[:100_000],
+            "stderr": stderr_text[:10_000] if stderr_text.strip() else "",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3028,21 +3387,21 @@ async def context_window_status() -> str:
     compact_at = _token_usage.get("compact_threshold", 0) or int(window * 0.60)
     pct = round(total / window * 100, 1) if window else 0.0
 
-    return json.dumps({
-        "ok": True,
-        "input_tokens": input_t,
-        "output_tokens": output_t,
-        "total_tokens": total,
-        "context_window": window,
-        "compact_threshold": compact_at,
-        "percent_used": pct,
-        "should_compact": total > compact_at,
-        "status": (
-            "critical" if pct > 80
-            else "warning" if pct > 60
-            else "healthy"
-        ),
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "input_tokens": input_t,
+            "output_tokens": output_t,
+            "total_tokens": total,
+            "context_window": window,
+            "compact_threshold": compact_at,
+            "percent_used": pct,
+            "should_compact": total > compact_at,
+            "status": (
+                "critical" if pct > 80 else "warning" if pct > 60 else "healthy"
+            ),
+        },
+    )
 
 
 @tool(
@@ -3066,12 +3425,12 @@ async def list_unix_capabilities() -> str:
             },
             "tools_count": len(tool_names),
             "tools": tool_names,
-        }
+        },
     )
 
 
 # ---------------------------------------------------------------------------
-# Todo list — lightweight task tracker for agent planning
+# TODO list — lightweight task tracker for agent planning
 # ---------------------------------------------------------------------------
 
 _todo_items: list[dict[str, str]] = []
@@ -3141,7 +3500,7 @@ async def todo_write(todos: Any = None) -> str:
             "intent": {
                 "type": "string",
                 "description": "The agent's current intent or high-level plan",
-            }
+            },
         },
         "required": ["intent"],
     },
@@ -3327,41 +3686,51 @@ async def _handle_ui_permission(action: str, reason: str, risk: str) -> str:
         )
     try:
         result = await _user_interact_callback(
-            mode="permission", action=action, reason=reason, risk=risk,
+            mode="permission",
+            action=action,
+            reason=reason,
+            risk=risk,
         )
         approved = result.get("approved", False)
-        return json.dumps({
-            "ok": True,
-            "approved": approved,
-            "action": "approve" if approved else "deny",
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "approved": approved,
+                "action": "approve" if approved else "deny",
+            },
+        )
     except Exception as exc:
         return _json_error("permission_failed", detail=str(exc))
 
 
 async def _handle_ui_notify(
-    title: str, message: str, priority: str, channels: list[str] | None,
+    title: str,
+    message: str,
+    priority: str,
+    channels: list[str] | None,
 ) -> str:
     """Handle notify mode of user_interact."""
     resolved_channels = channels or ["tui", "bell"]
     delivered: list[str] = []
 
     # TUI channel — uses callback if available
-    if "tui" in resolved_channels:
-        if _user_interact_callback is not None:
-            try:
-                await _user_interact_callback(
-                    mode="notify", title=title, message=message, priority=priority,
-                )
-                delivered.append("tui")
-            except Exception:
-                pass
+    if "tui" in resolved_channels and _user_interact_callback is not None:
+        try:
+            await _user_interact_callback(
+                mode="notify",
+                title=title,
+                message=message,
+                priority=priority,
+            )
+            delivered.append("tui")
+        except Exception:
+            pass
 
     # OS notification channel — use NativeNotifier
     if "os" in resolved_channels:
         try:
-            from obscura.notifications.native import NativeNotifier
             from obscura.agent.interaction import AttentionPriority
+            from obscura.notifications.native import NativeNotifier
 
             prio_map = {
                 "low": AttentionPriority.LOW,
@@ -3407,7 +3776,9 @@ async def _handle_ui_notify(
 
 
 async def _handle_ui_question(
-    question: str, choices: list[str] | None, allow_custom: bool,
+    question: str,
+    choices: list[str] | None,
+    allow_custom: bool,
 ) -> str:
     """Handle question mode of user_interact."""
     if _user_interact_callback is None:
@@ -3509,12 +3880,11 @@ async def user_interact(
     """Unified user interaction tool with permission, notify, and question modes."""
     if mode == "permission":
         return await _handle_ui_permission(action, reason, risk)
-    elif mode == "notify":
+    if mode == "notify":
         return await _handle_ui_notify(title, message, priority, channels)
-    elif mode == "question":
+    if mode == "question":
         return await _handle_ui_question(question, choices, allow_custom)
-    else:
-        return _json_error("invalid_mode", detail=f"Unknown mode: {mode}")
+    return _json_error("invalid_mode", detail=f"Unknown mode: {mode}")
 
 
 # ---------------------------------------------------------------------------
@@ -3563,26 +3933,36 @@ async def history_snip(
     reason: str = "",
 ) -> str:
     if _snip_message_history is None:
-        return json.dumps({"ok": False, "error": "no_history", "detail": "Message history not available"})
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "no_history",
+                "detail": "Message history not available",
+            },
+        )
 
     total = len(_snip_message_history)
     if start_turn < 0 or end_turn >= total or start_turn > end_turn:
-        return json.dumps({
-            "ok": False,
-            "error": "invalid_range",
-            "detail": f"Range {start_turn}-{end_turn} invalid (history has {total} entries)",
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "invalid_range",
+                "detail": f"Range {start_turn}-{end_turn} invalid (history has {total} entries)",
+            },
+        )
 
     # Remove the specified range.
     removed_count = end_turn - start_turn + 1
-    del _snip_message_history[start_turn:end_turn + 1]
+    del _snip_message_history[start_turn : end_turn + 1]
 
-    return json.dumps({
-        "ok": True,
-        "removed_turns": removed_count,
-        "remaining_turns": len(_snip_message_history),
-        "reason": reason,
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "removed_turns": removed_count,
+            "remaining_turns": len(_snip_message_history),
+            "reason": reason,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3599,9 +3979,18 @@ async def history_snip(
     {
         "type": "object",
         "properties": {
-            "notebook_path": {"type": "string", "description": "Path to the .ipynb file."},
-            "cell_index": {"type": "integer", "description": "0-based index of the cell to edit/insert after/delete."},
-            "new_source": {"type": "string", "description": "New cell source content (required for replace/insert)."},
+            "notebook_path": {
+                "type": "string",
+                "description": "Path to the .ipynb file.",
+            },
+            "cell_index": {
+                "type": "integer",
+                "description": "0-based index of the cell to edit/insert after/delete.",
+            },
+            "new_source": {
+                "type": "string",
+                "description": "New cell source content (required for replace/insert).",
+            },
             "cell_type": {
                 "type": "string",
                 "enum": ["code", "markdown"],
@@ -3640,38 +4029,60 @@ async def notebook_edit(
 
     if edit_mode == "delete":
         if cell_index < 0 or cell_index >= len(cells):
-            return _json_error("cell_index_out_of_range", index=cell_index, total_cells=len(cells))
+            return _json_error(
+                "cell_index_out_of_range",
+                index=cell_index,
+                total_cells=len(cells),
+            )
         old_source = "".join(cells[cell_index].get("source", []))
         del cells[cell_index]
-        target.write_text(json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        return json.dumps({
-            "ok": True,
-            "edit_mode": "delete",
-            "cell_index": cell_index,
-            "deleted_source": old_source[:200],
-            "cell_count": len(cells),
-        })
+        target.write_text(
+            json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return json.dumps(
+            {
+                "ok": True,
+                "edit_mode": "delete",
+                "cell_index": cell_index,
+                "deleted_source": old_source[:200],
+                "cell_count": len(cells),
+            },
+        )
 
     if edit_mode == "replace":
         if cell_index < 0 or cell_index >= len(cells):
-            return _json_error("cell_index_out_of_range", index=cell_index, total_cells=len(cells))
+            return _json_error(
+                "cell_index_out_of_range",
+                index=cell_index,
+                total_cells=len(cells),
+            )
         old_source = "".join(cells[cell_index].get("source", []))
         cells[cell_index]["source"] = new_source.splitlines(keepends=True)
         if cell_type:
             cells[cell_index]["cell_type"] = cell_type
-        target.write_text(json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        return json.dumps({
-            "ok": True,
-            "edit_mode": "replace",
-            "cell_index": cell_index,
-            "cell_type": cells[cell_index].get("cell_type", "code"),
-            "old_source": old_source[:200],
-            "new_source": new_source[:200],
-        })
+        target.write_text(
+            json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return json.dumps(
+            {
+                "ok": True,
+                "edit_mode": "replace",
+                "cell_index": cell_index,
+                "cell_type": cells[cell_index].get("cell_type", "code"),
+                "old_source": old_source[:200],
+                "new_source": new_source[:200],
+            },
+        )
 
     if edit_mode == "insert":
         if cell_index < -1 or cell_index >= len(cells):
-            return _json_error("cell_index_out_of_range", index=cell_index, total_cells=len(cells))
+            return _json_error(
+                "cell_index_out_of_range",
+                index=cell_index,
+                total_cells=len(cells),
+            )
         new_cell: dict[str, Any] = {
             "cell_type": cell_type,
             "source": new_source.splitlines(keepends=True),
@@ -3681,15 +4092,20 @@ async def notebook_edit(
         if cell_type == "code":
             new_cell["execution_count"] = None
         cells.insert(cell_index + 1, new_cell)
-        target.write_text(json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        return json.dumps({
-            "ok": True,
-            "edit_mode": "insert",
-            "inserted_after": cell_index,
-            "cell_type": cell_type,
-            "new_source": new_source[:200],
-            "cell_count": len(cells),
-        })
+        target.write_text(
+            json.dumps(nb_data, indent=1, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return json.dumps(
+            {
+                "ok": True,
+                "edit_mode": "insert",
+                "inserted_after": cell_index,
+                "cell_type": cell_type,
+                "new_source": new_source[:200],
+                "cell_count": len(cells),
+            },
+        )
 
     return _json_error("invalid_edit_mode", detail=f"Unknown edit_mode: {edit_mode}")
 
@@ -3721,7 +4137,10 @@ def set_tool_registry(registry: Any) -> None:
                 "type": "string",
                 "description": "Search query. 'select:name' for exact match, or keywords.",
             },
-            "max_results": {"type": "integer", "description": "Max results (default 5)."},
+            "max_results": {
+                "type": "integer",
+                "description": "Max results (default 5).",
+            },
         },
         "required": ["query"],
     },
@@ -3741,12 +4160,14 @@ async def tool_search(query: str, max_results: int = 5) -> str:
             spec = _tool_registry_ref.get(name)
             if spec is not None:
                 found.append({"name": spec.name, "description": spec.description})
-        return json.dumps({
-            "ok": True,
-            "query": query,
-            "matches": found,
-            "total_tools": len(all_specs),
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "query": query,
+                "matches": found,
+                "total_tools": len(all_specs),
+            },
+        )
 
     # Keyword search: score each tool by query term matches.
     terms = query.lower().split()
@@ -3759,23 +4180,24 @@ async def tool_search(query: str, max_results: int = 5) -> str:
             if term == name_lower:
                 score += 10.0  # Exact name match
             elif term in name_lower:
-                score += 5.0   # Partial name match
+                score += 5.0  # Partial name match
             if term in desc_lower:
-                score += 1.0   # Description match
+                score += 1.0  # Description match
         if score > 0:
             scored.append((score, spec))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     matches = [
-        {"name": spec.name, "description": spec.description}
-        for _, spec in scored[:cap]
+        {"name": spec.name, "description": spec.description} for _, spec in scored[:cap]
     ]
-    return json.dumps({
-        "ok": True,
-        "query": query,
-        "matches": matches,
-        "total_tools": len(all_specs),
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "query": query,
+            "matches": matches,
+            "total_tools": len(all_specs),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3819,8 +4241,13 @@ async def sleep_tool(seconds: float = 10.0) -> str:
                 "enum": ["get", "set", "list"],
                 "description": "Action: 'get' a key, 'set' a key, or 'list' all settings.",
             },
-            "key": {"type": "string", "description": "Settings key (dot-notation, e.g. 'backend.default')."},
-            "value": {"description": "Value to set (for 'set' action). Can be string, number, bool, or null."},
+            "key": {
+                "type": "string",
+                "description": "Settings key (dot-notation, e.g. 'backend.default').",
+            },
+            "value": {
+                "description": "Value to set (for 'set' action). Can be string, number, bool, or null.",
+            },
         },
         "required": ["action"],
     },
@@ -3845,7 +4272,10 @@ async def config_tool(
 
     if action == "get":
         if not key:
-            return _json_error("missing_key", detail="'key' is required for 'get' action")
+            return _json_error(
+                "missing_key",
+                detail="'key' is required for 'get' action",
+            )
         # Support dot-notation: "backend.default" → settings["backend"]["default"]
         parts = key.split(".")
         current: Any = settings
@@ -3853,12 +4283,17 @@ async def config_tool(
             if isinstance(current, dict) and part in current:
                 current = current[part]
             else:
-                return json.dumps({"ok": True, "key": key, "value": None, "found": False})
+                return json.dumps(
+                    {"ok": True, "key": key, "value": None, "found": False},
+                )
         return json.dumps({"ok": True, "key": key, "value": current, "found": True})
 
     if action == "set":
         if not key:
-            return _json_error("missing_key", detail="'key' is required for 'set' action")
+            return _json_error(
+                "missing_key",
+                detail="'key' is required for 'set' action",
+            )
         parts = key.split(".")
         target_dict = settings
         for part in parts[:-1]:
@@ -3867,7 +4302,10 @@ async def config_tool(
             target_dict = target_dict[part]
         target_dict[parts[-1]] = value
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        settings_path.write_text(
+            json.dumps(settings, indent=2) + "\n",
+            encoding="utf-8",
+        )
         return json.dumps({"ok": True, "key": key, "value": value, "written": True})
 
     return _json_error("invalid_action", detail=f"Unknown action: {action}")
@@ -3877,88 +4315,88 @@ def get_system_tool_specs() -> list[ToolSpec]:
     """Return default system tool specs for agent runtime."""
     static_specs = [
         # Execution
-        cast(ToolSpec, getattr(cast(Any, run_python3), "spec")),
-        cast(ToolSpec, getattr(cast(Any, run_python), "spec")),
-        cast(ToolSpec, getattr(cast(Any, run_npx), "spec")),
-        cast(ToolSpec, getattr(cast(Any, run_command), "spec")),
-        cast(ToolSpec, getattr(cast(Any, run_shell), "spec")),
+        cast("ToolSpec", cast("Any", run_python3).spec),
+        cast("ToolSpec", cast("Any", run_python).spec),
+        cast("ToolSpec", cast("Any", run_npx).spec),
+        cast("ToolSpec", cast("Any", run_command).spec),
+        cast("ToolSpec", cast("Any", run_shell).spec),
         # Web
-        cast(ToolSpec, getattr(cast(Any, web_fetch), "spec")),
-        cast(ToolSpec, getattr(cast(Any, web_search), "spec")),
+        cast("ToolSpec", cast("Any", web_fetch).spec),
+        cast("ToolSpec", cast("Any", web_search).spec),
         # Delegation
-        cast(ToolSpec, getattr(cast(Any, task), "spec")),
+        cast("ToolSpec", cast("Any", task).spec),
         # System discovery
-        cast(ToolSpec, getattr(cast(Any, which_command), "spec")),
-        cast(ToolSpec, getattr(cast(Any, discover_all_commands), "spec")),
+        cast("ToolSpec", cast("Any", which_command).spec),
+        cast("ToolSpec", cast("Any", discover_all_commands).spec),
         # Filesystem — basic
-        cast(ToolSpec, getattr(cast(Any, list_directory), "spec")),
-        cast(ToolSpec, getattr(cast(Any, read_text_file), "spec")),
-        cast(ToolSpec, getattr(cast(Any, write_text_file), "spec")),
-        cast(ToolSpec, getattr(cast(Any, append_text_file), "spec")),
-        cast(ToolSpec, getattr(cast(Any, make_directory), "spec")),
-        cast(ToolSpec, getattr(cast(Any, remove_path), "spec")),
+        cast("ToolSpec", cast("Any", list_directory).spec),
+        cast("ToolSpec", cast("Any", read_text_file).spec),
+        cast("ToolSpec", cast("Any", write_text_file).spec),
+        cast("ToolSpec", cast("Any", append_text_file).spec),
+        cast("ToolSpec", cast("Any", make_directory).spec),
+        cast("ToolSpec", cast("Any", remove_path).spec),
         # Filesystem — advanced
-        cast(ToolSpec, getattr(cast(Any, grep_files), "spec")),
-        cast(ToolSpec, getattr(cast(Any, find_files), "spec")),
-        cast(ToolSpec, getattr(cast(Any, edit_text_file), "spec")),
-        cast(ToolSpec, getattr(cast(Any, copy_path), "spec")),
-        cast(ToolSpec, getattr(cast(Any, move_path), "spec")),
-        cast(ToolSpec, getattr(cast(Any, file_info), "spec")),
-        cast(ToolSpec, getattr(cast(Any, tree_directory), "spec")),
-        cast(ToolSpec, getattr(cast(Any, diff_files), "spec")),
+        cast("ToolSpec", cast("Any", grep_files).spec),
+        cast("ToolSpec", cast("Any", find_files).spec),
+        cast("ToolSpec", cast("Any", edit_text_file).spec),
+        cast("ToolSpec", cast("Any", copy_path).spec),
+        cast("ToolSpec", cast("Any", move_path).spec),
+        cast("ToolSpec", cast("Any", file_info).spec),
+        cast("ToolSpec", cast("Any", tree_directory).spec),
+        cast("ToolSpec", cast("Any", diff_files).spec),
         # Git
-        cast(ToolSpec, getattr(cast(Any, git_status), "spec")),
-        cast(ToolSpec, getattr(cast(Any, git_diff), "spec")),
-        cast(ToolSpec, getattr(cast(Any, git_log), "spec")),
-        cast(ToolSpec, getattr(cast(Any, git_commit), "spec")),
-        cast(ToolSpec, getattr(cast(Any, git_branch), "spec")),
+        cast("ToolSpec", cast("Any", git_status).spec),
+        cast("ToolSpec", cast("Any", git_diff).spec),
+        cast("ToolSpec", cast("Any", git_log).spec),
+        cast("ToolSpec", cast("Any", git_commit).spec),
+        cast("ToolSpec", cast("Any", git_branch).spec),
         # Utilities
-        cast(ToolSpec, getattr(cast(Any, download_file), "spec")),
-        cast(ToolSpec, getattr(cast(Any, http_request), "spec")),
-        cast(ToolSpec, getattr(cast(Any, clipboard_read), "spec")),
-        cast(ToolSpec, getattr(cast(Any, clipboard_write), "spec")),
-        cast(ToolSpec, getattr(cast(Any, json_query), "spec")),
+        cast("ToolSpec", cast("Any", download_file).spec),
+        cast("ToolSpec", cast("Any", http_request).spec),
+        cast("ToolSpec", cast("Any", clipboard_read).spec),
+        cast("ToolSpec", cast("Any", clipboard_write).spec),
+        cast("ToolSpec", cast("Any", json_query).spec),
         # Context window
-        cast(ToolSpec, getattr(cast(Any, context_window_status), "spec")),
+        cast("ToolSpec", cast("Any", context_window_status).spec),
         # Dynamic tools + sandbox
-        cast(ToolSpec, getattr(cast(Any, create_tool), "spec")),
-        cast(ToolSpec, getattr(cast(Any, call_dynamic_tool), "spec")),
-        cast(ToolSpec, getattr(cast(Any, list_dynamic_tools), "spec")),
-        cast(ToolSpec, getattr(cast(Any, code_sandbox), "spec")),
+        cast("ToolSpec", cast("Any", create_tool).spec),
+        cast("ToolSpec", cast("Any", call_dynamic_tool).spec),
+        cast("ToolSpec", cast("Any", list_dynamic_tools).spec),
+        cast("ToolSpec", cast("Any", code_sandbox).spec),
         # Copilot GPT-5 Mini
-        cast(ToolSpec, getattr(cast(Any, copilot_query), "spec")),
+        cast("ToolSpec", cast("Any", copilot_query).spec),
         # System info
-        cast(ToolSpec, getattr(cast(Any, get_environment), "spec")),
-        cast(ToolSpec, getattr(cast(Any, get_system_info), "spec")),
-        cast(ToolSpec, getattr(cast(Any, list_processes), "spec")),
-        cast(ToolSpec, getattr(cast(Any, signal_process), "spec")),
-        cast(ToolSpec, getattr(cast(Any, list_listening_ports), "spec")),
-        cast(ToolSpec, getattr(cast(Any, security_lookup), "spec")),
-        cast(ToolSpec, getattr(cast(Any, manage_crontab), "spec")),
-        cast(ToolSpec, getattr(cast(Any, list_unix_capabilities), "spec")),
-        cast(ToolSpec, getattr(cast(Any, list_system_tools), "spec")),
+        cast("ToolSpec", cast("Any", get_environment).spec),
+        cast("ToolSpec", cast("Any", get_system_info).spec),
+        cast("ToolSpec", cast("Any", list_processes).spec),
+        cast("ToolSpec", cast("Any", signal_process).spec),
+        cast("ToolSpec", cast("Any", list_listening_ports).spec),
+        cast("ToolSpec", cast("Any", security_lookup).spec),
+        cast("ToolSpec", cast("Any", manage_crontab).spec),
+        cast("ToolSpec", cast("Any", list_unix_capabilities).spec),
+        cast("ToolSpec", cast("Any", list_system_tools).spec),
         # Task tracking
-        cast(ToolSpec, getattr(cast(Any, todo_write), "spec")),
+        cast("ToolSpec", cast("Any", todo_write).spec),
         # Agent intent reporting
-        cast(ToolSpec, getattr(cast(Any, report_intent), "spec")),
+        cast("ToolSpec", cast("Any", report_intent).spec),
         # User interaction
-        cast(ToolSpec, getattr(cast(Any, ask_user), "spec")),
-        cast(ToolSpec, getattr(cast(Any, user_interact), "spec")),
+        cast("ToolSpec", cast("Any", ask_user).spec),
+        cast("ToolSpec", cast("Any", user_interact).spec),
         # Intelligence tools (context_snapshot, causal_trace, policy_probe)
-        cast(ToolSpec, getattr(cast(Any, context_snapshot), "spec")),
-        cast(ToolSpec, getattr(cast(Any, causal_trace), "spec")),
-        cast(ToolSpec, getattr(cast(Any, policy_probe), "spec")),
+        cast("ToolSpec", cast("Any", context_snapshot).spec),
+        cast("ToolSpec", cast("Any", causal_trace).spec),
+        cast("ToolSpec", cast("Any", policy_probe).spec),
         # Team prompt
-        cast(ToolSpec, getattr(cast(Any, read_team_prompt), "spec")),
+        cast("ToolSpec", cast("Any", read_team_prompt).spec),
         # History snip
-        cast(ToolSpec, getattr(cast(Any, history_snip), "spec")),
+        cast("ToolSpec", cast("Any", history_snip).spec),
         # Notebook edit
-        cast(ToolSpec, getattr(cast(Any, notebook_edit), "spec")),
+        cast("ToolSpec", cast("Any", notebook_edit).spec),
         # Tool search
-        cast(ToolSpec, getattr(cast(Any, tool_search), "spec")),
+        cast("ToolSpec", cast("Any", tool_search).spec),
         # Sleep & Config
-        cast(ToolSpec, getattr(cast(Any, sleep_tool), "spec")),
-        cast(ToolSpec, getattr(cast(Any, config_tool), "spec")),
+        cast("ToolSpec", cast("Any", sleep_tool).spec),
+        cast("ToolSpec", cast("Any", config_tool).spec),
     ]
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():

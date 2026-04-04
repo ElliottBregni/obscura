@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import tomllib
 import warnings
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -23,6 +23,9 @@ from obscura.core.compiler.specs import (
     TemplateSpec,
     WorkspaceSpec,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +42,11 @@ def load_spec_file(path: Path) -> AnySpec:
     ------
     SpecLoadError
         If the file cannot be read, parsed, or validated.
+
     """
     if not path.is_file():
-        raise SpecLoadError(f"Spec file not found: {path}", source=str(path))
+        msg = f"Spec file not found: {path}"
+        raise SpecLoadError(msg, source=str(path))
 
     suffix = path.suffix.lower()
 
@@ -50,7 +55,8 @@ def load_spec_file(path: Path) -> AnySpec:
             with open(path, "rb") as f:
                 raw = tomllib.load(f)
         except Exception as exc:
-            raise SpecLoadError(f"Invalid TOML in {path}: {exc}", source=str(path)) from exc
+            msg = f"Invalid TOML in {path}: {exc}"
+            raise SpecLoadError(msg, source=str(path)) from exc
     elif suffix in (".yaml", ".yml"):
         warnings.warn(
             f"YAML spec files are deprecated; migrate {path.name} to TOML.",
@@ -63,38 +69,46 @@ def load_spec_file(path: Path) -> AnySpec:
             text = path.read_text(encoding="utf-8")
             raw = yaml.safe_load(text)
         except ImportError as exc:
+            msg = f"PyYAML required to read {path}; install it or convert to TOML."
             raise SpecLoadError(
-                f"PyYAML required to read {path}; install it or convert to TOML.",
+                msg,
                 source=str(path),
             ) from exc
         except Exception as exc:
-            raise SpecLoadError(f"Invalid YAML in {path}: {exc}", source=str(path)) from exc
+            msg = f"Invalid YAML in {path}: {exc}"
+            raise SpecLoadError(msg, source=str(path)) from exc
     else:
-        raise SpecLoadError(f"Unsupported spec file extension: {suffix}", source=str(path))
+        msg = f"Unsupported spec file extension: {suffix}"
+        raise SpecLoadError(msg, source=str(path))
 
     if not isinstance(raw, dict):
+        msg = f"Expected a mapping in {path}, got {type(raw).__name__}"
         raise SpecLoadError(
-            f"Expected a mapping in {path}, got {type(raw).__name__}",
+            msg,
             source=str(path),
         )
 
     kind: str | None = raw.get("kind")
     if kind is None:
-        raise SpecLoadError(f"Missing 'kind' field in {path}", source=str(path))
+        msg = f"Missing 'kind' field in {path}"
+        raise SpecLoadError(msg, source=str(path))
 
     model_cls: type[AnySpec] | None = SPEC_KIND_MAP.get(kind)
     if model_cls is None:
+        msg = (
+            f"Unknown kind {kind!r} in {path}. Expected one of: {sorted(SPEC_KIND_MAP)}"
+        )
         raise SpecLoadError(
-            f"Unknown kind {kind!r} in {path}. "
-            f"Expected one of: {sorted(SPEC_KIND_MAP)}",
+            msg,
             source=str(path),
         )
 
     try:
         return model_cls.model_validate(raw)
     except ValidationError as exc:
+        msg = f"Validation error in {path}: {exc}"
         raise SpecLoadError(
-            f"Validation error in {path}: {exc}",
+            msg,
             source=str(path),
         ) from exc
 

@@ -1,5 +1,4 @@
-"""
-obscura.kairos.frustration — User frustration detection.
+"""obscura.kairos.frustration — User frustration detection.
 
 Detects frustration signals in user input for UX adaptation.
 When frustration is detected, the agent can adjust its behavior
@@ -119,7 +118,12 @@ class FrustrationDetector:
 class SentimentResult:
     """Result of frustration/sentiment analysis."""
 
-    __slots__ = ("sentiment", "is_frustrated", "matched_phrase", "consecutive_frustrations")
+    __slots__ = (
+        "consecutive_frustrations",
+        "is_frustrated",
+        "matched_phrase",
+        "sentiment",
+    )
 
     def __init__(
         self,

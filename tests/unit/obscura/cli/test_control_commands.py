@@ -23,7 +23,6 @@ from obscura.cli.control_commands import (
     cmd_status,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -193,13 +192,22 @@ class TestSupervisorProbe:
         conn.execute(
             "INSERT INTO session_locks (session_id, holder_id, acquired_at, heartbeat_at, expires_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            ("sess-1", "holder-abc", now.isoformat(), now.isoformat(), expires.isoformat()),
+            (
+                "sess-1",
+                "holder-abc",
+                now.isoformat(),
+                now.isoformat(),
+                expires.isoformat(),
+            ),
         )
         conn.commit()
         conn.close()
 
         report = HeartbeatReport()
-        with patch("obscura.cli.control_commands.resolve_obscura_home", return_value=tmp_path):
+        with patch(
+            "obscura.cli.control_commands.resolve_obscura_home",
+            return_value=tmp_path,
+        ):
             _probe_supervisor_sync(report, "sess-1")
 
         assert report.supervisor_db_exists is True
@@ -218,13 +226,22 @@ class TestSupervisorProbe:
         conn.execute(
             "INSERT INTO session_locks (session_id, holder_id, acquired_at, heartbeat_at, expires_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            ("sess-1", "holder-old", now.isoformat(), now.isoformat(), expired.isoformat()),
+            (
+                "sess-1",
+                "holder-old",
+                now.isoformat(),
+                now.isoformat(),
+                expired.isoformat(),
+            ),
         )
         conn.commit()
         conn.close()
 
         report = HeartbeatReport()
-        with patch("obscura.cli.control_commands.resolve_obscura_home", return_value=tmp_path):
+        with patch(
+            "obscura.cli.control_commands.resolve_obscura_home",
+            return_value=tmp_path,
+        ):
             _probe_supervisor_sync(report, "sess-1")
 
         assert report.supervisor_db_exists is True
@@ -241,7 +258,10 @@ class TestCommandHandlers:
     async def test_status_delegates_to_heartbeat(self) -> None:
         """cmd_status should call cmd_heartbeat."""
         ctx = FakeREPLContext()
-        with patch("obscura.cli.control_commands.cmd_heartbeat", new_callable=AsyncMock) as mock_hb:
+        with patch(
+            "obscura.cli.control_commands.cmd_heartbeat",
+            new_callable=AsyncMock,
+        ) as mock_hb:
             mock_hb.return_value = None
             await cmd_status("", ctx)
             mock_hb.assert_called_once_with("", ctx)
@@ -266,11 +286,16 @@ class TestCommandHandlers:
     @pytest.mark.asyncio
     async def test_policies_no_db(self) -> None:
         ctx = FakeREPLContext()
-        with patch("obscura.cli.control_commands.resolve_obscura_home", return_value=Path("/nonexistent")):
-            with patch("obscura.cli.control_commands.print_info") as mock_info:
-                result = await cmd_policies("", ctx)
-                assert result is None
-                mock_info.assert_called_once()
+        with (
+            patch(
+                "obscura.cli.control_commands.resolve_obscura_home",
+                return_value=Path("/nonexistent"),
+            ),
+            patch("obscura.cli.control_commands.print_info") as mock_info,
+        ):
+            result = await cmd_policies("", ctx)
+            assert result is None
+            mock_info.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_replay_missing_arg(self) -> None:
@@ -284,8 +309,13 @@ class TestCommandHandlers:
     @pytest.mark.asyncio
     async def test_replay_no_db(self) -> None:
         ctx = FakeREPLContext()
-        with patch("obscura.cli.control_commands.resolve_obscura_home", return_value=Path("/nonexistent")):
-            with patch("obscura.cli.control_commands.print_info") as mock_info:
-                result = await cmd_replay("some-run-id", ctx)
-                assert result is None
-                mock_info.assert_called_once()
+        with (
+            patch(
+                "obscura.cli.control_commands.resolve_obscura_home",
+                return_value=Path("/nonexistent"),
+            ),
+            patch("obscura.cli.control_commands.print_info") as mock_info,
+        ):
+            result = await cmd_replay("some-run-id", ctx)
+            assert result is None
+            mock_info.assert_called_once()

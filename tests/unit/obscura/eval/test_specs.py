@@ -26,8 +26,12 @@ class TestEvalSuiteMeta:
 
     def test_full(self) -> None:
         meta = EvalSuiteMeta(
-            id="suite-2", title="Full", version="2",
-            tags=["a", "b"], backend="claude", model="claude-sonnet-4-5-20250929",
+            id="suite-2",
+            title="Full",
+            version="2",
+            tags=["a", "b"],
+            backend="claude",
+            model="claude-sonnet-4-5-20250929",
         )
         assert meta.backend == "claude"
         assert meta.model == "claude-sonnet-4-5-20250929"
@@ -62,7 +66,9 @@ class TestEvalExpectedToolCall:
 
     def test_with_args(self) -> None:
         tc = EvalExpectedToolCall(
-            name="read_file", order=1, args_contain={"path": "/tmp/x"},
+            name="read_file",
+            order=1,
+            args_contain={"path": "/tmp/x"},
         )
         assert tc.args_contain["path"] == "/tmp/x"
 

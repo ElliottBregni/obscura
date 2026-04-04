@@ -13,8 +13,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from obscura.plugins.broker import BrokerAuditEntry
+if TYPE_CHECKING:
+    from obscura.plugins.broker import BrokerAuditEntry
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +179,7 @@ class ToolScoreIndex:
                 "  total_latency_ms REAL,"
                 "  last_error TEXT,"
                 "  last_used REAL"
-                ")"
+                ")",
             )
             for s in self._scores.values():
                 conn.execute(
@@ -230,8 +232,7 @@ class ToolScoreIndex:
                     s.success_count += row["success_count"]
                     s.error_count += row["error_count"]
                     s.total_latency_ms += row["total_latency_ms"]
-                    if row["last_used"] > s.last_used:
-                        s.last_used = row["last_used"]
+                    s.last_used = max(s.last_used, row["last_used"])
                     if not s.last_error and row["last_error"]:
                         s.last_error = row["last_error"]
         except sqlite3.OperationalError:

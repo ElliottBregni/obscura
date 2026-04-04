@@ -1,5 +1,4 @@
-"""
-obscura.a2a — Agent-to-Agent (A2A) protocol integration for Obscura.
+"""obscura.a2a — Agent-to-Agent (A2A) protocol integration for Obscura.
 
 Provides both A2A Server (expose Obscura agents to external callers)
 and A2A Client (invoke remote A2A agents from within Obscura).
@@ -18,8 +17,8 @@ from obscura.integrations.a2a.types import (
     Artifact,
     AuthScheme,
     DataPart,
-    FilePart,
     FileContent,
+    FilePart,
     Part,
     SendMessageConfiguration,
     Task,
@@ -43,39 +42,39 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    # Client
+    "A2AClient",
     # Types
     "A2AMessage",
     "A2AMethod",
+    # Service
+    "A2AService",
+    "A2ASessionManager",
     "AgentCard",
+    # Card generation
+    "AgentCardGenerator",
     "AgentSkill",
     "Artifact",
     "AuthScheme",
     "DataPart",
-    "FilePart",
+    # Event mapping
+    "EventMapper",
     "FileContent",
+    "FilePart",
+    # Store
+    "InMemoryTaskStore",
+    # Server
+    "ObscuraA2AServer",
     "Part",
+    "RedisTaskStore",
     "SendMessageConfiguration",
     "Task",
     "TaskArtifactUpdateEvent",
     "TaskState",
     "TaskStatus",
     "TaskStatusUpdateEvent",
-    "TextPart",
-    # Service
-    "A2AService",
-    # Store
-    "InMemoryTaskStore",
-    "RedisTaskStore",
     "TaskStore",
-    # Client
-    "A2AClient",
-    "A2ASessionManager",
-    # Server
-    "ObscuraA2AServer",
-    # Card generation
-    "AgentCardGenerator",
-    # Event mapping
-    "EventMapper",
+    "TextPart",
 ]
 
 
@@ -105,4 +104,5 @@ def __getattr__(name: str) -> object:
         from obscura.integrations.a2a.event_mapper import EventMapper
 
         return EventMapper
-    raise AttributeError(f"module 'obscura.a2a' has no attribute {name!r}")
+    msg = f"module 'obscura.a2a' has no attribute {name!r}"
+    raise AttributeError(msg)

@@ -9,7 +9,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ def _str_any_dict() -> dict[str, Any]:
 
 _DEFAULT_BASE_URL = "http://localhost:8080"
 _DEFAULT_TIMEOUT_S = 10
+
 
 @dataclass(frozen=True)
 class SignalMessage:
@@ -60,7 +61,7 @@ class SignalClient:
 
     def _jsonrpc(self, method: str, params: dict[str, Any]) -> Any:
         payload = json.dumps(
-            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
         ).encode("utf-8")
         req = urllib.request.Request(
             f"{self._base_url}/api/v1/rpc",
@@ -77,18 +78,25 @@ class SignalClient:
 
     def _check_access_sync(self) -> bool:
         if not self._account:
-            raise RuntimeError(
+            msg = (
                 "SIGNAL_ACCOUNT_NUMBER must be set for Signal integration. "
                 "Also ensure signal-cli daemon is running."
+            )
+            raise RuntimeError(
+                msg,
             )
         try:
             resp = self._jsonrpc("listAccounts", {})
             if "error" in resp:
-                raise RuntimeError(f"signal-cli error: {resp['error']}")
+                msg = f"signal-cli error: {resp['error']}"
+                raise RuntimeError(msg)
         except urllib.error.URLError as e:
-            raise RuntimeError(
+            msg = (
                 f"Cannot reach signal-cli at {self._base_url}. "
                 "Ensure signal-cli daemon is running."
+            )
+            raise RuntimeError(
+                msg,
             ) from e
         return True
 
@@ -115,7 +123,7 @@ class SignalClient:
             group_id = str(group_info.get("groupId", "")) if group_info else None
             if self._contacts and sender not in self._contacts:
                 continue
-            timestamp = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC)
             out.append(
                 SignalMessage(
                     envelope_ts_ms=ts_ms,
@@ -126,7 +134,7 @@ class SignalClient:
                     timestamp=timestamp,
                     group_id=group_id,
                     raw=dict(env),
-                )
+                ),
             )
         return out
 

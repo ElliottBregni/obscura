@@ -48,7 +48,7 @@ class DelegationContext:
     peer_registry: PeerRegistry | None = None
     event_store: EventStoreProtocol | None = None
     can_delegate: bool = False
-    delegate_allowlist: list[str] = field(default_factory=lambda: list[str]())
+    delegate_allowlist: list[str] = field(default_factory=list[str])
     max_delegation_depth: int = 3
     current_depth: int = 0
     caller_agent_id: str = ""
@@ -71,50 +71,59 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
     async def _task_handler(prompt: str, target: str = "") -> str:
         # Gate: delegation enabled?
         if not ctx.can_delegate:
-            return json.dumps({
-                "ok": False,
-                "error": "delegation_disabled",
-                "message": "This agent is not configured for delegation.",
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "delegation_disabled",
+                    "message": "This agent is not configured for delegation.",
+                },
+            )
 
         # Gate: depth limit
         if ctx.current_depth >= ctx.max_delegation_depth:
-            return json.dumps({
-                "ok": False,
-                "error": "max_depth_exceeded",
-                "message": (
-                    f"Delegation depth {ctx.current_depth} "
-                    f"exceeds max {ctx.max_delegation_depth}."
-                ),
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "max_depth_exceeded",
+                    "message": (
+                        f"Delegation depth {ctx.current_depth} "
+                        f"exceeds max {ctx.max_delegation_depth}."
+                    ),
+                },
+            )
 
         # Gate: target in allowlist (empty = all allowed)
         if ctx.delegate_allowlist and target not in ctx.delegate_allowlist:
-            return json.dumps({
-                "ok": False,
-                "error": "target_not_allowed",
-                "message": (
-                    f"Target '{target}' not in allowlist: "
-                    f"{ctx.delegate_allowlist}"
-                ),
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "target_not_allowed",
+                    "message": (
+                        f"Target '{target}' not in allowlist: {ctx.delegate_allowlist}"
+                    ),
+                },
+            )
 
         # Resolve target
         if ctx.peer_registry is None:
-            return json.dumps({
-                "ok": False,
-                "error": "no_peer_registry",
-                "message": "No peer registry configured for delegation.",
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "no_peer_registry",
+                    "message": "No peer registry configured for delegation.",
+                },
+            )
 
         # Try resolving by name first (more user-friendly), then by ID
         agent = _resolve_by_name_or_id(ctx.peer_registry, target)
         if agent is None:
-            return json.dumps({
-                "ok": False,
-                "error": "target_not_found",
-                "message": f"Peer '{target}' not found in registry.",
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "target_not_found",
+                    "message": f"Peer '{target}' not found in registry.",
+                },
+            )
 
         # Create child session ID
         child_session_id = f"delegation-{uuid.uuid4().hex[:12]}"
@@ -137,6 +146,7 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
         #      the model knows it only has run_shell available.
         try:
             from obscura.tools.policy.models import inject_subagent_context
+
             inject_subagent_context(agent)
         except Exception:
             logger.warning(
@@ -148,21 +158,25 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
         # Execute delegate
         try:
             result = await agent.run_loop(prompt)
-            return json.dumps({
-                "ok": True,
-                "target": target,
-                "session_id": child_session_id,
-                "result": str(result),
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "target": target,
+                    "session_id": child_session_id,
+                    "result": str(result),
+                },
+            )
         except Exception as exc:
             logger.warning("Delegation to '%s' failed: %s", target, exc)
-            return json.dumps({
-                "ok": False,
-                "error": "delegation_failed",
-                "target": target,
-                "session_id": child_session_id,
-                "message": str(exc),
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "delegation_failed",
+                    "target": target,
+                    "session_id": child_session_id,
+                    "message": str(exc),
+                },
+            )
 
     return ToolSpec(
         name="task",

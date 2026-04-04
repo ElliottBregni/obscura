@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import override
-
-from obscura.agent.agent import BaseAgent
-from obscura.core.types import AgentContext
 
 # Re-use ObscuraClient via forward reference to avoid circular imports
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
+
+from obscura.agent.agent import BaseAgent
 
 if TYPE_CHECKING:
     from obscura.core.client import ObscuraClient
+    from obscura.core.types import AgentContext
 
 
 @dataclass(frozen=True)

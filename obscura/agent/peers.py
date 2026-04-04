@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
+
 from obscura.integrations.a2a.client import A2AClient
 
 if TYPE_CHECKING:
@@ -66,7 +68,7 @@ class PeerCatalog(BaseModel):
     local: list[AgentRef] = Field(default_factory=_default_local_refs)
     remote: list[RemoteAgentRef] = Field(default_factory=_default_remote_refs)
     unix_socket: list[UnixSocketAgentRef] = Field(
-        default_factory=_default_unix_socket_refs
+        default_factory=_default_unix_socket_refs,
     )
 
 
@@ -98,7 +100,7 @@ class PeerRegistry:
                     model=agent.config.model,
                     status=agent.status.name,
                     capabilities=("local_invoke", "local_stream"),
-                )
+                ),
             )
         return refs
 
@@ -122,7 +124,7 @@ class PeerRegistry:
                     socket_path=path,
                     name=os.path.basename(path).removesuffix(".sock"),
                     status=status,
-                )
+                ),
             )
         return refs
 
@@ -159,13 +161,11 @@ class PeerRegistry:
                         capabilities=tuple(capability_names),
                         skills=tuple(skill.name for skill in card.skills),
                         description=str(getattr(card, "description", "") or ""),
-                    )
+                    ),
                 )
             except Exception:
                 refs.append(RemoteAgentRef(url=url, status="error"))
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     await client.disconnect()
-                except Exception:
-                    pass
         return refs

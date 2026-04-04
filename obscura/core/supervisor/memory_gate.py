@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.memory_gate — Memory commit gating with deduplication.
+"""obscura.core.supervisor.memory_gate — Memory commit gating with deduplication.
 
 Controls what gets written to memory during COMMITTING_MEMORY phase.
 Prevents duplicate writes, enforces importance thresholds, and ensures
@@ -120,7 +119,7 @@ class MemoryCommitGate:
                 relevance=relevance,
                 pinned=pinned,
                 source_run_id=self._run_id,
-            )
+            ),
         )
 
     @property
@@ -145,6 +144,7 @@ class MemoryCommitGate:
 
         Returns:
             MemoryCommitResult with counts.
+
         """
         committed = 0
         deduplicated = 0
@@ -265,19 +265,27 @@ class MemoryCommitGate:
 
     def get_committed_hashes(self) -> set[str]:
         """Get all content hashes committed for this session (sync)."""
-        rows = self._conn().execute(
-            "SELECT content_hash FROM memory_commits WHERE session_id = ?",
-            (self._session_id,),
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT content_hash FROM memory_commits WHERE session_id = ?",
+                (self._session_id,),
+            )
+            .fetchall()
+        )
         return {row["content_hash"] for row in rows}
 
     def get_commits_for_run(self) -> list[dict[str, Any]]:
         """Get all commits for the current run (sync)."""
-        rows = self._conn().execute(
-            "SELECT key, content_hash, importance, pinned, committed_at "
-            "FROM memory_commits WHERE run_id = ? ORDER BY committed_at",
-            (self._run_id,),
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT key, content_hash, importance, pinned, committed_at "
+                "FROM memory_commits WHERE run_id = ? ORDER BY committed_at",
+                (self._run_id,),
+            )
+            .fetchall()
+        )
         return [dict(row) for row in rows]
 
     # -- internal ------------------------------------------------------------
@@ -293,7 +301,7 @@ class MemoryCommitGate:
                 run_id=self._run_id,
                 session_id=self._session_id,
                 payload=payload,
-            )
+            ),
         )
 
     def close(self) -> None:

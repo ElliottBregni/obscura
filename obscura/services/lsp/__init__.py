@@ -1,5 +1,4 @@
-"""
-obscura.services.lsp — Language Server Protocol client integration.
+"""obscura.services.lsp — Language Server Protocol client integration.
 
 Provides code navigation (go-to-definition, find-references, hover,
 document symbols) by spawning and communicating with language servers

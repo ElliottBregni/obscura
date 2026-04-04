@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_state_dir
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

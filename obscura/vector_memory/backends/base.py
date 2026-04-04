@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from obscura.memory import MemoryKey
-from obscura.vector_memory.vector_memory_filters import MetadataFilter
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from obscura.memory import MemoryKey
+    from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 
 @dataclass

@@ -8,14 +8,14 @@ from obscura.schemas import HealthResponse
 router = APIRouter(tags=["infra"])
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health")
 async def health() -> HealthResponse:
     """Liveness probe -- always returns 200."""
     cfg = ObscuraConfig()
     return HealthResponse(status="ok", auth_enabled=cfg.auth_enabled)
 
 
-@router.get("/ready", response_model=HealthResponse)
+@router.get("/ready")
 async def ready() -> HealthResponse:
     """Readiness probe -- returns 200 when the server can serve traffic."""
     return HealthResponse(status="ok")

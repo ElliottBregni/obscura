@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
 from obscura.auth.models import AuthenticatedUser
 from obscura.cli import (
+    build_parser,
     collect_observed_agent_states,
     find_stale_agent_ids,
     run_observe,
-    build_parser,
 )
 from obscura.memory import MemoryStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _user(user_id: str) -> AuthenticatedUser:
@@ -87,7 +91,8 @@ def test_collect_observed_agent_states_and_stale_detection(tmp_path: Path) -> No
 
 
 def test_run_observe_once_prints_snapshot(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _configure_memory_dir(tmp_path)
     user = _user("observe-u2")

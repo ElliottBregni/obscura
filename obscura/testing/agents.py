@@ -12,11 +12,13 @@ Usage::
 
 from __future__ import annotations
 
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
 from obscura.agent.agent import BaseAgent
-from obscura.core.types import AgentContext
+
+if TYPE_CHECKING:
+    from obscura.core.types import AgentContext
 
 __all__ = ["StubAgent", "make_stub_agent"]
 
@@ -41,7 +43,9 @@ class StubAgent(BaseAgent):
     @override
     async def analyze(self, ctx: AgentContext) -> None:
         self.call_order.append("analyze")
-        ctx.analysis = ctx.input_data if ctx.input_data is not None else {"items": [1, 2, 3]}
+        ctx.analysis = (
+            ctx.input_data if ctx.input_data is not None else {"items": [1, 2, 3]}
+        )
 
     @override
     async def plan(self, ctx: AgentContext) -> None:

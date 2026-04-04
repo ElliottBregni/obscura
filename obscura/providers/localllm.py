@@ -1,5 +1,4 @@
-"""
-obscura.backends.localllm — BackendProtocol implementation for local LLM servers.
+"""obscura.backends.localllm — BackendProtocol implementation for local LLM servers.
 
 Connects to OpenAI-compatible local servers (LM Studio, Ollama, llama.cpp,
 vLLM, etc.) via the ``openai`` Python SDK in full proxy mode — all traffic
@@ -12,9 +11,8 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, AsyncIterator, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.auth import AuthConfig
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -34,7 +32,6 @@ from obscura.core.types import (
     ToolChoice,
     ToolSpec,
 )
-from obscura.providers.registry import ModelInfo as RegistryModelInfo
 from obscura.providers.models import (
     ChatMessage,
     CompletionParams,
@@ -42,6 +39,12 @@ from obscura.providers.models import (
     ModelInfo,
     ToolCallDefinition,
 )
+from obscura.providers.registry import ModelInfo as RegistryModelInfo
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from obscura.core.auth import AuthConfig
 
 
 class LocalLLMBackend:
@@ -184,7 +187,7 @@ class LocalLLMBackend:
             _set_span_attr(span, "base_url", self._base_url)
 
             await self._run_hooks(
-                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
             )
 
             structured = kwargs.pop("messages", None)
@@ -206,7 +209,7 @@ class LocalLLMBackend:
                         tool_name=block.tool_name,
                         tool_input=block.tool_input,
                         message=msg,
-                    )
+                    ),
                 )
                 await self._run_hooks(
                     HookContext(
@@ -214,13 +217,13 @@ class LocalLLMBackend:
                         tool_name=block.tool_name,
                         tool_input=block.tool_input,
                         message=msg,
-                    )
+                    ),
                 )
 
             # Persist conversation history (including tool calls)
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
-                    ChatMessage(role="user", content=prompt)
+                    ChatMessage(role="user", content=prompt),
                 )
                 if tool_blocks:
                     import json as _json
@@ -241,11 +244,11 @@ class LocalLLMBackend:
                             role="assistant",
                             content=msg.text,
                             tool_calls=tc_list,
-                        )
+                        ),
                     )
                 else:
                     self._conversations[self._active_session].append(
-                        ChatMessage(role="assistant", content=msg.text)
+                        ChatMessage(role="assistant", content=msg.text),
                     )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
@@ -262,7 +265,7 @@ class LocalLLMBackend:
         finish_reason = ""
         try:
             await self._run_hooks(
-                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt)
+                HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
             )
 
             structured = kwargs.pop("messages", None)
@@ -307,7 +310,7 @@ class LocalLLMBackend:
                                         hook=HookPoint.POST_TOOL_USE,
                                         tool_name=_active_tool_name,
                                         tool_input=tool_input,
-                                    )
+                                    ),
                                 )
                                 _active_tool_input = ""
                             _active_tool_name = tc.function.name
@@ -323,7 +326,7 @@ class LocalLLMBackend:
                                     hook=HookPoint.PRE_TOOL_USE,
                                     tool_name=_active_tool_name,
                                     tool_input={},
-                                )
+                                ),
                             )
                         if tc.function and tc.function.arguments:
                             _active_tool_input += tc.function.arguments
@@ -356,16 +359,16 @@ class LocalLLMBackend:
                         hook=HookPoint.POST_TOOL_USE,
                         tool_name=_active_tool_name,
                         tool_input=tool_input,
-                    )
+                    ),
                 )
 
             # Persist conversation history
             if self._active_session and self._active_session in self._conversations:
                 self._conversations[self._active_session].append(
-                    ChatMessage(role="user", content=prompt)
+                    ChatMessage(role="user", content=prompt),
                 )
                 self._conversations[self._active_session].append(
-                    ChatMessage(role="assistant", content=accumulated_text)
+                    ChatMessage(role="assistant", content=accumulated_text),
                 )
 
             await self._run_hooks(HookContext(hook=HookPoint.STOP))
@@ -400,7 +403,8 @@ class LocalLLMBackend:
     async def resume_session(self, ref: SessionRef) -> None:
         """Resume a conversation session."""
         if ref.session_id not in self._conversations:
-            raise RuntimeError(f"Session {ref.session_id} not found")
+            msg = f"Session {ref.session_id} not found"
+            raise RuntimeError(msg)
         self._active_session = ref.session_id
 
     async def list_sessions(self) -> list[SessionRef]:
@@ -419,7 +423,8 @@ class LocalLLMBackend:
 
         source = self._conversations.get(ref.session_id)
         if source is None:
-            raise RuntimeError(f"Session {ref.session_id} not found")
+            msg = f"Session {ref.session_id} not found"
+            raise RuntimeError(msg)
 
         session_id = str(uuid.uuid4())
         self._conversations[session_id] = copy.deepcopy(source)
@@ -498,7 +503,6 @@ class LocalLLMBackend:
 
     # -- Internals -----------------------------------------------------------
 
-
     # -- Provider Registry (model discovery) ---------------------------------
 
     async def list_models(self) -> list[RegistryModelInfo]:
@@ -507,23 +511,27 @@ class LocalLLMBackend:
         try:
             # Query the server's models endpoint
             response = await self._client.get("/v1/models")
-            models_data = response.json() if hasattr(response, 'json') else response
-            
+            models_data = response.json() if hasattr(response, "json") else response
+
             model_list = []
             for model in models_data.get("data", []):
                 model_id = model.get("id", "unknown")
                 # Infer capabilities from model name
-                supports_tools = any(keyword in model_id.lower() 
-                                   for keyword in ["tool", "function", "agent"])
+                supports_tools = any(
+                    keyword in model_id.lower()
+                    for keyword in ["tool", "function", "agent"]
+                )
                 supports_vision = "vision" in model_id.lower()
-                
-                model_list.append(RegistryModelInfo(
-                    id=model_id,
-                    name=model.get("name", model_id),
-                    provider="localllm",
-                    supports_tools=supports_tools,
-                    supports_vision=supports_vision,
-                ))
+
+                model_list.append(
+                    RegistryModelInfo(
+                        id=model_id,
+                        name=model.get("name", model_id),
+                        provider="localllm",
+                        supports_tools=supports_tools,
+                        supports_vision=supports_vision,
+                    ),
+                )
             return model_list
         except Exception:
             # Server unavailable or no models endpoint
@@ -539,7 +547,8 @@ class LocalLLMBackend:
 
     def _ensure_client(self) -> None:
         if self._client is None:
-            raise RuntimeError("LocalLLMBackend not started. Call start() first.")
+            msg = "LocalLLMBackend not started. Call start() first."
+            raise RuntimeError(msg)
 
     def _build_messages(
         self,
@@ -559,7 +568,7 @@ class LocalLLMBackend:
         # Append conversation history if in a session
         if self._active_session and self._active_session in self._conversations:
             messages.extend(
-                [msg.to_dict() for msg in self._conversations[self._active_session]]
+                [msg.to_dict() for msg in self._conversations[self._active_session]],
             )
 
         messages.append({"role": "user", "content": prompt})
@@ -590,7 +599,9 @@ class LocalLLMBackend:
         if self._tools:
             result["tools"] = [
                 ToolCallDefinition(
-                    t.name, t.description, t.parameters
+                    t.name,
+                    t.description,
+                    t.parameters,
                 ).to_openai_function()
                 for t in self._tools
             ]
@@ -620,7 +631,7 @@ class LocalLLMBackend:
                         tool_name=tc.function.name,
                         tool_input=tool_input,
                         tool_use_id=tc.id,
-                    )
+                    ),
                 )
 
         if not blocks:
@@ -682,7 +693,7 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
                             "role": "tool",
                             "content": block.text,
                             "tool_call_id": block.tool_use_id,
-                        }
+                        },
                     )
             continue
 
@@ -718,7 +729,7 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            return cast(dict[str, Any], parsed)
+            return cast("dict[str, Any]", parsed)
         return {"raw": raw}
     except json.JSONDecodeError:
         return {"raw": raw}

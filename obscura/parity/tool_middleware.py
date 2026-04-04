@@ -26,10 +26,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.core.hooks import HookRegistry
 from obscura.core.types import AgentEvent, AgentEventKind
+
+if TYPE_CHECKING:
+    from obscura.core.hooks import HookRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +59,10 @@ class ToolRecordReplayMiddleware:
     mode: str = "live"
     fixtures_dir: str = ""
     _recorded: list[ToolFixture] = field(
-        default_factory=lambda: list[ToolFixture]()
+        default_factory=list[ToolFixture],
     )
     _replay_fixtures: list[ToolFixture] = field(
-        default_factory=lambda: list[ToolFixture]()
+        default_factory=list[ToolFixture],
     )
     _replay_index: int = 0
 
@@ -151,7 +153,11 @@ class ToolRecordReplayMiddleware:
             for entry in raw
         ]
         self._replay_index = 0
-        logger.debug("Loaded %d fixtures from %s", len(self._replay_fixtures), fixtures_path)
+        logger.debug(
+            "Loaded %d fixtures from %s",
+            len(self._replay_fixtures),
+            fixtures_path,
+        )
 
     @property
     def recorded(self) -> list[ToolFixture]:

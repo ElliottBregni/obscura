@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,13 +18,16 @@ from obscura.core.compiler.specs import (
     PolicySpec,
     PolicySpecBody,
     SpecMetadata,
+    StartupSpec,
     TemplateSpec,
     TemplateSpecBody,
     WorkspaceAgentRef,
     WorkspaceSpec,
     WorkspaceSpecBody,
-    StartupSpec,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_yaml(path: Path, content: str) -> None:
@@ -181,18 +184,22 @@ spec:
 class TestCompileWorkspaceFromRegistry:
     def test_agent_overrides_applied(self) -> None:
         registry = SpecRegistry()
-        registry.add(TemplateSpec(
-            metadata=SpecMetadata(name="base"),
-            spec=TemplateSpecBody(
-                provider="copilot",
-                plugins=["git"],
-                config={"shell": {"cwd": "/tmp"}},
+        registry.add(
+            TemplateSpec(
+                metadata=SpecMetadata(name="base"),
+                spec=TemplateSpecBody(
+                    provider="copilot",
+                    plugins=["git"],
+                    config={"shell": {"cwd": "/tmp"}},
+                ),
             ),
-        ))
-        registry.add(PolicySpec(
-            metadata=SpecMetadata(name="p"),
-            spec=PolicySpecBody(),
-        ))
+        )
+        registry.add(
+            PolicySpec(
+                metadata=SpecMetadata(name="p"),
+                spec=PolicySpecBody(),
+            ),
+        )
 
         ws = WorkspaceSpec(
             metadata=SpecMetadata(name="ws"),
@@ -222,10 +229,12 @@ class TestCompileWorkspaceFromRegistry:
 
     def test_strict_validation_raises(self) -> None:
         registry = SpecRegistry()
-        registry.add(TemplateSpec(
-            metadata=SpecMetadata(name="t"),
-            spec=TemplateSpecBody(),
-        ))
+        registry.add(
+            TemplateSpec(
+                metadata=SpecMetadata(name="t"),
+                spec=TemplateSpecBody(),
+            ),
+        )
 
         ws = WorkspaceSpec(
             metadata=SpecMetadata(name="ws"),
@@ -247,10 +256,12 @@ class TestCompileWorkspaceFromRegistry:
 
     def test_non_strict_logs_warnings(self) -> None:
         registry = SpecRegistry()
-        registry.add(TemplateSpec(
-            metadata=SpecMetadata(name="t"),
-            spec=TemplateSpecBody(),
-        ))
+        registry.add(
+            TemplateSpec(
+                metadata=SpecMetadata(name="t"),
+                spec=TemplateSpecBody(),
+            ),
+        )
 
         ws = WorkspaceSpec(
             metadata=SpecMetadata(name="ws"),

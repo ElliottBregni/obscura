@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import (
     APIRouter,
@@ -16,9 +16,11 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit, authenticate_websocket
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["heartbeat"])
 
@@ -34,7 +36,7 @@ async def _get_heartbeat_monitor(request: Request) -> Any:
 
         monitor = get_default_monitor()
         await monitor.start()
-        setattr(request.app.state, "_heartbeat_monitor", monitor)
+        request.app.state._heartbeat_monitor = monitor
     return monitor
 
 
@@ -42,10 +44,10 @@ async def _get_heartbeat_monitor(request: Request) -> Any:
 async def heartbeat_receive(
     body: dict[str, Any],
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Receive a heartbeat from an agent."""
-    from obscura.heartbeat.types import Heartbeat, HealthStatus, SystemMetrics
+    from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
 
     monitor: Any = await _get_heartbeat_monitor(request)
 
@@ -53,7 +55,7 @@ async def heartbeat_receive(
         heartbeat = Heartbeat(
             agent_id=body["agent_id"],
             timestamp=datetime.fromisoformat(
-                body.get("timestamp", datetime.now(UTC).isoformat())
+                body.get("timestamp", datetime.now(UTC).isoformat()),
             ),
             status=HealthStatus(body.get("status", "unknown")),
             metrics=SystemMetrics(**body.get("metrics", {})),
@@ -84,7 +86,7 @@ async def heartbeat_receive(
             "agent_id": heartbeat.agent_id,
             "status": heartbeat.status.value,
             "timestamp": datetime.now(UTC).isoformat(),
-        }
+        },
     )
 
 
@@ -92,7 +94,7 @@ async def heartbeat_receive(
 async def heartbeat_get_agent(
     agent_id: str,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get health status for a specific agent."""
     monitor: Any = await _get_heartbeat_monitor(request)
@@ -100,7 +102,8 @@ async def heartbeat_get_agent(
     record: Any = await monitor.get_agent_record(agent_id)
     if record is None:
         raise HTTPException(
-            status_code=404, detail=f"Agent {agent_id} not found in health records"
+            status_code=404,
+            detail=f"Agent {agent_id} not found in health records",
         )
 
     return JSONResponse(
@@ -114,14 +117,14 @@ async def heartbeat_get_agent(
             "missed_count": record.missed_count,
             "registered_at": record.registered_at.isoformat(),
             "alert_count": record.alert_count,
-        }
+        },
     )
 
 
 @router.get("/health")
 async def health_list_all(
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List health status for all agents."""
     monitor: Any = await _get_heartbeat_monitor(request)
@@ -144,9 +147,9 @@ async def health_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     if not hasattr(websocket.app.state, "health_ws_clients"):
         websocket.app.state.health_ws_clients = []
-    ws_clients_any = getattr(websocket.app.state, "health_ws_clients")
+    ws_clients_any = websocket.app.state.health_ws_clients
     if isinstance(ws_clients_any, list):
-        ws_clients = cast(list[WebSocket], ws_clients_any)
+        ws_clients = cast("list[WebSocket]", ws_clients_any)
     else:
         ws_clients: list[WebSocket] = []
         websocket.app.state.health_ws_clients = ws_clients
@@ -159,14 +162,14 @@ async def health_websocket(websocket: WebSocket) -> None:
 
             monitor = get_default_monitor()
             await monitor.start()
-            setattr(websocket.app.state, "_heartbeat_monitor", monitor)
+            websocket.app.state._heartbeat_monitor = monitor
 
         summary: dict[str, Any] = await monitor.get_health_summary()
         await websocket.send_json(
             {
                 "type": "init",
                 "data": summary,
-            }
+            },
         )
 
         while True:
@@ -177,7 +180,7 @@ async def health_websocket(websocket: WebSocket) -> None:
 
             try:
                 await websocket.send_json(
-                    {"type": "ping", "timestamp": datetime.now(UTC).isoformat()}
+                    {"type": "ping", "timestamp": datetime.now(UTC).isoformat()},
                 )
             except Exception:
                 break
@@ -192,7 +195,9 @@ async def health_websocket(websocket: WebSocket) -> None:
 
 
 async def _broadcast_health_update(
-    request: Request, agent_id: str, status: str
+    request: Request,
+    agent_id: str,
+    status: str,
 ) -> None:
     """Broadcast health update to all connected WebSocket clients."""
     message: dict[str, Any] = {

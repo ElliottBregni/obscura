@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,6 +12,9 @@ from obscura.core.supervisor.heartbeat import (
     get_heartbeats_for_run,
 )
 from obscura.core.supervisor.types import SupervisorEventKind, SupervisorState
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -54,7 +57,8 @@ class TestSessionHeartbeatManager:
         await hb_manager.stop()
         events = hb_manager.events
         assert any(
-            e.payload.get("state") == "running_model" and e.payload.get("turn_number") == 3
+            e.payload.get("state") == "running_model"
+            and e.payload.get("turn_number") == 3
             for e in events
         )
 
@@ -71,7 +75,10 @@ class TestSessionHeartbeatManager:
     async def test_persisted_to_db(self, tmp_path: Path) -> None:
         db = tmp_path / "test.db"
         hb = SessionHeartbeatManager(
-            db_path=db, session_id="sess-1", run_id="run-1", interval=0.1,
+            db_path=db,
+            session_id="sess-1",
+            run_id="run-1",
+            interval=0.1,
         )
         await hb.start()
         await asyncio.sleep(0.25)

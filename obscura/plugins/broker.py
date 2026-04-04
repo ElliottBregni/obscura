@@ -24,17 +24,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any
 
+from obscura.core.tool_executor import ConcurrentToolExecutor
 from obscura.core.types import (
     ToolCallEnvelope,
-    ToolResultEnvelope,
-    ToolExecutionError,
+    ToolCallInfo,
     ToolErrorType,
+    ToolExecutionError,
+    ToolResultEnvelope,
 )
-from obscura.plugins.capabilities import CapabilityResolver
-from obscura.plugins.policy import PluginPolicyEngine
+
+if TYPE_CHECKING:
+    from obscura.plugins.capabilities import CapabilityResolver
+    from obscura.plugins.policy import PluginPolicyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +126,7 @@ class ToolBroker:
         Default per-tool timeout in seconds.
     max_retries : int
         Maximum retry attempts on transient failures.
+
     """
 
     def __init__(
@@ -147,6 +153,7 @@ class ToolBroker:
         self._score_index = score_index
         self._quarantined: dict[str, tuple[Any, RegistrationResult]] = {}
         self._permission_engine = permission_mode_engine
+        self._tool_executor = ConcurrentToolExecutor()
 
     # -- Lazy loading --------------------------------------------------------
 
@@ -190,7 +197,9 @@ class ToolBroker:
 
         if result.issues:
             logger.info(
-                "Tool %s registered with warnings: %s", spec.name, result.summary
+                "Tool %s registered with warnings: %s",
+                spec.name,
+                result.summary,
             )
         return result
 
@@ -209,21 +218,21 @@ class ToolBroker:
         # Handler must be callable
         if not callable(getattr(spec, "handler", None)):
             issues.append(
-                RegistrationIssue("critical", "handler is not callable")
+                RegistrationIssue("critical", "handler is not callable"),
             )
 
         # Name must be a valid identifier
         name = getattr(spec, "name", "")
         if not name or not re.match(r"^[a-zA-Z0-9_.:-]+$", name):
             issues.append(
-                RegistrationIssue("critical", f"invalid tool name: {name!r}")
+                RegistrationIssue("critical", f"invalid tool name: {name!r}"),
             )
 
         # Description should be present
         desc = getattr(spec, "description", "")
         if not desc:
             issues.append(
-                RegistrationIssue("warning", "missing description")
+                RegistrationIssue("warning", "missing description"),
             )
 
         # Parameters should be a dict (JSON Schema). Accept Mapping-like
@@ -233,11 +242,13 @@ class ToolBroker:
             # Non-dict parameters are treated as a warning to avoid quarantining
             # tool specs that use mock/placeholder parameter objects.
             issues.append(
-                RegistrationIssue("warning", "parameters is not a dict")
+                RegistrationIssue("warning", "parameters is not a dict"),
             )
 
         return RegistrationResult(
-            status="quarantined" if any(i.level == "critical" for i in issues) else "registered",
+            status="quarantined"
+            if any(i.level == "critical" for i in issues)
+            else "registered",
             issues=issues,
         )
 
@@ -265,7 +276,8 @@ class ToolBroker:
 
         # 1. Policy check
         decision = self._policy.can_execute_tool(
-            envelope.tool, agent_id=envelope.agent_id
+            envelope.tool,
+            agent_id=envelope.agent_id,
         )
         if not decision.allowed:
             return self._denied(envelope, decision.reason, decision.matched_rule, start)
@@ -273,11 +285,15 @@ class ToolBroker:
         # 1b. Permission mode check (dangerous patterns + mode restrictions)
         if self._permission_engine is not None:
             perm_decision = self._permission_engine.evaluate(
-                envelope.tool, envelope.args
+                envelope.tool,
+                envelope.args,
             )
             if not perm_decision.allowed:
                 return self._denied(
-                    envelope, perm_decision.reason, "permission-mode", start
+                    envelope,
+                    perm_decision.reason,
+                    "permission-mode",
+                    start,
                 )
             # If auto-approved by permission mode, skip the approval gate later.
             if perm_decision.auto_approved:
@@ -329,7 +345,10 @@ class ToolBroker:
                 handler = self._handlers.get(envelope.tool)
         if handler is None:
             return self._error(
-                envelope, "no_handler", f"No handler for tool: {envelope.tool}", start
+                envelope,
+                "no_handler",
+                f"No handler for tool: {envelope.tool}",
+                start,
             )
 
         # 5. Execute with timeout and retry
@@ -354,8 +373,8 @@ class ToolBroker:
                     result=result,
                     latency_ms=latency,
                 )
-            except asyncio.TimeoutError:
-                last_error = asyncio.TimeoutError(f"Tool {envelope.tool} timed out")
+            except TimeoutError:
+                last_error = TimeoutError(f"Tool {envelope.tool} timed out")
                 logger.warning(
                     "Timeout on %s (attempt %d/%d)",
                     envelope.tool,
@@ -401,10 +420,62 @@ class ToolBroker:
             latency_ms=latency,
         )
 
+    # -- Batch execution ---------------------------------------------------
+
+    async def execute_batch(
+        self,
+        envelopes: list[ToolCallEnvelope],
+        registry: Any = None,
+    ) -> list[ToolResultEnvelope]:
+        """Execute a batch of tool calls with concurrency partitioning.
+
+        Read-only tools (based on ``side_effects`` from their ToolSpec)
+        run concurrently under a semaphore.  Mutation tools run
+        sequentially.  Each tool still passes through the full broker
+        pipeline (policy, approval, audit).
+        """
+        if not envelopes:
+            return []
+
+        async def _execute_via_broker(tc: ToolCallInfo) -> ToolResultEnvelope:
+            envelope = ToolCallEnvelope(
+                call_id=tc.tool_use_id,
+                agent_id="broker_batch",
+                tool=tc.name,
+                args=tc.input,
+            )
+            return await self.execute(envelope)
+
+        # Convert envelopes to ToolCallInfo for the executor
+        calls = [
+            ToolCallInfo(
+                tool_use_id=e.call_id,
+                name=e.tool,
+                input=e.args,
+            )
+            for e in envelopes
+        ]
+
+        if registry is not None:
+            return await self._tool_executor.execute_batch(
+                calls,
+                _execute_via_broker,
+                registry,
+            )
+
+        # Without a registry, fall back to sequential execution
+        results: list[ToolResultEnvelope] = []
+        for envelope in envelopes:
+            result = await self.execute(envelope)
+            results.append(result)
+        return results
+
     # -- Internals ---------------------------------------------------------
 
     async def _invoke(
-        self, handler: Callable[..., Any], envelope: ToolCallEnvelope
+        self,
+        handler: Callable[..., Any],
+        envelope: ToolCallEnvelope,
     ) -> Any:
         """Invoke handler with timeout."""
         coro = (
@@ -497,9 +568,9 @@ class ToolBroker:
 
 
 __all__ = [
-    "ToolBroker",
-    "BrokerAuditEntry",
     "ApprovalCallback",
+    "BrokerAuditEntry",
     "RegistrationIssue",
     "RegistrationResult",
+    "ToolBroker",
 ]

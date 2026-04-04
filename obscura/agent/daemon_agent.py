@@ -26,10 +26,12 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from datetime import UTC
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from obscura.agent.interaction import (
@@ -56,13 +58,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DaemonAgent",
-    "Trigger",
-    "ScheduleTrigger",
     "FileWatchTrigger",
-    "MemoryChangeTrigger",
-    "PeerMessageTrigger",
     "IMessageTrigger",
+    "MemoryChangeTrigger",
     "MessageTrigger",
+    "PeerMessageTrigger",
+    "ScheduleTrigger",
+    "Trigger",
 ]
 
 logger = logging.getLogger(__name__)
@@ -87,7 +89,7 @@ class Trigger:
     prompt: str = ""
     notify_user: bool = False
     priority: AttentionPriority = AttentionPriority.NORMAL
-    data: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    data: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True)
@@ -254,7 +256,11 @@ class DaemonAgent:
                 details=details,
             )
         except Exception:
-            logger.exception("[%s] failed to persist runtime event: %s", self._name, event_type)
+            logger.exception(
+                "[%s] failed to persist runtime event: %s",
+                self._name,
+                event_type,
+            )
 
     async def run_forever(self) -> None:
         """Main loop: wait for triggers → process → notify → repeat.
@@ -283,7 +289,10 @@ class DaemonAgent:
 
         if self._stopped:
             return
-        self._record_runtime_event("daemon_lock_acquired", details={"lock_name": self._lock_name})
+        self._record_runtime_event(
+            "daemon_lock_acquired",
+            details={"lock_name": self._lock_name},
+        )
 
         # Start background schedulers for static triggers
         self._scheduler_task = asyncio.create_task(self._run_schedulers())
@@ -292,7 +301,11 @@ class DaemonAgent:
             logger.info("[%s] main loop entering", self._name)
             while not self._stopped:
                 # Watchdog: if poll/scheduler task dies unexpectedly, restart it.
-                if self._scheduler_task and self._scheduler_task.done() and not self._stopped:
+                if (
+                    self._scheduler_task
+                    and self._scheduler_task.done()
+                    and not self._stopped
+                ):
                     try:
                         exc = self._scheduler_task.exception()
                     except asyncio.CancelledError:
@@ -308,7 +321,10 @@ class DaemonAgent:
                             details={"reason": "crash", "error": str(exc)},
                         )
                     else:
-                        logger.warning("[%s] scheduler task stopped; restarting", self._name)
+                        logger.warning(
+                            "[%s] scheduler task stopped; restarting",
+                            self._name,
+                        )
                         self._record_runtime_event(
                             "scheduler_restarted",
                             details={"reason": "stopped"},
@@ -317,7 +333,11 @@ class DaemonAgent:
                     _sched_restart_count = getattr(self, "_sched_restart_count", 0) + 1
                     self._sched_restart_count = _sched_restart_count  # type: ignore[attr-defined]
                     _backoff = min(2.0 ** min(_sched_restart_count, 6), 60.0)
-                    logger.info("[%s] scheduler restart backoff: %.1fs", self._name, _backoff)
+                    logger.info(
+                        "[%s] scheduler restart backoff: %.1fs",
+                        self._name,
+                        _backoff,
+                    )
                     await asyncio.sleep(_backoff)
                     self._scheduler_task = asyncio.create_task(self._run_schedulers())
 
@@ -354,7 +374,10 @@ class DaemonAgent:
                                     )
                                     break
                                 await asyncio.sleep(self._lock_retry_interval_s)
-                    if now - self._last_heartbeat_monotonic >= self._heartbeat_interval_s:
+                    if (
+                        now - self._last_heartbeat_monotonic
+                        >= self._heartbeat_interval_s
+                    ):
                         self._last_heartbeat_monotonic = now
                         self._record_runtime_event(
                             "daemon_heartbeat",
@@ -370,7 +393,10 @@ class DaemonAgent:
                     platform=str(trigger.data.get("platform", "")),
                     conversation_key=str(trigger.data.get("conversation_key", "")),
                     message_id=str(trigger.data.get("message_id", "")),
-                    details={"kind": trigger.kind, "queue_size": self._trigger_queue.qsize()},
+                    details={
+                        "kind": trigger.kind,
+                        "queue_size": self._trigger_queue.qsize(),
+                    },
                 )
                 logger.info(
                     "[%s] dequeued trigger #%d kind=%s",
@@ -384,15 +410,18 @@ class DaemonAgent:
                         self._handle_trigger(trigger),
                         timeout=self._trigger_timeout_s,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     self._record_runtime_event(
                         "trigger_timeout",
                         platform=str(trigger.data.get("platform", "")),
                         conversation_key=str(trigger.data.get("conversation_key", "")),
                         message_id=str(trigger.data.get("message_id", "")),
-                        details={"kind": trigger.kind, "timeout_s": self._trigger_timeout_s},
+                        details={
+                            "kind": trigger.kind,
+                            "timeout_s": self._trigger_timeout_s,
+                        },
                     )
-                    logger.error(
+                    logger.exception(
                         "[%s] trigger timeout kind=%s after %.1fs",
                         self._name,
                         trigger.kind,
@@ -426,10 +455,8 @@ class DaemonAgent:
             if self._scheduler_task:
                 if not self._scheduler_task.done():
                     self._scheduler_task.cancel()
-                    try:
+                    with contextlib.suppress(asyncio.CancelledError):
                         await self._scheduler_task
-                    except asyncio.CancelledError:
-                        pass
                 else:
                     try:
                         exc = self._scheduler_task.exception()
@@ -442,7 +469,10 @@ class DaemonAgent:
                     except asyncio.CancelledError:
                         pass
             logger.info("[%s] daemon agent stopped", self._name)
-            self._lock_store.release(lock_name=self._lock_name, owner_id=self._lock_owner)
+            self._lock_store.release(
+                lock_name=self._lock_name,
+                owner_id=self._lock_owner,
+            )
 
     async def loop_forever(self) -> None:
         """Backward-compatible alias for callers expecting ``loop_forever``."""
@@ -452,12 +482,10 @@ class DaemonAgent:
         """Signal the daemon to stop after the current trigger."""
         self._stopped = True
         # Unblock the trigger queue
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             self._trigger_queue.put_nowait(
                 Trigger(kind="__stop__"),
             )
-        except asyncio.QueueFull:
-            pass
 
     # -- Trigger handling (override in subclasses) ---------------------------
 
@@ -579,7 +607,7 @@ class DaemonAgent:
             prompt = (
                 f"You are in a multi-turn {platform} conversation with {sender_display}.\n\n"
                 f"Conversation so far:\n{history_block}\n\n"
-                f"Their latest message:\n\"{text}\"\n\n"
+                f'Their latest message:\n"{text}"\n\n'
                 f"Write your reply message ONLY — just the text you want to send back. "
                 f"Do NOT use any tools. Do NOT describe what you would do. "
                 f"Do NOT mention tools, capabilities, or limitations. "
@@ -589,7 +617,7 @@ class DaemonAgent:
         else:
             prompt = (
                 f"You received a {platform} message from {sender_display}:\n\n"
-                f"\"{text}\"\n\n"
+                f'"{text}"\n\n'
                 f"Write your reply message ONLY — just the text you want to send back. "
                 f"Do NOT use any tools. Do NOT describe what you would do. "
                 f"Do NOT mention tools, capabilities, or limitations. "
@@ -601,15 +629,20 @@ class DaemonAgent:
         # stuck after a completed stream() call, causing subsequent calls to
         # hang.  Conversation history is already in the prompt, so session
         # state isn't needed.
-        logger.info("[%s] calling LLM for %s message from %s", self._name, platform, sender_display)
+        logger.info(
+            "[%s] calling LLM for %s message from %s",
+            self._name,
+            platform,
+            sender_display,
+        )
         try:
             await self._client.reset_session()
             result = await asyncio.wait_for(
                 self._client.run_loop_to_completion(prompt, max_turns=self._max_turns),
                 timeout=60.0,
             )
-        except asyncio.TimeoutError:
-            logger.error(
+        except TimeoutError:
+            logger.exception(
                 "[%s] LLM call timed out for message from %s",
                 self._name,
                 sender_display,
@@ -642,7 +675,12 @@ class DaemonAgent:
                 message_id=message_id,
             )
             return
-        logger.info("[%s] LLM returned for %s: %s", self._name, sender_display, result[:80])
+        logger.info(
+            "[%s] LLM returned for %s: %s",
+            self._name,
+            sender_display,
+            result[:80],
+        )
         self._record_runtime_event(
             "llm_ok",
             platform=platform,
@@ -668,7 +706,10 @@ class DaemonAgent:
             return
 
         # Append assistant reply to thread
-        thread = self._conversation_store.append_assistant_message(conversation_key, result)
+        thread = self._conversation_store.append_assistant_message(
+            conversation_key,
+            result,
+        )
 
         # -- Send reply via platform adapter ---------------------------------
         all_contacts = list(
@@ -680,7 +721,7 @@ class DaemonAgent:
                     or (isinstance(t, MessageTrigger) and t.platform == platform)
                 )
                 for c in t.contacts
-            }
+            },
         )
         adapter = get_adapter(
             platform=platform,
@@ -728,8 +769,8 @@ class DaemonAgent:
                 adapter.send(sender_target, result),
                 timeout=15.0,
             )
-        except asyncio.TimeoutError:
-            logger.error(
+        except TimeoutError:
+            logger.exception(
                 "[%s] send timed out for %s reply to %s (target=%s)",
                 self._name,
                 platform,
@@ -799,7 +840,7 @@ class DaemonAgent:
                 if trigger.kind == "__stop__":
                     return None
                 return trigger
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return None
         return None
 
@@ -828,10 +869,8 @@ class DaemonAgent:
         if not tasks:
             # No triggers configured — block until cancelled rather than
             # returning immediately (which causes the watchdog to spin).
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                pass
             return
 
         try:
@@ -901,7 +940,11 @@ class DaemonAgent:
             self._record_runtime_event(
                 "poll_adapter_started",
                 platform=platform,
-                details={"account_id": account_id, "interval": interval, "contacts": contacts},
+                details={
+                    "account_id": account_id,
+                    "interval": interval,
+                    "contacts": contacts,
+                },
             )
             adapters.append((platform, account_id, interval, adapter, tgroup))
             next_due[(platform, account_id, interval)] = 0.0
@@ -952,8 +995,12 @@ class DaemonAgent:
                             continue
 
                         msg_sender_key = normalize_identity(msg.sender_id)
-                        sender_display = str(msg.metadata.get("sender_raw", msg.sender_id))
-                        sender_target = str(msg.metadata.get("sender_target", msg.sender_id))
+                        sender_display = str(
+                            msg.metadata.get("sender_raw", msg.sender_id),
+                        )
+                        sender_target = str(
+                            msg.metadata.get("sender_target", msg.sender_id),
+                        )
                         conversation_key = build_conversation_key(
                             platform=msg.platform,
                             account_id=msg.account_id,
@@ -962,13 +1009,17 @@ class DaemonAgent:
                         )
                         matching = tgroup[0]
                         for t in tgroup:
-                            trigger_contact_keys = {normalize_identity(c) for c in t.contacts}
+                            trigger_contact_keys = {
+                                normalize_identity(c) for c in t.contacts
+                            }
                             if msg_sender_key in trigger_contact_keys:
                                 matching = t
                                 break
 
                         fire_trigger = Trigger(
-                            kind="imessage" if msg.platform == "imessage" else "message",
+                            kind="imessage"
+                            if msg.platform == "imessage"
+                            else "message",
                             description=f"{msg.platform} message from {sender_display}",
                             notify_user=matching.notify_user,
                             priority=matching.priority,
@@ -988,7 +1039,9 @@ class DaemonAgent:
                         )
                         forced_recipient = matching.data.get("forced_recipient")
                         if forced_recipient:
-                            fire_trigger.data["forced_recipient"] = str(forced_recipient)
+                            fire_trigger.data["forced_recipient"] = str(
+                                forced_recipient,
+                            )
                         await self._trigger_queue.put(fire_trigger)
                         qsize = self._trigger_queue.qsize()
                         if qsize >= 10:
@@ -1061,7 +1114,8 @@ class DaemonAgent:
         """Ask for user attention via the InteractionBus."""
         if self._bus is None:
             logger.debug(
-                "[%s] no interaction bus — skipping attention request", self._name
+                "[%s] no interaction bus — skipping attention request",
+                self._name,
             )
             return None
 
@@ -1091,14 +1145,14 @@ def _cron_matches_now(cron_expr: str) -> bool:
     Supports ``*``, integer literals, and ``*/N`` step syntax.
     Does **not** support ranges or comma lists (add later if needed).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     fields = cron_expr.strip().split()
     if len(fields) != 5:
         logger.warning("Invalid cron expression (expected 5 fields): %s", cron_expr)
         return False
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     now_values = (now.minute, now.hour, now.day, now.month, now.weekday())
     # cron weekday: 0=Sunday, Python weekday: 0=Monday
     # Remap: python_weekday → cron_weekday

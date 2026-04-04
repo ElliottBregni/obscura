@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import require_role
 from obscura.deps import audit, record_sync_metric
 from obscura.schemas import SyncRequest, SyncResponse
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["sync"])
 
@@ -19,7 +22,7 @@ router = APIRouter(prefix="/api/v1", tags=["sync"])
 @router.post("/sync", response_model=SyncResponse)
 async def trigger_sync(
     body: SyncRequest,
-    user: AuthenticatedUser = Depends(require_role("sync:write")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("sync:write"))],
 ) -> SyncResponse:
     """Trigger a vault sync operation."""
     cmd = [sys.executable, "sync.py", "--mode", "symlink"]

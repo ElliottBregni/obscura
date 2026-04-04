@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.webhook.client import WebhookClient
 from obscura.integrations.webhook.state import WebhookState
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from obscura.integrations.messaging.models import PlatformMessage
 
 logger = logging.getLogger(__name__)
 _PLATFORM = "webhook"

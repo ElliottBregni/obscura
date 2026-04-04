@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from obscura.core.client import ObscuraClient
 from obscura.core.types import (
     Backend,
     ChunkKind,
@@ -18,21 +19,22 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.core.client import ObscuraClient
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_copilot_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set env vars so auth resolution doesn't fail for Copilot."""
     monkeypatch.setenv("GITHUB_TOKEN", "fake-gh-token")
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_claude_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set env vars so auth resolution doesn't fail for Claude."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-anthropic-key")
@@ -67,7 +69,8 @@ class TestModelResolution:
         assert model == "copilot_automation_safe"
 
     def test_copilot_premium_blocked_by_automation_safe(
-        self, mock_copilot_env: None
+        self,
+        mock_copilot_env: None,
     ) -> None:
         """Premium alias should be rejected when automation_safe=True."""
         client = ObscuraClient.__new__(ObscuraClient)
@@ -119,7 +122,7 @@ class TestReasoningDefaults:
         client = ObscuraClient.__new__(ObscuraClient)
         client._model = "gpt-5"
         out = client._apply_default_reasoning_kwargs(  # pyright: ignore[reportPrivateUsage]
-            {"reasoning_effort": "low"}
+            {"reasoning_effort": "low"},
         )
         assert out["reasoning_effort"] == "low"
 
@@ -127,7 +130,7 @@ class TestReasoningDefaults:
         client = ObscuraClient.__new__(ObscuraClient)
         client._model = "gpt-5"
         out = client._apply_default_reasoning_kwargs(  # pyright: ignore[reportPrivateUsage]
-            {"response_create_kwargs": {"reasoning": {"effort": "high"}}}
+            {"response_create_kwargs": {"reasoning": {"effort": "high"}}},
         )
         assert "reasoning_effort" not in out
 
@@ -218,7 +221,8 @@ class TestAuthResolution:
                 ObscuraClient("claude")
 
     def test_missing_moonshot_auth_raises(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Missing Moonshot API key should raise ValueError."""
         for var in ("MOONSHOT_API_KEY", "KIMI_API_KEY", "OPENAI_API_KEY"):
@@ -440,7 +444,8 @@ class TestStream:
 
         async def mock_stream(prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
             yield StreamChunk(kind=ChunkKind.TEXT_DELTA, text="partial")
-            raise RuntimeError("stream failed")
+            msg = "stream failed"
+            raise RuntimeError(msg)
 
         mock_backend.stream = mock_stream
 
@@ -550,7 +555,8 @@ class TestRunLoop:
         mock_loop_instance.run.return_value = iter([])  # returns an iterator
 
         with patch(
-            "obscura.core.agent_loop.AgentLoop", return_value=mock_loop_instance
+            "obscura.core.agent_loop.AgentLoop",
+            return_value=mock_loop_instance,
         ) as mock_cls:
             client.run_loop("fix bug", max_turns=5)
 
@@ -571,7 +577,8 @@ class TestRunLoop:
         mock_loop_instance.run_to_completion = AsyncMock(return_value="done!")
 
         with patch(
-            "obscura.core.agent_loop.AgentLoop", return_value=mock_loop_instance
+            "obscura.core.agent_loop.AgentLoop",
+            return_value=mock_loop_instance,
         ) as mock_cls:
             result = await client.run_loop_to_completion("fix bug", max_turns=3)
 
@@ -596,7 +603,8 @@ class TestRunLoop:
         mock_loop_instance.run.return_value = iter([])
 
         with patch(
-            "obscura.core.agent_loop.AgentLoop", return_value=mock_loop_instance
+            "obscura.core.agent_loop.AgentLoop",
+            return_value=mock_loop_instance,
         ) as mock_cls:
             client.run_loop("fix bug", on_confirm=confirm_fn)
             mock_cls.assert_called_once_with(
@@ -676,7 +684,9 @@ class TestCreateBackend:
 class TestTelemetryHelpers:
     def test_get_client_tracer_returns_noop_on_failure(self) -> None:
         """_get_client_tracer should return NoOpTracer when OTel is unavailable."""
-        from obscura.core.client import _get_client_tracer  # pyright: ignore[reportPrivateUsage]
+        from obscura.core.client import (
+            _get_client_tracer,  # pyright: ignore[reportPrivateUsage]
+        )
 
         tracer = _get_client_tracer()
         # Should be usable (either real or NoOp)
@@ -685,14 +695,18 @@ class TestTelemetryHelpers:
 
     def test_set_span_attr_noop(self) -> None:
         """_set_span_attr should not raise on non-span objects."""
-        from obscura.core.client import _set_span_attr  # pyright: ignore[reportPrivateUsage]
+        from obscura.core.client import (
+            _set_span_attr,  # pyright: ignore[reportPrivateUsage]
+        )
         from obscura.telemetry.traces import NoOpSpan
 
         _set_span_attr(NoOpSpan(), "key", "value")  # no set_attribute -> no-op
 
     def test_set_span_attr_with_set_attribute(self) -> None:
         """_set_span_attr should call set_attribute when available."""
-        from obscura.core.client import _set_span_attr  # pyright: ignore[reportPrivateUsage]
+        from obscura.core.client import (
+            _set_span_attr,  # pyright: ignore[reportPrivateUsage]
+        )
         from obscura.telemetry.traces import NoOpSpan
 
         mock_span = NoOpSpan()
@@ -702,19 +716,25 @@ class TestTelemetryHelpers:
 
     def test_record_request_metric_noop(self) -> None:
         """_record_request_metric should not raise when metrics unavailable."""
-        from obscura.core.client import _record_request_metric  # pyright: ignore[reportPrivateUsage]
+        from obscura.core.client import (
+            _record_request_metric,  # pyright: ignore[reportPrivateUsage]
+        )
 
         # Should not raise
         _record_request_metric("copilot", "send", "success")
 
     def test_record_request_duration_noop(self) -> None:
         """_record_request_duration should not raise when metrics unavailable."""
-        from obscura.core.client import _record_request_duration  # pyright: ignore[reportPrivateUsage]
+        from obscura.core.client import (
+            _record_request_duration,  # pyright: ignore[reportPrivateUsage]
+        )
 
         _record_request_duration("copilot", "send", 0.5)
 
     def test_record_stream_chunk_noop(self) -> None:
         """_record_stream_chunk should not raise when metrics unavailable."""
-        from obscura.core.client import _record_stream_chunk  # pyright: ignore[reportPrivateUsage]
+        from obscura.core.client import (
+            _record_stream_chunk,  # pyright: ignore[reportPrivateUsage]
+        )
 
         _record_stream_chunk("copilot", "text_delta")

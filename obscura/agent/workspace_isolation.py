@@ -1,5 +1,4 @@
-"""
-obscura.agent.workspace_isolation — Per-agent workspace isolation.
+"""obscura.agent.workspace_isolation — Per-agent workspace isolation.
 
 Provides filesystem and memory isolation for agents:
   - Git worktree isolation (separate working directory per agent)
@@ -17,6 +16,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -39,7 +39,7 @@ class AgentWorkspaceIsolation:
         self,
         agent_name: str,
         *,
-        isolation_mode: str = "",   # "" | "worktree"
+        isolation_mode: str = "",  # "" | "worktree"
         memory_namespace: str = "",
         original_cwd: str = "",
     ) -> None:
@@ -85,18 +85,25 @@ class AgentWorkspaceIsolation:
             slug = f"agent-{self._agent_name}"
             self._worktree_branch = f"agent/{slug}"
             self._worktree_path = str(
-                Path(git_root).parent / ".obscura-worktrees" / slug
+                Path(git_root).parent / ".obscura-worktrees" / slug,
             )
 
             rc, _, err = await _git(
-                "worktree", "add", "-b", self._worktree_branch,
-                self._worktree_path, cwd=git_root,
+                "worktree",
+                "add",
+                "-b",
+                self._worktree_branch,
+                self._worktree_path,
+                cwd=git_root,
             )
             if rc != 0:
                 # Branch may already exist — try without -b.
                 rc, _, err = await _git(
-                    "worktree", "add", self._worktree_path,
-                    self._worktree_branch, cwd=git_root,
+                    "worktree",
+                    "add",
+                    self._worktree_path,
+                    self._worktree_branch,
+                    cwd=git_root,
                 )
                 if rc != 0:
                     logger.warning("Agent isolation: worktree creation failed: %s", err)
@@ -107,7 +114,8 @@ class AgentWorkspaceIsolation:
             self._active = True
             logger.info(
                 "Agent %s isolated in worktree: %s",
-                self._agent_name, self._worktree_path,
+                self._agent_name,
+                self._worktree_path,
             )
             return True
 
@@ -122,10 +130,8 @@ class AgentWorkspaceIsolation:
             return
 
         # Restore original working directory.
-        try:
+        with contextlib.suppress(OSError):
             os.chdir(self._original_cwd)
-        except OSError:
-            pass
 
         if self._worktree_path and not keep_worktree:
             # Remove worktree.
@@ -133,11 +139,17 @@ class AgentWorkspaceIsolation:
                 rc, git_root, _ = await _git("rev-parse", "--show-toplevel")
                 if rc == 0:
                     await _git(
-                        "worktree", "remove", "--force",
-                        self._worktree_path, cwd=git_root,
+                        "worktree",
+                        "remove",
+                        "--force",
+                        self._worktree_path,
+                        cwd=git_root,
                     )
                     await _git(
-                        "branch", "-D", self._worktree_branch, cwd=git_root,
+                        "branch",
+                        "-D",
+                        self._worktree_branch,
+                        cwd=git_root,
                     )
                     logger.info("Agent %s worktree removed", self._agent_name)
             except Exception:
@@ -159,7 +171,8 @@ class AgentWorkspaceIsolation:
 async def _git(*args: str, cwd: str | None = None) -> tuple[int, str, str]:
     """Run a git command and return (exit_code, stdout, stderr)."""
     proc = await asyncio.create_subprocess_exec(
-        "git", *args,
+        "git",
+        *args,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

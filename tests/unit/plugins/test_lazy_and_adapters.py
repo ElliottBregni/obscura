@@ -19,10 +19,10 @@ from obscura.plugins.models import (
     ToolContribution,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_spec(
     plugin_id: str = "test-plugin",
@@ -32,9 +32,7 @@ def _make_spec(
 ) -> PluginSpec:
     """Build a minimal valid PluginSpec for testing."""
     if tools is None:
-        tools = (
-            ToolContribution(name="test_tool", description="A test tool"),
-        )
+        tools = (ToolContribution(name="test_tool", description="A test tool"),)
     return PluginSpec(
         id=plugin_id,
         name=kwargs.pop("name", plugin_id),
@@ -49,6 +47,7 @@ def _make_spec(
 @dataclass
 class _MockTool:
     """Tool-like object with a ``handler`` attribute (as adapters expect)."""
+
     name: str
     handler: str = ""
 
@@ -77,6 +76,7 @@ def _spec_with_handler_tools(
 # LazyPluginManager
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestLazyPluginManagerRegister:
     """Tests for register() and initial state."""
 
@@ -88,10 +88,12 @@ class TestLazyPluginManagerRegister:
 
     def test_register_creates_tool_mapping(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
-        spec = _make_spec(tools=(
-            ToolContribution(name="alpha", description="a"),
-            ToolContribution(name="beta", description="b"),
-        ))
+        spec = _make_spec(
+            tools=(
+                ToolContribution(name="alpha", description="a"),
+                ToolContribution(name="beta", description="b"),
+            ),
+        )
         mgr.register(spec)
         # Both tools should resolve to plugin
         assert mgr.ensure_tool_ready("alpha")
@@ -215,9 +217,12 @@ class TestPrewarm:
         init = MagicMock()
         mgr = LazyPluginManager(init_fn=init, prewarm={"test-plugin"})
         mgr.register(_make_spec())
-        mgr.register(_make_spec(plugin_id="other-plugin", tools=(
-            ToolContribution(name="other_tool", description="o"),
-        )))
+        mgr.register(
+            _make_spec(
+                plugin_id="other-plugin",
+                tools=(ToolContribution(name="other_tool", description="o"),),
+            ),
+        )
         # init called once for prewarmed plugin
         init.assert_called_once()
         assert mgr.get_state("other-plugin") == LazyState.READY
@@ -228,12 +233,18 @@ class TestStatsAndQueries:
 
     def test_stats_counts_per_state(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
-        mgr.register(_make_spec(plugin_id="plug-a", tools=(
-            ToolContribution(name="tool_a", description="a"),
-        )))
-        mgr.register(_make_spec(plugin_id="plug-b", tools=(
-            ToolContribution(name="tool_b", description="b"),
-        )))
+        mgr.register(
+            _make_spec(
+                plugin_id="plug-a",
+                tools=(ToolContribution(name="tool_a", description="a"),),
+            ),
+        )
+        mgr.register(
+            _make_spec(
+                plugin_id="plug-b",
+                tools=(ToolContribution(name="tool_b", description="b"),),
+            ),
+        )
         mgr.ensure_tool_ready("tool_a")  # plug-a → ACTIVE
 
         stats = mgr.stats()
@@ -242,12 +253,18 @@ class TestStatsAndQueries:
 
     def test_active_plugins(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
-        mgr.register(_make_spec(plugin_id="plug-a", tools=(
-            ToolContribution(name="tool_a", description="a"),
-        )))
-        mgr.register(_make_spec(plugin_id="plug-b", tools=(
-            ToolContribution(name="tool_b", description="b"),
-        )))
+        mgr.register(
+            _make_spec(
+                plugin_id="plug-a",
+                tools=(ToolContribution(name="tool_a", description="a"),),
+            ),
+        )
+        mgr.register(
+            _make_spec(
+                plugin_id="plug-b",
+                tools=(ToolContribution(name="tool_b", description="b"),),
+            ),
+        )
         mgr.ensure_tool_ready("tool_a")
 
         assert mgr.active_plugins() == ["plug-a"]
@@ -263,12 +280,18 @@ class TestMultiplePluginIsolation:
             call_log.append(spec.id)
 
         mgr = LazyPluginManager(init_fn=init_fn)
-        mgr.register(_make_spec(plugin_id="plug-a", tools=(
-            ToolContribution(name="tool_a", description="a"),
-        )))
-        mgr.register(_make_spec(plugin_id="plug-b", tools=(
-            ToolContribution(name="tool_b", description="b"),
-        )))
+        mgr.register(
+            _make_spec(
+                plugin_id="plug-a",
+                tools=(ToolContribution(name="tool_a", description="a"),),
+            ),
+        )
+        mgr.register(
+            _make_spec(
+                plugin_id="plug-b",
+                tools=(ToolContribution(name="tool_b", description="b"),),
+            ),
+        )
 
         mgr.ensure_tool_ready("tool_a")
 
@@ -279,6 +302,7 @@ class TestMultiplePluginIsolation:
 # ═══════════════════════════════════════════════════════════════════════════
 # NativeAdapter
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestNativeAdapterCanHandle:
     def test_native_returns_true(self) -> None:
@@ -333,7 +357,10 @@ class TestNativeAdapterHealthcheck:
     def test_default_healthcheck_returns_true(self) -> None:
         adapter = NativeAdapter()
         spec = _make_spec(runtime_type="native")
-        assert asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec)) is True
+        assert (
+            asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec))
+            is True
+        )
 
     def test_callable_healthcheck_invoked(self) -> None:
         adapter = NativeAdapter()
@@ -342,22 +369,28 @@ class TestNativeAdapterHealthcheck:
             healthcheck=HealthcheckSpec(type="callable", target="os.path:exists"),
         )
         # os.path.exists() with no args raises TypeError → returns False
-        assert asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec)) is False
+        assert (
+            asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec))
+            is False
+        )
 
 
 class TestResolveHandler:
     def test_colon_notation(self) -> None:
         import json
+
         assert _resolve_handler("json:loads") is json.loads
 
     def test_dot_notation(self) -> None:
         import os.path
+
         assert _resolve_handler("os.path.exists") is os.path.exists
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CLIAdapter
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestCLIAdapterCanHandle:
     def test_cli_returns_true(self) -> None:
@@ -378,9 +411,7 @@ class TestCLIAdapterLoad:
         adapter = CLIAdapter()
         spec = _spec_with_handler_tools(
             runtime_type="cli",
-            handler_tools=(
-                _MockTool(name="my_grep", handler="grep {pattern} {file}"),
-            ),
+            handler_tools=(_MockTool(name="my_grep", handler="grep {pattern} {file}"),),
         )
 
         result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
@@ -406,10 +437,12 @@ class TestCLIHandlerExecution:
         mock_proc.communicate.return_value = (b"hello world\n", b"")
         mock_proc.returncode = 0
 
-        with patch("obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
-                    return_value=mock_proc) as mock_shell:
+        with patch(
+            "obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
+            return_value=mock_proc,
+        ) as mock_shell:
             result = asyncio.get_event_loop().run_until_complete(
-                handler(msg="hello world")
+                handler(msg="hello world"),
             )
 
         mock_shell.assert_called_once()
@@ -424,15 +457,20 @@ class TestCLIHandlerExecution:
         mock_proc.communicate.return_value = (b"", b"some error")
         mock_proc.returncode = 1
 
-        with patch("obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
-                    return_value=mock_proc):
-            with pytest.raises(RuntimeError, match="failed.*rc=1"):
-                asyncio.get_event_loop().run_until_complete(handler())
+        with (
+            patch(
+                "obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
+                return_value=mock_proc,
+            ),
+            pytest.raises(RuntimeError, match="failed.*rc=1"),
+        ):
+            asyncio.get_event_loop().run_until_complete(handler())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ContentAdapter
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestContentAdapterCanHandle:
     def test_content_returns_true(self) -> None:
@@ -461,4 +499,7 @@ class TestContentAdapterHealthcheck:
     def test_always_true(self) -> None:
         adapter = ContentAdapter()
         spec = _make_spec(runtime_type="content")
-        assert asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec)) is True
+        assert (
+            asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec))
+            is True
+        )

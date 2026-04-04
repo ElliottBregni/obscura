@@ -1,9 +1,10 @@
 """Tests for sdk.heartbeat.monitor — HeartbeatMonitor."""
 
-import pytest
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, timedelta
+
+import pytest
 
 from obscura.heartbeat.monitor import (
     HeartbeatMonitor,
@@ -11,10 +12,10 @@ from obscura.heartbeat.monitor import (
     set_default_monitor,
 )
 from obscura.heartbeat.types import (
-    Heartbeat,
     HealthRecord,
     HealthStatus,
     HealthStatusTransition,
+    Heartbeat,
 )
 
 
@@ -212,11 +213,15 @@ class TestHeartbeatMonitorQueries:
     async def test_get_health_summary(self) -> None:
         store: Any = AsyncMock()
         hb = Heartbeat(
-            agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY
+            agent_id="a1",
+            timestamp=datetime.now(),
+            status=HealthStatus.HEALTHY,
         )
         store.list_records.return_value = [
             HealthRecord(
-                agent_id="a1", computed_status=HealthStatus.HEALTHY, last_heartbeat=hb
+                agent_id="a1",
+                computed_status=HealthStatus.HEALTHY,
+                last_heartbeat=hb,
             ),
         ]
         monitor = HeartbeatMonitor(store=store)
@@ -261,7 +266,10 @@ class TestHeartbeatMonitorAlertMessage:
         monitor = HeartbeatMonitor()
         record = HealthRecord(agent_id="a1", missed_count=5)
         msg = monitor._generate_alert_message(  # pyright: ignore[reportPrivateUsage]
-            "a1", HealthStatus.WARNING, HealthStatus.CRITICAL, record
+            "a1",
+            HealthStatus.WARNING,
+            HealthStatus.CRITICAL,
+            record,
         )
         assert "CRITICAL" in msg
         assert "5" in msg
@@ -270,7 +278,10 @@ class TestHeartbeatMonitorAlertMessage:
         monitor = HeartbeatMonitor()
         record = HealthRecord(agent_id="a1")
         msg = monitor._generate_alert_message(  # pyright: ignore[reportPrivateUsage]
-            "a1", HealthStatus.HEALTHY, HealthStatus.WARNING, record
+            "a1",
+            HealthStatus.HEALTHY,
+            HealthStatus.WARNING,
+            record,
         )
         assert "WARNING" in msg
 
@@ -278,7 +289,10 @@ class TestHeartbeatMonitorAlertMessage:
         monitor = HeartbeatMonitor()
         record = HealthRecord(agent_id="a1")
         msg = monitor._generate_alert_message(  # pyright: ignore[reportPrivateUsage]
-            "a1", HealthStatus.WARNING, HealthStatus.HEALTHY, record
+            "a1",
+            HealthStatus.WARNING,
+            HealthStatus.HEALTHY,
+            record,
         )
         assert "recovered" in msg
 

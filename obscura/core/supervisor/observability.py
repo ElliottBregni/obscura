@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.observability  Run observer for logging + drift detection.
+"""obscura.core.supervisor.observability  Run observer for logging + drift detection.
 
 Tracks:
 - Prompt hash fingerprinting
@@ -16,6 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+
 # NOTE: datetime import removed  unused in this module.
 from typing import Any
 
@@ -74,9 +74,13 @@ class RunMetrics:
             "lock_wait_ms": round(self.lock_wait_ms, 1),
             "lock_hold_ms": round(self.lock_hold_ms, 1),
             "prompt_hash": self.prompt_hash[:12] if self.prompt_hash else "",
-            "tool_snapshot_hash": self.tool_snapshot_hash[:12] if self.tool_snapshot_hash else "",
+            "tool_snapshot_hash": self.tool_snapshot_hash[:12]
+            if self.tool_snapshot_hash
+            else "",
             "policy_hash": self.policy_hash[:12] if self.policy_hash else "",
-            "agent_version_hash": self.agent_version_hash[:12] if self.agent_version_hash else "",
+            "agent_version_hash": self.agent_version_hash[:12]
+            if self.agent_version_hash
+            else "",
             "tool_count": self.tool_count,
             "turn_count": self.turn_count,
             "heartbeat_count": self.heartbeat_count,
@@ -166,7 +170,10 @@ class RunObserver:
         # Historically tests (and some supervisors) emit MODEL_TURN_START for
         # completed turns. Count both start and end events to be tolerant to
         # upstream changes.
-        if kind == SupervisorEventKind.MODEL_TURN_START or kind == SupervisorEventKind.MODEL_TURN_END:
+        if kind in (
+            SupervisorEventKind.MODEL_TURN_START,
+            SupervisorEventKind.MODEL_TURN_END,
+        ):
             self._metrics.turn_count += 1
 
         elif kind == SupervisorEventKind.TOOL_EXECUTION_END:
@@ -208,7 +215,9 @@ class RunObserver:
             return False
         if current_hash != self._metrics.tool_snapshot_hash:
             self._record_drift(
-                "tool_registry", self._metrics.tool_snapshot_hash, current_hash
+                "tool_registry",
+                self._metrics.tool_snapshot_hash,
+                current_hash,
             )
             return True
         return False

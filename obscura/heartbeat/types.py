@@ -1,5 +1,4 @@
-"""
-obscura.heartbeat.types — Core types for the heartbeat monitoring system.
+"""obscura.heartbeat.types — Core types for the heartbeat monitoring system.
 
 Defines HealthStatus, Heartbeat, HealthCheck and related data structures
 used by the heartbeat monitoring infrastructure.
@@ -7,10 +6,13 @@ used by the heartbeat monitoring infrastructure.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class HealthStatus(Enum):
@@ -43,8 +45,7 @@ class SystemMetrics:
 
 @dataclass
 class Heartbeat:
-    """
-    Heartbeat message sent by agents to report their health status.
+    """Heartbeat message sent by agents to report their health status.
 
     Attributes:
         agent_id: Unique identifier for the agent
@@ -55,16 +56,17 @@ class Heartbeat:
         ttl: Time-to-live in seconds (how long until considered stale)
         version: Agent version string
         tags: Optional tags for categorization
+
     """
 
     agent_id: str
     timestamp: datetime
     status: HealthStatus
     metrics: SystemMetrics = field(default_factory=SystemMetrics)
-    message: Optional[str] = None
+    message: str | None = None
     ttl: int = 30  # seconds
     version: str = "0.1.0"
-    tags: list[str] = field(default_factory=lambda: list[str]())
+    tags: list[str] = field(default_factory=list[str])
 
     def to_dict(self) -> dict[str, Any]:
         """Convert heartbeat to dictionary for serialization."""
@@ -96,8 +98,7 @@ class Heartbeat:
 
 @dataclass
 class HealthCheck:
-    """
-    Definition of a health check that can be performed.
+    """Definition of a health check that can be performed.
 
     Attributes:
         name: Unique identifier for this check
@@ -105,6 +106,7 @@ class HealthCheck:
         interval: How often to run this check (seconds)
         timeout: Maximum time to wait for check (seconds)
         description: Human-readable description
+
     """
 
     name: str
@@ -116,19 +118,18 @@ class HealthCheck:
 
 @dataclass
 class HealthRecord:
-    """
-    Stored health record for an agent.
+    """Stored health record for an agent.
 
     Includes the latest heartbeat and computed health status.
     """
 
     agent_id: str
-    last_heartbeat: Optional[Heartbeat] = None
+    last_heartbeat: Heartbeat | None = None
     computed_status: HealthStatus = HealthStatus.UNKNOWN
     expected_interval: int = 30  # seconds between heartbeats
     missed_count: int = 0
-    registered_at: datetime = field(default_factory=lambda: datetime.now())
-    last_updated: datetime = field(default_factory=lambda: datetime.now())
+    registered_at: datetime = field(default_factory=datetime.now)
+    last_updated: datetime = field(default_factory=datetime.now)
     alert_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,8 +150,7 @@ class HealthRecord:
 
 @dataclass
 class Alert:
-    """
-    Alert generated when health status changes or thresholds are crossed.
+    """Alert generated when health status changes or thresholds are crossed.
 
     Attributes:
         alert_id: Unique identifier
@@ -160,6 +160,7 @@ class Alert:
         message: Human-readable alert message
         timestamp: When the alert was generated
         acknowledged: Whether the alert has been acknowledged
+
     """
 
     alert_id: str
@@ -169,8 +170,8 @@ class Alert:
     message: str
     timestamp: datetime
     acknowledged: bool = False
-    acknowledged_by: Optional[str] = None
-    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: str | None = None
+    acknowledged_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert alert to dictionary."""
@@ -192,13 +193,15 @@ class Alert:
 class HealthStatusTransition:
     """Tracks health status transitions for an agent."""
 
-    def __init__(self, agent_id: str):
+    def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
         self.transitions: list[tuple[datetime, HealthStatus, HealthStatus]] = []
         self.current_status = HealthStatus.UNKNOWN
 
     def record_transition(
-        self, from_status: HealthStatus, to_status: HealthStatus
+        self,
+        from_status: HealthStatus,
+        to_status: HealthStatus,
     ) -> bool:
         """Record a status transition if it's actually a change."""
         if from_status != to_status:

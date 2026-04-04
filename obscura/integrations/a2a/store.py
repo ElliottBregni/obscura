@@ -1,5 +1,4 @@
-"""
-obscura.a2a.store — Task persistence with state machine enforcement.
+"""obscura.a2a.store — Task persistence with state machine enforcement.
 
 Provides ``InMemoryTaskStore`` for development/testing and
 ``RedisTaskStore`` for production (durable, pub/sub, multi-instance).
@@ -17,10 +16,11 @@ import logging
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
-from collections.abc import AsyncIterator
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from obscura.integrations.a2a.types import (
+    TERMINAL_STATES,
+    VALID_TRANSITIONS,
     A2AMessage,
     Artifact,
     InvalidTransitionError,
@@ -31,9 +31,10 @@ from obscura.integrations.a2a.types import (
     TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
-    TERMINAL_STATES,
-    VALID_TRANSITIONS,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,9 @@ class TaskStore(Protocol):
     """Contract for A2A task persistence backends."""
 
     async def create_task(
-        self, context_id: str, initial_message: A2AMessage
+        self,
+        context_id: str,
+        initial_message: A2AMessage,
     ) -> Task: ...
 
     async def get_task(self, task_id: str) -> Task | None: ...
@@ -95,7 +98,7 @@ class InMemoryTaskStore:
         self._tasks: dict[str, Task] = {}
         self._context_tasks: dict[str, list[str]] = defaultdict(list)
         self._subscribers: dict[str, list[asyncio.Queue[StreamEvent]]] = defaultdict(
-            list
+            list,
         )
 
     async def create_task(self, context_id: str, initial_message: A2AMessage) -> Task:
@@ -266,9 +269,12 @@ class RedisTaskStore:
             await self._redis.ping()
             logger.info("Connected to Redis at %s", self._redis_url)
         except ImportError:
-            raise ImportError(
+            msg = (
                 "redis package required for RedisTaskStore. "
                 "Install with: pip install 'obscura[a2a]'"
+            )
+            raise ImportError(
+                msg,
             )
 
     async def disconnect(self) -> None:
@@ -344,7 +350,9 @@ class RedisTaskStore:
         if context_id:
             # Get task IDs from context sorted set (reverse chronological)
             raw_ids: list[Any] = await self._redis.zrevrange(
-                self._context_key(context_id), 0, -1
+                self._context_key(context_id),
+                0,
+                -1,
             )
             task_ids = [str(x) for x in raw_ids]
         else:

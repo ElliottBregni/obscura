@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.supervisor — The single-writer Supervisor coordinator.
+"""obscura.core.supervisor.supervisor — The single-writer Supervisor coordinator.
 
 Orchestrates the full lifecycle of a supervised run:
 
@@ -39,7 +38,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.supervisor.errors import (
     LockExpiredError,
@@ -63,6 +62,9 @@ from obscura.core.supervisor.types import (
     SupervisorHookPoint,
     SupervisorState,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +139,7 @@ class Supervisor:
 
         Yields:
             SupervisorEvent for each state change, hook fire, heartbeat, etc.
+
         """
         run_id = str(uuid.uuid4())
         holder_id = str(uuid.uuid4())
@@ -197,7 +200,7 @@ class Supervisor:
             # 1. ACQUIRE LOCK
             # ==============================================================
             lock_start = time.monotonic()
-            lock_info = await self._lock.acquire(
+            await self._lock.acquire(
                 session_id,
                 holder_id,
                 timeout=config.lock_timeout,
@@ -227,7 +230,9 @@ class Supervisor:
 
             async def _heartbeat_tick(hb: Any) -> None:
                 refreshed = await self._lock.heartbeat(
-                    session_id, holder_id, ttl=config.lock_ttl
+                    session_id,
+                    holder_id,
+                    ttl=config.lock_ttl,
                 )
                 if not refreshed:
                     logger.critical(
@@ -239,9 +244,12 @@ class Supervisor:
                     )
                     if _run_task is not None and not _run_task.done():
                         _run_task.cancel()
-                    raise LockExpiredError(
+                    msg = (
                         f"Session lock for {session_id!r} expired or was stolen "
                         f"during run {run_id!r} (heartbeat seq={hb.seq})"
+                    )
+                    raise LockExpiredError(
+                        msg,
                     )
 
             heartbeat.on_tick(_heartbeat_tick)
@@ -291,7 +299,9 @@ class Supervisor:
                 specs = tool_registry.all() if hasattr(tool_registry, "all") else []
                 tool_snapshot = FrozenToolRegistry.from_specs(specs)
                 await asyncio.to_thread(
-                    self._tool_store.save, tool_snapshot, run_id
+                    self._tool_store.save,
+                    tool_snapshot,
+                    run_id,
                 )
                 yield SupervisorEvent(
                     kind=SupervisorEventKind.TOOLS_FROZEN,
@@ -425,7 +435,7 @@ class Supervisor:
                         "run_id": run_id,
                         "prompt_hash": run_context.prompt_hash[:12],
                         "tool_hash": run_context.tool_snapshot_hash[:12],
-                    }
+                    },
                 },
             )
 
@@ -543,7 +553,9 @@ class Supervisor:
             all_events.extend(memory_gate.events)
 
             await asyncio.to_thread(
-                self._persist_events_sync, run_id, all_events
+                self._persist_events_sync,
+                run_id,
+                all_events,
             )
 
             # Reset state machine
@@ -578,13 +590,15 @@ class Supervisor:
 
         except SupervisorError as e:
             # Known supervisor error — record and emit
-            logger.error("Supervisor error: %s", e)
+            logger.exception("Supervisor error: %s", e)
 
             if sm.state != SupervisorState.IDLE:
                 sm.fail(str(e))
 
             await asyncio.to_thread(
-                self._fail_run_sync, run_id, str(e)
+                self._fail_run_sync,
+                run_id,
+                str(e),
             )
 
             await heartbeat.stop()
@@ -609,7 +623,9 @@ class Supervisor:
                 sm.fail(str(e))
 
             await asyncio.to_thread(
-                self._fail_run_sync, run_id, str(e)
+                self._fail_run_sync,
+                run_id,
+                str(e),
             )
 
             await heartbeat.stop()
@@ -646,13 +662,15 @@ class Supervisor:
         """
         run = await asyncio.to_thread(self._get_run_sync, run_id)
         if run is None:
-            raise ValueError(f"Run not found: {run_id}")
+            msg = f"Run not found: {run_id}"
+            raise ValueError(msg)
 
         events = await asyncio.to_thread(self._get_events_sync, run_id)
 
         # Load tool snapshot
         tool_snapshot = await asyncio.to_thread(
-            self._tool_store.load_for_run, run_id
+            self._tool_store.load_for_run,
+            run_id,
         )
 
         result: dict[str, Any] = {
@@ -785,19 +803,27 @@ class Supervisor:
         conn.commit()
 
     def _get_run_sync(self, run_id: str) -> dict[str, Any] | None:
-        row = self._conn().execute(
-            "SELECT * FROM supervisor_runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT * FROM supervisor_runs WHERE run_id = ?",
+                (run_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return dict(row)
 
     def _get_events_sync(self, run_id: str) -> list[dict[str, Any]]:
-        rows = self._conn().execute(
-            "SELECT * FROM supervisor_events WHERE run_id = ? ORDER BY seq",
-            (run_id,),
-        ).fetchall()
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT * FROM supervisor_events WHERE run_id = ? ORDER BY seq",
+                (run_id,),
+            )
+            .fetchall()
+        )
         return [dict(r) for r in rows]
 
     def _persist_events_sync(

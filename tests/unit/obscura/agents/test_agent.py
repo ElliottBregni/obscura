@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
 from typing import Any, override
+from unittest.mock import MagicMock
 
 import pytest
 
-from obscura.core.types import AgentContext, AgentPhase, HookPoint
 from obscura.agent.agent import BaseAgent
-
+from obscura.agent.aper_loop_agent import APERMode
+from obscura.core.types import AgentContext, AgentPhase, HookPoint
 
 # ---------------------------------------------------------------------------
 # Concrete test agent
@@ -19,7 +19,8 @@ from obscura.agent.agent import BaseAgent
 class StubAgent(BaseAgent):
     """Minimal agent for testing the APER loop."""
 
-    def __init__(self, client: MagicMock, **kwargs: Any):
+    def __init__(self, client: MagicMock, **kwargs: Any) -> None:
+        kwargs.setdefault("aper_mode", APERMode.ALWAYS)
         super().__init__(client, **kwargs)
         self.call_order: list[str] = []
 
@@ -163,7 +164,8 @@ class TestHooks:
         )
         agent.on(HookPoint.PRE_PLAN, lambda ctx: phases.append(("pre_plan", ctx.phase)))
         agent.on(
-            HookPoint.PRE_EXECUTE, lambda ctx: phases.append(("pre_execute", ctx.phase))
+            HookPoint.PRE_EXECUTE,
+            lambda ctx: phases.append(("pre_execute", ctx.phase)),
         )
         agent.on(
             HookPoint.POST_EXECUTE,

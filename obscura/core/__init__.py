@@ -1,5 +1,4 @@
-"""
-obscura.core — Stable runtime API surface.
+"""obscura.core — Stable runtime API surface.
 
 This package contains the foundational types, tools, configuration, and
 client that app developers import by default::
@@ -32,34 +31,34 @@ from obscura.core.types import (
 )
 
 __all__ = [
-    # Auth
-    "AuthConfig",
-    "TokenRefresher",
-    "resolve_auth",
-    # Config
-    "ObscuraConfig",
-    # Context
-    "ContextLoader",
-    # Handlers
-    "RequestHandler",
-    "SimpleHandler",
-    # Sessions
-    "SessionStore",
-    # Tools
-    "ToolRegistry",
-    "tool",
     # Types
     "AgentContext",
     "AgentPhase",
+    # Auth
+    "AuthConfig",
     "Backend",
     "BackendProtocol",
     "ChunkKind",
     "ContentBlock",
+    # Context
+    "ContextLoader",
     "HookContext",
     "HookPoint",
     "Message",
+    # Config
+    "ObscuraConfig",
+    # Handlers
+    "RequestHandler",
     "Role",
     "SessionRef",
+    # Sessions
+    "SessionStore",
+    "SimpleHandler",
     "StreamChunk",
+    "TokenRefresher",
+    # Tools
+    "ToolRegistry",
     "ToolSpec",
+    "resolve_auth",
+    "tool",
 ]

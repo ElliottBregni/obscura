@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-"""
-obscura.internal.tools — Unified tool definitions for both backends.
+"""obscura.internal.tools — Unified tool definitions for both backends.
 
 Provides a ``@tool`` decorator that creates a ``ToolSpec`` which can be
 registered with either the Copilot or Claude backend. Includes basic
@@ -11,10 +10,12 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.types import ToolSpec
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # ---------------------------------------------------------------------------
 # Tool registry
@@ -244,15 +245,6 @@ class ToolRegistry:
             "todo": "todo_write",
             "update_todos": "todo_write",
             "write_todos": "todo_write",
-            # Claude Code native tool names (PascalCase → Obscura canonical)
-            "bash": "run_shell",
-            "read": "read_text_file",
-            "edit": "edit_text_file",
-            "write": "write_text_file",
-            "glob": "find_files",
-            "grep": "grep_files",
-            "websearch": "web_search",
-            "webfetch": "web_fetch",
             "notebookedit": "edit_text_file",
             "askuserquestion": "ask_user",
             "agent": "task",
@@ -265,7 +257,8 @@ class ToolRegistry:
     def _sanitize_tool_name(name: str) -> str:
         """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
         import re
-        return re.sub(r'[^a-zA-Z0-9_-]', '_', name)[:128]
+
+        return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:128]
 
     def register(self, spec: ToolSpec) -> None:
         # Always register with the original name for backward compat
@@ -321,16 +314,26 @@ class ToolRegistry:
         candidates = [stripped]
         if underscore_variant:
             candidates.append(underscore_variant)
-        for prefix in ("filesystem_", "git_", "memory_", "fetch_", "sequentialthinking_", "functions_", "multi_tool_use_"):
+        for prefix in (
+            "filesystem_",
+            "git_",
+            "memory_",
+            "fetch_",
+            "sequentialthinking_",
+            "functions_",
+            "multi_tool_use_",
+        ):
             for candidate in candidates:
                 if not candidate.startswith(prefix):
                     continue
-                without_prefix = candidate[len(prefix):]
+                without_prefix = candidate[len(prefix) :]
                 direct = self._tools.get(without_prefix)
                 if direct is not None:
                     return direct
                 # Also check alias for the unprefixed name
-                canonical = self._alias_targets.get(_normalize_tool_name(without_prefix))
+                canonical = self._alias_targets.get(
+                    _normalize_tool_name(without_prefix),
+                )
                 if canonical is not None:
                     found = self._tools.get(canonical)
                     if found is not None:
@@ -361,7 +364,7 @@ class ToolRegistry:
         return result
 
     def names(self) -> list[str]:
-        return [n for n in self._tools.keys() if n not in self._disabled]
+        return [n for n in self._tools if n not in self._disabled]
 
     def __len__(self) -> int:
         return len(self._tools)
@@ -517,7 +520,7 @@ def tool(
                 return _traced_tool_call_async(name, fn, *args, **kwargs)
             return _traced_tool_call(name, fn, *args, **kwargs)
 
-        setattr(wrapper, "spec", spec)
+        wrapper.spec = spec
         return wrapper
 
     return decorator
@@ -529,7 +532,10 @@ def tool(
 
 
 def _traced_tool_call(
-    tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
+    tool_name: str,
+    fn: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
 ) -> Any:
     """Execute a tool handler wrapped in an OTel span."""
     try:
@@ -561,7 +567,10 @@ def _traced_tool_call(
 
 
 async def _traced_tool_call_async(
-    tool_name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
+    tool_name: str,
+    fn: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
 ) -> Any:
     """Execute an async tool handler wrapped in an OTel span."""
     try:

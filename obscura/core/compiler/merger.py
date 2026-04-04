@@ -49,7 +49,10 @@ def merge_template_chain(chain: list[TemplateSpec]) -> TemplateSpec:
     # Lists: union (child appends to base, deduped)
     merged_plugins = _merge_str_lists(base.spec.plugins, child.spec.plugins)
     merged_caps = _merge_str_lists(base.spec.capabilities, child.spec.capabilities)
-    merged_denylist = _merge_str_lists(base.spec.tool_denylist, child.spec.tool_denylist)
+    merged_denylist = _merge_str_lists(
+        base.spec.tool_denylist,
+        child.spec.tool_denylist,
+    )
 
     # MCP servers: child extends base (by name, child wins on conflict)
     base_mcp: dict[str, MCPServerSpec] = {s.name: s for s in base.spec.mcp_servers}
@@ -73,9 +76,12 @@ def merge_template_chain(chain: list[TemplateSpec]) -> TemplateSpec:
         agent_type=child.spec.agent_type,
         max_iterations=child.spec.max_iterations,
         provider=child.spec.provider,
-        model_id=child.spec.model_id if child.spec.model_id is not None else base.spec.model_id,
+        model_id=child.spec.model_id
+        if child.spec.model_id is not None
+        else base.spec.model_id,
         instructions=_merge_instructions(
-            base.spec.instructions, child.spec.instructions,
+            base.spec.instructions,
+            child.spec.instructions,
         ),
         plugins=merged_plugins,
         capabilities=merged_caps,
@@ -324,11 +330,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     """Deep-merge two dicts. Override wins on scalar conflicts."""
     result = dict(base)
     for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = value

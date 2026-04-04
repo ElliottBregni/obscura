@@ -19,10 +19,10 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from pathlib import Path
-import logging
 from typing import Any
 
 import click
@@ -36,10 +36,28 @@ def _swallow(label: str, exc: Exception) -> None:
     """Log a swallowed exception at DEBUG level instead of silently ignoring."""
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
+
+import contextlib
+
+from obscura.cli import trace as trace_mod
+
+# ---------------------------------------------------------------------------
+# MCP / agent discovery — canonical implementations live in bootstrap.py
+# ---------------------------------------------------------------------------
+from obscura.cli.bootstrap import (  # noqa: E402
+    AgentInfo as AgentInfo,
+)
+from obscura.cli.bootstrap import (
+    _discover_agent_infos,
+    _discover_agents,
+    _discover_mcp,
+    _parse_inline_agent_mention,
+    _run_inline_agent_from_mention,
+)
 from obscura.cli.commands import (
+    _FILE_WRITE_TOOLS,
     COMPLETIONS,
     REPLContext,
-    _FILE_WRITE_TOOLS,
     handle_command,
 )
 from obscura.cli.prompt import (
@@ -52,15 +70,13 @@ from obscura.cli.prompt import (
     create_prompt_session,
 )
 from obscura.cli.render import (
-    StreamRenderer,
     console,
-    print_error,
     print_banner,
+    print_error,
     print_ok,
     print_warning,
     render_plan,
 )
-from obscura.cli import trace as trace_mod
 from obscura.cli.vector_memory_bridge import (
     auto_save_turn,
     init_vector_store,
@@ -70,23 +86,9 @@ from obscura.cli.vector_memory_bridge import (
     search_with_router,
 )
 from obscura.core.client import ObscuraClient
-from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir
 from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
-
-
-# ---------------------------------------------------------------------------
-# MCP / agent discovery — canonical implementations live in bootstrap.py
-# ---------------------------------------------------------------------------
-from obscura.cli.bootstrap import (  # noqa: E402
-    AgentInfo as AgentInfo,
-    _discover_agent_infos,
-    _discover_agents,
-    _discover_mcp,
-    _parse_inline_agent_mention,
-    _run_inline_agent_from_mention,
-)
-
 
 # ---------------------------------------------------------------------------
 # Tool confirmation callback
@@ -94,7 +96,9 @@ from obscura.cli.bootstrap import (  # noqa: E402
 
 
 async def _cli_confirm(
-    ctx: REPLContext, tool_name: str, tool_input: dict[str, Any]
+    ctx: REPLContext,
+    tool_name: str,
+    tool_input: dict[str, Any],
 ) -> bool:
     """Prompt user to approve a tool call via TUI widget. Returns True to allow."""
     if tool_name in ctx.confirm_always:
@@ -103,7 +107,7 @@ async def _cli_confirm(
     from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
 
     result = await confirm_tool(
-        ToolConfirmRequest(tool_name=tool_name, tool_input=tool_input)
+        ToolConfirmRequest(tool_name=tool_name, tool_input=tool_input),
     )
 
     if result.action == "always_allow":
@@ -142,16 +146,21 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
             # Record attribution.
             try:
                 from obscura.core.commit_attribution import get_attribution_tracker
+
                 added = len(after.splitlines()) - len(before.splitlines())
                 if added >= 0:
                     get_attribution_tracker().record_agent_edit(path, lines_added=added)
                 else:
-                    get_attribution_tracker().record_agent_edit(path, lines_removed=abs(added))
+                    get_attribution_tracker().record_agent_edit(
+                        path,
+                        lines_removed=abs(added),
+                    )
             except Exception:
                 pass
             # Record in file history.
             try:
                 from obscura.tools.system.file_state import record_file_access
+
                 record_file_access(Path(path), "edit")
             except Exception:
                 pass
@@ -217,7 +226,9 @@ async def send_message(
             )
         return inline_agent_response
 
-    renderer = StreamRenderer(streaming_status=streaming_status)
+    from obscura.cli.renderer import create_renderer
+
+    renderer = create_renderer(streaming_status=streaming_status)
     # Register active renderer so prompt can expand previews while streaming
     try:
         from obscura.cli.render import set_active_renderer
@@ -234,12 +245,17 @@ async def send_message(
     async def confirm_cb(tc: ToolCallInfo) -> bool:
         # 1. Check permission mode (dangerous patterns + mode restrictions).
         try:
-            from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+            from obscura.core.permission_modes import (
+                PermissionMode,
+                PermissionModeEngine,
+            )
+
             mode_str = getattr(ctx, "_permission_mode", "default")
             engine = PermissionModeEngine(PermissionMode(mode_str))
             decision = engine.evaluate(tc.name, tc.input)
             if not decision.allowed:
                 from obscura.cli.render import print_warning
+
                 print_warning(f"Blocked by {mode_str} mode: {tc.name}")
                 return False
             if decision.auto_approved:
@@ -313,14 +329,18 @@ async def send_message(
     if _pre_tokens > _compact_threshold:
         console.print(
             f"[yellow]⚡ Auto-compacting context (~{_pre_tokens:,} tokens, "
-            f"60% of {_context_window:,}) …[/]"
+            f"60% of {_context_window:,}) …[/]",
         )
         await cmd_compact("6", ctx)
 
-    _tip_scheduler = None  # initialised later; declared here so nested fn can reference it
+    _tip_scheduler = (
+        None  # initialised later; declared here so nested fn can reference it
+    )
+
     # ── Streaming with graceful retry on context-limit errors ────────────────
     async def _stream_with_retry(
-        context_retry_used: bool = False, dead_session_retry_used: bool = False
+        context_retry_used: bool = False,
+        dead_session_retry_used: bool = False,
     ) -> list[str]:
         nonlocal _stream_output_chars
         _buf: list[str] = []
@@ -328,7 +348,8 @@ async def send_message(
         _effective_kwargs = dict(loop_kwargs)
         if hasattr(ctx, "_effort_level") and ctx._effort_level:
             try:
-                from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+                from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
+
                 _lvl = EffortLevel(ctx._effort_level)
                 _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[_lvl]
             except (ValueError, KeyError):
@@ -371,6 +392,7 @@ async def send_message(
                 # Deep logging: log every tool call and API event.
                 try:
                     from obscura.core.deep_log import dlog
+
                     if event.kind == AgentEventKind.TOOL_CALL:
                         dlog.tool_call(
                             getattr(event, "tool_name", ""),
@@ -390,6 +412,7 @@ async def send_message(
                     tool_input = getattr(event, "tool_input", {})
                     try:
                         from obscura.cli.tool_collapse import ToolCollapser
+
                         if not hasattr(ctx, "_collapser"):
                             ctx._collapser = ToolCollapser()
                         ctx._collapser.record(tool_name, tool_input)
@@ -397,7 +420,11 @@ async def send_message(
                         pass
                     # Tips: record tool type for targeted tips.
                     if _tip_scheduler is not None:
-                        _FILE_TOOLS = {"write_text_file", "edit_text_file", "append_text_file"}
+                        _FILE_TOOLS = {
+                            "write_text_file",
+                            "edit_text_file",
+                            "append_text_file",
+                        }
                         _SEARCH_TOOLS = {"grep_files", "find_files", "web_search"}
                         if tool_name in _FILE_TOOLS:
                             _tip_scheduler.record_edit()
@@ -414,7 +441,10 @@ async def send_message(
                         except Exception:
                             pass
                 # Track costs on turn completion.
-                if event.kind in (AgentEventKind.TURN_COMPLETE, AgentEventKind.AGENT_DONE):
+                if event.kind in (
+                    AgentEventKind.TURN_COMPLETE,
+                    AgentEventKind.AGENT_DONE,
+                ):
                     meta = getattr(event, "metadata", None)
                     if meta is not None:
                         # StreamMetadata stores usage in .usage dict, not direct attributes.
@@ -428,7 +458,12 @@ async def send_message(
                         if inp > 0 or out > 0:
                             try:
                                 from obscura.core.cost_tracker import get_cost_tracker
-                                get_cost_tracker().record(inp, out, ctx.model or ctx.backend)
+
+                                get_cost_tracker().record(
+                                    inp,
+                                    out,
+                                    ctx.model or ctx.backend,
+                                )
                             except Exception:
                                 pass
         except KeyboardInterrupt:
@@ -461,7 +496,7 @@ async def send_message(
             )
             if _is_ctx_err and not context_retry_used:
                 console.print(
-                    "[red]⚠ Context limit reached — aggressive compact and retry…[/]"
+                    "[red]⚠ Context limit reached — aggressive compact and retry…[/]",
                 )
                 await cmd_compact("2", ctx)
                 return await _stream_with_retry(
@@ -470,17 +505,15 @@ async def send_message(
                 )
             if _is_dead_session_err and not dead_session_retry_used:
                 console.print(
-                    "[yellow]⚠ Backend session became stale — recreating and retrying once…[/]"
+                    "[yellow]⚠ Backend session became stale — recreating and retrying once…[/]",
                 )
                 try:
                     await ctx.client.reset_session()
                 except Exception:
                     # reset_session can't revive a dead process;
                     # full recreate is needed
-                    try:
+                    with contextlib.suppress(Exception):
                         await ctx.recreate_client(ctx.backend, ctx.model)
-                    except Exception:
-                        pass
                 return await _stream_with_retry(
                     context_retry_used=context_retry_used,
                     dead_session_retry_used=True,
@@ -536,13 +569,14 @@ async def send_message(
             f"[dim yellow]  Context: ~{_post_tokens:,} tokens "
             f"({int(_post_tokens / _context_window * 100)}% of "
             f"{_context_window:,}). "
-            f"Auto-compact at {_compact_threshold:,} (60%).[/]"
+            f"Auto-compact at {_compact_threshold:,} (60%).[/]",
         )
 
     # Auto-compact: trigger if context exceeds 80% of window.
     if _post_tokens > _compact_threshold:
         try:
             from obscura.core.compaction import should_auto_compact
+
             if should_auto_compact(
                 [{"role": r, "content": t} for r, t in ctx.message_history],
                 ctx.model or "default",
@@ -550,6 +584,7 @@ async def send_message(
             ):
                 console.print("[dim cyan]  Auto-compacting context...[/]")
                 from obscura.cli.commands import cmd_compact
+
                 await cmd_compact("4", ctx)
         except Exception:
             pass
@@ -559,6 +594,7 @@ async def send_message(
         _session_state["titled"] = True
         try:
             from obscura.core.session_utils import generate_session_title
+
             title = await generate_session_title(text, ctx.client._backend)
             if title:
                 await ctx.store.update_summary(ctx.session_id, title)
@@ -571,7 +607,7 @@ async def send_message(
     # Auto-detect question choices and present interactive widget.
     # Skip if the ask_user tool already presented a widget this turn.
     try:
-        from obscura.tools.system import was_ask_user_called, reset_ask_user_called
+        from obscura.tools.system import reset_ask_user_called, was_ask_user_called
 
         _tool_asked = was_ask_user_called()
         reset_ask_user_called()
@@ -587,7 +623,12 @@ async def send_message(
                 selection = await present_detected_choices(detected)
                 if selection is not None:
                     # Feed the selection back as a user message
-                    return await send_message(ctx, selection, loop_kwargs, streaming_status)
+                    return await send_message(
+                        ctx,
+                        selection,
+                        loop_kwargs,
+                        streaming_status,
+                    )
     except Exception:
         pass
 
@@ -603,9 +644,9 @@ async def _start_imessage_daemon(
     client: Any,
 ) -> asyncio.Task[None] | None:
     """Start iMessage daemon if configured in agents.yaml. Returns the task."""
-    from obscura.agent.supervisor import SupervisorConfig
     from obscura.agent.daemon_agent import DaemonAgent
     from obscura.agent.interaction import InteractionBus
+    from obscura.agent.supervisor import SupervisorConfig
     from obscura.cli.render import console as _console
     from obscura.core.client import ObscuraClient
 
@@ -639,7 +680,7 @@ async def _start_imessage_daemon(
                     notify_user=tdef.notify_user,
                     priority=tdef.priority,
                     data=im_data,
-                )
+                ),
             )
 
         bus = InteractionBus()
@@ -719,6 +760,7 @@ async def _repl(
     # ordering is: shell env > global ~/.obscura/.env > project .obscura/.env > CWD .env
     try:
         from dotenv import load_dotenv
+
         from obscura.core.paths import resolve_obscura_global_home
 
         # 1. Always load the global ~/.obscura/.env (user-wide creds/keys)
@@ -745,6 +787,7 @@ async def _repl(
 
     # Create authenticated user for vector memory + memory tools
     import os
+
     from obscura.auth.models import AuthenticatedUser
 
     cli_user = AuthenticatedUser(
@@ -812,6 +855,7 @@ async def _repl(
     if _context_router is not None:
         try:
             from obscura.tools.memory_tools import build_channels_prompt_section
+
             channels_doc = build_channels_prompt_section(_context_router.channels)
             if channels_doc:
                 custom_sections.append(channels_doc)
@@ -847,7 +891,9 @@ async def _repl(
 
     # Inject KAIROS context into system prompt if enabled
     try:
-        from obscura.kairos.engine import KairosEngine as _KairosEngineProbe, is_kairos_enabled as _kep
+        from obscura.kairos.engine import KairosEngine as _KairosEngineProbe
+        from obscura.kairos.engine import is_kairos_enabled as _kep
+
         if _kep():
             _probe_engine = _KairosEngineProbe()
             _kairos_sys = _probe_engine.get_system_prompt_addition()
@@ -947,6 +993,7 @@ async def _repl(
     if tools_enabled and system_tools:
         try:
             from dataclasses import replace as _dc_replace
+
             from obscura.plugins.loader import get_capability_map
 
             _cap_map = get_capability_map()
@@ -969,9 +1016,10 @@ async def _repl(
             _allowed = resolve_allowed_tools_from_config()
             if _allowed is not None:
                 system_tools = [
-                    t for t in system_tools
+                    t
+                    for t in system_tools
                     if not getattr(t, "capability", "")  # no capability → keep
-                    or t.name in _allowed                 # in grant list → keep
+                    or t.name in _allowed  # in grant list → keep
                 ]
         except Exception:
             pass
@@ -989,10 +1037,10 @@ async def _repl(
                 allow_custom: bool = False,
             ) -> str:
                 from obscura.cli.widgets import (
+                    AttentionWidgetRequest,
                     ModelQuestionRequest,
                     ask_model_question,
                     confirm_attention,
-                    AttentionWidgetRequest,
                 )
 
                 if choices:
@@ -1003,14 +1051,13 @@ async def _repl(
                             message=question,
                             priority="normal",
                             actions=tuple(choices),
-                        )
+                        ),
                     )
                     return result.action
-                else:
-                    result = await ask_model_question(
-                        ModelQuestionRequest(question=question)
-                    )
-                    return result.text
+                result = await ask_model_question(
+                    ModelQuestionRequest(question=question),
+                )
+                return result.text
 
             set_ask_user_callback(_ask_user_handler)
         except Exception:
@@ -1047,11 +1094,11 @@ async def _repl(
                             action=kwargs.get("action", ""),
                             reason=kwargs.get("reason", ""),
                             risk=kwargs.get("risk", "low"),
-                        )
+                        ),
                     )
                     return {"approved": result.action == "approve"}
 
-                elif mode == "notify":
+                if mode == "notify":
                     from obscura.cli.widgets import (
                         NotifyWidgetRequest,
                         render_notification_banner,
@@ -1062,36 +1109,35 @@ async def _repl(
                             title=kwargs.get("title", ""),
                             message=kwargs.get("message", ""),
                             priority=kwargs.get("priority", "normal"),
-                        )
+                        ),
                     )
                     return {}
 
-                else:  # question mode (default)
-                    from obscura.cli.widgets import (
-                        ModelQuestionRequest,
-                        ask_model_question,
-                        confirm_attention,
-                        AttentionWidgetRequest,
-                    )
+                # question mode (default)
+                from obscura.cli.widgets import (
+                    AttentionWidgetRequest,
+                    ModelQuestionRequest,
+                    ask_model_question,
+                    confirm_attention,
+                )
 
-                    choices = kwargs.get("choices", [])
-                    question = kwargs.get("question", "")
-                    if choices:
-                        result = await confirm_attention(
-                            AttentionWidgetRequest(
-                                request_id="user_interact",
-                                agent_name="assistant",
-                                message=question,
-                                priority="normal",
-                                actions=tuple(choices),
-                            )
-                        )
-                        return {"selected": result.action}
-                    else:
-                        result = await ask_model_question(
-                            ModelQuestionRequest(question=question)
-                        )
-                        return {"selected": result.text}
+                choices = kwargs.get("choices", [])
+                question = kwargs.get("question", "")
+                if choices:
+                    result = await confirm_attention(
+                        AttentionWidgetRequest(
+                            request_id="user_interact",
+                            agent_name="assistant",
+                            message=question,
+                            priority="normal",
+                            actions=tuple(choices),
+                        ),
+                    )
+                    return {"selected": result.action}
+                result = await ask_model_question(
+                    ModelQuestionRequest(question=question),
+                )
+                return {"selected": result.text}
 
             set_user_interact_callback(_user_interact_handler)
         except Exception:
@@ -1122,13 +1168,16 @@ async def _repl(
             _context_router.update_signals_from_event(event)
             # Sync file paths to tool router for context-aware recall
             if _tool_router_ref is not None and _context_router.signals.file_paths:
-                _tool_router_ref.set_file_context(list(_context_router.signals.file_paths))
+                _tool_router_ref.set_file_context(
+                    list(_context_router.signals.file_paths),
+                )
 
         project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
 
     # Wire Kairos tool-call and turn-complete logging hooks (closure over _kairos_engine)
     try:
         from obscura.kairos.engine import is_kairos_enabled as _kie2
+
         if _kie2():
             from obscura.core.hooks import HookRegistry
             from obscura.core.types import AgentEventKind as _AEK2
@@ -1165,11 +1214,14 @@ async def _repl(
         # Without this, all 100+ tools get sent to the model every turn.
         if tools_enabled:
             try:
+                from obscura.core.compiler.compiled import ToolRoutingConfig
                 from obscura.core.tool_router import ToolRouter
                 from obscura.core.tool_score_index import ToolScoreIndex
-                from obscura.core.compiler.compiled import ToolRoutingConfig
+                from obscura.plugins.loader import (
+                    PluginLoader,
+                    _load_plugin_config_flag,
+                )
                 from obscura.plugins.registries.capability_index import CapabilityIndex
-                from obscura.plugins.loader import PluginLoader, _load_plugin_config_flag
 
                 _routing_config = ToolRoutingConfig()
                 _score_index = ToolScoreIndex()
@@ -1194,7 +1246,7 @@ async def _repl(
                 )
                 client._backend.set_tool_router(_router)
                 # Let the TOOL_CALL hook feed file_context to this router
-                _tool_router_ref = _router  # noqa: F841 — read by _channel_tool_signal closure
+                _tool_router_ref = _router
             except Exception:
                 pass
 
@@ -1202,18 +1254,16 @@ async def _repl(
         if session_id:
             try:
                 await client.resume_session(
-                    SessionRef(session_id=session_id, backend=Backend(backend))
+                    SessionRef(session_id=session_id, backend=Backend(backend)),
                 )
             except Exception as exc:
                 # Keep the local session timeline but recover backend state.
                 print_warning(
                     f"Resume failed for session {session_id[:12]}: {exc}. "
-                    "Starting a fresh backend session."
+                    "Starting a fresh backend session.",
                 )
-                try:
+                with contextlib.suppress(Exception):
                     await client.reset_session()
-                except Exception:
-                    pass
 
         # Build kwargs for run_loop
         loop_kwargs: dict[str, Any] = {}
@@ -1226,7 +1276,8 @@ async def _repl(
             effort_val = getattr(ctx_ref, "_effort_level", None)
             if effort_val:
                 try:
-                    from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+                    from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
+
                     level = EffortLevel(effort_val)
                     kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[level]
                 except (ValueError, KeyError):
@@ -1288,9 +1339,10 @@ async def _repl(
         _supervisor: Any = None
         if supervise and agent_infos:
             try:
+                import os as _os
+
                 from obscura.agent.supervisor import AgentSupervisor
                 from obscura.auth.models import AuthenticatedUser
-                import os as _os
 
                 sup_user = AuthenticatedUser(
                     user_id=_os.environ.get("USER", "local"),
@@ -1400,10 +1452,12 @@ async def _repl(
         _kairos_hooks_registered = False
         try:
             from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+
             if is_kairos_enabled():
                 _kairos_engine = KairosEngine()
                 if _supervisor is not None and hasattr(_supervisor, "hooks"):
                     from obscura.kairos.supervisor_hooks import register_kairos_hooks
+
                     register_kairos_hooks(_supervisor.hooks, _kairos_engine)
                     _kairos_hooks_registered = True
                 else:
@@ -1416,6 +1470,7 @@ async def _repl(
         _tip_scheduler = None
         try:
             from obscura.cli.tips import TipScheduler
+
             _tip_scheduler = TipScheduler()
         except Exception as _e:
             _swallow("tips_init", _e)
@@ -1424,8 +1479,10 @@ async def _repl(
         _frustration_detector = None
         try:
             from obscura.kairos.engine import is_kairos_enabled as _kairos_enabled
+
             if _kairos_enabled():
                 from obscura.kairos.frustration import FrustrationDetector
+
                 _frustration_detector = FrustrationDetector()
         except Exception as _e:
             _swallow("frustration_init", _e)
@@ -1434,8 +1491,10 @@ async def _repl(
         _away_tracker = None
         try:
             from obscura.kairos.engine import is_kairos_enabled as _kairos_enabled
+
             if _kairos_enabled():
                 from obscura.kairos.away_summary import AwaySummaryTracker
+
                 _away_tracker = AwaySummaryTracker()
         except Exception as _e:
             _swallow("away_init", _e)
@@ -1444,30 +1503,39 @@ async def _repl(
         _prompt_cache = None
         try:
             from obscura.core.prompt_cache import PromptCacheManager
+
             _prompt_cache = PromptCacheManager()
         except Exception:
             pass
 
         # --- Register cleanup tasks ---
         try:
-            from obscura.core.cleanup import register_cleanup, cleanup_stale_files
-            register_cleanup("stale_files", lambda: cleanup_stale_files(max_age_days=30))
+            from obscura.core.cleanup import cleanup_stale_files, register_cleanup
+
+            register_cleanup(
+                "stale_files",
+                lambda: cleanup_stale_files(max_age_days=30),
+            )
         except Exception as _e:
             _swallow("cleanup_init", _e)
 
         # --- Concurrent session detection ---
         try:
             from obscura.core.session_utils import (
-                register_session, unregister_session, check_concurrent_sessions,
-                install_signal_handlers, register_shutdown_handler,
+                check_concurrent_sessions,
+                install_signal_handlers,
+                register_session,
+                register_shutdown_handler,
+                unregister_session,
             )
+
             register_session(sid, backend=backend_name, model=model_name or "")
             register_shutdown_handler(lambda: unregister_session(sid))
             install_signal_handlers()
             concurrent = check_concurrent_sessions(sid)
             if concurrent:
                 console.print(
-                    f"[yellow]Note: {len(concurrent)} other session(s) running in this workspace[/]"
+                    f"[yellow]Note: {len(concurrent)} other session(s) running in this workspace[/]",
                 )
         except Exception:
             pass
@@ -1475,7 +1543,13 @@ async def _repl(
         # --- Deep log session start ---
         try:
             from obscura.core.deep_log import dlog
-            dlog.session_event("start", session_id=sid, backend=backend_name, model=model_name or "")
+
+            dlog.session_event(
+                "start",
+                session_id=sid,
+                backend=backend_name,
+                model=model_name or "",
+            )
         except Exception:
             pass
 
@@ -1483,6 +1557,7 @@ async def _repl(
         _uds_inbox = None
         try:
             from obscura.kairos.uds_messaging import UDSInbox
+
             _uds_inbox = UDSInbox(sid)
 
             def _on_peer_message(msg: dict) -> None:
@@ -1517,20 +1592,18 @@ async def _repl(
                                     exc = None
                             dc = getattr(daemon_task, "_daemon_client", None)
                             if dc is not None:
-                                try:
+                                with contextlib.suppress(Exception):
                                     await dc.__aexit__(None, None, None)
-                                except Exception:
-                                    pass
                             print_warning(
                                 "iMessage daemon stopped unexpectedly; restarting "
                                 f"(attempt {daemon_restart_count})"
-                                + (f": {exc}" if exc else "")
+                                + (f": {exc}" if exc else ""),
                             )
                             try:
                                 daemon_task = await _start_imessage_daemon(ctx.client)
                             except Exception as restart_exc:
                                 print_warning(
-                                    f"iMessage daemon restart failed: {restart_exc}"
+                                    f"iMessage daemon restart failed: {restart_exc}",
                                 )
                                 daemon_task = None
                     _refresh_prompt_status()
@@ -1545,21 +1618,26 @@ async def _repl(
                 if user_input == "__VOICE_RECORD__":
                     voice_enabled = getattr(ctx, "_voice_enabled", False)
                     if not voice_enabled:
-                        console.print("[dim]Voice mode is off. Enable with /voice on[/]")
+                        console.print(
+                            "[dim]Voice mode is off. Enable with /voice on[/]",
+                        )
                         continue
                     try:
                         from obscura.voice.session import VoiceSession
+
                         _vsession = VoiceSession()
                         if not _vsession.is_available:
-                            console.print(f"[red]Voice unavailable: {_vsession.install_hint}[/]")
+                            console.print(
+                                f"[red]Voice unavailable: {_vsession.install_hint}[/]",
+                            )
                             continue
-                        console.print("[yellow]Recording... (speak now, press Enter when done)[/]")
+                        console.print(
+                            "[yellow]Recording... (speak now, press Enter when done)[/]",
+                        )
                         await _vsession.start_recording()
                         # Wait for user to press Enter to stop.
-                        try:
+                        with contextlib.suppress(EOFError, KeyboardInterrupt):
                             await bordered_prompt(session)
-                        except (EOFError, KeyboardInterrupt):
-                            pass
                         transcript = await _vsession.stop_and_transcribe()
                         if transcript:
                             console.print(f"[green]Voice:[/] {transcript}")
@@ -1573,29 +1651,35 @@ async def _repl(
 
                 # KAIROS: log user message
                 if _kairos_engine is not None and _kairos_engine.is_running:
-                    try:
+                    with contextlib.suppress(Exception):
                         _kairos_engine.log_user_message(user_input)
-                    except Exception:
-                        pass
 
                 # Keyword detection: "ultrathink" triggers max effort + visual.
-                if "ultrathink" in user_input.lower() and not user_input.startswith("/"):
+                if "ultrathink" in user_input.lower() and not user_input.startswith(
+                    "/",
+                ):
                     if getattr(ctx, "_effort_level", "medium") != "max":
                         ctx._effort_level = "max"
                         try:
                             from obscura.cli.tui_effects import ultrathink_banner
+
                             ultrathink_banner()
                         except Exception:
-                            console.print("[bold bright_magenta]⚡ ULTRATHINK activated[/]")
+                            console.print(
+                                "[bold bright_magenta]⚡ ULTRATHINK activated[/]",
+                            )
 
                 # Frustration detection: check user input for frustration signals.
                 if _frustration_detector is not None and not user_input.startswith("/"):
                     try:
                         _sentiment = _frustration_detector.analyze(user_input)
-                        if _sentiment.is_frustrated and _sentiment.consecutive_frustrations >= 2:
+                        if (
+                            _sentiment.is_frustrated
+                            and _sentiment.consecutive_frustrations >= 2
+                        ):
                             console.print(
                                 "[dim italic]I notice some frustration — "
-                                "let me be more careful with my approach.[/]"
+                                "let me be more careful with my approach.[/]",
                             )
                     except Exception:
                         pass
@@ -1604,7 +1688,10 @@ async def _repl(
                 if _away_tracker is not None:
                     try:
                         if _away_tracker.should_generate():
-                            from obscura.kairos.away_summary import generate_away_summary
+                            from obscura.kairos.away_summary import (
+                                generate_away_summary,
+                            )
+
                             _summary = await generate_away_summary(ctx.message_history)
                             if _summary:
                                 console.print(f"[dim]{_summary}[/]")
@@ -1626,10 +1713,10 @@ async def _repl(
 
                 # *eval — benchmark a command/skill chain
                 if user_input.startswith("*"):
+                    import subprocess as _sp
+
                     from obscura.cli.render import print_error as _pe
                     from obscura.cli.render import print_info as _pi
-
-                    import subprocess as _sp
 
                     def _snapshot_git() -> str | None:
                         """Capture current git diff so we can revert on eval failure."""
@@ -1648,7 +1735,7 @@ async def _repl(
                                 timeout=5,
                             )
                             files = (r.stdout.strip() + "\n" + u.stdout.strip()).strip()
-                            return files if files else None
+                            return files or None
                         except Exception:
                             return None
 
@@ -1673,10 +1760,10 @@ async def _repl(
                             after = set(
                                 (r.stdout.strip() + "\n" + u.stdout.strip())
                                 .strip()
-                                .splitlines()
+                                .splitlines(),
                             )
                             before = set(
-                                before_files.splitlines() if before_files else []
+                                before_files.splitlines() if before_files else [],
                             )
                             new_files = after - before
                             reverted: list[str] = []
@@ -1718,12 +1805,12 @@ async def _repl(
                         suite = ctx.get_eval_suite(cmd_name)
                         if suite is None:
                             _pe(
-                                f"No eval suite found for @{cmd_name}. Create {cmd_name}.eval.md next to the command."
+                                f"No eval suite found for @{cmd_name}. Create {cmd_name}.eval.md next to the command.",
                             )
                             continue
 
                         _pi(
-                            f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)"
+                            f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)",
                         )
                         total_pass = 0
                         total_criteria = 0
@@ -1802,15 +1889,15 @@ async def _repl(
                                         _pe(
                                             f"  Eval failed ({pass_count}/{len(case.criteria)}) "
                                             f"— reverted {len(reverted)} file(s): "
-                                            + ", ".join(reverted)
+                                            + ", ".join(reverted),
                                         )
                                     else:
                                         _pe(
-                                            f"  Eval failed ({pass_count}/{len(case.criteria)}) — no file changes to revert"
+                                            f"  Eval failed ({pass_count}/{len(case.criteria)}) — no file changes to revert",
                                         )
 
                         _pi(
-                            f"\n── Eval complete: {total_pass}/{total_criteria} criteria passed"
+                            f"\n── Eval complete: {total_pass}/{total_criteria} criteria passed",
                         )
                         continue
 
@@ -1857,19 +1944,17 @@ async def _repl(
                     # Use command-specific eval criteria when declared in
                     # frontmatter, falling back to generic 5-criteria grading.
                     cmd_criteria = getattr(resolved.meta, "eval_criteria", None)
-                    criteria = (
-                        cmd_criteria
-                        if cmd_criteria
-                        else [
-                            "Response is relevant to the command's purpose",
-                            "Response follows the command's output format",
-                            "Response is complete (not truncated or missing sections)",
-                            "Response is accurate (no hallucinated information)",
-                            "Response is actionable (provides specific, useful details)",
-                        ]
-                    )
+                    criteria = cmd_criteria or [
+                        "Response is relevant to the command's purpose",
+                        "Response follows the command's output format",
+                        "Response is complete (not truncated or missing sections)",
+                        "Response is accurate (no hallucinated information)",
+                        "Response is actionable (provides specific, useful details)",
+                    ]
                     pass_threshold = getattr(
-                        resolved.meta, "eval_pass_threshold", None
+                        resolved.meta,
+                        "eval_pass_threshold",
+                        None,
                     ) or len(criteria)
                     grading = ctx.build_grading_prompt(
                         cmd_name,
@@ -1888,9 +1973,10 @@ async def _repl(
 
                     # Persist eval result to the eval store
                     try:
+                        import time as _time
+
                         from obscura.eval.models import EvalRunSummary
                         from obscura.eval.store import EvalResultStore
-                        import time as _time
 
                         _pass_ct = grade_response.upper().count("| PASS")
                         _fail_ct = len(criteria) - _pass_ct
@@ -1919,7 +2005,7 @@ async def _repl(
                     pass_count = grade_response.upper().count("| PASS")
                     total = len(criteria)
                     _pi(
-                        f"Score: {pass_count}/{total} (threshold: {pass_threshold}/{total})"
+                        f"Score: {pass_count}/{total} (threshold: {pass_threshold}/{total})",
                     )
                     if pass_count < pass_threshold:
                         reverted = _revert_changes(_pre_files)
@@ -1927,11 +2013,11 @@ async def _repl(
                             _pe(
                                 f"Eval failed ({pass_count}/{total}) "
                                 f"— reverted {len(reverted)} file(s): "
-                                + ", ".join(reverted)
+                                + ", ".join(reverted),
                             )
                         else:
                             _pe(
-                                f"Eval failed ({pass_count}/{total}) — no file changes to revert"
+                                f"Eval failed ({pass_count}/{total}) — no file changes to revert",
                             )
                     else:
                         _pi(f"Eval passed ({pass_count}/{total}) — changes kept")
@@ -1943,7 +2029,7 @@ async def _repl(
                     from obscura.cli.render import print_info as _pi
 
                     skill_names, cmd_name, remaining = ctx.parse_chained_input(
-                        user_input
+                        user_input,
                     )
                     blocks: list[str] = []
                     _abort = False
@@ -1953,7 +2039,7 @@ async def _repl(
                         body = ctx.resolve_dollar_skill(sname)
                         if body is None:
                             _pe(
-                                f"Unknown skill: ${sname}. Available: {', '.join(ctx.discover_dollar_skills())}"
+                                f"Unknown skill: ${sname}. Available: {', '.join(ctx.discover_dollar_skills())}",
                             )
                             _abort = True
                             break
@@ -1969,7 +2055,7 @@ async def _repl(
                         resolved = ctx.resolve_at_command(cmd_name, remaining)
                         if resolved is None:
                             _pe(
-                                f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}"
+                                f"Unknown command: @{cmd_name}. Available: {', '.join(ctx.discover_at_commands())}",
                             )
                             continue
                         _pi(f"@{resolved.name}: {resolved.description}")
@@ -2003,7 +2089,7 @@ async def _repl(
                 # The StreamingStatus drives the toolbar spinner instead of
                 # console.status() which conflicts with patch_stdout.
                 task = asyncio.create_task(
-                    send_message(ctx, user_input, loop_kwargs, streaming_status=ss)
+                    send_message(ctx, user_input, loop_kwargs, streaming_status=ss),
                 )
                 background_tasks.add(task)
 
@@ -2018,42 +2104,33 @@ async def _repl(
             # Stop supervisor fleet
             if supervisor_task is not None:
                 if _supervisor is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await _supervisor.stop()
-                    except Exception:
-                        pass
                 if not supervisor_task.done():
                     supervisor_task.cancel()
-                    try:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
                         await supervisor_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
             if daemon_task is not None:
                 if not daemon_task.done():
                     daemon_task.cancel()
-                    try:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
                         await daemon_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
                 # Close the daemon's dedicated client
                 dc = getattr(daemon_task, "_daemon_client", None)
                 if dc is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await dc.__aexit__(None, None, None)
-                    except Exception:
-                        pass
             if background_tasks:
                 await asyncio.gather(*background_tasks, return_exceptions=True)
             await ctx.stop_runtime()
             # Stop UDS inbox.
             if _uds_inbox is not None:
-                try:
+                with contextlib.suppress(Exception):
                     await _uds_inbox.stop()
-                except Exception:
-                    pass
             # Flush deep log.
             try:
                 from obscura.core.deep_log import dlog
+
                 dlog.session_event("end", session_id=ctx.session_id)
                 dlog.flush()
                 dlog.close()
@@ -2061,19 +2138,19 @@ async def _repl(
                 pass
             # KAIROS: stop engine if not already handled by supervisor hooks
             if _kairos_engine is not None and not _kairos_hooks_registered:
-                try:
+                with contextlib.suppress(Exception):
                     await _kairos_engine.stop()
-                except Exception:
-                    pass
             # Run cleanup tasks (stale files, etc.)
             try:
                 from obscura.core.cleanup import run_cleanup
+
                 await run_cleanup()
             except Exception:
                 pass
             # Save commit attribution
             try:
                 from obscura.core.commit_attribution import get_attribution_tracker
+
                 get_attribution_tracker().save()
             except Exception:
                 pass
@@ -2111,7 +2188,9 @@ async def _repl(
     help="Resume the most recent session.",
 )
 @click.option(
-    "--resume", default=None, help="Resume session by ID (alias for --session)."
+    "--resume",
+    default=None,
+    help="Resume session by ID (alias for --session).",
 )
 @click.option("--max-turns", default=10, type=int, help="Max agent loop turns.")
 @click.option(
@@ -2174,6 +2253,7 @@ def main(
         return
 
     import logging as _logging
+
     from obscura.cli.logger import configure_logger
 
     cli_logger = _logging.getLogger("obscura")
@@ -2197,7 +2277,7 @@ def main(
             click.echo(
                 f"Loaded workspace '{compiled_ws.name}' "
                 f"({len(compiled_ws.agents)} agents, "
-                f"{len(compiled_ws.policies)} policies)"
+                f"{len(compiled_ws.policies)} policies)",
             )
         except Exception as exc:
             click.echo(f"Failed to load workspace '{workspace_name}': {exc}", err=True)
@@ -2211,7 +2291,7 @@ def main(
             db_path = resolve_obscura_home() / "events.db"
             con = sqlite3.connect(str(db_path))
             row = con.execute(
-                "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1"
+                "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1",
             ).fetchone()
             con.close()
             if row:
@@ -2232,7 +2312,7 @@ def main(
                 no_default_prompt,
                 supervise=supervise,
                 compiled_ws=compiled_ws,
-            )
+            ),
         )
     except KeyboardInterrupt:
         pass  # graceful exit on Ctrl-C
@@ -2288,7 +2368,7 @@ def init(force: bool, no_bootstrap: bool) -> None:
             else:
                 click.echo(
                     "Some deps failed. Install manually: "
-                    + ", ".join(e.split(":")[0] for e in summary["errors"])
+                    + ", ".join(e.split(":")[0] for e in summary["errors"]),
                 )
         except Exception as exc:
             click.echo(f"Bootstrap failed: {exc}", err=True)
@@ -2352,7 +2432,7 @@ def workspace_inspect(name: str) -> None:
         click.echo(f"  Plugin exclude: {', '.join(sorted(ws.plugin_exclude))}")
     if ws.memory:
         click.echo(
-            f"  Memory: namespace={ws.memory.namespace} scope={ws.memory.shared_scope}"
+            f"  Memory: namespace={ws.memory.namespace} scope={ws.memory.shared_scope}",
         )
 
     if ws.agents:
@@ -2361,7 +2441,7 @@ def workspace_inspect(name: str) -> None:
             click.echo(
                 f"    {a.name:20s}  template={a.template_name}  "
                 f"mode={a.mode}  provider={a.provider}  "
-                f"plugins=[{', '.join(a.plugins)}]"
+                f"plugins=[{', '.join(a.plugins)}]",
             )
 
     if ws.startup_agents:
@@ -2476,14 +2556,19 @@ def template_inspect(name: str) -> None:
             preview += "..."
         click.echo(f"  Instructions: {preview}")
 
+
 # Backwards-compat aliases added by test harness
 def _emit_context_warnings(*args, **kwargs):
     from .warnings import emit_context_warnings as _impl
+
     return _impl(*args, **kwargs)
+
 
 def _copilot_budget_pct(tokens: int, context_window: int):
     from .warnings import get_copilot_budget_pct as _impl
+
     return _impl(tokens, context_window)
+
 
 def _parse_confirm_decision(answer: str) -> str | None:
     a = (answer or "").lower()
@@ -2493,6 +2578,7 @@ def _parse_confirm_decision(answer: str) -> str | None:
         return "deny"
     return None
 
+
 def _track_task_surface_event(ctx, ev) -> None:
     """Compatibility stub: track a task-surface event (no-op)."""
-    return None
+    return

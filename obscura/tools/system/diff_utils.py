@@ -1,5 +1,4 @@
-"""
-obscura.tools.system.diff_utils — Structured unified diff generation.
+"""obscura.tools.system.diff_utils — Structured unified diff generation.
 
 Provides a lightweight ``compute_unified_diff`` helper that returns a
 JSON-serialisable dict with hunks, insertions/deletions counts, and a
@@ -55,7 +54,7 @@ def compute_unified_diff(
     deletions = 0
 
     for line in diff_lines:
-        if line.startswith("---") or line.startswith("+++"):
+        if line.startswith(("---", "+++")):
             continue
         if line.startswith("@@"):
             current_hunk = {"header": line.rstrip(), "lines": []}

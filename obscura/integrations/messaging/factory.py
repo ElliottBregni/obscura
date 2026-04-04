@@ -59,13 +59,21 @@ def register_adapter(platform: str, builder: AdapterBuilder) -> None:
     _ADAPTER_BUILDERS[platform.strip().lower()] = builder
 
 
-def get_adapter(*, platform: str, contacts: list[str], account_id: str = "default") -> Any:
+def get_adapter(
+    *,
+    platform: str,
+    contacts: list[str],
+    account_id: str = "default",
+) -> Any:
     """Construct an adapter for the requested platform."""
     key = platform.strip().lower()
     builder = _ADAPTER_BUILDERS.get(key)
     if builder is None:
-        raise ValueError(
+        msg = (
             f"Unknown messaging platform '{platform}'. "
             f"Registered: {', '.join(sorted(_ADAPTER_BUILDERS))}"
+        )
+        raise ValueError(
+            msg,
         )
     return builder(contacts=contacts, account_id=account_id)

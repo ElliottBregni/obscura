@@ -56,7 +56,8 @@ class ManifestError(Exception):
 def _require(data: dict[str, Any], key: str, path: Path | None = None) -> Any:
     """Return ``data[key]`` or raise ``ManifestError``."""
     if key not in data:
-        raise ManifestError(f"Missing required field: {key!r}", path)
+        msg = f"Missing required field: {key!r}"
+        raise ManifestError(msg, path)
     return data[key]
 
 
@@ -70,24 +71,28 @@ def _parse_config_requirements(
     if isinstance(raw, dict):
         for key, spec in raw.items():
             if isinstance(spec, dict):
-                items.append(ConfigRequirement(
-                    key=key,
-                    type=spec.get("type", "string"),
-                    required=spec.get("required", True),
-                    description=spec.get("description", ""),
-                    default=spec.get("default"),
-                ))
+                items.append(
+                    ConfigRequirement(
+                        key=key,
+                        type=spec.get("type", "string"),
+                        required=spec.get("required", True),
+                        description=spec.get("description", ""),
+                        default=spec.get("default"),
+                    ),
+                )
             else:
                 items.append(ConfigRequirement(key=key))
     elif isinstance(raw, list):
         for entry in raw:
-            items.append(ConfigRequirement(
-                key=entry.get("key", entry.get("name", "")),
-                type=entry.get("type", "string"),
-                required=entry.get("required", True),
-                description=entry.get("description", ""),
-                default=entry.get("default"),
-            ))
+            items.append(
+                ConfigRequirement(
+                    key=entry.get("key", entry.get("name", "")),
+                    type=entry.get("type", "string"),
+                    required=entry.get("required", True),
+                    description=entry.get("description", ""),
+                    default=entry.get("default"),
+                ),
+            )
     return tuple(items)
 
 
@@ -100,21 +105,26 @@ def _parse_capabilities(
     # Support dict-form {id: {fields}} and list-form [{id: ..., fields}]
     entries: list[dict[str, Any]]
     if isinstance(raw, dict):
-        entries = [{**spec, "id": cap_id} if isinstance(spec, dict) else {"id": cap_id} for cap_id, spec in raw.items()]
+        entries = [
+            {**spec, "id": cap_id} if isinstance(spec, dict) else {"id": cap_id}
+            for cap_id, spec in raw.items()
+        ]
     else:
         entries = raw
     for entry in entries:
         tools_raw = entry.get("tools", [])
         if isinstance(tools_raw, str):
             tools_raw = [tools_raw]
-        items.append(CapabilitySpec(
-            id=entry["id"],
-            version=entry.get("version", "1.0.0"),
-            description=entry.get("description", ""),
-            tools=tuple(tools_raw),
-            requires_approval=entry.get("requires_approval", False),
-            default_grant=entry.get("default_grant", True),
-        ))
+        items.append(
+            CapabilitySpec(
+                id=entry["id"],
+                version=entry.get("version", "1.0.0"),
+                description=entry.get("description", ""),
+                tools=tuple(tools_raw),
+                requires_approval=entry.get("requires_approval", False),
+                default_grant=entry.get("default_grant", True),
+            ),
+        )
     return tuple(items)
 
 
@@ -127,21 +137,28 @@ def _parse_tools(
     # Support dict-form {name: {fields}} and list-form [{name: ..., fields}]
     entries: list[dict[str, Any]]
     if isinstance(raw, dict):
-        entries = [{**spec, "name": tool_name} if isinstance(spec, dict) else {"name": tool_name} for tool_name, spec in raw.items()]
+        entries = [
+            {**spec, "name": tool_name}
+            if isinstance(spec, dict)
+            else {"name": tool_name}
+            for tool_name, spec in raw.items()
+        ]
     else:
         entries = raw
     for entry in entries:
-        items.append(ToolContribution(
-            name=entry["name"],
-            description=entry.get("description", ""),
-            parameters=entry.get("parameters", {}),
-            handler_ref=entry.get("handler", entry.get("handler_ref", "")),
-            capability=entry.get("capability", ""),
-            side_effects=entry.get("side_effects", "none"),
-            required_tier=entry.get("required_tier", "public"),
-            timeout_seconds=float(entry.get("timeout_seconds", 60.0)),
-            retries=int(entry.get("retries", 0)),
-        ))
+        items.append(
+            ToolContribution(
+                name=entry["name"],
+                description=entry.get("description", ""),
+                parameters=entry.get("parameters", {}),
+                handler_ref=entry.get("handler", entry.get("handler_ref", "")),
+                capability=entry.get("capability", ""),
+                side_effects=entry.get("side_effects", "none"),
+                required_tier=entry.get("required_tier", "public"),
+                timeout_seconds=float(entry.get("timeout_seconds", 60.0)),
+                retries=int(entry.get("retries", 0)),
+            ),
+        )
     return tuple(items)
 
 
@@ -154,7 +171,10 @@ def _parse_workflows(
     # Support dict-form {id: {fields}} and list-form [{id: ..., fields}]
     entries: list[dict[str, Any]]
     if isinstance(raw, dict):
-        entries = [{**spec, "id": wf_id} if isinstance(spec, dict) else {"id": wf_id} for wf_id, spec in raw.items()]
+        entries = [
+            {**spec, "id": wf_id} if isinstance(spec, dict) else {"id": wf_id}
+            for wf_id, spec in raw.items()
+        ]
     else:
         entries = raw
     for entry in entries:
@@ -162,14 +182,16 @@ def _parse_workflows(
         if isinstance(caps, str):
             caps = [caps]
         steps = entry.get("steps", [])
-        items.append(WorkflowSpec(
-            id=entry["id"],
-            version=entry.get("version", "1.0.0"),
-            name=entry.get("name", entry["id"]),
-            description=entry.get("description", ""),
-            steps=tuple(steps),
-            required_capabilities=tuple(caps),
-        ))
+        items.append(
+            WorkflowSpec(
+                id=entry["id"],
+                version=entry.get("version", "1.0.0"),
+                name=entry.get("name", entry["id"]),
+                description=entry.get("description", ""),
+                steps=tuple(steps),
+                required_capabilities=tuple(caps),
+            ),
+        )
     return tuple(items)
 
 
@@ -182,17 +204,22 @@ def _parse_instructions(
     # Support dict-form {id: {fields}} and list-form [{id: ..., fields}]
     entries: list[dict[str, Any]]
     if isinstance(raw, dict):
-        entries = [{**spec, "id": instr_id} if isinstance(spec, dict) else {"id": instr_id} for instr_id, spec in raw.items()]
+        entries = [
+            {**spec, "id": instr_id} if isinstance(spec, dict) else {"id": instr_id}
+            for instr_id, spec in raw.items()
+        ]
     else:
         entries = raw
     for entry in entries:
-        items.append(InstructionSpec(
-            id=entry["id"],
-            version=entry.get("version", "1.0.0"),
-            scope=entry.get("scope", "agent"),
-            content=entry.get("content", ""),
-            priority=int(entry.get("priority", 50)),
-        ))
+        items.append(
+            InstructionSpec(
+                id=entry["id"],
+                version=entry.get("version", "1.0.0"),
+                scope=entry.get("scope", "agent"),
+                content=entry.get("content", ""),
+                priority=int(entry.get("priority", 50)),
+            ),
+        )
     return tuple(items)
 
 
@@ -205,15 +232,22 @@ def _parse_policy_hints(
     # Support dict-form {capability_id: {fields}} and list-form [{capability_id: ..., fields}]
     entries: list[dict[str, Any]]
     if isinstance(raw, dict):
-        entries = [{**spec, "capability_id": cap_id} if isinstance(spec, dict) else {"capability_id": cap_id} for cap_id, spec in raw.items()]
+        entries = [
+            {**spec, "capability_id": cap_id}
+            if isinstance(spec, dict)
+            else {"capability_id": cap_id}
+            for cap_id, spec in raw.items()
+        ]
     else:
         entries = raw
     for entry in entries:
-        items.append(PolicyHintSpec(
-            capability_id=entry["capability_id"],
-            recommended_action=entry.get("recommended_action", "allow"),
-            reason=entry.get("reason", ""),
-        ))
+        items.append(
+            PolicyHintSpec(
+                capability_id=entry["capability_id"],
+                recommended_action=entry.get("recommended_action", "allow"),
+                reason=entry.get("reason", ""),
+            ),
+        )
     return tuple(items)
 
 
@@ -248,12 +282,14 @@ def _parse_bootstrap(
                 dep_type, pkg = "pip", entry
             deps.append(BootstrapDep(type=dep_type, package=pkg))
         elif isinstance(entry, dict):
-            deps.append(BootstrapDep(
-                type=entry.get("type", "pip"),
-                package=entry.get("package", ""),
-                version=entry.get("version", ""),
-                optional=entry.get("optional", False),
-            ))
+            deps.append(
+                BootstrapDep(
+                    type=entry.get("type", "pip"),
+                    package=entry.get("package", ""),
+                    version=entry.get("version", ""),
+                    optional=entry.get("optional", False),
+                ),
+            )
     return BootstrapSpec(
         deps=tuple(deps),
         post_install=raw.get("post_install", ""),
@@ -316,7 +352,8 @@ def parse_manifest_file(path: Path) -> PluginSpec:
     """
     path = Path(path)
     if not path.exists():
-        raise ManifestError(f"Manifest file not found: {path}", path)
+        msg = f"Manifest file not found: {path}"
+        raise ManifestError(msg, path)
 
     suffix = path.suffix.lower()
 
@@ -327,7 +364,8 @@ def parse_manifest_file(path: Path) -> PluginSpec:
             with open(path, "rb") as f:
                 data = tomllib.load(f)
         except Exception as exc:
-            raise ManifestError(f"Failed to parse TOML: {exc}", path) from exc
+            msg = f"Failed to parse TOML: {exc}"
+            raise ManifestError(msg, path) from exc
     elif suffix in (".yaml", ".yml"):
         import warnings
 
@@ -344,12 +382,14 @@ def parse_manifest_file(path: Path) -> PluginSpec:
             try:
                 data = json.loads(path.read_text())
             except Exception as exc:
-                raise ManifestError(f"Failed to parse manifest: {exc}", path) from exc
+                msg = f"Failed to parse manifest: {exc}"
+                raise ManifestError(msg, path) from exc
         else:
             try:
                 data = yaml.safe_load(path.read_text())
             except Exception as exc:
-                raise ManifestError(f"Failed to parse YAML: {exc}", path) from exc
+                msg = f"Failed to parse YAML: {exc}"
+                raise ManifestError(msg, path) from exc
     else:
         # JSON fallback
         import json
@@ -357,12 +397,14 @@ def parse_manifest_file(path: Path) -> PluginSpec:
         try:
             data = json.loads(path.read_text())
         except Exception as exc:
-            raise ManifestError(f"Failed to parse manifest: {exc}", path) from exc
+            msg = f"Failed to parse manifest: {exc}"
+            raise ManifestError(msg, path) from exc
 
     if not isinstance(data, dict):
-        raise ManifestError("Manifest must be a mapping", path)
+        msg = "Manifest must be a mapping"
+        raise ManifestError(msg, path)
 
     return parse_manifest(data, source_path=path)
 
 
-__all__ = ["parse_manifest", "parse_manifest_file", "ManifestError"]
+__all__ = ["ManifestError", "parse_manifest", "parse_manifest_file"]

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -16,15 +16,18 @@ from obscura.integrations.imessage.client import (
     _apple_date_to_datetime,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 class TestAppleDateConversion:
     def test_zero_returns_epoch(self) -> None:
         dt = _apple_date_to_datetime(0)
-        assert dt == datetime.fromtimestamp(0, tz=timezone.utc)
+        assert dt == datetime.fromtimestamp(0, tz=UTC)
 
     def test_none_returns_epoch(self) -> None:
         dt = _apple_date_to_datetime(None)
-        assert dt == datetime.fromtimestamp(0, tz=timezone.utc)
+        assert dt == datetime.fromtimestamp(0, tz=UTC)
 
     def test_nanosecond_format(self) -> None:
         # 2024-01-01 00:00:00 UTC in Apple nanoseconds
@@ -50,7 +53,7 @@ class TestIMessageDataclass:
             guid="abc",
             text="hello",
             sender="+1234567890",
-            date=datetime.now(tz=timezone.utc),
+            date=datetime.now(tz=UTC),
             is_from_me=False,
         )
         with pytest.raises(AttributeError):
@@ -70,7 +73,7 @@ class TestIMessageClientCheckAccess:
         db_path = tmp_path / "chat.db"
         con = sqlite3.connect(str(db_path))
         con.execute(
-            "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT)"
+            "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT)",
         )
         con.execute("INSERT INTO message (text) VALUES ('test')")
         con.commit()
@@ -89,7 +92,10 @@ class TestIMessageClientSend:
         mock_proc.communicate.return_value = (b"", b"")
         mock_proc.returncode = 0
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+        with patch(
+            "asyncio.create_subprocess_exec",
+            return_value=mock_proc,
+        ) as mock_exec:
             result = await client.send_message("+1234567890", "Hello")
             assert result is True
             mock_exec.assert_called_once()
@@ -112,7 +118,10 @@ class TestIMessageClientSend:
         mock_proc.communicate.return_value = (b"", b"")
         mock_proc.returncode = 0
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+        with patch(
+            "asyncio.create_subprocess_exec",
+            return_value=mock_proc,
+        ) as mock_exec:
             await client.send_message("+1", 'He said "hello"')
             # Verify the script was passed to osascript
             call_args = mock_exec.call_args
@@ -191,10 +200,10 @@ class TestIMessageClientSQLiteRead:
         """)
         con.execute("INSERT INTO handle (ROWID, id) VALUES (1, '+1')")
         con.execute(
-            "INSERT INTO message VALUES (1, 'g1', 'old', 0, 0, 1)"
+            "INSERT INTO message VALUES (1, 'g1', 'old', 0, 0, 1)",
         )
         con.execute(
-            "INSERT INTO message VALUES (2, 'g2', 'new', 0, 0, 1)"
+            "INSERT INTO message VALUES (2, 'g2', 'new', 0, 0, 1)",
         )
         con.commit()
         con.close()
@@ -238,18 +247,25 @@ class TestIMessageClientSQLiteRead:
                 guid="g",
                 text="hi",
                 sender="+1",
-                date=datetime.now(tz=timezone.utc),
+                date=datetime.now(tz=UTC),
                 is_from_me=False,
-            )
+            ),
         ]
         with patch("time.monotonic", return_value=1.0):
             with patch.object(client, "check_access", AsyncMock(return_value=True)):
-                with patch.object(client, "_poll_sqlite", AsyncMock(return_value=expected)):
+                with patch.object(
+                    client,
+                    "_poll_sqlite",
+                    AsyncMock(return_value=expected),
+                ):
                     out = await client.poll_unread(0)
         assert out == expected
 
     @pytest.mark.asyncio
-    async def test_poll_rate_limits_disabled_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_poll_rate_limits_disabled_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         client = IMessageClient(["+1"])
         client._use_sqlite = False
         client._next_access_recheck_at = 1000.0
@@ -257,7 +273,5 @@ class TestIMessageClientSQLiteRead:
         with patch("time.monotonic", side_effect=[10.0, 10.5]):
             await client.poll_unread(0)
             await client.poll_unread(0)
-        warnings = [
-            r for r in caplog.records if "ingest disabled" in r.getMessage()
-        ]
+        warnings = [r for r in caplog.records if "ingest disabled" in r.getMessage()]
         assert len(warnings) == 1

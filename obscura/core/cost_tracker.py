@@ -1,5 +1,4 @@
-"""
-obscura.core.cost_tracker — Per-session token and cost tracking.
+"""obscura.core.cost_tracker — Per-session token and cost tracking.
 
 Tracks input/output tokens per model turn and computes USD cost using
 pricing from the model registry.  Wire into the agent loop via an
@@ -57,7 +56,12 @@ class CostTracker:
         self._pricing = pricing or dict(_DEFAULT_PRICING)
         self._turns: list[TurnCost] = []
 
-    def set_pricing(self, model: str, input_per_1k: float, output_per_1k: float) -> None:
+    def set_pricing(
+        self,
+        model: str,
+        input_per_1k: float,
+        output_per_1k: float,
+    ) -> None:
         """Override pricing for a specific model."""
         self._pricing[model] = (input_per_1k, output_per_1k)
 

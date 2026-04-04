@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from typing import Any
-
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Annotated, Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit, get_runtime
 from obscura.routes.agents import agent_templates
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
 
@@ -82,7 +84,7 @@ def get_workflow_executions_store() -> dict[str, WorkflowExecution]:
 @router.post("/workflows")
 async def workflow_create(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create a workflow with steps."""
     workflow_id = str(uuid.uuid4())
@@ -112,7 +114,7 @@ async def workflow_create(
 
 @router.get("/workflows")
 async def workflow_list(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List all workflows."""
     workflows: list[dict[str, Any]] = [wf.as_dict() for wf in _workflows.values()]
@@ -120,14 +122,14 @@ async def workflow_list(
         content={
             "workflows": workflows,
             "count": len(workflows),
-        }
+        },
     )
 
 
 @router.get("/workflows/{workflow_id}")
 async def workflow_get(
     workflow_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a specific workflow."""
     workflow = _workflows.get(workflow_id)
@@ -139,7 +141,7 @@ async def workflow_get(
 @router.delete("/workflows/{workflow_id}")
 async def workflow_delete(
     workflow_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Delete a workflow."""
     if workflow_id not in _workflows:
@@ -156,7 +158,7 @@ async def workflow_delete(
 async def workflow_execute(
     workflow_id: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Execute a workflow with inputs."""
     runtime = await get_runtime(user)
@@ -209,7 +211,8 @@ async def workflow_execute(
             prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
         for prev_step_name, prev_result in step_results.items():
             prompt = prompt.replace(
-                f"{{{{{prev_step_name}.output}}}}", str(prev_result)
+                f"{{{{{prev_step_name}.output}}}}",
+                str(prev_result),
             )
 
         try:
@@ -269,14 +272,14 @@ async def workflow_execute(
             "status": execution.status,
             "outputs": execution.outputs,
             "step_results": execution.step_results,
-        }
+        },
     )
 
 
 @router.get("/workflows/{workflow_id}/executions")
 async def workflow_list_executions(
     workflow_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List executions for a workflow."""
     if workflow_id not in _workflows:
@@ -293,20 +296,21 @@ async def workflow_list_executions(
             "workflow_id": workflow_id,
             "executions": executions,
             "count": len(executions),
-        }
+        },
     )
 
 
 @router.get("/workflows/executions/{execution_id}")
 async def workflow_get_execution(
     execution_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a specific execution."""
     execution = _workflow_executions.get(execution_id)
     if execution is None:
         raise HTTPException(
-            status_code=404, detail=f"Execution {execution_id} not found"
+            status_code=404,
+            detail=f"Execution {execution_id} not found",
         )
     return JSONResponse(content=execution.as_dict())
 
@@ -314,7 +318,7 @@ async def workflow_get_execution(
 @router.post("/workflows/run")
 async def workflow_run(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Run a single-step workflow optimized for external orchestrators."""
     runtime = await get_runtime(user)
@@ -337,7 +341,7 @@ async def workflow_run(
     ]
     if constraints:
         prompt_lines.append("Constraints:")
-        prompt_lines.extend([f"- {str(c)}" for c in constraints])
+        prompt_lines.extend([f"- {c!s}" for c in constraints])
     if expected_output:
         prompt_lines.append(f"Expected Output: {expected_output}")
     prompt = "\n".join(prompt_lines)
@@ -390,5 +394,5 @@ async def workflow_run(
             "task_type": task_type,
             "memory_namespace": memory_namespace,
             "result": result,
-        }
+        },
     )

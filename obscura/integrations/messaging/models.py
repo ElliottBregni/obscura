@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -19,7 +19,7 @@ class PlatformMessage:
     message_id: str
     text: str
     timestamp: datetime
-    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -31,7 +31,7 @@ class ConversationState:
     account_id: str
     channel_id: str
     participants: list[str]
-    history: list[dict[str, str]] = field(default_factory=lambda: [])
+    history: list[dict[str, str]] = field(default_factory=list)
     last_activity_epoch_s: float = 0.0
 
     @classmethod
@@ -63,4 +63,4 @@ class ConversationState:
 
 
 def utc_now() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)

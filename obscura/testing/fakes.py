@@ -15,16 +15,18 @@ Usage::
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 __all__ = [
-    "FakeTextBlock",
-    "FakeThinkingBlock",
-    "FakeToolUseBlock",
     "FakeAssistantMessage",
     "FakeResultMessage",
     "FakeSystemMessage",
+    "FakeTextBlock",
+    "FakeThinkingBlock",
+    "FakeToolUseBlock",
     "async_iter",
 ]
 

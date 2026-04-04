@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from obscura.plugins.models import CapabilitySpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import CapabilitySpec
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,9 @@ class CapabilityIndex:
         if spec.id in self._capabilities and self._owner.get(spec.id) != plugin_id:
             logger.warning(
                 "Capability %s already registered by plugin %s, overwritten by %s",
-                spec.id, self._owner.get(spec.id), plugin_id,
+                spec.id,
+                self._owner.get(spec.id),
+                plugin_id,
             )
         self._capabilities[spec.id] = spec
         self._owner[spec.id] = plugin_id
@@ -52,7 +56,8 @@ class CapabilityIndex:
 
     def filter_by_plugin(self, plugin_id: str) -> list[CapabilitySpec]:
         return [
-            cap for cid, cap in self._capabilities.items()
+            cap
+            for cid, cap in self._capabilities.items()
             if self._owner.get(cid) == plugin_id
         ]
 

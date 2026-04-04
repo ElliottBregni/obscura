@@ -75,7 +75,7 @@ async def test_openclaw_bridge_smoke_end_to_end() -> None:
                     model="claude",
                     system_prompt="You are a smoke agent.",
                     memory_namespace="openclaw-smoke",
-                )
+                ),
             )
             assert spawned["agent_id"] == "agent-smoke-1"
 
@@ -93,7 +93,7 @@ async def test_openclaw_bridge_smoke_end_to_end() -> None:
                 namespace="openclaw-smoke",
                 key="hello",
                 value={"msg": "world"},
-            )
+            ),
         )
         value = await bridge.get_memory("openclaw-smoke", "hello")
         assert value == {"msg": "world"}
@@ -103,7 +103,7 @@ async def test_openclaw_bridge_smoke_end_to_end() -> None:
             json={"text": "OpenClaw bridge smoke document", "memory_type": "note"},
         )
         results = await bridge.semantic_search(
-            SemanticSearchRequest(query="smoke document", namespace="openclaw-smoke")
+            SemanticSearchRequest(query="smoke document", namespace="openclaw-smoke"),
         )
         assert isinstance(results, list)
 
@@ -150,7 +150,7 @@ async def test_openclaw_bridge_run_workflow_uses_routing_policy() -> None:
                     task_type="codegen",
                     goal="Write a tiny function.",
                     context={"language": "python"},
-                )
+                ),
             )
         assert result["status"] == "completed"
         assert result["model"] == "openai"
@@ -182,7 +182,7 @@ async def test_openclaw_bridge_sets_request_and_idempotency_headers() -> None:
             client=client,
         )
         await bridge.health(
-            RequestMetadata(correlation_id="req-123", idempotency_key="idem-123")
+            RequestMetadata(correlation_id="req-123", idempotency_key="idem-123"),
         )
 
     assert seen_headers["x-request-id"] == "req-123"
@@ -196,12 +196,13 @@ async def test_openclaw_bridge_run_agent_sends_timeout_and_cancellation() -> Non
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/run"):
             payload = cast(
-                dict[str, Any],
+                "dict[str, Any]",
                 json.loads(request.content.decode("utf-8")),
             )
             seen_payload.update(payload)
             return httpx.Response(
-                200, json={"agent_id": "a1", "status": "RUNNING", "result": "ok"}
+                200,
+                json={"agent_id": "a1", "status": "RUNNING", "result": "ok"},
             )
         return httpx.Response(404, json={"detail": "not found"})
 
@@ -260,7 +261,7 @@ async def test_openclaw_bridge_workflow_retries_then_succeeds() -> None:
     ) as client:
         bridge = OpenClawBridge(config, client=client)
         result = await bridge.run_workflow(
-            WorkflowRunRequest(task_type="codegen", goal="write code", model="openai")
+            WorkflowRunRequest(task_type="codegen", goal="write code", model="openai"),
         )
 
     assert result["status"] == "completed"
@@ -307,7 +308,7 @@ async def test_openclaw_bridge_workflow_fallback_to_next_model() -> None:
     ) as client:
         bridge = OpenClawBridge(config, routing_policy=policy, client=client)
         result = await bridge.run_workflow(
-            WorkflowRunRequest(task_type="codegen", goal="write code")
+            WorkflowRunRequest(task_type="codegen", goal="write code"),
         )
 
     assert result["status"] == "completed"

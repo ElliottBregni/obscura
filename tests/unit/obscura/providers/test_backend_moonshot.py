@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from obscura.providers.moonshot import MoonshotBackend
 from obscura.core.auth import AuthConfig
 from obscura.core.types import Backend
+from obscura.providers.moonshot import MoonshotBackend
 
 
 def test_moonshot_defaults() -> None:

@@ -1,5 +1,4 @@
-"""
-obscura.openclaw_bridge -- Async OpenClaw-facing bridge for Obscura HTTP API.
+"""obscura.openclaw_bridge -- Async OpenClaw-facing bridge for Obscura HTTP API.
 
 This module provides a small, typed client surface that OpenClaw can use to
 spawn/run agents, interact with key-value memory, and perform semantic search.
@@ -7,10 +6,10 @@ spawn/run agents, interact with key-value memory, and perform semantic search.
 
 from __future__ import annotations
 
-import uuid
 import asyncio
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Self, cast
 
 import httpx
 
@@ -47,10 +46,10 @@ class BackendRoutingPolicy:
             "codegen": "openai",
             "testgen": "openai",
             "support": "copilot",
-        }
+        },
     )
     fallback_order: tuple[str, ...] = ("claude", "copilot", "openai", "localllm")
-    fallback_routes: dict[str, tuple[str, ...]] = field(default_factory=lambda: {})
+    fallback_routes: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def select_model(self, task_type: str) -> str:
         normalized = task_type.strip().lower()
@@ -98,7 +97,7 @@ class RunAgentRequest:
     """Request payload for POST /api/v1/agents/{id}/run."""
 
     prompt: str
-    context: dict[str, Any] = field(default_factory=lambda: {})
+    context: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float | None = None
     cancellation_token: str = ""
 
@@ -144,8 +143,8 @@ class WorkflowRunRequest:
 
     task_type: str
     goal: str
-    context: dict[str, Any] = field(default_factory=lambda: {})
-    constraints: list[str] = field(default_factory=lambda: [])
+    context: dict[str, Any] = field(default_factory=dict)
+    constraints: list[str] = field(default_factory=list)
     expected_output: str = ""
     model: str | None = None
     name: str = "openclaw-workflow"
@@ -201,11 +200,11 @@ class OpenClawBridge:
         self._client = client
         self._owns_client = client is None
 
-    async def __aenter__(self) -> OpenClawBridge:
+    async def __aenter__(self) -> Self:
         self._ensure_client()
         return self
 
-    async def __aexit__(self, *_: Any) -> None:
+    async def __aexit__(self, *_: object) -> None:
         await self.aclose()
 
     @property
@@ -315,7 +314,8 @@ class OpenClawBridge:
     ) -> dict[str, Any]:
         """Run high-level workflow task with retries and model fallbacks."""
         candidates = self._routing_policy.model_candidates(
-            request.task_type, request.model
+            request.task_type,
+            request.model,
         )
         errors: list[str] = []
         attempts: list[WorkflowAttemptTelemetry] = []
@@ -337,10 +337,10 @@ class OpenClawBridge:
                     resp.raise_for_status()
                     body = resp.json()
                     if isinstance(body, dict):
-                        body_map = cast(dict[str, Any], body)
+                        body_map = cast("dict[str, Any]", body)
                         result = dict(body_map)
                         result["telemetry"] = {
-                            "attempts": [a.to_dict() for a in attempts]
+                            "attempts": [a.to_dict() for a in attempts],
                         }
                         return result
                     return {
@@ -374,7 +374,7 @@ class OpenClawBridge:
         raise RuntimeError(
             "Workflow failed across fallback chain: "
             + "; ".join(errors)
-            + f"; attempts={[a.to_dict() for a in attempts]}"
+            + f"; attempts={[a.to_dict() for a in attempts]}",
         )
 
     async def health(self, metadata: RequestMetadata | None = None) -> dict[str, Any]:
@@ -394,7 +394,8 @@ class OpenClawBridge:
     def _http(self) -> httpx.AsyncClient:
         self._ensure_client()
         if self._client is None:
-            raise RuntimeError("OpenClawBridge HTTP client is not initialized.")
+            msg = "OpenClawBridge HTTP client is not initialized."
+            raise RuntimeError(msg)
         return self._client
 
     @staticmethod

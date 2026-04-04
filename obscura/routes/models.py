@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Annotated
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import get_current_user
 from obscura.core.types import Backend
 from obscura.providers.model_cache import (
-    list_provider_models,
     invalidate_cache,
+    list_provider_models,
 )
-from obscura.providers.registry import ModelInfo
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
+    from obscura.providers.registry import ModelInfo
 
 router = APIRouter(prefix="/api/v1", tags=["models"])
 
@@ -25,23 +29,30 @@ def _get_backend_instance(backend: Backend) -> object:
 
     if backend == Backend.CLAUDE:
         from obscura.providers.claude import ClaudeBackend
+
         return ClaudeBackend(auth=auth)
     if backend == Backend.OPENAI:
         from obscura.providers.openai import OpenAIBackend
+
         return OpenAIBackend(auth=auth)
     if backend == Backend.COPILOT:
         from obscura.providers.copilot import CopilotBackend
+
         return CopilotBackend(auth=auth)
     if backend == Backend.LOCALLLM:
         from obscura.providers.localllm import LocalLLMBackend
+
         return LocalLLMBackend(auth=auth)
     if backend == Backend.CODEX:
         from obscura.providers.codex import CodexBackend
+
         return CodexBackend(auth=auth)
     if backend == Backend.MOONSHOT:
         from obscura.providers.moonshot import MoonshotBackend
+
         return MoonshotBackend(auth=auth)
-    raise ValueError(f"Unknown backend: {backend}")
+    msg = f"Unknown backend: {backend}"
+    raise ValueError(msg)
 
 
 def _model_to_dict(model: ModelInfo) -> dict[str, object]:
@@ -60,7 +71,10 @@ def _model_to_dict(model: ModelInfo) -> dict[str, object]:
 
 @router.get("/models")
 async def list_models(
-    provider: str | None = Query(None, description="Filter by provider name"),
+    provider: Annotated[
+        str | None,
+        Query(description="Filter by provider name"),
+    ] = None,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> JSONResponse:
     """List available models, optionally filtered by provider."""
@@ -91,7 +105,7 @@ async def list_models(
 
 @router.post("/models/refresh")
 async def refresh_models(
-    provider: str | None = Query(None, description="Provider to refresh"),
+    provider: Annotated[str | None, Query(description="Provider to refresh")] = None,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> JSONResponse:
     """Invalidate the model cache and force a refresh."""

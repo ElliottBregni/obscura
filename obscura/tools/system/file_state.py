@@ -1,5 +1,4 @@
-"""
-obscura.tools.system.file_state — Read-before-edit staleness tracking.
+"""obscura.tools.system.file_state — Read-before-edit staleness tracking.
 
 Tracks file modification times at read time so that edit/write tools
 can reject changes when the file has been modified externally since
@@ -11,7 +10,10 @@ Pattern borrowed from claude-code's ``readFileState`` mtime validation.
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # {canonical_path_str: (read_timestamp, mtime_at_read)}
 _read_state: dict[str, tuple[float, float]] = {}

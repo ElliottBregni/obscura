@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.integrations.messaging.identity import normalize_identity
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.whatsapp.client import WhatsAppClient
 from obscura.integrations.whatsapp.state import WhatsAppState
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +59,12 @@ class WhatsAppAdapter:
             if msg.sid in self._state.seen_sids:
                 continue
             sender_id = normalize_identity(msg.from_number.replace("whatsapp:", ""))
-            message_id = msg.sid or hashlib.sha1(
-                f"{sender_id}|{msg.date_created.isoformat()}|{msg.body}".encode()
-            ).hexdigest()
+            message_id = (
+                msg.sid
+                or hashlib.sha1(
+                    f"{sender_id}|{msg.date_created.isoformat()}|{msg.body}".encode(),
+                ).hexdigest()
+            )
             out.append(
                 PlatformMessage(
                     platform=_PLATFORM,
@@ -70,7 +76,7 @@ class WhatsAppAdapter:
                     text=msg.body,
                     timestamp=msg.date_created,
                     metadata=msg.raw,
-                )
+                ),
             )
             self._state.mark_seen(msg.sid)
         self._state.update_fetch_time(now)

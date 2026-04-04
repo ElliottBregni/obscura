@@ -1,3 +1,3 @@
-from .oauth import GraphOAuth, DEFAULT_SCOPES
+from .oauth import DEFAULT_SCOPES, GraphOAuth
 
-__all__ = ["GraphOAuth", "DEFAULT_SCOPES"]
+__all__ = ["DEFAULT_SCOPES", "GraphOAuth"]

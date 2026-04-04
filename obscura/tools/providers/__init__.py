@@ -9,12 +9,14 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.tools import ToolRegistry
 from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.tool_adapter import register_remote_agent_as_tool
 from obscura.tools.system import get_system_tool_specs
-from obscura.core.tools import ToolRegistry
 
 if TYPE_CHECKING:
+    from obscura.agent.agents import AgentConfig
+    from obscura.auth.models import AuthenticatedUser
     from obscura.integrations.mcp.types import MCPConnectionConfig
 
 logger = logging.getLogger(__name__)
@@ -23,8 +25,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BrokerContext:
     """Context passed to providers during install/uninstall."""
+
     broker: Any  # ToolBroker
-    agent: Any   # Agent — needed for lifecycle (e.g. MCP backend)
+    agent: Any  # Agent — needed for lifecycle (e.g. MCP backend)
     allowed_tool_names: set[str] | None = None
 
 
@@ -36,7 +39,10 @@ class SystemToolProvider:
         for tool_spec in get_system_tool_specs():
             if allowlist is not None and tool_spec.name not in allowlist:
                 continue
-            if context.allowed_tool_names is not None and tool_spec.name not in context.allowed_tool_names:
+            if (
+                context.allowed_tool_names is not None
+                and tool_spec.name not in context.allowed_tool_names
+            ):
                 continue
             if tool_spec.name == "task" and delegation_spec is not None:
                 context.broker.register_tool_spec(delegation_spec)
@@ -62,7 +68,6 @@ class SystemToolProvider:
     def _build_delegation_tool(context: BrokerContext) -> Any:
         """Build a real delegation tool if the agent supports it."""
         try:
-            from obscura.agent.agents import AgentConfig
             from obscura.tools.delegation import DelegationContext, make_task_tool
 
             agent = context.agent
@@ -71,7 +76,9 @@ class SystemToolProvider:
                 return None
 
             peer_registry = getattr(
-                getattr(agent, "runtime", None), "peer_registry", None
+                getattr(agent, "runtime", None),
+                "peer_registry",
+                None,
             )
 
             ctx = DelegationContext(
@@ -132,7 +139,6 @@ class MemoryToolProvider:
     """Provides memory and vector storage tools to agents."""
 
     async def install(self, context: BrokerContext) -> None:
-        from obscura.auth.models import AuthenticatedUser
         from obscura.tools.memory_tools import make_memory_tool_specs
 
         user: AuthenticatedUser | None = getattr(context.agent, "user", None)

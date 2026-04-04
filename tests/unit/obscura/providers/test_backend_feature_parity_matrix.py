@@ -10,13 +10,13 @@ from typing import Any, cast
 
 import pytest
 
+from obscura.core.auth import AuthConfig
+from obscura.core.types import HookPoint, NativeHandle, ToolSpec
 from obscura.providers.claude import ClaudeBackend
 from obscura.providers.copilot import CopilotBackend
 from obscura.providers.localllm import LocalLLMBackend
 from obscura.providers.moonshot import MoonshotBackend
 from obscura.providers.openai import OpenAIBackend
-from obscura.core.auth import AuthConfig
-from obscura.core.types import HookPoint, NativeHandle, ToolSpec
 
 
 def _auth_for(name: str) -> AuthConfig:
@@ -99,11 +99,11 @@ def test_backend_registers_tools_and_hooks(name: str, backend_cls: Any) -> None:
     backend.register_hook(HookPoint.STOP, _on_stop)
 
     if hasattr(backend, "tools"):
-        tools = getattr(backend, "tools")
+        tools = backend.tools
         assert isinstance(tools, list)
-        tools_any = cast(list[Any], tools)
+        tools_any = cast("list[Any]", tools)
         assert any(getattr(t, "name", "") == "echo" for t in tools_any)
 
     if hasattr(backend, "hooks"):
-        hooks = getattr(backend, "hooks")
+        hooks = backend.hooks
         assert HookPoint.STOP in hooks

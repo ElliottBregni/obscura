@@ -11,7 +11,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,9 @@ class IMessageClient:
     ) -> None:
         self._contacts = contacts
         self._normalized_contacts = {
-            normalize_identity(c) for c in contacts if normalize_identity(c) != "unknown"
+            normalize_identity(c)
+            for c in contacts
+            if normalize_identity(c) != "unknown"
         }
         self._db_path = db_path or CHAT_DB_PATH
         self._use_sqlite = True
@@ -75,7 +77,7 @@ class IMessageClient:
             self._use_sqlite = True
             return True
         except (sqlite3.OperationalError, sqlite3.DatabaseError):
-            logger.error(
+            logger.exception(
                 "Cannot read %s -- SQLite access required for reliable ingest. "
                 "Grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access.",
                 self._db_path,
@@ -94,14 +96,14 @@ class IMessageClient:
                 else:
                     if now >= self._next_warn_at:
                         logger.warning(
-                            "iMessage ingest disabled: SQLite chat.db access unavailable"
+                            "iMessage ingest disabled: SQLite chat.db access unavailable",
                         )
                         self._next_warn_at = now + self._warn_interval_s
                     return []
             else:
                 if now >= self._next_warn_at:
                     logger.warning(
-                        "iMessage ingest disabled: SQLite chat.db access unavailable"
+                        "iMessage ingest disabled: SQLite chat.db access unavailable",
                     )
                     self._next_warn_at = now + self._warn_interval_s
                 return []
@@ -121,7 +123,7 @@ class IMessageClient:
         escaped_recipient = recipient.replace('"', '\\"')
         script = (
             f'tell application "Messages"\n'
-            f'  set targetService to 1st account whose service type = iMessage\n'
+            f"  set targetService to 1st account whose service type = iMessage\n"
             f'  set targetBuddy to buddy "{escaped_recipient}" of targetService\n'
             f'  send "{escaped_text}" to targetBuddy\n'
             f"end tell"
@@ -139,8 +141,8 @@ class IMessageClient:
                     proc.communicate(),
                     timeout=_SEND_TIMEOUT_SECONDS,
                 )
-            except asyncio.TimeoutError:
-                logger.error(
+            except TimeoutError:
+                logger.exception(
                     "osascript send timed out after %.1fs to %s",
                     _SEND_TIMEOUT_SECONDS,
                     recipient,
@@ -179,7 +181,10 @@ class IMessageClient:
         messages: list[IMessage] = []
         for row in rows:
             sender = str(row["handle_id"])
-            if self._normalized_contacts and normalize_identity(sender) not in self._normalized_contacts:
+            if (
+                self._normalized_contacts
+                and normalize_identity(sender) not in self._normalized_contacts
+            ):
                 continue
             dt = _apple_date_to_datetime(row["date"])
             messages.append(
@@ -190,7 +195,7 @@ class IMessageClient:
                     sender=sender,
                     date=dt,
                     is_from_me=bool(row["is_from_me"]),
-                )
+                ),
             )
         return messages
 
@@ -198,10 +203,10 @@ class IMessageClient:
 def _apple_date_to_datetime(apple_ts: Any) -> datetime:
     """Convert Apple timestamp to UTC datetime."""
     if not apple_ts:
-        return datetime.fromtimestamp(0, tz=timezone.utc)
+        return datetime.fromtimestamp(0, tz=UTC)
     ts = int(apple_ts)
     if ts > 1_000_000_000_000:
         unix_ts = (ts / 1_000_000_000) + _APPLE_EPOCH_OFFSET
     else:
         unix_ts = ts + _APPLE_EPOCH_OFFSET
-    return datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+    return datetime.fromtimestamp(unix_ts, tz=UTC)

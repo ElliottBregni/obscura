@@ -13,10 +13,10 @@ from obscura.plugins.models import CapabilitySpec, ToolContribution
 from obscura.plugins.registries.capability_index import CapabilityIndex
 from obscura.plugins.registries.tool_index import ToolIndex
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_cap(
     cap_id: str,
@@ -36,10 +36,14 @@ def _make_cap(
 
 
 def _make_tool(name: str, capability: str = "") -> ToolContribution:
-    return ToolContribution(name=name, description=f"Tool {name}", capability=capability)
+    return ToolContribution(
+        name=name,
+        description=f"Tool {name}",
+        capability=capability,
+    )
 
 
-@pytest.fixture()
+@pytest.fixture
 def cap_index() -> CapabilityIndex:
     idx = CapabilityIndex()
     idx.register(_make_cap("repo.read", tools=("list_files", "read_file")), "plugin-a")
@@ -54,7 +58,7 @@ def cap_index() -> CapabilityIndex:
     return idx
 
 
-@pytest.fixture()
+@pytest.fixture
 def tool_index() -> ToolIndex:
     idx = ToolIndex()
     idx.register(_make_tool("list_files", capability="repo.read"), "plugin-a")
@@ -65,7 +69,7 @@ def tool_index() -> ToolIndex:
     return idx
 
 
-@pytest.fixture()
+@pytest.fixture
 def resolver(cap_index: CapabilityIndex, tool_index: ToolIndex) -> CapabilityResolver:
     return CapabilityResolver(cap_index, tool_index)
 
@@ -77,7 +81,11 @@ def resolver(cap_index: CapabilityIndex, tool_index: ToolIndex) -> CapabilityRes
 
 class TestDataclasses:
     def test_capability_grant_defaults(self) -> None:
-        g = CapabilityGrant(capability_id="repo.read", grantee_type="agent", grantee_id="a1")
+        g = CapabilityGrant(
+            capability_id="repo.read",
+            grantee_type="agent",
+            grantee_id="a1",
+        )
         assert g.capability_id == "repo.read"
         assert g.grantee_type == "agent"
         assert g.granted_by == "default"
@@ -85,7 +93,11 @@ class TestDataclasses:
         assert g.granted_at  # non-empty ISO string
 
     def test_capability_denial_defaults(self) -> None:
-        d = CapabilityDenial(capability_id="pr.comment", grantee_type="agent", grantee_id="a1")
+        d = CapabilityDenial(
+            capability_id="pr.comment",
+            grantee_type="agent",
+            grantee_id="a1",
+        )
         assert d.denied_by == "policy"
         assert d.reason == ""
 
@@ -122,12 +134,18 @@ class TestGrantDeny:
 
 
 class TestOrdering:
-    def test_grant_then_deny_removes_capability(self, resolver: CapabilityResolver) -> None:
+    def test_grant_then_deny_removes_capability(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         resolver.grant("agent-1", "repo.read")
         resolver.deny("agent-1", "repo.read")
         assert not resolver.is_granted("agent-1", "repo.read")
 
-    def test_deny_then_grant_restores_capability(self, resolver: CapabilityResolver) -> None:
+    def test_deny_then_grant_restores_capability(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         resolver.deny("agent-1", "repo.read")
         resolver.grant("agent-1", "repo.read")
         assert resolver.is_granted("agent-1", "repo.read")
@@ -147,7 +165,10 @@ class TestGrantDefaults:
         assert "pr.comment" in granted_ids
         assert "shell.exec" not in granted_ids
 
-    def test_grant_defaults_respects_existing_denial(self, resolver: CapabilityResolver) -> None:
+    def test_grant_defaults_respects_existing_denial(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         resolver.deny("agent-1", "repo.read")
         grants = resolver.grant_defaults("agent-1")
         granted_ids = {g.capability_id for g in grants}
@@ -194,13 +215,19 @@ class TestResolveTools:
         names = {t.name for t in tools}
         assert "post_comment" not in names
 
-    def test_resolve_tools_includes_no_capability_tools(self, resolver: CapabilityResolver) -> None:
+    def test_resolve_tools_includes_no_capability_tools(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         """Tools with no capability (empty string) are always visible."""
         tools = resolver.resolve_tools("agent-1")
         names = {t.name for t in tools}
         assert "help" in names
 
-    def test_resolve_tool_names_returns_set_of_strings(self, resolver: CapabilityResolver) -> None:
+    def test_resolve_tool_names_returns_set_of_strings(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         resolver.grant("agent-1", "repo.read")
         names = resolver.resolve_tool_names("agent-1")
         assert isinstance(names, set)
@@ -257,7 +284,10 @@ class TestMultipleAgents:
         assert resolver.resolve_for_agent("agent-1") == {"repo.read"}
         assert resolver.resolve_for_agent("agent-2") == {"pr.comment"}
 
-    def test_deny_on_one_agent_doesnt_affect_other(self, resolver: CapabilityResolver) -> None:
+    def test_deny_on_one_agent_doesnt_affect_other(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         resolver.grant("agent-1", "repo.read")
         resolver.grant("agent-2", "repo.read")
         resolver.deny("agent-1", "repo.read")
@@ -274,13 +304,19 @@ class TestEmptyState:
     def test_no_grants_empty_resolve(self, resolver: CapabilityResolver) -> None:
         assert resolver.resolve_for_agent("agent-1") == set()
 
-    def test_no_grants_resolve_tools_only_uncapped(self, resolver: CapabilityResolver) -> None:
+    def test_no_grants_resolve_tools_only_uncapped(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         tools = resolver.resolve_tools("agent-1")
         names = {t.name for t in tools}
         # only the "help" tool with no capability should appear
         assert names == {"help"}
 
-    def test_no_grants_empty_tool_names_plus_uncapped(self, resolver: CapabilityResolver) -> None:
+    def test_no_grants_empty_tool_names_plus_uncapped(
+        self,
+        resolver: CapabilityResolver,
+    ) -> None:
         assert resolver.resolve_tool_names("agent-1") == {"help"}
 
 

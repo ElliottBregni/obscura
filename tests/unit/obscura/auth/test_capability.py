@@ -1,5 +1,4 @@
-"""
-Tests for the two-tier cryptographic capability system.
+"""Tests for the two-tier cryptographic capability system.
 
 Covers:
 - Tier resolution from user roles
@@ -19,11 +18,11 @@ from typing import Any
 import pytest
 
 from obscura.auth.capability import (
+    PRIVILEGED_ROLES,
     CapabilityTier,
     CapabilityToken,
-    PRIVILEGED_ROLES,
-    reset_signing_key,
     generate_capability_token,
+    reset_signing_key,
     resolve_tier,
     validate_capability_token,
 )
@@ -32,7 +31,6 @@ from obscura.auth.prompt_filter import filter_prompt
 from obscura.auth.system_prompts import (
     get_tier_system_prompt,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -101,7 +99,7 @@ class TestCapabilityTierResolution:
         assert resolve_tier(user) == CapabilityTier.PUBLIC
 
     def test_privileged_roles_set_is_correct(self) -> None:
-        assert PRIVILEGED_ROLES == frozenset({"admin", "operator", "tier:privileged"})
+        assert frozenset({"admin", "operator", "tier:privileged"}) == PRIVILEGED_ROLES
 
 
 # ===========================================================================
@@ -131,7 +129,7 @@ class TestCapabilityTokenGeneration:
         user = _make_user()
         token = generate_capability_token(user, "s1", ttl_seconds=10)
         assert token.expires_at > token.issued_at
-        _approx: Any = getattr(pytest, "approx")
+        _approx: Any = pytest.approx
         assert token.expires_at - token.issued_at == _approx(10, abs=1)
 
     def test_nonce_is_unique(self) -> None:
@@ -353,7 +351,7 @@ class TestToolTierGating:
                 parameters={},
                 handler=lambda: None,
                 required_tier="public",
-            )
+            ),
         )
         reg.register(
             ToolSpec(
@@ -362,7 +360,7 @@ class TestToolTierGating:
                 parameters={},
                 handler=lambda: None,
                 required_tier="privileged",
-            )
+            ),
         )
 
         public_tools = reg.for_tier("public")
@@ -380,7 +378,7 @@ class TestToolTierGating:
                 parameters={},
                 handler=lambda: None,
                 required_tier="public",
-            )
+            ),
         )
         reg.register(
             ToolSpec(
@@ -389,7 +387,7 @@ class TestToolTierGating:
                 parameters={},
                 handler=lambda: None,
                 required_tier="privileged",
-            )
+            ),
         )
 
         priv_tools = reg.for_tier("privileged")
@@ -407,7 +405,7 @@ class TestToolTierGating:
                 parameters={},
                 handler=lambda: None,
                 required_tier="public",
-            )
+            ),
         )
         reg.register(
             ToolSpec(
@@ -416,7 +414,7 @@ class TestToolTierGating:
                 parameters={},
                 handler=lambda: None,
                 required_tier="privileged",
-            )
+            ),
         )
 
         assert set(reg.names_for_tier("public")) == {"a", "b"}
@@ -429,7 +427,7 @@ class TestToolTierGating:
         def my_tool(x: str) -> str:
             return x
 
-        spec: Any = getattr(my_tool, "spec")
+        spec: Any = my_tool.spec
         assert spec.required_tier == "privileged"
 
     def test_tool_decorator_default_tier(self) -> None:
@@ -439,7 +437,7 @@ class TestToolTierGating:
         def my_tool2(x: str) -> str:
             return x
 
-        spec: Any = getattr(my_tool2, "spec")
+        spec: Any = my_tool2.spec
         assert spec.required_tier == "public"
 
 
@@ -454,9 +452,9 @@ class TestAgentLoopCapabilityEnforcement:
     @pytest.mark.asyncio
     async def test_public_token_allows_privileged_tool(self) -> None:
         """Both tiers allow all tools for now."""
+        from obscura.core.agent_loop import AgentLoop
         from obscura.core.tools import ToolRegistry
         from obscura.core.types import ToolCallInfo, ToolSpec
-        from obscura.core.agent_loop import AgentLoop
 
         reg = ToolRegistry()
         reg.register(
@@ -466,7 +464,7 @@ class TestAgentLoopCapabilityEnforcement:
                 parameters={},
                 handler=lambda: "secret",
                 required_tier="privileged",
-            )
+            ),
         )
 
         user = _make_user(roles=("agent:read",))
@@ -489,9 +487,9 @@ class TestAgentLoopCapabilityEnforcement:
 
     @pytest.mark.asyncio
     async def test_privileged_token_allows_privileged_tool(self) -> None:
+        from obscura.core.agent_loop import AgentLoop
         from obscura.core.tools import ToolRegistry
         from obscura.core.types import ToolCallInfo, ToolSpec
-        from obscura.core.agent_loop import AgentLoop
 
         reg = ToolRegistry()
         reg.register(
@@ -501,7 +499,7 @@ class TestAgentLoopCapabilityEnforcement:
                 parameters={},
                 handler=lambda: "admin_data",
                 required_tier="privileged",
-            )
+            ),
         )
 
         user = _make_user(roles=("admin",))
@@ -524,9 +522,9 @@ class TestAgentLoopCapabilityEnforcement:
 
     @pytest.mark.asyncio
     async def test_expired_token_denies_all_tools(self) -> None:
+        from obscura.core.agent_loop import AgentLoop
         from obscura.core.tools import ToolRegistry
         from obscura.core.types import ToolCallInfo, ToolSpec
-        from obscura.core.agent_loop import AgentLoop
 
         reg = ToolRegistry()
         reg.register(
@@ -536,7 +534,7 @@ class TestAgentLoopCapabilityEnforcement:
                 parameters={},
                 handler=lambda: "ok",
                 required_tier="public",
-            )
+            ),
         )
 
         user = _make_user(roles=("admin",))
@@ -559,9 +557,9 @@ class TestAgentLoopCapabilityEnforcement:
     @pytest.mark.asyncio
     async def test_no_token_allows_all_tools(self) -> None:
         """Without a capability token, tools execute unrestricted (backward compat)."""
+        from obscura.core.agent_loop import AgentLoop
         from obscura.core.tools import ToolRegistry
         from obscura.core.types import ToolCallInfo, ToolSpec
-        from obscura.core.agent_loop import AgentLoop
 
         reg = ToolRegistry()
         reg.register(
@@ -571,7 +569,7 @@ class TestAgentLoopCapabilityEnforcement:
                 parameters={},
                 handler=lambda: "result",
                 required_tier="privileged",
-            )
+            ),
         )
 
         loop = AgentLoop(
@@ -590,9 +588,9 @@ class TestAgentLoopCapabilityEnforcement:
 
     @pytest.mark.asyncio
     async def test_public_token_allows_public_tool(self) -> None:
+        from obscura.core.agent_loop import AgentLoop
         from obscura.core.tools import ToolRegistry
         from obscura.core.types import ToolCallInfo, ToolSpec
-        from obscura.core.agent_loop import AgentLoop
 
         reg = ToolRegistry()
         reg.register(
@@ -602,7 +600,7 @@ class TestAgentLoopCapabilityEnforcement:
                 parameters={},
                 handler=lambda: "safe_data",
                 required_tier="public",
-            )
+            ),
         )
 
         user = _make_user(roles=("agent:read",))
@@ -635,6 +633,7 @@ class TestCapabilityAPIEndpoints:
     def app(self) -> Any:
         """Create a minimal FastAPI app with capabilities router."""
         from fastapi import FastAPI
+
         from obscura.routes.capabilities import router
 
         app = FastAPI()

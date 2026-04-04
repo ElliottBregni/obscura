@@ -41,6 +41,7 @@ class DecayProfile:
         Decay multiplier below which a memory is eligible for GC / consolidation.
     immune:
         If True the memory never decays (e.g. preferences).
+
     """
 
     half_life_days: float = 30.0
@@ -61,7 +62,9 @@ DEFAULT_PROFILES: dict[str, DecayProfile] = {
 class DecayConfig:
     """Top-level decay configuration, loadable from ``[vector_memory.decay]``."""
 
-    profiles: dict[str, DecayProfile] = field(default_factory=lambda: dict(DEFAULT_PROFILES))
+    profiles: dict[str, DecayProfile] = field(
+        default_factory=lambda: dict(DEFAULT_PROFILES),
+    )
     access_boost_days: float = 7.0
     consolidation_age_days: float = 14.0
     consolidation_batch_size: int = 20
@@ -89,7 +92,10 @@ def compute_decay(
 
     Returns ``1.0`` for immune types (e.g. ``"preference"``).
     """
-    profile = config.profiles.get(memory_type, config.profiles.get("general", DecayProfile()))
+    profile = config.profiles.get(
+        memory_type,
+        config.profiles.get("general", DecayProfile()),
+    )
 
     if profile.immune:
         return 1.0
@@ -131,7 +137,10 @@ def is_below_floor(
     config: DecayConfig,
 ) -> bool:
     """True when a memory has decayed below its floor — eligible for GC."""
-    profile = config.profiles.get(memory_type, config.profiles.get("general", DecayProfile()))
+    profile = config.profiles.get(
+        memory_type,
+        config.profiles.get("general", DecayProfile()),
+    )
     if profile.immune:
         return False
     decay = compute_decay(memory_type, created_at, accessed_at, config)
@@ -190,5 +199,8 @@ def load_decay_config_from_disk() -> DecayConfig:
         raw_section = (home_cfg or {}).get("vector_memory", {}).get("decay")
         return load_decay_config(raw_section)
     except Exception:
-        logger.debug("Could not load decay config from disk, using defaults", exc_info=True)
+        logger.debug(
+            "Could not load decay config from disk, using defaults",
+            exc_info=True,
+        )
         return DecayConfig()

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, AsyncIterator
-import pytest
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from obscura.agent.agents import (
     Agent,
@@ -18,8 +19,11 @@ from obscura.agent.agents import (
     AgentStatus,
     MCPConfig,
 )
-from obscura.core.types import AgentEvent, AgentEventKind
 from obscura.auth.models import AuthenticatedUser
+from obscura.core.types import AgentEvent, AgentEventKind
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @pytest.fixture
@@ -40,7 +44,9 @@ def runtime(test_user: AuthenticatedUser) -> AgentRuntime:
 
 
 def _make_agent(
-    runtime: AgentRuntime, name: str = "test-agent", **kwargs: Any
+    runtime: AgentRuntime,
+    name: str = "test-agent",
+    **kwargs: Any,
 ) -> Agent:
     """Helper to spawn an agent with heartbeat disabled."""
     with patch.dict(os.environ, {"OBSCURA_HEARTBEAT_ENABLED": "false"}):
@@ -115,7 +121,9 @@ class TestMCPConfig:
 class TestAgentRuntime:
     @pytest.mark.asyncio
     async def test_spawn_agent(
-        self, runtime: AgentRuntime, test_user: AuthenticatedUser
+        self,
+        runtime: AgentRuntime,
+        test_user: AuthenticatedUser,
     ) -> None:
         await runtime.start()
         agent = _make_agent(runtime)
@@ -207,7 +215,8 @@ class TestAgentRuntime:
 
     @pytest.mark.asyncio
     async def test_lifecycle_hook_emits_spawn_start_ready_stop(
-        self, test_user: AuthenticatedUser
+        self,
+        test_user: AuthenticatedUser,
     ) -> None:
         events: list[str] = []
 
@@ -523,10 +532,10 @@ class TestAgentStart:
 
             with (
                 patch(
-                    "obscura.integrations.mcp.config_loader.discover_mcp_servers"
+                    "obscura.integrations.mcp.config_loader.discover_mcp_servers",
                 ) as mock_discover,
                 patch(
-                    "obscura.integrations.mcp.config_loader.build_runtime_server_configs"
+                    "obscura.integrations.mcp.config_loader.build_runtime_server_configs",
                 ) as mock_build,
                 patch("obscura.providers.mcp_backend.MCPBackend") as MockMCPBackend,
             ):
@@ -538,7 +547,7 @@ class TestAgentStart:
                         "args": ["-y", "@playwright/mcp@latest"],
                         "env": {},
                         "tools": [],
-                    }
+                    },
                 ]
                 mcp_instance = AsyncMock()
                 mcp_instance.list_tools = MagicMock(return_value=[mock_tool])
@@ -670,7 +679,8 @@ class TestAgentRun:
 
     @pytest.mark.asyncio
     async def test_run_stores_task_and_result_in_memory(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         """Cover lines 198-230: memory set calls during run()."""
         agent = _make_agent(runtime, "mem-test")
@@ -742,7 +752,8 @@ class TestAgentStream:
 
         async def failing_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
             yield MagicMock(text="partial")
-            raise ConnectionError("lost connection")
+            msg = "lost connection"
+            raise ConnectionError(msg)
 
         mock_client = AsyncMock()
         mock_client.stream = failing_stream
@@ -831,7 +842,7 @@ class TestAgentRunLoop:
 
         mock_client = AsyncMock()
         mock_client.run_loop_to_completion = AsyncMock(
-            side_effect=RuntimeError("model error")
+            side_effect=RuntimeError("model error"),
         )
         agent.client = mock_client
 
@@ -912,7 +923,8 @@ class TestAgentStreamLoop:
 
         async def failing_loop(*args: Any, **kwargs: Any) -> AsyncIterator[AgentEvent]:
             yield AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="start")
-            raise IOError("connection lost")
+            msg = "connection lost"
+            raise OSError(msg)
 
         mock_client = MagicMock()
         mock_client.run_loop = failing_loop
@@ -958,7 +970,8 @@ class TestAgentStatePersistence:
 
         # Check memory has the state
         state_data = agent.memory.get(
-            f"agent_state_{agent.id}", namespace="agent:runtime"
+            f"agent_state_{agent.id}",
+            namespace="agent:runtime",
         )
         assert state_data is not None
         assert state_data["name"] == "state-test"
@@ -1004,7 +1017,9 @@ class TestAgentPromptBuilding:
         agent.memory.set("context", {"repo": "test"}, namespace="default:tasks")
 
         prompt = agent.build_prompt(
-            "do something", {"memory:1": {"data": "value"}}, {"extra": "context"}
+            "do something",
+            {"memory:1": {"data": "value"}},
+            {"extra": "context"},
         )
 
         assert "do something" in prompt
@@ -1035,7 +1050,9 @@ class TestAgentMemoryIntegration:
 
         # Manually store task (normally done in run())
         agent.memory.set(
-            "task_0", {"prompt": "test task", "context": {}}, namespace="default:tasks"
+            "task_0",
+            {"prompt": "test task", "context": {}},
+            namespace="default:tasks",
         )
 
         # Verify stored
@@ -1048,7 +1065,9 @@ class TestAgentMemoryIntegration:
         # Store some tasks
         for i in range(3):
             agent.memory.set(
-                f"task_{i}", {"prompt": f"task {i}"}, namespace="default:tasks"
+                f"task_{i}",
+                {"prompt": f"task {i}"},
+                namespace="default:tasks",
             )
 
         memory = agent.load_relevant_memory("test prompt")
@@ -1057,7 +1076,8 @@ class TestAgentMemoryIntegration:
         assert len(memory) > 0
 
     def test_load_relevant_memory_with_search_fallback(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         """Cover lines 459-462: fallback text search when no semantic results."""
         agent = _make_agent(runtime, "search-fallback")
@@ -1176,7 +1196,7 @@ class TestAgentStop:
         agent.client = AsyncMock()
 
         # Create a dummy task
-        async def dummy():
+        async def dummy() -> None:
             await asyncio.sleep(100)
 
         agent.task = asyncio.create_task(dummy())
@@ -1185,7 +1205,8 @@ class TestAgentStop:
         # Let the event loop process the cancellation
         await asyncio.sleep(0)
 
-        assert agent.task is not None and (agent.task.cancelled() or agent.task.done())
+        assert agent.task is not None
+        assert agent.task.cancelled() or agent.task.done()
         assert agent.status == AgentStatus.STOPPED
 
     @pytest.mark.asyncio
@@ -1203,13 +1224,13 @@ class TestAgentStop:
         agent = _make_agent(runtime, "graceful-to")
 
         # Make stop() take forever
-        async def slow_stop():
+        async def slow_stop() -> None:
             await asyncio.sleep(100)
 
         agent.stop = slow_stop
 
         # Create a mock task
-        async def dummy():
+        async def dummy() -> None:
             await asyncio.sleep(100)
 
         agent.task = asyncio.create_task(dummy())
@@ -1219,13 +1240,15 @@ class TestAgentStop:
         await asyncio.sleep(0)
 
         assert agent.status == AgentStatus.STOPPED
-        assert agent.task is not None and (agent.task.cancelled() or agent.task.done())
+        assert agent.task is not None
+        assert agent.task.cancelled() or agent.task.done()
 
 
 class TestAgentMessages:
     @pytest.mark.asyncio
     async def test_receive_messages_yields_and_stops(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         """Cover lines 506-515: receive_messages iterator."""
         agent = _make_agent(runtime, "recv-test")
@@ -1249,7 +1272,8 @@ class TestAgentMessages:
 
     @pytest.mark.asyncio
     async def test_receive_messages_stops_on_failed(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         """Cover line 514: stops when status is FAILED."""
         agent = _make_agent(runtime, "recv-fail")
@@ -1263,7 +1287,8 @@ class TestAgentMessages:
 
     @pytest.mark.asyncio
     async def test_receive_messages_stops_on_stopped(
-        self, runtime: AgentRuntime
+        self,
+        runtime: AgentRuntime,
     ) -> None:
         """Cover line 514: stops when status is STOPPED."""
         agent = _make_agent(runtime, "recv-stop")

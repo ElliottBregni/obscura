@@ -1,5 +1,4 @@
-"""
-obscura.client — ObscuraClient: unified entry point for all backends.
+"""obscura.client — ObscuraClient: unified entry point for all backends.
 
 Dispatches to the appropriate backend (Copilot, Claude, OpenAI, Moonshot, LocalLLM)
 based on the ``backend`` parameter. Integrates with ``copilot_models`` for
@@ -9,11 +8,12 @@ model alias resolution and safety guards.
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator, Awaitable, Callable, cast
+from typing import TYPE_CHECKING, Any, Self, cast
 
 _logger = logging.getLogger(__name__)
 
 from obscura.core.auth import AuthConfig, resolve_auth
+from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     AgentEvent,
@@ -27,8 +27,9 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.core.tool_policy import ToolPolicy
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
 # ---------------------------------------------------------------------------
 # Unified client
@@ -96,7 +97,9 @@ class ObscuraClient:
             backend = Backend(backend)
         self._backend_type = backend
         self._user = user
-        self._tool_policy = tool_policy or ToolPolicy.custom_only()  # Default: block native tools
+        self._tool_policy = (
+            tool_policy or ToolPolicy.custom_only()
+        )  # Default: block native tools
         self._hooks = hooks
 
         # Resolve model via copilot_models aliases
@@ -119,10 +122,11 @@ class ObscuraClient:
         self._capability_token = None
         if user is not None:
             try:
+                import uuid as _uuid
+
                 from obscura.auth.capability import generate_capability_token
                 from obscura.auth.models import AuthenticatedUser as _AuthUser
                 from obscura.auth.system_prompts import get_tier_system_prompt
-                import uuid as _uuid
 
                 if isinstance(user, _AuthUser):
                     session_id = _uuid.uuid4().hex
@@ -141,6 +145,7 @@ class ObscuraClient:
         if inject_claude_context:
             try:
                 from obscura.core.context import ContextLoader
+
                 loader = ContextLoader(
                     backend,
                     lazy_load_skills=lazy_load_skills,
@@ -150,7 +155,11 @@ class ObscuraClient:
                 )
                 claude_ctx = loader.load_system_prompt()
                 if claude_ctx:
-                    system_prompt = f"{claude_ctx}\n\n{system_prompt}" if system_prompt else claude_ctx
+                    system_prompt = (
+                        f"{claude_ctx}\n\n{system_prompt}"
+                        if system_prompt
+                        else claude_ctx
+                    )
             except Exception:
                 pass
 
@@ -232,7 +241,7 @@ class ObscuraClient:
                         url=server.get("url"),
                         env=server.get("env", {}),
                         name=server.get("name", ""),
-                    )
+                    ),
                 )
 
             self._mcp_backend = MCPBackend(configs)
@@ -261,11 +270,11 @@ class ObscuraClient:
             self._mcp_backend = None
         await self._backend.stop()
 
-    async def __aenter__(self) -> ObscuraClient:
+    async def __aenter__(self) -> Self:
         await self.start()
         return self
 
-    async def __aexit__(self, *exc: Any) -> None:
+    async def __aexit__(self, *exc: object) -> None:
         await self.stop()
 
     # -- Query ---------------------------------------------------------------
@@ -285,7 +294,10 @@ class ObscuraClient:
 
             cache: LLMCache = self._cache
             cache_key = LLMCache.make_key(
-                self._backend_type.value, self._model, self._system_prompt, prompt
+                self._backend_type.value,
+                self._model,
+                self._system_prompt,
+                prompt,
             )
             cached = cache.get(cache_key)
             if cached is not None:
@@ -350,7 +362,8 @@ class ObscuraClient:
         circuit = self._circuit_registry.get(self._backend_type.value)
         if not circuit.allow_request():
             raise CircuitOpenError(
-                circuit.name, circuit.time_until_half_open()
+                circuit.name,
+                circuit.time_until_half_open(),
             )
 
         tracer = _get_client_tracer()
@@ -419,6 +432,7 @@ class ObscuraClient:
         auto_complete:
             When False, the loop will not mark the session COMPLETED
             on finish — the caller manages the session lifecycle.
+
         """
         from obscura.core.agent_loop import AgentLoop
 
@@ -428,13 +442,19 @@ class ObscuraClient:
             try:
                 from obscura.core.context import load_session_messages
                 from obscura.core.paths import resolve_obscura_home
+
                 db_path = resolve_obscura_home() / "events.db"
-                initial_messages = load_session_messages(session_id, db_path, max_turns=5)
+                initial_messages = load_session_messages(
+                    session_id,
+                    db_path,
+                    max_turns=5,
+                )
                 if initial_messages:
-                    _logger.debug(f"Loaded {len(initial_messages)} messages from session {session_id}")
+                    _logger.debug(
+                        f"Loaded {len(initial_messages)} messages from session {session_id}",
+                    )
             except Exception as e:
                 _logger.warning(f"Could not load session history: {e}")
-
 
         # For Claude: route confirmation through PreToolUse hook instead of
         # AgentLoop.on_confirm (Claude SDK executes tools internally via MCP,
@@ -468,7 +488,12 @@ class ObscuraClient:
             context_budget=context_budget,
         )
         self._current_loop = loop
-        return loop.run(prompt, session_id=session_id, initial_messages=initial_messages, **kwargs)
+        return loop.run(
+            prompt,
+            session_id=session_id,
+            initial_messages=initial_messages,
+            **kwargs,
+        )
 
     async def run_loop_to_completion(
         self,
@@ -528,10 +553,11 @@ class ObscuraClient:
         """
         fork_fn = getattr(self._backend, "fork_session", None)
         if callable(fork_fn):
-            typed_fork = cast(Callable[[SessionRef], Awaitable[SessionRef]], fork_fn)
+            typed_fork = cast("Callable[[SessionRef], Awaitable[SessionRef]]", fork_fn)
             return await typed_fork(ref)
+        msg = f"Backend {self._backend_type.value} does not support session forking."
         raise RuntimeError(
-            f"Backend {self._backend_type.value} does not support session forking."
+            msg,
         )
 
     # -- Tools ---------------------------------------------------------------
@@ -610,14 +636,20 @@ class ObscuraClient:
     # -- Reliability configuration -------------------------------------------
 
     def configure_retry(
-        self, *, max_retries: int = 2, initial_backoff: float = 0.5
+        self,
+        *,
+        max_retries: int = 2,
+        initial_backoff: float = 0.5,
     ) -> None:
         """Set retry parameters for ``send()``."""
         self._max_retries = max_retries
         self._retry_initial_backoff = initial_backoff
 
     def configure_cache(
-        self, *, max_entries: int = 1000, default_ttl: float = 300.0
+        self,
+        *,
+        max_entries: int = 1000,
+        default_ttl: float = 300.0,
     ) -> None:
         """Enable the LLM response cache for ``send()``."""
         from obscura.core.llm_cache import LLMCache
@@ -672,8 +704,8 @@ class ObscuraClient:
         if self._user is None:
             return prompt
         try:
-            from obscura.memory import MemoryStore
             from obscura.auth.models import AuthenticatedUser as _AuthUser
+            from obscura.memory import MemoryStore
 
             if isinstance(self._user, _AuthUser):
                 mem = MemoryStore.for_user(self._user)
@@ -808,7 +840,8 @@ class ObscuraClient:
                 mcp_servers=mcp_servers,
             )
 
-        raise ValueError(f"Unknown backend: {backend}")
+        msg = f"Unknown backend: {backend}"
+        raise ValueError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -841,7 +874,8 @@ def _record_request_metric(backend: str, method: str, status: str) -> None:
 
         m = get_metrics()
         m.requests_total.add(
-            1, {"backend": backend, "method": method, "status": status}
+            1,
+            {"backend": backend, "method": method, "status": status},
         )
     except Exception:
         pass
@@ -853,7 +887,8 @@ def _record_request_duration(backend: str, method: str, duration: float) -> None
 
         m = get_metrics()
         m.request_duration_seconds.record(
-            duration, {"backend": backend, "method": method}
+            duration,
+            {"backend": backend, "method": method},
         )
     except Exception:
         pass
@@ -893,11 +928,10 @@ def _audit_prompt_filtered(token: Any, flags: tuple[str, ...] | list[str]) -> No
                 outcome="modified",
                 details={
                     "flags": list(flags),
-                    "tier": getattr(token, "tier", None)
-                    and token.tier.value
+                    "tier": (getattr(token, "tier", None) and token.tier.value)
                     or "unknown",
                 },
-            )
+            ),
         )
     except Exception:
         pass

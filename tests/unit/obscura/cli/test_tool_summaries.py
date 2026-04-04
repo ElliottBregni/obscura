@@ -6,7 +6,10 @@ from obscura.cli.tool_summaries import summarize_tool_call
 
 
 def test_read_text_file() -> None:
-    assert summarize_tool_call("read_text_file", {"path": "/foo/bar/render.py"}) == "Reading render.py"
+    assert (
+        summarize_tool_call("read_text_file", {"path": "/foo/bar/render.py"})
+        == "Reading render.py"
+    )
 
 
 def test_read_text_file_no_path() -> None:
@@ -14,19 +17,34 @@ def test_read_text_file_no_path() -> None:
 
 
 def test_write_text_file() -> None:
-    assert summarize_tool_call("write_text_file", {"path": "/tmp/out.py", "text": "..."}) == "Writing out.py"
+    assert (
+        summarize_tool_call("write_text_file", {"path": "/tmp/out.py", "text": "..."})
+        == "Writing out.py"
+    )
 
 
 def test_edit_text_file() -> None:
-    assert summarize_tool_call("edit_text_file", {"path": "src/main.py", "old_text": "x", "new_text": "y"}) == "Editing main.py"
+    assert (
+        summarize_tool_call(
+            "edit_text_file",
+            {"path": "src/main.py", "old_text": "x", "new_text": "y"},
+        )
+        == "Editing main.py"
+    )
 
 
 def test_append_text_file() -> None:
-    assert summarize_tool_call("append_text_file", {"path": "/tmp/log.txt"}) == "Appending to log.txt"
+    assert (
+        summarize_tool_call("append_text_file", {"path": "/tmp/log.txt"})
+        == "Appending to log.txt"
+    )
 
 
 def test_grep_files() -> None:
-    assert summarize_tool_call("grep_files", {"pattern": "StreamRenderer", "path": "."}) == "Searching for 'StreamRenderer'"
+    assert (
+        summarize_tool_call("grep_files", {"pattern": "StreamRenderer", "path": "."})
+        == "Searching for 'StreamRenderer'"
+    )
 
 
 def test_grep_files_no_pattern() -> None:
@@ -69,7 +87,10 @@ def test_web_fetch() -> None:
 
 
 def test_web_search() -> None:
-    assert summarize_tool_call("web_search", {"query": "python asyncio"}) == "Searching web for 'python asyncio'"
+    assert (
+        summarize_tool_call("web_search", {"query": "python asyncio"})
+        == "Searching web for 'python asyncio'"
+    )
 
 
 def test_git_status() -> None:
@@ -85,7 +106,10 @@ def test_git_diff_with_ref() -> None:
 
 
 def test_git_commit() -> None:
-    assert summarize_tool_call("git_commit", {"message": "Fix bug in auth"}) == 'git commit -m "Fix bug in auth"'
+    assert (
+        summarize_tool_call("git_commit", {"message": "Fix bug in auth"})
+        == 'git commit -m "Fix bug in auth"'
+    )
 
 
 def test_git_branch() -> None:
@@ -108,7 +132,10 @@ def test_task_delegate() -> None:
 
 
 def test_http_request() -> None:
-    result = summarize_tool_call("http_request", {"method": "post", "url": "https://api.example.com/v1"})
+    result = summarize_tool_call(
+        "http_request",
+        {"method": "post", "url": "https://api.example.com/v1"},
+    )
     assert result == "POST https://api.example.com/v1"
 
 

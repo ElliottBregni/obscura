@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.paths import resolve_all_evals_dirs
 from obscura.eval.specs import EvalSuiteSpec
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def discover_eval_files(dirs: list[Path] | None = None) -> list[Path]:

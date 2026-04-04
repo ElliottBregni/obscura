@@ -1,38 +1,39 @@
 """Tests for sdk.heartbeat.store — InMemoryHeartbeatStore and FileHeartbeatStore."""
 
 import asyncio
-import pytest
 import json
 import tempfile
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from obscura.heartbeat.store import (
-    InMemoryHeartbeatStore,
     FileHeartbeatStore,
+    InMemoryHeartbeatStore,
     get_default_store,
     set_default_store,
 )
-from obscura.heartbeat.types import Heartbeat, HealthStatus
+from obscura.heartbeat.types import HealthStatus, Heartbeat
 
 
 class TestInMemoryHeartbeatStore:
     @pytest.mark.asyncio
-    async def test_register_and_list(self):
+    async def test_register_and_list(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1", 30)
         agents = await store.list_agents()
         assert "a1" in agents
 
     @pytest.mark.asyncio
-    async def test_unregister(self):
+    async def test_unregister(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1")
         assert await store.unregister("a1") is True
         assert await store.unregister("a1") is False
 
     @pytest.mark.asyncio
-    async def test_save_and_get_last(self):
+    async def test_save_and_get_last(self) -> None:
         store = InMemoryHeartbeatStore()
         hb = Heartbeat(
             agent_id="a1",
@@ -45,7 +46,7 @@ class TestInMemoryHeartbeatStore:
         assert last.agent_id == "a1"
 
     @pytest.mark.asyncio
-    async def test_save_auto_registers(self):
+    async def test_save_auto_registers(self) -> None:
         store = InMemoryHeartbeatStore()
         hb = Heartbeat(
             agent_id="new-agent",
@@ -59,7 +60,7 @@ class TestInMemoryHeartbeatStore:
         assert record.last_heartbeat is hb
 
     @pytest.mark.asyncio
-    async def test_save_updates_existing_record(self):
+    async def test_save_updates_existing_record(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1", 30)
         hb = Heartbeat(
@@ -73,12 +74,12 @@ class TestInMemoryHeartbeatStore:
         assert record.computed_status == HealthStatus.WARNING
 
     @pytest.mark.asyncio
-    async def test_get_record_none(self):
+    async def test_get_record_none(self) -> None:
         store = InMemoryHeartbeatStore()
         assert await store.get_record("nonexistent") is None
 
     @pytest.mark.asyncio
-    async def test_list_records(self):
+    async def test_list_records(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1")
         await store.register("a2")
@@ -86,7 +87,7 @@ class TestInMemoryHeartbeatStore:
         assert len(records) == 2
 
     @pytest.mark.asyncio
-    async def test_update_computed_status(self):
+    async def test_update_computed_status(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1")
         await store.update_computed_status("a1", HealthStatus.CRITICAL)
@@ -95,12 +96,12 @@ class TestInMemoryHeartbeatStore:
         assert record.computed_status == HealthStatus.CRITICAL
 
     @pytest.mark.asyncio
-    async def test_update_computed_status_unknown_agent(self):
+    async def test_update_computed_status_unknown_agent(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.update_computed_status("unknown", HealthStatus.HEALTHY)
 
     @pytest.mark.asyncio
-    async def test_increment_missed_count(self):
+    async def test_increment_missed_count(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1")
         count = await store.increment_missed_count("a1")
@@ -109,13 +110,13 @@ class TestInMemoryHeartbeatStore:
         assert count == 2
 
     @pytest.mark.asyncio
-    async def test_increment_missed_count_unknown(self):
+    async def test_increment_missed_count_unknown(self) -> None:
         store = InMemoryHeartbeatStore()
         count = await store.increment_missed_count("unknown")
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_reset_missed_count(self):
+    async def test_reset_missed_count(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1")
         await store.increment_missed_count("a1")
@@ -125,12 +126,12 @@ class TestInMemoryHeartbeatStore:
         assert record.missed_count == 0
 
     @pytest.mark.asyncio
-    async def test_reset_missed_count_unknown(self):
+    async def test_reset_missed_count_unknown(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.reset_missed_count("unknown")
 
     @pytest.mark.asyncio
-    async def test_get_unhealthy_agents(self):
+    async def test_get_unhealthy_agents(self) -> None:
         store = InMemoryHeartbeatStore()
         await store.register("a1")
         await store.register("a2")
@@ -138,7 +139,7 @@ class TestInMemoryHeartbeatStore:
         unhealthy = await store.get_unhealthy_agents()
         assert len(unhealthy) == 2
 
-    def test_clear(self):
+    def test_clear(self) -> None:
         store = InMemoryHeartbeatStore()
         # populate via public API
         asyncio.run(store.register("a1"))
@@ -146,10 +147,12 @@ class TestInMemoryHeartbeatStore:
         assert len(store.records) == 0
 
     @pytest.mark.asyncio
-    async def test_unregister_with_heartbeat(self):
+    async def test_unregister_with_heartbeat(self) -> None:
         store = InMemoryHeartbeatStore()
         hb = Heartbeat(
-            agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY
+            agent_id="a1",
+            timestamp=datetime.now(),
+            status=HealthStatus.HEALTHY,
         )
         await store.save(hb)
         await store.unregister("a1")
@@ -158,7 +161,7 @@ class TestInMemoryHeartbeatStore:
 
 class TestFileHeartbeatStore:
     @pytest.mark.asyncio
-    async def test_register_persists(self):
+    async def test_register_persists(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             store = FileHeartbeatStore(path)
@@ -168,19 +171,21 @@ class TestFileHeartbeatStore:
             assert len(data["records"]) == 1
 
     @pytest.mark.asyncio
-    async def test_save_persists(self):
+    async def test_save_persists(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             store = FileHeartbeatStore(path)
             hb = Heartbeat(
-                agent_id="a1", timestamp=datetime.now(), status=HealthStatus.HEALTHY
+                agent_id="a1",
+                timestamp=datetime.now(),
+                status=HealthStatus.HEALTHY,
             )
             await store.save(hb)
             data = json.loads(path.read_text())
             assert len(data["heartbeats"]) == 1
 
     @pytest.mark.asyncio
-    async def test_load_from_disk(self):
+    async def test_load_from_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             data: dict[str, list[dict[str, object]]] = {
@@ -193,7 +198,7 @@ class TestFileHeartbeatStore:
                         "last_updated": datetime.now().isoformat(),
                         "computed_status": "healthy",
                         "alert_count": 0,
-                    }
+                    },
                 ],
                 "heartbeats": [
                     {
@@ -204,7 +209,7 @@ class TestFileHeartbeatStore:
                         "ttl": 30,
                         "version": "0.1.0",
                         "tags": [],
-                    }
+                    },
                 ],
             }
             path.write_text(json.dumps(data))
@@ -214,7 +219,7 @@ class TestFileHeartbeatStore:
             assert "a1" in agents
 
     @pytest.mark.asyncio
-    async def test_load_from_disk_bad_json(self):
+    async def test_load_from_disk_bad_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             path.write_text("not json")
@@ -223,7 +228,7 @@ class TestFileHeartbeatStore:
             assert agents == []
 
     @pytest.mark.asyncio
-    async def test_unregister_persists(self):
+    async def test_unregister_persists(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             store = FileHeartbeatStore(path)
@@ -233,7 +238,7 @@ class TestFileHeartbeatStore:
             assert len(data["records"]) == 0
 
     @pytest.mark.asyncio
-    async def test_delegates_to_memory_store(self):
+    async def test_delegates_to_memory_store(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "heartbeats.json"
             store = FileHeartbeatStore(path)
@@ -253,11 +258,11 @@ class TestFileHeartbeatStore:
 
 
 class TestDefaultStore:
-    def test_get_default_store(self):
+    def test_get_default_store(self) -> None:
         store = get_default_store()
         assert isinstance(store, InMemoryHeartbeatStore)
 
-    def test_set_default_store(self):
+    def test_set_default_store(self) -> None:
         custom = InMemoryHeartbeatStore()
         set_default_store(custom)
         assert get_default_store() is custom

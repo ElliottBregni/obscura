@@ -3,13 +3,16 @@
 # pyright: reportUnknownMemberType=false
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.vector_memory import VectorMemoryStore, cosine_similarity, simple_embedding
 from obscura.vector_memory.backends import BackendConfig, SQLiteBackend
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -213,15 +216,21 @@ class TestSemanticMemoryMixin:
             namespace="default:semantic",
         )
         store.set(
-            "mem2", "JavaScript promises are asynchronous", namespace="default:semantic"
+            "mem2",
+            "JavaScript promises are asynchronous",
+            namespace="default:semantic",
         )
         store.set(
-            "mem3", "Cooking pasta requires boiling water", namespace="default:semantic"
+            "mem3",
+            "Cooking pasta requires boiling water",
+            namespace="default:semantic",
         )
 
         # Simulate recall()
         results = store.search_similar(
-            "how do I run async code?", namespace="default:semantic", top_k=2
+            "how do I run async code?",
+            namespace="default:semantic",
+            top_k=2,
         )
 
         assert len(results) == 2

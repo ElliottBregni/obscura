@@ -1,5 +1,4 @@
-"""
-obscura.kairos.dream — Memory consolidation during idle ("dreaming").
+"""obscura.kairos.dream — Memory consolidation during idle ("dreaming").
 
 Runs as a background process when KAIROS detects sufficient idle time.
 Performs a 4-phase consolidation:
@@ -18,11 +17,12 @@ Gating order (cheapest first):
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +110,21 @@ class DreamConsolidator:
         if last_at > 0:
             hours_elapsed = (time.time() - last_at) / 3600
             if hours_elapsed < self._min_hours:
-                logger.debug("Dream skipped: %.1fh < %.1fh minimum", hours_elapsed, self._min_hours)
+                logger.debug(
+                    "Dream skipped: %.1fh < %.1fh minimum",
+                    hours_elapsed,
+                    self._min_hours,
+                )
                 return False
 
         # Gate 2: Session count since last consolidation.
         session_count = self._sessions_since(last_at)
         if session_count < self._min_sessions:
-            logger.debug("Dream skipped: %d < %d sessions", session_count, self._min_sessions)
+            logger.debug(
+                "Dream skipped: %d < %d sessions",
+                session_count,
+                self._min_sessions,
+            )
             return False
 
         # Gate 3: Lock availability.
@@ -147,6 +155,7 @@ class DreamConsolidator:
 
             # Log the consolidation event.
             from obscura.kairos.daily_log import DailyLog
+
             DailyLog().append("Dream consolidation executed", source="dream")
 
             # Phase 1-4: Spawn a forked agent with the CONSOLIDATION_PROMPT.
@@ -160,7 +169,9 @@ class DreamConsolidator:
             if agent_result:
                 logger.info("Dream consolidation completed (agent ran successfully)")
             else:
-                logger.info("Dream consolidation completed (agent unavailable — pruned only)")
+                logger.info(
+                    "Dream consolidation completed (agent unavailable — pruned only)",
+                )
             return True
 
         except Exception:
@@ -235,13 +246,14 @@ class DreamConsolidator:
             return 0
         try:
             import sqlite3
+
             conn = sqlite3.connect(str(events_db))
             # Convert since_ts (seconds since epoch) to ISO8601 UTC string to
             # compare against created_at TEXT columns stored in ISO format.
             try:
-                since_iso = datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat()
+                since_iso = datetime.fromtimestamp(float(since_ts), tz=UTC).isoformat()
             except Exception:
-                since_iso = datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat()
+                since_iso = datetime.fromtimestamp(time.time(), tz=UTC).isoformat()
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM sessions WHERE created_at > ?",
                 (since_iso,),
@@ -324,10 +336,8 @@ class DreamConsolidator:
             tmp.write_text(json.dumps(data), encoding="utf-8")
             os.replace(str(tmp), str(self._lock_file()))
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 self._lock_file().touch()
-            except Exception:
-                pass
 
     def _prune_index(self) -> None:
         """Ensure MEMORY.md stays within limits."""
@@ -341,6 +351,8 @@ class DreamConsolidator:
             self._memory_index().write_text("\n".join(lines) + "\n", encoding="utf-8")
         if len(content.encode("utf-8")) > MEMORY_INDEX_MAX_BYTES:
             # Binary chop to fit.
-            while len("\n".join(lines).encode("utf-8")) > MEMORY_INDEX_MAX_BYTES and lines:
+            while (
+                len("\n".join(lines).encode("utf-8")) > MEMORY_INDEX_MAX_BYTES and lines
+            ):
                 lines.pop()
             self._memory_index().write_text("\n".join(lines) + "\n", encoding="utf-8")

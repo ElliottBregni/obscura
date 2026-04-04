@@ -1,5 +1,4 @@
-"""
-obscura.auth.models -- Data models for authentication and identity.
+"""obscura.auth.models -- Data models for authentication and identity.
 
 Provides the AuthenticatedUser type that is set on request.state.user
 by the JWT validation middleware and consumed by RBAC dependencies.
@@ -8,7 +7,6 @@ by the JWT validation middleware and consumed by RBAC dependencies.
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
-
 
 # ---------------------------------------------------------------------------
 # Roles
@@ -30,7 +28,7 @@ VALID_ROLES: frozenset[str] = frozenset(
         "sessions:manage",
         "a2a:invoke",
         "a2a:manage",
-    }
+    },
 )
 
 

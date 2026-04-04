@@ -1,4 +1,4 @@
-"""APERLoopAgent — long-running agent that runs APER per input.
+r"""APERLoopAgent — long-running agent that runs APER per input.
 
 Combines the structured APER lifecycle of :class:`BaseAgent` with the
 long-running persistence of :class:`LoopAgent`.  Each incoming message
@@ -47,8 +47,12 @@ Config YAML (for supervisor)::
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import enum
 import logging
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+import re
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from obscura.agent.interaction import (
@@ -64,11 +68,81 @@ if TYPE_CHECKING:
     from obscura.core.client import ObscuraClient
     from obscura.core.context import ContextLoader
 
-__all__ = ["APERLoopAgent"]
+__all__ = ["APERLoopAgent", "APERMode"]
 
 logger = logging.getLogger(__name__)
 
 HookCallback = Callable[[AgentContext], Awaitable[Any] | Any]
+
+
+# ---------------------------------------------------------------------------
+# APER mode enum
+# ---------------------------------------------------------------------------
+
+
+class APERMode(enum.Enum):
+    """Controls when the full APER cycle is used.
+
+    ``ALWAYS``   -- 4 phases every time (current behaviour).
+    ``AUTO``     -- complexity heuristic decides per-input.
+    ``DISABLED`` -- skip APER, run execute phase only (simple loop).
+    """
+
+    ALWAYS = "always"
+    AUTO = "auto"
+    DISABLED = "disabled"
+
+
+# ---------------------------------------------------------------------------
+# Complexity keywords that suggest a task warrants full APER
+# ---------------------------------------------------------------------------
+
+_COMPLEX_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "refactor",
+        "implement",
+        "migrate",
+        "redesign",
+        "architect",
+        "integrate",
+        "overhaul",
+        "restructure",
+        "consolidate",
+        "optimise",
+        "optimize",
+        "rewrite",
+        "decompose",
+    },
+)
+
+
+def _should_use_aper(input_data: Any) -> bool:
+    """Quick heuristic: does *input_data* warrant the full APER cycle?"""
+    if input_data is None:
+        return False
+
+    text = str(input_data)
+
+    # Long input -> likely complex
+    if len(text) > 500:
+        return True
+
+    lower = text.lower()
+
+    # Contains complexity keywords
+    for kw in _COMPLEX_KEYWORDS:
+        if kw in lower:
+            return True
+
+    # Multiple questions or numbered items -> complex
+    if text.count("?") >= 2:
+        return True
+    if re.search(r"(?m)^\s*\d+[\.)\)]\s", text):
+        if len(re.findall(r"(?m)^\s*\d+[\.)\)]\s", text)) >= 2:
+            return True
+
+    # Default: simple (fast path)
+    return False
 
 
 class APERLoopAgent:
@@ -101,6 +175,7 @@ class APERLoopAgent:
         context_loader: ContextLoader | None = None,
         interaction_bus: InteractionBus | None = None,
         max_turns_per_input: int = 25,
+        aper_mode: APERMode = APERMode.AUTO,
     ) -> None:
         self._client = client
         self._name = name
@@ -108,6 +183,7 @@ class APERLoopAgent:
         self._context_loader = context_loader
         self._bus = interaction_bus
         self._max_turns = max_turns_per_input
+        self._aper_mode = aper_mode
         self._input_queue: asyncio.Queue[AgentInput] = asyncio.Queue()
         self._stopped = False
         self._iteration = 0
@@ -135,6 +211,11 @@ class APERLoopAgent:
     @property
     def interaction_bus(self) -> InteractionBus | None:
         return self._bus
+
+    @property
+    def aper_mode(self) -> APERMode:
+        """Current APER mode."""
+        return self._aper_mode
 
     # -- Hook registration ---------------------------------------------------
 
@@ -253,46 +334,70 @@ class APERLoopAgent:
     async def stop(self) -> None:
         """Signal the agent to stop after the current APER cycle."""
         self._stopped = True
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             self._input_queue.put_nowait(
                 AgentInput(content="", source="__stop__"),
             )
-        except asyncio.QueueFull:
-            pass
 
     # -- APER orchestrator ---------------------------------------------------
 
+    def _should_run_full_aper(self, input_data: Any) -> bool:
+        """Decide whether to run the full 4-phase APER cycle."""
+        if self._aper_mode is APERMode.ALWAYS:
+            return True
+        if self._aper_mode is APERMode.DISABLED:
+            return False
+        return _should_use_aper(input_data)
+
     async def _run_aper(self, input_data: Any = None) -> Any:
-        """Execute one full APER cycle."""
+        """Execute one APER cycle (full or simplified based on mode)."""
         ctx = AgentContext(phase=AgentPhase.ANALYZE, input_data=input_data)
 
         # Load context from vault if a loader was provided
         if self._context_loader is not None:
             ctx.metadata["system_prompt"] = self._context_loader.load_system_prompt()
 
-        # Analyze
-        ctx.phase = AgentPhase.ANALYZE
-        await self._fire_hook(HookPoint.PRE_ANALYZE, ctx)
-        await self.analyze(ctx)
-        await self._fire_hook(HookPoint.POST_ANALYZE, ctx)
+        if self._should_run_full_aper(input_data):
+            # Full APER: Analyze -> Plan -> Execute -> Respond
+            ctx.phase = AgentPhase.ANALYZE
+            await self._fire_hook(HookPoint.PRE_ANALYZE, ctx)
+            await self.analyze(ctx)
+            await self._fire_hook(HookPoint.POST_ANALYZE, ctx)
 
-        # Plan
-        ctx.phase = AgentPhase.PLAN
-        await self._fire_hook(HookPoint.PRE_PLAN, ctx)
-        await self.plan(ctx)
-        await self._fire_hook(HookPoint.POST_PLAN, ctx)
+            ctx.phase = AgentPhase.PLAN
+            await self._fire_hook(HookPoint.PRE_PLAN, ctx)
+            await self.plan(ctx)
+            await self._fire_hook(HookPoint.POST_PLAN, ctx)
 
-        # Execute
-        ctx.phase = AgentPhase.EXECUTE
-        await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
-        await self.execute(ctx)
-        await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
+            ctx.phase = AgentPhase.EXECUTE
+            await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
+            await self.execute(ctx)
+            await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
 
-        # Respond
-        ctx.phase = AgentPhase.RESPOND
-        await self._fire_hook(HookPoint.PRE_RESPOND, ctx)
-        await self.respond(ctx)
-        await self._fire_hook(HookPoint.POST_RESPOND, ctx)
+            ctx.phase = AgentPhase.RESPOND
+            await self._fire_hook(HookPoint.PRE_RESPOND, ctx)
+            await self.respond(ctx)
+            await self._fire_hook(HookPoint.POST_RESPOND, ctx)
+        else:
+            # Simplified path: execute only (single LLM call).
+            # Still fires PRE/POST_EXECUTE hooks for observability.
+            logger.debug(
+                "[%s] APER skipped (mode=%s) -- running execute only",
+                self._name,
+                self._aper_mode.value,
+            )
+            ctx.phase = AgentPhase.EXECUTE
+            if ctx.plan is None and ctx.input_data is not None:
+                ctx.plan = str(ctx.input_data)
+
+            await self._fire_hook(HookPoint.PRE_EXECUTE, ctx)
+            await self.execute(ctx)
+            await self._fire_hook(HookPoint.POST_EXECUTE, ctx)
+
+            if ctx.results:
+                ctx.response = "\n\n".join(str(r) for r in ctx.results)
+            else:
+                ctx.response = "No results."
 
         return ctx.response
 
@@ -303,12 +408,13 @@ class APERLoopAgent:
         while not self._stopped:
             try:
                 msg = await asyncio.wait_for(
-                    self._input_queue.get(), timeout=1.0,
+                    self._input_queue.get(),
+                    timeout=1.0,
                 )
                 if msg.source == "__stop__":
                     return None
                 return msg
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
         return None
 

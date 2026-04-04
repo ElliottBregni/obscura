@@ -1,5 +1,4 @@
-"""
-obscura.kairos.supervisor_hooks — Wire KairosEngine into the Supervisor lifecycle.
+"""obscura.kairos.supervisor_hooks — Wire KairosEngine into the Supervisor lifecycle.
 
 Registers two hooks on a SessionHookManager:
   - PRE_BUILD_CONTEXT/before  → engine.start()
@@ -17,16 +16,16 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from obscura.core.supervisor.types import SupervisorHookPoint
-from obscura.kairos.engine import KairosEngine
 
 if TYPE_CHECKING:
     from obscura.core.supervisor.session_hooks import SessionHookManager
+    from obscura.kairos.engine import KairosEngine
 
 logger = logging.getLogger(__name__)
 
 
 def register_kairos_hooks(
-    hooks: "SessionHookManager",
+    hooks: SessionHookManager,
     engine: KairosEngine,
 ) -> None:
     """Wire KairosEngine start/stop into Supervisor lifecycle hooks.
@@ -37,6 +36,7 @@ def register_kairos_hooks(
     Args:
         hooks: The SessionHookManager from the active Supervisor instance.
         engine: The KairosEngine instance to start/stop.
+
     """
 
     async def on_pre_build_context(ctx: dict[str, Any]) -> dict[str, Any]:

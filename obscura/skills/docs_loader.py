@@ -82,10 +82,12 @@ def load_markdown_skill_documents(
                 content=content,
                 metadata=meta,
                 description=str(meta.get("description", "")),
-                user_invocable=bool(meta.get("user-invocable", meta.get("user_invocable", True))),
+                user_invocable=bool(
+                    meta.get("user-invocable", meta.get("user_invocable", True)),
+                ),
                 allowed_tools=allowed,
                 body=result.body.strip(),
-            )
+            ),
         )
     return documents
 

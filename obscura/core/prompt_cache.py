@@ -1,5 +1,4 @@
-"""
-obscura.core.prompt_cache — Prompt caching strategy.
+"""obscura.core.prompt_cache — Prompt caching strategy.
 
 Hashes the system prompt + tool schemas to detect cache hits/misses
 and avoid re-sending identical prompt prefixes to the API.

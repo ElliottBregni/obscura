@@ -7,9 +7,10 @@ overlays, workflow definitions, and/or policy hints.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.plugins.models import PluginSpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,12 @@ class ContentAdapter:
         return spec.runtime_type == "content"
 
     async def load(self, spec: PluginSpec, config: dict[str, Any]) -> dict[str, Any]:
-        logger.debug("Content plugin %s loaded (%d instructions, %d workflows)",
-                      spec.id, len(spec.instructions), len(spec.workflows))
+        logger.debug(
+            "Content plugin %s loaded (%d instructions, %d workflows)",
+            spec.id,
+            len(spec.instructions),
+            len(spec.workflows),
+        )
         return {"handlers": {}}
 
     async def healthcheck(self, spec: PluginSpec) -> bool:

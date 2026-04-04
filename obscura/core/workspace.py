@@ -76,12 +76,27 @@ def init_workspace(
     global_home = _resolve_global_home()
 
     # -- directories ---------------------------------------------------------
-    for subdir in ("mcp", "hooks", "skills", "sessions", "memory", "state", "plugins", "commands", "evals"):
+    for subdir in (
+        "mcp",
+        "hooks",
+        "skills",
+        "sessions",
+        "memory",
+        "state",
+        "plugins",
+        "commands",
+        "evals",
+    ):
         (ws / subdir).mkdir(parents=True, exist_ok=True)
         logger.info("Created %s/", ws / subdir)
 
     # -- specs/ scaffold -----------------------------------------------------
-    for specs_subdir in ("specs/templates", "specs/policies", "specs/workspaces", "specs/packs"):
+    for specs_subdir in (
+        "specs/templates",
+        "specs/policies",
+        "specs/workspaces",
+        "specs/packs",
+    ):
         (ws / specs_subdir).mkdir(parents=True, exist_ok=True)
         logger.info("Created %s/", ws / specs_subdir)
 
@@ -157,6 +172,7 @@ def init_workspace(
         POLICY_GUIDE,
         SPEC_GUIDE,
     )
+
     _write_if_missing(
         dst=ws / "docs" / "PLUGIN_GUIDE.md",
         content=PLUGIN_GUIDE,
@@ -258,6 +274,7 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
     dict
         Keys: ``installed``, ``skipped``, ``errors``, ``warnings`` — each a
         list of ``"plugin_id: dep"`` strings.
+
     """
     from obscura.plugins.bootstrapper import run_bootstrap
     from obscura.plugins.loader import PluginLoader
@@ -403,8 +420,13 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
     "defaults": {
         "capabilities": {
             "grant": [
-                "shell.exec", "file.read", "file.write", "git.ops",
-                "web.browse", "search.web", "security.scan",
+                "shell.exec",
+                "file.read",
+                "file.write",
+                "git.ops",
+                "web.browse",
+                "search.web",
+                "security.scan",
             ],
             "deny": [],
         },
@@ -541,6 +563,7 @@ _DEFAULT_CONFIG_TOML = textwrap.dedent("""\
     auto_discover = true
 """)
 
+
 def _build_default_base_agent_template() -> str:
     """Build base-agent template dynamically with all builtin plugin IDs."""
     from obscura.core.config_io import dumps_toml  # noqa: PLC0415
@@ -553,8 +576,13 @@ def _build_default_base_agent_template() -> str:
         plugin_ids = ["system-tools", "websearch", "gitleaks"]
 
     capability_ids = [
-        "shell.exec", "file.read", "file.write", "git.ops",
-        "web.browse", "search.web", "security.scan",
+        "shell.exec",
+        "file.read",
+        "file.write",
+        "git.ops",
+        "web.browse",
+        "search.web",
+        "security.scan",
     ]
 
     doc = {
@@ -577,6 +605,7 @@ def _build_default_base_agent_template() -> str:
         },
     }
     return dumps_toml(doc)
+
 
 _DEFAULT_SAFE_DEV_POLICY = textwrap.dedent("""\
     apiVersion = "obscura/v1"

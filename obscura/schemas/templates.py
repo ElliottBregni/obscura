@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Sub-schemas
 # ---------------------------------------------------------------------------
@@ -34,14 +33,23 @@ class APERProfileSchema(BaseModel):
         default="Return a final concise answer based on execution output.",
         description="Prompt template for the Respond phase",
     )
-    max_turns: int = Field(default=8, ge=1, le=100, description="Max LLM turns during execute")
+    max_turns: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        description="Max LLM turns during execute",
+    )
 
 
 class SkillSpecSchema(BaseModel):
     """An inline skill injected into the system prompt."""
 
     name: str = Field(..., min_length=1, description="Skill identifier")
-    content: str = Field(..., min_length=1, description="Skill content (markdown or text)")
+    content: str = Field(
+        ...,
+        min_length=1,
+        description="Skill content (markdown or text)",
+    )
     source: str = Field(default="inline", description="Origin: 'inline' or file path")
 
 
@@ -51,7 +59,10 @@ class MCPServerSpecSchema(BaseModel):
     name: str = Field(..., min_length=1)
     transport: Literal["stdio", "sse"]
     command: str = Field(default="", description="Command for stdio transport")
-    args: list[str] = Field(default_factory=list, description="Args for stdio transport")
+    args: list[str] = Field(
+        default_factory=list,
+        description="Args for stdio transport",
+    )
     url: str = Field(default="", description="URL for sse transport")
     env: dict[str, str] = Field(default_factory=dict)
 
@@ -75,7 +86,10 @@ class TemplateCreateRequest(BaseModel):
     # Basic fields (existing)
     name: str = Field(default="unnamed-template", min_length=1)
     provider: str = Field(default="claude", description="Backend provider")
-    model_id: str | None = Field(default=None, description="Specific model ID (optional)")
+    model_id: str | None = Field(
+        default=None,
+        description="Specific model ID (optional)",
+    )
     system_prompt: str = Field(default="")
     timeout_seconds: float = Field(default=300.0, gt=0)
     max_iterations: int = Field(default=10, ge=1)
@@ -87,7 +101,8 @@ class TemplateCreateRequest(BaseModel):
     lifecycle_logs_enabled: bool = Field(default=True)
     parent_agent_id: str | None = Field(default=None)
     aper_profile: APERProfileSchema | None = Field(
-        default=None, description="APER phase config; null = no APER"
+        default=None,
+        description="APER phase config; null = no APER",
     )
     skills: list[SkillSpecSchema] = Field(default_factory=list)
     mcp_servers: list[MCPServerSpecSchema] = Field(default_factory=list)
@@ -100,7 +115,8 @@ class TemplateCreateRequest(BaseModel):
 
     # Persistence
     persist: bool = Field(
-        default=False, description="Save to SQLite for server-restart durability"
+        default=False,
+        description="Save to SQLite for server-restart durability",
     )
 
 
@@ -139,7 +155,8 @@ class SpawnFromTemplateRequest(BaseModel):
     name: str | None = Field(default=None, description="Override template name")
     prompt: str = Field(default="", description="Initial prompt for APER mode")
     mode: Literal["run", "loop", "stream", "aper"] = Field(
-        default="loop", description="Run mode; 'aper' uses the template's APERProfile"
+        default="loop",
+        description="Run mode; 'aper' uses the template's APERProfile",
     )
 
 

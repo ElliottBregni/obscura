@@ -1,5 +1,4 @@
-"""
-obscura.kairos.away_summary — Summarize what happened while the user was away.
+"""obscura.kairos.away_summary — Summarize what happened while the user was away.
 
 Generates a brief 1-3 sentence summary of the current work context
 when the user returns after an idle period.
@@ -56,9 +55,7 @@ class AwaySummaryTracker:
         if self.idle_seconds < self._threshold_s:
             return False
         # Don't generate if we already did since last activity.
-        if self._last_summary_at > self._last_active:
-            return False
-        return True
+        return not self._last_summary_at > self._last_active
 
 
 async def generate_away_summary(
@@ -81,7 +78,7 @@ async def generate_away_summary(
         preview = text[:300].replace("\n", " ")
         context_parts.append(f"[{role}] {preview}")
 
-    _context = "\n".join(context_parts)  # noqa: F841 — used by LLM call in full impl
+    _context = "\n".join(context_parts)
 
     # In a full implementation, this would call the LLM with
     # AWAY_SUMMARY_PROMPT + context. For now, extract from last

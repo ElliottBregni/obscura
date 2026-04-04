@@ -3,29 +3,30 @@
 from __future__ import annotations
 
 import hashlib
-import os
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
-
 import logging
+import os
 import threading
 import time
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    KeywordIndexParams,
     MatchValue,
     PointStruct,
     VectorParams,
-    KeywordIndexParams,
 )
 
 from obscura.memory import MemoryKey
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
-from obscura.vector_memory.vector_memory_filters import MetadataFilter
+
+if TYPE_CHECKING:
+    from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class QdrantBackend:
         path: str | None = None,
         url: str | None = None,
         api_key: str | None = None,
-    ):
+    ) -> None:
         self.config = config
         self._decay_config = decay_config
         self._db_id = hashlib.sha256(config.user_id.encode()).hexdigest()[:16]
@@ -78,7 +79,8 @@ class QdrantBackend:
                 api_key=api_key or os.environ.get("QDRANT_API_KEY"),
             )
         else:
-            raise ValueError(f"Unknown Qdrant mode: {mode}")
+            msg = f"Unknown Qdrant mode: {mode}"
+            raise ValueError(msg)
 
         self._init_collection()
 
@@ -123,7 +125,10 @@ class QdrantBackend:
         existing_created_at = now_iso
         try:
             existing = self.client.retrieve(
-                self.collection_name, [point_id], with_payload=True, with_vectors=False,
+                self.collection_name,
+                [point_id],
+                with_payload=True,
+                with_vectors=False,
             )
             if existing and "created_at" in existing[0].payload:
                 existing_created_at = existing[0].payload["created_at"]
@@ -153,7 +158,9 @@ class QdrantBackend:
             )
         except Exception:
             logger.exception(
-                "Failed to upsert vector for %s:%s", key.namespace, key.key
+                "Failed to upsert vector for %s:%s",
+                key.namespace,
+                key.key,
             )
             raise
 
@@ -177,7 +184,9 @@ class QdrantBackend:
             to_delete = []
             for p in points:
                 try:
-                    if "expires_at" in p.payload and datetime.now(UTC) > datetime.fromisoformat(p.payload["expires_at"]):
+                    if "expires_at" in p.payload and datetime.now(
+                        UTC,
+                    ) > datetime.fromisoformat(p.payload["expires_at"]):
                         to_delete.append(p.id)
                 except Exception:
                     # Ignore malformed payloads
@@ -186,7 +195,10 @@ class QdrantBackend:
                 self.client.delete(self.collection_name, to_delete)
                 deleted = len(to_delete)
         except Exception:
-            logger.exception("Failed to purge expired vectors for %s", self.collection_name)
+            logger.exception(
+                "Failed to purge expired vectors for %s",
+                self.collection_name,
+            )
         return deleted
 
     def _start_gc_thread(self) -> None:
@@ -195,13 +207,18 @@ class QdrantBackend:
         Enabled via env var OBSCURA_QDRANT_ENABLE_GC=1. Interval in seconds via
         OBSCURA_QDRANT_GC_INTERVAL (default: 3600).
         """
-        def _loop():
+
+        def _loop() -> None:
             interval = int(os.environ.get("OBSCURA_QDRANT_GC_INTERVAL", "3600"))
             while True:
                 try:
                     deleted = self.purge_expired()
                     if deleted:
-                        logger.info("qdrant: purged %d expired points from %s", deleted, self.collection_name)
+                        logger.info(
+                            "qdrant: purged %d expired points from %s",
+                            deleted,
+                            self.collection_name,
+                        )
                 except Exception:
                     logger.exception("qdrant: background GC encountered an error")
                 time.sleep(interval)
@@ -236,10 +253,13 @@ class QdrantBackend:
                 metadata=p.payload.get("metadata", {}),
                 memory_type=p.payload.get("memory_type", "general"),
                 created_at=datetime.fromisoformat(p.payload["created_at"]),
-                accessed_at=datetime.fromisoformat(accessed_at_str) if accessed_at_str else None,
+                accessed_at=datetime.fromisoformat(accessed_at_str)
+                if accessed_at_str
+                else None,
             )
         except Exception:
             return None
+
     def search_vectors(
         self,
         query_embedding: list[float],
@@ -271,20 +291,31 @@ class QdrantBackend:
         now = datetime.now(UTC)
         for hit in response.points:
             # Skip expired
-            if "expires_at" in hit.payload and now > datetime.fromisoformat(hit.payload["expires_at"]):
+            if "expires_at" in hit.payload and now > datetime.fromisoformat(
+                hit.payload["expires_at"],
+            ):
                 continue
             try:
                 created = datetime.fromisoformat(hit.payload["created_at"])
             except Exception:
                 created = now
             accessed_at_str = hit.payload.get("accessed_at")
-            accessed_at = datetime.fromisoformat(accessed_at_str) if accessed_at_str else None
+            accessed_at = (
+                datetime.fromisoformat(accessed_at_str) if accessed_at_str else None
+            )
             memory_type = hit.payload.get("memory_type", "general")
 
             # Per-type decay via centralized compute_decay
             if self._decay_config is not None:
                 from obscura.vector_memory.decay import compute_decay as _compute_decay
-                decay = _compute_decay(memory_type, created, accessed_at, self._decay_config, now=now)
+
+                decay = _compute_decay(
+                    memory_type,
+                    created,
+                    accessed_at,
+                    self._decay_config,
+                    now=now,
+                )
             else:
                 # Legacy single half-life fallback
                 half_life = (
@@ -389,7 +420,9 @@ class QdrantBackend:
     ) -> list[VectorEntry]:
         """List entries of a given type, optionally filtered by age."""
         filt = Filter(
-            must=[FieldCondition(key="memory_type", match=MatchValue(value=memory_type))],
+            must=[
+                FieldCondition(key="memory_type", match=MatchValue(value=memory_type)),
+            ],
         )
         points, _ = self.client.scroll(
             self.collection_name,
@@ -409,13 +442,18 @@ class QdrantBackend:
             accessed_at_str = p.payload.get("accessed_at")
             entries.append(
                 VectorEntry(
-                    key=MemoryKey(namespace=p.payload["namespace"], key=p.payload["key"]),
+                    key=MemoryKey(
+                        namespace=p.payload["namespace"],
+                        key=p.payload["key"],
+                    ),
                     text=p.payload["text"],
                     embedding=[],
                     metadata=p.payload.get("metadata", {}),
                     memory_type=p.payload.get("memory_type", "general"),
                     created_at=created,
-                    accessed_at=datetime.fromisoformat(accessed_at_str) if accessed_at_str else None,
+                    accessed_at=datetime.fromisoformat(accessed_at_str)
+                    if accessed_at_str
+                    else None,
                 ),
             )
         return entries

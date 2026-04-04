@@ -1,11 +1,12 @@
 import asyncio
 import json
+from typing import Never
 from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
-from prompt_toolkit import PromptSession
 
 from obscura.cli.prompt import bordered_prompt
 from obscura.cli.render import OutputManager, StreamRenderer, console
@@ -28,17 +29,33 @@ async def test_streaming_updates_during_prompt() -> None:
         renderer = StreamRenderer(external_status=mock_status)
 
         # send a thinking delta then a text delta and a tool call/result
-        renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="thinking..."))
+        renderer.handle(
+            AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="thinking..."),
+        )
         renderer.handle(AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="hello world"))
-        renderer.handle(AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="echo", tool_input={"q": "1"}))
-        renderer.handle(AgentEvent(kind=AgentEventKind.TOOL_RESULT, tool_result="ok", is_error=False))
+        renderer.handle(
+            AgentEvent(
+                kind=AgentEventKind.TOOL_CALL,
+                tool_name="echo",
+                tool_input={"q": "1"},
+            ),
+        )
+        renderer.handle(
+            AgentEvent(
+                kind=AgentEventKind.TOOL_RESULT,
+                tool_result="ok",
+                is_error=False,
+            ),
+        )
 
         # allow background updates to run
         await asyncio.sleep(0.05)
 
         # ensure external status.update was called at least once
         assert mock_status.update.call_count >= 1
-        rendered_updates = [str(c.args[0]) for c in mock_status.update.call_args_list if c.args]
+        rendered_updates = [
+            str(c.args[0]) for c in mock_status.update.call_args_list if c.args
+        ]
         assert any("thinking" in u for u in rendered_updates)
 
         # finish prompt so test can exit
@@ -49,22 +66,24 @@ async def test_streaming_updates_during_prompt() -> None:
 
 def test_non_tty_fallback(monkeypatch) -> None:
     """When external status.update raises, StreamRenderer should fallback to printing via console."""
-
     calls = []
 
-    def fake_print(*args, **kwargs):
+    def fake_print(*args, **kwargs) -> None:
         calls.append((args, kwargs))
 
     monkeypatch.setattr(console, "print", fake_print)
 
     class BadStatus:
-        def update(self, *args, **kwargs):
-            raise AttributeError("update not supported")
+        def update(self, *args, **kwargs) -> Never:
+            msg = "update not supported"
+            raise AttributeError(msg)
 
     renderer = StreamRenderer(external_status=BadStatus())
 
     # thinking delta should attempt update and on exception fall back to console.print
-    renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="i am thinking"))
+    renderer.handle(
+        AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="i am thinking"),
+    )
     renderer.finish()
 
     # Expect at least one console.print fallback call
@@ -80,7 +99,7 @@ def test_thinking_status_in_external_status_line() -> None:
             kind=AgentEventKind.THINKING_DELTA,
             text="analyzing",
             raw={"status": "planning edits"},
-        )
+        ),
     )
     updates = [str(c.args[0]) for c in mock_status.update.call_args_list if c.args]
     assert any("planning edits" in u for u in updates)
@@ -128,7 +147,9 @@ def test_reasoning_preview_uses_jitter(monkeypatch) -> None:
 def test_flush_thinking_does_not_emit_reasoning_preview_text_to_status() -> None:
     mock_status = MagicMock()
     renderer = StreamRenderer(external_status=mock_status)
-    renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="deep plan steps"))
+    renderer.handle(
+        AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="deep plan steps"),
+    )
     # Trigger thinking flush
     renderer.handle(AgentEvent(kind=AgentEventKind.TEXT_DELTA, text="final answer"))
     updates = [str(c.args[0]) for c in mock_status.update.call_args_list if c.args]

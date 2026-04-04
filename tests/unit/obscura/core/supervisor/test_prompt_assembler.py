@@ -132,7 +132,10 @@ class TestFormatToolDefinitions:
             {
                 "name": "bash",
                 "description": "Run command",
-                "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"cmd": {"type": "string"}},
+                },
             },
         ]
         result = format_tool_definitions(tools)

@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.state_machine — Deterministic session state machine.
+"""obscura.core.supervisor.state_machine — Deterministic session state machine.
 
 Enforces valid transitions, records every transition as an event,
 and provides invariant checking at each state boundary.
@@ -12,10 +11,10 @@ from typing import Any
 
 from obscura.core.supervisor.errors import StateTransitionError
 from obscura.core.supervisor.types import (
+    VALID_SUPERVISOR_TRANSITIONS,
     SupervisorEvent,
     SupervisorEventKind,
     SupervisorState,
-    VALID_SUPERVISOR_TRANSITIONS,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +91,7 @@ class SessionStateMachine:
 
         Returns:
             The state transition event (for logging/persistence).
+
         """
         if not self.can_transition(target):
             raise StateTransitionError(self._state.value, target.value)
@@ -199,14 +199,17 @@ class SessionStateMachine:
 
         Raises:
             StateTransitionError: If current state doesn't match.
+
         """
         if self._state != expected:
+            msg = f"Expected {expected.value}, currently in {self._state.value}"
             raise StateTransitionError(
-                f"Expected {expected.value}, currently in {self._state.value}",
+                msg,
                 "assertion",
             )
 
     def assert_not_idle(self) -> None:
         """Assert we're in an active run (not IDLE)."""
         if self._state == SupervisorState.IDLE:
-            raise StateTransitionError("idle", "any active state")
+            msg = "idle"
+            raise StateTransitionError(msg, "any active state")

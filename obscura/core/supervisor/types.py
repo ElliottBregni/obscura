@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.types — Core types for the deterministic supervisor.
+"""obscura.core.supervisor.types — Core types for the deterministic supervisor.
 
 Defines supervisor states, events, configuration, and run context.
 All types are frozen dataclasses for immutability guarantees.
@@ -11,7 +10,6 @@ import enum
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Supervisor states
@@ -38,20 +36,28 @@ class SupervisorState(enum.Enum):
 VALID_SUPERVISOR_TRANSITIONS: dict[SupervisorState, frozenset[SupervisorState]] = {
     SupervisorState.IDLE: frozenset({SupervisorState.BUILDING_CONTEXT}),
     SupervisorState.BUILDING_CONTEXT: frozenset(
-        {SupervisorState.RUNNING_MODEL, SupervisorState.FAILED}
+        {SupervisorState.RUNNING_MODEL, SupervisorState.FAILED},
     ),
     SupervisorState.RUNNING_MODEL: frozenset(
         {
             SupervisorState.RUNNING_TOOLS,
             SupervisorState.COMMITTING_MEMORY,
             SupervisorState.FAILED,
-        }
+        },
     ),
     SupervisorState.RUNNING_TOOLS: frozenset(
-        {SupervisorState.RUNNING_MODEL, SupervisorState.COMMITTING_MEMORY, SupervisorState.FAILED}
+        {
+            SupervisorState.RUNNING_MODEL,
+            SupervisorState.COMMITTING_MEMORY,
+            SupervisorState.FAILED,
+        },
     ),
     SupervisorState.COMMITTING_MEMORY: frozenset(
-        {SupervisorState.FINALIZING, SupervisorState.FAILED, SupervisorState.EVAL_FAILED}
+        {
+            SupervisorState.FINALIZING,
+            SupervisorState.FAILED,
+            SupervisorState.EVAL_FAILED,
+        },
     ),
     SupervisorState.FINALIZING: frozenset({SupervisorState.IDLE}),
     SupervisorState.FAILED: frozenset({SupervisorState.IDLE}),
@@ -273,11 +279,7 @@ class MemoryCandidate:
     @property
     def score(self) -> float:
         """Composite score: importance(0.4) + recency(0.3) + relevance(0.3)."""
-        return (
-            self.importance * 0.4
-            + self.recency * 0.3
-            + self.relevance * 0.3
-        )
+        return self.importance * 0.4 + self.recency * 0.3 + self.relevance * 0.3
 
 
 @dataclass(frozen=True)

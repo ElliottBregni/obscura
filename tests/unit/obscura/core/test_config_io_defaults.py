@@ -6,8 +6,7 @@ Covers ``apply_agent_defaults``, ``_deep_merge_new``, and ``load_merged_agents``
 from __future__ import annotations
 
 import copy
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml  # type: ignore[import-untyped]
 
@@ -17,6 +16,8 @@ from obscura.core.config_io import (
     load_merged_agents,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # _deep_merge_new
@@ -330,7 +331,8 @@ class TestLoadMergedAgents:
         assert "visible-bot" in result
 
     def test_applies_defaults_from_each_file_independently(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         _write_yaml(
             tmp_path / "agents-available.yaml",

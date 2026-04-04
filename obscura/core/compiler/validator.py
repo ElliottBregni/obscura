@@ -7,10 +7,13 @@ internally consistent and references are satisfiable.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from obscura.core.compiler.compiled import CompiledAgent, CompiledWorkspace
 from obscura.core.compiler.errors import SpecValidationError
-from obscura.core.compiler.loader import SpecRegistry
+
+if TYPE_CHECKING:
+    from obscura.core.compiler.compiled import CompiledAgent, CompiledWorkspace
+    from obscura.core.compiler.loader import SpecRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ def validate_workspace(
     -------
     list[SpecValidationError]
         All validation errors found. Empty list means valid.
+
     """
     errors: list[SpecValidationError] = []
 
@@ -47,11 +51,13 @@ def validate_workspace(
     agent_names = {a.name for a in workspace.agents}
     for name in workspace.startup_agents:
         if name not in agent_names:
-            errors.append(SpecValidationError(
-                f"Startup agent '{name}' is not defined in workspace "
-                f"'{workspace.name}'",
-                source=workspace.name,
-            ))
+            errors.append(
+                SpecValidationError(
+                    f"Startup agent '{name}' is not defined in workspace "
+                    f"'{workspace.name}'",
+                    source=workspace.name,
+                ),
+            )
 
     # Validate each agent
     for agent in workspace.agents:
@@ -61,11 +67,13 @@ def validate_workspace(
     seen_names: set[str] = set()
     for agent in workspace.agents:
         if agent.name in seen_names:
-            errors.append(SpecValidationError(
-                f"Duplicate agent name '{agent.name}' in workspace "
-                f"'{workspace.name}'",
-                source=workspace.name,
-            ))
+            errors.append(
+                SpecValidationError(
+                    f"Duplicate agent name '{agent.name}' in workspace "
+                    f"'{workspace.name}'",
+                    source=workspace.name,
+                ),
+            )
         seen_names.add(agent.name)
 
     return errors
@@ -79,45 +87,55 @@ def _validate_agent(
     errors: list[SpecValidationError] = []
 
     if agent.mode not in VALID_MODES:
-        errors.append(SpecValidationError(
-            f"Agent '{agent.name}' has invalid mode '{agent.mode}'. "
-            f"Must be one of: {sorted(VALID_MODES)}",
-            source=agent.name,
-        ))
+        errors.append(
+            SpecValidationError(
+                f"Agent '{agent.name}' has invalid mode '{agent.mode}'. "
+                f"Must be one of: {sorted(VALID_MODES)}",
+                source=agent.name,
+            ),
+        )
 
     if agent.agent_type not in VALID_AGENT_TYPES:
-        errors.append(SpecValidationError(
-            f"Agent '{agent.name}' has invalid agent_type '{agent.agent_type}'. "
-            f"Must be one of: {sorted(VALID_AGENT_TYPES)}",
-            source=agent.name,
-        ))
+        errors.append(
+            SpecValidationError(
+                f"Agent '{agent.name}' has invalid agent_type '{agent.agent_type}'. "
+                f"Must be one of: {sorted(VALID_AGENT_TYPES)}",
+                source=agent.name,
+            ),
+        )
 
     if agent.max_iterations < 1:
-        errors.append(SpecValidationError(
-            f"Agent '{agent.name}' has max_iterations={agent.max_iterations}, "
-            f"must be >= 1",
-            source=agent.name,
-        ))
+        errors.append(
+            SpecValidationError(
+                f"Agent '{agent.name}' has max_iterations={agent.max_iterations}, "
+                f"must be >= 1",
+                source=agent.name,
+            ),
+        )
 
     # Check plugin availability
     if available_plugins is not None:
         for plugin in agent.plugins:
             if plugin not in available_plugins:
-                errors.append(SpecValidationError(
-                    f"Agent '{agent.name}' requires plugin '{plugin}' "
-                    f"which is not available",
-                    source=agent.name,
-                ))
+                errors.append(
+                    SpecValidationError(
+                        f"Agent '{agent.name}' requires plugin '{plugin}' "
+                        f"which is not available",
+                        source=agent.name,
+                    ),
+                )
 
     # Check tool allowlist/denylist consistency
     if agent.tool_allowlist is not None and agent.tool_denylist:
         overlap = agent.tool_allowlist & agent.tool_denylist
         if overlap:
-            errors.append(SpecValidationError(
-                f"Agent '{agent.name}' has tools in both allowlist and "
-                f"denylist: {sorted(overlap)}",
-                source=agent.name,
-            ))
+            errors.append(
+                SpecValidationError(
+                    f"Agent '{agent.name}' has tools in both allowlist and "
+                    f"denylist: {sorted(overlap)}",
+                    source=agent.name,
+                ),
+            )
 
     return errors
 
@@ -142,39 +160,47 @@ def validate_pack_references(
     for pack_name in pack_names:
         pack = registry.get_pack(pack_name)
         if pack is None:
-            errors.append(SpecValidationError(
-                f"Workspace '{workspace_name}' references pack "
-                f"'{pack_name}' which was not found",
-                source=workspace_name,
-            ))
+            errors.append(
+                SpecValidationError(
+                    f"Workspace '{workspace_name}' references pack "
+                    f"'{pack_name}' which was not found",
+                    source=workspace_name,
+                ),
+            )
             continue
 
         # Check pack plugins
         if available_plugins is not None:
             for plugin in pack.spec.plugins:
                 if plugin not in available_plugins:
-                    errors.append(SpecValidationError(
-                        f"Pack '{pack_name}' requires plugin '{plugin}' "
-                        f"which is not available",
-                        source=pack_name,
-                    ))
+                    errors.append(
+                        SpecValidationError(
+                            f"Pack '{pack_name}' requires plugin '{plugin}' "
+                            f"which is not available",
+                            source=pack_name,
+                        ),
+                    )
 
         # Check pack policies
         for policy_name in pack.spec.policies:
             if registry.get_policy(policy_name) is None:
-                errors.append(SpecValidationError(
-                    f"Pack '{pack_name}' references policy "
-                    f"'{policy_name}' which was not found",
-                    source=pack_name,
-                ))
+                errors.append(
+                    SpecValidationError(
+                        f"Pack '{pack_name}' references policy "
+                        f"'{policy_name}' which was not found",
+                        source=pack_name,
+                    ),
+                )
 
         # Check pack templates
         for template_name in pack.spec.templates:
             if registry.get_template(template_name) is None:
-                errors.append(SpecValidationError(
-                    f"Pack '{pack_name}' references template "
-                    f"'{template_name}' which was not found",
-                    source=pack_name,
-                ))
+                errors.append(
+                    SpecValidationError(
+                        f"Pack '{pack_name}' references template "
+                        f"'{template_name}' which was not found",
+                        source=pack_name,
+                    ),
+                )
 
     return errors

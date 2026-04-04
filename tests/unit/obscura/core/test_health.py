@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-import pytest
-
 from obscura.core.health import collect_startup_health
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestCheckVectorMemory:
@@ -29,7 +31,10 @@ class TestCheckVectorMemory:
         assert checks[0].status == "degraded"
         assert "SQLite fallback" in checks[0].message
 
-    def test_sqlite_requested_not_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_sqlite_requested_not_reported(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """When SQLite is explicitly requested, no degradation is reported."""
         monkeypatch.setenv("OBSCURA_VECTOR_BACKEND", "sqlite")
         store = MagicMock()
@@ -63,7 +68,10 @@ class TestCheckSkippedTools:
         skipped = [
             ("msgraph.mail.list", "obscura.tools.providers.msgraph:MSGraphProvider"),
             ("msgraph.mail.send", "obscura.tools.providers.msgraph:MSGraphProvider"),
-            ("msgraph.calendar.events.list", "obscura.tools.providers.msgraph:MSGraphProvider"),
+            (
+                "msgraph.calendar.events.list",
+                "obscura.tools.providers.msgraph:MSGraphProvider",
+            ),
         ]
         store = MagicMock()
         store.backend = MagicMock()

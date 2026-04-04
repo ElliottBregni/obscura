@@ -15,7 +15,12 @@ class TestRateLimitResult:
         assert r.retry_after_seconds == 0.0
 
     def test_denied(self) -> None:
-        r = RateLimitResult(allowed=False, remaining=0, retry_after_seconds=5.0, limit=100)
+        r = RateLimitResult(
+            allowed=False,
+            remaining=0,
+            retry_after_seconds=5.0,
+            limit=100,
+        )
         assert r.allowed is False
         assert r.retry_after_seconds == 5.0
 

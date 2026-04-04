@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from typing import Any
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from obscura.core.types import HookContext, HookPoint, ToolSpec
-from obscura.providers.mcp_backend import MCPBackend
 from obscura.integrations.mcp.types import (
     MCPConnectionConfig,
-    MCPTransportType,
     MCPError,
+    MCPTransportType,
 )
+from obscura.providers.mcp_backend import MCPBackend
 
 
 class TestMCPBackendInit:
@@ -65,7 +65,8 @@ class TestMCPBackendLifecycle:
     @pytest.mark.asyncio
     async def test_start_with_server_failure(self) -> None:
         config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="nonexistent"
+            transport=MCPTransportType.STDIO,
+            command="nonexistent",
         )
         b = MCPBackend(mcp_servers=[config])
         with (
@@ -109,7 +110,7 @@ class TestMCPBackendSessions:
 
     @pytest.mark.asyncio
     async def test_resume_session_not_implemented(self) -> None:
-        from obscura.core.types import SessionRef, Backend
+        from obscura.core.types import Backend, SessionRef
 
         b = MCPBackend()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
@@ -124,7 +125,7 @@ class TestMCPBackendSessions:
 
     @pytest.mark.asyncio
     async def test_delete_session_not_implemented(self) -> None:
-        from obscura.core.types import SessionRef, Backend
+        from obscura.core.types import Backend, SessionRef
 
         b = MCPBackend()
         ref = SessionRef(session_id="s1", backend=Backend.COPILOT)
@@ -136,7 +137,10 @@ class TestMCPBackendTools:
     def test_register_tool(self) -> None:
         b = MCPBackend()
         spec = ToolSpec(
-            name="t1", description="test", parameters={}, handler=lambda: None
+            name="t1",
+            description="test",
+            parameters={},
+            handler=lambda: None,
         )
         b.register_tool(spec)
         assert len(b.tools) == 1
@@ -145,7 +149,10 @@ class TestMCPBackendTools:
     def test_list_tools_returns_copy(self) -> None:
         b = MCPBackend()
         spec = ToolSpec(
-            name="t1", description="test", parameters={}, handler=lambda: None
+            name="t1",
+            description="test",
+            parameters={},
+            handler=lambda: None,
         )
         b.register_tool(spec)
         tools = b.list_tools()
@@ -171,7 +178,10 @@ class TestMCPBackendTools:
             return {"result": "ok"}
 
         spec = ToolSpec(
-            name="my_tool", description="test", parameters={}, handler=my_handler
+            name="my_tool",
+            description="test",
+            parameters={},
+            handler=my_handler,
         )
         b.register_tool(spec)
 
@@ -198,7 +208,10 @@ class TestMCPBackendHooks:
             return "ok"
 
         spec = ToolSpec(
-            name="t1", description="test", parameters={}, handler=my_handler
+            name="t1",
+            description="test",
+            parameters={},
+            handler=my_handler,
         )
         b.register_tool(spec)
 
@@ -219,7 +232,10 @@ class TestMCPBackendHooks:
             return "ok"
 
         spec = ToolSpec(
-            name="t1", description="test", parameters={}, handler=my_handler
+            name="t1",
+            description="test",
+            parameters={},
+            handler=my_handler,
         )
         b.register_tool(spec)
 
@@ -263,7 +279,8 @@ class TestMCPBackendConnectionErrors:
     @pytest.mark.asyncio
     async def test_connection_errors_populated_on_failure(self) -> None:
         config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="nonexistent"
+            transport=MCPTransportType.STDIO,
+            command="nonexistent",
         )
         b = MCPBackend(mcp_servers=[config])
         with (
@@ -289,7 +306,8 @@ class TestMCPBackendConnectionErrors:
         import logging
 
         config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="nonexistent"
+            transport=MCPTransportType.STDIO,
+            command="nonexistent",
         )
         b = MCPBackend(mcp_servers=[config])
         with (
@@ -315,10 +333,12 @@ class TestMCPBackendConnectionErrors:
         import logging
 
         config1 = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="good"
+            transport=MCPTransportType.STDIO,
+            command="good",
         )
         config2 = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="bad"
+            transport=MCPTransportType.STDIO,
+            command="bad",
         )
         b = MCPBackend(mcp_servers=[config1, config2])
 
@@ -328,7 +348,8 @@ class TestMCPBackendConnectionErrors:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
-                raise Exception("second server failed")
+                msg = "second server failed"
+                raise Exception(msg)
 
         with (
             patch.object(
@@ -346,6 +367,4 @@ class TestMCPBackendConnectionErrors:
             caplog.at_level(logging.WARNING),
         ):
             await b.start()
-        assert not any(
-            "All MCP servers failed" in r.message for r in caplog.records
-        )
+        assert not any("All MCP servers failed" in r.message for r in caplog.records)

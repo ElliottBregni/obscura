@@ -1,5 +1,4 @@
-"""
-obscura.agent.definitions — Agent definition model, loader, and resolver.
+"""obscura.agent.definitions — Agent definition model, loader, and resolver.
 
 Agent definitions are markdown files with TOML/YAML frontmatter that
 describe specialized agent types (tools, model, system prompt, etc.).
@@ -40,14 +39,14 @@ class AgentDefinition:
     name: str
     description: str = ""
     system_prompt: str = ""
-    tools: tuple[str, ...] = ()             # allowlist (empty = all tools)
-    disallowed_tools: tuple[str, ...] = ()   # denylist
-    model: str = "inherit"                   # "inherit" or specific model ID
+    tools: tuple[str, ...] = ()  # allowlist (empty = all tools)
+    disallowed_tools: tuple[str, ...] = ()  # denylist
+    model: str = "inherit"  # "inherit" or specific model ID
     max_turns: int = 50
     permission_mode: str = "default"
-    isolation: str = ""                      # "" or "worktree"
+    isolation: str = ""  # "" or "worktree"
     background: bool = False
-    source: str = "built-in"                 # "built-in", "global", "local"
+    source: str = "built-in"  # "built-in", "global", "local"
 
 
 def load_agent_definition(path: Path, *, source: str = "local") -> AgentDefinition:
@@ -70,7 +69,11 @@ def load_agent_definition(path: Path, *, source: str = "local") -> AgentDefiniti
     )
 
 
-def load_definitions_dir(directory: Path, *, source: str = "local") -> dict[str, AgentDefinition]:
+def load_definitions_dir(
+    directory: Path,
+    *,
+    source: str = "local",
+) -> dict[str, AgentDefinition]:
     """Scan a directory for ``.md`` agent definition files."""
     defs: dict[str, AgentDefinition] = {}
     if not directory.is_dir():
@@ -99,6 +102,7 @@ def resolve_all_definitions(cwd: Path | None = None) -> dict[str, AgentDefinitio
 
     # 2. Global user definitions.
     from obscura.core.paths import resolve_obscura_global_home
+
     global_agents = resolve_obscura_global_home() / "agents"
     merged.update(load_definitions_dir(global_agents, source="global"))
 

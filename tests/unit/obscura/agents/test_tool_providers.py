@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from obscura.core.types import ToolSpec
 from obscura.tools.providers import (
     A2ARemoteToolProvider,
     BrokerContext,
     MCPToolProvider,
     SystemToolProvider,
 )
-from obscura.core.types import ToolSpec
 
 
 @dataclass
@@ -35,7 +35,8 @@ class TestSystemToolProvider:
         broker = _make_broker()
         provider = SystemToolProvider()
         context = BrokerContext(
-            broker=broker, agent=_FakeAgent(client=MagicMock()),
+            broker=broker,
+            agent=_FakeAgent(client=MagicMock()),
         )
 
         await provider.install(context)

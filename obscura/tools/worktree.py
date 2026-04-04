@@ -1,5 +1,4 @@
-"""
-obscura.tools.worktree — Git worktree isolation tools.
+"""obscura.tools.worktree — Git worktree isolation tools.
 
 Provides ``enter_worktree`` and ``exit_worktree`` tools that let agents
 work in isolated git worktrees, preventing changes from polluting the
@@ -16,10 +15,12 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.tools import tool
-from obscura.core.types import ToolSpec
+
+if TYPE_CHECKING:
+    from obscura.core.types import ToolSpec
 
 # Module-level state tracking active worktree sessions.
 # Maps session_key -> {"original_cwd": str, "worktree_path": str, "branch": str}
@@ -35,11 +36,13 @@ def _json_error(error: str, **extra: object) -> str:
 
 
 async def _git(
-    *args: str, cwd: str | None = None,
+    *args: str,
+    cwd: str | None = None,
 ) -> tuple[int, str, str]:
     """Run a git command and return (exit_code, stdout, stderr)."""
     proc = await asyncio.create_subprocess_exec(
-        "git", *args,
+        "git",
+        *args,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -81,7 +84,10 @@ async def enter_worktree(name: str = "") -> str:
     # Validate name.
     slug = name.strip() if name else f"obscura-wt-{int(time.time())}"
     if not re.match(r"^[a-zA-Z0-9._-]{1,64}$", slug):
-        return _json_error("invalid_name", detail="Name must be alphanumeric/dash/dot/underscore, max 64 chars.")
+        return _json_error(
+            "invalid_name",
+            detail="Name must be alphanumeric/dash/dot/underscore, max 64 chars.",
+        )
 
     # Find git root.
     rc, git_root, err = await _git("rev-parse", "--show-toplevel")
@@ -92,7 +98,14 @@ async def enter_worktree(name: str = "") -> str:
     branch_name = f"worktree/{slug}"
     worktree_path = str(Path(git_root).parent / ".obscura-worktrees" / slug)
 
-    rc, _, err = await _git("worktree", "add", "-b", branch_name, worktree_path, cwd=git_root)
+    rc, _, err = await _git(
+        "worktree",
+        "add",
+        "-b",
+        branch_name,
+        worktree_path,
+        cwd=git_root,
+    )
     if rc != 0:
         return _json_error("worktree_create_failed", detail=err)
 
@@ -108,13 +121,15 @@ async def enter_worktree(name: str = "") -> str:
     # Change to worktree directory.
     os.chdir(worktree_path)
 
-    return json.dumps({
-        "ok": True,
-        "worktree_path": worktree_path,
-        "branch": branch_name,
-        "original_cwd": original_cwd,
-        "message": f"Entered worktree at {worktree_path} on branch {branch_name}",
-    })
+    return json.dumps(
+        {
+            "ok": True,
+            "worktree_path": worktree_path,
+            "branch": branch_name,
+            "original_cwd": original_cwd,
+            "message": f"Entered worktree at {worktree_path} on branch {branch_name}",
+        },
+    )
 
 
 @tool(
@@ -162,9 +177,12 @@ async def exit_worktree(
 
     if action == "remove":
         # Check for uncommitted changes.
-        rc, status_out, _ = await _git("status", "--porcelain", cwd=worktree_path)
-        rc2, log_out, _ = await _git(
-            "rev-list", "--count", "HEAD", f"^{branch}~0",
+        _rc, status_out, _ = await _git("status", "--porcelain", cwd=worktree_path)
+        _rc2, _log_out, _ = await _git(
+            "rev-list",
+            "--count",
+            "HEAD",
+            f"^{branch}~0",
             cwd=worktree_path,
         )
         uncommitted_files = len([ln for ln in status_out.splitlines() if ln.strip()])
@@ -198,7 +216,8 @@ async def exit_worktree(
 def get_worktree_tool_specs() -> list[ToolSpec]:
     """Return worktree tool specs for registration."""
     from typing import cast
+
     return [
-        cast(ToolSpec, getattr(enter_worktree, "spec")),
-        cast(ToolSpec, getattr(exit_worktree, "spec")),
+        cast("ToolSpec", enter_worktree.spec),
+        cast("ToolSpec", exit_worktree.spec),
     ]

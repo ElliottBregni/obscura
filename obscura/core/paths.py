@@ -110,7 +110,9 @@ def resolve_all_obscura_homes(cwd: Path | None = None) -> tuple[Path, Path]:
 
 
 def _merge_order_dirs(
-    local_home: Path, global_home: Path, subdir: str,
+    local_home: Path,
+    global_home: Path,
+    subdir: str,
 ) -> list[Path]:
     """Return subdirectories in merge order (global first, local last).
 
@@ -192,6 +194,7 @@ def resolve_all_agents_dirs(cwd: Path | None = None) -> list[Path]:
 
     # Built-in agents (always present).
     from obscura.agent.definitions import _BUILTIN_DIR
+
     if _BUILTIN_DIR.is_dir():
         dirs.append(_BUILTIN_DIR)
         seen.add(_BUILTIN_DIR.resolve())

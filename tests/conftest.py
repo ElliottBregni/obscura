@@ -47,8 +47,8 @@ def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTEL_METRICS_EXPORTER", "none")
     monkeypatch.setenv("OTEL_TRACES_EXPORTER", "none")
     try:
-        from opentelemetry import metrics, trace
         import opentelemetry.metrics._internal as _mi
+        from opentelemetry import metrics, trace
         from opentelemetry.util._once import Once
 
         metrics._METER_PROVIDER = None  # type: ignore[attr-defined]
@@ -63,7 +63,8 @@ def disable_otel(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def temp_memory_dirs(
-    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Route memory and vector memory storage to a writable temp dir."""
     mem_dir: Path = tmp_path_factory.mktemp("memory")
@@ -91,7 +92,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             "tests/e2e/" in item.nodeid or item.get_closest_marker("e2e")
         ):
             item.add_marker(
-                pytest.mark.skip(reason="Use --run-e2e to include e2e tests")
+                pytest.mark.skip(reason="Use --run-e2e to include e2e tests"),
             )
 
 
@@ -113,7 +114,7 @@ def _mk(base: Path, rel_path: str, content: str = "") -> Path:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def vault_root(tmp_path: Path) -> Path:
     """Miniature vault under tmp_path/vault/ mirroring real vault structure."""
     vault = tmp_path / "vault"
@@ -183,7 +184,7 @@ def vault_root(tmp_path: Path) -> Path:
     return vault
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_repo(tmp_path: Path) -> Path:
     """Fake code repo under tmp_path/TestRepo/ with the directory structure
     needed to trigger recursive discovery (platform/, platform/partview_core/).
@@ -196,7 +197,7 @@ def mock_repo(tmp_path: Path) -> Path:
     return repo
 
 
-@pytest.fixture()
+@pytest.fixture
 def sync_instance(vault_root: Path, mock_repo: Path) -> VaultSync:
     """VaultSync pointed at the fixture vault, with repos/INDEX.md
     containing the absolute path to mock_repo.
@@ -206,7 +207,7 @@ def sync_instance(vault_root: Path, mock_repo: Path) -> VaultSync:
     return VaultSync(vault_path=vault_root)
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Fake home directory. Monkeypatches Path.home() and os.path.expanduser
     so sync_system() writes to tmp instead of the real ~/ .
@@ -226,7 +227,7 @@ def mock_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_lock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect LOCK_FILE to tmp_path so watcher tests don't touch /tmp/."""
     lock = tmp_path / "test-watcher.pid"
@@ -239,7 +240,7 @@ def mock_lock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def variant_vault(tmp_path: Path) -> Path:
     """Vault with model-variant and role files for VariantSelector tests."""
     vault = tmp_path / "variant_vault"
@@ -279,7 +280,7 @@ def variant_vault(tmp_path: Path) -> Path:
     return vault
 
 
-@pytest.fixture()
+@pytest.fixture
 def variant_sync(variant_vault: Path) -> VaultSync:
     """VaultSync with no profile set (baseline — no variant filtering)."""
     return VaultSync(vault_path=variant_vault)

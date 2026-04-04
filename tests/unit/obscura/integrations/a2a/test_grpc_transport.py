@@ -17,7 +17,6 @@ from obscura.integrations.a2a.store import InMemoryTaskStore
 from obscura.integrations.a2a.transports.grpc_server import A2AServicer
 from obscura.integrations.a2a.types import TaskNotFoundError
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -47,7 +46,7 @@ class TestSendMessage:
                     "parts": [{"kind": "text", "text": "Hello gRPC"}],
                 },
                 "blocking": True,
-            }
+            },
         )
         result_json = await servicer.SendMessage(request)
         result = json.loads(result_json)
@@ -64,7 +63,7 @@ class TestSendMessage:
                     "parts": [{"kind": "text", "text": "Test"}],
                 },
                 "contextId": "ctx-grpc",
-            }
+            },
         )
         result = json.loads(await servicer.SendMessage(request))
         assert result["contextId"] == "ctx-grpc"
@@ -87,8 +86,8 @@ class TestGetTask:
                         "messageId": "m1",
                         "parts": [{"kind": "text", "text": "Create"}],
                     },
-                }
-            )
+                },
+            ),
         )
         task_id = json.loads(create_json)["id"]
 
@@ -123,8 +122,8 @@ class TestListTasks:
                         "messageId": "m1",
                         "parts": [{"kind": "text", "text": "A"}],
                     },
-                }
-            )
+                },
+            ),
         )
         result = json.loads(await servicer.ListTasks(json.dumps({})))
         assert len(result["tasks"]) == 1
@@ -147,15 +146,15 @@ class TestCancelTask:
                         "parts": [{"kind": "text", "text": "X"}],
                     },
                     "blocking": False,
-                }
-            )
+                },
+            ),
         )
         task_id = json.loads(create_json)["id"]
         # Task may already be completed, but CancelTask should either
         # succeed or raise TaskNotCancelableError
         try:
             result = json.loads(
-                await servicer.CancelTask(json.dumps({"taskId": task_id}))
+                await servicer.CancelTask(json.dumps({"taskId": task_id})),
             )
             assert result["status"]["state"] == "canceled"
         except Exception:
@@ -177,7 +176,7 @@ class TestStreamMessage:
                     "messageId": "m1",
                     "parts": [{"kind": "text", "text": "Stream me"}],
                 },
-            }
+            },
         )
         events: list[dict[str, Any]] = []
         async for event_json in servicer.StreamMessage(request):

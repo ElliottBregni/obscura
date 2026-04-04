@@ -6,15 +6,19 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, AsyncIterator, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from obscura.auth.models import AuthenticatedUser
-from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.approvals import list_tool_approval_requests
+from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["observe"])
 
@@ -106,7 +110,7 @@ def _collect_states(
         payload = store.get(key.key, namespace=namespace)
         if not isinstance(payload, dict):
             continue
-        payload_dict = cast(dict[Any, Any], payload)
+        payload_dict = cast("dict[Any, Any]", payload)
         typed_payload: dict[str, Any] = {}
         for raw_key, raw_value in payload_dict.items():
             key_name = raw_key if isinstance(raw_key, str) else str(raw_key)
@@ -156,7 +160,7 @@ async def observe_snapshot(
             "stale_agent_ids": stale_agent_ids,
             "states": [state.to_dict() for state in states],
             "pending_tool_approvals": [entry.to_dict() for entry in pending_approvals],
-        }
+        },
     )
 
 
@@ -220,7 +224,7 @@ async def observe_stream(
                                     "agent_id": state.agent_id,
                                     "status": state.status,
                                     "age_seconds": age_seconds,
-                                }
+                                },
                             ),
                         }
 

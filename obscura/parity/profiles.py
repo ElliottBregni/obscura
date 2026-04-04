@@ -5,7 +5,6 @@ from __future__ import annotations
 from obscura.core.types import Backend
 from obscura.parity.models import BackendParityProfile, FeatureStatus, FeatureSupport
 
-
 PROFILES: tuple[BackendParityProfile, ...] = (
     BackendParityProfile(
         backend=Backend.OPENAI,
@@ -19,7 +18,9 @@ PROFILES: tuple[BackendParityProfile, ...] = (
             ),
             FeatureSupport("stream_text", FeatureStatus.SUPPORTED),
             FeatureSupport(
-                "stream_thinking", FeatureStatus.PARTIAL, "Model dependent."
+                "stream_thinking",
+                FeatureStatus.PARTIAL,
+                "Model dependent.",
             ),
             FeatureSupport("stream_tool_lifecycle", FeatureStatus.SUPPORTED),
             FeatureSupport("native_event_passthrough", FeatureStatus.SUPPORTED),
@@ -40,7 +41,9 @@ PROFILES: tuple[BackendParityProfile, ...] = (
             ),
             FeatureSupport("stream_text", FeatureStatus.SUPPORTED),
             FeatureSupport(
-                "stream_thinking", FeatureStatus.PARTIAL, "Model dependent."
+                "stream_thinking",
+                FeatureStatus.PARTIAL,
+                "Model dependent.",
             ),
             FeatureSupport("stream_tool_lifecycle", FeatureStatus.SUPPORTED),
             FeatureSupport("native_event_passthrough", FeatureStatus.SUPPORTED),
@@ -95,7 +98,9 @@ PROFILES: tuple[BackendParityProfile, ...] = (
             ),
             FeatureSupport("stream_text", FeatureStatus.SUPPORTED),
             FeatureSupport(
-                "stream_thinking", FeatureStatus.PARTIAL, "Depends on local server."
+                "stream_thinking",
+                FeatureStatus.PARTIAL,
+                "Depends on local server.",
             ),
             FeatureSupport(
                 "stream_tool_lifecycle",

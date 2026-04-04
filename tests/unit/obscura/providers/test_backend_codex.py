@@ -23,6 +23,7 @@ class _FakeThread:
 
     async def run(self, _prompt: str, **_kwargs: Any) -> Any:
         self.last_kwargs = dict(_kwargs)
+
         class _Turn:
             final_response = self._text
             thread_id = "thr-1"
@@ -46,7 +47,7 @@ class TestCodexBackend:
     async def test_start_requires_sdk(self) -> None:
         backend = CodexBackend(_auth())
         backend._import_sdk_class = lambda: (_ for _ in ()).throw(  # type: ignore[method-assign]
-            RuntimeError("Official OpenAI Codex SDK not found")
+            RuntimeError("Official OpenAI Codex SDK not found"),
         )
         with pytest.raises(RuntimeError, match="Official OpenAI Codex SDK not found"):
             await backend.start()

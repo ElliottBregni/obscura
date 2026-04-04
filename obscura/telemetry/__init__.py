@@ -1,5 +1,4 @@
-"""
-obscura.telemetry — Bootstrap for OpenTelemetry tracing, metrics, and structured logging.
+"""obscura.telemetry — Bootstrap for OpenTelemetry tracing, metrics, and structured logging.
 
 Initializes OTel TracerProvider, MeterProvider, and structlog. Safe to call
 multiple times (idempotent). When ``otel_enabled`` is False, NoOp providers
@@ -17,7 +16,7 @@ Usage::
 from __future__ import annotations
 
 import threading
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from obscura.core.config import ObscuraConfig
@@ -96,20 +95,20 @@ def _setup_tracing(config: ObscuraConfig) -> None:
     """Set up TracerProvider with OTLP gRPC exporter."""
     try:
         from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
 
         resource = Resource.create(
             {
                 "service.name": config.otel_service_name,
-            }
+            },
         )
 
         if config.otel_enabled:
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
                 OTLPSpanExporter,
             )
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
             provider = TracerProvider(resource=resource)
             exporter = OTLPSpanExporter(endpoint=config.otel_endpoint, insecure=True)
@@ -133,14 +132,14 @@ def _setup_metrics(config: ObscuraConfig) -> None:
         resource = Resource.create(
             {
                 "service.name": config.otel_service_name,
-            }
+            },
         )
 
         if config.otel_enabled:
-            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
             from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
                 OTLPMetricExporter,
             )
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
             exporter = OTLPMetricExporter(endpoint=config.otel_endpoint, insecure=True)
             reader = PeriodicExportingMetricReader(exporter)

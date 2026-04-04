@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.paths import resolve_obscura_state_dir
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 _STATE_FILENAME = "signal_state.json"
@@ -34,7 +37,9 @@ class SignalState:
         try:
             if self._path.is_file():
                 data = json.loads(self._path.read_text(encoding="utf-8"))
-                self._last_ts_ms = {k: int(v) for k, v in data.get("last_ts_ms", {}).items()}
+                self._last_ts_ms = {
+                    k: int(v) for k, v in data.get("last_ts_ms", {}).items()
+                }
         except Exception:
             logger.warning("Failed to load Signal state; starting fresh")
             self._last_ts_ms = {}

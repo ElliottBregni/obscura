@@ -1,8 +1,11 @@
 """Tests for sdk.backends.claude — ClaudeBackend."""
 
-from typing import Any, AsyncIterator
-import pytest
+from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from obscura.core.auth import AuthConfig
 from obscura.core.types import (
     Backend,
@@ -23,7 +26,7 @@ def _tool_handler(**_: Any) -> str:
 
 
 class TestClaudeBackendInit:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -32,7 +35,7 @@ class TestClaudeBackendInit:
         assert b.cwd is None
         assert b.client is None
 
-    def test_custom_settings(self):
+    def test_custom_settings(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(
@@ -47,7 +50,7 @@ class TestClaudeBackendInit:
         assert b.permission_mode == "strict"
         assert b.cwd == "/tmp"
 
-    def test_capabilities_include_native_features(self):
+    def test_capabilities_include_native_features(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -59,7 +62,7 @@ class TestClaudeBackendInit:
 
 class TestClaudeLifecycle:
     @pytest.mark.asyncio
-    async def test_start(self):
+    async def test_start(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -74,7 +77,7 @@ class TestClaudeLifecycle:
             assert b.client is mock_client
 
     @pytest.mark.asyncio
-    async def test_stop(self):
+    async def test_stop(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -83,7 +86,7 @@ class TestClaudeLifecycle:
         assert b.client is None
 
     @pytest.mark.asyncio
-    async def test_stop_when_not_started(self):
+    async def test_stop_when_not_started(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -92,7 +95,7 @@ class TestClaudeLifecycle:
 
 class TestClaudeSend:
     @pytest.mark.asyncio
-    async def test_send(self):
+    async def test_send(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -132,7 +135,7 @@ class TestClaudeSend:
         assert msg.content[0].text == "Claude says hello"
 
     @pytest.mark.asyncio
-    async def test_send_not_started(self):
+    async def test_send_not_started(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -140,7 +143,7 @@ class TestClaudeSend:
             await b.send("test")
 
     @pytest.mark.asyncio
-    async def test_send_tool_choice_function_maps_allowed_tools(self):
+    async def test_send_tool_choice_function_maps_allowed_tools(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -152,7 +155,7 @@ class TestClaudeSend:
                 description="read file",
                 parameters={"type": "object"},
                 handler=_tool_handler,
-            )
+            ),
         )
 
         assistant_msg = MagicMock()
@@ -187,7 +190,7 @@ class TestClaudeSend:
         )
 
     @pytest.mark.asyncio
-    async def test_send_tool_choice_kwargs_fallback_on_type_error(self):
+    async def test_send_tool_choice_kwargs_fallback_on_type_error(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -199,7 +202,7 @@ class TestClaudeSend:
                 description="read file",
                 parameters={"type": "object"},
                 handler=_tool_handler,
-            )
+            ),
         )
 
         assistant_msg = MagicMock()
@@ -230,14 +233,14 @@ class TestClaudeSend:
 
         assert mock_client.query.await_count == 2
         assert mock_client.query.await_args_list[0].kwargs == {
-            "disallowed_tools": ["mcp__obscura_tools__read_file"]
+            "disallowed_tools": ["mcp__obscura_tools__read_file"],
         }
         assert mock_client.query.await_args_list[1].args == ("Hello",)
 
 
 class TestClaudeSessions:
     @pytest.mark.asyncio
-    async def test_create_session(self):
+    async def test_create_session(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -259,7 +262,7 @@ class TestClaudeSessions:
         assert ref.backend == Backend.CLAUDE
 
     @pytest.mark.asyncio
-    async def test_list_sessions(self):
+    async def test_list_sessions(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -282,9 +285,9 @@ class TestClaudeSessions:
         assert len(refs) == 1
 
     @pytest.mark.asyncio
-    async def test_delete_session(self):
-        from obscura.providers.claude import ClaudeBackend
+    async def test_delete_session(self) -> None:
         from obscura.core.types import SessionRef
+        from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
         b.set_client_for_testing(AsyncMock())
@@ -301,18 +304,21 @@ class TestClaudeSessions:
 
 
 class TestClaudeTools:
-    def test_register_tool(self):
-        from obscura.providers.claude import ClaudeBackend
+    def test_register_tool(self) -> None:
         from obscura.core.types import ToolSpec
+        from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
         spec = ToolSpec(
-            name="t1", description="test tool", parameters={}, handler=lambda: None
+            name="t1",
+            description="test tool",
+            parameters={},
+            handler=lambda: None,
         )
         b.register_tool(spec)
         assert len(b.tools) == 1
 
-    def test_register_hook(self):
+    def test_register_hook(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -322,14 +328,14 @@ class TestClaudeTools:
 
 
 class TestClaudeInternals:
-    def test_ensure_client_raises(self):
+    def test_ensure_client_raises(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
         with pytest.raises(RuntimeError, match="not started"):
             b.ensure_client_started()
 
-    def test_to_message_empty(self):
+    def test_to_message_empty(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -337,7 +343,7 @@ class TestClaudeInternals:
         assert msg.role.value == "assistant"
         assert msg.content[0].text == ""
 
-    def test_to_message_with_assistant(self):
+    def test_to_message_with_assistant(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -353,7 +359,7 @@ class TestClaudeInternals:
         assert msg.content[0].text == "Hello there"
         assert msg.backend == Backend.CLAUDE
 
-    def test_to_message_with_thinking(self):
+    def test_to_message_with_thinking(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -369,7 +375,7 @@ class TestClaudeInternals:
         assert msg.content[0].kind == "thinking"
         assert msg.content[0].text == "Let me think..."
 
-    def test_to_message_with_tool_use(self):
+    def test_to_message_with_tool_use(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -388,9 +394,9 @@ class TestClaudeInternals:
         assert msg.content[0].tool_name == "my_tool"
 
     @pytest.mark.asyncio
-    async def test_fork_session(self):
-        from obscura.providers.claude import ClaudeBackend
+    async def test_fork_session(self) -> None:
         from obscura.core.types import SessionRef
+        from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
         old_client = AsyncMock()
@@ -411,7 +417,7 @@ class TestClaudeInternals:
 class TestClaudeBuildOptions:
     """Tests for _build_options() MCP server config translation."""
 
-    def test_stdio_server_translated(self):
+    def test_stdio_server_translated(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(
@@ -438,7 +444,7 @@ class TestClaudeBuildOptions:
         }
         assert "transport" not in server
 
-    def test_sse_server_translated(self):
+    def test_sse_server_translated(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(
@@ -464,7 +470,7 @@ class TestClaudeBuildOptions:
         }
         assert "transport" not in server
 
-    def test_auto_naming(self):
+    def test_auto_naming(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(
@@ -484,7 +490,7 @@ class TestClaudeBuildOptions:
         assert servers["mcp_0"]["command"] == "echo"
         assert servers["mcp_1"]["command"] == "cat"
 
-    def test_optional_fields_omitted(self):
+    def test_optional_fields_omitted(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(
@@ -502,7 +508,7 @@ class TestClaudeBuildOptions:
         assert "args" not in server
         assert "env" not in server
 
-    def test_no_mcp_servers(self):
+    def test_no_mcp_servers(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -512,7 +518,7 @@ class TestClaudeBuildOptions:
 
         assert "mcp_servers" not in opts
 
-    def test_explicit_name_used(self):
+    def test_explicit_name_used(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(
@@ -536,7 +542,7 @@ class TestClaudeBuildOptions:
 
 class TestClaudeStream:
     @pytest.mark.asyncio
-    async def test_stream_tool_choice_none_maps_disallowed_tools(self):
+    async def test_stream_tool_choice_none_maps_disallowed_tools(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 
         b = ClaudeBackend(_make_auth())
@@ -548,7 +554,7 @@ class TestClaudeStream:
                 description="search tool",
                 parameters={"type": "object"},
                 handler=_tool_handler,
-            )
+            ),
         )
 
         async def mock_receive():
@@ -562,7 +568,8 @@ class TestClaudeStream:
         mock_client.query = AsyncMock()
 
         with patch(
-            "obscura.providers.claude.ClaudeIteratorAdapter", side_effect=_fake_adapter
+            "obscura.providers.claude.ClaudeIteratorAdapter",
+            side_effect=_fake_adapter,
         ):
             chunks: list[StreamChunk] = []
             async for c in b.stream("ping", tool_choice=ToolChoice.none()):

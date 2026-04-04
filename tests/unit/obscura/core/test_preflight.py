@@ -11,20 +11,19 @@ import pytest
 from obscura.core.compiler.compiled import CompiledAgent, EnvironmentManifest
 from obscura.core.preflight import PreflightCheck, PreflightResult, PreflightValidator
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def _minimal_agent(**overrides) -> CompiledAgent:
-    defaults = dict(
-        name="test-agent",
-        template_name="base",
-        mode="code",
-        agent_type="loop",
-        provider="claude",
-    )
+    defaults = {
+        "name": "test-agent",
+        "template_name": "base",
+        "mode": "code",
+        "agent_type": "loop",
+        "provider": "claude",
+    }
     defaults.update(overrides)
     return CompiledAgent(**defaults)
 
@@ -116,7 +115,12 @@ class TestPreflightResult:
             agent_name="ag",
             checks=(
                 PreflightCheck(name="ok", passed=True),
-                PreflightCheck(name="warn", passed=False, severity="warning", message="w"),
+                PreflightCheck(
+                    name="warn",
+                    passed=False,
+                    severity="warning",
+                    message="w",
+                ),
             ),
         )
         assert len(r.warnings) == 1
@@ -142,7 +146,11 @@ class TestPreflightResult:
 class TestPreflightValidatorBinaries:
     @patch("obscura.core.preflight.shutil.which", return_value="/usr/bin/ruff")
     @patch("obscura.core.preflight._obscura_venv_bin")
-    def test_binary_exists(self, mock_venv_bin: MagicMock, mock_which: MagicMock) -> None:
+    def test_binary_exists(
+        self,
+        mock_venv_bin: MagicMock,
+        mock_which: MagicMock,
+    ) -> None:
         mock_venv_bin.return_value = Path("/nonexistent/venv/bin")
         agent = _agent_with_env(binaries=("ruff",))
         result = PreflightValidator().validate(agent)
@@ -152,7 +160,11 @@ class TestPreflightValidatorBinaries:
 
     @patch("obscura.core.preflight.shutil.which", return_value=None)
     @patch("obscura.core.preflight._obscura_venv_bin")
-    def test_binary_missing(self, mock_venv_bin: MagicMock, mock_which: MagicMock) -> None:
+    def test_binary_missing(
+        self,
+        mock_venv_bin: MagicMock,
+        mock_which: MagicMock,
+    ) -> None:
         mock_venv_bin.return_value = Path("/nonexistent/venv/bin")
         agent = _agent_with_env(binaries=("nonexistent_tool",))
         result = PreflightValidator().validate(agent)
@@ -183,7 +195,10 @@ class TestPreflightValidatorEnvVars:
         assert len(env_checks) == 1
         assert env_checks[0].passed is False
 
-    def test_env_var_value_mismatch_is_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_var_value_mismatch_is_warning(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         monkeypatch.setenv("TEST_VAR", "actual")
         agent = _agent_with_env(env_vars=(("TEST_VAR", "expected"),))
         result = PreflightValidator().validate(agent)
@@ -221,7 +236,10 @@ class TestPreflightValidatorPythonVersion:
         py_checks = [c for c in result.checks if c.name == "python_version"]
         assert py_checks[0].passed is False
 
-    @patch("obscura.core.preflight.subprocess.run", side_effect=FileNotFoundError("no python"))
+    @patch(
+        "obscura.core.preflight.subprocess.run",
+        side_effect=FileNotFoundError("no python"),
+    )
     def test_python_version_error(self, mock_run: MagicMock) -> None:
         agent = _agent_with_env(python_version="3.13")
         result = PreflightValidator().validate(agent)

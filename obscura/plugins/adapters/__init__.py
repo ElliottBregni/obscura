@@ -9,13 +9,13 @@ from a ``PluginSpec``.
 """
 
 from obscura.plugins.adapters.base import PluginAdapter
-from obscura.plugins.adapters.native import NativeAdapter
 from obscura.plugins.adapters.cli import CLIAdapter
 from obscura.plugins.adapters.content import ContentAdapter
+from obscura.plugins.adapters.native import NativeAdapter
 
 __all__ = [
-    "PluginAdapter",
-    "NativeAdapter",
     "CLIAdapter",
     "ContentAdapter",
+    "NativeAdapter",
+    "PluginAdapter",
 ]

@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class PolicyAction(str, Enum):
+class PolicyAction(StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     APPROVE = "approve"  # allowed but requires user confirmation
@@ -40,6 +40,7 @@ class PolicyAction(str, Enum):
 @dataclass(frozen=True)
 class PolicyDecision:
     """Result of a policy evaluation."""
+
     action: PolicyAction
     reason: str = ""
     matched_rule: str = ""  # rule identifier for audit trail
@@ -61,23 +62,25 @@ class PolicyDecision:
 @dataclass
 class PolicyRule:
     """A single policy rule loaded from YAML."""
+
     id: str = ""
     # Matchers (all are optional; a rule matches if ALL specified matchers match)
-    plugin: str | None = None           # glob pattern, e.g. "obscura-*"
-    trust_level: str | None = None      # "builtin" | "verified" | "community" | "untrusted"
-    capability: str | None = None       # capability ID or glob
-    tool: str | None = None             # tool name or glob
-    agent: str | None = None            # agent ID or glob
-    environment: str | None = None      # "dev" | "staging" | "prod" or None=any
+    plugin: str | None = None  # glob pattern, e.g. "obscura-*"
+    trust_level: str | None = None  # "builtin" | "verified" | "community" | "untrusted"
+    capability: str | None = None  # capability ID or glob
+    tool: str | None = None  # tool name or glob
+    agent: str | None = None  # agent ID or glob
+    environment: str | None = None  # "dev" | "staging" | "prod" or None=any
     # Decision
     action: PolicyAction = PolicyAction.DENY
     reason: str = ""
-    priority: int = 0                   # higher = evaluated first
+    priority: int = 0  # higher = evaluated first
 
 
 @dataclass
 class PolicyRuleSet:
     """An ordered collection of rules."""
+
     rules: list[PolicyRule] = field(default_factory=list)
 
     def sorted_rules(self) -> list[PolicyRule]:
@@ -110,18 +113,34 @@ class PluginPolicyEngine:
     """
 
     _DEFAULT_RULES: list[PolicyRule] = [
-        PolicyRule(id="default-allow-builtin", trust_level="builtin",
-                   action=PolicyAction.ALLOW, reason="Built-in plugins are trusted",
-                   priority=-100),
-        PolicyRule(id="default-allow-verified", trust_level="verified",
-                   action=PolicyAction.ALLOW, reason="Verified plugins are trusted",
-                   priority=-100),
-        PolicyRule(id="default-allow-community", trust_level="community",
-                   action=PolicyAction.ALLOW, reason="Community plugins allowed by default",
-                   priority=-200),
-        PolicyRule(id="default-deny-untrusted", trust_level="untrusted",
-                   action=PolicyAction.DENY, reason="Untrusted plugins denied by default",
-                   priority=-300),
+        PolicyRule(
+            id="default-allow-builtin",
+            trust_level="builtin",
+            action=PolicyAction.ALLOW,
+            reason="Built-in plugins are trusted",
+            priority=-100,
+        ),
+        PolicyRule(
+            id="default-allow-verified",
+            trust_level="verified",
+            action=PolicyAction.ALLOW,
+            reason="Verified plugins are trusted",
+            priority=-100,
+        ),
+        PolicyRule(
+            id="default-allow-community",
+            trust_level="community",
+            action=PolicyAction.ALLOW,
+            reason="Community plugins allowed by default",
+            priority=-200,
+        ),
+        PolicyRule(
+            id="default-deny-untrusted",
+            trust_level="untrusted",
+            action=PolicyAction.DENY,
+            reason="Untrusted plugins denied by default",
+            priority=-300,
+        ),
     ]
 
     def __init__(self, ruleset: PolicyRuleSet | None = None) -> None:
@@ -144,7 +163,9 @@ class PluginPolicyEngine:
             from obscura.core.config_io import load_config  # noqa: PLC0415
 
             # Discover .toml first, then .yaml for backward compat
-            policy_files = sorted(policies_dir.glob("*.toml")) + sorted(policies_dir.glob("*.yaml"))
+            policy_files = sorted(policies_dir.glob("*.toml")) + sorted(
+                policies_dir.glob("*.yaml"),
+            )
             for f in policy_files:
                 try:
                     data = load_config(f) or {}
@@ -152,7 +173,9 @@ class PluginPolicyEngine:
                     raw_rules = data.get("rules", [])
                     if isinstance(raw_rules, dict):
                         raw_rules = [
-                            {**spec, "id": rule_id} if isinstance(spec, dict) else {"id": rule_id}
+                            {**spec, "id": rule_id}
+                            if isinstance(spec, dict)
+                            else {"id": rule_id}
                             for rule_id, spec in raw_rules.items()
                         ]
                     for i, rd in enumerate(raw_rules):
@@ -169,7 +192,11 @@ class PluginPolicyEngine:
                             priority=rd.get("priority", 0),
                         )
                         ruleset.rules.append(rule)
-                    logger.debug("Loaded %d rules from %s", len(data.get("rules", [])), f)
+                    logger.debug(
+                        "Loaded %d rules from %s",
+                        len(data.get("rules", [])),
+                        f,
+                    )
                 except Exception as exc:
                     logger.warning("Failed to parse policy file %s: %s", f, exc)
 
@@ -191,15 +218,25 @@ class PluginPolicyEngine:
             if rule.environment and rule.environment != self._env:
                 continue
             # Match all specified criteria
-            if rule.plugin is not None and (plugin is None or not _glob_match(rule.plugin, plugin)):
+            if rule.plugin is not None and (
+                plugin is None or not _glob_match(rule.plugin, plugin)
+            ):
                 continue
-            if rule.trust_level is not None and (trust_level is None or rule.trust_level != trust_level):
+            if rule.trust_level is not None and (
+                trust_level is None or rule.trust_level != trust_level
+            ):
                 continue
-            if rule.capability is not None and (capability is None or not _glob_match(rule.capability, capability)):
+            if rule.capability is not None and (
+                capability is None or not _glob_match(rule.capability, capability)
+            ):
                 continue
-            if rule.tool is not None and (tool is None or not _glob_match(rule.tool, tool)):
+            if rule.tool is not None and (
+                tool is None or not _glob_match(rule.tool, tool)
+            ):
                 continue
-            if rule.agent is not None and (agent is None or not _glob_match(rule.agent, agent)):
+            if rule.agent is not None and (
+                agent is None or not _glob_match(rule.agent, agent)
+            ):
                 continue
             return rule
         return None
@@ -207,20 +244,31 @@ class PluginPolicyEngine:
     def _decide(self, **kwargs: Any) -> PolicyDecision:
         rule = self._find_matching_rule(**kwargs)
         if rule is None:
-            return PolicyDecision(PolicyAction.ALLOW, reason="No matching rule — default allow")
+            return PolicyDecision(
+                PolicyAction.ALLOW,
+                reason="No matching rule — default allow",
+            )
         return PolicyDecision(
             action=rule.action,
             reason=rule.reason,
             matched_rule=rule.id,
         )
 
-    def can_load_plugin(self, plugin_id: str, trust_level: str = "community") -> PolicyDecision:
+    def can_load_plugin(
+        self,
+        plugin_id: str,
+        trust_level: str = "community",
+    ) -> PolicyDecision:
         return self._decide(plugin=plugin_id, trust_level=trust_level)
 
     def can_grant_capability(self, capability_id: str, agent_id: str) -> PolicyDecision:
         return self._decide(capability=capability_id, agent=agent_id)
 
-    def can_execute_tool(self, tool_name: str, agent_id: str | None = None) -> PolicyDecision:
+    def can_execute_tool(
+        self,
+        tool_name: str,
+        agent_id: str | None = None,
+    ) -> PolicyDecision:
         return self._decide(tool=tool_name, agent=agent_id)
 
     def requires_approval(self, tool_name: str, agent_id: str | None = None) -> bool:
@@ -237,9 +285,9 @@ class PluginPolicyEngine:
 
 
 __all__ = [
+    "PluginPolicyEngine",
     "PolicyAction",
     "PolicyDecision",
     "PolicyRule",
     "PolicyRuleSet",
-    "PluginPolicyEngine",
 ]

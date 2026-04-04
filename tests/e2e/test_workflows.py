@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from starlette.testclient import TestClient
+
+if TYPE_CHECKING:
+    from starlette.testclient import TestClient
 
 
 @pytest.mark.e2e
@@ -80,7 +82,8 @@ class TestWorkflows:
         """Can delete a workflow."""
         # Create workflow
         create_resp = client.post(
-            "/api/v1/workflows", json={"name": "delete-test-workflow"}
+            "/api/v1/workflows",
+            json={"name": "delete-test-workflow"},
         )
         create_data: Any = create_resp.json()
         workflow_id: str = create_data["workflow_id"]
@@ -117,7 +120,8 @@ class TestWorkflows:
     def test_execute_workflow_not_found(self, client: TestClient) -> None:
         """Executing non-existent workflow returns 404."""
         resp = client.post(
-            "/api/v1/workflows/non-existent/execute", json={"inputs": {}}
+            "/api/v1/workflows/non-existent/execute",
+            json={"inputs": {}},
         )
 
         assert resp.status_code == 404
@@ -131,7 +135,8 @@ class TestWorkflows:
         ).json()
 
         client.post(
-            f"/api/v1/workflows/{workflow['workflow_id']}/execute", json={"inputs": {}}
+            f"/api/v1/workflows/{workflow['workflow_id']}/execute",
+            json={"inputs": {}},
         )
 
         # List executions
@@ -151,7 +156,8 @@ class TestWorkflows:
         ).json()
 
         execution: Any = client.post(
-            f"/api/v1/workflows/{workflow['workflow_id']}/execute", json={"inputs": {}}
+            f"/api/v1/workflows/{workflow['workflow_id']}/execute",
+            json={"inputs": {}},
         ).json()
 
         # Get execution

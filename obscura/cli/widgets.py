@@ -33,6 +33,10 @@ from prompt_toolkit.layout import Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
+from rich.markup import escape as markup_escape
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
 
 from obscura.cli.render import (
     ACCENT,
@@ -45,24 +49,20 @@ from obscura.cli.render import (
     _sanitize_text,
     console,
 )
-from rich.markup import escape as markup_escape
-from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.text import Text
 
 __all__ = [
-    "ToolConfirmRequest",
     "AttentionWidgetRequest",
     "ModelQuestionRequest",
-    "PermissionWidgetRequest",
     "NotifyWidgetRequest",
+    "PermissionWidgetRequest",
+    "ToolConfirmRequest",
     "WidgetResult",
-    "confirm_tool",
+    "ask_model_question",
     "confirm_attention",
     "confirm_permission",
+    "confirm_tool",
     "detect_question_choices",
     "present_detected_choices",
-    "ask_model_question",
     "render_notification_banner",
 ]
 
@@ -74,7 +74,7 @@ _WIDGET_STYLE = Style.from_dict(
     {
         "selected": "bold reverse #6c71c4",
         "unselected": "#586e75",
-    }
+    },
 )
 
 
@@ -104,7 +104,7 @@ class AttentionWidgetRequest:
     message: str
     priority: str = "normal"  # low / normal / high / critical
     actions: tuple[str, ...] = ("ok",)
-    context: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    context: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True)
@@ -179,7 +179,7 @@ def _render_tool_panel(tool_name: str, tool_input: dict[str, Any]) -> None:
                 border_style=TOOL_COLOR,
                 expand=False,
                 padding=(0, 2),
-            )
+            ),
         )
         return
 
@@ -214,7 +214,7 @@ def _render_tool_panel(tool_name: str, tool_input: dict[str, Any]) -> None:
                             border_style=TOOL_COLOR,
                             expand=False,
                             padding=(0, 2),
-                        )
+                        ),
                     )
                     # Print args with syntax block separately
                     for prev_row in rows[:-1]:
@@ -238,7 +238,7 @@ def _render_tool_panel(tool_name: str, tool_input: dict[str, Any]) -> None:
             border_style=TOOL_COLOR,
             expand=False,
             padding=(0, 2),
-        )
+        ),
     )
 
 
@@ -268,7 +268,7 @@ def _render_attention_panel(request: AttentionWidgetRequest) -> None:
             border_style=border,
             expand=False,
             padding=(0, 2),
-        )
+        ),
     )
 
 
@@ -282,7 +282,7 @@ def _render_question_panel(request: ModelQuestionRequest) -> None:
             border_style=ACCENT,
             expand=False,
             padding=(0, 2),
-        )
+        ),
     )
 
 
@@ -310,6 +310,7 @@ async def _run_action_bar(
         Optional mapping of single-char keys to action strings.
     default_cancel:
         Action returned on Escape / Ctrl-C.
+
     """
     if not actions:
         return default_cancel
@@ -346,7 +347,7 @@ async def _run_action_bar(
     if hotkeys:
         for key, action in hotkeys.items():
 
-            def _make_hotkey_handler(a: str):  # noqa: E301
+            def _make_hotkey_handler(a: str):
                 def _handler(event: KeyPressEvent) -> None:
                     event.app.exit(result=a)
 
@@ -381,7 +382,7 @@ async def _run_action_bar(
             Window(
                 FormattedTextControl(_get_formatted_text),
                 height=height,
-            )
+            ),
         ),
         key_bindings=kb,
         style=_WIDGET_STYLE,
@@ -608,7 +609,7 @@ async def present_detected_choices(detected: DetectedQuestion) -> str | None:
             message=detected.question,
             priority="normal",
             actions=tuple(detected.choices),
-        )
+        ),
     )
     return result.action
 
@@ -629,9 +630,13 @@ def _render_permission_panel(request: PermissionWidgetRequest) -> None:
     border = risk_border.get(request.risk, WARN_COLOR)
 
     body_parts: list[str] = []
-    body_parts.append(f"[bold]Action:[/] {markup_escape(_sanitize_text(request.action))}")
+    body_parts.append(
+        f"[bold]Action:[/] {markup_escape(_sanitize_text(request.action))}",
+    )
     if request.reason:
-        body_parts.append(f"[bold]Reason:[/] {markup_escape(_sanitize_text(request.reason))}")
+        body_parts.append(
+            f"[bold]Reason:[/] {markup_escape(_sanitize_text(request.reason))}",
+        )
     body_parts.append(f"[bold]Risk:[/] {markup_escape(request.risk)}")
 
     console.print(
@@ -642,7 +647,7 @@ def _render_permission_panel(request: PermissionWidgetRequest) -> None:
             border_style=border,
             expand=False,
             padding=(0, 2),
-        )
+        ),
     )
 
 
@@ -667,7 +672,7 @@ def render_notification_banner(request: NotifyWidgetRequest) -> None:
             border_style=border,
             expand=False,
             padding=(0, 2),
-        )
+        ),
     )
 
 

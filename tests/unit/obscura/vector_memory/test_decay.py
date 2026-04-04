@@ -11,13 +11,12 @@ from obscura.vector_memory.decay import (
     load_decay_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # compute_decay
 # ---------------------------------------------------------------------------
 
 
-def test_episode_half_life_7_days():
+def test_episode_half_life_7_days() -> None:
     """An episode exactly 7 days old should have decay ≈ 0.5."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -26,7 +25,7 @@ def test_episode_half_life_7_days():
     assert abs(decay - 0.5) < 0.01
 
 
-def test_fact_decays_slower():
+def test_fact_decays_slower() -> None:
     """A fact at 7 days should decay much less than an episode."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -36,7 +35,7 @@ def test_fact_decays_slower():
     assert fact_decay > episode_decay
 
 
-def test_preference_immune():
+def test_preference_immune() -> None:
     """Preferences should always return 1.0 regardless of age."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -45,7 +44,7 @@ def test_preference_immune():
     assert decay == 1.0
 
 
-def test_accessed_at_resets_effective_age():
+def test_accessed_at_resets_effective_age() -> None:
     """accessed_at should make the memory appear younger."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -59,7 +58,7 @@ def test_accessed_at_resets_effective_age():
     assert decay_with > decay_without
 
 
-def test_zero_age_returns_one():
+def test_zero_age_returns_one() -> None:
     """A brand-new memory should have decay = 1.0."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -67,7 +66,7 @@ def test_zero_age_returns_one():
     assert decay == 1.0
 
 
-def test_naive_datetime_handled():
+def test_naive_datetime_handled() -> None:
     """Naive datetimes (no tzinfo) should be treated as UTC."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -76,7 +75,7 @@ def test_naive_datetime_handled():
     assert abs(decay - 0.5) < 0.01
 
 
-def test_unknown_type_uses_general():
+def test_unknown_type_uses_general() -> None:
     """Unknown memory types should fall back to 'general' profile."""
     config = DecayConfig()
     now = datetime(2026, 3, 28, tzinfo=UTC)
@@ -91,21 +90,21 @@ def test_unknown_type_uses_general():
 # ---------------------------------------------------------------------------
 
 
-def test_below_floor_old_episode():
+def test_below_floor_old_episode() -> None:
     """A very old episode should be below the floor."""
     config = DecayConfig()
     created = datetime(2020, 1, 1, tzinfo=UTC)
     assert is_below_floor("episode", created, None, config)
 
 
-def test_not_below_floor_recent():
+def test_not_below_floor_recent() -> None:
     """A recent memory should not be below the floor."""
     config = DecayConfig()
     created = datetime.now(UTC) - timedelta(hours=1)
     assert not is_below_floor("episode", created, None, config)
 
 
-def test_immune_never_below_floor():
+def test_immune_never_below_floor() -> None:
     """Preferences should never be below floor."""
     config = DecayConfig()
     created = datetime(2000, 1, 1, tzinfo=UTC)
@@ -117,7 +116,7 @@ def test_immune_never_below_floor():
 # ---------------------------------------------------------------------------
 
 
-def test_load_defaults():
+def test_load_defaults() -> None:
     """load_decay_config(None) should return defaults."""
     config = load_decay_config(None)
     assert config.profiles["episode"].half_life_days == 7.0
@@ -125,7 +124,7 @@ def test_load_defaults():
     assert config.maintenance_on_startup is True
 
 
-def test_load_custom_profile():
+def test_load_custom_profile() -> None:
     """Custom profiles should merge with defaults."""
     raw = {
         "profiles": {
@@ -141,7 +140,7 @@ def test_load_custom_profile():
     assert config.access_boost_days == 10.0
 
 
-def test_load_empty_raw():
+def test_load_empty_raw() -> None:
     """Empty dict should return defaults."""
     config = load_decay_config({})
     assert config.profiles["episode"].half_life_days == 7.0

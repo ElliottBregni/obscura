@@ -1,5 +1,4 @@
-"""
-obscura.kairos.daily_log — Append-only daily log management.
+"""obscura.kairos.daily_log — Append-only daily log management.
 
 Maintains a chronological log of observations and events per day,
 stored at ``~/.obscura/memory/logs/YYYY/MM/YYYY-MM-DD.md``.
@@ -66,7 +65,9 @@ class DailyLog:
         """Count entries in today's log."""
         if not self._path.is_file():
             return 0
-        return sum(1 for line in self._path.read_text().splitlines() if line.startswith("- ["))
+        return sum(
+            1 for line in self._path.read_text().splitlines() if line.startswith("- [")
+        )
 
     @staticmethod
     def recent_logs(days: int = 7) -> list[Path]:

@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable
-
-import pytest
+from typing import TYPE_CHECKING
 
 from scripts.sync import (
+    SYNC_PROFILE_FILE,
     VariantSelector,
     VaultSync,
     parse_sync_profile,
-    SYNC_PROFILE_FILE,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import pytest
 
 # ---------------------------------------------------------------------------
 # SyncProfile parsing
@@ -121,14 +123,14 @@ class TestModelVariantSwaps:
         selector = VariantSelector(model="opus", role=None)
         manifest = {
             Path("skills/deep-analysis.opus.md"): Path(
-                "/vault/skills/deep-analysis.opus.md"
+                "/vault/skills/deep-analysis.opus.md",
             ),
         }
         result = selector.select(manifest)
         # Should land at base dest (without model segment)
         assert Path("skills/deep-analysis.md") in result
         assert result[Path("skills/deep-analysis.md")] == Path(
-            "/vault/skills/deep-analysis.opus.md"
+            "/vault/skills/deep-analysis.opus.md",
         )
 
     def test_model_variant_no_base_wrong_model(self) -> None:
@@ -136,7 +138,7 @@ class TestModelVariantSwaps:
         selector = VariantSelector(model="sonnet", role=None)
         manifest = {
             Path("skills/deep-analysis.opus.md"): Path(
-                "/vault/skills/deep-analysis.opus.md"
+                "/vault/skills/deep-analysis.opus.md",
             ),
         }
         result = selector.select(manifest)
@@ -169,7 +171,7 @@ class TestRoleFiltering:
             Path("skills/git-workflow.md"): Path("/vault/skills/git-workflow.md"),
             Path("skills/roles/reviewer.md"): Path("/vault/skills/roles/reviewer.md"),
             Path("skills/roles/implementer.md"): Path(
-                "/vault/skills/roles/implementer.md"
+                "/vault/skills/roles/implementer.md",
             ),
         }
         result = selector.select(manifest)
@@ -184,7 +186,7 @@ class TestRoleFiltering:
             Path("skills/git-workflow.md"): Path("/vault/skills/git-workflow.md"),
             Path("skills/roles/reviewer.md"): Path("/vault/skills/roles/reviewer.md"),
             Path("skills/roles/implementer.md"): Path(
-                "/vault/skills/roles/implementer.md"
+                "/vault/skills/roles/implementer.md",
             ),
         }
         result = selector.select(manifest)

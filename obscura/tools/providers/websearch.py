@@ -1,4 +1,5 @@
 """Websearch tool provider — wraps the `websearch` Rust CLI binary."""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,17 +14,24 @@ logger = logging.getLogger(__name__)
 async def _run_websearch(*args: str) -> dict[str, Any]:
     binary = shutil.which("websearch")
     if not binary:
-        return {"error": "websearch binary not found on PATH. Install with: cargo install websearch"}
+        return {
+            "error": "websearch binary not found on PATH. Install with: cargo install websearch",
+        }
     cmd = [binary, *args]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         out = stdout.decode() if stdout else ""
         err = stderr.decode() if stderr else ""
         if proc.returncode != 0:
-            return {"error": err or f"websearch exited {proc.returncode}", "output": out}
+            return {
+                "error": err or f"websearch exited {proc.returncode}",
+                "output": out,
+            }
         try:
             return json.loads(out)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError):

@@ -35,7 +35,7 @@ def _build_app() -> FastAPI:
                     "description": "Classify support issues",
                     "tags": ["support"],
                 },
-            ]
+            ],
         )
         .with_capabilities(streaming=True, push_notifications=True, extended_card=True)
         .with_bearer_auth()
@@ -56,7 +56,8 @@ def _build_app() -> FastAPI:
 async def test_well_known_discovery_exposes_skills_and_capabilities() -> None:
     app = _build_app()
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
     ) as http:
         response = await http.get("/.well-known/agent.json")
         assert response.status_code == 200
@@ -77,7 +78,8 @@ async def test_well_known_discovery_exposes_skills_and_capabilities() -> None:
 async def test_jsonrpc_agent_card_matches_well_known_discovery() -> None:
     app = _build_app()
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
     ) as http:
         rpc_payload: dict[str, Any] = {
             "jsonrpc": "2.0",

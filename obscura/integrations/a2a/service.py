@@ -1,5 +1,4 @@
-"""
-obscura.a2a.service — Protocol-agnostic A2A business logic.
+"""obscura.a2a.service — Protocol-agnostic A2A business logic.
 
 The ``A2AService`` is the core: it receives method calls from any
 transport (JSON-RPC, REST, SSE, gRPC) and orchestrates task creation,
@@ -11,12 +10,13 @@ Transports are thin adapters that delegate here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
-from typing import Any, AsyncIterator, Callable, Awaitable
+from typing import TYPE_CHECKING, Any
 
+from obscura.core.types import AgentEvent, AgentEventKind, ToolCallInfo
 from obscura.integrations.a2a.event_mapper import EventMapper
-from obscura.integrations.a2a.store import TaskStore
 from obscura.integrations.a2a.types import (
     A2AMessage,
     AgentCard,
@@ -27,7 +27,11 @@ from obscura.integrations.a2a.types import (
     TaskStatusUpdateEvent,
     TextPart,
 )
-from obscura.core.types import AgentEvent, AgentEventKind, ToolCallInfo
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from obscura.integrations.a2a.store import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,7 @@ class A2AService:
         Model backend to use when spawning agents (default: ``"copilot"``).
     agent_system_prompt:
         System prompt for spawned agents.
+
     """
 
     def __init__(
@@ -73,7 +78,8 @@ class A2AService:
 
         # Pending confirmations: task_id → (Event, result dict)
         self._pending_confirmations: dict[
-            str, tuple[asyncio.Event, dict[str, bool]]
+            str,
+            tuple[asyncio.Event, dict[str, bool]],
         ] = {}
 
         # Context → agent mapping for multi-turn conversations
@@ -129,9 +135,8 @@ class A2AService:
             await self._run_agent_blocking(task)
             refreshed = await self._store.get_task(task.id)
             return refreshed or task
-        else:
-            self._run_agent_background(task)
-            return task
+        self._run_agent_background(task)
+        return task
 
     # ------------------------------------------------------------------
     # message/stream — streaming request
@@ -173,7 +178,7 @@ class A2AService:
                         continue
                     yield a2a_event
         except Exception as e:
-            logger.error("Agent execution failed for task %s: %s", task.id, e)
+            logger.exception("Agent execution failed for task %s: %s", task.id, e)
             await self._store.transition(task.id, TaskState.FAILED)
             yield mapper.status_event(TaskState.FAILED, final=True)
 
@@ -198,7 +203,10 @@ class A2AService:
     ) -> tuple[list[Task], str | None]:
         """List tasks with optional filtering and pagination."""
         return await self._store.list_tasks(
-            context_id=context_id, state=state, cursor=cursor, limit=limit
+            context_id=context_id,
+            state=state,
+            cursor=cursor,
+            limit=limit,
         )
 
     # ------------------------------------------------------------------
@@ -231,7 +239,8 @@ class A2AService:
     # ------------------------------------------------------------------
 
     def _make_on_confirm(
-        self, task_id: str
+        self,
+        task_id: str,
     ) -> Callable[[ToolCallInfo], Awaitable[bool]]:
         """Create an on_confirm callback that bridges to A2A INPUT_REQUIRED.
 
@@ -252,12 +261,14 @@ class A2AService:
                 messageId=f"confirm-{uuid.uuid4().hex[:8]}",
                 parts=[
                     TextPart(
-                        text=f"Approve tool call: {tool_call.name}({tool_call.input})"
-                    )
+                        text=f"Approve tool call: {tool_call.name}({tool_call.input})",
+                    ),
                 ],
             )
             await self._store.transition(
-                task_id, TaskState.INPUT_REQUIRED, message=confirm_msg
+                task_id,
+                TaskState.INPUT_REQUIRED,
+                message=confirm_msg,
             )
 
             # Publish update for streaming subscribers
@@ -331,16 +342,12 @@ class A2AService:
             await self._store.transition(task.id, TaskState.COMPLETED)
 
         except asyncio.CancelledError:
-            try:
+            with contextlib.suppress(Exception):
                 await self._store.transition(task.id, TaskState.CANCELED)
-            except Exception:
-                pass
         except Exception as e:
-            logger.error("Agent execution failed for task %s: %s", task.id, e)
-            try:
+            logger.exception("Agent execution failed for task %s: %s", task.id, e)
+            with contextlib.suppress(Exception):
                 await self._store.transition(task.id, TaskState.FAILED)
-            except Exception:
-                pass
 
     def _run_agent_background(self, task: Task) -> None:
         """Start agent execution as a background asyncio task."""

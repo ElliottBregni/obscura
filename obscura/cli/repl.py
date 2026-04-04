@@ -5,28 +5,39 @@ Extracted from cli/__init__.py (Fix 7: god-module decomposition).
 
 from __future__ import annotations
 
+import contextlib
 import time
-from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from obscura.cli import trace as trace_mod
 from obscura.cli.commands import (
-    REPLContext,
     _FILE_WRITE_TOOLS,
+    REPLContext,
     cmd_compact,
     estimate_effective_context_tokens,
 )
-from obscura.cli.render import StreamRenderer, console
-from obscura.cli import trace as trace_mod
+from obscura.cli.render import console
+from obscura.cli.renderer import create_renderer
 from obscura.cli.vector_memory_bridge import auto_save_turn, search_relevant_context
 from obscura.core.types import AgentEventKind
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
-async def _cli_confirm(ctx: REPLContext, tool_name: str, tool_input: dict[str, Any]) -> bool:
+
+async def _cli_confirm(
+    ctx: REPLContext,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> bool:
     if tool_name in ctx.confirm_always:
         return True
     from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
-    result = await confirm_tool(ToolConfirmRequest(tool_name=tool_name, tool_input=tool_input))
+
+    result = await confirm_tool(
+        ToolConfirmRequest(tool_name=tool_name, tool_input=tool_input),
+    )
     if result.action == "always_allow":
         ctx.confirm_always.add(tool_name)
         return True
@@ -42,7 +53,10 @@ def _track_file_event(event_kind: AgentEventKind, ctx: REPLContext, ev: Any) -> 
             except (FileNotFoundError, OSError):
                 before = ""
             ctx._pending_file_reads[ev.tool_use_id] = (path, before)
-    elif ev.kind == AgentEventKind.TOOL_RESULT and ev.tool_use_id in ctx._pending_file_reads:
+    elif (
+        ev.kind == AgentEventKind.TOOL_RESULT
+        and ev.tool_use_id in ctx._pending_file_reads
+    ):
         path, before = ctx._pending_file_reads.pop(ev.tool_use_id)
         try:
             after = Path(path).read_text()
@@ -57,10 +71,12 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     if mm is None:
         return
     from obscura.cli.app.modes import TUIMode
+
     if mm.current != TUIMode.PLAN or not response_text.strip():
         return
     from obscura.cli.app.modes import Plan
     from obscura.cli.render import render_plan
+
     plan = Plan.parse(response_text)
     if plan.steps:
         mm.active_plan = plan
@@ -74,7 +90,9 @@ async def send_message(
     streaming_status: Any | None = None,
 ) -> str:
     """Send a chat message and stream the response. Returns accumulated assistant text."""
-    from obscura.cli.bootstrap import _run_inline_agent_from_mention  # type: ignore[reportPrivateUsage]
+    from obscura.cli.bootstrap import (
+        _run_inline_agent_from_mention,  # type: ignore[reportPrivateUsage]
+    )
     from obscura.cli.render import set_active_renderer
     from obscura.tools.system import update_token_usage
 
@@ -85,21 +103,28 @@ async def send_message(
             ctx.message_history.append(("assistant", inline_agent_response))
         if ctx.vector_store is not None and inline_agent_response:
             turn_num = len([m for m in ctx.message_history if m[0] == "user"])
-            auto_save_turn(ctx.vector_store, ctx.session_id, text, inline_agent_response, turn_number=turn_num)
+            auto_save_turn(
+                ctx.vector_store,
+                ctx.session_id,
+                text,
+                inline_agent_response,
+                turn_number=turn_num,
+            )
         return inline_agent_response
 
-    renderer = StreamRenderer(streaming_status=streaming_status)
-    try:
+    renderer = create_renderer(streaming_status=streaming_status)
+    with contextlib.suppress(Exception):
         set_active_renderer(renderer)
-    except Exception:
-        pass
     accumulated: list[str] = []
 
     from obscura.core.types import ToolCallInfo
+
     confirm_cb: Callable[[ToolCallInfo], Coroutine[Any, Any, bool]] | None = None
     if ctx.confirm_enabled:
+
         async def _confirm_cb_impl(tc: ToolCallInfo) -> bool:
             return await _cli_confirm(ctx, tc.name, tc.input)
+
         confirm_cb = _confirm_cb_impl
 
     _context_window = ctx.client.context_window
@@ -115,8 +140,15 @@ async def send_message(
         if vm_context:
             augmented_text = f"{vm_context}\n\n---\n\n{augmented_text}"
 
-    _pre_tokens = estimate_effective_context_tokens(ctx, pending_user_text=augmented_text)
-    update_token_usage(input_tokens=_pre_tokens, context_window=_context_window, compact_threshold=_compact_threshold)
+    _pre_tokens = estimate_effective_context_tokens(
+        ctx,
+        pending_user_text=augmented_text,
+    )
+    update_token_usage(
+        input_tokens=_pre_tokens,
+        context_window=_context_window,
+        compact_threshold=_compact_threshold,
+    )
     _stream_output_chars = 0
     _stream_output_tokens_sent = 0
     _last_usage_push = 0.0
@@ -130,21 +162,35 @@ async def send_message(
                 return
             if now - _last_usage_push < 0.75:
                 return
-        update_token_usage(input_tokens=_pre_tokens, output_tokens=est,
-                           context_window=_context_window, compact_threshold=_compact_threshold)
+        update_token_usage(
+            input_tokens=_pre_tokens,
+            output_tokens=est,
+            context_window=_context_window,
+            compact_threshold=_compact_threshold,
+        )
         _stream_output_tokens_sent = est
         _last_usage_push = now
 
     if _pre_tokens > _compact_threshold:
-        console.print(f"[yellow]⚡ Auto-compacting context (~{_pre_tokens:,} tokens, 60% of {_context_window:,}) …[/]")
+        console.print(
+            f"[yellow]⚡ Auto-compacting context (~{_pre_tokens:,} tokens, 60% of {_context_window:,}) …[/]",
+        )
         await cmd_compact("6", ctx)
 
-    async def _stream_with_retry(context_retry_used: bool = False, dead_session_retry_used: bool = False) -> list[str]:
+    async def _stream_with_retry(
+        context_retry_used: bool = False,
+        dead_session_retry_used: bool = False,
+    ) -> list[str]:
         nonlocal _stream_output_chars
         _buf: list[str] = []
         _s = ctx.client.run_loop(
-            augmented_text, max_turns=ctx.max_turns, event_store=ctx.store,
-            session_id=ctx.session_id, auto_complete=False, on_confirm=confirm_cb, **loop_kwargs,
+            augmented_text,
+            max_turns=ctx.max_turns,
+            event_store=ctx.store,
+            session_id=ctx.session_id,
+            auto_complete=False,
+            on_confirm=confirm_cb,
+            **loop_kwargs,
         )
         try:
             async for event in _s:
@@ -157,8 +203,14 @@ async def send_message(
                         preview = str(event.tool_result)[:200]
                     elif getattr(event, "tool_input", None):
                         preview = str(event.tool_input)[:200]
-                    tool_names = [event.tool_name] if getattr(event, "tool_name", None) else []
-                    trace_mod.append_event(event.kind.name, preview=preview, tool_names=tool_names)
+                    tool_names = (
+                        [event.tool_name] if getattr(event, "tool_name", None) else []
+                    )
+                    trace_mod.append_event(
+                        event.kind.name,
+                        preview=preview,
+                        tool_names=tool_names,
+                    )
                 except Exception:
                     pass
                 if event.kind == AgentEventKind.TEXT_DELTA:
@@ -170,22 +222,52 @@ async def send_message(
             pass
         except Exception as exc:
             _err = str(exc).lower()
-            _ctx = any(kw in _err for kw in ("prompt is too long", "context window", "too many tokens", "maximum context length", "request too large"))
-            _dead = any(kw in _err for kw in ("dead process", "cannot send message", "can't send message", "cannot write to terminated", "write to terminated process", "terminated process", "exit code", "session is closed", "session closed"))
+            _ctx = any(
+                kw in _err
+                for kw in (
+                    "prompt is too long",
+                    "context window",
+                    "too many tokens",
+                    "maximum context length",
+                    "request too large",
+                )
+            )
+            _dead = any(
+                kw in _err
+                for kw in (
+                    "dead process",
+                    "cannot send message",
+                    "can't send message",
+                    "cannot write to terminated",
+                    "write to terminated process",
+                    "terminated process",
+                    "exit code",
+                    "session is closed",
+                    "session closed",
+                )
+            )
             if _ctx and not context_retry_used:
-                console.print("[red]⚠ Context limit reached — aggressive compact and retry…[/]")
+                console.print(
+                    "[red]⚠ Context limit reached — aggressive compact and retry…[/]",
+                )
                 await cmd_compact("2", ctx)
-                return await _stream_with_retry(context_retry_used=True, dead_session_retry_used=dead_session_retry_used)
+                return await _stream_with_retry(
+                    context_retry_used=True,
+                    dead_session_retry_used=dead_session_retry_used,
+                )
             if _dead and not dead_session_retry_used:
-                console.print("[yellow]⚠ Backend session became stale — recreating and retrying once…[/]")
+                console.print(
+                    "[yellow]⚠ Backend session became stale — recreating and retrying once…[/]",
+                )
                 try:
                     await ctx.client.reset_session()
                 except Exception:
-                    try:
+                    with contextlib.suppress(Exception):
                         await ctx.recreate_client(ctx.backend, ctx.model)
-                    except Exception:
-                        pass
-                return await _stream_with_retry(context_retry_used=context_retry_used, dead_session_retry_used=True)
+                return await _stream_with_retry(
+                    context_retry_used=context_retry_used,
+                    dead_session_retry_used=True,
+                )
             raise
         return _buf
 
@@ -195,10 +277,8 @@ async def send_message(
         pass
     finally:
         renderer.finish()
-        try:
+        with contextlib.suppress(Exception):
             set_active_renderer(None)
-        except Exception:
-            pass
 
     console.print()
     response_text = "".join(accumulated)
@@ -207,31 +287,52 @@ async def send_message(
         ctx.message_history.append(("assistant", response_text))
     if ctx.vector_store is not None and response_text:
         turn_num = len([m for m in ctx.message_history if m[0] == "user"])
-        auto_save_turn(ctx.vector_store, ctx.session_id, text, response_text, turn_number=turn_num)
+        auto_save_turn(
+            ctx.vector_store,
+            ctx.session_id,
+            text,
+            response_text,
+            turn_number=turn_num,
+        )
 
     _push_stream_token_usage(force=True)
     _post_tokens = estimate_effective_context_tokens(ctx)
-    update_token_usage(input_tokens=_post_tokens, output_tokens=len(response_text) // 4,
-                       context_window=_context_window, compact_threshold=_compact_threshold)
+    update_token_usage(
+        input_tokens=_post_tokens,
+        output_tokens=len(response_text) // 4,
+        context_window=_context_window,
+        compact_threshold=_compact_threshold,
+    )
     if _warn_threshold < _post_tokens <= _compact_threshold:
-        console.print(f"[dim yellow]  Context: ~{_post_tokens:,} tokens ({int(_post_tokens/_context_window*100)}% of {_context_window:,}). Auto-compact at {_compact_threshold:,} (60%).[/]")
+        console.print(
+            f"[dim yellow]  Context: ~{_post_tokens:,} tokens ({int(_post_tokens / _context_window * 100)}% of {_context_window:,}). Auto-compact at {_compact_threshold:,} (60%).[/]",
+        )
 
     _maybe_parse_plan(response_text, ctx)
 
     # Skip auto-detection if ask_user tool already presented a widget this turn.
     try:
-        from obscura.tools.system import was_ask_user_called, reset_ask_user_called
+        from obscura.tools.system import reset_ask_user_called, was_ask_user_called
 
         _tool_asked = was_ask_user_called()
         reset_ask_user_called()
 
         if not _tool_asked:
-            from obscura.cli.widgets import detect_question_choices, present_detected_choices
+            from obscura.cli.widgets import (
+                detect_question_choices,
+                present_detected_choices,
+            )
+
             detected = detect_question_choices(response_text)
             if detected is not None:
                 selection = await present_detected_choices(detected)
                 if selection is not None:
-                    return await send_message(ctx, selection, loop_kwargs, streaming_status)
+                    return await send_message(
+                        ctx,
+                        selection,
+                        loop_kwargs,
+                        streaming_status,
+                    )
     except Exception:
         pass
 

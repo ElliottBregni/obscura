@@ -1,5 +1,4 @@
-"""
-obscura.voice.capture — Audio capture via SoX or ALSA.
+"""obscura.voice.capture — Audio capture via SoX or ALSA.
 
 Records raw PCM audio (16kHz, 16-bit signed, mono) from the system
 microphone using whichever backend is available.
@@ -12,6 +11,7 @@ Priority:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import platform
 import shutil
@@ -74,7 +74,9 @@ def check_voice_dependencies() -> VoiceDependency:
         available=False,
         backend="none",
         binary_path="",
-        missing=["sox (rec)" if system == "Darwin" else "sox (rec) or alsa-utils (arecord)"],
+        missing=[
+            "sox (rec)" if system == "Darwin" else "sox (rec) or alsa-utils (arecord)",
+        ],
         install_hint=hint,
     )
 
@@ -100,7 +102,8 @@ class AudioCapture:
         """Start recording from the microphone."""
         deps = check_voice_dependencies()
         if not deps.available:
-            raise RuntimeError(f"No audio capture backend. {deps.install_hint}")
+            msg = f"No audio capture backend. {deps.install_hint}"
+            raise RuntimeError(msg)
 
         self._backend = deps.backend
         self._chunks = []
@@ -108,22 +111,32 @@ class AudioCapture:
         if self._backend == "sox":
             cmd = [
                 deps.binary_path,
-                "-q",                   # quiet
-                "--buffer", "1024",     # force frequent stdout flush
-                "-t", "raw",           # raw PCM output
-                "-r", str(SAMPLE_RATE),
-                "-e", ENCODING,
-                "-b", str(SAMPLE_WIDTH),
-                "-c", str(CHANNELS),
-                "-",                    # stdout
+                "-q",  # quiet
+                "--buffer",
+                "1024",  # force frequent stdout flush
+                "-t",
+                "raw",  # raw PCM output
+                "-r",
+                str(SAMPLE_RATE),
+                "-e",
+                ENCODING,
+                "-b",
+                str(SAMPLE_WIDTH),
+                "-c",
+                str(CHANNELS),
+                "-",  # stdout
             ]
         else:  # arecord
             cmd = [
                 deps.binary_path,
-                "-f", "S16_LE",
-                "-r", str(SAMPLE_RATE),
-                "-c", str(CHANNELS),
-                "-t", "raw",
+                "-f",
+                "S16_LE",
+                "-r",
+                str(SAMPLE_RATE),
+                "-c",
+                str(CHANNELS),
+                "-t",
+                "raw",
                 "-q",
                 "-",
             ]
@@ -160,24 +173,26 @@ class AudioCapture:
         try:
             self._process.terminate()
             await asyncio.wait_for(self._process.wait(), timeout=2.0)
-        except (asyncio.TimeoutError, ProcessLookupError):
+        except (TimeoutError, ProcessLookupError):
             self._process.kill()
             await self._process.wait()
 
         # Cancel reader and collect remaining data.
         if self._reader_task is not None:
             self._reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
-            except asyncio.CancelledError:
-                pass
 
         self._process = None
         self._reader_task = None
 
         audio = b"".join(self._chunks)
         self._chunks = []
-        logger.debug("Audio capture stopped: %d bytes (%.1fs)", len(audio), len(audio) / (SAMPLE_RATE * 2))
+        logger.debug(
+            "Audio capture stopped: %d bytes (%.1fs)",
+            len(audio),
+            len(audio) / (SAMPLE_RATE * 2),
+        )
         return audio
 
     @property

@@ -43,6 +43,7 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, cast
 
 from obscura.core.tools import ToolRegistry
@@ -55,6 +56,7 @@ from obscura.core.types import (
     Message,
     Role,
     StreamChunk,
+    StreamMetadata,
     ToolCallContext,
     ToolCallEnvelope,
     ToolCallInfo,
@@ -87,6 +89,79 @@ PARAMETER_ALIASES: dict[str, dict[str, str]] = {
         "filepath": "path",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Immutable per-turn state (Fix #1)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TurnState:
+    """Immutable snapshot of per-turn loop state.
+
+    Each loop iteration produces a new ``TurnState`` instead of mutating
+    local variables.  Use :meth:`replace` to derive a new instance with
+    updated fields.
+    """
+
+    turn: int = 0
+    turn_text: str = ""
+    accumulated_text: str = ""
+    accumulated_chars: int = 0
+    tool_calls: tuple[ToolCallInfo, ...] = ()
+    current_tool_name: str = ""
+    current_tool_input_json: str = ""
+    current_tool_raw: Any = None
+    inside_tool_accumulation: bool = False
+    emitted_keys: frozenset[str] = frozenset()
+    messages: tuple[Message, ...] = ()
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def replace(self, **changes: Any) -> TurnState:
+        """Return a new ``TurnState`` with the given fields replaced."""
+        current = {
+            "turn": self.turn,
+            "turn_text": self.turn_text,
+            "accumulated_text": self.accumulated_text,
+            "accumulated_chars": self.accumulated_chars,
+            "tool_calls": self.tool_calls,
+            "current_tool_name": self.current_tool_name,
+            "current_tool_input_json": self.current_tool_input_json,
+            "current_tool_raw": self.current_tool_raw,
+            "inside_tool_accumulation": self.inside_tool_accumulation,
+            "emitted_keys": self.emitted_keys,
+            "messages": self.messages,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }
+        current.update(changes)
+        return TurnState(**current)
+
+    def add_tool_call(self, tc: ToolCallInfo) -> TurnState:
+        """Return a new state with *tc* appended to tool_calls."""
+        return self.replace(tool_calls=self.tool_calls + (tc,))
+
+    def add_emitted_key(self, key: str) -> TurnState:
+        """Return a new state with *key* added to emitted_keys."""
+        return self.replace(emitted_keys=self.emitted_keys | {key})
+
+
+# ---------------------------------------------------------------------------
+# Per-turn metrics (Fix #6 -- observability)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TurnMetrics:
+    """Token usage and timing for a single turn."""
+
+    turn: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    tool_count: int = 0
+    accumulated_chars: int = 0
 
 
 # Type alias for confirmation callbacks.
@@ -197,7 +272,7 @@ class AgentLoop:
         event: AgentEvent,
         session_id: str | None,
     ) -> AgentEvent | None:
-        """Run before-hooks → persist → return event (or None if suppressed).
+        """Run before-hooks -> persist -> return event (or None if suppressed).
 
         After-hooks run separately via :meth:`_post_emit`.
         """
@@ -349,46 +424,61 @@ class AgentLoop:
         stream_kwargs: dict[str, Any],
         initial_messages: list | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        """Core loop body shared by :meth:`run` and :meth:`resume`."""
-        turn: int = start_turn
+        """Core loop body shared by :meth:`run` and :meth:`resume`.
+
+        Uses an immutable :class:`TurnState` -- each iteration produces a
+        new state instead of mutating locals.
+        """
+        state = TurnState(
+            turn=start_turn,
+            accumulated_text=accumulated_text,
+        )
         current_prompt: str = prompt
         kwargs: dict[str, Any] = stream_kwargs
         _prev_event: AgentEvent | None = None
 
-        while turn < self._max_turns:
-            turn += 1
+        while state.turn < self._max_turns:
+            state = state.replace(turn=state.turn + 1)
+
+            # Fresh per-turn state (carry over accumulated_text/chars/tokens)
+            state = state.replace(
+                turn_text="",
+                tool_calls=(),
+                current_tool_name="",
+                current_tool_input_json="",
+                current_tool_raw=None,
+                inside_tool_accumulation=False,
+                emitted_keys=frozenset(),
+                input_tokens=0,
+                output_tokens=0,
+            )
 
             # Run post-hook for the previous event before emitting next
             if _prev_event is not None:
                 await self._post_emit(_prev_event)
                 _prev_event = None
 
-            turn_start = AgentEvent(kind=AgentEventKind.TURN_START, turn=turn)
+            turn_start = AgentEvent(kind=AgentEventKind.TURN_START, turn=state.turn)
             emitted = await self._emit(turn_start, session_id)
             if emitted is not None:
                 yield emitted
                 _prev_event = emitted
 
-            tool_calls: list[ToolCallInfo] = []
-            turn_text: str = ""
-            _current_tool_name: str = ""
-            _current_tool_input_json: str = ""
-            _current_tool_raw: Any = None
-            _seen_tool_use: bool = False
-            _emitted_tool_keys: set[str] = set()  # dedup event emissions
-            # Claude SDK executes tools internally via MCP — collect
-            # results from the stream so we don't re-execute them.
-            _sdk_tool_results: list[StreamChunk] = []
+            # Mutable list used by _flush_pending_tool (passed by reference)
+            _tool_calls_mut: list[ToolCallInfo] = []
+            _emitted_keys_mut: set[str] = set()
 
             try:
                 async for chunk in self._call_stream(current_prompt, kwargs):
-                    # Suppress text generated after a tool_use block in the
-                    # same turn — models often hallucinate tool outcomes
-                    # (e.g. "permission denied") before seeing the real result.
-                    if chunk.kind == ChunkKind.TEXT_DELTA and _seen_tool_use:
+                    # Fix #4: suppress text only inside tool accumulation.
+                    # Text between TOOL_USE_START and TOOL_USE_END is dropped
+                    # (hallucinated tool output).  Text after TOOL_USE_END but
+                    # before the next TOOL_USE_START is kept (legitimate
+                    # interleaved explanation).
+                    if chunk.kind == ChunkKind.TEXT_DELTA and state.inside_tool_accumulation:
                         continue
 
-                    event = self._map_chunk(chunk, turn)
+                    event = self._map_chunk(chunk, state.turn)
                     if event is not None:
                         # Run post-hook for previous, then emit new
                         if _prev_event is not None:
@@ -401,54 +491,88 @@ class AgentLoop:
 
                     # Accumulate text
                     if chunk.kind == ChunkKind.TEXT_DELTA:
-                        turn_text += chunk.text
+                        state = state.replace(turn_text=state.turn_text + chunk.text)
 
                     # Collect tool calls
                     if chunk.kind == ChunkKind.TOOL_USE_START:
-                        _seen_tool_use = True
+                        state = state.replace(inside_tool_accumulation=True)
                         # Flush previous tool if any (fallback for backends
                         # that don't emit TOOL_USE_END)
-                        if _current_tool_name:
+                        if state.current_tool_name:
                             _to_yield, _prev_event = await self._flush_pending_tool(
-                                _current_tool_name, _current_tool_input_json, _current_tool_raw,
-                                turn=turn, emitted_keys=_emitted_tool_keys,
-                                tool_calls=tool_calls, prev_event=_prev_event,
+                                state.current_tool_name,
+                                state.current_tool_input_json,
+                                state.current_tool_raw,
+                                turn=state.turn,
+                                emitted_keys=_emitted_keys_mut,
+                                tool_calls=_tool_calls_mut,
+                                prev_event=_prev_event,
                                 session_id=session_id,
                             )
                             if _to_yield is not None:
                                 yield _to_yield
-                        _current_tool_name = chunk.tool_name
-                        _current_tool_input_json = ""
-                        _current_tool_raw = chunk.raw
+                        state = state.replace(
+                            current_tool_name=chunk.tool_name,
+                            current_tool_input_json="",
+                            current_tool_raw=chunk.raw,
+                        )
 
                     if chunk.kind == ChunkKind.TOOL_USE_DELTA:
-                        _current_tool_input_json += chunk.tool_input_delta
+                        state = state.replace(
+                            current_tool_input_json=(
+                                state.current_tool_input_json + chunk.tool_input_delta
+                            ),
+                        )
 
-                    # Collect SDK-executed tool results (Claude backend)
+                    # Fix #2: SDK tool results are logged but not collected
+                    # for re-use.  All tools are executed locally.
                     if chunk.kind == ChunkKind.TOOL_RESULT:
-                        _sdk_tool_results.append(chunk)
+                        logger.debug(
+                            "SDK tool result received (ignored): %s",
+                            chunk.text[:120] if chunk.text else "",
+                        )
 
-                    # TOOL_USE_END — flush accumulated tool immediately
+                    # TOOL_USE_END -- flush accumulated tool immediately
                     if chunk.kind == ChunkKind.TOOL_USE_END:
-                        if _current_tool_name:
+                        if state.current_tool_name:
                             _to_yield, _prev_event = await self._flush_pending_tool(
-                                _current_tool_name, _current_tool_input_json, _current_tool_raw,
-                                turn=turn, emitted_keys=_emitted_tool_keys,
-                                tool_calls=tool_calls, prev_event=_prev_event,
+                                state.current_tool_name,
+                                state.current_tool_input_json,
+                                state.current_tool_raw,
+                                turn=state.turn,
+                                emitted_keys=_emitted_keys_mut,
+                                tool_calls=_tool_calls_mut,
+                                prev_event=_prev_event,
                                 session_id=session_id,
                             )
                             if _to_yield is not None:
                                 yield _to_yield
-                            _current_tool_name = ""
-                            _current_tool_input_json = ""
-                            _current_tool_raw = None
+                            state = state.replace(
+                                current_tool_name="",
+                                current_tool_input_json="",
+                                current_tool_raw=None,
+                                inside_tool_accumulation=False,
+                            )
+
+                    # Fix #6: extract per-turn token usage from DONE metadata
+                    if chunk.kind == ChunkKind.DONE and chunk.metadata is not None:
+                        usage = chunk.metadata.usage
+                        if usage is not None:
+                            state = state.replace(
+                                input_tokens=usage.get("input_tokens", 0),
+                                output_tokens=usage.get("output_tokens", 0),
+                            )
 
                 # Flush last tool call (fallback if no TOOL_USE_END received)
-                if _current_tool_name:
+                if state.current_tool_name:
                     _to_yield, _prev_event = await self._flush_pending_tool(
-                        _current_tool_name, _current_tool_input_json, _current_tool_raw,
-                        turn=turn, emitted_keys=_emitted_tool_keys,
-                        tool_calls=tool_calls, prev_event=_prev_event,
+                        state.current_tool_name,
+                        state.current_tool_input_json,
+                        state.current_tool_raw,
+                        turn=state.turn,
+                        emitted_keys=_emitted_keys_mut,
+                        tool_calls=_tool_calls_mut,
+                        prev_event=_prev_event,
                         session_id=session_id,
                     )
                     if _to_yield is not None:
@@ -458,7 +582,7 @@ class AgentLoop:
                 err_event = AgentEvent(
                     kind=AgentEventKind.ERROR,
                     text=str(exc),
-                    turn=turn,
+                    turn=state.turn,
                     raw=exc,
                 )
                 if _prev_event is not None:
@@ -477,32 +601,54 @@ class AgentLoop:
                         logger.debug("Failed to mark session failed", exc_info=True)
                 return
 
-            accumulated_text += turn_text
+            # Sync mutable tool_calls back into immutable state
+            state = state.replace(
+                tool_calls=tuple(_tool_calls_mut),
+                emitted_keys=frozenset(_emitted_keys_mut),
+                accumulated_text=state.accumulated_text + state.turn_text,
+            )
 
             # Emit TURN_COMPLETE
             if _prev_event is not None:
                 await self._post_emit(_prev_event)
                 _prev_event = None
             tc_event = AgentEvent(
-                kind=AgentEventKind.TURN_COMPLETE, turn=turn, text=turn_text
+                kind=AgentEventKind.TURN_COMPLETE, turn=state.turn, text=state.turn_text
             )
             emitted = await self._emit(tc_event, session_id)
             if emitted is not None:
                 yield emitted
                 _prev_event = emitted
 
+            # Fix #6: emit TurnMetrics for observability
+            metrics = TurnMetrics(
+                turn=state.turn,
+                input_tokens=state.input_tokens,
+                output_tokens=state.output_tokens,
+                tool_count=len(state.tool_calls),
+                accumulated_chars=len(state.accumulated_text),
+            )
+            logger.info(
+                "Turn %d metrics: in=%d out=%d tools=%d chars=%d",
+                metrics.turn,
+                metrics.input_tokens,
+                metrics.output_tokens,
+                metrics.tool_count,
+                metrics.accumulated_chars,
+            )
+
             # ----------------------------------------------------------
             # Turn boundary: check pause / user input before next turn
             # ----------------------------------------------------------
 
-            # Pause check — current turn completed, pause before next
+            # Pause check -- current turn completed, pause before next
             if self._should_pause:
                 if _prev_event is not None:
                     await self._post_emit(_prev_event)
                     _prev_event = None
                 pause_event = AgentEvent(
                     kind=AgentEventKind.SESSION_PAUSED,
-                    turn=turn,
+                    turn=state.turn,
                     text="Session paused at turn boundary",
                 )
                 emitted = await self._emit(pause_event, session_id)
@@ -519,7 +665,7 @@ class AgentLoop:
                         logger.debug("Failed to mark session paused", exc_info=True)
                 return
 
-            # Mid-run user input — drain queue, use as next prompt
+            # Mid-run user input -- drain queue, use as next prompt
             if not self._user_input_queue.empty():
                 if _prev_event is not None:
                     await self._post_emit(_prev_event)
@@ -527,7 +673,7 @@ class AgentLoop:
                 user_text = self._user_input_queue.get_nowait()
                 ui_event = AgentEvent(
                     kind=AgentEventKind.USER_INPUT,
-                    turn=turn,
+                    turn=state.turn,
                     text=user_text,
                 )
                 emitted = await self._emit(ui_event, session_id)
@@ -536,22 +682,22 @@ class AgentLoop:
                     _prev_event = emitted
                 # Override the next prompt with the user's input
                 current_prompt = user_text
-                # Skip tool execution for this turn — go straight to
+                # Skip tool execution for this turn -- go straight to
                 # next model call with the injected prompt.
                 # Remove "messages" from kwargs so the backend doesn't
                 # replay stale tool results.
                 kwargs.pop("messages", None)
                 continue
 
-            # No tool calls → model is done
-            if not tool_calls:
+            # No tool calls -> model is done
+            if not state.tool_calls:
                 if _prev_event is not None:
                     await self._post_emit(_prev_event)
                     _prev_event = None
                 done_event = AgentEvent(
                     kind=AgentEventKind.AGENT_DONE,
-                    turn=turn,
-                    text=accumulated_text,
+                    turn=state.turn,
+                    text=state.accumulated_text,
                 )
                 emitted = await self._emit(done_event, session_id)
                 if emitted is not None:
@@ -567,19 +713,10 @@ class AgentLoop:
                         logger.debug("Failed to mark session completed", exc_info=True)
                 return
 
-            # Execute tool calls and build results for next turn.
-            # When Claude SDK already executed tools via its MCP server,
-            # use the results from the stream instead of re-executing.
-            _sdk_executed = (
-                self._backend_name == "claude"
-                and len(_sdk_tool_results) >= len(tool_calls)
-            )
-            if _sdk_executed:
-                tool_results = self._build_results_from_sdk(
-                    tool_calls, _sdk_tool_results,
-                )
-            else:
-                tool_results = await self._execute_tools(tool_calls)
+            # Fix #2: Always execute tools locally -- backend is a pure
+            # LLM interface.  No SDK/local execution fork.
+            tool_calls_list = list(state.tool_calls)
+            tool_results = await self._execute_tools(tool_calls_list)
 
             # Yield tool result events
             for result in tool_results:
@@ -592,7 +729,7 @@ class AgentLoop:
                     tool_use_id=result.tool_use_id,
                     tool_result=self._render_tool_result_text(result),
                     is_error=result.status == "error",
-                    turn=turn,
+                    turn=state.turn,
                     raw=result,
                 )
                 emitted = await self._emit(tr_event, session_id)
@@ -600,14 +737,14 @@ class AgentLoop:
                     yield emitted
                     _prev_event = emitted
 
-            # Build structured messages for backends that support it,
-            # with plain-text fallback as the prompt.
+            # Fix #5: Only use structured messages -- no dual prompt format.
+            # Build structured messages and use an empty continuation prompt.
             structured = self._build_structured_tool_messages(
-                tool_calls,
+                tool_calls_list,
                 tool_results,
-                turn_text,
+                state.turn_text,
             )
-            current_prompt = self._format_tool_results_envelopes(tool_results)
+            current_prompt = ""
 
             # Pass structured messages via kwargs so backends can
             # persist full tool call/result history.  Merge rather
@@ -616,36 +753,60 @@ class AgentLoop:
 
             # Context budget: track accumulated chars and compact when
             # the internal message list grows too large.
+            # Fix #6: prefer token-based budget when token usage is available.
             if self._context_budget > 0:
-                turn_chars = sum(
-                    len(self._render_tool_result_text(r)) for r in tool_results
-                ) + len(turn_text)
-                self._accumulated_chars += turn_chars
-                if self._accumulated_chars > self._context_budget:
-                    kwargs, dropped, freed = self._compact_messages(kwargs)
-                    compact_event = AgentEvent(
-                        kind=AgentEventKind.CONTEXT_COMPACT,
-                        turn=turn,
-                        text=(
-                            f"Compacted {dropped} tool turns "
-                            f"({freed:,} chars freed)"
-                        ),
-                    )
-                    if _prev_event is not None:
-                        await self._post_emit(_prev_event)
-                        _prev_event = None
-                    emitted = await self._emit(compact_event, session_id)
-                    if emitted is not None:
-                        yield emitted
-                        _prev_event = emitted
+                if state.input_tokens > 0 or state.output_tokens > 0:
+                    # Token-based budget check (tokens are roughly 4 chars)
+                    total_tokens = state.input_tokens + state.output_tokens
+                    budget_tokens = self._context_budget // 4
+                    if total_tokens > budget_tokens:
+                        kwargs, dropped, freed = self._compact_messages(kwargs)
+                        compact_event = AgentEvent(
+                            kind=AgentEventKind.CONTEXT_COMPACT,
+                            turn=state.turn,
+                            text=(
+                                f"Compacted {dropped} tool turns "
+                                f"(~{total_tokens:,} tokens, {freed:,} chars freed)"
+                            ),
+                        )
+                        if _prev_event is not None:
+                            await self._post_emit(_prev_event)
+                            _prev_event = None
+                        emitted = await self._emit(compact_event, session_id)
+                        if emitted is not None:
+                            yield emitted
+                            _prev_event = emitted
+                else:
+                    # Legacy char-based compaction fallback
+                    turn_chars = sum(
+                        len(self._render_tool_result_text(r)) for r in tool_results
+                    ) + len(state.turn_text)
+                    self._accumulated_chars += turn_chars
+                    if self._accumulated_chars > self._context_budget:
+                        kwargs, dropped, freed = self._compact_messages(kwargs)
+                        compact_event = AgentEvent(
+                            kind=AgentEventKind.CONTEXT_COMPACT,
+                            turn=state.turn,
+                            text=(
+                                f"Compacted {dropped} tool turns "
+                                f"({freed:,} chars freed)"
+                            ),
+                        )
+                        if _prev_event is not None:
+                            await self._post_emit(_prev_event)
+                            _prev_event = None
+                        emitted = await self._emit(compact_event, session_id)
+                        if emitted is not None:
+                            yield emitted
+                            _prev_event = emitted
 
         # Hit max turns
         if _prev_event is not None:
             await self._post_emit(_prev_event)
         done_event = AgentEvent(
             kind=AgentEventKind.AGENT_DONE,
-            turn=turn,
-            text=accumulated_text,
+            turn=state.turn,
+            text=state.accumulated_text,
         )
         emitted = await self._emit(done_event, session_id)
         if emitted is not None:
@@ -773,48 +934,6 @@ class AgentLoop:
     # Tool execution
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _build_results_from_sdk(
-        tool_calls: list[ToolCallInfo],
-        sdk_chunks: list[StreamChunk],
-    ) -> list[ToolResultEnvelope]:
-        """Build ToolResultEnvelopes from SDK-executed TOOL_RESULT chunks.
-
-        The Claude SDK executes tools internally via its MCP server and
-        streams back ToolResultBlock chunks.  We pair them with our
-        collected tool_calls so the rest of the loop (event emission,
-        structured message building) works identically.
-        """
-        # Build a map from tool_use_id to the SDK result text.
-        sdk_by_id: dict[str, str] = {}
-        for chunk in sdk_chunks:
-            raw = chunk.raw
-            use_id = getattr(raw, "tool_use_id", "") if raw else ""
-            sdk_by_id[use_id] = chunk.text
-
-        results: list[ToolResultEnvelope] = []
-        for i, tc in enumerate(tool_calls):
-            # Match by tool_use_id first, fall back to positional order.
-            result_text = sdk_by_id.get(tc.tool_use_id)
-            if result_text is None and i < len(sdk_chunks):
-                result_text = sdk_chunks[i].text
-            if result_text is None:
-                result_text = ""
-            is_error = getattr(
-                sdk_chunks[i].raw if i < len(sdk_chunks) else None,
-                "is_error", False,
-            )
-            results.append(
-                ToolResultEnvelope(
-                    call_id=tc.tool_use_id,
-                    tool=tc.name,
-                    status="error" if is_error else "ok",
-                    result=result_text,
-                    tool_use_id=tc.tool_use_id,
-                )
-            )
-        return results
-
     async def _execute_tools(
         self,
         tool_calls: list[ToolCallInfo],
@@ -827,7 +946,7 @@ class AgentLoop:
         # Deduplicate: skip tool calls with identical name+input in the same
         # turn.  LLMs sometimes emit the same call twice.  Reuse the first
         # result so the model sees a consistent response for both call IDs.
-        seen_calls: dict[str, ToolResultEnvelope] = {}  # "name|input_json" → result
+        seen_calls: dict[str, ToolResultEnvelope] = {}  # "name|input_json" -> result
 
         for tc in tool_calls:
             dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
@@ -924,7 +1043,7 @@ class AgentLoop:
                 err = ToolExecutionError(
                     type=ToolErrorType.NOT_FOUND,
                     message=msg,
-                    # Retryable if we have suggestions — let the model self-correct.
+                    # Retryable if we have suggestions -- let the model self-correct.
                     # After 3+ failures, stop retrying (the hard-stop message above).
                     safe_to_retry=bool(matches) and count < 3,
                 )
@@ -966,7 +1085,7 @@ class AgentLoop:
                         )
                         continue
 
-                    # Tier-based enforcement removed — access control is handled
+                    # Tier-based enforcement removed -- access control is handled
                     # by ToolPolicy + CapabilityResolver + ToolBroker.
                     pass
                 except Exception:
@@ -1020,7 +1139,7 @@ class AgentLoop:
     async def _call_handler(spec: ToolSpec, inputs: dict[str, Any]) -> Any:
         """Call a tool handler (sync or async).
 
-        Automatically filters out kwargs the handler doesn't declare — e.g. a
+        Automatically filters out kwargs the handler doesn't declare -- e.g. a
         ``prompt`` param that Claude passes to ``web_fetch`` but other backends
         don't.  This gives cross-agent parity without requiring every tool to
         enumerate every LLM-convention parameter.
@@ -1045,7 +1164,7 @@ class AgentLoop:
         except TypeError as exc:
             if "unexpected keyword argument" not in str(exc):
                 raise
-            # If the handler uses **kwargs it accepts everything — a TypeError
+            # If the handler uses **kwargs it accepts everything -- a TypeError
             # here is a genuine bug, not a cross-agent compat issue.
             sig = inspect.signature(handler)
             if any(
@@ -1427,11 +1546,22 @@ class AgentLoop:
         )
         return new_kwargs, dropped_pairs, old_chars
 
+    # Fix #5: _format_tool_results and _format_tool_results_envelopes are
+    # kept for backward compatibility (public test wrappers, reconstruct_state)
+    # but are no longer used in the main loop.  The loop now uses only
+    # structured messages with an empty continuation prompt.
+
     @staticmethod
     def _format_tool_results(
         results: list[tuple[ToolCallInfo, str, bool]],
     ) -> str:
-        """Format tool results as a prompt for the next model turn."""
+        """Format tool results as a prompt for the next model turn.
+
+        .. deprecated::
+            Retained for backward compatibility with tests and
+            ``reconstruct_state``.  The main loop now uses only
+            structured messages (Fix #5).
+        """
         envelopes: list[ToolResultEnvelope] = []
         for tc, result_text, is_error in results:
             envelopes.append(
@@ -1459,8 +1589,10 @@ class AgentLoop:
     def _format_tool_results_envelopes(results: list[ToolResultEnvelope]) -> str:
         """Format canonical tool result envelopes as prompt text.
 
-        Uses explicit ``<tool_result>`` XML tags so the LLM clearly
-        distinguishes these from user-authored messages.
+        .. deprecated::
+            Retained for backward compatibility with tests and
+            ``reconstruct_state``.  The main loop now uses only
+            structured messages (Fix #5).
         """
         parts: list[str] = [
             "<system>The following are results from the tool calls you just made. "
@@ -1504,7 +1636,8 @@ class AgentLoop:
             - turn: last completed turn number
             - accumulated_text: all text deltas concatenated
             - messages: structured tool call/result Message pairs
-            - last_prompt: the most recent prompt text
+            - last_prompt: the most recent prompt text (empty string for
+              structured-only continuation)
         """
         turn = 0
         accumulated_text = ""
@@ -1530,9 +1663,8 @@ class AgentLoop:
                         current_turn_text,
                     )
                     messages.extend(pair)
-                    last_prompt = AgentLoop._format_tool_results_envelopes(
-                        current_turn_tool_results
-                    )
+                    # Fix #5: use empty prompt for structured continuation
+                    last_prompt = ""
                 current_turn_tool_calls = []
                 current_turn_tool_results = []
                 current_turn_text = ""
@@ -1596,9 +1728,8 @@ class AgentLoop:
                 current_turn_text,
             )
             messages.extend(pair)
-            last_prompt = AgentLoop._format_tool_results_envelopes(
-                current_turn_tool_results
-            )
+            # Fix #5: use empty prompt for structured continuation
+            last_prompt = ""
 
         return turn, accumulated_text, messages, last_prompt
 

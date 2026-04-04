@@ -1,4 +1,5 @@
 """Data.gov CKAN API provider — search federal open datasets."""
+
 from __future__ import annotations
 
 import re
@@ -49,7 +50,11 @@ async def _ckan_search(q: str, rows: int, start: int) -> dict[str, Any]:
             "url": ds.get("url"),
             "organization": (ds.get("organization") or {}).get("title"),
             "formats": sorted(
-                {r.get("format", "").upper() for r in ds.get("resources", []) if r.get("format")}
+                {
+                    r.get("format", "").upper()
+                    for r in ds.get("resources", [])
+                    if r.get("format")
+                },
             ),
         }
         for ds in result_block.get("results", [])

@@ -1,5 +1,4 @@
-"""
-obscura.heartbeat.alerts — Alert management system.
+"""obscura.heartbeat.alerts — Alert management system.
 
 Provides alert channels (webhook, logging, etc.) and alert routing.
 """
@@ -12,19 +11,21 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional, override
+from typing import TYPE_CHECKING, Any, override
 
 import httpx
 
 from obscura.heartbeat.types import Alert, HealthRecord, HealthStatus
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AlertRule:
-    """
-    Rule for triggering alerts based on health status.
+    """Rule for triggering alerts based on health status.
 
     Attributes:
         name: Rule identifier
@@ -32,6 +33,7 @@ class AlertRule:
         severity: Minimum severity level to trigger
         cooldown: Minimum seconds between repeated alerts for same agent
         channels: Channel names to send alerts to
+
     """
 
     name: str
@@ -55,12 +57,10 @@ class AlertChannel(ABC):
     @abstractmethod
     async def send(self, alert: Alert) -> bool:
         """Send an alert through this channel. Returns success status."""
-        pass
 
     @abstractmethod
     async def test(self) -> bool:
         """Test the channel configuration."""
-        pass
 
 
 class LoggingAlertChannel(AlertChannel):
@@ -85,8 +85,7 @@ class LoggingAlertChannel(AlertChannel):
 
 
 class WebhookAlertChannel(AlertChannel):
-    """
-    Alert channel that sends alerts via HTTP webhook.
+    """Alert channel that sends alerts via HTTP webhook.
 
     Supports POST requests with JSON payloads.
     """
@@ -96,10 +95,10 @@ class WebhookAlertChannel(AlertChannel):
     def __init__(
         self,
         webhook_url: str,
-        headers: Optional[dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
         timeout: float = 30.0,
         retries: int = 3,
-        secret: Optional[str] = None,  # For webhook signature
+        secret: str | None = None,  # For webhook signature
     ) -> None:
         self.webhook_url = webhook_url
         self.headers = headers or {"Content-Type": "application/json"}
@@ -122,12 +121,14 @@ class WebhookAlertChannel(AlertChannel):
 
         headers = dict(self.headers)
         if self.secret:
-            import hmac
             import hashlib
+            import hmac
 
             payload_str = json.dumps(payload, sort_keys=True)
             signature = hmac.new(
-                self.secret.encode(), payload_str.encode(), hashlib.sha256
+                self.secret.encode(),
+                payload_str.encode(),
+                hashlib.sha256,
             ).hexdigest()
             headers["X-Webhook-Signature"] = f"sha256={signature}"
 
@@ -142,17 +143,16 @@ class WebhookAlertChannel(AlertChannel):
                     if response.status_code < 400:
                         logger.debug(f"Alert sent to webhook: {alert.alert_id}")
                         return True
-                    else:
-                        logger.warning(
-                            f"Webhook returned {response.status_code}: {response.text}"
-                        )
+                    logger.warning(
+                        f"Webhook returned {response.status_code}: {response.text}",
+                    )
             except httpx.TimeoutException:
                 logger.warning(
-                    f"Webhook timeout (attempt {attempt + 1}/{self.retries})"
+                    f"Webhook timeout (attempt {attempt + 1}/{self.retries})",
                 )
             except Exception as e:
                 logger.warning(
-                    f"Webhook error (attempt {attempt + 1}/{self.retries}): {e}"
+                    f"Webhook error (attempt {attempt + 1}/{self.retries}): {e}",
                 )
 
         logger.error(f"Failed to send alert to webhook after {self.retries} attempts")
@@ -182,7 +182,7 @@ class SlackAlertChannel(AlertChannel):
     def __init__(
         self,
         webhook_url: str,
-        channel: Optional[str] = None,
+        channel: str | None = None,
         username: str = "Obscura Heartbeat",
         emoji: str = ":heartpulse:",
     ) -> None:
@@ -315,8 +315,7 @@ class NativeNotificationChannel(AlertChannel):
 
 
 class AlertManager:
-    """
-    Manages health alerts and routing to channels.
+    """Manages health alerts and routing to channels.
 
     Supports multiple alert channels and rules-based routing.
     """
@@ -342,7 +341,7 @@ class AlertManager:
             return True
         return False
 
-    def get_channel(self, name: str) -> Optional[AlertChannel]:
+    def get_channel(self, name: str) -> AlertChannel | None:
         """Get an alert channel by name."""
         return self._channels.get(name)
 
@@ -381,10 +380,9 @@ class AlertManager:
     async def trigger(
         self,
         record: HealthRecord,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> list[Alert]:
-        """
-        Trigger alerts for a health record.
+        """Trigger alerts for a health record.
 
         Evaluates rules and sends alerts through appropriate channels.
         """
@@ -453,7 +451,7 @@ class AlertManager:
         self,
         alert_id: str,
         acknowledged_by: str,
-    ) -> Optional[Alert]:
+    ) -> Alert | None:
         """Acknowledge an alert."""
         for alert in self._alerts:
             if alert.alert_id == alert_id:
@@ -465,8 +463,8 @@ class AlertManager:
 
     def get_alerts(
         self,
-        agent_id: Optional[str] = None,
-        acknowledged: Optional[bool] = None,
+        agent_id: str | None = None,
+        acknowledged: bool | None = None,
         limit: int = 100,
     ) -> list[Alert]:
         """Get alerts with optional filtering."""
@@ -479,8 +477,7 @@ class AlertManager:
             alerts = [a for a in alerts if a.acknowledged == acknowledged]
 
         # Sort by timestamp (newest first) and limit
-        alerts = sorted(alerts, key=lambda a: a.timestamp, reverse=True)[:limit]
-        return alerts
+        return sorted(alerts, key=lambda a: a.timestamp, reverse=True)[:limit]
 
     async def test_channel(self, name: str) -> bool:
         """Test an alert channel."""
@@ -498,7 +495,7 @@ class AlertManager:
 
 
 # Global alert manager instance
-_default_alert_manager: Optional[AlertManager] = None
+_default_alert_manager: AlertManager | None = None
 
 
 def get_default_alert_manager() -> AlertManager:
@@ -509,7 +506,7 @@ def get_default_alert_manager() -> AlertManager:
     return _default_alert_manager
 
 
-def set_default_alert_manager(manager: Optional[AlertManager]) -> None:
+def set_default_alert_manager(manager: AlertManager | None) -> None:
     """Set the default alert manager."""
     global _default_alert_manager
     _default_alert_manager = manager

@@ -71,11 +71,11 @@ async def compare_with_threshold(
     details_parts: list[str] = []
     if below_floor:
         details_parts.append(
-            f"score {current.composite_score:.3f} < threshold {score_threshold}"
+            f"score {current.composite_score:.3f} < threshold {score_threshold}",
         )
     if relative_regression:
         details_parts.append(
-            f"delta {delta:+.3f} < max_delta {max_score_delta}"
+            f"delta {delta:+.3f} < max_delta {max_score_delta}",
         )
 
     return RegressionComparison(

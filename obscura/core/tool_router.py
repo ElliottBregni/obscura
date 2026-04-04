@@ -17,11 +17,12 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.core.compiler.compiled import ToolRoutingConfig
-from obscura.core.tool_score_index import ToolScoreIndex
-from obscura.core.types import ToolSpec
+if TYPE_CHECKING:
+    from obscura.core.compiler.compiled import ToolRoutingConfig
+    from obscura.core.tool_score_index import ToolScoreIndex
+    from obscura.core.types import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ DEFAULT_PINNED_TOOLS: frozenset[str] = frozenset(
         "grep_files",
         "find_files",
         "git_status",
-    }
+    },
 )
 
 
@@ -60,9 +61,9 @@ class RoutingResult:
     """Output of a single routing decision."""
 
     tools: list[ToolSpec]
-    pinned: list[str] = field(default_factory=lambda: list[str]())
-    capability_matched: list[str] = field(default_factory=lambda: list[str]())
-    score_ranked: list[str] = field(default_factory=lambda: list[str]())
+    pinned: list[str] = field(default_factory=list[str])
+    capability_matched: list[str] = field(default_factory=list[str])
+    score_ranked: list[str] = field(default_factory=list[str])
     dropped_count: int = 0
     quarantined_count: int = 0
 
@@ -106,6 +107,7 @@ class ToolRouter:
         Tool names quarantined at registration time.
     backend : str
         Backend name for looking up the hard tool limit.
+
     """
 
     def __init__(
@@ -198,6 +200,7 @@ class ToolRouter:
         -------
         RoutingResult
             Selected tools with per-tier attribution.
+
         """
         if not self._config.enabled:
             return RoutingResult(tools=available_tools)
@@ -209,7 +212,10 @@ class ToolRouter:
         try:
             return self._do_select(prompt, available_tools, file_context)
         except Exception:
-            logger.warning("Tool routing failed — falling back to full list", exc_info=True)
+            logger.warning(
+                "Tool routing failed — falling back to full list",
+                exc_info=True,
+            )
             hard_limit = BACKEND_TOOL_LIMITS.get(self._backend, 128)
             cap = min(self._config.max_tools, hard_limit)
             return RoutingResult(
@@ -296,9 +302,14 @@ class ToolRouter:
 
         # ----- Layer 5: Context adjust (reorder, don't add/remove) -----------
         ordered_names = list(selected.keys())
-        if self._config.use_context_recall and self._eval_memory is not None and file_context:
+        if (
+            self._config.use_context_recall
+            and self._eval_memory is not None
+            and file_context
+        ):
             ordered_names = self._apply_context_recall(
-                ordered_names, file_context
+                ordered_names,
+                file_context,
             )
 
         # Build final result.
@@ -338,7 +349,9 @@ class ToolRouter:
     # -- Context recall ------------------------------------------------------
 
     def _apply_context_recall(
-        self, tool_names: list[str], file_paths: list[str]
+        self,
+        tool_names: list[str],
+        file_paths: list[str],
     ) -> list[str]:
         """Reorder *tool_names* using EvalMemory context signals.
 
@@ -350,10 +363,15 @@ class ToolRouter:
 
         try:
             warnings = self._eval_memory.recall_for_context(
-                tool_names=tool_names, file_paths=file_paths, top_k=10
+                tool_names=tool_names,
+                file_paths=file_paths,
+                top_k=10,
             )
         except Exception:
-            logger.debug("EvalMemory recall failed — skipping context adjust", exc_info=True)
+            logger.debug(
+                "EvalMemory recall failed — skipping context adjust",
+                exc_info=True,
+            )
             return tool_names
 
         if not warnings:
@@ -377,8 +395,8 @@ class ToolRouter:
 
 
 __all__ = [
-    "ToolRouter",
-    "RoutingResult",
     "BACKEND_TOOL_LIMITS",
     "DEFAULT_PINNED_TOOLS",
+    "RoutingResult",
+    "ToolRouter",
 ]

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -27,6 +26,9 @@ from obscura.core.types import (
 )
 from obscura.tools.delegation import DelegationContext, make_task_tool
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -140,7 +142,7 @@ class TestDelegationTool:
         )
         tool = make_task_tool(ctx)
         result = json.loads(
-            await tool.handler(prompt="do something", target="hacker")
+            await tool.handler(prompt="do something", target="hacker"),
         )
         assert result["ok"] is False
         assert result["error"] == "target_not_allowed"
@@ -155,7 +157,7 @@ class TestDelegationTool:
         tool = make_task_tool(ctx)
         # No peer registry → will fail at "no_peer_registry", not allowlist
         result = json.loads(
-            await tool.handler(prompt="do something", target="anyone")
+            await tool.handler(prompt="do something", target="anyone"),
         )
         assert result["error"] == "no_peer_registry"
 
@@ -168,7 +170,7 @@ class TestDelegationTool:
         )
         tool = make_task_tool(ctx)
         result = json.loads(
-            await tool.handler(prompt="do something", target="agent")
+            await tool.handler(prompt="do something", target="agent"),
         )
         assert result["ok"] is False
         assert result["error"] == "no_peer_registry"
@@ -188,7 +190,7 @@ class TestDelegationTool:
         )
         tool = make_task_tool(ctx)
         result = json.loads(
-            await tool.handler(prompt="do something", target="ghost")
+            await tool.handler(prompt="do something", target="ghost"),
         )
         assert result["ok"] is False
         assert result["error"] == "target_not_found"
@@ -211,7 +213,7 @@ class TestDelegationTool:
         )
         tool = make_task_tool(ctx)
         result = json.loads(
-            await tool.handler(prompt="analyze this", target="researcher")
+            await tool.handler(prompt="analyze this", target="researcher"),
         )
         assert result["ok"] is True
         assert result["result"] == "delegation result text"
@@ -220,7 +222,8 @@ class TestDelegationTool:
 
     @pytest.mark.asyncio
     async def test_delegation_creates_child_session(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         """Delegation creates a child session in the event store."""
         from unittest.mock import AsyncMock, MagicMock
@@ -240,7 +243,7 @@ class TestDelegationTool:
         )
         tool = make_task_tool(ctx)
         result = json.loads(
-            await tool.handler(prompt="task", target="agent")
+            await tool.handler(prompt="task", target="agent"),
         )
         assert result["ok"] is True
 
@@ -266,7 +269,7 @@ class TestDelegationTool:
         )
         tool = make_task_tool(ctx)
         result = json.loads(
-            await tool.handler(prompt="crash", target="agent")
+            await tool.handler(prompt="crash", target="agent"),
         )
         assert result["ok"] is False
         assert result["error"] == "delegation_failed"
@@ -289,15 +292,17 @@ class TestToolAllowlist:
             handler=lambda: "should not run",
         )
         # Only allow "safe" tool, not "secret"
-        backend = MockBackend([
-            # Turn 1: model tries to use "secret"
+        backend = MockBackend(
             [
-                StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="secret"),
-                StreamChunk(kind=ChunkKind.TOOL_USE_END),
-                StreamChunk(kind=ChunkKind.DONE),
+                # Turn 1: model tries to use "secret"
+                [
+                    StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="secret"),
+                    StreamChunk(kind=ChunkKind.TOOL_USE_END),
+                    StreamChunk(kind=ChunkKind.DONE),
+                ],
+                _make_text_chunks("done"),
             ],
-            _make_text_chunks("done"),
-        ])
+        )
         loop = AgentLoop(
             backend,
             _make_registry(spec),
@@ -324,14 +329,16 @@ class TestToolAllowlist:
             parameters={},
             handler=lambda: "safe result",
         )
-        backend = MockBackend([
+        backend = MockBackend(
             [
-                StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="safe"),
-                StreamChunk(kind=ChunkKind.TOOL_USE_END),
-                StreamChunk(kind=ChunkKind.DONE),
+                [
+                    StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="safe"),
+                    StreamChunk(kind=ChunkKind.TOOL_USE_END),
+                    StreamChunk(kind=ChunkKind.DONE),
+                ],
+                _make_text_chunks("done"),
             ],
-            _make_text_chunks("done"),
-        ])
+        )
         loop = AgentLoop(
             backend,
             _make_registry(spec),
@@ -357,14 +364,16 @@ class TestToolAllowlist:
             parameters={},
             handler=lambda: "works",
         )
-        backend = MockBackend([
+        backend = MockBackend(
             [
-                StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="any_tool"),
-                StreamChunk(kind=ChunkKind.TOOL_USE_END),
-                StreamChunk(kind=ChunkKind.DONE),
+                [
+                    StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="any_tool"),
+                    StreamChunk(kind=ChunkKind.TOOL_USE_END),
+                    StreamChunk(kind=ChunkKind.DONE),
+                ],
+                _make_text_chunks("done"),
             ],
-            _make_text_chunks("done"),
-        ])
+        )
         loop = AgentLoop(
             backend,
             _make_registry(spec),

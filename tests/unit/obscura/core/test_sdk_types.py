@@ -15,11 +15,10 @@ from obscura.core.types import (
     Role,
     SessionRef,
     StreamChunk,
-    ToolSpec,
     ToolChoice,
+    ToolSpec,
     UnifiedRequest,
 )
-
 
 # ---------------------------------------------------------------------------
 # Backend enum
@@ -101,7 +100,8 @@ class TestContentBlock:
         block = ContentBlock(kind="text", text="hello")
         try:
             block.text = "world"  # type: ignore[misc]
-            assert False, "Should be frozen"
+            msg = "Should be frozen"
+            raise AssertionError(msg)
         except AttributeError:
             pass
 
@@ -139,7 +139,8 @@ class TestMessage:
         msg = Message(role=Role.USER, content=[])
         try:
             msg.role = Role.ASSISTANT  # type: ignore[misc]
-            assert False, "Should be frozen"
+            msg_0 = "Should be frozen"
+            raise AssertionError(msg_0)
         except AttributeError:
             pass
 
@@ -168,7 +169,8 @@ class TestStreamChunk:
         chunk = StreamChunk(kind=ChunkKind.DONE)
         try:
             chunk.kind = ChunkKind.ERROR  # type: ignore[misc]
-            assert False, "Should be frozen"
+            msg = "Should be frozen"
+            raise AssertionError(msg)
         except AttributeError:
             pass
 
@@ -206,7 +208,8 @@ class TestToolSpec:
         spec = ToolSpec(name="t", description="d", parameters={}, handler=lambda: None)
         try:
             spec.name = "other"  # type: ignore[misc]
-            assert False, "Should be frozen"
+            msg = "Should be frozen"
+            raise AssertionError(msg)
         except AttributeError:
             pass
 

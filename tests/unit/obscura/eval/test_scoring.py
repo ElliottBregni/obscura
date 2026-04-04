@@ -33,13 +33,13 @@ class TestToolNameMatch:
         case = _make_case(
             assertions=(
                 CompiledAssertion(
-                    kind="tool_name_match", expected=("read_file",), turn=1,
+                    kind="tool_name_match",
+                    expected=("read_file",),
+                    turn=1,
                 ),
             ),
         )
-        tool_calls = (
-            ToolCallRecord(turn=1, tool_name="read_file"),
-        )
+        tool_calls = (ToolCallRecord(turn=1, tool_name="read_file"),)
         score, outcomes = score_deterministic(case, (), "", tool_calls)
         assert score == 1.0
         assert outcomes[0].result == AssertionResult.PASS
@@ -48,7 +48,9 @@ class TestToolNameMatch:
         case = _make_case(
             assertions=(
                 CompiledAssertion(
-                    kind="tool_name_match", expected=("read_file",), turn=1,
+                    kind="tool_name_match",
+                    expected=("read_file",),
+                    turn=1,
                 ),
             ),
         )
@@ -60,23 +62,21 @@ class TestToolNameMatch:
         case = _make_case(
             assertions=(
                 CompiledAssertion(
-                    kind="tool_name_match", expected=("read_file",), turn=1,
+                    kind="tool_name_match",
+                    expected=("read_file",),
+                    turn=1,
                 ),
             ),
         )
-        tool_calls = (
-            ToolCallRecord(turn=2, tool_name="read_file"),
-        )
-        score, outcomes = score_deterministic(case, (), "", tool_calls)
+        tool_calls = (ToolCallRecord(turn=2, tool_name="read_file"),)
+        score, _outcomes = score_deterministic(case, (), "", tool_calls)
         assert score == 0.0
 
 
 class TestOutputContains:
     def test_passes(self) -> None:
         case = _make_case(
-            assertions=(
-                CompiledAssertion(kind="output_contains", substring="hello"),
-            ),
+            assertions=(CompiledAssertion(kind="output_contains", substring="hello"),),
         )
         score, outcomes = score_deterministic(case, (), "hello world", ())
         assert score == 1.0
@@ -84,9 +84,7 @@ class TestOutputContains:
 
     def test_fails(self) -> None:
         case = _make_case(
-            assertions=(
-                CompiledAssertion(kind="output_contains", substring="hello"),
-            ),
+            assertions=(CompiledAssertion(kind="output_contains", substring="hello"),),
         )
         score, outcomes = score_deterministic(case, (), "goodbye world", ())
         assert score == 0.0
@@ -98,7 +96,8 @@ class TestToolSequence:
         case = _make_case(
             assertions=(
                 CompiledAssertion(
-                    kind="tool_sequence", expected=("read", "write"),
+                    kind="tool_sequence",
+                    expected=("read", "write"),
                 ),
             ),
         )
@@ -113,7 +112,8 @@ class TestToolSequence:
         case = _make_case(
             assertions=(
                 CompiledAssertion(
-                    kind="tool_sequence", expected=("read", "write"),
+                    kind="tool_sequence",
+                    expected=("read", "write"),
                 ),
             ),
         )
@@ -129,7 +129,8 @@ class TestToolSequence:
         case = _make_case(
             assertions=(
                 CompiledAssertion(
-                    kind="tool_sequence", expected=("read", "write"),
+                    kind="tool_sequence",
+                    expected=("read", "write"),
                 ),
             ),
         )
@@ -168,26 +169,22 @@ class TestEventPresent:
             ),
         )
         events = ("TURN_START", "TEXT_DELTA", "AGENT_DONE")
-        score, outcomes = score_deterministic(case, events, "", ())
+        score, _outcomes = score_deterministic(case, events, "", ())
         assert score == 1.0
 
     def test_fails(self) -> None:
         case = _make_case(
-            assertions=(
-                CompiledAssertion(kind="event_present", expected=("ERROR",)),
-            ),
+            assertions=(CompiledAssertion(kind="event_present", expected=("ERROR",)),),
         )
         events = ("TURN_START", "AGENT_DONE")
-        score, outcomes = score_deterministic(case, events, "", ())
+        score, _outcomes = score_deterministic(case, events, "", ())
         assert score == 0.0
 
 
 class TestExpectToolCalls:
     def test_expected_tool_found(self) -> None:
         case = _make_case(
-            expect_tool_calls=(
-                CompiledExpectedToolCall(name="bash"),
-            ),
+            expect_tool_calls=(CompiledExpectedToolCall(name="bash"),),
         )
         tool_calls = (ToolCallRecord(turn=1, tool_name="bash"),)
         score, outcomes = score_deterministic(case, (), "", tool_calls)
@@ -208,20 +205,19 @@ class TestExpectToolCalls:
         )
         tool_calls = (
             ToolCallRecord(
-                turn=1, tool_name="read_file",
+                turn=1,
+                tool_name="read_file",
                 tool_input={"path": "/tmp/x"},
             ),
         )
-        score, outcomes = score_deterministic(case, (), "", tool_calls)
+        score, _outcomes = score_deterministic(case, (), "", tool_calls)
         assert score == 1.0
 
     def test_expected_tool_not_found(self) -> None:
         case = _make_case(
-            expect_tool_calls=(
-                CompiledExpectedToolCall(name="bash"),
-            ),
+            expect_tool_calls=(CompiledExpectedToolCall(name="bash"),),
         )
-        score, outcomes = score_deterministic(case, (), "", ())
+        score, _outcomes = score_deterministic(case, (), "", ())
         assert score == 0.0
 
 

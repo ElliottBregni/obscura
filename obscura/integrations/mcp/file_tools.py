@@ -1,5 +1,4 @@
-"""
-obscura.mcp.file_tools — Sandboxed file read and search for MCP tools.
+"""obscura.mcp.file_tools — Sandboxed file read and search for MCP tools.
 
 Provides file operations that are restricted to allowed directories,
 preventing path traversal and access to sensitive system files.
@@ -11,7 +10,6 @@ import fnmatch
 import os
 from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Sandboxing
@@ -51,6 +49,7 @@ def _resolve_safe(
 
     Raises:
         ValueError: If path is outside allowed roots or is blocked.
+
     """
     roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
     resolved = Path(path_str).expanduser().resolve()
@@ -58,11 +57,13 @@ def _resolve_safe(
     # Check allowed roots
     in_allowed = any(str(resolved).startswith(str(Path(r).resolve())) for r in roots)
     if not in_allowed:
-        raise ValueError(f"Path {path_str!r} is outside allowed directories")
+        msg = f"Path {path_str!r} is outside allowed directories"
+        raise ValueError(msg)
 
     # Check blocked patterns
     if _is_blocked(resolved):
-        raise ValueError(f"Path {path_str!r} matches a blocked pattern")
+        msg = f"Path {path_str!r} matches a blocked pattern"
+        raise ValueError(msg)
 
     return resolved
 
@@ -92,6 +93,7 @@ def read_file(
     Returns:
         Dict with ``path``, ``content``, ``total_lines``, ``start_line``,
         ``end_line``, and ``truncated``.
+
     """
     resolved = _resolve_safe(path, allowed_roots)
 
@@ -158,6 +160,7 @@ def search_files(
 
     Returns:
         Dict with ``results`` list and ``count``.
+
     """
     search_root = Path(root or os.getcwd()).expanduser().resolve()
 
@@ -205,7 +208,7 @@ def search_files(
                 {
                     "path": str(p),
                     "matches": matches,
-                }
+                },
             )
 
     return {

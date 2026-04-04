@@ -1,18 +1,20 @@
 import importlib
-import os
 import logging
+import os
 
 
 def reload_modules():
     # ensure render and logger pick up env vars
-    import obscura.cli.render as render
+    from obscura.cli import render
+
     importlib.reload(render)
     import obscura.cli.logger as clog
+
     importlib.reload(clog)
     return render
 
 
-def test_info_logs_to_console(monkeypatch, tmp_path):
+def test_info_logs_to_console(monkeypatch, tmp_path) -> None:
     os.environ["OBSCURA_OUTPUT_MODE"] = "cli"
     render = reload_modules()
     # ensure verbose internals are enabled
@@ -20,7 +22,7 @@ def test_info_logs_to_console(monkeypatch, tmp_path):
 
     printed = []
 
-    def fake_print(*args, **kwargs):
+    def fake_print(*args, **kwargs) -> None:
         printed.append(" ".join(str(a) for a in args))
 
     monkeypatch.setattr(render.console, "print", fake_print)
@@ -29,10 +31,12 @@ def test_info_logs_to_console(monkeypatch, tmp_path):
     # child logger should propagate to 'obscura' parent handlers
     logger.info("hello user")
 
-    assert any("hello user" in p for p in printed), "INFO log was not printed to console"
+    assert any("hello user" in p for p in printed), (
+        "INFO log was not printed to console"
+    )
 
 
-def test_debug_logs_to_output_buffer(monkeypatch):
+def test_debug_logs_to_output_buffer(monkeypatch) -> None:
     os.environ["OBSCURA_OUTPUT_MODE"] = "cli"
     render = reload_modules()
     render.output.verbose = True

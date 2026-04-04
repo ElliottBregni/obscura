@@ -49,15 +49,15 @@ def build_channels_prompt_section(channels: list[MemoryChannel]) -> str:
 
         lines.append(
             f"- **{ch.name}** → namespace `{ch.namespace}` "
-            f"({injection}, {trigger_str})"
+            f"({injection}, {trigger_str})",
         )
 
     lines.append("")
     lines.append(
-        "To store a memory: `store_searchable(key, text, namespace=\"<namespace>\", memory_type=\"fact\")`"
+        'To store a memory: `store_searchable(key, text, namespace="<namespace>", memory_type="fact")`',
     )
     lines.append(
-        "To search a channel: `semantic_search(query, namespace=\"<namespace>\")`"
+        'To search a channel: `semantic_search(query, namespace="<namespace>")`',
     )
 
     return "\n".join(lines)

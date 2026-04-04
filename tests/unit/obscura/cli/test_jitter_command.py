@@ -24,7 +24,7 @@ def _ctx() -> REPLContext:
 async def test_jitter_show(monkeypatch) -> None:
     calls: list[str] = []
     monkeypatch.setenv("OBSCURA_REASONING_JITTER_MS", "180")
-    monkeypatch.setattr("obscura.cli.commands.print_info", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.commands.print_info", calls.append)
     await cmd_jitter("", _ctx())
     assert any("180ms" in c for c in calls)
 
@@ -32,7 +32,7 @@ async def test_jitter_show(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_jitter_set_numeric(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("obscura.cli.commands.print_ok", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.commands.print_ok", calls.append)
     await cmd_jitter("275", _ctx())
     assert any("275" in c for c in calls)
 
@@ -40,7 +40,7 @@ async def test_jitter_set_numeric(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_jitter_off(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("obscura.cli.commands.print_ok", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.commands.print_ok", calls.append)
     await cmd_jitter("off", _ctx())
     assert any("0ms" in c for c in calls)
 
@@ -48,7 +48,7 @@ async def test_jitter_off(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_jitter_invalid(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("obscura.cli.commands.print_error", lambda msg: calls.append(msg))
+    monkeypatch.setattr("obscura.cli.commands.print_error", calls.append)
     await cmd_jitter("wat", _ctx())
-    assert calls and "Usage" in calls[0]
-
+    assert calls
+    assert "Usage" in calls[0]

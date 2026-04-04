@@ -6,33 +6,40 @@ import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any, AsyncGenerator, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from obscura.approvals import (
     create_tool_approval_request,
     wait_for_tool_approval,
 )
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.core.system_prompts import (
     compose_environment_context,
+)
+from obscura.core.system_prompts import (
     compose_system_prompt as compose_default_prompt,
 )
-from obscura.core.types import ToolCallInfo
 from obscura.deps import audit, get_runtime
 from obscura.routes import template_store
-from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
-from obscura.schemas.templates import (
-    SpawnFromTemplateRequest,
-    TemplateCreateRequest,
-    TemplateUpdateRequest,
-)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from pydantic import BaseModel
+
+    from obscura.auth.models import AuthenticatedUser
+    from obscura.core.types import ToolCallInfo
+    from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
+    from obscura.schemas.templates import (
+        SpawnFromTemplateRequest,
+        TemplateCreateRequest,
+        TemplateUpdateRequest,
+    )
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
@@ -81,7 +88,7 @@ def _dump_explicit_top_level(model: BaseModel) -> dict[str, Any]:
 def _string_key_dict(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    typed = cast(dict[Any, Any], value)
+    typed = cast("dict[Any, Any]", value)
     return {str(k): v for k, v in typed.items()}
 
 
@@ -90,7 +97,7 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
 
     raw_builder = body.get("builder", {})
     builder: dict[str, Any] = (
-        cast(dict[str, Any], raw_builder) if isinstance(raw_builder, dict) else {}
+        cast("dict[str, Any]", raw_builder) if isinstance(raw_builder, dict) else {}
     )
 
     model_raw = _resolve_spawn_field(body, builder, "model", "copilot")
@@ -105,13 +112,13 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
     system_prompt_base = str(_resolve_spawn_field(body, builder, "system_prompt", ""))
     skills_raw = builder.get("skills", [])
     skills: list[dict[str, Any]] = (
-        cast(list[dict[str, Any]], skills_raw) if isinstance(skills_raw, list) else []
+        cast("list[dict[str, Any]]", skills_raw) if isinstance(skills_raw, list) else []
     )
     system_prompt = _compose_system_prompt(
         {
             "system_prompt": system_prompt_base,
             "skills": skills,
-        }
+        },
     )
 
     raw_a2a_remote_tools = _resolve_spawn_field(
@@ -121,7 +128,7 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
         {},
     )
     a2a_remote_tools: dict[str, Any] = (
-        cast(dict[str, Any], raw_a2a_remote_tools)
+        cast("dict[str, Any]", raw_a2a_remote_tools)
         if isinstance(raw_a2a_remote_tools, dict)
         else {}
     )
@@ -134,13 +141,13 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
     if mcp_payload_map is not None:
         mcp_servers_raw = mcp_payload_map.get("servers", [])
         mcp_servers: list[dict[str, Any]] = (
-            cast(list[dict[str, Any]], mcp_servers_raw)
+            cast("list[dict[str, Any]]", mcp_servers_raw)
             if isinstance(mcp_servers_raw, list)
             else []
         )
         raw_server_names = mcp_payload_map.get("server_names", [])
         mcp_server_names: list[str] = (
-            [str(name) for name in cast(list[Any], raw_server_names)]
+            [str(name) for name in cast("list[Any]", raw_server_names)]
             if isinstance(raw_server_names, list)
             else []
         )
@@ -148,11 +155,11 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
             enabled=bool(mcp_payload_map.get("enabled", False)),
             servers=mcp_servers,
             config_path=str(
-                mcp_payload_map.get("config_path", str(resolve_obscura_mcp_dir()))
+                mcp_payload_map.get("config_path", str(resolve_obscura_mcp_dir())),
             ),
             server_names=mcp_server_names,
             primary_server_name=str(
-                mcp_payload_map.get("primary_server_name", "github")
+                mcp_payload_map.get("primary_server_name", "github"),
             ),
             auto_discover=bool(mcp_payload_map.get("auto_discover", True)),
             resolve_env=bool(mcp_payload_map.get("resolve_env", True)),
@@ -162,7 +169,7 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
 
     tags_value = _resolve_spawn_field(body, builder, "tags", [])
     tags: list[str] = (
-        [str(tag) for tag in cast(list[Any], tags_value)]
+        [str(tag) for tag in cast("list[Any]", tags_value)]
         if isinstance(tags_value, list)
         else []
     )
@@ -172,14 +179,16 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
         "model": model,
         "system_prompt": system_prompt,
         "memory_namespace": str(
-            _resolve_spawn_field(body, builder, "memory_namespace", "default")
+            _resolve_spawn_field(body, builder, "memory_namespace", "default"),
         ),
-        "max_iterations": int(_resolve_spawn_field(body, builder, "max_iterations", 10)),
+        "max_iterations": int(
+            _resolve_spawn_field(body, builder, "max_iterations", 10),
+        ),
         "timeout_seconds": float(
-            _resolve_spawn_field(body, builder, "timeout_seconds", 300.0)
+            _resolve_spawn_field(body, builder, "timeout_seconds", 300.0),
         ),
         "enable_system_tools": bool(
-            _resolve_spawn_field(body, builder, "enable_system_tools", True)
+            _resolve_spawn_field(body, builder, "enable_system_tools", True),
         ),
         "a2a_remote_tools": a2a_remote_tools,
         "mcp": mcp_config,
@@ -197,12 +206,12 @@ def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool
 @router.post("/agents")
 async def agent_spawn(
     body: AgentSpawnRequest,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Spawn a new agent."""
     runtime = await get_runtime(user)
     spawn_kwargs, mcp_enabled = _normalize_spawn_request(
-        _dump_explicit_top_level(body)
+        _dump_explicit_top_level(body),
     )
     agent = runtime.spawn(**spawn_kwargs)
 
@@ -226,14 +235,14 @@ async def agent_spawn(
             "status": agent.status.name,
             "created_at": agent.created_at.isoformat(),
             "mcp_enabled": mcp_enabled,
-        }
+        },
     )
 
 
 @router.get("/agents/{agent_id}")
 async def agent_get(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get agent status and details."""
     runtime = await get_runtime(user)
@@ -251,14 +260,14 @@ async def agent_get(
             "updated_at": state.updated_at.isoformat(),
             "iteration_count": state.iteration_count,
             "error_message": state.error_message,
-        }
+        },
     )
 
 
 @router.get("/agents/{agent_id}/tools")
 async def agent_list_tools(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List currently registered tools for an agent."""
     runtime = await get_runtime(user)
@@ -280,7 +289,7 @@ async def agent_list_tools(
                 }
                 for tool in tools
             ],
-        }
+        },
     )
 
 
@@ -307,7 +316,7 @@ async def agent_list_peers(
             "agent_id": agent_id,
             "local": [ref.model_dump(mode="json") for ref in catalog.local],
             "remote": [ref.model_dump(mode="json") for ref in catalog.remote],
-        }
+        },
     )
 
 
@@ -315,7 +324,7 @@ async def agent_list_peers(
 async def agent_run(
     agent_id: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Run a task on an existing agent."""
     runtime = await get_runtime(user)
@@ -397,7 +406,7 @@ async def agent_run(
                         prompt,
                         on_confirm=on_confirm,
                         **context,
-                    )
+                    ),
                 )
             done, _pending = await asyncio.wait(
                 {run_task},
@@ -415,7 +424,7 @@ async def agent_run(
                 "agent_id": agent_id,
                 "status": agent.status.name,
                 "result": result,
-            }
+            },
         )
     except HTTPException:
         raise
@@ -426,7 +435,7 @@ async def agent_run(
 @router.delete("/agents/{agent_id}")
 async def agent_stop(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Stop and cleanup an agent."""
     runtime = await get_runtime(user)
@@ -442,7 +451,7 @@ async def agent_stop(
         content={
             "agent_id": agent_id,
             "status": "stopped",
-        }
+        },
     )
 
 
@@ -492,7 +501,7 @@ async def agent_list(
                 for a in agents
             ],
             "count": len(agents),
-        }
+        },
     )
 
 
@@ -502,7 +511,7 @@ async def agent_list(
 @router.post("/agents/bulk")
 async def agents_bulk_spawn(
     body: AgentBulkSpawnRequest,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Spawn multiple agents in one request."""
     runtime = await get_runtime(user)
@@ -514,7 +523,8 @@ async def agents_bulk_spawn(
         raise HTTPException(status_code=400, detail="No agents provided")
     if len(agents_config) > 100:
         raise HTTPException(
-            status_code=400, detail="Cannot spawn more than 100 agents at once"
+            status_code=400,
+            detail="Cannot spawn more than 100 agents at once",
         )
 
     created: list[dict[str, Any]] = []
@@ -536,7 +546,7 @@ async def agents_bulk_spawn(
                     "agent_id": agent.id,
                     "name": agent.config.name,
                     "status": agent.status.name,
-                }
+                },
             )
             audit(
                 "agent.spawn",
@@ -557,14 +567,14 @@ async def agents_bulk_spawn(
             "errors": errors,
             "total_requested": len(agents_config),
             "total_created": len(created),
-        }
+        },
     )
 
 
 @router.post("/agents/bulk/stop")
 async def agents_bulk_stop(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Stop multiple agents in one request."""
     runtime = await get_runtime(user)
@@ -594,14 +604,14 @@ async def agents_bulk_stop(
             "errors": errors,
             "total_requested": len(agent_ids),
             "total_stopped": len(stopped),
-        }
+        },
     )
 
 
 @router.post("/agents/bulk/tag")
 async def agents_bulk_tag(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Add tags to multiple agents."""
     runtime = await get_runtime(user)
@@ -634,7 +644,7 @@ async def agents_bulk_tag(
             "tagged": tagged,
             "errors": errors,
             "tags": tags,
-        }
+        },
     )
 
 
@@ -644,7 +654,7 @@ async def agents_bulk_tag(
 @router.post("/agent-templates")
 async def template_create(
     body: TemplateCreateRequest,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create an agent template with full APER profile support."""
     template_id = str(uuid.uuid4())
@@ -678,7 +688,7 @@ async def template_create(
 
 @router.get("/agent-templates")
 async def template_list(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List all agent templates."""
     templates: list[dict[str, Any]] = list(template_store.get_all().values())
@@ -686,14 +696,14 @@ async def template_list(
         content={
             "templates": templates,
             "count": len(templates),
-        }
+        },
     )
 
 
 @router.get("/agent-templates/{template_id}")
 async def template_get(
     template_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a specific agent template."""
     template = template_store.get(template_id)
@@ -706,7 +716,7 @@ async def template_get(
 async def template_update(
     template_id: str,
     body: TemplateUpdateRequest,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Partial-update an agent template (only non-null fields are merged)."""
     existing = template_store.get(template_id)
@@ -717,10 +727,10 @@ async def template_update(
     for key, value in updates.items():
         if key == "aper_profile" and isinstance(value, dict):
             existing[key] = value
-        elif key == "skills" and isinstance(value, list):
-            existing[key] = cast(list[Any], value)
-        elif key == "mcp_servers" and isinstance(value, list):
-            existing[key] = cast(list[Any], value)
+        elif (key == "skills" and isinstance(value, list)) or (
+            key == "mcp_servers" and isinstance(value, list)
+        ):
+            existing[key] = cast("list[Any]", value)
         elif key == "a2a_remote_tools" and isinstance(value, dict):
             existing[key] = value
         else:
@@ -740,7 +750,7 @@ async def template_update(
 @router.delete("/agent-templates/{template_id}")
 async def template_delete(
     template_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Delete an agent template."""
     existing = template_store.get(template_id)
@@ -770,14 +780,18 @@ def _compose_system_prompt(template: dict[str, Any]) -> str:
     if skills:
         skill_parts.append("## Loaded Skills")
         for skill in skills:
-            skill_parts.append(f"### {skill['name']} (source: {skill.get('source', 'inline')})")
+            skill_parts.append(
+                f"### {skill['name']} (source: {skill.get('source', 'inline')})",
+            )
             skill_parts.append(str(skill.get("content", "")).strip())
             skill_parts.append("")
 
     skills_section = "\n".join(skill_parts).strip() if skill_parts else ""
 
     # Check env var to disable default prompt if needed
-    include_default = os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "true"
+    include_default = (
+        os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "true"
+    )
 
     custom_sections: list[str] = []
     if skills_section:
@@ -816,18 +830,22 @@ def _build_mcp_config(template: dict[str, Any]) -> Any:
     for spec in mcp_servers_raw:
         transport = spec.get("transport", "stdio")
         if transport == "stdio":
-            explicit_servers.append({
-                "transport": "stdio",
-                "command": spec.get("command", ""),
-                "args": spec.get("args", []),
-                "env": spec.get("env", {}),
-            })
+            explicit_servers.append(
+                {
+                    "transport": "stdio",
+                    "command": spec.get("command", ""),
+                    "args": spec.get("args", []),
+                    "env": spec.get("env", {}),
+                },
+            )
         else:
-            explicit_servers.append({
-                "transport": "sse",
-                "url": spec.get("url", ""),
-                "env": spec.get("env", {}),
-            })
+            explicit_servers.append(
+                {
+                    "transport": "sse",
+                    "url": spec.get("url", ""),
+                    "env": spec.get("env", {}),
+                },
+            )
 
     mcp_enabled = template.get("mcp_auto_discover", False) or bool(explicit_servers)
     return MCPConfig(
@@ -844,7 +862,7 @@ def _build_mcp_config(template: dict[str, Any]) -> Any:
 @router.post("/agents/from-template")
 async def agent_spawn_from_template(
     body: SpawnFromTemplateRequest,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Spawn an agent from a template with full APER / MCP / A2A support."""
     runtime = await get_runtime(user)
@@ -852,7 +870,8 @@ async def agent_spawn_from_template(
     template = template_store.get(body.template_id)
     if template is None:
         raise HTTPException(
-            status_code=404, detail=f"Template {body.template_id} not found"
+            status_code=404,
+            detail=f"Template {body.template_id} not found",
         )
 
     system_prompt = _compose_system_prompt(template)
@@ -957,7 +976,7 @@ async def agent_spawn_from_template(
 async def agent_add_tags(
     agent_id: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Add tags to an agent."""
     runtime = await get_runtime(user)
@@ -982,7 +1001,7 @@ async def agent_add_tags(
             "agent_id": agent_id,
             "tags": agent.config.tags,
             "added": list(new_tags - current_tags),
-        }
+        },
     )
 
 
@@ -990,7 +1009,7 @@ async def agent_add_tags(
 async def agent_remove_tags(
     agent_id: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Remove tags from an agent."""
     runtime = await get_runtime(user)
@@ -1015,14 +1034,14 @@ async def agent_remove_tags(
             "agent_id": agent_id,
             "tags": agent.config.tags,
             "removed": list(remove_tags & current_tags),
-        }
+        },
     )
 
 
 @router.get("/agents/{agent_id}/tags")
 async def agent_get_tags(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get tags for an agent."""
     runtime = await get_runtime(user)
@@ -1037,7 +1056,7 @@ async def agent_get_tags(
         content={
             "agent_id": agent_id,
             "tags": tags,
-        }
+        },
     )
 
 
@@ -1048,7 +1067,7 @@ async def agent_get_tags(
 async def agent_stream(
     agent_id: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> EventSourceResponse:
     """Stream an agent's response as SSE events."""
     runtime = await get_runtime(user)
@@ -1060,7 +1079,7 @@ async def agent_stream(
     prompt: str = body.get("prompt", "")
     context: dict[str, Any] = body.get("context", {})
 
-    async def _event_generator() -> AsyncGenerator[dict[str, str], None]:
+    async def _event_generator() -> AsyncGenerator[dict[str, str]]:
         try:
             async for chunk in agent.stream(prompt, **context):
                 yield {

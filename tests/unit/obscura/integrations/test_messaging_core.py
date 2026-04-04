@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.integrations.messaging.identity import (
     build_conversation_key,
@@ -14,6 +14,9 @@ from obscura.integrations.messaging.store import (
     MessageRuntimeEventStore,
     MessageSendEventStore,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_normalize_identity_phone_and_email() -> None:
@@ -92,11 +95,11 @@ def test_conversation_store_and_dedupe_roundtrip(tmp_path: Path) -> None:
     con = sqlite3.connect(str(db_path))
     try:
         row = con.execute(
-            "SELECT recipient, success, reply_preview FROM messaging_send_events ORDER BY id DESC LIMIT 1"
+            "SELECT recipient, success, reply_preview FROM messaging_send_events ORDER BY id DESC LIMIT 1",
         ).fetchone()
         assert row == ("+1555", 1, "ok")
         row2 = con.execute(
-            "SELECT component, event_type, platform, conversation_key, message_id FROM messaging_runtime_events ORDER BY id DESC LIMIT 1"
+            "SELECT component, event_type, platform, conversation_key, message_id FROM messaging_runtime_events ORDER BY id DESC LIMIT 1",
         ).fetchone()
         assert row2 == ("imessage-assistant", "send_ok", "imessage", "abc", "m1")
     finally:
@@ -107,8 +110,22 @@ def test_daemon_lock_store_takeover_and_release(tmp_path: Path) -> None:
     db_path = tmp_path / "messaging_state.db"
     locks = DaemonLockStore(db_path=db_path)
 
-    assert locks.try_acquire(lock_name="daemon:imessage", owner_id="a", stale_after_s=300.0) is True
-    assert locks.try_acquire(lock_name="daemon:imessage", owner_id="b", stale_after_s=300.0) is False
+    assert (
+        locks.try_acquire(
+            lock_name="daemon:imessage",
+            owner_id="a",
+            stale_after_s=300.0,
+        )
+        is True
+    )
+    assert (
+        locks.try_acquire(
+            lock_name="daemon:imessage",
+            owner_id="b",
+            stale_after_s=300.0,
+        )
+        is False
+    )
     assert locks.heartbeat(lock_name="daemon:imessage", owner_id="a") is True
     assert locks.heartbeat(lock_name="daemon:imessage", owner_id="b") is False
 
@@ -125,6 +142,12 @@ def test_daemon_lock_store_takeover_and_release(tmp_path: Path) -> None:
     finally:
         con.close()
 
-    assert locks.try_acquire(lock_name="daemon:imessage", owner_id="b", stale_after_s=30.0) is True
+    assert (
+        locks.try_acquire(lock_name="daemon:imessage", owner_id="b", stale_after_s=30.0)
+        is True
+    )
     locks.release(lock_name="daemon:imessage", owner_id="b")
-    assert locks.try_acquire(lock_name="daemon:imessage", owner_id="c", stale_after_s=30.0) is True
+    assert (
+        locks.try_acquire(lock_name="daemon:imessage", owner_id="c", stale_after_s=30.0)
+        is True
+    )

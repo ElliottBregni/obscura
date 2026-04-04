@@ -1,5 +1,4 @@
-"""
-End-to-End Tests for Obscura
+"""End-to-End Tests for Obscura.
 
 These tests verify complete workflows from API to response.
 Uses FastAPI TestClient with auth disabled — no running server needed.
@@ -14,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, AsyncIterator, Iterator
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
@@ -25,6 +24,8 @@ from obscura.auth.rbac import get_current_user
 from obscura.core.config import ObscuraConfig
 from obscura.server import create_app
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
 
 # ---------------------------------------------------------------------------
 # Test user returned when auth is disabled
@@ -65,8 +66,8 @@ class _FakeAgentConfig:
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
-    tags: list[str] = field(default_factory=lambda: list[str]())
-    mcp: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
+    tags: list[str] = field(default_factory=list[str])
+    mcp: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass
@@ -84,7 +85,10 @@ class _FakeAgent:
     """Minimal fake Agent that satisfies the server endpoints."""
 
     def __init__(
-        self, name: str = "test-agent", model: str = "claude", **kwargs: Any
+        self,
+        name: str = "test-agent",
+        model: str = "claude",
+        **kwargs: Any,
     ) -> None:
         self.id = str(uuid.uuid4())
         self.config = _FakeAgentConfig(name=name, model=model, **kwargs)
@@ -105,7 +109,6 @@ class _FakeAgent:
 
     async def send_message(self, target: str, content: str) -> None:
         """Send a message to another agent."""
-        pass
 
     def get_state(self) -> _FakeAgentState:
         return _FakeAgentState(
@@ -127,7 +130,10 @@ class _FakeAgentRuntime:
         pass
 
     def spawn(
-        self, name: str = "unnamed", model: str = "claude", **kwargs: Any
+        self,
+        name: str = "unnamed",
+        model: str = "claude",
+        **kwargs: Any,
     ) -> _FakeAgent:
         agent = _FakeAgent(name=name, model=model, **kwargs)
         self._agents[agent.id] = agent
@@ -143,7 +149,9 @@ class _FakeAgentRuntime:
         return agent.get_state()
 
     def list_agents(
-        self, status: Any = None, name: str | None = None
+        self,
+        status: Any = None,
+        name: str | None = None,
     ) -> list[_FakeAgent]:
         return list(self._agents.values())
 
@@ -162,13 +170,13 @@ class _FakeMemoryKey:
 class _FakeMemoryStore:
     """In-memory fake MemoryStore."""
 
-    _stores: dict[str, "_FakeMemoryStore"] = {}
+    _stores: dict[str, _FakeMemoryStore] = {}
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
 
     @classmethod
-    def for_user(cls, user: Any) -> "_FakeMemoryStore":
+    def for_user(cls, user: Any) -> _FakeMemoryStore:
         uid = getattr(user, "user_id", "test")
         if uid not in cls._stores:
             cls._stores[uid] = cls()
@@ -179,7 +187,11 @@ class _FakeMemoryStore:
         cls._stores.clear()
 
     def set(
-        self, key: str, value: Any, namespace: str = "default", ttl: Any = None
+        self,
+        key: str,
+        value: Any,
+        namespace: str = "default",
+        ttl: Any = None,
     ) -> None:
         self._data[f"{namespace}:{key}"] = value
 
@@ -227,13 +239,13 @@ class _FakeVectorResult:
 class _FakeVectorMemoryStore:
     """In-memory fake VectorMemoryStore."""
 
-    _stores: dict[str, "_FakeVectorMemoryStore"] = {}
+    _stores: dict[str, _FakeVectorMemoryStore] = {}
 
     def __init__(self) -> None:
         self._data: dict[str, dict[str, Any]] = {}
 
     @classmethod
-    def for_user(cls, user: Any, **kwargs: Any) -> "_FakeVectorMemoryStore":
+    def for_user(cls, user: Any, **kwargs: Any) -> _FakeVectorMemoryStore:
         uid = getattr(user, "user_id", "test")
         if uid not in cls._stores:
             cls._stores[uid] = cls()
@@ -258,7 +270,9 @@ class _FakeVectorMemoryStore:
         }
 
     def _build_results(
-        self, namespace: str | None = None, top_k: int = 5
+        self,
+        namespace: str | None = None,
+        top_k: int = 5,
     ) -> list[_FakeVectorResult]:
         results: list[_FakeVectorResult] = []
         for k, v in self._data.items():
@@ -272,17 +286,25 @@ class _FakeVectorMemoryStore:
                         metadata=v["metadata"],
                         memory_type=v.get("memory_type", "general"),
                         final_score=0.9,
-                    )
+                    ),
                 )
         return results[:top_k]
 
     def search_similar(
-        self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any
+        self,
+        query: str,
+        namespace: str | None = None,
+        top_k: int = 5,
+        **kw: Any,
     ) -> list[_FakeVectorResult]:
         return self._build_results(namespace, top_k)
 
     def search_reranked(
-        self, query: str, namespace: str | None = None, top_k: int = 5, **kw: Any
+        self,
+        query: str,
+        namespace: str | None = None,
+        top_k: int = 5,
+        **kw: Any,
     ) -> list[_FakeVectorResult]:
         return self._build_results(namespace, top_k)
 
@@ -317,7 +339,7 @@ def _reset_fakes() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
     _shared_runtime = _FakeAgentRuntime()
     _FakeMemoryStore.reset()
     _FakeVectorMemoryStore.reset()
-    yield
+    return
 
 
 @pytest.fixture

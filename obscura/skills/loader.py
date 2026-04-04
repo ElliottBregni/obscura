@@ -1,5 +1,4 @@
-"""
-obscura.skills.loader -- Dynamic skill loading from modules and packages.
+"""obscura.skills.loader -- Dynamic skill loading from modules and packages.
 
 Supports loading skills from:
 - Built-in skills (obscura.skills.builtin)
@@ -16,6 +15,7 @@ import logging
 import pkgutil
 import sys
 from pathlib import Path
+
 from obscura.skills.base import Skill
 
 logger = logging.getLogger(__name__)
@@ -35,11 +35,12 @@ class SkillLoader:
 
         # Load from a file path
         skills = loader.load_from_file("/path/to/custom_skill.py")
+
     """
 
     BUILTIN_MODULE = "obscura.skills.builtin"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._loaded_modules: set[str] = set()
 
     def load_builtin_skills(self) -> list[Skill]:
@@ -47,6 +48,7 @@ class SkillLoader:
 
         Returns:
             List of loaded skill instances
+
         """
         return self.load_from_module(self.BUILTIN_MODULE)
 
@@ -58,6 +60,7 @@ class SkillLoader:
 
         Returns:
             List of loaded skill instances
+
         """
         skills: list[Skill] = []
 
@@ -78,14 +81,14 @@ class SkillLoader:
                         skills.append(skill)
                         logger.info(f"Loaded skill '{skill.name}' from {module_path}")
                     except Exception as e:
-                        logger.error(
-                            f"Failed to instantiate skill '{name}' from {module_path}: {e}"
+                        logger.exception(
+                            f"Failed to instantiate skill '{name}' from {module_path}: {e}",
                         )
 
             # Check for submodules (packages)
             if hasattr(module, "__path__"):
                 for _importer, submod_name, ispkg in pkgutil.iter_modules(
-                    module.__path__
+                    module.__path__,
                 ):
                     if not ispkg and not submod_name.startswith("_"):
                         full_path = f"{module_path}.{submod_name}"
@@ -93,12 +96,14 @@ class SkillLoader:
                             sub_skills = self.load_from_module(full_path)
                             skills.extend(sub_skills)
                         except Exception as e:
-                            logger.error(f"Failed to load submodule {full_path}: {e}")
+                            logger.exception(
+                                f"Failed to load submodule {full_path}: {e}",
+                            )
 
         except ImportError as e:
-            logger.error(f"Failed to import module {module_path}: {e}")
+            logger.exception(f"Failed to import module {module_path}: {e}")
         except Exception as e:
-            logger.error(f"Error loading skills from {module_path}: {e}")
+            logger.exception(f"Error loading skills from {module_path}: {e}")
 
         return skills
 
@@ -110,14 +115,17 @@ class SkillLoader:
 
         Returns:
             List of loaded skill instances
+
         """
         file_path = Path(file_path)
 
         if not file_path.exists():
-            raise FileNotFoundError(f"Skill file not found: {file_path}")
+            msg = f"Skill file not found: {file_path}"
+            raise FileNotFoundError(msg)
 
-        if not file_path.suffix == ".py":
-            raise ValueError(f"Skill file must be a Python file: {file_path}")
+        if file_path.suffix != ".py":
+            msg = f"Skill file must be a Python file: {file_path}"
+            raise ValueError(msg)
 
         skills: list[Skill] = []
         module_name = f"_skill_loader_{file_path.stem}_{id(file_path)}"
@@ -126,7 +134,8 @@ class SkillLoader:
             # Load the module from file
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec is None or spec.loader is None:
-                raise ImportError(f"Cannot load spec from {file_path}")
+                msg = f"Cannot load spec from {file_path}"
+                raise ImportError(msg)
 
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
@@ -144,12 +153,12 @@ class SkillLoader:
                         skills.append(skill)
                         logger.info(f"Loaded skill '{skill.name}' from {file_path}")
                     except Exception as e:
-                        logger.error(
-                            f"Failed to instantiate skill '{name}' from {file_path}: {e}"
+                        logger.exception(
+                            f"Failed to instantiate skill '{name}' from {file_path}: {e}",
                         )
 
         except Exception as e:
-            logger.error(f"Error loading skills from {file_path}: {e}")
+            logger.exception(f"Error loading skills from {file_path}: {e}")
             raise
         finally:
             # Clean up sys.modules
@@ -166,14 +175,17 @@ class SkillLoader:
 
         Returns:
             List of loaded skill instances
+
         """
         directory = Path(directory)
 
         if not directory.exists():
-            raise FileNotFoundError(f"Skill directory not found: {directory}")
+            msg = f"Skill directory not found: {directory}"
+            raise FileNotFoundError(msg)
 
         if not directory.is_dir():
-            raise ValueError(f"Path is not a directory: {directory}")
+            msg = f"Path is not a directory: {directory}"
+            raise ValueError(msg)
 
         skills: list[Skill] = []
 
@@ -185,7 +197,7 @@ class SkillLoader:
                 file_skills = self.load_from_file(file_path)
                 skills.extend(file_skills)
             except Exception as e:
-                logger.error(f"Failed to load skills from {file_path}: {e}")
+                logger.exception(f"Failed to load skills from {file_path}: {e}")
 
         return skills
 
@@ -195,6 +207,7 @@ def load_builtin_skills() -> list[Skill]:
 
     Returns:
         List of built-in skill instances
+
     """
     loader = SkillLoader()
     return loader.load_builtin_skills()

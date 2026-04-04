@@ -20,13 +20,12 @@ from obscura.core.types import (
     SessionRef,
     ToolSpec,
 )
-from obscura.providers.mcp_backend import MCPBackend, MCPBackendMixin
 from obscura.integrations.mcp.types import (
     MCPConnectionConfig,
     MCPError,
     MCPTransportType,
 )
-
+from obscura.providers.mcp_backend import MCPBackend, MCPBackendMixin
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,7 +39,8 @@ async def echo_handler(**kwargs: Any) -> dict[str, Any]:
 
 async def failing_handler(**kwargs: Any) -> None:
     """Handler that always raises."""
-    raise RuntimeError("boom")
+    msg = "boom"
+    raise RuntimeError(msg)
 
 
 def make_tool(name: str = "test_tool", handler: Any = None) -> ToolSpec:
@@ -340,12 +340,14 @@ class TestMCPBackendHooks:
 
     @pytest.mark.asyncio
     async def test_hook_error_logged_not_raised(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
 
         def exploding_hook(ctx: Any) -> None:
-            raise ValueError("hook exploded")
+            msg = "hook exploded"
+            raise ValueError(msg)
 
         backend.register_hook(HookPoint.PRE_TOOL_USE, exploding_hook)
 
@@ -364,12 +366,14 @@ class TestMCPBackendHooks:
 
     @pytest.mark.asyncio
     async def test_async_hook_error_logged_not_raised(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
 
         async def async_exploding_hook(ctx: Any) -> None:
-            raise RuntimeError("async hook exploded")
+            msg = "async hook exploded"
+            raise RuntimeError(msg)
 
         backend.register_hook(HookPoint.POST_TOOL_USE, async_exploding_hook)
 
@@ -457,7 +461,8 @@ class TestMCPBackendLifecycle:
     @pytest.mark.asyncio
     async def test_start_with_server_failure_still_initializes(self) -> None:
         config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO, command="nonexistent"
+            transport=MCPTransportType.STDIO,
+            command="nonexistent",
         )
         backend = MCPBackend(mcp_servers=[config], name="test-mcp")
         mock_mgr: Any = MagicMock()
@@ -578,7 +583,8 @@ class TestMCPBackendServers:
         backend._session_manager = mock_mgr  # pyright: ignore[reportPrivateUsage]
 
         config = MCPConnectionConfig(
-            transport=MCPTransportType.SSE, url="http://localhost:3000"
+            transport=MCPTransportType.SSE,
+            url="http://localhost:3000",
         )
         session_name = await backend.add_server(config)
         assert session_name == "mcp_server_0"
@@ -642,7 +648,9 @@ class TestMCPBackendMCPToolConversion:
 
         result = await tool_spec.handler(arg1="val1")
         backend._execute_mcp_tool.assert_awaited_once_with(  # pyright: ignore[reportPrivateUsage]
-            "srv", "do_thing", {"arg1": "val1"}
+            "srv",
+            "do_thing",
+            {"arg1": "val1"},
         )
         assert result == "done"
 

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.core.supervisor.policy_store import PolicyStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -51,10 +54,14 @@ class TestPolicyStore:
     def test_scoped_policies(self, store: PolicyStore) -> None:
         global_p = store.create_version(scope="global", policy_json={"max_turns": 10})
         agent_p = store.create_version(
-            scope="agent", scope_id="agent-1", policy_json={"max_turns": 5}
+            scope="agent",
+            scope_id="agent-1",
+            policy_json={"max_turns": 5},
         )
         session_p = store.create_version(
-            scope="session", scope_id="sess-1", policy_json={"max_turns": 3}
+            scope="session",
+            scope_id="sess-1",
+            policy_json={"max_turns": 3},
         )
 
         assert global_p.scope == "global"

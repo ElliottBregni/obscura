@@ -1,5 +1,4 @@
-"""
-obscura — Unified wrapper for Copilot, Claude, OpenAI, and LocalLLM backends.
+"""obscura — Unified wrapper for Copilot, Claude, OpenAI, and LocalLLM backends.
 
 Public API::
 
@@ -12,7 +11,13 @@ Public API::
 
 from __future__ import annotations
 
+from obscura.agent.agent import BaseAgent
+from obscura.auth.models import AuthenticatedUser
 from obscura.core.auth import AuthConfig
+from obscura.core.client import ObscuraClient
+from obscura.core.config import ObscuraConfig
+from obscura.core.context import ContextLoader
+from obscura.core.handlers import RequestHandler, SimpleHandler
 from obscura.core.tools import ToolRegistry, tool
 from obscura.core.types import (
     AgentContext,
@@ -29,12 +34,6 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.agent.agent import BaseAgent
-from obscura.auth.models import AuthenticatedUser
-from obscura.core.client import ObscuraClient
-from obscura.core.config import ObscuraConfig
-from obscura.core.context import ContextLoader
-from obscura.core.handlers import RequestHandler, SimpleHandler
 from obscura.openclaw_bridge import (
     BackendRoutingPolicy,
     MemoryWriteRequest,
@@ -48,45 +47,45 @@ from obscura.openclaw_bridge import (
 )
 
 __all__ = [
-    # Client
-    "ObscuraClient",
-    # Agent
-    "BaseAgent",
     "AgentContext",
     "AgentPhase",
-    # Handlers
-    "RequestHandler",
-    "SimpleHandler",
-    # OpenClaw bridge
-    "OpenClawBridge",
-    "OpenClawBridgeConfig",
-    "BackendRoutingPolicy",
-    "RequestMetadata",
-    "SpawnAgentRequest",
-    "RunAgentRequest",
-    "MemoryWriteRequest",
-    "SemanticSearchRequest",
-    "WorkflowRunRequest",
-    # Context
-    "ContextLoader",
-    # Config
-    "ObscuraConfig",
-    # Types
-    "Backend",
-    "BackendProtocol",
-    "ChunkKind",
-    "ContentBlock",
-    "HookContext",
-    "HookPoint",
-    "Message",
-    "Role",
-    "SessionRef",
-    "StreamChunk",
-    "ToolSpec",
     # Auth
     "AuthConfig",
     "AuthenticatedUser",
+    # Types
+    "Backend",
+    "BackendProtocol",
+    "BackendRoutingPolicy",
+    # Agent
+    "BaseAgent",
+    "ChunkKind",
+    "ContentBlock",
+    # Context
+    "ContextLoader",
+    "HookContext",
+    "HookPoint",
+    "MemoryWriteRequest",
+    "Message",
+    # Client
+    "ObscuraClient",
+    # Config
+    "ObscuraConfig",
+    # OpenClaw bridge
+    "OpenClawBridge",
+    "OpenClawBridgeConfig",
+    # Handlers
+    "RequestHandler",
+    "RequestMetadata",
+    "Role",
+    "RunAgentRequest",
+    "SemanticSearchRequest",
+    "SessionRef",
+    "SimpleHandler",
+    "SpawnAgentRequest",
+    "StreamChunk",
+    "ToolRegistry",
+    "ToolSpec",
+    "WorkflowRunRequest",
     # Tools
     "tool",
-    "ToolRegistry",
 ]

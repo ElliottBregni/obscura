@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -35,6 +35,8 @@ from obscura.parity.tool_middleware import (
     ToolRecordReplayMiddleware,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,7 +61,7 @@ def _make_tool_call_chunks(
         StreamChunk(
             kind=ChunkKind.TOOL_USE_DELTA,
             tool_input_delta=json.dumps(tool_input),
-        )
+        ),
     )
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
     return chunks
@@ -174,7 +176,9 @@ class TestRecordMode:
 
         assert len(middleware.recorded) == 3
         assert [f.tool_name for f in middleware.recorded] == [
-            "tool_0", "tool_1", "tool_2"
+            "tool_0",
+            "tool_1",
+            "tool_2",
         ]
 
     def test_flush_writes_fixtures(self, tmp_path: Path) -> None:
@@ -212,7 +216,7 @@ class TestReplayMode:
                 "tool_input": {"msg": "cached"},
                 "tool_result": "cached:result",
                 "is_error": False,
-            }
+            },
         ]
         (fixtures_dir / "tool_fixtures.json").write_text(json.dumps(fixture_data))
 
@@ -242,8 +246,18 @@ class TestReplayMode:
         fixtures_dir = tmp_path / "fixtures"
         fixtures_dir.mkdir()
         fixture_data = [
-            {"tool_name": "a", "tool_input": {}, "tool_result": "first", "is_error": False},
-            {"tool_name": "b", "tool_input": {}, "tool_result": "second", "is_error": False},
+            {
+                "tool_name": "a",
+                "tool_input": {},
+                "tool_result": "first",
+                "is_error": False,
+            },
+            {
+                "tool_name": "b",
+                "tool_input": {},
+                "tool_result": "second",
+                "is_error": False,
+            },
         ]
         (fixtures_dir / "tool_fixtures.json").write_text(json.dumps(fixture_data))
 
@@ -255,14 +269,16 @@ class TestReplayMode:
         middleware.install(hooks)
 
         r1 = await hooks.run_before(
-            AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="a", turn=1)
+            AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="a", turn=1),
         )
         r2 = await hooks.run_before(
-            AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="b", turn=1)
+            AgentEvent(kind=AgentEventKind.TOOL_CALL, tool_name="b", turn=1),
         )
 
-        assert r1 is not None and r1.tool_result == "first"
-        assert r2 is not None and r2.tool_result == "second"
+        assert r1 is not None
+        assert r1.tool_result == "first"
+        assert r2 is not None
+        assert r2.tool_result == "second"
 
 
 class TestLiveMode:
@@ -302,9 +318,7 @@ class TestAgentLoopScenarioExecutor:
             title="say hello",
             feature_ids=("text",),
             backend=Backend.COPILOT,
-            steps=(
-                ScenarioStep(kind=ScenarioStepKind.USER_PROMPT, text="say hello"),
-            ),
+            steps=(ScenarioStep(kind=ScenarioStepKind.USER_PROMPT, text="say hello"),),
         )
 
         result = await executor.execute_async(spec)
@@ -366,12 +380,16 @@ class TestAgentLoopScenarioExecutor:
             parameters={"type": "object", "properties": {"msg": {"type": "string"}}},
             handler=_echo_handler,
         )
-        backend = MockBackend([
-            _make_tool_call_chunks("echo", {"msg": "test"}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("echo", {"msg": "test"}),
+                _make_text_chunks("done"),
+            ],
+        )
         executor = AgentLoopScenarioExecutor(
-            backend, _make_registry(spec_tool), max_turns=5
+            backend,
+            _make_registry(spec_tool),
+            max_turns=5,
         )
         fixtures_dir = str(tmp_path / "fixtures")
 
@@ -382,9 +400,7 @@ class TestAgentLoopScenarioExecutor:
             backend=Backend.COPILOT,
             tool_mode="record",
             fixtures_dir=fixtures_dir,
-            steps=(
-                ScenarioStep(kind=ScenarioStepKind.USER_PROMPT, text="echo test"),
-            ),
+            steps=(ScenarioStep(kind=ScenarioStepKind.USER_PROMPT, text="echo test"),),
         )
 
         result = await executor.execute_async(spec)

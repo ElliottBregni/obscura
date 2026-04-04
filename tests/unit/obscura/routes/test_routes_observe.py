@@ -77,7 +77,7 @@ def test_observe_snapshot_returns_states_and_stale_ids(client: TestClient) -> No
             tool_use_id="tool-use-1",
             tool_name="run_shell",
             tool_input={"script": "pwd"},
-        )
+        ),
     )
 
     resp = client.get("/api/v1/observe", params={"stale_seconds": 20})
@@ -119,7 +119,7 @@ def test_observe_stream_once_emits_snapshot_event(client: TestClient) -> None:
             tool_use_id="tool-use-xyz",
             tool_name="run_python3",
             tool_input={"script": "print(1)"},
-        )
+        ),
     )
 
     with client.stream("GET", "/api/v1/observe/stream?once=true") as resp:

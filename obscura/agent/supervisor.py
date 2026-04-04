@@ -40,8 +40,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from obscura.agent.interaction import (
     AttentionPriority,
@@ -50,9 +49,11 @@ from obscura.agent.interaction import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from obscura.auth.models import AuthenticatedUser
 
-__all__ = ["AgentSupervisor", "SupervisorConfig", "AgentDefinition"]
+__all__ = ["AgentDefinition", "AgentSupervisor", "SupervisorConfig"]
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +90,13 @@ class AgentDefinition:
     max_turns: int = 25
     mcp_servers: str | list[str] = "auto"
     triggers: list[TriggerDefinition] = field(
-        default_factory=lambda: list[TriggerDefinition]()
+        default_factory=list[TriggerDefinition],
     )
-    tags: list[str] = field(default_factory=lambda: list[str]())
+    tags: list[str] = field(default_factory=list[str])
 
     # Delegation
     can_delegate: bool = False
-    delegate_allowlist: list[str] = field(default_factory=lambda: list[str]())
+    delegate_allowlist: list[str] = field(default_factory=list[str])
     max_delegation_depth: int = 3
 
     # Tool allowlist (None = all tools allowed)
@@ -107,7 +108,7 @@ class SupervisorConfig:
     """Top-level supervisor config."""
 
     agents: list[AgentDefinition] = field(
-        default_factory=lambda: list[AgentDefinition]()
+        default_factory=list[AgentDefinition],
     )
 
     @classmethod
@@ -131,27 +132,34 @@ class SupervisorConfig:
 
         agents: list[AgentDefinition] = []
         import dataclasses as _dc
+
         _trigger_fields = {f.name for f in _dc.fields(TriggerDefinition)}
         for m in manifests:
             triggers: list[TriggerDefinition] = []
             for raw_t in m.triggers:
                 if isinstance(raw_t, dict):
-                    filtered_t = {k: v for k, v in raw_t.items() if k in _trigger_fields}
+                    filtered_t = {
+                        k: v for k, v in raw_t.items() if k in _trigger_fields
+                    }
                     triggers.append(TriggerDefinition(**filtered_t))
-            agents.append(AgentDefinition(
-                name=m.name,
-                type=m.agent_type,
-                model=m.model,
-                system_prompt=m.system_prompt,
-                max_turns=m.max_turns,
-                mcp_servers=m.mcp_servers,
-                triggers=triggers,
-                tags=list(m.tags),
-                can_delegate=m.can_delegate,
-                delegate_allowlist=list(m.delegate_allowlist),
-                max_delegation_depth=m.max_delegation_depth,
-                tool_allowlist=list(m.tool_allowlist) if m.tool_allowlist is not None else None,
-            ))
+            agents.append(
+                AgentDefinition(
+                    name=m.name,
+                    type=m.agent_type,
+                    model=m.model,
+                    system_prompt=m.system_prompt,
+                    max_turns=m.max_turns,
+                    mcp_servers=m.mcp_servers,
+                    triggers=triggers,
+                    tags=list(m.tags),
+                    can_delegate=m.can_delegate,
+                    delegate_allowlist=list(m.delegate_allowlist),
+                    max_delegation_depth=m.max_delegation_depth,
+                    tool_allowlist=list(m.tool_allowlist)
+                    if m.tool_allowlist is not None
+                    else None,
+                ),
+            )
 
         return cls(agents=agents)
 
@@ -169,9 +177,16 @@ class SupervisorConfig:
 
         # Try .toml variant first
         toml_path = resolved.with_suffix(".toml")
-        yaml_path = resolved if resolved.suffix in (".yaml", ".yml") else resolved.with_suffix(".yaml")
+        yaml_path = (
+            resolved
+            if resolved.suffix in (".yaml", ".yml")
+            else resolved.with_suffix(".yaml")
+        )
 
-        from obscura.core.config_io import apply_agent_defaults, try_load_config  # noqa: PLC0415
+        from obscura.core.config_io import (  # noqa: PLC0415
+            apply_agent_defaults,
+            try_load_config,
+        )
 
         raw = try_load_config(toml_path, yaml_path)
         if raw is None:
@@ -216,12 +231,13 @@ class SupervisorConfig:
                 continue
             raw_triggers: list[dict[str, Any]] = entry.get("triggers", [])
             triggers = [
-                TriggerDefinition(**{k: v for k, v in t.items() if k in _trigger_fields})
+                TriggerDefinition(
+                    **{k: v for k, v in t.items() if k in _trigger_fields},
+                )
                 for t in raw_triggers
             ]
             filtered = {
-                k: v for k, v in entry.items()
-                if k in _agent_fields and k != "triggers"
+                k: v for k, v in entry.items() if k in _agent_fields and k != "triggers"
             }
             agents.append(AgentDefinition(**filtered, triggers=triggers))
 
@@ -452,7 +468,7 @@ class AgentSupervisor:
                         description=tdef.description,
                         notify_user=tdef.notify_user,
                         priority=priority,
-                    )
+                    ),
                 )
             elif tdef.imessage is not None:
                 im_cfg = tdef.imessage
@@ -470,7 +486,7 @@ class AgentSupervisor:
                         notify_user=tdef.notify_user,
                         priority=priority,
                         data=im_data,
-                    )
+                    ),
                 )
             elif tdef.message is not None:
                 msg_cfg = tdef.message
@@ -484,7 +500,7 @@ class AgentSupervisor:
                         description=tdef.description or "Message polling",
                         notify_user=tdef.notify_user,
                         priority=priority,
-                    )
+                    ),
                 )
             else:
                 triggers.append(
@@ -494,7 +510,7 @@ class AgentSupervisor:
                         description=tdef.description,
                         notify_user=tdef.notify_user,
                         priority=priority,
-                    )
+                    ),
                 )
 
         agent = DaemonAgent(
@@ -521,7 +537,6 @@ class AgentSupervisor:
         )
         await agent.run_forever()
 
-
     def _generate_agent_card(self, agent_def: AgentDefinition) -> None:
         """Generate and store an A2A agent card for the given definition."""
         try:
@@ -530,7 +545,9 @@ class AgentSupervisor:
             card = AgentCardGenerator.from_agent_config(
                 agent_name=agent_def.name,
                 base_url=self._base_url,
-                description=agent_def.system_prompt[:200] if agent_def.system_prompt else "",
+                description=agent_def.system_prompt[:200]
+                if agent_def.system_prompt
+                else "",
                 streaming=True,
             )
             self._agent_cards[agent_def.name] = card

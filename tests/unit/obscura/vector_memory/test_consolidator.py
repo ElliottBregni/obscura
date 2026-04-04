@@ -25,12 +25,24 @@ def _make_store(tmp_path):
     )
     config = BackendConfig(user_id=user.user_id, embedding_dim=8)
     decay_config = DecayConfig(consolidation_age_days=7)
-    backend = SQLiteBackend(config=config, db_path=tmp_path / "test.db", decay_config=decay_config)
-    embedding_fn = lambda text: [0.0] * 8
-    return VectorMemoryStore(user, backend=backend, embedding_fn=embedding_fn, decay_config=decay_config)
+    backend = SQLiteBackend(
+        config=config,
+        db_path=tmp_path / "test.db",
+        decay_config=decay_config,
+    )
+
+    def embedding_fn(text):
+        return [0.0] * 8
+
+    return VectorMemoryStore(
+        user,
+        backend=backend,
+        embedding_fn=embedding_fn,
+        decay_config=decay_config,
+    )
 
 
-def test_consolidate_groups_by_session(tmp_path):
+def test_consolidate_groups_by_session(tmp_path) -> None:
     """Episodes should be grouped by session_id and consolidated."""
     store = _make_store(tmp_path)
     now = datetime.now(UTC)
@@ -90,7 +102,7 @@ def test_consolidate_groups_by_session(tmp_path):
     assert len(summaries) == 1
 
 
-def test_consolidate_skips_recent(tmp_path):
+def test_consolidate_skips_recent(tmp_path) -> None:
     """Episodes younger than consolidation_age_days should be skipped."""
     store = _make_store(tmp_path)
 
@@ -115,7 +127,7 @@ def test_consolidate_skips_recent(tmp_path):
     assert created == 0
 
 
-def test_consolidate_preserves_metadata(tmp_path):
+def test_consolidate_preserves_metadata(tmp_path) -> None:
     """The summary should inherit metadata from the first episode."""
     store = _make_store(tmp_path)
     old = datetime.now(UTC) - timedelta(days=10)
@@ -124,7 +136,11 @@ def test_consolidate_preserves_metadata(tmp_path):
         store.set(
             key=f"meta_ep_{i}",
             text=f"Turn {i} discussion",
-            metadata={"session_id": "meta_session", "turn": i, "custom_tag": "important"},
+            metadata={
+                "session_id": "meta_session",
+                "turn": i,
+                "custom_tag": "important",
+            },
             namespace="cli:conversation",
             memory_type="episode",
         )
@@ -139,12 +155,12 @@ def test_consolidate_preserves_metadata(tmp_path):
         config=store.decay_config,
         summarize_fn=lambda texts: "Consolidated summary",
     )
-    deleted, created = consolidator.consolidate()
+    _deleted, created = consolidator.consolidate()
 
     assert created == 1
     # Find the summary
     keys = store.list_keys()
-    summary_key = [k for k in keys if k.key.startswith("summary_")][0]
+    summary_key = next(k for k in keys if k.key.startswith("summary_"))
     entry = store.get(summary_key)
     assert entry is not None
     assert entry.metadata["original_session_id"] == "meta_session"

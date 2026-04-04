@@ -1,5 +1,4 @@
-"""
-obscura.a2a.tool_adapter — Register remote A2A agents as Obscura tools.
+"""obscura.a2a.tool_adapter — Register remote A2A agents as Obscura tools.
 
 Wraps an ``A2AClient`` as a ``ToolSpec`` so any Obscura agent can invoke
 remote A2A agents through the standard tool-calling interface.
@@ -23,12 +22,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from obscura.core.types import ToolSpec
 from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.types import DataPart, TextPart
-from obscura.core.tools import ToolRegistry
-from obscura.core.types import ToolSpec
+
+if TYPE_CHECKING:
+    from obscura.core.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ def register_remote_agent_as_tool(
     -------
     ToolSpec:
         The registered tool spec.
+
     """
     card = client.agent_card
     name = tool_name or (card.name if card else client.base_url.split("//")[-1])
@@ -97,7 +99,7 @@ def register_remote_agent_as_tool(
             return f"Task {task.id} completed with status: {task.status.state.value}"
 
         except Exception as e:
-            logger.error("A2A tool call failed: %s", e)
+            logger.exception("A2A tool call failed: %s", e)
             return f"Error calling remote agent: {e}"
 
     spec = ToolSpec(
@@ -144,6 +146,7 @@ def register_agents_from_urls(
     -------
     list[ToolSpec]:
         The registered tool specs.
+
     """
     specs: list[ToolSpec] = []
 
@@ -156,7 +159,7 @@ def register_agents_from_urls(
                 spec = register_remote_agent_as_tool(registry, client)
                 specs.append(spec)
             except Exception as e:
-                logger.error("Failed to register agent at %s: %s", url, e)
+                logger.exception("Failed to register agent at %s: %s", url, e)
                 await client.disconnect()
 
     asyncio.get_event_loop().run_until_complete(_register_all())

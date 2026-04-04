@@ -1,14 +1,13 @@
-import os
 import json
+import os
 import time
 from pathlib import Path
-
-import pytest
+from typing import Never
 
 from obscura.kairos.dream import DreamConsolidator
 
 
-def test_acquire_writes_json_and_is_locked(tmp_path, monkeypatch):
+def test_acquire_writes_json_and_is_locked(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     d = DreamConsolidator()
 
@@ -23,7 +22,7 @@ def test_acquire_writes_json_and_is_locked(tmp_path, monkeypatch):
     d._rollback_lock()
 
 
-def test_stale_lock_allows_acquire(tmp_path, monkeypatch):
+def test_stale_lock_allows_acquire(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     mem = Path(tmp_path) / ".obscura" / "memory"
     mem.mkdir(parents=True)
@@ -42,7 +41,7 @@ def test_stale_lock_allows_acquire(tmp_path, monkeypatch):
     d._rollback_lock()
 
 
-def test_permission_error_treated_as_locked(tmp_path, monkeypatch):
+def test_permission_error_treated_as_locked(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     mem = Path(tmp_path) / ".obscura" / "memory"
     mem.mkdir(parents=True)
@@ -53,8 +52,8 @@ def test_permission_error_treated_as_locked(tmp_path, monkeypatch):
     d = DreamConsolidator()
 
     # Patch os.kill to raise PermissionError to simulate restricted PID check.
-    def fake_kill(pid, sig):
-        raise PermissionError()
+    def fake_kill(pid, sig) -> Never:
+        raise PermissionError
 
     monkeypatch.setattr(os, "kill", fake_kill)
 

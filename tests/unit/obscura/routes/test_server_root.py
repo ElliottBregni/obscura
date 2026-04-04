@@ -1,5 +1,4 @@
-"""
-Tests for sdk.server — FastAPI HTTP API integration tests.
+"""Tests for sdk.server — FastAPI HTTP API integration tests.
 
 Uses FastAPI TestClient with mocked backends to verify all 8 routes,
 auth gating, and request/response schemas.
@@ -7,16 +6,18 @@ auth gating, and request/response schemas.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.core.config import ObscuraConfig
 from obscura.server import create_app
+
+if TYPE_CHECKING:
+    import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,10 +38,12 @@ def _make_app(*, auth_enabled: bool = False, otel_enabled: bool = False) -> Any:
     config = ObscuraConfig.from_env()
     # Override config for test
     object.__setattr__(config, "auth_enabled", auth_enabled) if hasattr(
-        config, "__dataclass_fields__"
+        config,
+        "__dataclass_fields__",
     ) else setattr(config, "auth_enabled", auth_enabled)
     object.__setattr__(config, "otel_enabled", otel_enabled) if hasattr(
-        config, "__dataclass_fields__"
+        config,
+        "__dataclass_fields__",
     ) else setattr(config, "otel_enabled", otel_enabled)
     return create_app(config)
 
@@ -97,7 +100,8 @@ class TestSendEndpoint:
         client = TestClient(app)
 
         with patch(
-            "obscura.auth.rbac.require_any_role", return_value=lambda: _TEST_USER
+            "obscura.auth.rbac.require_any_role",
+            return_value=lambda: _TEST_USER,
         ):
             # Override the dependency
             from obscura.auth.rbac import require_any_role
@@ -217,7 +221,8 @@ class TestAppFactory:
         assert app.state._health_ws_clients == []
 
     def test_create_app_default_config_from_env(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When config=None, create_app should build config from environment."""
         monkeypatch.setenv("OBSCURA_AUTH_ENABLED", "false")
@@ -242,7 +247,8 @@ class TestOtelMiddlewareConditional:
 
     def test_otel_middleware_enabled_does_not_crash(self) -> None:
         """When otel_enabled=True, app creation should succeed even if
-        the telemetry middleware import fails."""
+        the telemetry middleware import fails.
+        """
         app = _make_app(otel_enabled=True)
         assert isinstance(app, FastAPI)
 
@@ -265,9 +271,7 @@ class TestAuthMiddlewareConditional:
         from obscura.auth.middleware import APIKeyAuthMiddleware
 
         app = _make_app(auth_enabled=False)
-        middleware_classes = [
-            m.cls for m in app.user_middleware if hasattr(m, "cls")
-        ]
+        middleware_classes = [m.cls for m in app.user_middleware if hasattr(m, "cls")]
         assert APIKeyAuthMiddleware not in middleware_classes
 
     def test_auth_middleware_present_when_enabled(self) -> None:
@@ -275,9 +279,7 @@ class TestAuthMiddlewareConditional:
         from obscura.auth.middleware import APIKeyAuthMiddleware
 
         app = _make_app(auth_enabled=True)
-        middleware_classes = [
-            m.cls for m in app.user_middleware if hasattr(m, "cls")
-        ]
+        middleware_classes = [m.cls for m in app.user_middleware if hasattr(m, "cls")]
         assert APIKeyAuthMiddleware in middleware_classes
 
 
@@ -293,7 +295,8 @@ class TestGlobalExceptionHandler:
 
         @app.get("/test-kaboom")
         async def kaboom() -> None:  # pyright: ignore[reportUnusedFunction]
-            raise ValueError("kaboom error")
+            msg = "kaboom error"
+            raise ValueError(msg)
 
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/test-kaboom")
@@ -307,7 +310,8 @@ class TestGlobalExceptionHandler:
 
         @app.get("/test-runtime")
         async def runtime_err() -> None:  # pyright: ignore[reportUnusedFunction]
-            raise RuntimeError("runtime boom")
+            msg = "runtime boom"
+            raise RuntimeError(msg)
 
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/test-runtime")
@@ -381,7 +385,8 @@ class TestLifespan:
         app = create_app(config)
 
         with patch(
-            "obscura.telemetry.init_telemetry", side_effect=Exception("otel boom")
+            "obscura.telemetry.init_telemetry",
+            side_effect=Exception("otel boom"),
         ):
             # Should not raise
             async with lifespan(app):

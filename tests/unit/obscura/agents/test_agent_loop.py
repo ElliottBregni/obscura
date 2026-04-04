@@ -4,30 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Callable, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 
+from obscura.core.agent_loop import AgentLoop
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    AgentEventKind,
     AgentEvent,
+    AgentEventKind,
     Backend,
     BackendCapabilities,
+    BackendProtocol,
     ChunkKind,
+    HookPoint,
     Message,
     NativeHandle,
     Role,
-    StreamChunk,
     SessionRef,
+    StreamChunk,
     ToolCallInfo,
     ToolErrorType,
     ToolSpec,
-    HookPoint,
 )
-from obscura.core.agent_loop import AgentLoop
-from obscura.core.types import BackendProtocol
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,7 +57,7 @@ def _make_tool_call_chunks(
     chunks.append(StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name=tool_name))
     input_json = json.dumps(tool_input)
     chunks.append(
-        StreamChunk(kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta=input_json)
+        StreamChunk(kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta=input_json),
     )
     chunks.append(StreamChunk(kind=ChunkKind.DONE))
     return chunks
@@ -275,7 +277,7 @@ class TestAgentLoopToolExecution:
                         "recipient_name": "functions.web_search",
                         "parameters": {"query": "obscura"},
                     },
-                ]
+                ],
             },
         )
         turn2 = _make_text_chunks("done")
@@ -303,7 +305,9 @@ class TestAgentLoopToolExecution:
             handler=web_fetch,
         )
 
-        raw_start = {"data": {"tool_name": "web_fetch", "input": {"url": "https://example.com"}}}
+        raw_start = {
+            "data": {"tool_name": "web_fetch", "input": {"url": "https://example.com"}},
+        }
         turn1 = [
             StreamChunk(
                 kind=ChunkKind.TOOL_USE_START,
@@ -410,10 +414,14 @@ class TestAgentLoopToolExecution:
         """If a tool handler raises, the result should be an error."""
 
         def failing_handler() -> str:
-            raise RuntimeError("disk full")
+            msg = "disk full"
+            raise RuntimeError(msg)
 
         spec = ToolSpec(
-            name="write", description="Write", parameters={}, handler=failing_handler
+            name="write",
+            description="Write",
+            parameters={},
+            handler=failing_handler,
         )
         turn1 = _make_tool_call_chunks("write", {})
         turn2 = _make_text_chunks("Write failed.")
@@ -580,7 +588,9 @@ class TestAgentLoopErrors:
             async def stop(self) -> None: ...
             @override
             async def send(
-                self, prompt: str, **kwargs: Any
+                self,
+                prompt: str,
+                **kwargs: Any,
             ) -> Message:  # pragma: no cover - not used
                 raise NotImplementedError
 
@@ -600,7 +610,9 @@ class TestAgentLoopErrors:
             def register_tool(self, spec: ToolSpec) -> None: ...
             @override
             def register_hook(
-                self, hook: HookPoint, callback: Callable[..., Any]
+                self,
+                hook: HookPoint,
+                callback: Callable[..., Any],
             ) -> None: ...
             @override
             def get_tool_registry(self) -> ToolRegistry:
@@ -617,10 +629,13 @@ class TestAgentLoopErrors:
 
             @override
             async def stream(
-                self, prompt: str, **kw: Any
+                self,
+                prompt: str,
+                **kw: Any,
             ) -> AsyncIterator[StreamChunk]:
-                raise ConnectionError("backend down")
-                yield  # make it a generator  # noqa: E501
+                msg = "backend down"
+                raise ConnectionError(msg)
+                yield  # make it a generator
 
         loop = AgentLoop(FailingBackend(), _make_registry())
         events = [e async for e in loop.run("fail")]
@@ -748,21 +763,21 @@ class TestToolCallParsing:
 class TestToolErrorNormalization:
     def test_missing_argument_maps_to_invalid_args(self) -> None:
         err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]
-            TypeError("run_python3() missing 1 required positional argument: 'code'")
+            TypeError("run_python3() missing 1 required positional argument: 'code'"),
         )
         assert err.type == ToolErrorType.INVALID_ARGS
         assert err.safe_to_retry is True
 
     def test_timeout_maps_to_timeout_retryable(self) -> None:
         err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]
-            TimeoutError("tool timed out")
+            TimeoutError("tool timed out"),
         )
         assert err.type == ToolErrorType.TIMEOUT
         assert err.safe_to_retry is True
 
     def test_permission_maps_to_unauthorized(self) -> None:
         err = AgentLoop._normalize_tool_error(  # pyright: ignore[reportPrivateUsage]
-            PermissionError("permission denied")
+            PermissionError("permission denied"),
         )
         assert err.type == ToolErrorType.UNAUTHORIZED
         assert err.safe_to_retry is False

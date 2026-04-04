@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
 from obscura.cli import main
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _seed_sessions_db(home: Path, rows: list[tuple[str, str]]) -> None:
@@ -51,4 +54,3 @@ def test_resume_takes_precedence_over_continue(tmp_path: Path, monkeypatch) -> N
     assert result.exit_code == 0
     assert repl_mock.await_count == 1
     assert repl_mock.await_args.args[3] == "session-cli"
-

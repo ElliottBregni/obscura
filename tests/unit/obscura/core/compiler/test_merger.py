@@ -6,14 +6,14 @@ from pathlib import Path
 
 from obscura.core.compiler.compiled import CompiledPolicy
 from obscura.core.compiler.merger import (
+    _deep_merge,
+    _merge_instructions,
+    _merge_str_lists,
     apply_agent_overrides,
     compile_agent,
     compile_memory,
     compile_policy,
     merge_template_chain,
-    _deep_merge,
-    _merge_instructions,
-    _merge_str_lists,
 )
 from obscura.core.compiler.specs import (
     MCPServerSpec,

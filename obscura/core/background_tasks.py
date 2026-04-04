@@ -1,5 +1,4 @@
-"""
-obscura.core.background_tasks — Background task process manager.
+"""obscura.core.background_tasks — Background task process manager.
 
 Allows tools (e.g. ``run_shell``) to launch long-running shell commands
 in the background, retrieve their output later, and stop them on demand.
@@ -16,6 +15,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import time
 from dataclasses import dataclass, field
@@ -59,7 +59,7 @@ class BackgroundTaskManager:
     ) -> str:
         """Launch *command* in the background, returning a task ID."""
         task_id = hashlib.sha256(
-            f"{command}:{cwd}:{time.time()}".encode()
+            f"{command}:{cwd}:{time.time()}".encode(),
         ).hexdigest()[:12]
 
         proc = await asyncio.create_subprocess_shell(
@@ -79,7 +79,7 @@ class BackgroundTaskManager:
 
         # Spawn a watcher coroutine that collects output on completion.
         self._watchers[task_id] = asyncio.create_task(
-            self._watch(task_id, proc, timeout)
+            self._watch(task_id, proc, timeout),
         )
 
         return task_id
@@ -94,13 +94,18 @@ class BackgroundTaskManager:
         task = self._tasks[task_id]
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
+                proc.communicate(),
+                timeout=timeout,
             )
-            task.stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-            task.stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            task.stdout = (
+                stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            )
+            task.stderr = (
+                stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            )
             task.exit_code = proc.returncode
             task.status = "completed" if proc.returncode == 0 else "failed"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             task.status = "failed"
@@ -128,10 +133,8 @@ class BackgroundTaskManager:
         watcher = self._watchers.get(task_id)
         if watcher is not None:
             watcher.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await watcher
-            except asyncio.CancelledError:
-                pass
         task = self._tasks.get(task_id)
         if task is not None:
             task.status = "stopped"

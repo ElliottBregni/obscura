@@ -1,5 +1,4 @@
-"""
-obscura.core.deep_log — Deep structured logging for debugging and diagnostics.
+"""obscura.core.deep_log — Deep structured logging for debugging and diagnostics.
 
 Provides a centralized logging system that captures:
   - Every tool call (name, args summary, duration, result status)
@@ -20,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -103,10 +103,8 @@ class DeepLogger:
         """Flush and close the log file."""
         self.flush()
         if self._file_handle is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._file_handle.close()
-            except Exception:
-                pass
             self._file_handle = None
 
     # ── Typed log methods ──────────────────────────────────────────────
@@ -129,17 +127,19 @@ class DeepLogger:
                 sv = str(v)
                 safe_args[k] = sv[:200] if len(sv) > 200 else sv
 
-        self._write({
-            "type": "tool_call",
-            "data": {
-                "tool": tool_name,
-                "args": safe_args,
-                "duration_ms": duration_ms,
-                "ok": ok,
-                "error": error[:500] if error else "",
-                "result_preview": result_preview[:200],
+        self._write(
+            {
+                "type": "tool_call",
+                "data": {
+                    "tool": tool_name,
+                    "args": safe_args,
+                    "duration_ms": duration_ms,
+                    "ok": ok,
+                    "error": error[:500] if error else "",
+                    "result_preview": result_preview[:200],
+                },
             },
-        })
+        )
 
     def api_request(
         self,
@@ -152,17 +152,19 @@ class DeepLogger:
         error: str = "",
     ) -> None:
         """Log an API request to the LLM backend."""
-        self._write({
-            "type": "api_request",
-            "data": {
-                "model": model,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cache_hit": cache_hit,
-                "latency_ms": latency_ms,
-                "error": error[:500] if error else "",
+        self._write(
+            {
+                "type": "api_request",
+                "data": {
+                    "model": model,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_hit": cache_hit,
+                    "latency_ms": latency_ms,
+                    "error": error[:500] if error else "",
+                },
             },
-        })
+        )
 
     def event(
         self,
@@ -174,10 +176,12 @@ class DeepLogger:
         for k, v in data.items():
             sv = str(v)
             safe_data[k] = sv[:500] if len(sv) > 500 else sv
-        self._write({
-            "type": "event",
-            "data": {"event": event_type, **safe_data},
-        })
+        self._write(
+            {
+                "type": "event",
+                "data": {"event": event_type, **safe_data},
+            },
+        )
 
     def error(
         self,
@@ -187,14 +191,16 @@ class DeepLogger:
         exc_type: str = "",
     ) -> None:
         """Log an error."""
-        self._write({
-            "type": "error",
-            "data": {
-                "message": message[:1000],
-                "source": source,
-                "exc_type": exc_type,
+        self._write(
+            {
+                "type": "error",
+                "data": {
+                    "message": message[:1000],
+                    "source": source,
+                    "exc_type": exc_type,
+                },
             },
-        })
+        )
 
     def session_event(
         self,
@@ -203,10 +209,12 @@ class DeepLogger:
         **extra: Any,
     ) -> None:
         """Log a session lifecycle event."""
-        self._write({
-            "type": "session",
-            "data": {"action": action, "session_id": session_id[:16], **extra},
-        })
+        self._write(
+            {
+                "type": "session",
+                "data": {"action": action, "session_id": session_id[:16], **extra},
+            },
+        )
 
     @property
     def total_entries(self) -> int:
@@ -219,5 +227,10 @@ class DeepLogger:
 
 # ── Module singleton ───────────────────────────────────────────────────
 
-_enabled = os.environ.get("OBSCURA_DEEP_LOG", "1").strip().lower() not in ("0", "false", "no", "off")
+_enabled = os.environ.get("OBSCURA_DEEP_LOG", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 dlog = DeepLogger(enabled=_enabled)

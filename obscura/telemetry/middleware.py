@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-"""
-obscura.telemetry.middleware — ASGI middleware for request tracing.
+"""obscura.telemetry.middleware — ASGI middleware for request tracing.
 
 Enriches each request span with user identity, request ID, and
 propagates W3C traceparent headers. Uses
@@ -20,9 +19,12 @@ from __future__ import annotations
 
 import importlib
 import uuid
-from typing import Any, Callable, override
+from typing import TYPE_CHECKING, Any, override
 
 from starlette.middleware.base import BaseHTTPMiddleware
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ObscuraTelemetryMiddleware(BaseHTTPMiddleware):

@@ -8,7 +8,7 @@ from starlette.testclient import TestClient
 class TestWebhooks:
     """Test webhook functionality."""
 
-    def test_create_webhook(self, client: TestClient):
+    def test_create_webhook(self, client: TestClient) -> None:
         """Can create a webhook."""
         resp = client.post(
             "/api/v1/webhooks",
@@ -26,7 +26,7 @@ class TestWebhooks:
         assert "secret" in data  # Secret only shown on creation
         assert data["active"] is True
 
-    def test_list_webhooks(self, client: TestClient):
+    def test_list_webhooks(self, client: TestClient) -> None:
         """Can list webhooks (without secrets)."""
         # Create webhook
         client.post(
@@ -43,7 +43,7 @@ class TestWebhooks:
         for webhook in data["webhooks"]:
             assert "secret" not in webhook
 
-    def test_get_webhook(self, client: TestClient):
+    def test_get_webhook(self, client: TestClient) -> None:
         """Can get a specific webhook."""
         # Create webhook
         create_resp = client.post(
@@ -59,17 +59,18 @@ class TestWebhooks:
         assert data["webhook_id"] == webhook_id
         assert "secret" not in data  # Secret not exposed
 
-    def test_get_webhook_not_found(self, client: TestClient):
+    def test_get_webhook_not_found(self, client: TestClient) -> None:
         """Getting non-existent webhook returns 404."""
         resp = client.get("/api/v1/webhooks/non-existent")
 
         assert resp.status_code == 404
 
-    def test_delete_webhook(self, client: TestClient):
+    def test_delete_webhook(self, client: TestClient) -> None:
         """Can delete a webhook."""
         # Create webhook
         create_resp = client.post(
-            "/api/v1/webhooks", json={"url": "https://example.com/webhook-delete"}
+            "/api/v1/webhooks",
+            json={"url": "https://example.com/webhook-delete"},
         )
         webhook_id = create_resp.json()["webhook_id"]
 
@@ -83,7 +84,7 @@ class TestWebhooks:
 class TestAdminAuditLogs:
     """Test admin audit log functionality."""
 
-    def test_list_audit_logs_admin_only(self, client: TestClient):
+    def test_list_audit_logs_admin_only(self, client: TestClient) -> None:
         """Audit logs require admin role."""
         # This test uses the default client which has admin role
         resp = client.get("/api/v1/audit/logs")
@@ -93,7 +94,7 @@ class TestAdminAuditLogs:
         assert "logs" in data
         assert "total" in data
 
-    def test_audit_logs_filter_by_action(self, client: TestClient):
+    def test_audit_logs_filter_by_action(self, client: TestClient) -> None:
         """Can filter audit logs by action."""
         # Create some activity
         client.post("/api/v1/agents", json={"name": "audit-test"})
@@ -106,7 +107,7 @@ class TestAdminAuditLogs:
         create_logs = [l for l in data["logs"] if l.get("action") == "create"]
         assert len(create_logs) >= 1
 
-    def test_audit_logs_pagination(self, client: TestClient):
+    def test_audit_logs_pagination(self, client: TestClient) -> None:
         """Audit logs support pagination."""
         resp = client.get("/api/v1/audit/logs?limit=5&offset=0")
 
@@ -116,7 +117,7 @@ class TestAdminAuditLogs:
         assert data["offset"] == 0
         assert len(data["logs"]) <= 5
 
-    def test_audit_logs_summary(self, client: TestClient):
+    def test_audit_logs_summary(self, client: TestClient) -> None:
         """Can get audit log summary."""
         resp = client.get("/api/v1/audit/logs/summary")
 
@@ -132,7 +133,7 @@ class TestAdminAuditLogs:
 class TestMetrics:
     """Test metrics endpoints."""
 
-    def test_get_system_metrics(self, client: TestClient):
+    def test_get_system_metrics(self, client: TestClient) -> None:
         """Can get system metrics."""
         # Create some data
         client.post("/api/v1/agents", json={"name": "metrics-test", "model": "claude"})
@@ -153,11 +154,12 @@ class TestMetrics:
         assert "by_status" in data["agents"]
         assert "by_model" in data["agents"]
 
-    def test_get_agent_metrics(self, client: TestClient):
+    def test_get_agent_metrics(self, client: TestClient) -> None:
         """Can get metrics for a specific agent."""
         # Create agent
         agent = client.post(
-            "/api/v1/agents", json={"name": "agent-metrics-test"}
+            "/api/v1/agents",
+            json={"name": "agent-metrics-test"},
         ).json()
 
         resp = client.get(f"/api/v1/metrics/agents/{agent['agent_id']}")
@@ -169,7 +171,7 @@ class TestMetrics:
         assert "status" in data
         assert "created_at" in data
 
-    def test_get_agent_metrics_not_found(self, client: TestClient):
+    def test_get_agent_metrics_not_found(self, client: TestClient) -> None:
         """Getting metrics for non-existent agent returns 404."""
         resp = client.get("/api/v1/metrics/agents/non-existent")
 
@@ -180,7 +182,7 @@ class TestMetrics:
 class TestRateLimits:
     """Test rate limit functionality."""
 
-    def test_get_rate_limits_admin_only(self, client: TestClient):
+    def test_get_rate_limits_admin_only(self, client: TestClient) -> None:
         """Rate limits require admin role."""
         resp = client.get("/api/v1/rate-limits")
 
@@ -194,7 +196,7 @@ class TestRateLimits:
         assert "concurrent_agents" in data["default"]
         assert "memory_quota_mb" in data["default"]
 
-    def test_set_rate_limit(self, client: TestClient):
+    def test_set_rate_limit(self, client: TestClient) -> None:
         """Can set custom rate limits."""
         resp = client.post(
             "/api/v1/rate-limits",
@@ -212,14 +214,14 @@ class TestRateLimits:
         assert data["limits"]["requests_per_minute"] == 200
         assert data["limits"]["concurrent_agents"] == 20
 
-    def test_set_rate_limit_missing_key(self, client: TestClient):
+    def test_set_rate_limit_missing_key(self, client: TestClient) -> None:
         """Setting rate limit without api_key returns error."""
         resp = client.post("/api/v1/rate-limits", json={"requests_per_minute": 100})
 
         assert resp.status_code == 400
         assert "api_key is required" in resp.json()["detail"]
 
-    def test_delete_rate_limit(self, client: TestClient):
+    def test_delete_rate_limit(self, client: TestClient) -> None:
         """Can delete custom rate limits."""
         # Set a rate limit first
         client.post(

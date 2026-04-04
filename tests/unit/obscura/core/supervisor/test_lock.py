@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.core.supervisor.errors import LockAcquisitionError
 from obscura.core.supervisor.lock import SessionLock
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture

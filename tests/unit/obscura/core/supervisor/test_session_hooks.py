@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.core.supervisor.session_hooks import SessionHookManager
 from obscura.core.supervisor.types import SupervisorEventKind, SupervisorHookPoint
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -79,7 +82,7 @@ class TestSessionHookManager:
             hook_point=SupervisorHookPoint.POST_TOOL_EXECUTION,
             hook_type="after",
             handler_ref="logger",
-            handler=lambda ctx: called.append(ctx),
+            handler=called.append,
         )
 
         await hooks.fire_after(
@@ -126,8 +129,9 @@ class TestSessionHookManager:
         )
 
         import asyncio
+
         asyncio.get_event_loop().run_until_complete(
-            hooks.fire_before(SupervisorHookPoint.PRE_TOOL_EXECUTION, {})
+            hooks.fire_before(SupervisorHookPoint.PRE_TOOL_EXECUTION, {}),
         )
         assert order == [1, 2]
 
@@ -170,8 +174,9 @@ class TestSessionHookManager:
         h2.load_from_db()
 
         import asyncio
+
         asyncio.get_event_loop().run_until_complete(
-            h2.fire_before(SupervisorHookPoint.PRE_TOOL_EXECUTION, {})
+            h2.fire_before(SupervisorHookPoint.PRE_TOOL_EXECUTION, {}),
         )
         assert len(called) == 1
         h2.close()

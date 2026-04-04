@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from obscura.plugins.models import InstructionSpec
+if TYPE_CHECKING:
+    from obscura.plugins.models import InstructionSpec
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,8 @@ class InstructionIndex:
 
     def filter_by_plugin(self, plugin_id: str) -> list[InstructionSpec]:
         return [
-            i for iid, i in self._instructions.items()
+            i
+            for iid, i in self._instructions.items()
             if self._owner.get(iid) == plugin_id
         ]
 

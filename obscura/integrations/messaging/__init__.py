@@ -2,7 +2,10 @@
 
 from obscura.integrations.messaging.adapter import MessagePlatformAdapter
 from obscura.integrations.messaging.factory import get_adapter, register_adapter
-from obscura.integrations.messaging.identity import build_conversation_key, normalize_identity
+from obscura.integrations.messaging.identity import (
+    build_conversation_key,
+    normalize_identity,
+)
 from obscura.integrations.messaging.models import ConversationState, PlatformMessage
 from obscura.integrations.messaging.store import (
     ConversationStore,
@@ -11,14 +14,14 @@ from obscura.integrations.messaging.store import (
 )
 
 __all__ = [
-    "MessagePlatformAdapter",
     "ConversationState",
-    "PlatformMessage",
     "ConversationStore",
     "DaemonLockStore",
     "MessageDedupeStore",
-    "normalize_identity",
+    "MessagePlatformAdapter",
+    "PlatformMessage",
     "build_conversation_key",
     "get_adapter",
+    "normalize_identity",
     "register_adapter",
 ]

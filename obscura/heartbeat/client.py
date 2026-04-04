@@ -1,5 +1,4 @@
-"""
-obscura.heartbeat.client — Agent heartbeat client.
+"""obscura.heartbeat.client — Agent heartbeat client.
 
 Provides AgentHeartbeatClient for agents to send periodic heartbeats
 to a monitoring service.
@@ -8,16 +7,19 @@ to a monitoring service.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from datetime import datetime
-from typing import Any, Optional, Callable
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING, Any
 
 import httpx
+from pydantic import BaseModel
 
-from obscura.heartbeat.types import Heartbeat, HealthStatus, SystemMetrics
+from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,7 @@ class HeartbeatClientConfig(BaseModel):
 
 
 class AgentHeartbeatClient:
-    """
-    Client for agents to send heartbeats to a monitor.
+    """Client for agents to send heartbeats to a monitor.
 
     This client:
     - Sends periodic heartbeats to the monitor
@@ -71,14 +72,14 @@ class AgentHeartbeatClient:
         interval: int = 30,
         **kwargs: Any,
     ) -> None:
-        """
-        Initialize the heartbeat client.
+        """Initialize the heartbeat client.
 
         Args:
             agent_id: Unique identifier for this agent
             monitor_url: Base URL of the heartbeat monitor API
             interval: Seconds between heartbeats
             **kwargs: Additional configuration options
+
         """
         config_fields = set(HeartbeatClientConfig.model_fields.keys())
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
@@ -91,10 +92,10 @@ class AgentHeartbeatClient:
         )
 
         self._running = False
-        self._heartbeat_task: Optional[asyncio.Task[None]] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
+        self._http_client: httpx.AsyncClient | None = None
         self._start_time: float = 0.0
-        self._last_heartbeat_time: Optional[float] = None
+        self._last_heartbeat_time: float | None = None
         self._consecutive_failures: int = 0
         self._connected: bool = False
         self._status_callbacks: list[Callable[[HealthStatus], None]] = []
@@ -155,7 +156,7 @@ class AgentHeartbeatClient:
         """Start the heartbeat client."""
         if self._running:
             logger.warning(
-                f"HeartbeatClient for {self.config.agent_id} already running"
+                f"HeartbeatClient for {self.config.agent_id} already running",
             )
             return
 
@@ -185,10 +186,8 @@ class AgentHeartbeatClient:
 
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
             self._heartbeat_task = None
 
         if self._http_client:
@@ -215,8 +214,7 @@ class AgentHeartbeatClient:
                 logger.exception(f"Error in heartbeat loop: {e}")
 
     async def _send_heartbeat(self) -> bool:
-        """
-        Send a heartbeat to the monitor.
+        """Send a heartbeat to the monitor.
 
         Returns True if successful, False otherwise.
         """
@@ -243,25 +241,24 @@ class AgentHeartbeatClient:
                     if not self._connected:
                         self._connected = True
                         logger.info(
-                            f"Connected to heartbeat monitor for {self.config.agent_id}"
+                            f"Connected to heartbeat monitor for {self.config.agent_id}",
                         )
 
                     logger.debug(
-                        f"Heartbeat sent successfully for {self.config.agent_id}"
+                        f"Heartbeat sent successfully for {self.config.agent_id}",
                     )
                     return True
-                else:
-                    logger.debug(
-                        f"Heartbeat returned {response.status_code}: {response.text}"
-                    )
+                logger.debug(
+                    f"Heartbeat returned {response.status_code}: {response.text}",
+                )
 
             except httpx.TimeoutException:
                 logger.warning(
-                    f"Heartbeat timeout (attempt {attempt + 1}/{self.config.max_retries})"
+                    f"Heartbeat timeout (attempt {attempt + 1}/{self.config.max_retries})",
                 )
             except Exception as e:
                 logger.warning(
-                    f"Heartbeat error (attempt {attempt + 1}/{self.config.max_retries}): {e}"
+                    f"Heartbeat error (attempt {attempt + 1}/{self.config.max_retries}): {e}",
                 )
 
             # Wait before retry
@@ -275,7 +272,7 @@ class AgentHeartbeatClient:
             self._connected = False
             logger.warning(
                 f"Lost connection to heartbeat monitor for {self.config.agent_id} "
-                f"({self._consecutive_failures} consecutive failures)"
+                f"({self._consecutive_failures} consecutive failures)",
             )
 
         # Trigger auto-reconnect if enabled
@@ -356,10 +353,11 @@ class AgentHeartbeatClient:
         return False
 
     async def send_status_update(
-        self, status: HealthStatus, message: Optional[str] = None
+        self,
+        status: HealthStatus,
+        message: str | None = None,
     ) -> bool:
-        """
-        Send an immediate status update (not waiting for next heartbeat).
+        """Send an immediate status update (not waiting for next heartbeat).
 
         Args:
             status: The new health status
@@ -367,6 +365,7 @@ class AgentHeartbeatClient:
 
         Returns:
             True if successfully sent
+
         """
         if not self._http_client:
             return False
@@ -395,8 +394,7 @@ class AgentHeartbeatClient:
             return False
 
     async def check_health(self) -> HealthStatus:
-        """
-        Check the health of the heartbeat service.
+        """Check the health of the heartbeat service.
 
         Returns the last known status.
         """
@@ -431,8 +429,7 @@ class AgentHeartbeatClient:
 
 
 class HeartbeatClientPool:
-    """
-    Pool for managing multiple heartbeat clients.
+    """Pool for managing multiple heartbeat clients.
 
     Useful when running multiple agents in the same process.
     """
@@ -449,7 +446,7 @@ class HeartbeatClientPool:
         """Register a new agent for heartbeat monitoring."""
         if agent_id in self._clients:
             logger.warning(
-                f"Agent {agent_id} already registered, stopping existing client"
+                f"Agent {agent_id} already registered, stopping existing client",
             )
             await self._clients[agent_id].stop()
 
@@ -466,7 +463,7 @@ class HeartbeatClientPool:
             return True
         return False
 
-    def get_client(self, agent_id: str) -> Optional[AgentHeartbeatClient]:
+    def get_client(self, agent_id: str) -> AgentHeartbeatClient | None:
         """Get a heartbeat client by agent ID."""
         return self._clients.get(agent_id)
 

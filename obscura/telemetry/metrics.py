@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-"""
-obscura.telemetry.metrics — Pre-defined metrics for the Obscura SDK.
+"""obscura.telemetry.metrics — Pre-defined metrics for the Obscura SDK.
 
 All metrics are lazily created on first access so the module can be
 imported without OTel installed.
@@ -26,7 +25,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol, overload, runtime_checkable
 
-
 # ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
@@ -41,11 +39,15 @@ class MetricInstrument(Protocol):
     """
 
     def add(
-        self, amount: float = 1, attributes: dict[str, str] | None = None
+        self,
+        amount: float = 1,
+        attributes: dict[str, str] | None = None,
     ) -> None: ...
 
     def record(
-        self, amount: float, attributes: dict[str, str] | None = None
+        self,
+        amount: float,
+        attributes: dict[str, str] | None = None,
     ) -> None: ...
 
 
@@ -57,15 +59,27 @@ class Meter(Protocol):
     """
 
     def create_counter(
-        self, name: str, *, unit: str = "", description: str = ""
+        self,
+        name: str,
+        *,
+        unit: str = "",
+        description: str = "",
     ) -> Any: ...
 
     def create_histogram(
-        self, name: str, *, unit: str = "", description: str = ""
+        self,
+        name: str,
+        *,
+        unit: str = "",
+        description: str = "",
     ) -> Any: ...
 
     def create_up_down_counter(
-        self, name: str, *, unit: str = "", description: str = ""
+        self,
+        name: str,
+        *,
+        unit: str = "",
+        description: str = "",
     ) -> Any: ...
 
 
@@ -83,7 +97,11 @@ class _LazyMetric:
     """Descriptor that lazily creates an OTel metric instrument."""
 
     def __init__(
-        self, factory_name: str, metric_name: str, description: str, unit: str = ""
+        self,
+        factory_name: str,
+        metric_name: str,
+        description: str,
+        unit: str = "",
     ) -> None:
         self._factory_name = factory_name
         self._metric_name = metric_name
@@ -101,7 +119,9 @@ class _LazyMetric:
     def __get__(self, obj: object, objtype: type | None = None) -> MetricInstrument: ...
 
     def __get__(
-        self, obj: object | None, objtype: type | None = None
+        self,
+        obj: object | None,
+        objtype: type | None = None,
     ) -> _LazyMetric | MetricInstrument:
         if obj is None:
             return self

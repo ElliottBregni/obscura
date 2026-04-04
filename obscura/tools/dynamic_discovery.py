@@ -42,7 +42,9 @@ class DynamicToolDiscovery:
         self.mcpservers_provider = MCPServersOrgCatalogProvider()
 
     def discover_popular(
-        self, limit: int = 50, min_rank: int | None = None
+        self,
+        limit: int = 50,
+        min_rank: int | None = None,
     ) -> list[ToolCapability]:
         """Discover top N popular tool capabilities."""
         capabilities: list[ToolCapability] = []
@@ -75,7 +77,9 @@ class DynamicToolDiscovery:
         return capabilities[:limit]
 
     def discover_by_category(
-        self, category: str, limit: int = 20
+        self,
+        category: str,
+        limit: int = 20,
     ) -> list[ToolCapability]:
         """Discover tools by category (e.g., 'filesystem', 'database', 'web')."""
         # Fetch from cache or get fresh data (avoid pagination issues)
@@ -109,16 +113,19 @@ class DynamicToolDiscovery:
 
     @staticmethod
     def _convert_entries(
-        entries: list[MCPCatalogEntry], source: str
+        entries: list[MCPCatalogEntry],
+        source: str,
     ) -> list[ToolCapability]:
         """Convert catalog entries to tool capabilities."""
         capabilities = []
         for entry in entries:
             # Extract npm package name if possible
             npm_package = None
-            if "-mcp" in entry.slug or "mcp-" in entry.slug:
-                npm_package = entry.slug
-            elif entry.slug.startswith("@"):
+            if (
+                "-mcp" in entry.slug
+                or "mcp-" in entry.slug
+                or entry.slug.startswith("@")
+            ):
                 npm_package = entry.slug
             else:
                 npm_package = f"{entry.slug}-mcp"
@@ -136,7 +143,7 @@ class DynamicToolDiscovery:
                     installation_command=["npx", "-y", npm_package]
                     if npm_package
                     else None,
-                )
+                ),
             )
         return capabilities
 
@@ -185,7 +192,9 @@ class AutoInstallToolProvider:
 
         # Get top N popular
         if self.auto_install_top_n > 0:
-            capabilities.extend(self.discovery.discover_popular(self.auto_install_top_n))
+            capabilities.extend(
+                self.discovery.discover_popular(self.auto_install_top_n),
+            )
 
         # Get by categories
         for category in self.categories:
@@ -224,31 +233,25 @@ class AutoInstallToolProvider:
 
 
 def cli_discover_tools(
-    limit: int = 50, category: str | None = None, output: str | None = None
+    limit: int = 50,
+    category: str | None = None,
+    output: str | None = None,
 ) -> None:
     """CLI helper to discover and optionally save popular tools."""
     discovery = DynamicToolDiscovery()
 
     if category:
-        print(f"🔍 Discovering {category} tools...")
         capabilities = discovery.discover_by_category(category, limit)
     else:
-        print(f"🔍 Discovering top {limit} popular tools...")
         capabilities = discovery.discover_popular(limit)
 
-    print(f"\n✅ Found {len(capabilities)} tools:\n")
-    print(f"{'Rank':<6} {'Category':<15} {'Name':<40} {'Package'}")
-    print("-" * 100)
-
-    for cap in capabilities:
-        pkg = cap.npm_package or "N/A"
-        print(f"{cap.popularity_rank:<6} {cap.category:<15} {cap.name:<40} {pkg}")
+    for _cap in capabilities:
+        pass
 
     if output:
         provider = AutoInstallToolProvider(auto_install_top_n=0)
         provider.categories = [category] if category else []
-        path = provider.save_config()
-        print(f"\n💾 Saved config to: {path}")
+        provider.save_config()
 
 
 if __name__ == "__main__":

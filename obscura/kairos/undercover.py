@@ -1,5 +1,4 @@
-"""
-obscura.kairos.undercover — Stealth mode for public repositories.
+"""obscura.kairos.undercover — Stealth mode for public repositories.
 
 When active, strips all AI attribution and internal references from
 commits, PRs, and agent output to prevent revealing that an AI tool
@@ -52,9 +51,7 @@ def is_undercover() -> bool:
     **ON by default.** Only disabled when explicitly set to off.
     """
     env_val = os.environ.get("OBSCURA_UNDERCOVER", "1").strip().lower()
-    if env_val in ("0", "false", "no", "off"):
-        return False
-    return True
+    return env_val not in ("0", "false", "no", "off")
 
 
 @lru_cache(maxsize=1)
@@ -62,9 +59,12 @@ def _get_repo_class() -> str:
     """Classify the current repo as 'internal' or 'public'."""
     try:
         import subprocess
+
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode != 0:
             return "unknown"
@@ -108,6 +108,7 @@ class UndercoverMode:
         if not self.is_active:
             return message
         import re
+
         # Remove Co-Authored-By lines mentioning AI/Claude/Obscura.
         sanitized = re.sub(
             r"\n\s*Co-Authored-By:.*(?:Claude|Obscura|AI|Agent|noreply@).*",

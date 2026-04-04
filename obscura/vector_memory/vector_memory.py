@@ -27,15 +27,13 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.memory import MemoryKey
 from obscura.vector_memory.backends import (
     BackendConfig,
@@ -52,8 +50,16 @@ except ImportError:
     def QdrantBackend(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         """Stub when qdrant-client is not installed."""
 
+
+import contextlib
+
 from obscura.vector_memory.decay import DecayConfig, load_decay_config_from_disk
-from obscura.vector_memory.vector_memory_filters import MetadataFilter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from obscura.auth.models import AuthenticatedUser
+    from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 _log = logging.getLogger(__name__)
 
@@ -84,9 +90,11 @@ def _make_default_embedding_fn(dim: int = 384):
     2. simple_embedding (hash-based fallback, deterministic but not semantic)
     """
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import]
         import logging as _logging
         import os as _os
+
+        from sentence_transformers import SentenceTransformer  # type: ignore[import]
+
         _log = _logging.getLogger(__name__)
         # Suppress noisy model loading output (position_ids warning, progress bars, HF auth)
         _env_overrides = {
@@ -96,26 +104,39 @@ def _make_default_embedding_fn(dim: int = 384):
         }
         _prev_env = {k: _os.environ.get(k) for k in _env_overrides}
         _os.environ.update(_env_overrides)
-        for _logger_name in ("transformers", "sentence_transformers", "huggingface_hub"):
+        for _logger_name in (
+            "transformers",
+            "sentence_transformers",
+            "huggingface_hub",
+        ):
             _logging.getLogger(_logger_name).setLevel(_logging.ERROR)
         _model = SentenceTransformer("all-MiniLM-L6-v2")
-        for _logger_name in ("transformers", "sentence_transformers", "huggingface_hub"):
+        for _logger_name in (
+            "transformers",
+            "sentence_transformers",
+            "huggingface_hub",
+        ):
             _logging.getLogger(_logger_name).setLevel(_logging.WARNING)
         for k, v in _prev_env.items():
             if v is None:
                 _os.environ.pop(k, None)
             else:
                 _os.environ[k] = v
-        _log.info("vector_memory: using sentence-transformers/all-MiniLM-L6-v2 for embeddings")
+        _log.info(
+            "vector_memory: using sentence-transformers/all-MiniLM-L6-v2 for embeddings",
+        )
+
         def _st_embed(text: str) -> list[float]:
             return _model.encode(text, normalize_embeddings=True).tolist()
+
         return _st_embed
     except ImportError:
         import logging as _logging
+
         _logging.getLogger(__name__).warning(
             "vector_memory: sentence-transformers not installed, "
             "falling back to hash-based embedding (not semantic). "
-            "Install with: pip install sentence-transformers"
+            "Install with: pip install sentence-transformers",
         )
         return simple_embedding
 
@@ -161,7 +182,7 @@ class VectorMemoryStore:
         backend: VectorBackend | None = None,
         embedding_fn: Callable[[str], list[float]] | None = None,
         decay_config: DecayConfig | None = None,
-    ):
+    ) -> None:
         self.user = user
         self.user_id = user.user_id
         self.decay_config = decay_config or load_decay_config_from_disk()
@@ -184,7 +205,7 @@ class VectorMemoryStore:
         backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "qdrant").lower()
 
         try:
-            half_life = float(os.environ.get('OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS'))
+            half_life = float(os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS"))
         except Exception:
             half_life = None
         config = BackendConfig(
@@ -212,7 +233,10 @@ class VectorMemoryStore:
                     )
                 except Exception as e:
                     # If Qdrant client exists but remote is unreachable, fall back to sqlite
-                    logger.warning("Qdrant backend initialization failed, falling back to SQLite: %s", e)
+                    logger.warning(
+                        "Qdrant backend initialization failed, falling back to SQLite: %s",
+                        e,
+                    )
                     backend_type = "sqlite"
             else:
                 # Qdrant not available, fall back to SQLite
@@ -228,7 +252,11 @@ class VectorMemoryStore:
         db_id = hashlib.sha256(self.user_id.encode()).hexdigest()[:16]
         db_path = base_dir / f"{db_id}.db"
 
-        return SQLiteBackend(config=config, db_path=db_path, decay_config=self.decay_config)
+        return SQLiteBackend(
+            config=config,
+            db_path=db_path,
+            decay_config=self.decay_config,
+        )
 
     @classmethod
     def for_user(
@@ -247,7 +275,6 @@ class VectorMemoryStore:
         """Clear singleton cache. For testing only."""
         with cls._lock:
             cls._instances.clear()
-
 
     def set(
         self,
@@ -289,7 +316,9 @@ class VectorMemoryStore:
         )
 
     def get(
-        self, key: str | MemoryKey, namespace: str = "default",
+        self,
+        key: str | MemoryKey,
+        namespace: str = "default",
     ) -> VectorMemoryEntry | None:
         """Retrieve a specific memory entry by key."""
         if isinstance(key, str):
@@ -343,7 +372,9 @@ class VectorMemoryStore:
         if date_range:
             filters.append(
                 DateRangeFilter(
-                    field="created_at", start=date_range[0], end=date_range[1],
+                    field="created_at",
+                    start=date_range[0],
+                    end=date_range[1],
                 ),
             )
 
@@ -357,9 +388,12 @@ class VectorMemoryStore:
 
         # Ensure results are sorted by final_score (backend may apply decay), fallback to score.
         for r in results:
-            if not getattr(r, 'final_score', None):
+            if not getattr(r, "final_score", None):
                 r.final_score = r.score or 0.0
-        results.sort(key=lambda x: getattr(x, 'final_score', x.score or 0.0), reverse=True)
+        results.sort(
+            key=lambda x: getattr(x, "final_score", x.score or 0.0),
+            reverse=True,
+        )
         return results[:top_k]
 
     def search_reranked(
@@ -415,7 +449,8 @@ class VectorMemoryStore:
         # Stage 2: rerank
         if reranker is None:
             reranker = RecencyReranker(
-                weight=recency_weight, decay_config=self.decay_config,
+                weight=recency_weight,
+                decay_config=self.decay_config,
             )
 
         query_embedding = self.embedding_fn(query)
@@ -447,10 +482,16 @@ class VectorMemoryStore:
         backend_stats = self.backend.get_stats()
 
         return {
-            "total_memories": backend_stats.get("total_vectors", backend_stats.get("total_count", 0)),
+            "total_memories": backend_stats.get(
+                "total_vectors",
+                backend_stats.get("total_count", 0),
+            ),
             "embedding_dim": backend_stats.get("embedding_dim", self.embedding_dim),
             "namespaces": backend_stats.get("namespaces", {}),
-            "backend": backend_stats.get("backend", backend_stats.get("backend_type", "unknown")),
+            "backend": backend_stats.get(
+                "backend",
+                backend_stats.get("backend_type", "unknown"),
+            ),
         }
 
     def touch(self, key: str | MemoryKey, namespace: str = "default") -> None:
@@ -461,12 +502,12 @@ class VectorMemoryStore:
 
     def _touch_results_async(self, entries: list[VectorEntry]) -> None:
         """Touch all entries in a background thread (fire-and-forget)."""
+
         def _do() -> None:
             for e in entries:
-                try:
+                with contextlib.suppress(Exception):
                     self.backend.touch_vector(e.key)
-                except Exception:
-                    pass
+
         # daemon=True: fire-and-forget touch — data loss on exit is acceptable
         # because touch only updates access timestamps (best-effort freshness).
         t = threading.Thread(target=_do, daemon=True)
@@ -491,6 +532,7 @@ class VectorMemoryStore:
         # 2. Consolidation (import here to avoid circular)
         try:
             from obscura.vector_memory.consolidator import MemoryConsolidator
+
             consolidator = MemoryConsolidator(store=self, config=self.decay_config)
             consolidated, summaries = consolidator.consolidate()
         except Exception:
@@ -505,7 +547,10 @@ class VectorMemoryStore:
         )
         _log.info(
             "memory maintenance: purged=%d consolidated=%d summaries=%d (%.0fms)",
-            expired, consolidated, summaries, duration,
+            expired,
+            consolidated,
+            summaries,
+            duration,
         )
         return report
 

@@ -1,5 +1,4 @@
-"""
-obscura.auth.capability -- Cryptographic capability tokens for tiered LLM access.
+"""obscura.auth.capability -- Cryptographic capability tokens for tiered LLM access.
 
 Generates and validates HMAC-SHA256 signed capability tokens that bind
 a user's identity and resolved tier to a non-forgeable opaque token.
@@ -30,10 +29,10 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.auth.models import AuthenticatedUser
-
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 # ---------------------------------------------------------------------------
 # Tier enumeration
@@ -56,7 +55,7 @@ PRIVILEGED_ROLES: frozenset[str] = frozenset(
         "admin",
         "operator",
         "tier:privileged",
-    }
+    },
 )
 
 
@@ -131,10 +130,7 @@ def _get_signing_key() -> bytes:
     global _signing_key  # noqa: PLW0603
     if _signing_key is None:
         env_key = os.environ.get("OBSCURA_CAPABILITY_SECRET")
-        if env_key:
-            _signing_key = env_key.encode("utf-8")
-        else:
-            _signing_key = secrets.token_bytes(32)
+        _signing_key = env_key.encode("utf-8") if env_key else secrets.token_bytes(32)
     return _signing_key
 
 
@@ -183,6 +179,7 @@ def generate_capability_token(
     -------
     CapabilityToken
         A frozen, HMAC-signed token.
+
     """
     tier = tier_override if tier_override is not None else resolve_tier(user)
     now = time.time()

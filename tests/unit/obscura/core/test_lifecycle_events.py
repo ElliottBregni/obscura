@@ -8,7 +8,6 @@ import pytest
 
 from obscura.core.lifecycle_events import LifecycleEvent
 
-
 # ---------------------------------------------------------------------------
 # Creation and defaults
 # ---------------------------------------------------------------------------

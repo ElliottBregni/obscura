@@ -1,5 +1,4 @@
-"""
-obscura.a2a.agent_card — Generate A2A Agent Cards from Obscura config.
+"""obscura.a2a.agent_card — Generate A2A Agent Cards from Obscura config.
 
 Reads ``AgentConfig`` and ``ObscuraConfig`` to produce a well-formed
 ``AgentCard`` suitable for publication at ``/.well-known/agent.json``.
@@ -35,6 +34,7 @@ class AgentCardGenerator:
         Human-readable description of the agent.
     version:
         Agent version string (defaults to ``"1.0"``).
+
     """
 
     def __init__(
@@ -78,7 +78,7 @@ class AgentCardGenerator:
                     name=t.get("name", ""),
                     description=t.get("description", ""),
                     tags=t.get("tags", []),
-                )
+                ),
             )
         return self
 
@@ -179,6 +179,7 @@ class AgentCardGenerator:
             Name of the provider organization.
         provider_url:
             URL of the provider organization.
+
         """
         builder = cls(
             name=agent_name,

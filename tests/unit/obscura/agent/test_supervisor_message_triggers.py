@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.agent.supervisor import SupervisorConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_from_yaml_parses_message_trigger(tmp_path: Path) -> None:

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from obscura.integrations.mcp.config_loader import discover_mcp_servers
 from obscura.skills.docs_loader import load_markdown_skill_documents
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @pytest.mark.integration
 def test_loads_mcp_from_workspace_obscura_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = tmp_path / "workspace"
     mcp_dir = workspace / ".obscura" / "mcp"
@@ -27,9 +31,9 @@ def test_loads_mcp_from_workspace_obscura_directory(
                         "command": "npx",
                         "args": ["-y", "@supabase/mcp-server"],
                         "env": {"SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"},
-                    }
-                }
-            }
+                    },
+                },
+            },
         ),
         encoding="utf-8",
     )
@@ -45,13 +49,15 @@ def test_loads_mcp_from_workspace_obscura_directory(
 
 @pytest.mark.integration
 def test_loads_skill_documents_from_workspace_obscura_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = tmp_path / "workspace"
     skills_dir = workspace / ".obscura" / "skills"
     (skills_dir / "roles" / "reviewer").mkdir(parents=True)
     (skills_dir / "python.md").write_text(
-        "# Python\nUse strict typing.", encoding="utf-8"
+        "# Python\nUse strict typing.",
+        encoding="utf-8",
     )
     (skills_dir / "roles" / "reviewer" / "style.md").write_text(
         "# Reviewer Style\nFocus on regressions.",
@@ -68,7 +74,8 @@ def test_loads_skill_documents_from_workspace_obscura_directory(
 
 @pytest.mark.integration
 def test_obscura_home_env_overrides_workspace_obscura(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True)

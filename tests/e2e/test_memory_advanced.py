@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from starlette.testclient import TestClient
+
+if TYPE_CHECKING:
+    from starlette.testclient import TestClient
 
 
 @pytest.mark.e2e
@@ -50,7 +52,8 @@ class TestMemoryNamespaces:
 
         # Delete without deleting data
         resp = client.delete(
-            "/api/v1/memory/namespaces/temp-namespace", params={"delete_data": "false"}
+            "/api/v1/memory/namespaces/temp-namespace",
+            params={"delete_data": "false"},
         )
 
         assert resp.status_code == 200
@@ -67,7 +70,8 @@ class TestMemoryNamespaces:
 
         # Delete with data
         resp = client.delete(
-            "/api/v1/memory/namespaces/temp-with-data", params={"delete_data": "true"}
+            "/api/v1/memory/namespaces/temp-with-data",
+            params={"delete_data": "true"},
         )
 
         assert resp.status_code == 200
@@ -113,7 +117,7 @@ class TestMemoryTransactions:
                         "key": "key2",
                         "value": {"nested": "data"},
                     },
-                ]
+                ],
             },
         )
 
@@ -133,7 +137,7 @@ class TestMemoryTransactions:
                 "operations": [
                     {"op": "delete", "namespace": "txn-del-test", "key": "key1"},
                     {"op": "get", "namespace": "txn-del-test", "key": "key1"},
-                ]
+                ],
             },
         )
 
@@ -160,7 +164,7 @@ class TestMemoryTransactions:
                     {"op": "set", "namespace": "ns2", "key": "k2", "value": "v2"},
                     {"op": "get", "namespace": "ns1", "key": "k1"},
                     {"op": "get", "namespace": "ns2", "key": "k2"},
-                ]
+                ],
             },
         )
 
@@ -210,7 +214,7 @@ class TestMemoryImportExport:
             "import-test-ns": {
                 "key1": "imported-value-1",
                 "key2": {"nested": "imported"},
-            }
+            },
         }
 
         resp = client.post("/api/v1/memory/import", json={"data": import_data})
@@ -233,7 +237,8 @@ class TestMemoryImportExport:
         import_data = {"import-overwrite": {"key1": "overwritten"}}
 
         resp = client.post(
-            "/api/v1/memory/import?overwrite=true", json={"data": import_data}
+            "/api/v1/memory/import?overwrite=true",
+            json={"data": import_data},
         )
 
         assert resp.status_code == 200
@@ -253,7 +258,8 @@ class TestMemoryImportExport:
         import_data = {"import-skip": {"key1": "new-value"}}
 
         resp = client.post(
-            "/api/v1/memory/import?overwrite=false", json={"data": import_data}
+            "/api/v1/memory/import?overwrite=false",
+            json={"data": import_data},
         )
 
         assert resp.status_code == 200
@@ -286,7 +292,8 @@ class TestMemoryImportExport:
 
         # Clear data
         client.delete(
-            "/api/v1/memory/namespaces/roundtrip", params={"delete_data": "true"}
+            "/api/v1/memory/namespaces/roundtrip",
+            params={"delete_data": "true"},
         )
 
         # Re-import

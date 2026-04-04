@@ -45,6 +45,7 @@ class MemoryChannel:
         Higher values inject first.
     enabled:
         Set to ``False`` to disable without removing.
+
     """
 
     name: str

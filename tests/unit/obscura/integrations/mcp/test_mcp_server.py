@@ -2,9 +2,10 @@
 
 # pyright: reportPrivateUsage=false, reportMissingParameterType=false, reportUnknownParameterType=false
 import json
-import pytest
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from obscura.integrations.mcp.server import ObscuraMCPServer, create_mcp_router
 from obscura.integrations.mcp.types import (
@@ -13,7 +14,6 @@ from obscura.integrations.mcp.types import (
     ObscuraMCPConfig,
     ObscuraMCPToolContext,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,18 +71,18 @@ def _make_memory_store():
 
 
 class TestObscuraMCPServerInit:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         server = ObscuraMCPServer()
         assert server._initialized is False
         assert server._runtime is None
         assert server.user is None
 
-    def test_with_config(self):
+    def test_with_config(self) -> None:
         config = ObscuraMCPConfig()
         server = ObscuraMCPServer(config=config)
         assert server.config is config
 
-    def test_with_user(self):
+    def test_with_user(self) -> None:
         user = _make_user()
         server = ObscuraMCPServer(user=user)
         assert server.user is user
@@ -95,28 +95,28 @@ class TestObscuraMCPServerInit:
 
 class TestObscuraMCPServerLifecycle:
     @pytest.mark.asyncio
-    async def test_initialize_no_user(self):
+    async def test_initialize_no_user(self) -> None:
         server = ObscuraMCPServer()
         await server.initialize()
         assert server._initialized is True
         assert server._runtime is None  # No user, no runtime
 
     @pytest.mark.asyncio
-    async def test_initialize_idempotent(self):
+    async def test_initialize_idempotent(self) -> None:
         server = ObscuraMCPServer()
         await server.initialize()
         await server.initialize()  # Should not raise
         assert server._initialized is True
 
     @pytest.mark.asyncio
-    async def test_shutdown(self):
+    async def test_shutdown(self) -> None:
         server = ObscuraMCPServer()
         await server.initialize()
         await server.shutdown()
         assert server._initialized is False
 
     @pytest.mark.asyncio
-    async def test_initialize_with_user_creates_runtime(self):
+    async def test_initialize_with_user_creates_runtime(self) -> None:
         user = _make_user()
         server = ObscuraMCPServer()
         with patch("obscura.integrations.mcp.server.AgentRuntime") as MockRT:
@@ -129,7 +129,7 @@ class TestObscuraMCPServerLifecycle:
             mock_rt_inst.start.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_shutdown_with_runtime(self):
+    async def test_shutdown_with_runtime(self) -> None:
         server = ObscuraMCPServer()
         mock_rt = MagicMock()
         mock_rt.shutdown = AsyncMock()
@@ -149,7 +149,7 @@ class TestObscuraMCPServerLifecycle:
 
 class TestObscuraMCPServerProtocol:
     @pytest.mark.asyncio
-    async def test_handle_initialize(self):
+    async def test_handle_initialize(self) -> None:
         server = ObscuraMCPServer()
         result = await server.handle_initialize(
             protocolVersion="2024-11-05",
@@ -162,7 +162,7 @@ class TestObscuraMCPServerProtocol:
         assert result["serverInfo"]["name"] == "obscura-mcp"
 
     @pytest.mark.asyncio
-    async def test_handle_tools_list(self):
+    async def test_handle_tools_list(self) -> None:
         server = ObscuraMCPServer()
         tools = await server.handle_tools_list()
         assert isinstance(tools, list)
@@ -177,21 +177,21 @@ class TestObscuraMCPServerProtocol:
         assert "get_agent_status" in tool_names
 
     @pytest.mark.asyncio
-    async def test_handle_tools_call_list_agents_no_runtime(self):
+    async def test_handle_tools_call_list_agents_no_runtime(self) -> None:
         server = ObscuraMCPServer()
         context = ObscuraMCPToolContext(user_id="test")
         result = await server.handle_tools_call("list_agents", {}, context)
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_handle_tools_call_default_context(self):
+    async def test_handle_tools_call_default_context(self) -> None:
         """When no context passed, an anonymous context is created."""
         server = ObscuraMCPServer()
         result = await server.handle_tools_call("list_agents", {})
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_list(self):
+    async def test_handle_prompts_list(self) -> None:
         server = ObscuraMCPServer()
         prompts = await server.handle_prompts_list()
         assert isinstance(prompts, list)
@@ -201,7 +201,7 @@ class TestObscuraMCPServerProtocol:
         assert "memory_query" in names
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_get_agent_task(self):
+    async def test_handle_prompts_get_agent_task(self) -> None:
         server = ObscuraMCPServer()
         result = await server.handle_prompts_get(
             "agent_task",
@@ -212,14 +212,14 @@ class TestObscuraMCPServerProtocol:
         assert "Run some tests" in result["messages"][0]["content"]["text"]
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_get_agent_task_default(self):
+    async def test_handle_prompts_get_agent_task_default(self) -> None:
         """agent_task with no task argument uses default."""
         server = ObscuraMCPServer()
         result = await server.handle_prompts_get("agent_task", {})
         assert "Execute the task" in result["messages"][0]["content"]["text"]
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_get_memory_query(self):
+    async def test_handle_prompts_get_memory_query(self) -> None:
         server = ObscuraMCPServer()
         result = await server.handle_prompts_get(
             "memory_query",
@@ -229,34 +229,34 @@ class TestObscuraMCPServerProtocol:
         assert "user preferences" in result["messages"][0]["content"]["text"]
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_get_memory_query_default(self):
+    async def test_handle_prompts_get_memory_query_default(self) -> None:
         """memory_query with no query argument uses empty string."""
         server = ObscuraMCPServer()
         result = await server.handle_prompts_get("memory_query", {})
         assert "messages" in result
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_get_not_found(self):
+    async def test_handle_prompts_get_not_found(self) -> None:
         server = ObscuraMCPServer()
         with pytest.raises(MCPError) as exc_info:
             await server.handle_prompts_get("nonexistent")
         assert exc_info.value.code == MCPErrorCode.PROMPT_NOT_FOUND.value
 
     @pytest.mark.asyncio
-    async def test_handle_prompts_get_none_arguments(self):
+    async def test_handle_prompts_get_none_arguments(self) -> None:
         """Passing None arguments should use defaults."""
         server = ObscuraMCPServer()
         result = await server.handle_prompts_get("agent_task", None)
         assert "messages" in result
 
     @pytest.mark.asyncio
-    async def test_handle_resources_list_no_user(self):
+    async def test_handle_resources_list_no_user(self) -> None:
         server = ObscuraMCPServer()
         resources = await server.handle_resources_list()
         assert resources == []
 
     @pytest.mark.asyncio
-    async def test_handle_resources_read_unknown_uri(self):
+    async def test_handle_resources_read_unknown_uri(self) -> None:
         server = ObscuraMCPServer()
         with pytest.raises(MCPError) as exc_info:
             await server.handle_resources_read("unknown://foo")
@@ -270,14 +270,14 @@ class TestObscuraMCPServerProtocol:
 
 class TestObscuraMCPServerToolHandlers:
     @pytest.mark.asyncio
-    async def test_handle_list_agents_no_runtime(self):
+    async def test_handle_list_agents_no_runtime(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_list_agents(ctx, {})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_list_agents_with_runtime(self):
+    async def test_handle_list_agents_with_runtime(self) -> None:
         server = ObscuraMCPServer()
         agent = _make_agent()
         mock_runtime = MagicMock()
@@ -291,7 +291,7 @@ class TestObscuraMCPServerToolHandlers:
         assert result["agents"][0]["name"] == "helper"
 
     @pytest.mark.asyncio
-    async def test_handle_list_agents_namespace_filter_match(self):
+    async def test_handle_list_agents_namespace_filter_match(self) -> None:
         server = ObscuraMCPServer()
         agent = _make_agent(namespace="project")
         mock_runtime = MagicMock()
@@ -303,7 +303,7 @@ class TestObscuraMCPServerToolHandlers:
         assert result["count"] == 1
 
     @pytest.mark.asyncio
-    async def test_handle_list_agents_namespace_filter_no_match(self):
+    async def test_handle_list_agents_namespace_filter_no_match(self) -> None:
         server = ObscuraMCPServer()
         agent = _make_agent(namespace="default")
         mock_runtime = MagicMock()
@@ -316,26 +316,28 @@ class TestObscuraMCPServerToolHandlers:
         assert result["agents"] == []
 
     @pytest.mark.asyncio
-    async def test_handle_spawn_agent_no_runtime(self):
+    async def test_handle_spawn_agent_no_runtime(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_spawn_agent(
-            ctx, {"name": "a1", "model": "claude"}
+            ctx,
+            {"name": "a1", "model": "claude"},
         )
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_spawn_agent_no_user(self):
+    async def test_handle_spawn_agent_no_user(self) -> None:
         server = ObscuraMCPServer()
         server._runtime = MagicMock()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_spawn_agent(
-            ctx, {"name": "a1", "model": "claude"}
+            ctx,
+            {"name": "a1", "model": "claude"},
         )
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_spawn_agent_success(self):
+    async def test_handle_spawn_agent_success(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         agent = _make_agent()
@@ -361,14 +363,14 @@ class TestObscuraMCPServerToolHandlers:
         agent.start.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_handle_stop_agent_no_runtime(self):
+    async def test_handle_stop_agent_no_runtime(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_stop_agent(ctx, {"agent_id": "a1"})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_stop_agent_not_found(self):
+    async def test_handle_stop_agent_not_found(self) -> None:
         server = ObscuraMCPServer()
         mock_runtime = MagicMock()
         mock_runtime.get_agent.return_value = None
@@ -380,7 +382,7 @@ class TestObscuraMCPServerToolHandlers:
         assert "not found" in result["error"].lower()
 
     @pytest.mark.asyncio
-    async def test_handle_stop_agent_graceful(self):
+    async def test_handle_stop_agent_graceful(self) -> None:
         server = ObscuraMCPServer()
         agent = _make_agent()
         mock_runtime = MagicMock()
@@ -393,7 +395,7 @@ class TestObscuraMCPServerToolHandlers:
         agent.stop_graceful.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_handle_stop_agent_force(self):
+    async def test_handle_stop_agent_force(self) -> None:
         server = ObscuraMCPServer()
         agent = _make_agent()
         mock_runtime = MagicMock()
@@ -402,20 +404,21 @@ class TestObscuraMCPServerToolHandlers:
 
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_stop_agent(
-            ctx, {"agent_id": "agent-1", "force": True}
+            ctx,
+            {"agent_id": "agent-1", "force": True},
         )
         assert result["stopped"] is True
         agent.stop.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_handle_get_memory_no_user(self):
+    async def test_handle_get_memory_no_user(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_get_memory(ctx, {"key": "k1"})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_get_memory_found(self):
+    async def test_handle_get_memory_found(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -425,14 +428,15 @@ class TestObscuraMCPServerToolHandlers:
         with patch("obscura.integrations.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
             result = await server._handle_get_memory(
-                ctx, {"key": "k1", "namespace": "proj"}
+                ctx,
+                {"key": "k1", "namespace": "proj"},
             )
         assert result["found"] is True
         assert result["key"] == "k1"
         assert result["value"] == {"data": "hello"}
 
     @pytest.mark.asyncio
-    async def test_handle_get_memory_not_found(self):
+    async def test_handle_get_memory_not_found(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -445,14 +449,14 @@ class TestObscuraMCPServerToolHandlers:
         assert result["found"] is False
 
     @pytest.mark.asyncio
-    async def test_handle_set_memory_no_user(self):
+    async def test_handle_set_memory_no_user(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_set_memory(ctx, {"key": "k1", "value": "v1"})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_set_memory_json_value(self):
+    async def test_handle_set_memory_json_value(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -472,7 +476,7 @@ class TestObscuraMCPServerToolHandlers:
         store.set.assert_called_once_with("k1", {"x": 1}, namespace="ns")
 
     @pytest.mark.asyncio
-    async def test_handle_set_memory_plain_string_value(self):
+    async def test_handle_set_memory_plain_string_value(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -492,14 +496,14 @@ class TestObscuraMCPServerToolHandlers:
         store.set.assert_called_once_with("k1", "not-json", namespace="default")
 
     @pytest.mark.asyncio
-    async def test_handle_delete_memory_no_user(self):
+    async def test_handle_delete_memory_no_user(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_delete_memory(ctx, {"key": "k1"})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_delete_memory_success(self):
+    async def test_handle_delete_memory_success(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -509,13 +513,14 @@ class TestObscuraMCPServerToolHandlers:
         with patch("obscura.integrations.mcp.server.MemoryStore") as MockMS:
             MockMS.for_user.return_value = store
             result = await server._handle_delete_memory(
-                ctx, {"key": "k1", "namespace": "ns"}
+                ctx,
+                {"key": "k1", "namespace": "ns"},
             )
         assert result["success"] is True
         assert result["key"] == "k1"
 
     @pytest.mark.asyncio
-    async def test_handle_delete_memory_not_found(self):
+    async def test_handle_delete_memory_not_found(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -528,14 +533,14 @@ class TestObscuraMCPServerToolHandlers:
         assert result["success"] is False
 
     @pytest.mark.asyncio
-    async def test_handle_search_memory_no_user(self):
+    async def test_handle_search_memory_no_user(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_search_memory(ctx, {"query": "test"})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_search_memory_all_namespaces(self):
+    async def test_handle_search_memory_all_namespaces(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -551,7 +556,7 @@ class TestObscuraMCPServerToolHandlers:
         assert result["count"] == 1
 
     @pytest.mark.asyncio
-    async def test_handle_search_memory_specific_namespace(self):
+    async def test_handle_search_memory_specific_namespace(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -575,7 +580,7 @@ class TestObscuraMCPServerToolHandlers:
         assert result["results"][0]["key"] == "myconfig"
 
     @pytest.mark.asyncio
-    async def test_handle_search_memory_namespace_no_match(self):
+    async def test_handle_search_memory_namespace_no_match(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -597,14 +602,14 @@ class TestObscuraMCPServerToolHandlers:
         assert result["count"] == 0
 
     @pytest.mark.asyncio
-    async def test_handle_get_agent_status_no_runtime(self):
+    async def test_handle_get_agent_status_no_runtime(self) -> None:
         server = ObscuraMCPServer()
         ctx = ObscuraMCPToolContext(user_id="test")
         result = await server._handle_get_agent_status(ctx, {"agent_id": "a1"})
         assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_handle_get_agent_status_found(self):
+    async def test_handle_get_agent_status_found(self) -> None:
         server = ObscuraMCPServer()
         agent = _make_agent()
         mock_runtime = MagicMock()
@@ -618,7 +623,7 @@ class TestObscuraMCPServerToolHandlers:
         assert result["tags"] == ["test"]
 
     @pytest.mark.asyncio
-    async def test_handle_get_agent_status_not_found(self):
+    async def test_handle_get_agent_status_not_found(self) -> None:
         server = ObscuraMCPServer()
         mock_runtime = MagicMock()
         mock_runtime.get_agent.return_value = None
@@ -636,7 +641,7 @@ class TestObscuraMCPServerToolHandlers:
 
 class TestObscuraMCPServerResources:
     @pytest.mark.asyncio
-    async def test_resources_list_with_user(self):
+    async def test_resources_list_with_user(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -658,7 +663,7 @@ class TestObscuraMCPServerResources:
         assert "memory://project" in uris
 
     @pytest.mark.asyncio
-    async def test_resources_read_memory_with_key(self):
+    async def test_resources_read_memory_with_key(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -674,7 +679,7 @@ class TestObscuraMCPServerResources:
         assert text == {"config": "value"}
 
     @pytest.mark.asyncio
-    async def test_resources_read_memory_namespace_only(self):
+    async def test_resources_read_memory_namespace_only(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -693,7 +698,7 @@ class TestObscuraMCPServerResources:
         assert "k1" in text["keys"]
 
     @pytest.mark.asyncio
-    async def test_resources_read_memory_key_not_found(self):
+    async def test_resources_read_memory_key_not_found(self) -> None:
         server = ObscuraMCPServer()
         server.user = _make_user()
         store = _make_memory_store()
@@ -706,7 +711,7 @@ class TestObscuraMCPServerResources:
         assert exc_info.value.code == MCPErrorCode.RESOURCE_NOT_FOUND.value
 
     @pytest.mark.asyncio
-    async def test_resources_read_memory_no_user(self):
+    async def test_resources_read_memory_no_user(self) -> None:
         server = ObscuraMCPServer()
         with pytest.raises(MCPError) as exc_info:
             await server.handle_resources_read("memory://proj/key")
@@ -740,7 +745,7 @@ def _make_rpc_client():
 
 
 class TestCreateMCPRouter:
-    def test_router_creation(self):
+    def test_router_creation(self) -> None:
         server = ObscuraMCPServer()
         router = create_mcp_router(server)
         assert router is not None
@@ -749,7 +754,7 @@ class TestCreateMCPRouter:
         assert "/mcp/sse" in route_paths
 
     @pytest.mark.asyncio
-    async def test_rpc_initialize(self):
+    async def test_rpc_initialize(self) -> None:
         client, __server = _make_rpc_client()
 
         resp = client.post(
@@ -771,7 +776,7 @@ class TestCreateMCPRouter:
         assert "result" in data
 
     @pytest.mark.asyncio
-    async def test_rpc_tools_list(self):
+    async def test_rpc_tools_list(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -788,7 +793,7 @@ class TestCreateMCPRouter:
         assert "list_agents" in tool_names
 
     @pytest.mark.asyncio
-    async def test_rpc_tools_call(self):
+    async def test_rpc_tools_call(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -808,7 +813,7 @@ class TestCreateMCPRouter:
         assert "content" in data["result"]
 
     @pytest.mark.asyncio
-    async def test_rpc_resources_list(self):
+    async def test_rpc_resources_list(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -824,7 +829,7 @@ class TestCreateMCPRouter:
         assert "result" in data
 
     @pytest.mark.asyncio
-    async def test_rpc_resources_read_error(self):
+    async def test_rpc_resources_read_error(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -840,7 +845,7 @@ class TestCreateMCPRouter:
         assert "error" in data
 
     @pytest.mark.asyncio
-    async def test_rpc_prompts_list(self):
+    async def test_rpc_prompts_list(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -856,7 +861,7 @@ class TestCreateMCPRouter:
         assert "result" in data
 
     @pytest.mark.asyncio
-    async def test_rpc_prompts_get(self):
+    async def test_rpc_prompts_get(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -873,7 +878,7 @@ class TestCreateMCPRouter:
         assert "messages" in data["result"]
 
     @pytest.mark.asyncio
-    async def test_rpc_method_not_found(self):
+    async def test_rpc_method_not_found(self) -> None:
         client, __server = _make_rpc_client()
         resp = client.post(
             "/mcp/rpc",
@@ -890,10 +895,12 @@ class TestCreateMCPRouter:
         assert data["error"]["code"] == MCPErrorCode.METHOD_NOT_FOUND.value
 
     @pytest.mark.asyncio
-    async def test_rpc_internal_error(self):
+    async def test_rpc_internal_error(self) -> None:
         client, __server = _make_rpc_client()
         with patch.object(
-            __server, "handle_initialize", side_effect=RuntimeError("boom")
+            __server,
+            "handle_initialize",
+            side_effect=RuntimeError("boom"),
         ):
             resp = client.post(
                 "/mcp/rpc",

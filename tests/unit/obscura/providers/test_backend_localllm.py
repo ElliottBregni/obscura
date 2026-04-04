@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from obscura.core.auth import AuthConfig
 from obscura.core.types import Backend, ChunkKind, HookPoint, StreamChunk
 
@@ -171,8 +172,8 @@ class TestLocalLLMSessions:
 
     @pytest.mark.asyncio
     async def test_resume_unknown_session(self) -> None:
-        from obscura.providers.localllm import LocalLLMBackend
         from obscura.core.types import SessionRef
+        from obscura.providers.localllm import LocalLLMBackend
 
         b = LocalLLMBackend(_make_auth())
         b.set_client_for_testing(MagicMock())
@@ -193,12 +194,15 @@ class TestLocalLLMSessions:
 
 class TestLocalLLMTools:
     def test_register_tool(self) -> None:
-        from obscura.providers.localllm import LocalLLMBackend
         from obscura.core.types import ToolSpec
+        from obscura.providers.localllm import LocalLLMBackend
 
         b = LocalLLMBackend(_make_auth())
         spec = ToolSpec(
-            name="t1", description="test", parameters={}, handler=lambda: None
+            name="t1",
+            description="test",
+            parameters={},
+            handler=lambda: None,
         )
         b.register_tool(spec)
         assert len(b.tools) == 1

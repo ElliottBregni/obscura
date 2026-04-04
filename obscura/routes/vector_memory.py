@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["vector-memory"])
 
@@ -86,19 +88,18 @@ async def vector_memory_search(
                 for r in results
             ],
             "count": len(results),
-        }
+        },
     )
 
 
 @router.post("/vector-memory/search/routed")
 async def vector_memory_search_routed(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Multi-query search with memory type routing and weighted merging."""
-    from obscura.vector_memory import VectorMemoryStore
+    from obscura.vector_memory import MetadataFilter, VectorMemoryStore
     from obscura.vector_memory.vector_memory_router import MemoryRouter, MemoryTypeQuery
-    from obscura.vector_memory import MetadataFilter
 
     store = VectorMemoryStore.for_user(user)
     router_inst = MemoryRouter(store)
@@ -106,7 +107,8 @@ async def vector_memory_search_routed(
     query: str = body["query"]
     route_configs: list[dict[str, Any]] = body.get("routes", [])
     metadata_filters_body = cast(
-        list[MetadataFilter] | None, body.get("metadata_filters")
+        "list[MetadataFilter] | None",
+        body.get("metadata_filters"),
     )
     routes: list[MemoryTypeQuery] = [
         MemoryTypeQuery(
@@ -144,7 +146,7 @@ async def vector_memory_search_routed(
             ],
             "sources": result.sources,
             "count": len(result.entries),
-        }
+        },
     )
 
 
@@ -154,7 +156,7 @@ async def vector_memory_set(
     namespace: str,
     key: str,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Store text with semantic embedding for vector search."""
     from obscura.vector_memory import VectorMemoryStore
@@ -165,11 +167,19 @@ async def vector_memory_set(
     memory_type: str = body.get("memory_type", "general")
     try:
         store.set(
-            key, text, metadata=metadata, namespace=namespace, memory_type=memory_type
+            key,
+            text,
+            metadata=metadata,
+            namespace=namespace,
+            memory_type=memory_type,
         )
     except Exception:
         audit(
-            "vector_memory.set", user, f"vector:{namespace}:{key}", "write", "failure"
+            "vector_memory.set",
+            user,
+            f"vector:{namespace}:{key}",
+            "write",
+            "failure",
         )
         return JSONResponse(
             status_code=500,
@@ -182,5 +192,5 @@ async def vector_memory_set(
         )
     audit("vector_memory.set", user, f"vector:{namespace}:{key}", "write", "success")
     return JSONResponse(
-        content={"namespace": namespace, "key": key, "stored": True, "type": "vector"}
+        content={"namespace": namespace, "key": key, "stored": True, "type": "vector"},
     )

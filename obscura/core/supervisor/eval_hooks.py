@@ -37,7 +37,9 @@ def _snapshot_dirty_files() -> set[str]:
     try:
         r = subprocess.run(
             ["git", "diff", "--name-only", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         files.update(f for f in r.stdout.strip().splitlines() if f)
     except Exception:
@@ -45,7 +47,9 @@ def _snapshot_dirty_files() -> set[str]:
     try:
         u = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         files.update(f for f in u.stdout.strip().splitlines() if f)
     except Exception:
@@ -56,12 +60,14 @@ def _snapshot_dirty_files() -> set[str]:
 def _revert_files(new_files: set[str]) -> list[str]:
     """Revert a set of files.  Returns list of successfully reverted paths."""
     import os
+
     reverted: list[str] = []
     for f in sorted(new_files):
         try:
             cr = subprocess.run(
                 ["git", "checkout", "HEAD", "--", f],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             if cr.returncode != 0:
                 os.remove(f)
@@ -80,7 +86,9 @@ def _check_python_files(files: set[str]) -> dict[str, str]:
     try:
         proc = subprocess.run(
             ["ruff", "check", "--no-fix", *py_files],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if proc.returncode != 0 and proc.stdout.strip():
             for line in proc.stdout.strip().splitlines():
@@ -170,7 +178,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
             result_text = getattr(event, "tool_result", "") or ""
             if "⚠" in result_text:
                 tool_errors.append(
-                    f"{getattr(event, 'tool_name', '?')}: {result_text[:200]}"
+                    f"{getattr(event, 'tool_name', '?')}: {result_text[:200]}",
                 )
 
     if tool_errors:
@@ -189,6 +197,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
 
     # --- Signal 3: Syntax check on dirty Python files ---
     import ast as _ast
+
     syntax_errors: list[str] = []
     for f in dirty:
         if not f.endswith(".py") or not os.path.isfile(f):
@@ -210,6 +219,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
         if f.endswith((".yaml", ".yml")):
             try:
                 import yaml  # type: ignore[import-untyped]
+
                 with open(f) as fh:
                     yaml.safe_load(fh)
             except Exception as exc:
@@ -217,6 +227,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
         elif f.endswith(".toml"):
             try:
                 import tomllib
+
                 with open(f, "rb") as fh:
                     tomllib.load(fh)
             except Exception as exc:
@@ -224,6 +235,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
         elif f.endswith(".json"):
             try:
                 import json as _json
+
                 with open(f) as fh:
                     _json.load(fh)
             except Exception as exc:
@@ -235,8 +247,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
     # --- Signal 5: Empty session check ---
     has_output = bool(session_output and session_output.strip())
     has_tool_calls = any(
-        getattr(e, "kind", None) is not None
-        and getattr(e, "kind").value == "tool_call"
+        getattr(e, "kind", None) is not None and e.kind.value == "tool_call"
         for e in session_events
     )
     if not has_output and not has_tool_calls:
@@ -254,7 +265,9 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
         detail = "; ".join(issues) if issues else "below threshold"
         logger.warning(
             "Session eval gate: blocking (score=%.2f, threshold=%.2f) — %s",
-            score, threshold, detail,
+            score,
+            threshold,
+            detail,
         )
         context["eval_blocked"] = True
         context["eval_lint_errors"] = lint_errors
@@ -264,6 +277,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
         # Record in eval memory for future recall
         try:
             from obscura.eval.memory import EvalMemory
+
             em = EvalMemory.get_instance()
             em.record_session_failure(
                 session_id=context.get("session_id", "unknown"),
@@ -310,6 +324,7 @@ def _try_persist_result(
         )
         store = EvalResultStore()
         import asyncio
+
         asyncio.create_task(store.save_run(summary))
     except Exception:
         pass

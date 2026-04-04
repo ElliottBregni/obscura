@@ -1,5 +1,4 @@
-"""
-obscura.mcp.types — MCP (Model Context Protocol) type definitions.
+"""obscura.mcp.types — MCP (Model Context Protocol) type definitions.
 
 Implements the MCP protocol types for communication between MCP clients and servers.
 Based on the Model Context Protocol specification.
@@ -8,7 +7,6 @@ Based on the Model Context Protocol specification.
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal, override
-
 
 # ---------------------------------------------------------------------------
 # JSON-RPC Types
@@ -28,7 +26,7 @@ class JSONRPCRequest:
     jsonrpc: str = "2.0"
     id: str | int | None = None
     method: str = ""
-    params: dict[str, Any] = field(default_factory=lambda: {})
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -47,7 +45,7 @@ class JSONRPCNotification:
 
     jsonrpc: str = "2.0"
     method: str = ""
-    params: dict[str, Any] = field(default_factory=lambda: {})
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -105,7 +103,7 @@ class MCPImplementation:
 class MCPCapabilities:
     """MCP server/client capabilities."""
 
-    experimental: dict[str, Any] = field(default_factory=lambda: {})
+    experimental: dict[str, Any] = field(default_factory=dict)
     prompts: dict[str, Any] | None = None
     resources: dict[str, Any] | None = None
     tools: dict[str, Any] | None = None
@@ -116,7 +114,7 @@ class MCPCapabilities:
 class MCPClientCapabilities:
     """MCP client capabilities."""
 
-    experimental: dict[str, Any] = field(default_factory=lambda: {})
+    experimental: dict[str, Any] = field(default_factory=dict)
     roots: dict[str, Any] | None = None
     sampling: dict[str, Any] | None = None
 
@@ -127,7 +125,7 @@ class MCPTool:
 
     name: str
     description: str
-    inputSchema: dict[str, Any] = field(default_factory=lambda: {})
+    inputSchema: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -135,14 +133,14 @@ class MCPToolCall:
     """MCP tool call."""
 
     name: str
-    arguments: dict[str, Any] = field(default_factory=lambda: {})
+    arguments: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class MCPToolResult:
     """MCP tool result."""
 
-    content: list[dict[str, Any]] = field(default_factory=lambda: [])
+    content: list[dict[str, Any]] = field(default_factory=list)
     isError: bool = False
 
 
@@ -188,7 +186,7 @@ class MCPPromptResult:
     """MCP prompt result."""
 
     description: str | None = None
-    messages: list[MCPPromptMessage] = field(default_factory=lambda: [])
+    messages: list[MCPPromptMessage] = field(default_factory=list)
 
 
 @dataclass
@@ -196,7 +194,14 @@ class MCPLoggingMessage:
     """MCP logging message."""
 
     level: Literal[
-        "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"
+        "debug",
+        "info",
+        "notice",
+        "warning",
+        "error",
+        "critical",
+        "alert",
+        "emergency",
     ]
     logger: str | None = None
     data: Any = None
@@ -221,9 +226,9 @@ class MCPConnectionConfig:
 
     transport: MCPTransportType
     command: str | None = None  # For stdio transport
-    args: list[str] = field(default_factory=lambda: [])  # For stdio transport
+    args: list[str] = field(default_factory=list)  # For stdio transport
     url: str | None = None  # For SSE/WebSocket transport
-    env: dict[str, str] = field(default_factory=lambda: {})
+    env: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0
     name: str = ""  # Human-readable server name used as session/tool prefix
 
@@ -293,7 +298,7 @@ class ObscuraMCPConfig:
     """Configuration for Obscura MCP integration."""
 
     enabled: bool = True
-    servers: list[MCPConnectionConfig] = field(default_factory=lambda: [])
+    servers: list[MCPConnectionConfig] = field(default_factory=list)
     expose_obscura_as_mcp: bool = True
     allow_external_mcp: bool = True
     tool_timeout: float = 60.0

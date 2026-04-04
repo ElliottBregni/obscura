@@ -7,7 +7,7 @@ import json
 import sqlite3
 import threading
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.core.paths import resolve_obscura_evals_dir
 from obscura.eval.models import (
@@ -19,6 +19,9 @@ from obscura.eval.models import (
     JudgeScore,
     ToolCallRecord,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -141,7 +144,7 @@ class EvalResultStore:
                     "latency_ms": tc.latency_ms,
                 }
                 for tc in result.tool_calls_observed
-            ]
+            ],
         )
 
         assertion_outcomes_json = json.dumps(
@@ -152,7 +155,7 @@ class EvalResultStore:
                     "message": ao.message,
                 }
                 for ao in result.assertion_outcomes
-            ]
+            ],
         )
 
         judge_detail_json = None
@@ -162,7 +165,7 @@ class EvalResultStore:
                     "score": result.judge_detail.score,
                     "reasoning": result.judge_detail.reasoning,
                     "criteria": result.judge_detail.criteria,
-                }
+                },
             )
 
         events_json = json.dumps(list(result.events))
@@ -195,7 +198,9 @@ class EvalResultStore:
         )
 
     def _get_case_result_sync(
-        self, run_id: str, case_id: str,
+        self,
+        run_id: str,
+        case_id: str,
     ) -> EvalCaseResult | None:
         conn = self._conn()
         row = conn.execute(
@@ -207,7 +212,9 @@ class EvalResultStore:
         return self._row_to_case_result(row)
 
     def _get_baseline_sync(
-        self, case_id: str, suite_id: str,
+        self,
+        case_id: str,
+        suite_id: str,
     ) -> tuple[str, float] | None:
         """Return ``(run_id, score)`` for the baseline or ``None``."""
         conn = self._conn()
@@ -221,7 +228,9 @@ class EvalResultStore:
         return (row["run_id"], row["score"])
 
     def _promote_baseline_sync(
-        self, run_id: str, suite_id: str,
+        self,
+        run_id: str,
+        suite_id: str,
     ) -> None:
         conn = self._conn()
         rows = conn.execute(
@@ -240,7 +249,9 @@ class EvalResultStore:
         conn.commit()
 
     def _list_runs_sync(
-        self, suite_id: str | None = None, limit: int = 20,
+        self,
+        suite_id: str | None = None,
+        limit: int = 20,
     ) -> list[dict[str, object]]:
         conn = self._conn()
         if suite_id:
@@ -257,13 +268,13 @@ class EvalResultStore:
         return [dict(r) for r in rows]
 
     def _list_baselines_sync(
-        self, suite_id: str | None = None,
+        self,
+        suite_id: str | None = None,
     ) -> list[dict[str, object]]:
         conn = self._conn()
         if suite_id:
             rows = conn.execute(
-                "SELECT * FROM eval_baselines WHERE suite_id = ? "
-                "ORDER BY case_id",
+                "SELECT * FROM eval_baselines WHERE suite_id = ? ORDER BY case_id",
                 (suite_id,),
             ).fetchall()
         else:
@@ -340,39 +351,55 @@ class EvalResultStore:
         await asyncio.to_thread(self._save_run_sync, summary)
 
     async def get_case_result(
-        self, run_id: str, case_id: str,
+        self,
+        run_id: str,
+        case_id: str,
     ) -> EvalCaseResult | None:
         """Retrieve a single case result."""
         return await asyncio.to_thread(
-            self._get_case_result_sync, run_id, case_id,
+            self._get_case_result_sync,
+            run_id,
+            case_id,
         )
 
     async def get_baseline(
-        self, case_id: str, suite_id: str,
+        self,
+        case_id: str,
+        suite_id: str,
     ) -> tuple[str, float] | None:
         """Get the baseline ``(run_id, score)`` for a case."""
         return await asyncio.to_thread(
-            self._get_baseline_sync, case_id, suite_id,
+            self._get_baseline_sync,
+            case_id,
+            suite_id,
         )
 
     async def promote_baseline(self, run_id: str, suite_id: str) -> None:
         """Promote all case results from a run as the new baseline."""
         await asyncio.to_thread(
-            self._promote_baseline_sync, run_id, suite_id,
+            self._promote_baseline_sync,
+            run_id,
+            suite_id,
         )
 
     async def list_runs(
-        self, suite_id: str | None = None, limit: int = 20,
+        self,
+        suite_id: str | None = None,
+        limit: int = 20,
     ) -> list[dict[str, object]]:
         """List recent eval runs."""
         return await asyncio.to_thread(
-            self._list_runs_sync, suite_id, limit,
+            self._list_runs_sync,
+            suite_id,
+            limit,
         )
 
     async def list_baselines(
-        self, suite_id: str | None = None,
+        self,
+        suite_id: str | None = None,
     ) -> list[dict[str, object]]:
         """List current baselines."""
         return await asyncio.to_thread(
-            self._list_baselines_sync, suite_id,
+            self._list_baselines_sync,
+            suite_id,
         )

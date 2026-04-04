@@ -1,10 +1,12 @@
 """Tests for sdk.internal.stream — EventToIteratorBridge and ClaudeIteratorAdapter."""
 
-import pytest
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import MagicMock
 
-from obscura.core.stream import EventToIteratorBridge, ClaudeIteratorAdapter
+import pytest
+
+from obscura.core.stream import ClaudeIteratorAdapter, EventToIteratorBridge
 from obscura.core.types import ChunkKind, StreamChunk
 
 

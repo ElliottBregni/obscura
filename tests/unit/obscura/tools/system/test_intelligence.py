@@ -1,5 +1,4 @@
-"""
-Tests for obscura.tools.system.intelligence — context_snapshot, causal_trace, policy_probe.
+"""Tests for obscura.tools.system.intelligence — context_snapshot, causal_trace, policy_probe.
 
 Strategy:
 - All three tools are async coroutines that return JSON strings.
@@ -17,8 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
@@ -31,6 +29,8 @@ from obscura.tools.system.intelligence import (
     policy_probe,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,10 +139,25 @@ def tmp_db(tmp_path: Path) -> Path:
     # Insert some events
     events = [
         ("run-1", "run_started", '{"prompt": "hello"}', "2024-01-01T00:00:01"),
-        ("run-1", "state_transition", '{"from": "IDLE", "to": "RUNNING_MODEL"}', "2024-01-01T00:00:02"),
+        (
+            "run-1",
+            "state_transition",
+            '{"from": "IDLE", "to": "RUNNING_MODEL"}',
+            "2024-01-01T00:00:02",
+        ),
         ("run-1", "model_turn_start", "{}", "2024-01-01T00:00:03"),
-        ("run-1", "tool_execution_start", '{"tool": "read_file"}', "2024-01-01T00:00:04"),
-        ("run-1", "tool_execution_end", '{"tool": "read_file", "success": true}', "2024-01-01T00:00:05"),
+        (
+            "run-1",
+            "tool_execution_start",
+            '{"tool": "read_file"}',
+            "2024-01-01T00:00:04",
+        ),
+        (
+            "run-1",
+            "tool_execution_end",
+            '{"tool": "read_file", "success": true}',
+            "2024-01-01T00:00:05",
+        ),
         ("run-1", "memory_commit", '{"committed": 1}', "2024-01-01T00:00:06"),
         ("run-1", "run_completed", "{}", "2024-01-01T00:00:07"),
     ]
@@ -164,7 +179,13 @@ def tmp_db(tmp_path: Path) -> Path:
     )
 
     # Insert a policy version
-    policy_data = json.dumps({"allow_list": ["read_file", "search_files"], "deny_list": [], "full_access": False})
+    policy_data = json.dumps(
+        {
+            "allow_list": ["read_file", "search_files"],
+            "deny_list": [],
+            "full_access": False,
+        },
+    )
     conn.execute(
         "INSERT INTO policy_versions VALUES (?,?,?,?)",
         ("pv-1", "sess-1", policy_data, "2024-01-01T00:00:00"),
@@ -232,9 +253,17 @@ class TestRows:
     def test_parametrized_query(self, tmp_db: Path) -> None:
         conn = _open_db(tmp_db)
         assert conn is not None
-        rows = _rows(conn, "SELECT * FROM supervisor_runs WHERE session_id = ?", ("sess-1",))
+        rows = _rows(
+            conn,
+            "SELECT * FROM supervisor_runs WHERE session_id = ?",
+            ("sess-1",),
+        )
         assert len(rows) == 1
-        rows_none = _rows(conn, "SELECT * FROM supervisor_runs WHERE session_id = ?", ("no-such",))
+        rows_none = _rows(
+            conn,
+            "SELECT * FROM supervisor_runs WHERE session_id = ?",
+            ("no-such",),
+        )
         assert rows_none == []
         conn.close()
 
@@ -399,7 +428,14 @@ class TestContextSnapshotWithDb:
             "obscura.tools.system.intelligence._get_supervisor_db",
             return_value=tmp_db,
         ):
-            result = parse(run(context_snapshot(session_id="no-such-session", run_id="no-such-run")))
+            result = parse(
+                run(
+                    context_snapshot(
+                        session_id="no-such-session",
+                        run_id="no-such-run",
+                    ),
+                ),
+            )
         assert result["status"] == "ok"
         assert result["run"] == {}
         assert result["tools"] == []
@@ -582,7 +618,12 @@ class TestCausalTraceWithDb:
         conn.execute(
             "INSERT INTO supervisor_events (run_id, kind, payload_json, timestamp) "
             "VALUES (?,?,?,?)",
-            ("run-1", "drift_detected", '{"reason": "hash mismatch"}', "2024-01-01T00:00:08"),
+            (
+                "run-1",
+                "drift_detected",
+                '{"reason": "hash mismatch"}',
+                "2024-01-01T00:00:08",
+            ),
         )
         conn.commit()
         conn.close()
@@ -632,33 +673,49 @@ class TestPolicyProbeFullAccess:
     """policy_override with full_access=True — always allows."""
 
     def test_allows_any_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="delete_file",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="delete_file",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         assert result["status"] == "ok"
         assert result["allowed"] is True
 
     def test_full_access_explanation(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="shell_exec",
-            policy_override={"full_access": True},
-            explain=True,
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="shell_exec",
+                    policy_override={"full_access": True},
+                    explain=True,
+                ),
+            ),
+        )
         assert "full_access" in result["explanation"].lower()
 
     def test_policy_source_inline(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="read_file",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="read_file",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         assert result["policy_source"] == "inline_override"
 
     def test_policy_summary_full_access_true(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="search_files",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="search_files",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         assert result["policy_summary"]["full_access"] is True
 
 
@@ -666,33 +723,49 @@ class TestPolicyProbeDenyList:
     """policy_override with deny_list."""
 
     def test_denies_listed_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="write_file",
-            policy_override={"deny_list": ["write_file", "delete_file"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="write_file",
+                    policy_override={"deny_list": ["write_file", "delete_file"]},
+                ),
+            ),
+        )
         assert result["status"] == "ok"
         assert result["allowed"] is False
 
     def test_allows_unlisted_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="read_file",
-            policy_override={"deny_list": ["write_file"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="read_file",
+                    policy_override={"deny_list": ["write_file"]},
+                ),
+            ),
+        )
         assert result["allowed"] is True
 
     def test_deny_explanation_mentions_deny_list(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="write_file",
-            policy_override={"deny_list": ["write_file"]},
-            explain=True,
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="write_file",
+                    policy_override={"deny_list": ["write_file"]},
+                    explain=True,
+                ),
+            ),
+        )
         assert "deny_list" in result["explanation"].lower()
 
     def test_matched_rule_is_deny_list(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="delete_file",
-            policy_override={"deny_list": ["delete_file"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="delete_file",
+                    policy_override={"deny_list": ["delete_file"]},
+                ),
+            ),
+        )
         assert result["matched_rule"] == "deny_list"
 
 
@@ -700,54 +773,81 @@ class TestPolicyProbeAllowList:
     """policy_override with allow_list (non-FS tools only to avoid path_arg bug)."""
 
     def test_allows_listed_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="web_search",
-            policy_override={"allow_list": ["web_search", "run_command"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="web_search",
+                    policy_override={"allow_list": ["web_search", "run_command"]},
+                ),
+            ),
+        )
         assert result["status"] == "ok"
         assert result["allowed"] is True
 
     def test_denies_unlisted_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="shell_exec",
-            policy_override={"allow_list": ["web_search"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="shell_exec",
+                    policy_override={"allow_list": ["web_search"]},
+                ),
+            ),
+        )
         assert result["allowed"] is False
 
     def test_deny_explanation_mentions_allow_list(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="shell_exec",
-            policy_override={"allow_list": ["web_search"]},
-            explain=True,
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="shell_exec",
+                    policy_override={"allow_list": ["web_search"]},
+                    explain=True,
+                ),
+            ),
+        )
         assert "allow_list" in result["explanation"].lower()
 
     def test_alternatives_provided_when_denied(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="shell_exec",
-            policy_override={"allow_list": ["web_search", "run_command"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="shell_exec",
+                    policy_override={"allow_list": ["web_search", "run_command"]},
+                ),
+            ),
+        )
         assert result["allowed"] is False
         # alternatives should list permitted tools
         assert "alternatives" in result
-        assert "web_search" in result["alternatives"] or "run_command" in result["alternatives"]
+        assert (
+            "web_search" in result["alternatives"]
+            or "run_command" in result["alternatives"]
+        )
 
     def test_no_alternatives_when_allowed(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="web_search",
-            policy_override={"allow_list": ["web_search"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="web_search",
+                    policy_override={"allow_list": ["web_search"]},
+                ),
+            ),
+        )
         assert result["allowed"] is True
         assert "alternatives" not in result
 
 
 class TestPolicyProbeNoExplain:
     def test_no_explanation_key_when_explain_false(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="web_search",
-            policy_override={"full_access": True},
-            explain=False,
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="web_search",
+                    policy_override={"full_access": True},
+                    explain=False,
+                ),
+            ),
+        )
         assert "explanation" not in result
 
 
@@ -781,7 +881,9 @@ class TestPolicyProbeWithDb:
             "obscura.tools.system.intelligence._get_supervisor_db",
             return_value=tmp_db,
         ):
-            result = parse(run(policy_probe(tool_name="read_file", session_id="sess-1")))
+            result = parse(
+                run(policy_probe(tool_name="read_file", session_id="sess-1")),
+            )
         assert result["status"] == "ok"
         # Policy from DB: allow_list = ["read_file", "search_files"]
         assert result["allowed"] is True
@@ -791,7 +893,9 @@ class TestPolicyProbeWithDb:
             "obscura.tools.system.intelligence._get_supervisor_db",
             return_value=tmp_db,
         ):
-            result = parse(run(policy_probe(tool_name="write_file", session_id="sess-1")))
+            result = parse(
+                run(policy_probe(tool_name="write_file", session_id="sess-1")),
+            )
         assert result["allowed"] is False
 
     def test_policy_source_from_db(self, tmp_db: Path) -> None:
@@ -799,7 +903,9 @@ class TestPolicyProbeWithDb:
             "obscura.tools.system.intelligence._get_supervisor_db",
             return_value=tmp_db,
         ):
-            result = parse(run(policy_probe(tool_name="read_file", session_id="sess-1")))
+            result = parse(
+                run(policy_probe(tool_name="read_file", session_id="sess-1")),
+            )
         assert result["policy_source"].startswith("db:")
 
 
@@ -807,47 +913,71 @@ class TestPolicyProbeMetadata:
     """Validate the metadata fields in every response."""
 
     def test_tool_name_echoed(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="my_tool",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="my_tool",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         assert result["tool_name"] == "my_tool"
 
     def test_is_filesystem_tool_false_for_non_fs(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="web_search",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="web_search",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         assert result["is_filesystem_tool"] is False
 
     def test_is_filesystem_tool_true_for_fs(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="read_file",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="read_file",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         assert result["is_filesystem_tool"] is True
 
     def test_path_checked_none_for_non_fs_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="web_search",
-            policy_override={"full_access": True},
-            args={"query": "something"},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="web_search",
+                    policy_override={"full_access": True},
+                    args={"query": "something"},
+                ),
+            ),
+        )
         assert result["path_checked"] is None
 
     def test_path_checked_for_fs_tool(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="read_file",
-            policy_override={"full_access": True},
-            args={"path": "/tmp/foo.txt"},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="read_file",
+                    policy_override={"full_access": True},
+                    args={"path": "/tmp/foo.txt"},
+                ),
+            ),
+        )
         assert result["path_checked"] == "/tmp/foo.txt"
 
     def test_policy_summary_keys_present(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="any_tool",
-            policy_override={"full_access": True},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="any_tool",
+                    policy_override={"full_access": True},
+                ),
+            ),
+        )
         summary = result["policy_summary"]
         assert "full_access" in summary
         assert "allow_list" in summary
@@ -855,18 +985,24 @@ class TestPolicyProbeMetadata:
         assert "base_dir" in summary
 
     def test_policy_summary_allow_list_sorted(self) -> None:
-        result = parse(run(policy_probe(
-            tool_name="read_file",
-            policy_override={"allow_list": ["z_tool", "a_tool", "m_tool"]},
-        )))
+        result = parse(
+            run(
+                policy_probe(
+                    tool_name="read_file",
+                    policy_override={"allow_list": ["z_tool", "a_tool", "m_tool"]},
+                ),
+            ),
+        )
         al = result["policy_summary"]["allow_list"]
         assert al == sorted(al)
 
     def test_result_is_valid_json(self) -> None:
-        raw = run(policy_probe(
-            tool_name="any_tool",
-            policy_override={"full_access": True},
-        ))
+        raw = run(
+            policy_probe(
+                tool_name="any_tool",
+                policy_override={"full_access": True},
+            ),
+        )
         parsed = json.loads(raw)
         assert isinstance(parsed, dict)
 
@@ -881,33 +1017,51 @@ class TestToolRegistration:
 
     def test_context_snapshot_registered(self) -> None:
         from obscura.tools.system import get_system_tool_specs
+
         names = {s.name for s in get_system_tool_specs()}
         assert "context_snapshot" in names
 
     def test_causal_trace_registered(self) -> None:
         from obscura.tools.system import get_system_tool_specs
+
         names = {s.name for s in get_system_tool_specs()}
         assert "causal_trace" in names
 
     def test_policy_probe_registered(self) -> None:
         from obscura.tools.system import get_system_tool_specs
+
         names = {s.name for s in get_system_tool_specs()}
         assert "policy_probe" in names
 
     def test_all_three_have_spec_attribute(self) -> None:
-        from obscura.tools.system.intelligence import causal_trace, context_snapshot, policy_probe
+        from obscura.tools.system.intelligence import (
+            causal_trace,
+            context_snapshot,
+            policy_probe,
+        )
+
         assert hasattr(context_snapshot, "spec")
         assert hasattr(causal_trace, "spec")
         assert hasattr(policy_probe, "spec")
 
     def test_spec_names_match(self) -> None:
-        from obscura.tools.system.intelligence import causal_trace, context_snapshot, policy_probe
+        from obscura.tools.system.intelligence import (
+            causal_trace,
+            context_snapshot,
+            policy_probe,
+        )
+
         assert context_snapshot.spec.name == "context_snapshot"  # type: ignore[attr-defined]
         assert causal_trace.spec.name == "causal_trace"  # type: ignore[attr-defined]
         assert policy_probe.spec.name == "policy_probe"  # type: ignore[attr-defined]
 
     def test_spec_descriptions_non_empty(self) -> None:
-        from obscura.tools.system.intelligence import causal_trace, context_snapshot, policy_probe
+        from obscura.tools.system.intelligence import (
+            causal_trace,
+            context_snapshot,
+            policy_probe,
+        )
+
         assert context_snapshot.spec.description  # type: ignore[attr-defined]
         assert causal_trace.spec.description  # type: ignore[attr-defined]
         assert policy_probe.spec.description  # type: ignore[attr-defined]

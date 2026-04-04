@@ -1,5 +1,4 @@
-"""
-obscura.kairos.background_sessions — Background session management.
+"""obscura.kairos.background_sessions — Background session management.
 
 Provides ``ps``, ``logs``, ``attach``, and ``kill`` operations for
 background Obscura sessions running as detached processes.

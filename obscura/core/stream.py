@@ -1,5 +1,4 @@
-"""
-obscura.internal.stream — Streaming adapters for normalizing backend output.
+"""obscura.internal.stream — Streaming adapters for normalizing backend output.
 
 Copilot is event/push-based (register callbacks, events fire).
 Claude is pull-based (async iterator of Messages/StreamEvents).
@@ -11,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.types import ChunkKind, StreamChunk, StreamMetadata
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ---------------------------------------------------------------------------
 # Copilot: Event → AsyncIterator bridge
@@ -71,7 +72,7 @@ class EventToIteratorBridge:
                     text=delta,
                     raw=event,
                     native_event=event,
-                )
+                ),
             )
 
     def on_thinking_delta(self, event: Any) -> None:
@@ -101,7 +102,7 @@ class EventToIteratorBridge:
                 text=delta,
                 raw=event,
                 native_event=event,
-            )
+            ),
         )
 
     def on_tool_start(self, event: Any) -> None:
@@ -116,7 +117,7 @@ class EventToIteratorBridge:
                 tool_name=name,
                 raw=event,
                 native_event=event,
-            )
+            ),
         )
         # Extract tool input from event and emit as TOOL_USE_DELTA so the
         # agent loop can parse arguments.  Copilot events carry input in
@@ -145,7 +146,7 @@ class EventToIteratorBridge:
                         tool_input_delta=delta,
                         raw=event,
                         native_event=event,
-                    )
+                    ),
                 )
 
     def on_tool_end(self, event: Any) -> None:
@@ -165,11 +166,14 @@ class EventToIteratorBridge:
                 tool_name=name,
                 raw=event,
                 native_event=event,
-            )
+            ),
         )
 
     def finish(
-        self, event: Any = None, *, metadata: StreamMetadata | None = None
+        self,
+        event: Any = None,
+        *,
+        metadata: StreamMetadata | None = None,
     ) -> None:
         """Signal end of stream."""
         self.push(
@@ -178,12 +182,15 @@ class EventToIteratorBridge:
                 raw=event,
                 metadata=metadata,
                 native_event=event,
-            )
+            ),
         )
         self._queue.put_nowait(None)
 
     def error(
-        self, err: Exception | Any, *, metadata: StreamMetadata | None = None
+        self,
+        err: Exception | Any,
+        *,
+        metadata: StreamMetadata | None = None,
     ) -> None:
         """Signal error and end stream."""
         self.push(
@@ -193,7 +200,7 @@ class EventToIteratorBridge:
                 raw=err,
                 native_event=err,
                 metadata=metadata,
-            )
+            ),
         )
         self._queue.put_nowait(None)
 
@@ -266,7 +273,7 @@ class ClaudeIteratorAdapter:
                     raw=item,
                     metadata=meta,
                     native_event=item,
-                )
+                ),
             ]
 
         # StreamEvent → partial deltas
@@ -292,7 +299,7 @@ class ClaudeIteratorAdapter:
                 text=str(item),
                 raw=item,
                 native_event=item,
-            )
+            ),
         ]
 
     def _adapt_stream_event(self, event: Any) -> list[StreamChunk]:
@@ -314,7 +321,7 @@ class ClaudeIteratorAdapter:
                         text=delta.get("text", ""),
                         raw=event,
                         native_event=event,
-                    )
+                    ),
                 ]
             if delta_type == "thinking_delta":
                 return [
@@ -323,7 +330,7 @@ class ClaudeIteratorAdapter:
                         text=delta.get("thinking", ""),
                         raw=event,
                         native_event=event,
-                    )
+                    ),
                 ]
             if delta_type == "input_json_delta":
                 return [
@@ -332,7 +339,7 @@ class ClaudeIteratorAdapter:
                         tool_input_delta=delta.get("partial_json", ""),
                         raw=event,
                         native_event=event,
-                    )
+                    ),
                 ]
 
         if ev_type == "content_block_start":
@@ -345,7 +352,7 @@ class ClaudeIteratorAdapter:
                         tool_use_id=block.get("id", ""),
                         raw=event,
                         native_event=event,
-                    )
+                    ),
                 ]
 
         if ev_type == "content_block_stop":
@@ -354,7 +361,7 @@ class ClaudeIteratorAdapter:
                     kind=ChunkKind.TOOL_USE_END,
                     raw=event,
                     native_event=event,
-                )
+                ),
             ]
 
         if ev_type == "message_start":
@@ -363,7 +370,7 @@ class ClaudeIteratorAdapter:
                     kind=ChunkKind.MESSAGE_START,
                     raw=event,
                     native_event=event,
-                )
+                ),
             ]
 
         return []
@@ -384,7 +391,7 @@ class ClaudeIteratorAdapter:
                         text=block.text,
                         raw=block,
                         native_event=block,
-                    )
+                    ),
                 )
             elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
                 chunks.append(
@@ -393,7 +400,7 @@ class ClaudeIteratorAdapter:
                         text=block.thinking,
                         raw=block,
                         native_event=block,
-                    )
+                    ),
                 )
             elif block_type == "ToolUseBlock":
                 tool_id = getattr(block, "id", "")
@@ -404,7 +411,7 @@ class ClaudeIteratorAdapter:
                         tool_use_id=tool_id,
                         raw=block,
                         native_event=block,
-                    )
+                    ),
                 )
                 # Emit tool input as a single delta (mirrors streaming path)
                 block_input = getattr(block, "input", None)
@@ -415,14 +422,14 @@ class ClaudeIteratorAdapter:
                             tool_input_delta=json.dumps(block_input),
                             raw=block,
                             native_event=block,
-                        )
+                        ),
                     )
                 chunks.append(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_END,
                         raw=block,
                         native_event=block,
-                    )
+                    ),
                 )
             elif block_type == "ToolResultBlock":
                 text = ""
@@ -434,7 +441,7 @@ class ClaudeIteratorAdapter:
                         text=text,
                         raw=block,
                         native_event=block,
-                    )
+                    ),
                 )
 
         return chunks

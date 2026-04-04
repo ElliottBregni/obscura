@@ -35,7 +35,8 @@ class PluginIndex:
 
     def list_enabled(self) -> list[PluginSpec]:
         return [
-            spec for pid, spec in self._specs.items()
+            spec
+            for pid, spec in self._specs.items()
             if self._statuses.get(pid, PluginStatus(plugin_id=pid)).enabled
         ]
 

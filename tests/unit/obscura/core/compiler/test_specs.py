@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from obscura.core.compiler.specs import (
+    SPEC_KIND_MAP,
     AgentInstanceSpec,
     MCPServerSpec,
     MemoryBindingSpec,
@@ -18,7 +19,6 @@ from obscura.core.compiler.specs import (
     WorkspaceAgentRef,
     WorkspaceSpec,
     WorkspaceSpecBody,
-    SPEC_KIND_MAP,
 )
 
 
@@ -104,6 +104,7 @@ class TestTemplateSpec:
 class TestAgentInstanceSpec:
     def test_minimal(self) -> None:
         from obscura.core.compiler.specs import AgentInstanceSpecBody
+
         a = AgentInstanceSpec(
             metadata=SpecMetadata(name="my-agent"),
             spec=AgentInstanceSpecBody(template="code-agent"),
@@ -116,6 +117,7 @@ class TestAgentInstanceSpec:
 
     def test_with_overrides(self) -> None:
         from obscura.core.compiler.specs import AgentInstanceSpecBody
+
         a = AgentInstanceSpec(
             metadata=SpecMetadata(name="orders-dev"),
             spec=AgentInstanceSpecBody(
@@ -132,6 +134,7 @@ class TestAgentInstanceSpec:
 class TestPolicySpec:
     def test_defaults(self) -> None:
         from obscura.core.compiler.specs import PolicySpecBody
+
         p = PolicySpec(
             metadata=SpecMetadata(name="default"),
             spec=PolicySpecBody(),
@@ -143,6 +146,7 @@ class TestPolicySpec:
 
     def test_full(self) -> None:
         from obscura.core.compiler.specs import PolicySpecBody
+
         p = PolicySpec(
             metadata=SpecMetadata(name="strict"),
             spec=PolicySpecBody(

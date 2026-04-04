@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import require_any_role, require_role
 from obscura.deps import audit_logs, get_runtime
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
+    from obscura.core.rate_limiter import RateLimiter
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])
 
@@ -66,13 +69,13 @@ async def audit_logs_list(
             "total": total,
             "limit": limit,
             "offset": offset,
-        }
+        },
     )
 
 
 @router.get("/audit/logs/summary")
 async def audit_logs_summary(
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Get audit log summary. Admin only."""
     actions: Counter[str | None] = Counter(l.get("action") for l in audit_logs)
@@ -89,7 +92,7 @@ async def audit_logs_summary(
             "actions": dict(actions),
             "outcomes": dict(outcomes),
             "last_24h": len(recent),
-        }
+        },
     )
 
 
@@ -98,7 +101,10 @@ async def audit_logs_summary(
 
 @router.get("/metrics")
 async def metrics_get(
-    user: AuthenticatedUser = Depends(require_any_role("admin", "agent:read")),
+    user: Annotated[
+        AuthenticatedUser,
+        Depends(require_any_role("admin", "agent:read")),
+    ],
 ) -> JSONResponse:
     """Get system metrics."""
     runtime = await get_runtime(user)
@@ -124,11 +130,11 @@ async def metrics_get(
     memory_stats = store.get_stats()
 
     from obscura.routes.agents import get_agent_templates
-    from obscura.routes.workflows import (
-        get_workflows_store,
-        get_workflow_executions_store,
-    )
     from obscura.routes.webhooks import get_webhooks_store
+    from obscura.routes.workflows import (
+        get_workflow_executions_store,
+        get_workflows_store,
+    )
 
     return JSONResponse(
         content={
@@ -146,14 +152,17 @@ async def metrics_get(
                 "active": sum(1 for w in get_webhooks_store().values() if w.active),
             },
             "timestamp": datetime.now(UTC).isoformat(),
-        }
+        },
     )
 
 
 @router.get("/metrics/agents/{agent_id}")
 async def metrics_agent_get(
     agent_id: str,
-    user: AuthenticatedUser = Depends(require_any_role("admin", "agent:read")),
+    user: Annotated[
+        AuthenticatedUser,
+        Depends(require_any_role("admin", "agent:read")),
+    ],
 ) -> JSONResponse:
     """Get metrics for a specific agent."""
     runtime = await get_runtime(user)
@@ -173,7 +182,7 @@ async def metrics_agent_get(
             "updated_at": state.updated_at.isoformat(),
             "iteration_count": state.iteration_count,
             "error_message": state.error_message,
-        }
+        },
     )
 
 
@@ -183,14 +192,12 @@ async def metrics_agent_get(
 @router.get("/rate-limits")
 async def rate_limits_get(
     request: Request,
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Get current rate limits. Admin only."""
     # Use real rate limiter from app state if available
     limiter = getattr(request.app.state, "rate_limiter", None)
     if limiter is not None:
-        from obscura.core.rate_limiter import RateLimiter
-
         rl: RateLimiter = limiter
         return JSONResponse(
             content={
@@ -199,7 +206,7 @@ async def rate_limits_get(
                     "concurrent": rl.get_limits("__default__")["concurrent"],
                 },
                 "custom": _rate_limits,
-            }
+            },
         )
 
     return JSONResponse(
@@ -210,7 +217,7 @@ async def rate_limits_get(
                 "memory_quota_mb": 1024,
             },
             "custom": _rate_limits,
-        }
+        },
     )
 
 
@@ -218,7 +225,7 @@ async def rate_limits_get(
 async def rate_limits_set(
     request: Request,
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Set rate limits for a user/API key. Admin only."""
     api_key: str | None = body.get("api_key")
@@ -228,8 +235,6 @@ async def rate_limits_set(
     # Apply to real rate limiter if available
     limiter = getattr(request.app.state, "rate_limiter", None)
     if limiter is not None:
-        from obscura.core.rate_limiter import RateLimiter
-
         rl: RateLimiter = limiter
         rl.set_limits(
             api_key,
@@ -249,18 +254,17 @@ async def rate_limits_set(
         content={
             "api_key": api_key[:8] + "...",
             "limits": _rate_limits[api_key],
-        }
+        },
     )
 
 
 @router.delete("/rate-limits/{api_key}")
 async def rate_limits_delete(
     api_key: str,
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Delete custom rate limits for an API key. Admin only."""
-    if api_key in _rate_limits:
-        del _rate_limits[api_key]
+    _rate_limits.pop(api_key, None)
 
     return JSONResponse(content={"api_key": api_key[:8] + "...", "deleted": True})
 
@@ -270,7 +274,7 @@ async def rate_limits_delete(
 
 @router.get("/cache/stats")
 async def cache_stats_get(
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Get LLM cache statistics. Admin only."""
     try:
@@ -281,7 +285,7 @@ async def cache_stats_get(
             content={
                 "enabled": available,
                 "note": "Cache stats are per-client; use client._cache.stats() in SDK",
-            }
+            },
         )
     except Exception:
         return JSONResponse(content={"enabled": False})
@@ -289,7 +293,7 @@ async def cache_stats_get(
 
 @router.post("/cache/clear")
 async def cache_clear(
-    user: AuthenticatedUser = Depends(require_role("admin")),
+    user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Clear LLM cache. Admin only."""
     return JSONResponse(content={"cleared": True})

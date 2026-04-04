@@ -1,5 +1,4 @@
-"""
-obscura.tools.system.intelligence — Glass-box observability tools.
+"""obscura.tools.system.intelligence — Glass-box observability tools.
 
 Three high-leverage tools that give an agent full introspective access to its
 own supervisor state, causal event history, and policy constraints:
@@ -19,8 +18,7 @@ from typing import Any
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
 from obscura.tools.policy import ToolPolicy, evaluate_policy
-from obscura.tools.policy.engine import _FS_TOOLS  # noqa: PLC2701
-
+from obscura.tools.policy.engine import _FS_TOOLS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,11 +40,13 @@ def _open_db(db_path: Path) -> sqlite3.Connection | None:
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    return dict(zip(row.keys(), tuple(row)))
+    return dict(zip(row.keys(), tuple(row), strict=False))
 
 
 def _rows(
-    conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()
+    conn: sqlite3.Connection,
+    sql: str,
+    params: tuple[Any, ...] = (),
 ) -> list[dict[str, Any]]:
     try:
         cur = conn.execute(sql, params)
@@ -108,7 +108,7 @@ async def context_snapshot(
                     f"Supervisor database not found at {db_path}. "
                     "The supervisor has not run yet in this environment."
                 ),
-            }
+            },
         )
 
     try:
@@ -255,7 +255,7 @@ _CAUSAL_EVENT_KINDS: frozenset[str] = frozenset(
         "prompt_assembled",
         "memory_retrieved",
         "hook_fired",
-    }
+    },
 )
 
 
@@ -313,7 +313,7 @@ async def causal_trace(
             {
                 "status": "no_db",
                 "message": f"Supervisor database not found at {db_path}.",
-            }
+            },
         )
 
     try:
@@ -347,7 +347,7 @@ async def causal_trace(
                     "session_id": session_id,
                     "run_id": run_id,
                     "message": "No runs found.",
-                }
+                },
             )
 
         # ── Fetch all causal events for this run ─────────────────────────────
@@ -366,7 +366,7 @@ async def causal_trace(
                     "session_id": session_id,
                     "run_id": run_id,
                     "message": "No causal events found for this run.",
-                }
+                },
             )
 
         # ── Find terminal event ───────────────────────────────────────────────
@@ -380,7 +380,7 @@ async def causal_trace(
                     break
                 try:
                     payload_str = json.dumps(
-                        json.loads(ev.get("payload_json") or "{}")
+                        json.loads(ev.get("payload_json") or "{}"),
                     ).lower()
                     if outcome_lower in payload_str:
                         terminal_idx = i
@@ -527,7 +527,7 @@ async def policy_probe(
             policy_source = "inline_override"
         except Exception as exc:
             return json.dumps(
-                {"status": "error", "message": f"Invalid policy_override: {exc}"}
+                {"status": "error", "message": f"Invalid policy_override: {exc}"},
             )
 
     if policy is None:
@@ -558,8 +558,12 @@ async def policy_probe(
                             raw_base = data.get("base_dir")
                             policy = ToolPolicy(
                                 name=f"db:{session_id}",
-                                allow_list=frozenset(raw_allow) if raw_allow else frozenset(),
-                                deny_list=frozenset(raw_deny) if raw_deny else frozenset(),
+                                allow_list=frozenset(raw_allow)
+                                if raw_allow
+                                else frozenset(),
+                                deny_list=frozenset(raw_deny)
+                                if raw_deny
+                                else frozenset(),
                                 base_dir=Path(raw_base) if raw_base else None,
                                 full_access=bool(data.get("full_access", False)),
                             )
@@ -611,23 +615,22 @@ async def policy_probe(
                 )
             else:
                 explanation = f"'{tool_name}' is permitted (no deny rule matched)."
+        elif result.matched_rule == "deny_list":
+            explanation = (
+                f"'{tool_name}' is explicitly in the deny_list and will be blocked."
+            )
+        elif result.matched_rule == "allow_list":
+            explanation = (
+                f"'{tool_name}' is not in the allow_list. Only these tools are "
+                f"permitted: {sorted(policy.allow_list or [])}."
+            )
+        elif result.matched_rule == "base_dir":
+            explanation = (
+                f"'{tool_name}' is a filesystem tool but path '{path_arg}' is "
+                f"outside the allowed base_dir '{policy.base_dir}'."
+            )
         else:
-            if result.matched_rule == "deny_list":
-                explanation = (
-                    f"'{tool_name}' is explicitly in the deny_list and will be blocked."
-                )
-            elif result.matched_rule == "allow_list":
-                explanation = (
-                    f"'{tool_name}' is not in the allow_list. Only these tools are "
-                    f"permitted: {sorted(policy.allow_list or [])}."
-                )
-            elif result.matched_rule == "base_dir":
-                explanation = (
-                    f"'{tool_name}' is a filesystem tool but path '{path_arg}' is "
-                    f"outside the allowed base_dir '{policy.base_dir}'."
-                )
-            else:
-                explanation = f"'{tool_name}' is denied by policy."
+            explanation = f"'{tool_name}' is denied by policy."
         verdict["explanation"] = explanation
 
     # ── Suggest alternatives when denied ─────────────────────────────────────

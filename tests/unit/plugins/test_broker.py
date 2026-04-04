@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Never
 from unittest.mock import AsyncMock, MagicMock
-
 
 from obscura.core.types import (
     ToolCallEnvelope,
@@ -14,10 +14,10 @@ from obscura.core.types import (
 from obscura.plugins.broker import BrokerAuditEntry, ToolBroker, _auto_deny
 from obscura.plugins.policy import PolicyAction, PolicyDecision
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_envelope(
     call_id: str = "c1",
@@ -34,14 +34,24 @@ def _make_envelope(
 
 
 def _allow_decision(rule: str = "allow-all") -> PolicyDecision:
-    return PolicyDecision(action=PolicyAction.ALLOW, reason="allowed", matched_rule=rule)
+    return PolicyDecision(
+        action=PolicyAction.ALLOW,
+        reason="allowed",
+        matched_rule=rule,
+    )
 
 
-def _deny_decision(reason: str = "forbidden", rule: str = "deny-rule") -> PolicyDecision:
+def _deny_decision(
+    reason: str = "forbidden",
+    rule: str = "deny-rule",
+) -> PolicyDecision:
     return PolicyDecision(action=PolicyAction.DENY, reason=reason, matched_rule=rule)
 
 
-def _approve_decision(reason: str = "needs approval", rule: str = "approve-rule") -> PolicyDecision:
+def _approve_decision(
+    reason: str = "needs approval",
+    rule: str = "approve-rule",
+) -> PolicyDecision:
     return PolicyDecision(action=PolicyAction.APPROVE, reason=reason, matched_rule=rule)
 
 
@@ -69,8 +79,9 @@ async def _async_handler(**kwargs):
 # 1. Constructor defaults and custom params
 # ---------------------------------------------------------------------------
 
+
 class TestConstructor:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         policy = _mock_policy()
         broker = ToolBroker(policy_engine=policy)
         assert broker._policy is policy
@@ -80,7 +91,7 @@ class TestConstructor:
         assert broker._handlers == {}
         assert broker._audit_log == []
 
-    def test_custom_params(self):
+    def test_custom_params(self) -> None:
         policy = _mock_policy()
         resolver = _mock_resolver()
         cb = AsyncMock(return_value=True)
@@ -96,7 +107,7 @@ class TestConstructor:
         assert broker._default_timeout == 10.0
         assert broker._max_retries == 3
 
-    def test_default_approval_callback_is_auto_deny(self):
+    def test_default_approval_callback_is_auto_deny(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         assert broker._approval is _auto_deny
 
@@ -105,19 +116,20 @@ class TestConstructor:
 # 2. register_handler
 # ---------------------------------------------------------------------------
 
+
 class TestRegisterHandler:
-    def test_register(self):
+    def test_register(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("tool_a", _sync_handler)
         assert broker._handlers["tool_a"] is _sync_handler
 
-    def test_overwrite(self):
+    def test_overwrite(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("tool_a", _sync_handler)
         broker.register_handler("tool_a", _async_handler)
         assert broker._handlers["tool_a"] is _async_handler
 
-    def test_multiple_tools(self):
+    def test_multiple_tools(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("tool_a", _sync_handler)
         broker.register_handler("tool_b", _async_handler)
@@ -128,8 +140,9 @@ class TestRegisterHandler:
 # 3. Policy deny
 # ---------------------------------------------------------------------------
 
+
 class TestPolicyDeny:
-    async def test_denied_status(self):
+    async def test_denied_status(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision()))
         result = await broker.execute(_make_envelope())
         assert result.status == "denied"
@@ -137,14 +150,14 @@ class TestPolicyDeny:
         assert result.error.type == ToolErrorType.UNAUTHORIZED
         assert "forbidden" in result.error.message
 
-    async def test_denied_preserves_call_id_and_tool(self):
+    async def test_denied_preserves_call_id_and_tool(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision()))
         env = _make_envelope(call_id="x99", tool="blocked_tool")
         result = await broker.execute(env)
         assert result.call_id == "x99"
         assert result.tool == "blocked_tool"
 
-    async def test_denied_audit_entry(self):
+    async def test_denied_audit_entry(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision(rule="rule-7")))
         await broker.execute(_make_envelope())
         assert len(broker.audit_log) == 1
@@ -157,8 +170,9 @@ class TestPolicyDeny:
 # 4. Capability check deny
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityDeny:
-    async def test_denied_when_tool_not_in_set(self):
+    async def test_denied_when_tool_not_in_set(self) -> None:
         resolver = _mock_resolver({"other_tool"})
         broker = ToolBroker(policy_engine=_mock_policy(), capability_resolver=resolver)
         result = await broker.execute(_make_envelope(tool="my_tool"))
@@ -166,7 +180,7 @@ class TestCapabilityDeny:
         assert result.error.type == ToolErrorType.UNAUTHORIZED
         assert "capability" in result.error.message.lower()
 
-    async def test_denied_audit_has_capability_check_rule(self):
+    async def test_denied_audit_has_capability_check_rule(self) -> None:
         resolver = _mock_resolver({"other"})
         broker = ToolBroker(policy_engine=_mock_policy(), capability_resolver=resolver)
         await broker.execute(_make_envelope())
@@ -177,14 +191,15 @@ class TestCapabilityDeny:
 # 5. Capability check passes when no resolver
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityNoResolver:
-    async def test_passes_without_resolver(self):
+    async def test_passes_without_resolver(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _sync_handler)
         result = await broker.execute(_make_envelope())
         assert result.status == "ok"
 
-    async def test_passes_when_tool_in_resolved_set(self):
+    async def test_passes_when_tool_in_resolved_set(self) -> None:
         resolver = _mock_resolver({"my_tool"})
         broker = ToolBroker(policy_engine=_mock_policy(), capability_resolver=resolver)
         broker.register_handler("my_tool", _sync_handler)
@@ -196,8 +211,9 @@ class TestCapabilityNoResolver:
 # 6. Approval required -> callback True -> proceeds
 # ---------------------------------------------------------------------------
 
+
 class TestApprovalApproved:
-    async def test_execution_proceeds(self):
+    async def test_execution_proceeds(self) -> None:
         cb = AsyncMock(return_value=True)
         broker = ToolBroker(
             policy_engine=_mock_policy(_approve_decision()),
@@ -208,7 +224,7 @@ class TestApprovalApproved:
         assert result.status == "ok"
         cb.assert_awaited_once()
 
-    async def test_approval_callback_receives_envelope_and_reason(self):
+    async def test_approval_callback_receives_envelope_and_reason(self) -> None:
         cb = AsyncMock(return_value=True)
         broker = ToolBroker(
             policy_engine=_mock_policy(_approve_decision(reason="confirm pls")),
@@ -224,8 +240,9 @@ class TestApprovalApproved:
 # 7. Approval required -> callback False -> approval_denied
 # ---------------------------------------------------------------------------
 
+
 class TestApprovalDenied:
-    async def test_approval_denied_status(self):
+    async def test_approval_denied_status(self) -> None:
         cb = AsyncMock(return_value=False)
         broker = ToolBroker(
             policy_engine=_mock_policy(_approve_decision()),
@@ -236,7 +253,7 @@ class TestApprovalDenied:
         assert result.status == "approval_denied"
         assert result.error.type == ToolErrorType.UNAUTHORIZED
 
-    async def test_approval_denied_audit(self):
+    async def test_approval_denied_audit(self) -> None:
         cb = AsyncMock(return_value=False)
         broker = ToolBroker(
             policy_engine=_mock_policy(_approve_decision(rule="apr-1")),
@@ -247,7 +264,7 @@ class TestApprovalDenied:
         assert broker.audit_log[0].action == "approval_denied"
         assert broker.audit_log[0].matched_rule == "apr-1"
 
-    async def test_auto_deny_default(self):
+    async def test_auto_deny_default(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_approve_decision()))
         broker.register_handler("my_tool", _sync_handler)
         result = await broker.execute(_make_envelope())
@@ -258,15 +275,16 @@ class TestApprovalDenied:
 # 8. Successful sync handler execution
 # ---------------------------------------------------------------------------
 
+
 class TestSyncHandler:
-    async def test_sync_returns_ok(self):
+    async def test_sync_returns_ok(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _sync_handler)
         result = await broker.execute(_make_envelope(args={"key": "val"}))
         assert result.status == "ok"
         assert result.result == {"echo": {"key": "val"}}
 
-    async def test_sync_error_is_none(self):
+    async def test_sync_error_is_none(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _sync_handler)
         result = await broker.execute(_make_envelope())
@@ -277,15 +295,16 @@ class TestSyncHandler:
 # 9. Successful async handler execution
 # ---------------------------------------------------------------------------
 
+
 class TestAsyncHandler:
-    async def test_async_returns_ok(self):
+    async def test_async_returns_ok(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
         result = await broker.execute(_make_envelope(args={"a": 1}))
         assert result.status == "ok"
         assert result.result == {"echo": {"a": 1}}
 
-    async def test_async_audit_entry_executed(self):
+    async def test_async_audit_entry_executed(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
         await broker.execute(_make_envelope())
@@ -296,15 +315,16 @@ class TestAsyncHandler:
 # 10. Handler not found
 # ---------------------------------------------------------------------------
 
+
 class TestNoHandler:
-    async def test_no_handler_error(self):
+    async def test_no_handler_error(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         result = await broker.execute(_make_envelope(tool="missing"))
         assert result.status == "error"
         assert result.error.type == ToolErrorType.UNKNOWN
         assert "No handler" in result.error.message
 
-    async def test_no_handler_audit(self):
+    async def test_no_handler_audit(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         await broker.execute(_make_envelope(tool="missing"))
         assert broker.audit_log[0].action == "no_handler"
@@ -314,9 +334,10 @@ class TestNoHandler:
 # 11. Timeout
 # ---------------------------------------------------------------------------
 
+
 class TestTimeout:
-    async def test_timeout_error(self):
-        async def slow(**kw):
+    async def test_timeout_error(self) -> None:
+        async def slow(**kw) -> None:
             await asyncio.sleep(10)
 
         broker = ToolBroker(policy_engine=_mock_policy(), default_timeout=0.05)
@@ -326,8 +347,8 @@ class TestTimeout:
         assert result.error.type == ToolErrorType.TIMEOUT
         assert result.error.safe_to_retry is True
 
-    async def test_timeout_audit(self):
-        async def slow(**kw):
+    async def test_timeout_audit(self) -> None:
+        async def slow(**kw) -> None:
             await asyncio.sleep(10)
 
         broker = ToolBroker(policy_engine=_mock_policy(), default_timeout=0.05)
@@ -340,10 +361,12 @@ class TestTimeout:
 # 12. Handler exception
 # ---------------------------------------------------------------------------
 
+
 class TestHandlerException:
-    async def test_exception_returns_error(self):
-        async def boom(**kw):
-            raise ValueError("kaboom")
+    async def test_exception_returns_error(self) -> None:
+        async def boom(**kw) -> Never:
+            msg = "kaboom"
+            raise ValueError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("boom", boom)
@@ -353,9 +376,10 @@ class TestHandlerException:
         assert result.error.safe_to_retry is False
         assert "kaboom" in result.error.message
 
-    async def test_exception_audit(self):
-        async def boom(**kw):
-            raise RuntimeError("oops")
+    async def test_exception_audit(self) -> None:
+        async def boom(**kw) -> Never:
+            msg = "oops"
+            raise RuntimeError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("boom", boom)
@@ -363,9 +387,10 @@ class TestHandlerException:
         assert broker.audit_log[0].action == "error"
         assert "oops" in broker.audit_log[0].error
 
-    async def test_sync_exception(self):
-        def bad(**kw):
-            raise TypeError("bad type")
+    async def test_sync_exception(self) -> None:
+        def bad(**kw) -> Never:
+            msg = "bad type"
+            raise TypeError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("bad", bad)
@@ -378,15 +403,17 @@ class TestHandlerException:
 # 13. Retry logic -- fails then succeeds
 # ---------------------------------------------------------------------------
 
+
 class TestRetrySuccess:
-    async def test_retries_then_succeeds(self):
+    async def test_retries_then_succeeds(self) -> None:
         call_count = 0
 
-        async def flaky(**kw):
+        async def flaky(**kw) -> str:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise RuntimeError("transient")
+                msg = "transient"
+                raise RuntimeError(msg)
             return "ok"
 
         broker = ToolBroker(policy_engine=_mock_policy(), max_retries=2)
@@ -396,14 +423,15 @@ class TestRetrySuccess:
         assert result.result == "ok"
         assert call_count == 3
 
-    async def test_retry_audit_is_executed_on_success(self):
+    async def test_retry_audit_is_executed_on_success(self) -> None:
         call_count = 0
 
-        async def flaky(**kw):
+        async def flaky(**kw) -> str:
             nonlocal call_count
             call_count += 1
             if call_count < 2:
-                raise RuntimeError("transient")
+                msg = "transient"
+                raise RuntimeError(msg)
             return "ok"
 
         broker = ToolBroker(policy_engine=_mock_policy(), max_retries=1)
@@ -416,10 +444,12 @@ class TestRetrySuccess:
 # 14. Retry exhausted
 # ---------------------------------------------------------------------------
 
+
 class TestRetryExhausted:
-    async def test_all_attempts_fail(self):
-        async def always_fail(**kw):
-            raise RuntimeError("nope")
+    async def test_all_attempts_fail(self) -> None:
+        async def always_fail(**kw) -> Never:
+            msg = "nope"
+            raise RuntimeError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy(), max_retries=2)
         broker.register_handler("fail", always_fail)
@@ -427,20 +457,25 @@ class TestRetryExhausted:
         assert result.status == "error"
         assert "nope" in result.error.message
 
-    async def test_timeout_retries_exhausted(self):
-        async def slow(**kw):
+    async def test_timeout_retries_exhausted(self) -> None:
+        async def slow(**kw) -> None:
             await asyncio.sleep(10)
 
-        broker = ToolBroker(policy_engine=_mock_policy(), default_timeout=0.05, max_retries=1)
+        broker = ToolBroker(
+            policy_engine=_mock_policy(),
+            default_timeout=0.05,
+            max_retries=1,
+        )
         broker.register_handler("slow", slow)
         result = await broker.execute(_make_envelope(tool="slow"))
         assert result.status == "error"
         assert result.error.type == ToolErrorType.TIMEOUT
         assert result.error.safe_to_retry is True
 
-    async def test_exhausted_audit_entry(self):
-        async def always_fail(**kw):
-            raise RuntimeError("fail")
+    async def test_exhausted_audit_entry(self) -> None:
+        async def always_fail(**kw) -> Never:
+            msg = "fail"
+            raise RuntimeError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy(), max_retries=1)
         broker.register_handler("fail", always_fail)
@@ -452,8 +487,9 @@ class TestRetryExhausted:
 # 15. Audit log entries for each scenario
 # ---------------------------------------------------------------------------
 
+
 class TestAuditLog:
-    async def test_audit_log_returns_copy(self):
+    async def test_audit_log_returns_copy(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision()))
         await broker.execute(_make_envelope())
         log1 = broker.audit_log
@@ -461,7 +497,7 @@ class TestAuditLog:
         assert log1 == log2
         assert log1 is not log2
 
-    async def test_audit_denied_fields(self):
+    async def test_audit_denied_fields(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision()))
         env = _make_envelope(call_id="d1", agent_id="ag", tool="t")
         await broker.execute(env)
@@ -470,13 +506,13 @@ class TestAuditLog:
         assert e.agent_id == "ag"
         assert e.tool == "t"
 
-    async def test_audit_executed_has_latency(self):
+    async def test_audit_executed_has_latency(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
         await broker.execute(_make_envelope())
         assert broker.audit_log[0].latency_ms >= 0
 
-    async def test_audit_timestamp_set(self):
+    async def test_audit_timestamp_set(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision()))
         before = time.time()
         await broker.execute(_make_envelope())
@@ -484,7 +520,7 @@ class TestAuditLog:
         ts = broker.audit_log[0].timestamp
         assert before <= ts <= after
 
-    async def test_multiple_executions_accumulate(self):
+    async def test_multiple_executions_accumulate(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
         await broker.execute(_make_envelope(call_id="c1"))
@@ -498,9 +534,10 @@ class TestAuditLog:
 # 16. Latency tracking
 # ---------------------------------------------------------------------------
 
+
 class TestLatency:
-    async def test_latency_positive_for_executed(self):
-        async def slow_ish(**kw):
+    async def test_latency_positive_for_executed(self) -> None:
+        async def slow_ish(**kw) -> str:
             await asyncio.sleep(0.01)
             return "done"
 
@@ -509,16 +546,17 @@ class TestLatency:
         result = await broker.execute(_make_envelope())
         assert result.latency_ms >= 10
 
-    async def test_latency_on_error_result(self):
-        async def boom(**kw):
-            raise ValueError("x")
+    async def test_latency_on_error_result(self) -> None:
+        async def boom(**kw) -> Never:
+            msg = "x"
+            raise ValueError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("boom", boom)
         result = await broker.execute(_make_envelope(tool="boom"))
         assert result.latency_ms >= 0
 
-    async def test_latency_on_denied_result(self):
+    async def test_latency_on_denied_result(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy(_deny_decision()))
         result = await broker.execute(_make_envelope())
         assert result.latency_ms >= 0
@@ -528,12 +566,13 @@ class TestLatency:
 # 17. Multiple tools registered, each routed correctly
 # ---------------------------------------------------------------------------
 
+
 class TestMultipleToolRouting:
-    async def test_routes_to_correct_handler(self):
-        async def handler_a(**kw):
+    async def test_routes_to_correct_handler(self) -> None:
+        async def handler_a(**kw) -> str:
             return "A"
 
-        async def handler_b(**kw):
+        async def handler_b(**kw) -> str:
             return "B"
 
         broker = ToolBroker(policy_engine=_mock_policy())
@@ -545,7 +584,7 @@ class TestMultipleToolRouting:
         assert ra.result == "A"
         assert rb.result == "B"
 
-    async def test_unregistered_among_registered(self):
+    async def test_unregistered_among_registered(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("tool_a", _sync_handler)
         result = await broker.execute(_make_envelope(tool="tool_x"))
@@ -556,16 +595,17 @@ class TestMultipleToolRouting:
 # Extra edge-case tests
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
-    async def test_empty_args(self):
+    async def test_empty_args(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
         result = await broker.execute(_make_envelope(args={}))
         assert result.status == "ok"
         assert result.result == {"echo": {}}
 
-    async def test_handler_returning_none(self):
-        async def none_handler(**kw):
+    async def test_handler_returning_none(self) -> None:
+        async def none_handler(**kw) -> None:
             return None
 
         broker = ToolBroker(policy_engine=_mock_policy())
@@ -574,11 +614,11 @@ class TestEdgeCases:
         assert result.status == "ok"
         assert result.result is None
 
-    async def test_policy_checked_before_handler(self):
+    async def test_policy_checked_before_handler(self) -> None:
         """Policy deny should not invoke handler at all."""
         called = False
 
-        async def spy(**kw):
+        async def spy(**kw) -> None:
             nonlocal called
             called = True
 
@@ -587,10 +627,10 @@ class TestEdgeCases:
         await broker.execute(_make_envelope())
         assert called is False
 
-    async def test_capability_checked_before_handler(self):
+    async def test_capability_checked_before_handler(self) -> None:
         called = False
 
-        async def spy(**kw):
+        async def spy(**kw) -> None:
             nonlocal called
             called = True
 
@@ -600,10 +640,10 @@ class TestEdgeCases:
         await broker.execute(_make_envelope())
         assert called is False
 
-    async def test_approval_denied_does_not_invoke_handler(self):
+    async def test_approval_denied_does_not_invoke_handler(self) -> None:
         called = False
 
-        async def spy(**kw):
+        async def spy(**kw) -> None:
             nonlocal called
             called = True
 
@@ -616,15 +656,18 @@ class TestEdgeCases:
         await broker.execute(_make_envelope())
         assert called is False
 
-    async def test_call_id_preserved_through_pipeline(self):
+    async def test_call_id_preserved_through_pipeline(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
         result = await broker.execute(_make_envelope(call_id="unique-42"))
         assert result.call_id == "unique-42"
 
-    async def test_broker_audit_entry_dataclass(self):
+    async def test_broker_audit_entry_dataclass(self) -> None:
         entry = BrokerAuditEntry(
-            call_id="c1", tool="t", agent_id="a", action="executed"
+            call_id="c1",
+            tool="t",
+            agent_id="a",
+            action="executed",
         )
         assert entry.call_id == "c1"
         assert entry.matched_rule == ""
@@ -632,43 +675,46 @@ class TestEdgeCases:
         assert entry.error == ""
         assert entry.timestamp > 0
 
-    async def test_auto_deny_returns_false(self):
+    async def test_auto_deny_returns_false(self) -> None:
         result = await _auto_deny(_make_envelope(), "reason")
         assert result is False
 
-    async def test_max_retries_zero_means_one_attempt(self):
+    async def test_max_retries_zero_means_one_attempt(self) -> None:
         call_count = 0
 
-        async def counting(**kw):
+        async def counting(**kw) -> Never:
             nonlocal call_count
             call_count += 1
-            raise RuntimeError("fail")
+            msg = "fail"
+            raise RuntimeError(msg)
 
         broker = ToolBroker(policy_engine=_mock_policy(), max_retries=0)
         broker.register_handler("fail", counting)
         await broker.execute(_make_envelope(tool="fail"))
         assert call_count == 1
 
-    async def test_context_default(self):
+    async def test_context_default(self) -> None:
         env = _make_envelope()
         assert env.context.trace_id == ""
         assert env.context.user_id == ""
         assert env.context.policy == ""
 
-    async def test_handler_with_multiple_kwargs(self):
+    async def test_handler_with_multiple_kwargs(self) -> None:
         broker = ToolBroker(policy_engine=_mock_policy())
         broker.register_handler("my_tool", _async_handler)
-        result = await broker.execute(_make_envelope(args={"a": 1, "b": "two", "c": [3]}))
+        result = await broker.execute(
+            _make_envelope(args={"a": 1, "b": "two", "c": [3]}),
+        )
         assert result.result == {"echo": {"a": 1, "b": "two", "c": [3]}}
 
-    async def test_policy_called_with_correct_args(self):
+    async def test_policy_called_with_correct_args(self) -> None:
         policy = _mock_policy()
         broker = ToolBroker(policy_engine=policy)
         broker.register_handler("my_tool", _async_handler)
         await broker.execute(_make_envelope(tool="my_tool", agent_id="ag-7"))
         policy.can_execute_tool.assert_called_once_with("my_tool", agent_id="ag-7")
 
-    async def test_resolver_called_with_agent_id(self):
+    async def test_resolver_called_with_agent_id(self) -> None:
         resolver = _mock_resolver({"my_tool"})
         broker = ToolBroker(policy_engine=_mock_policy(), capability_resolver=resolver)
         broker.register_handler("my_tool", _async_handler)

@@ -54,7 +54,9 @@ class ManifestLoader:
         resolved = self._resolve(path)
         result = parse_frontmatter_file(resolved)
         return agent_manifest_from_frontmatter(
-            result.metadata, result.body, source_path=resolved,
+            result.metadata,
+            result.body,
+            source_path=resolved,
         )
 
     def load_agent_manifests(self, directory: Path) -> list[AgentManifest]:
@@ -67,7 +69,11 @@ class ManifestLoader:
             try:
                 manifests.append(self.load_agent_manifest(md_file))
             except Exception:
-                logger.warning("Failed to load agent manifest %s", md_file, exc_info=True)
+                logger.warning(
+                    "Failed to load agent manifest %s",
+                    md_file,
+                    exc_info=True,
+                )
         return manifests
 
     # ----- Skills -----
@@ -80,8 +86,12 @@ class ManifestLoader:
         return SkillManifest(
             name=str(meta.get("name", resolved.stem)),
             description=str(meta.get("description", "")),
-            user_invocable=bool(meta.get("user-invocable", meta.get("user_invocable", True))),
-            allowed_tools=_str_list(meta.get("allowed-tools", meta.get("allowed_tools"))),
+            user_invocable=bool(
+                meta.get("user-invocable", meta.get("user_invocable", True)),
+            ),
+            allowed_tools=_str_list(
+                meta.get("allowed-tools", meta.get("allowed_tools")),
+            ),
             body=result.body.strip(),
             source_path=resolved,
         )
@@ -121,7 +131,8 @@ class ManifestLoader:
         )
 
     def load_instructions_from_directory(
-        self, directory: Path,
+        self,
+        directory: Path,
     ) -> list[InstructionManifest]:
         """Load all ``*.instructions.md`` and ``*.md`` from *directory*."""
         resolved = self._resolve(directory)
@@ -179,14 +190,23 @@ class ManifestLoader:
             for entry in cast("list[Any]", entries):
                 if isinstance(entry, dict):
                     entry_dict = cast("dict[str, Any]", entry)
-                    definitions.append(HookDefinition(
-                        event=str(event_name),
-                        type=str(entry_dict.get("type", "command")),
-                        bash=str(entry_dict.get("command", entry_dict.get("bash", ""))),
-                        module=str(entry_dict.get("module", "")),
-                        timeout_sec=int(entry_dict.get("timeout", entry_dict.get("timeout_sec", 10))),
-                        comment=str(entry_dict.get("comment", "")),
-                    ))
+                    definitions.append(
+                        HookDefinition(
+                            event=str(event_name),
+                            type=str(entry_dict.get("type", "command")),
+                            bash=str(
+                                entry_dict.get("command", entry_dict.get("bash", "")),
+                            ),
+                            module=str(entry_dict.get("module", "")),
+                            timeout_sec=int(
+                                entry_dict.get(
+                                    "timeout",
+                                    entry_dict.get("timeout_sec", 10),
+                                ),
+                            ),
+                            comment=str(entry_dict.get("comment", "")),
+                        ),
+                    )
         return definitions
 
     # ----- Permissions -----
@@ -245,26 +265,30 @@ class ManifestLoader:
             for name, config in srv_dict.items():
                 if isinstance(config, dict):
                     cfg = cast("dict[str, Any]", config)
-                    refs.append(MCPServerRef(
-                        name=str(name),
-                        transport=str(cfg.get("transport", "stdio")),
-                        command=str(cfg.get("command", "")),
-                        args=_str_list(cfg.get("args")),
-                        env=_str_dict(cfg.get("env")),
-                        url=str(cfg.get("url", "")),
-                    ))
+                    refs.append(
+                        MCPServerRef(
+                            name=str(name),
+                            transport=str(cfg.get("transport", "stdio")),
+                            command=str(cfg.get("command", "")),
+                            args=_str_list(cfg.get("args")),
+                            env=_str_dict(cfg.get("env")),
+                            url=str(cfg.get("url", "")),
+                        ),
+                    )
         elif isinstance(servers_raw, list):
             for item in cast("list[Any]", servers_raw):
                 if isinstance(item, dict):
                     cfg = cast("dict[str, Any]", item)
-                    refs.append(MCPServerRef(
-                        name=str(cfg.get("name", "")),
-                        transport=str(cfg.get("transport", "stdio")),
-                        command=str(cfg.get("command", "")),
-                        args=_str_list(cfg.get("args")),
-                        env=_str_dict(cfg.get("env")),
-                        url=str(cfg.get("url", "")),
-                    ))
+                    refs.append(
+                        MCPServerRef(
+                            name=str(cfg.get("name", "")),
+                            transport=str(cfg.get("transport", "stdio")),
+                            command=str(cfg.get("command", "")),
+                            args=_str_list(cfg.get("args")),
+                            env=_str_dict(cfg.get("env")),
+                            url=str(cfg.get("url", "")),
+                        ),
+                    )
 
         return refs
 

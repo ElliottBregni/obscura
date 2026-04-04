@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from obscura.parity.models import ParityReport
+from typing import TYPE_CHECKING
+
 from obscura.parity.scoring import parity_percent
+
+if TYPE_CHECKING:
+    from obscura.parity.models import ParityReport
 
 
 def to_markdown(report: ParityReport) -> str:
@@ -17,14 +21,14 @@ def to_markdown(report: ParityReport) -> str:
     for score in report.backend_scores:
         pct = 0.0 if score.max_score == 0 else (score.score / score.max_score) * 100.0
         lines.append(
-            f"| {score.backend.value} | {score.score:.1f} | {score.max_score:.1f} | {pct:.1f}% |"
+            f"| {score.backend.value} | {score.score:.1f} | {score.max_score:.1f} | {pct:.1f}% |",
         )
 
     lines.extend(
         [
             "",
             f"Overall: **{parity_percent(report):.1f}%**",
-        ]
+        ],
     )
 
     if report.backend_conformance:
@@ -35,11 +39,11 @@ def to_markdown(report: ParityReport) -> str:
                 "",
                 "| Backend | Passed | Total | Percent |",
                 "|---|---:|---:|---:|",
-            ]
+            ],
         )
         for conf in report.backend_conformance:
             lines.append(
-                f"| {conf.backend.value} | {conf.passed} | {conf.total} | {conf.percent:.1f}% |"
+                f"| {conf.backend.value} | {conf.passed} | {conf.total} | {conf.percent:.1f}% |",
             )
 
     if report.residual_risks:

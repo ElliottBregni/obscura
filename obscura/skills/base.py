@@ -1,5 +1,4 @@
-"""
-obscura.skills.base -- Base skill protocol and classes for the Skills Framework.
+"""obscura.skills.base -- Base skill protocol and classes for the Skills Framework.
 
 Skills are pluggable capabilities that agents can use to interact with
 external systems, perform actions, or access data.
@@ -10,7 +9,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 class CapabilityType(Enum):
@@ -31,7 +33,7 @@ class CapabilityParameter:
     description: str
     required: bool = True
     default: Any = None
-    enum: Optional[List[str]] = None  # For enumerated values
+    enum: list[str] | None = None  # For enumerated values
 
 
 @dataclass
@@ -40,7 +42,7 @@ class CapabilityReturn:
 
     type: str  # JSON schema type
     description: str
-    schema: Optional[Dict[str, Any]] = None  # JSON schema for complex types
+    schema: dict[str, Any] | None = None  # JSON schema for complex types
 
 
 @dataclass
@@ -53,12 +55,12 @@ class SkillCapability:
 
     name: str
     description: str
-    parameters: List[CapabilityParameter]
+    parameters: list[CapabilityParameter]
     returns: CapabilityReturn
     capability_type: CapabilityType = CapabilityType.ACTION
-    examples: List[Dict[str, Any]] = field(default_factory=lambda: [])
+    examples: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert capability to dictionary for serialization."""
         return {
             "name": self.name,
@@ -90,11 +92,11 @@ class SkillMetadata:
 
     author: str = "unknown"
     license: str = "MIT"
-    homepage: Optional[str] = None
-    repository: Optional[str] = None
-    tags: List[str] = field(default_factory=lambda: [])
+    homepage: str | None = None
+    repository: str | None = None
+    tags: list[str] = field(default_factory=list)
     category: str = "general"  # web, filesystem, communication, etc.
-    icon: Optional[str] = None  # Icon name or URL
+    icon: str | None = None  # Icon name or URL
 
 
 @dataclass
@@ -103,11 +105,11 @@ class SkillHealth:
 
     healthy: bool
     message: str
-    last_check: Optional[str] = None
-    latency_ms: Optional[float] = None
-    details: Dict[str, Any] = field(default_factory=lambda: {})
+    last_check: str | None = None
+    latency_ms: float | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "healthy": self.healthy,
             "message": self.message,
@@ -146,6 +148,7 @@ class Skill(ABC):
                 if capability == "do_something":
                     return await self._do_something(params["input"])
                 raise ValueError(f"Unknown capability: {capability}")
+
     """
 
     # Skill identity - must be overridden by subclasses
@@ -154,17 +157,17 @@ class Skill(ABC):
     description: str = ""
 
     # Capabilities - must be defined by subclasses
-    capabilities: List[SkillCapability] = []
+    capabilities: list[SkillCapability] = []
 
     # Optional metadata
     metadata: SkillMetadata = field(default_factory=SkillMetadata)
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._initialized = False
-        self._config: Dict[str, Any] = {}
+        self._config: dict[str, Any] = {}
 
     @abstractmethod
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """Initialize the skill with configuration.
 
         Called once before the skill is used. Use this to set up
@@ -175,11 +178,11 @@ class Skill(ABC):
 
         Raises:
             SkillInitializationError: If initialization fails
+
         """
-        pass
 
     @abstractmethod
-    async def execute(self, capability: str, params: Dict[str, Any]) -> Any:
+    async def execute(self, capability: str, params: dict[str, Any]) -> Any:
         """Execute a capability.
 
         Args:
@@ -192,11 +195,13 @@ class Skill(ABC):
         Raises:
             SkillExecutionError: If execution fails
             ValueError: If capability doesn't exist
+
         """
-        pass
 
     async def execute_stream(
-        self, capability: str, params: Dict[str, Any]
+        self,
+        capability: str,
+        params: dict[str, Any],
     ) -> AsyncIterator[Any]:
         """Execute a capability with streaming results.
 
@@ -209,6 +214,7 @@ class Skill(ABC):
 
         Yields:
             Stream chunks from the capability execution
+
         """
         result = await self.execute(capability, params)
         yield result
@@ -219,8 +225,8 @@ class Skill(ABC):
 
         Returns:
             SkillHealth with status and details
+
         """
-        pass
 
     @abstractmethod
     async def shutdown(self) -> None:
@@ -229,20 +235,19 @@ class Skill(ABC):
         Called when the skill is no longer needed. Release all resources
         and close connections.
         """
-        pass
 
-    def get_capability(self, name: str) -> Optional[SkillCapability]:
+    def get_capability(self, name: str) -> SkillCapability | None:
         """Get a capability by name."""
         for cap in self.capabilities:
             if cap.name == name:
                 return cap
         return None
 
-    def list_capabilities(self) -> List[SkillCapability]:
+    def list_capabilities(self) -> list[SkillCapability]:
         """List all capabilities of this skill."""
         return list(self.capabilities)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert skill info to dictionary."""
         return {
             "name": self.name,
@@ -261,18 +266,21 @@ class Skill(ABC):
         }
 
     def validate_params(
-        self, capability_name: str, params: Dict[str, Any]
-    ) -> List[str]:
+        self,
+        capability_name: str,
+        params: dict[str, Any],
+    ) -> list[str]:
         """Validate parameters for a capability.
 
         Returns:
             List of validation errors (empty if valid)
+
         """
         cap = self.get_capability(capability_name)
         if not cap:
             return [f"Unknown capability: {capability_name}"]
 
-        errors: List[str] = []
+        errors: list[str] = []
         provided_params = set(params.keys())
         required_params = {p.name for p in cap.parameters if p.required}
 
@@ -310,28 +318,18 @@ class Skill(ABC):
 class SkillError(Exception):
     """Base exception for skill-related errors."""
 
-    pass
-
 
 class SkillInitializationError(SkillError):
     """Error during skill initialization."""
-
-    pass
 
 
 class SkillExecutionError(SkillError):
     """Error during skill execution."""
 
-    pass
-
 
 class SkillNotFoundError(SkillError):
     """Skill not found in registry."""
 
-    pass
-
 
 class CapabilityNotFoundError(SkillError):
     """Capability not found on skill."""
-
-    pass

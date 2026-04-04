@@ -1,5 +1,4 @@
-"""
-obscura.heartbeat.monitor — Heartbeat monitoring service.
+"""obscura.heartbeat.monitor — Heartbeat monitoring service.
 
 Monitors agent health via heartbeats, detects missing heartbeats,
 and triggers alerts on health changes.
@@ -8,26 +7,29 @@ and triggers alerts on health changes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 from datetime import datetime
-from typing import Any, Optional, Callable
+from typing import TYPE_CHECKING, Any
 
+from obscura.heartbeat.alerts import AlertManager, get_default_alert_manager
+from obscura.heartbeat.store import HeartbeatStore, get_default_store
 from obscura.heartbeat.types import (
-    Heartbeat,
     HealthRecord,
     HealthStatus,
     HealthStatusTransition,
+    Heartbeat,
 )
-from obscura.heartbeat.store import HeartbeatStore, get_default_store
-from obscura.heartbeat.alerts import AlertManager, get_default_alert_manager
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 
 class HeartbeatMonitor:
-    """
-    Monitors agent health via heartbeats.
+    """Monitors agent health via heartbeats.
 
     This service:
     - Registers agents for monitoring
@@ -52,14 +54,13 @@ class HeartbeatMonitor:
 
     def __init__(
         self,
-        store: Optional[HeartbeatStore] = None,
-        alert_manager: Optional[AlertManager] = None,
+        store: HeartbeatStore | None = None,
+        alert_manager: AlertManager | None = None,
         check_interval: int = 10,
         warning_threshold: float = 1.5,  # 1.5x expected interval
         critical_threshold: float = 3.0,  # 3x expected interval
     ) -> None:
-        """
-        Initialize the heartbeat monitor.
+        """Initialize the heartbeat monitor.
 
         Args:
             store: Storage backend for heartbeats (defaults to in-memory)
@@ -67,6 +68,7 @@ class HeartbeatMonitor:
             check_interval: How often to check agent health (seconds)
             warning_threshold: Multiplier for WARNING status
             critical_threshold: Multiplier for CRITICAL status
+
         """
         self._store = store or get_default_store()
         self._alert_manager = alert_manager or get_default_alert_manager()
@@ -75,7 +77,7 @@ class HeartbeatMonitor:
         self._critical_threshold = critical_threshold
 
         self._running = False
-        self._monitor_task: Optional[asyncio.Task[None]] = None
+        self._monitor_task: asyncio.Task[None] | None = None
         self._transitions: dict[str, HealthStatusTransition] = {}
         self._callbacks: list[Callable[[str, HealthStatus, HealthStatus], None]] = []
 
@@ -100,10 +102,8 @@ class HeartbeatMonitor:
         self._running = False
         if self._monitor_task:
             self._monitor_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._monitor_task
-            except asyncio.CancelledError:
-                pass
             self._monitor_task = None
         logger.info("HeartbeatMonitor stopped")
 
@@ -137,11 +137,12 @@ class HeartbeatMonitor:
                     continue
 
                 # Skip if already checked recently
-                if agent_id in self._last_check:
-                    if (
-                        now - self._last_check[agent_id]
-                    ).total_seconds() < self._check_interval:
-                        continue
+                if (
+                    agent_id in self._last_check
+                    and (now - self._last_check[agent_id]).total_seconds()
+                    < self._check_interval
+                ):
+                    continue
 
                 self._last_check[agent_id] = now
 
@@ -160,10 +161,11 @@ class HeartbeatMonitor:
                 logger.exception(f"Error checking agent {agent_id}: {e}")
 
     async def _compute_health(
-        self, agent_id: str, record: HealthRecord
+        self,
+        agent_id: str,
+        record: HealthRecord,
     ) -> HealthStatus:
-        """
-        Compute the health status for an agent based on heartbeat timing.
+        """Compute the health status for an agent based on heartbeat timing.
 
         Status determination:
         - UNKNOWN: No heartbeat received yet
@@ -186,11 +188,10 @@ class HeartbeatMonitor:
 
         if elapsed >= critical_time:
             return HealthStatus.CRITICAL
-        elif elapsed >= warning_time:
+        if elapsed >= warning_time:
             return HealthStatus.WARNING
-        else:
-            # Use reported status if heartbeat is timely
-            return last_heartbeat.status
+        # Use reported status if heartbeat is timely
+        return last_heartbeat.status
 
     async def _handle_status_change(
         self,
@@ -200,7 +201,7 @@ class HeartbeatMonitor:
     ) -> None:
         """Handle a health status change."""
         logger.info(
-            f"Agent {agent_id} status changed: {old_status.value} -> {new_status.value}"
+            f"Agent {agent_id} status changed: {old_status.value} -> {new_status.value}",
         )
 
         # Track transition
@@ -215,7 +216,10 @@ class HeartbeatMonitor:
         if record:
             # Generate alert message
             message = self._generate_alert_message(
-                agent_id, old_status, new_status, record
+                agent_id,
+                old_status,
+                new_status,
+                record,
             )
 
             # Trigger alert
@@ -242,29 +246,28 @@ class HeartbeatMonitor:
         if new_status == HealthStatus.CRITICAL:
             missed = record.missed_count
             return f"Agent {agent_id} is CRITICAL - {missed} heartbeats missed"
-        elif new_status == HealthStatus.WARNING:
+        if new_status == HealthStatus.WARNING:
             return f"Agent {agent_id} is WARNING - heartbeats delayed"
-        elif new_status == HealthStatus.HEALTHY:
+        if new_status == HealthStatus.HEALTHY:
             return f"Agent {agent_id} recovered to HEALTHY"
-        else:
-            return f"Agent {agent_id} status: {new_status.value}"
+        return f"Agent {agent_id} status: {new_status.value}"
 
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
 
     async def register_agent(self, agent_id: str, expected_interval: int = 30) -> None:
-        """
-        Register an agent for monitoring.
+        """Register an agent for monitoring.
 
         Args:
             agent_id: Unique identifier for the agent
             expected_interval: Expected seconds between heartbeats
+
         """
         await self._store.register(agent_id, expected_interval)
         self._transitions[agent_id] = HealthStatusTransition(agent_id)
         logger.debug(
-            f"Registered agent {agent_id} for monitoring (interval: {expected_interval}s)"
+            f"Registered agent {agent_id} for monitoring (interval: {expected_interval}s)",
         )
 
     async def unregister_agent(self, agent_id: str) -> bool:
@@ -278,11 +281,11 @@ class HeartbeatMonitor:
         return result
 
     async def record_heartbeat(self, heartbeat: Heartbeat) -> None:
-        """
-        Record a heartbeat from an agent.
+        """Record a heartbeat from an agent.
 
         Args:
             heartbeat: The heartbeat to record
+
         """
         agent_id = heartbeat.agent_id
 
@@ -301,8 +304,7 @@ class HeartbeatMonitor:
         logger.debug(f"Recorded heartbeat from agent {agent_id}")
 
     async def get_agent_health(self, agent_id: str) -> HealthStatus:
-        """
-        Get the current health status of an agent.
+        """Get the current health status of an agent.
 
         Returns UNKNOWN if agent is not registered.
         """
@@ -312,7 +314,7 @@ class HeartbeatMonitor:
 
         return await self._compute_health(agent_id, record)
 
-    async def get_agent_record(self, agent_id: str) -> Optional[HealthRecord]:
+    async def get_agent_record(self, agent_id: str) -> HealthRecord | None:
         """Get the full health record for an agent."""
         return await self._store.get_record(agent_id)
 
@@ -350,7 +352,7 @@ class HeartbeatMonitor:
                     if record.last_heartbeat
                     else None,
                     "missed_count": record.missed_count,
-                }
+                },
             )
 
         summary: dict[str, Any] = {**counts, "agents": agents_list}
@@ -360,8 +362,7 @@ class HeartbeatMonitor:
         self,
         callback: Callable[[str, HealthStatus, HealthStatus], None],
     ) -> None:
-        """
-        Register a callback for status changes.
+        """Register a callback for status changes.
 
         Callback signature: (agent_id, old_status, new_status)
         """
@@ -377,13 +378,13 @@ class HeartbeatMonitor:
             return True
         return False
 
-    def get_transitions(self, agent_id: str) -> Optional[HealthStatusTransition]:
+    def get_transitions(self, agent_id: str) -> HealthStatusTransition | None:
         """Get the status transition history for an agent."""
         return self._transitions.get(agent_id)
 
 
 # Global monitor instance
-_default_monitor: Optional[HeartbeatMonitor] = None
+_default_monitor: HeartbeatMonitor | None = None
 
 
 def get_default_monitor() -> HeartbeatMonitor:

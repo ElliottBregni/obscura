@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
 
-
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _lock = Lock()
 _logger: logging.Logger | None = None
@@ -29,8 +30,17 @@ def _get_logger() -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
     # Avoid duplicate handlers during reload
-    if not any(isinstance(h, RotatingFileHandler) and Path(h.baseFilename).resolve() == log_path.resolve() for h in logger.handlers):
-        handler = RotatingFileHandler(str(log_path), maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+    if not any(
+        isinstance(h, RotatingFileHandler)
+        and Path(h.baseFilename).resolve() == log_path.resolve()
+        for h in logger.handlers
+    ):
+        handler = RotatingFileHandler(
+            str(log_path),
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
         formatter = logging.Formatter("%(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -38,14 +48,19 @@ def _get_logger() -> logging.Logger:
     return _logger
 
 
-def append_event(kind: str, preview: str = "", tool_names: Iterable[str] | None = None, extra: dict[str, Any] | None = None) -> None:
+def append_event(
+    kind: str,
+    preview: str = "",
+    tool_names: Iterable[str] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
     """Append a single JSONL trace event.
 
     Fields: ts (ISO8601), kind, preview, tool_names, extra
     """
     logger = _get_logger()
     payload = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "kind": kind,
         "preview": preview or "",
         "tool_names": list(tool_names) if tool_names else [],

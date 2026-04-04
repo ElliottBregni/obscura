@@ -1,21 +1,23 @@
 """Tests for provider model registry and caching."""
 
-import pytest
 from datetime import timedelta
+
+import pytest
+
 from obscura.core.types import Backend
-from obscura.providers.registry import ModelInfo
 from obscura.providers.model_cache import (
     ModelCache,
-    list_provider_models,
-    invalidate_cache,
     get_cache_age,
+    invalidate_cache,
+    list_provider_models,
 )
+from obscura.providers.registry import ModelInfo
 
 
 class MockProvider:
     """Mock provider implementing ProviderRegistry protocol."""
 
-    def __init__(self, models: list[ModelInfo]):
+    def __init__(self, models: list[ModelInfo]) -> None:
         self._models = models
         self.call_count = 0
 
@@ -35,7 +37,7 @@ class MockProvider:
 # ---------------------------------------------------------------------------
 
 
-def test_model_info_creation():
+def test_model_info_creation() -> None:
     """Test ModelInfo dataclass creation."""
     model = ModelInfo(
         id="gpt-4",
@@ -51,7 +53,7 @@ def test_model_info_creation():
     assert model.supports_vision is False
 
 
-def test_model_info_defaults():
+def test_model_info_defaults() -> None:
     """Test ModelInfo with default values."""
     model = ModelInfo(
         id="test-model",
@@ -71,7 +73,7 @@ def test_model_info_defaults():
 
 
 @pytest.mark.asyncio
-async def test_cache_basic_functionality():
+async def test_cache_basic_functionality() -> None:
     """Test basic caching behavior."""
     mock_models = [
         ModelInfo(id="mock-1", name="Mock 1", provider="mock"),
@@ -93,7 +95,7 @@ async def test_cache_basic_functionality():
 
 
 @pytest.mark.asyncio
-async def test_cache_expiration():
+async def test_cache_expiration() -> None:
     """Test that cache expires after TTL."""
     mock_models = [ModelInfo(id="mock-1", name="Mock 1", provider="mock")]
     mock_provider = MockProvider(mock_models)
@@ -111,7 +113,7 @@ async def test_cache_expiration():
 
 
 @pytest.mark.asyncio
-async def test_cache_per_backend():
+async def test_cache_per_backend() -> None:
     """Test that cache is separate per backend."""
     mock_models_1 = [ModelInfo(id="mock-1", name="Mock 1", provider="mock1")]
     mock_models_2 = [ModelInfo(id="mock-2", name="Mock 2", provider="mock2")]
@@ -137,16 +139,17 @@ async def test_cache_per_backend():
 
 
 @pytest.mark.asyncio
-async def test_cache_fallback_on_error():
+async def test_cache_fallback_on_error() -> None:
     """Test that cache falls back to stale data on provider error."""
 
     class FailingProvider:
-        def __init__(self):
+        def __init__(self) -> None:
             self.should_fail = False
 
         async def list_models(self) -> list[ModelInfo]:
             if self.should_fail:
-                raise Exception("Provider failed")
+                msg = "Provider failed"
+                raise Exception(msg)
             return [ModelInfo(id="mock-1", name="Mock 1", provider="mock")]
 
     provider = FailingProvider()
@@ -170,7 +173,7 @@ async def test_cache_fallback_on_error():
 
 
 @pytest.mark.asyncio
-async def test_list_provider_models():
+async def test_list_provider_models() -> None:
     """Test global list_provider_models API."""
     mock_models = [ModelInfo(id="mock-1", name="Mock 1", provider="mock")]
     mock_provider = MockProvider(mock_models)
@@ -183,14 +186,14 @@ async def test_list_provider_models():
     assert models[0].id == "mock-1"
 
 
-def test_invalidate_cache():
+def test_invalidate_cache() -> None:
     """Test cache invalidation."""
     # This just ensures it doesn't error
     invalidate_cache(Backend.OPENAI)
     invalidate_cache(Backend.CLAUDE)
 
 
-def test_get_cache_age():
+def test_get_cache_age() -> None:
     """Test getting cache age."""
     # Before any caching, should return None
     age = get_cache_age(Backend.OPENAI)
@@ -203,7 +206,7 @@ def test_get_cache_age():
 # ---------------------------------------------------------------------------
 
 
-def test_mock_provider_protocol():
+def test_mock_provider_protocol() -> None:
     """Test that MockProvider implements ProviderRegistry correctly."""
     models = [ModelInfo(id="mock-1", name="Mock 1", provider="mock")]
     provider = MockProvider(models)
@@ -227,11 +230,12 @@ def test_mock_provider_protocol():
 
 
 @pytest.mark.asyncio
-async def test_cache_integration():
+async def test_cache_integration() -> None:
     """Integration test simulating real usage pattern."""
+
     # Simulate a provider that returns different models over time
     class DynamicProvider:
-        def __init__(self):
+        def __init__(self) -> None:
             self.version = 1
 
         async def list_models(self) -> list[ModelInfo]:
@@ -240,7 +244,7 @@ async def test_cache_integration():
                     id=f"model-v{self.version}",
                     name=f"Model v{self.version}",
                     provider="dynamic",
-                )
+                ),
             ]
 
     provider = DynamicProvider()
@@ -259,6 +263,7 @@ async def test_cache_integration():
 
     # Wait for expiration
     import asyncio
+
     await asyncio.sleep(2.1)
 
     # Now should get new version
@@ -272,7 +277,7 @@ async def test_cache_integration():
 
 
 @pytest.mark.asyncio
-async def test_claude_model_catalog():
+async def test_claude_model_catalog() -> None:
     """Test that Claude backend returns up-to-date model catalog."""
     from obscura.core.auth import AuthConfig
     from obscura.providers.claude import ClaudeBackend
@@ -296,7 +301,7 @@ async def test_claude_model_catalog():
 
 
 @pytest.mark.asyncio
-async def test_openai_fallback_models():
+async def test_openai_fallback_models() -> None:
     """Test that OpenAI backend fallback includes current models."""
     from obscura.core.auth import AuthConfig
     from obscura.providers.openai import OpenAIBackend
@@ -312,7 +317,7 @@ async def test_openai_fallback_models():
     assert "o1" in model_ids
 
 
-def test_openai_validates_o3():
+def test_openai_validates_o3() -> None:
     """Test that OpenAI validates o3-prefixed models."""
     from obscura.core.auth import AuthConfig
     from obscura.providers.openai import OpenAIBackend

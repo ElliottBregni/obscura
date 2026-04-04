@@ -1,4 +1,5 @@
 """Hugging Face Hub CLI provider — wraps the hf binary."""
+
 from __future__ import annotations
 
 import asyncio

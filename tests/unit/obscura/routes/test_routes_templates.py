@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from obscura.core.config import ObscuraConfig
 from obscura.routes import template_store
 
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from fastapi import FastAPI
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -20,7 +22,7 @@ from obscura.routes import template_store
 
 
 @pytest.fixture(autouse=True)
-def _clear_templates() -> Generator[None, None, None]:
+def _clear_templates() -> Generator[None]:
     template_store.clear()
     yield
     template_store.clear()
@@ -157,8 +159,17 @@ class TestTemplateCreate:
             json={
                 "name": "mcp-agent",
                 "mcp_servers": [
-                    {"name": "pw", "transport": "stdio", "command": "npx", "args": ["-y", "@playwright/mcp"]},
-                    {"name": "remote", "transport": "sse", "url": "http://localhost:3000"},
+                    {
+                        "name": "pw",
+                        "transport": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "@playwright/mcp"],
+                    },
+                    {
+                        "name": "remote",
+                        "transport": "sse",
+                        "url": "http://localhost:3000",
+                    },
                 ],
             },
         )
@@ -264,7 +275,8 @@ class TestTemplateUpdate:
     def test_update_persisted(self, client: TestClient) -> None:
         with patch.object(template_store, "persist_template") as mock_persist:
             create_resp = client.post(
-                "/api/v1/agent-templates", json={"name": "durable", "persist": True}
+                "/api/v1/agent-templates",
+                json={"name": "durable", "persist": True},
             )
             tid = create_resp.json()["template_id"]
             mock_persist.reset_mock()
@@ -290,11 +302,16 @@ class TestTemplateDelete:
         assert resp.status_code == 404
 
     def test_delete_persisted(self, client: TestClient) -> None:
-        with patch.object(template_store, "persist_template"), patch.object(
-            template_store, "delete_persisted"
-        ) as mock_del:
+        with (
+            patch.object(template_store, "persist_template"),
+            patch.object(
+                template_store,
+                "delete_persisted",
+            ) as mock_del,
+        ):
             create_resp = client.post(
-                "/api/v1/agent-templates", json={"name": "durable", "persist": True}
+                "/api/v1/agent-templates",
+                json={"name": "durable", "persist": True},
             )
             tid = create_resp.json()["template_id"]
             client.delete(f"/api/v1/agent-templates/{tid}")
@@ -327,7 +344,11 @@ class TestSpawnFromTemplate:
         runtime.spawn.assert_called_once()
 
     @patch("obscura.routes.agents.get_runtime")
-    def test_spawn_with_mcp_config(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_spawn_with_mcp_config(
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
+    ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime(agent)
         mock_get_runtime.return_value = runtime
@@ -337,7 +358,12 @@ class TestSpawnFromTemplate:
             json={
                 "name": "mcp-agent",
                 "mcp_servers": [
-                    {"name": "pw", "transport": "stdio", "command": "npx", "args": ["-y", "@playwright/mcp"]},
+                    {
+                        "name": "pw",
+                        "transport": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "@playwright/mcp"],
+                    },
                 ],
             },
         )
@@ -350,7 +376,11 @@ class TestSpawnFromTemplate:
         assert len(spawn_kwargs["mcp"].servers) == 1
 
     @patch("obscura.routes.agents.get_runtime")
-    def test_spawn_with_skills_in_prompt(self, mock_get_runtime: Any, client: TestClient) -> None:
+    def test_spawn_with_skills_in_prompt(
+        self,
+        mock_get_runtime: Any,
+        client: TestClient,
+    ) -> None:
         agent = _make_mock_agent()
         runtime = _make_mock_runtime(agent)
         mock_get_runtime.return_value = runtime

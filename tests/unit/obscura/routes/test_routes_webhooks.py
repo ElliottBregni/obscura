@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from starlette.testclient import TestClient
+
 from obscura.core.config import ObscuraConfig
 
 
@@ -26,7 +27,9 @@ def client(app: Any) -> TestClient:
 class TestWebhookTest:
     @patch("httpx.AsyncClient")
     def test_webhook_test_success(
-        self, mock_async_cls: Any, client: TestClient
+        self,
+        mock_async_cls: Any,
+        client: TestClient,
     ) -> None:
         # Create a webhook first
         create = client.post(
@@ -58,7 +61,9 @@ class TestWebhookTest:
 
     @patch("httpx.AsyncClient")
     def test_webhook_test_network_error(
-        self, mock_async_cls: Any, client: TestClient
+        self,
+        mock_async_cls: Any,
+        client: TestClient,
     ) -> None:
         create = client.post(
             "/api/v1/webhooks",
@@ -87,9 +92,9 @@ class TestTriggerWebhooks:
     @patch("httpx.AsyncClient")
     async def test_trigger_webhooks(self, mock_async_cls: Any) -> None:
         from obscura.routes.webhooks import (
+            WebhookConfig,
             get_webhooks_store,
             trigger_webhooks,
-            WebhookConfig,
         )
 
         store = get_webhooks_store()
@@ -119,9 +124,9 @@ class TestTriggerWebhooks:
     @patch("httpx.AsyncClient")
     async def test_trigger_skips_inactive(self, mock_async_cls: Any) -> None:
         from obscura.routes.webhooks import (
+            WebhookConfig,
             get_webhooks_store,
             trigger_webhooks,
-            WebhookConfig,
         )
 
         store = get_webhooks_store()
@@ -150,9 +155,9 @@ class TestTriggerWebhooks:
     @patch("httpx.AsyncClient")
     async def test_trigger_skips_wrong_event(self, mock_async_cls: Any) -> None:
         from obscura.routes.webhooks import (
+            WebhookConfig,
             get_webhooks_store,
             trigger_webhooks,
-            WebhookConfig,
         )
 
         store = get_webhooks_store()

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
 
+from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.types import (
     Backend,
     ExecutionMode,
@@ -15,11 +17,14 @@ from obscura.core.types import (
     SessionRef,
     UnifiedRequest,
 )
-from obscura.auth.models import AuthenticatedUser
-from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import ClientFactory, audit
 from obscura.routes.session_sync import sync_session_turn
 from obscura.schemas import SendRequest, SendResponse, StreamRequest
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["agent"])
 
@@ -28,7 +33,7 @@ router = APIRouter(prefix="/api/v1", tags=["agent"])
 async def send(
     body: SendRequest,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> SendResponse:
     """Send a prompt and receive the full response."""
     factory: ClientFactory = request.app.state.client_factory
@@ -82,7 +87,7 @@ async def send(
             request=unified_req,
         )
         if body.session_id:
-            try:
+            with contextlib.suppress(Exception):
                 sync_session_turn(
                     user=user,
                     session_id=body.session_id,
@@ -91,8 +96,6 @@ async def send(
                     response=msg.text,
                     mode=body.mode,
                 )
-            except Exception:
-                pass
         audit(
             "agent.send",
             user,
@@ -124,11 +127,11 @@ async def send(
 async def stream(
     body: StreamRequest,
     request: Request,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> EventSourceResponse:
     """Send a prompt and receive an SSE event stream."""
 
-    async def _event_generator() -> AsyncGenerator[dict[str, str], None]:
+    async def _event_generator() -> AsyncGenerator[dict[str, str]]:
         factory: ClientFactory = request.app.state.client_factory
         client = await factory.create(
             body.backend,
@@ -141,7 +144,8 @@ async def stream(
         try:
             if body.session_id:
                 ref = SessionRef(
-                    session_id=body.session_id, backend=Backend(body.backend)
+                    session_id=body.session_id,
+                    backend=Backend(body.backend),
                 )
                 await client.resume_session(ref)
 
@@ -199,14 +203,14 @@ async def stream(
                             "finish_reason": chunk.metadata.finish_reason,
                             "model_id": chunk.metadata.model_id,
                             "usage": chunk.metadata.usage,
-                        }
+                        },
                     )
                 yield {
                     "event": chunk.kind.value,
                     "data": json.dumps(payload),
                 }
             if body.session_id:
-                try:
+                with contextlib.suppress(Exception):
                     sync_session_turn(
                         user=user,
                         session_id=body.session_id,
@@ -215,8 +219,6 @@ async def stream(
                         response="".join(response_text_parts),
                         mode=body.mode,
                     )
-                except Exception:
-                    pass
         finally:
             await client.stop()
 

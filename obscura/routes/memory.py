@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["memory"])
 
@@ -36,14 +38,14 @@ async def memory_list(
         content={
             "keys": [{"namespace": k.namespace, "key": k.key} for k in keys],
             "count": len(keys),
-        }
+        },
     )
 
 
 @router.get("/memory/search")
 async def memory_search(
     q: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Search memory keys and values."""
     from obscura.memory import MemoryStore
@@ -56,13 +58,13 @@ async def memory_search(
                 {"namespace": k.namespace, "key": k.key, "value": v} for k, v in results
             ],
             "count": len(results),
-        }
+        },
     )
 
 
 @router.get("/memory/stats")
 async def memory_stats(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get memory usage statistics."""
     from obscura.memory import MemoryStore
@@ -77,14 +79,14 @@ async def memory_stats(
 
 @router.get("/memory/namespaces")
 async def memory_namespace_list(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List all memory namespaces."""
     from obscura.memory import MemoryStore
 
     store = MemoryStore.for_user(user)
     keys = store.list_keys()
-    namespaces = set(k.namespace for k in keys)
+    namespaces = {k.namespace for k in keys}
 
     for ns_id, ns_data in _memory_namespaces.items():
         if ns_data.get("created_by") == user.user_id:
@@ -92,16 +94,16 @@ async def memory_namespace_list(
 
     return JSONResponse(
         content={
-            "namespaces": sorted(list(namespaces)),
+            "namespaces": sorted(namespaces),
             "count": len(namespaces),
-        }
+        },
     )
 
 
 @router.post("/memory/namespaces")
 async def memory_namespace_create(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create a new memory namespace with configuration."""
     namespace_id: str = body.get("name", str(uuid.uuid4()))
@@ -136,8 +138,7 @@ async def memory_namespace_delete(
     """Delete a memory namespace. Optionally delete all data in it."""
     from obscura.memory import MemoryStore
 
-    if namespace in _memory_namespaces:
-        del _memory_namespaces[namespace]
+    _memory_namespaces.pop(namespace, None)
 
     deleted_keys = 0
     if delete_data:
@@ -161,14 +162,14 @@ async def memory_namespace_delete(
             "namespace": namespace,
             "deleted": True,
             "keys_deleted": deleted_keys,
-        }
+        },
     )
 
 
 @router.get("/memory/namespaces/{namespace}/stats")
 async def memory_namespace_stats(
     namespace: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get statistics for a specific namespace."""
     from obscura.memory import MemoryStore
@@ -187,7 +188,7 @@ async def memory_namespace_stats(
             "namespace": namespace,
             "key_count": len(keys),
             "total_size_bytes": total_size,
-        }
+        },
     )
 
 
@@ -197,7 +198,7 @@ async def memory_namespace_stats(
 @router.post("/memory/transaction")
 async def memory_transaction(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Execute multiple memory operations atomically."""
     from obscura.memory import MemoryStore
@@ -228,12 +229,12 @@ async def memory_transaction(
             elif op_type == "get":
                 value = store.get(key, namespace=ns)
                 results.append(
-                    {"idx": idx, "op": "get", "status": "ok", "value": value}
+                    {"idx": idx, "op": "get", "status": "ok", "value": value},
                 )
             elif op_type == "delete":
                 deleted = store.delete(key, namespace=ns)
                 results.append(
-                    {"idx": idx, "op": "delete", "status": "ok", "deleted": deleted}
+                    {"idx": idx, "op": "delete", "status": "ok", "deleted": deleted},
                 )
             else:
                 errors.append({"idx": idx, "error": f"Unknown operation: {op_type}"})
@@ -246,7 +247,7 @@ async def memory_transaction(
             "errors": errors,
             "total_ops": len(operations),
             "successful": len(results),
-        }
+        },
     )
 
 
@@ -280,7 +281,7 @@ async def memory_export(
             "namespaces": list(data.keys()),
             "total_keys": sum(len(v) for v in data.values()),
             "data": data,
-        }
+        },
     )
 
 
@@ -332,7 +333,7 @@ async def memory_import(
             "skipped": skipped,
             "errors": errors,
             "total": imported + skipped,
-        }
+        },
     )
 
 
@@ -343,7 +344,7 @@ async def memory_import(
 async def memory_get(
     namespace: str,
     key: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a value from the user's memory store."""
     from obscura.memory import MemoryStore
@@ -352,7 +353,8 @@ async def memory_get(
     value = store.get(key, namespace=namespace)
     if value is None:
         raise HTTPException(
-            status_code=404, detail=f"Key '{namespace}:{key}' not found"
+            status_code=404,
+            detail=f"Key '{namespace}:{key}' not found",
         )
     return JSONResponse(content={"namespace": namespace, "key": key, "value": value})
 
@@ -380,7 +382,7 @@ async def memory_set(
 async def memory_delete(
     namespace: str,
     key: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Delete a key from the user's memory store."""
     from obscura.memory import MemoryStore
@@ -389,7 +391,8 @@ async def memory_delete(
     deleted = store.delete(key, namespace=namespace)
     if not deleted:
         raise HTTPException(
-            status_code=404, detail=f"Key '{namespace}:{key}' not found"
+            status_code=404,
+            detail=f"Key '{namespace}:{key}' not found",
         )
     audit("memory.delete", user, f"memory:{namespace}:{key}", "delete", "success")
     return JSONResponse(content={"namespace": namespace, "key": key, "deleted": True})

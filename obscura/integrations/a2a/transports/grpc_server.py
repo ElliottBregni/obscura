@@ -1,5 +1,4 @@
-"""
-obscura.a2a.transports.grpc_server — gRPC transport for A2A.
+"""obscura.a2a.transports.grpc_server — gRPC transport for A2A.
 
 Uses a JSON-over-gRPC approach: messages are serialized as JSON strings
 in generic request/response wrappers. This avoids a hard dependency on
@@ -22,15 +21,18 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
     TaskState,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from obscura.integrations.a2a.service import A2AService
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,8 @@ class A2AServicer:
         params = json.loads(request_json)
         message = A2AMessage.model_validate(params.get("message", {}))
         async for event in self._service.message_stream(
-            message, context_id=params.get("contextId")
+            message,
+            context_id=params.get("contextId"),
         ):
             yield event.model_dump_json()
 
@@ -132,14 +135,18 @@ async def start_grpc_server(
         Port to listen on.
     enable_reflection:
         Enable gRPC reflection for discovery (requires ``grpcio-reflection``).
+
     """
     try:
         import grpc
         import grpc.aio
     except ImportError:
-        raise ImportError(
+        msg = (
             "grpcio is required for gRPC transport. "
             "Install with: pip install 'obscura[a2a]'"
+        )
+        raise ImportError(
+            msg,
         )
 
     servicer = A2AServicer(service)

@@ -21,7 +21,9 @@ class TestDiscoverMCPServers:
         assert discovered == []
 
     def test_resolves_env_placeholders(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         config_path = tmp_path / "mcp-config.json"
         config_path.write_text(
@@ -33,9 +35,9 @@ class TestDiscoverMCPServers:
                             "args": ["-y", "@playwright/mcp@latest"],
                             "env": {"PLAYWRIGHT_TOKEN": "${PLAYWRIGHT_TOKEN}"},
                             "tools": ["browser_navigate"],
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             ),
             encoding="utf-8",
         )
@@ -62,9 +64,9 @@ class TestDiscoverMCPServers:
                             "command": "npx",
                             "args": ["-y", "jira-mcp"],
                             "env": {"JIRA_API_TOKEN": "${JIRA_API_TOKEN}"},
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             ),
             encoding="utf-8",
         )
@@ -84,9 +86,9 @@ class TestDiscoverMCPServers:
                         "bad": {
                             "transport": "websocket",
                             "url": "ws://localhost:8787",
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             ),
             encoding="utf-8",
         )
@@ -100,9 +102,9 @@ class TestDiscoverMCPServers:
             json.dumps(
                 {
                     "mcpServers": {
-                        "github": {"command": "npx", "args": ["-y", "github-mcp"]}
-                    }
-                }
+                        "github": {"command": "npx", "args": ["-y", "github-mcp"]},
+                    },
+                },
             ),
             encoding="utf-8",
         )
@@ -110,9 +112,9 @@ class TestDiscoverMCPServers:
             json.dumps(
                 {
                     "mcpServers": {
-                        "supabase": {"command": "npx", "args": ["-y", "supabase-mcp"]}
-                    }
-                }
+                        "supabase": {"command": "npx", "args": ["-y", "supabase-mcp"]},
+                    },
+                },
             ),
             encoding="utf-8",
         )
@@ -122,21 +124,13 @@ class TestDiscoverMCPServers:
         assert {"github", "supabase"} == names
 
     def test_loads_toml_config(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         config_path = tmp_path / "mcp-config.toml"
         config_path.write_text(
-            "\n".join(
-                [
-                    "[mcpServers.supabase]",
-                    'transport = "stdio"',
-                    'command = "npx"',
-                    'args = ["-y", "@supabase/mcp-server"]',
-                    "",
-                    "[mcpServers.supabase.env]",
-                    'SUPABASE_ACCESS_TOKEN = "${SUPABASE_ACCESS_TOKEN}"',
-                ]
-            ),
+            '[mcpServers.supabase]\ntransport = "stdio"\ncommand = "npx"\nargs = ["-y", "@supabase/mcp-server"]\n\n[mcpServers.supabase.env]\nSUPABASE_ACCESS_TOKEN = "${SUPABASE_ACCESS_TOKEN}"',
             encoding="utf-8",
         )
         monkeypatch.setenv("SUPABASE_ACCESS_TOKEN", "sb-token")
@@ -149,7 +143,9 @@ class TestDiscoverMCPServers:
         assert server.env["SUPABASE_ACCESS_TOKEN"] == "sb-token"
 
     def test_resolves_npx_from_nvm_when_path_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         fake_home = tmp_path / "home"
         fake_npx = fake_home / ".nvm" / "versions" / "node" / "v99.0.0" / "bin" / "npx"
@@ -169,9 +165,9 @@ class TestDiscoverMCPServers:
                                 "@modelcontextprotocol/server-filesystem",
                                 ".",
                             ],
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             ),
             encoding="utf-8",
         )
@@ -314,7 +310,7 @@ class TestBuildRuntimeServerConfigs:
                 env={},
                 tools=(),
                 missing_env=(),
-            )
+            ),
         ]
         with pytest.raises(ValueError, match="Unknown MCP server"):
             build_runtime_server_configs(discovered, selected_names=["missing"])

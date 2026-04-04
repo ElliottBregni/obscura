@@ -6,10 +6,13 @@ import json
 import logging
 import sqlite3
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from obscura.core.paths import resolve_obscura_home, resolve_obscura_state_dir
+from obscura.core.paths import resolve_obscura_home
 from obscura.integrations.messaging.models import ConversationState
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +63,7 @@ class _SQLiteBase:
                     last_activity_epoch_s REAL NOT NULL DEFAULT 0,
                     updated_at_epoch_s REAL NOT NULL DEFAULT 0
                 )
-                """
+                """,
             )
             con.execute(
                 """
@@ -68,13 +71,13 @@ class _SQLiteBase:
                     dedupe_id TEXT PRIMARY KEY,
                     seen_at_epoch_s REAL NOT NULL
                 )
-                """
+                """,
             )
             con.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_messaging_dedupe_seen_at
                 ON messaging_dedupe(seen_at_epoch_s)
-                """
+                """,
             )
             con.execute(
                 """
@@ -88,13 +91,13 @@ class _SQLiteBase:
                     error_text TEXT NOT NULL DEFAULT '',
                     reply_preview TEXT NOT NULL DEFAULT ''
                 )
-                """
+                """,
             )
             con.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_messaging_send_events_created
                 ON messaging_send_events(created_at_epoch_s DESC)
-                """
+                """,
             )
             con.execute(
                 """
@@ -108,7 +111,7 @@ class _SQLiteBase:
                     message_id TEXT NOT NULL DEFAULT '',
                     details_json TEXT NOT NULL DEFAULT '{}'
                 )
-                """
+                """,
             )
             con.execute(
                 """
@@ -118,13 +121,13 @@ class _SQLiteBase:
                     acquired_at_epoch_s REAL NOT NULL,
                     heartbeat_at_epoch_s REAL NOT NULL
                 )
-                """
+                """,
             )
             con.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_messaging_runtime_events_created
                 ON messaging_runtime_events(created_at_epoch_s DESC)
-                """
+                """,
             )
             con.commit()
         finally:
@@ -183,7 +186,8 @@ class ConversationStore(_SQLiteBase):
             con.close()
         state = self.get(conversation_key)
         if state is None:
-            raise RuntimeError(f"Failed to ensure conversation {conversation_key}")
+            msg = f"Failed to ensure conversation {conversation_key}"
+            raise RuntimeError(msg)
         return state
 
     def reset_if_stale(self, conversation_key: str, timeout_seconds: float) -> bool:
@@ -269,7 +273,8 @@ class ConversationStore(_SQLiteBase):
     ) -> ConversationState:
         state = self.get(conversation_key)
         if state is None:
-            raise KeyError(f"Conversation not found: {conversation_key}")
+            msg = f"Conversation not found: {conversation_key}"
+            raise KeyError(msg)
 
         history = list(state.history)
         history.append({"role": role, "text": text})
@@ -298,7 +303,8 @@ class ConversationStore(_SQLiteBase):
 
         updated = self.get(conversation_key)
         if updated is None:
-            raise RuntimeError(f"Conversation vanished after append: {conversation_key}")
+            msg = f"Conversation vanished after append: {conversation_key}"
+            raise RuntimeError(msg)
         return updated
 
     @staticmethod
@@ -332,7 +338,12 @@ class ConversationStore(_SQLiteBase):
 class MessageDedupeStore(_SQLiteBase):
     """Persistent seen-message table with bounded retention."""
 
-    def __init__(self, db_path: Path | None = None, *, max_entries: int = 10000) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        max_entries: int = 10000,
+    ) -> None:
         self._max_entries = max_entries
         super().__init__(db_path=db_path)
 
@@ -448,7 +459,12 @@ class MessageSendEventStore(_SQLiteBase):
 class MessageRuntimeEventStore(_SQLiteBase):
     """Persistent structured runtime events for daemon observability."""
 
-    def __init__(self, db_path: Path | None = None, *, max_entries: int = 50000) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        max_entries: int = 50000,
+    ) -> None:
         self._max_entries = max_entries
         super().__init__(db_path=db_path)
 

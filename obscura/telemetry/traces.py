@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-"""
-obscura.telemetry.traces — Tracer setup and ``@traced`` decorator.
+"""obscura.telemetry.traces — Tracer setup and ``@traced`` decorator.
 
 Provides helpers for creating spans around sync and async functions. All
 OTel imports are lazy so the SDK works without OTel installed.
@@ -18,12 +17,12 @@ Usage::
 
 from __future__ import annotations
 
-
-import importlib
 import functools
+import importlib
 import inspect
 import os
-from typing import Any, Callable, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, Self, TypeVar, cast
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -122,8 +121,7 @@ def traced(
                     for k, v in extra_attrs.items():
                         span.set_attribute(k, v)
                     try:
-                        result = await fn(*args, **kwargs)
-                        return result
+                        return await fn(*args, **kwargs)
                     except Exception as exc:
                         span.set_status(
                             trace.StatusCode.ERROR,
@@ -132,33 +130,31 @@ def traced(
                         span.record_exception(exc)
                         raise
 
-            return cast(F, async_wrapper)
-        else:
+            return cast("F", async_wrapper)
 
-            @functools.wraps(fn)
-            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        @functools.wraps(fn)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                from opentelemetry import trace
+
+                tracer = trace.get_tracer(fn.__module__)
+            except ImportError:
+                return fn(*args, **kwargs)
+
+            with tracer.start_as_current_span(span_name) as span:
+                for k, v in extra_attrs.items():
+                    span.set_attribute(k, v)
                 try:
-                    from opentelemetry import trace
-
-                    tracer = trace.get_tracer(fn.__module__)
-                except ImportError:
                     return fn(*args, **kwargs)
+                except Exception as exc:
+                    span.set_status(
+                        trace.StatusCode.ERROR,
+                        str(exc),
+                    )
+                    span.record_exception(exc)
+                    raise
 
-                with tracer.start_as_current_span(span_name) as span:
-                    for k, v in extra_attrs.items():
-                        span.set_attribute(k, v)
-                    try:
-                        result = fn(*args, **kwargs)
-                        return result
-                    except Exception as exc:
-                        span.set_status(
-                            trace.StatusCode.ERROR,
-                            str(exc),
-                        )
-                        span.record_exception(exc)
-                        raise
-
-            return cast(F, sync_wrapper)
+        return cast("F", sync_wrapper)
 
     return decorator
 
@@ -186,7 +182,7 @@ class NoOpSpan:
     def end(self) -> None:
         return None
 
-    def __enter__(self) -> "NoOpSpan":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

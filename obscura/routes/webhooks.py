@@ -7,16 +7,18 @@ import hmac
 import json
 import secrets
 import uuid
-from datetime import UTC, datetime
 from dataclasses import dataclass
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
 
@@ -54,7 +56,7 @@ def get_webhooks_store() -> dict[str, WebhookConfig]:
 @router.post("/webhooks")
 async def webhook_create(
     body: dict[str, Any],
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create a webhook for events."""
     webhook_id = str(uuid.uuid4())
@@ -86,13 +88,13 @@ async def webhook_create(
         content={
             **webhook.as_public_dict(),
             "secret": secret,
-        }
+        },
     )
 
 
 @router.get("/webhooks")
 async def webhook_list(
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List all webhooks."""
     webhooks: list[dict[str, Any]] = [w.as_public_dict() for w in _webhooks.values()]
@@ -100,14 +102,14 @@ async def webhook_list(
         content={
             "webhooks": webhooks,
             "count": len(webhooks),
-        }
+        },
     )
 
 
 @router.get("/webhooks/{webhook_id}")
 async def webhook_get(
     webhook_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a specific webhook."""
     webhook = _webhooks.get(webhook_id)
@@ -120,7 +122,7 @@ async def webhook_get(
 @router.delete("/webhooks/{webhook_id}")
 async def webhook_delete(
     webhook_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Delete a webhook."""
     if webhook_id not in _webhooks:
@@ -136,7 +138,7 @@ async def webhook_delete(
 @router.post("/webhooks/{webhook_id}/test")
 async def webhook_test(
     webhook_id: str,
-    user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Send a test event to a webhook."""
     import httpx
@@ -154,7 +156,9 @@ async def webhook_test(
     payload_json = json.dumps(payload, separators=(",", ":"))
     webhook_secret: str = webhook.secret
     signature = hmac.new(
-        webhook_secret.encode(), payload_json.encode(), hashlib.sha256
+        webhook_secret.encode(),
+        payload_json.encode(),
+        hashlib.sha256,
     ).hexdigest()
 
     try:
@@ -175,7 +179,7 @@ async def webhook_test(
                     "webhook_id": webhook_id,
                     "status_code": resp.status_code,
                     "success": 200 <= resp.status_code < 300,
-                }
+                },
             )
     except Exception as e:
         return JSONResponse(
@@ -183,7 +187,7 @@ async def webhook_test(
                 "webhook_id": webhook_id,
                 "error": str(e),
                 "success": False,
-            }
+            },
         )
 
 
@@ -204,9 +208,9 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
     for webhook in _webhooks.values():
         # Webhooks stored as dicts in tests; accept both dict and object forms
         if isinstance(webhook, dict):
-            wdict = cast(dict[str, Any], webhook)
+            wdict = cast("dict[str, Any]", webhook)
             active: bool = bool(wdict.get("active"))
-            events_raw = cast(list[Any], wdict.get("events", []))
+            events_raw = cast("list[Any]", wdict.get("events", []))
             events: list[str] = [str(e) for e in events_raw]
             webhook_secret: str = str(wdict.get("secret", ""))
             webhook_id: str = str(wdict.get("webhook_id", ""))
@@ -224,7 +228,9 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
             continue
 
         signature = hmac.new(
-            webhook_secret.encode(), payload_json.encode(), hashlib.sha256
+            webhook_secret.encode(),
+            payload_json.encode(),
+            hashlib.sha256,
         ).hexdigest()
 
         try:

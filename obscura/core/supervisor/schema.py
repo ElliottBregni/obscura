@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.schema — Complete SQLite schema for the supervisor.
+"""obscura.core.supervisor.schema — Complete SQLite schema for the supervisor.
 
 Single DB file. All tables. Full replay support.
 Idempotent (CREATE IF NOT EXISTS + ALTER migrations).
@@ -8,7 +7,10 @@ Idempotent (CREATE IF NOT EXISTS + ALTER migrations).
 from __future__ import annotations
 
 import logging
-import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +323,7 @@ REQUIRED_TABLES = (
 def verify_supervisor_schema(conn: sqlite3.Connection) -> list[str]:
     """Verify all supervisor tables exist. Returns list of missing tables."""
     rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
+        "SELECT name FROM sqlite_master WHERE type='table'",
     ).fetchall()
     existing = {row[0] for row in rows}
     missing = [t for t in REQUIRED_TABLES if t not in existing]

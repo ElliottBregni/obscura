@@ -1,5 +1,4 @@
-"""
-sdk/vector_memory_router — Memory type routing for multi-query retrieval.
+"""sdk/vector_memory_router — Memory type routing for multi-query retrieval.
 
 Routes a single query across multiple memory types with configurable weights,
 then merges and deduplicates results.
@@ -29,10 +28,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from obscura.vector_memory import VectorMemoryEntry, VectorMemoryStore
+    from obscura.vector_memory.vector_memory_filters import MetadataFilter
     from obscura.vector_memory.vector_memory_rerank import Reranker
-    from obscura.vector_memory.vector_memory_filters import MetadataFilter
 else:
-    from obscura.vector_memory.vector_memory_filters import MetadataFilter
+    pass
 
 
 @dataclass
@@ -56,7 +55,7 @@ class RoutedResult:
 class MemoryRouter:
     """Route queries to different memory types and merge results."""
 
-    def __init__(self, store: VectorMemoryStore):
+    def __init__(self, store: VectorMemoryStore) -> None:
         self.store = store
 
     def route_and_merge(
@@ -69,8 +68,7 @@ class MemoryRouter:
         first_stage_k: int = 50,
         metadata_filters: list[MetadataFilter] | None = None,
     ) -> RoutedResult:
-        """
-        Execute separate queries per memory type and merge results.
+        """Execute separate queries per memory type and merge results.
 
         Each route searches its memory type with its own weight and top_k,
         then results are weighted, deduplicated, and merged.
@@ -83,6 +81,7 @@ class MemoryRouter:
             threshold: Minimum similarity score
             first_stage_k: Candidate pool size per route
             metadata_filters: Additional filters applied to all routes
+
         """
         all_results: list[VectorMemoryEntry] = []
         sources: dict[str, int] = {}
@@ -101,7 +100,11 @@ class MemoryRouter:
 
             # Apply route weight to final scores (fall back to score if final_score unset)
             for entry in results:
-                base = entry.final_score if getattr(entry, "final_score", 0) else entry.score
+                base = (
+                    entry.final_score
+                    if getattr(entry, "final_score", 0)
+                    else entry.score
+                )
                 entry.final_score = base * route.weight
 
             all_results.extend(results)
@@ -121,11 +124,17 @@ class MemoryRouter:
             composite_key = (entry.key.namespace, entry.key.key)
             existing = seen.get(composite_key)
 
-            entry_score = entry.final_score if getattr(entry, "final_score", 0) else entry.score
+            entry_score = (
+                entry.final_score if getattr(entry, "final_score", 0) else entry.score
+            )
             if existing is None:
                 seen[composite_key] = entry
             else:
-                existing_score = existing.final_score if getattr(existing, "final_score", 0) else existing.score
+                existing_score = (
+                    existing.final_score
+                    if getattr(existing, "final_score", 0)
+                    else existing.score
+                )
                 if entry_score > existing_score:
                     seen[composite_key] = entry
 
@@ -135,5 +144,8 @@ class MemoryRouter:
             if not getattr(e, "final_score", 0):
                 e.final_score = e.score
 
-        merged.sort(key=lambda x: (x.final_score if getattr(x, "final_score", 0) else x.score), reverse=True)
+        merged.sort(
+            key=lambda x: x.final_score if getattr(x, "final_score", 0) else x.score,
+            reverse=True,
+        )
         return merged

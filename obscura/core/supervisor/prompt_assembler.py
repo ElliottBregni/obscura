@@ -1,5 +1,4 @@
-"""
-obscura.core.supervisor.prompt_assembler — Deterministic prompt assembly.
+"""obscura.core.supervisor.prompt_assembler — Deterministic prompt assembly.
 
 Assembles a prompt from ordered sections, freezes it as a PromptSnapshot,
 and ensures stability across turns within a run.
@@ -84,16 +83,22 @@ class PromptAssembler:
 
         Raises:
             PromptAssemblyError: If the section name is not recognized.
+
         """
         if name not in SECTION_ORDER:
+            msg = (
+                f"Unknown section: {name!r}. Valid sections: {', '.join(SECTION_ORDER)}"
+            )
             raise PromptAssemblyError(
-                f"Unknown section: {name!r}. "
-                f"Valid sections: {', '.join(SECTION_ORDER)}"
+                msg,
             )
         if self._frozen is not None:
-            raise PromptAssemblyError(
+            msg = (
                 "Cannot modify sections after freeze(). "
                 "Create a new assembler for a new run."
+            )
+            raise PromptAssemblyError(
+                msg,
             )
         self._sections[name] = content
 
@@ -114,13 +119,15 @@ class PromptAssembler:
 
         Raises:
             PromptAssemblyError: If required sections are missing.
+
         """
         if self._frozen is not None:
             return self._frozen
 
         # Validate required sections
         if not self._sections.get("user_prompt"):
-            raise PromptAssemblyError("user_prompt section is required")
+            msg = "user_prompt section is required"
+            raise PromptAssemblyError(msg)
 
         # Build sections in canonical order
         sections: list[PromptSection] = []
@@ -130,7 +137,7 @@ class PromptAssembler:
                 continue
             token_est = self._estimate_tokens(content)
             sections.append(
-                PromptSection(name=name, content=content, token_estimate=token_est)
+                PromptSection(name=name, content=content, token_estimate=token_est),
             )
 
         # Apply token budget (trim session_history from oldest)
@@ -138,9 +145,7 @@ class PromptAssembler:
             sections = self._apply_budget(sections)
 
         # Compute hash
-        hash_input = "\n".join(
-            f"[{s.name}]\n{s.content}" for s in sections
-        )
+        hash_input = "\n".join(f"[{s.name}]\n{s.content}" for s in sections)
         prompt_hash = hashlib.sha256(hash_input.encode()).hexdigest()
 
         total_tokens = sum(s.token_estimate for s in sections)
@@ -181,12 +186,15 @@ class PromptAssembler:
 
         Raises:
             DriftDetectedError: If hashes don't match.
+
         """
         if self._frozen is None:
-            raise PromptAssemblyError("Cannot check drift before freeze()")
+            msg = "Cannot check drift before freeze()"
+            raise PromptAssemblyError(msg)
         if self._frozen.prompt_hash != expected_hash:
+            msg = "prompt"
             raise DriftDetectedError(
-                "prompt",
+                msg,
                 expected=expected_hash,
                 actual=self._frozen.prompt_hash,
             )
@@ -198,7 +206,8 @@ class PromptAssembler:
         return max(1, int(len(text) / self._chars_per_token))
 
     def _apply_budget(
-        self, sections: list[PromptSection]
+        self,
+        sections: list[PromptSection],
     ) -> list[PromptSection]:
         """Trim variable sections to fit within token budget.
 
@@ -239,7 +248,8 @@ class PromptAssembler:
                 else:
                     # Trim from the beginning (oldest messages)
                     trimmed = self._trim_history(
-                        section.content, available_for_history
+                        section.content,
+                        available_for_history,
                     )
                     if trimmed:
                         result.append(
@@ -247,7 +257,7 @@ class PromptAssembler:
                                 name="session_history",
                                 content=trimmed,
                                 token_estimate=self._estimate_tokens(trimmed),
-                            )
+                            ),
                         )
             else:
                 result.append(section)

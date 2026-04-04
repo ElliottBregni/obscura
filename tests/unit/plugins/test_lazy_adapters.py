@@ -15,14 +15,15 @@ from obscura.plugins.adapters.native import NativeAdapter, _resolve_handler
 from obscura.plugins.lazy import LazyPluginEntry, LazyPluginManager, LazyState
 from obscura.plugins.models import HealthcheckSpec, PluginSpec
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class PluginToolSpec:
     """Lightweight tool spec with a ``handler`` attribute (as adapters expect)."""
+
     name: str
     handler: str = ""
     description: str = ""
@@ -68,16 +69,16 @@ def _tool_no_handler(name: str = "empty-tool") -> PluginToolSpec:
 
 
 class TestLazyPluginEntry:
-    def test_tool_names_returns_set_of_names(self):
+    def test_tool_names_returns_set_of_names(self) -> None:
         spec = _spec(tools=(_tool("a"), _tool("b")))
         entry = LazyPluginEntry(spec=spec)
         assert entry.tool_names == {"a", "b"}
 
-    def test_tool_names_empty_when_no_tools(self):
+    def test_tool_names_empty_when_no_tools(self) -> None:
         entry = LazyPluginEntry(spec=_spec())
         assert entry.tool_names == set()
 
-    def test_default_state_is_discovered(self):
+    def test_default_state_is_discovered(self) -> None:
         entry = LazyPluginEntry(spec=_spec())
         assert entry.state == LazyState.DISCOVERED
 
@@ -88,26 +89,26 @@ class TestLazyPluginEntry:
 
 
 class TestLazyPluginManagerRegister:
-    def test_register_sets_ready_state(self):
+    def test_register_sets_ready_state(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("alpha"))
         assert mgr.get_state("alpha") == LazyState.READY
 
-    def test_register_maps_tools_to_plugin(self):
+    def test_register_maps_tools_to_plugin(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         spec = _spec("alpha", tools=(_tool("t1"), _tool("t2")))
         mgr.register(spec)
         assert mgr._tool_to_plugin["t1"] == "alpha"
         assert mgr._tool_to_plugin["t2"] == "alpha"
 
-    def test_prewarm_triggers_immediate_init(self):
+    def test_prewarm_triggers_immediate_init(self) -> None:
         init_fn = MagicMock()
         mgr = LazyPluginManager(init_fn=init_fn, prewarm={"alpha"})
         mgr.register(_spec("alpha"))
         init_fn.assert_called_once()
         assert mgr.get_state("alpha") == LazyState.ACTIVE
 
-    def test_register_without_prewarm_does_not_init(self):
+    def test_register_without_prewarm_does_not_init(self) -> None:
         init_fn = MagicMock()
         mgr = LazyPluginManager(init_fn=init_fn)
         mgr.register(_spec("alpha"))
@@ -115,7 +116,7 @@ class TestLazyPluginManagerRegister:
 
 
 class TestEnsureToolReady:
-    def test_initializes_owning_plugin(self):
+    def test_initializes_owning_plugin(self) -> None:
         init_fn = MagicMock()
         mgr = LazyPluginManager(init_fn=init_fn)
         spec = _spec("alpha", tools=(_tool("t1"),))
@@ -125,7 +126,7 @@ class TestEnsureToolReady:
         init_fn.assert_called_once_with(spec)
         assert mgr.get_state("alpha") == LazyState.ACTIVE
 
-    def test_increments_use_count_and_updates_last_used(self):
+    def test_increments_use_count_and_updates_last_used(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         spec = _spec("alpha", tools=(_tool("t1"),))
         mgr.register(spec)
@@ -137,11 +138,11 @@ class TestEnsureToolReady:
         assert entry.use_count == 2
         assert entry.last_used_at >= before
 
-    def test_returns_false_for_unknown_tool(self):
+    def test_returns_false_for_unknown_tool(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         assert mgr.ensure_tool_ready("no-such-tool") is False
 
-    def test_failed_init_sets_failed_state_and_records_error(self):
+    def test_failed_init_sets_failed_state_and_records_error(self) -> None:
         init_fn = MagicMock(side_effect=RuntimeError("boom"))
         mgr = LazyPluginManager(init_fn=init_fn)
         spec = _spec("alpha", tools=(_tool("t1"),))
@@ -151,7 +152,7 @@ class TestEnsureToolReady:
         assert mgr.get_state("alpha") == LazyState.FAILED
         assert "boom" in mgr.all_entries()["alpha"].error
 
-    def test_failed_plugin_returns_false_on_subsequent_calls(self):
+    def test_failed_plugin_returns_false_on_subsequent_calls(self) -> None:
         init_fn = MagicMock(side_effect=RuntimeError("boom"))
         mgr = LazyPluginManager(init_fn=init_fn)
         spec = _spec("alpha", tools=(_tool("t1"),))
@@ -162,7 +163,7 @@ class TestEnsureToolReady:
         assert mgr.ensure_tool_ready("t1") is False
         init_fn.assert_not_called()  # no retry
 
-    def test_already_active_skips_init(self):
+    def test_already_active_skips_init(self) -> None:
         init_fn = MagicMock()
         mgr = LazyPluginManager(init_fn=init_fn)
         spec = _spec("alpha", tools=(_tool("t1"),))
@@ -175,23 +176,23 @@ class TestEnsureToolReady:
 
 
 class TestSuspendResume:
-    def test_suspend_active_returns_true(self):
+    def test_suspend_active_returns_true(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("alpha"))
         mgr._ensure_initialized("alpha")
         assert mgr.suspend("alpha") is True
         assert mgr.get_state("alpha") == LazyState.SUSPENDED
 
-    def test_suspend_non_active_returns_false(self):
+    def test_suspend_non_active_returns_false(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("alpha"))
         assert mgr.suspend("alpha") is False
 
-    def test_suspend_unknown_returns_false(self):
+    def test_suspend_unknown_returns_false(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         assert mgr.suspend("nope") is False
 
-    def test_resume_suspended_reinitializes(self):
+    def test_resume_suspended_reinitializes(self) -> None:
         init_fn = MagicMock()
         mgr = LazyPluginManager(init_fn=init_fn)
         mgr.register(_spec("alpha"))
@@ -202,62 +203,62 @@ class TestSuspendResume:
         assert mgr.get_state("alpha") == LazyState.ACTIVE
         assert init_fn.call_count == 2  # initial + resume
 
-    def test_resume_non_suspended_returns_false(self):
+    def test_resume_non_suspended_returns_false(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("alpha"))
         mgr._ensure_initialized("alpha")
         assert mgr.resume("alpha") is False
 
-    def test_resume_unknown_returns_false(self):
+    def test_resume_unknown_returns_false(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         assert mgr.resume("nope") is False
 
 
 class TestQueries:
-    def test_get_state_returns_correct_states(self):
+    def test_get_state_returns_correct_states(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("a"))
         assert mgr.get_state("a") == LazyState.READY
         mgr._ensure_initialized("a")
         assert mgr.get_state("a") == LazyState.ACTIVE
 
-    def test_get_state_returns_none_for_unknown(self):
+    def test_get_state_returns_none_for_unknown(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         assert mgr.get_state("nope") is None
 
-    def test_is_active_true_when_active(self):
+    def test_is_active_true_when_active(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("a"))
         mgr._ensure_initialized("a")
         assert mgr.is_active("a") is True
 
-    def test_is_active_false_when_not_active(self):
+    def test_is_active_false_when_not_active(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("a"))
         assert mgr.is_active("a") is False
 
-    def test_active_plugins_returns_only_active(self):
+    def test_active_plugins_returns_only_active(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("a"))
         mgr.register(_spec("b"))
         mgr._ensure_initialized("a")
         assert mgr.active_plugins() == ["a"]
 
-    def test_all_entries_returns_all(self):
+    def test_all_entries_returns_all(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("a"))
         mgr.register(_spec("b"))
         entries = mgr.all_entries()
         assert set(entries.keys()) == {"a", "b"}
 
-    def test_all_entries_returns_copy(self):
+    def test_all_entries_returns_copy(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("a"))
         entries = mgr.all_entries()
         entries["hacked"] = None  # type: ignore[assignment]
         assert "hacked" not in mgr.all_entries()
 
-    def test_stats_counts_by_state(self):
+    def test_stats_counts_by_state(self) -> None:
         init_fn = MagicMock()
         mgr = LazyPluginManager(init_fn=init_fn)
         mgr.register(_spec("a"))
@@ -271,7 +272,7 @@ class TestQueries:
         assert stats["failed"] == 1
         assert stats["ready"] == 1
 
-    def test_multiple_plugins_separate_tool_mappings(self):
+    def test_multiple_plugins_separate_tool_mappings(self) -> None:
         mgr = LazyPluginManager(init_fn=MagicMock())
         mgr.register(_spec("alpha", tools=(_tool("t1"),)))
         mgr.register(_spec("beta", tools=(_tool("t2"),)))
@@ -290,37 +291,40 @@ class TestQueries:
 
 
 class TestNativeAdapter:
-    def test_can_handle_native(self):
+    def test_can_handle_native(self) -> None:
         adapter = NativeAdapter()
         assert adapter.can_handle(_spec(runtime="native")) is True
 
-    def test_can_handle_rejects_non_native(self):
+    def test_can_handle_rejects_non_native(self) -> None:
         adapter = NativeAdapter()
         assert adapter.can_handle(_spec(runtime="cli")) is False
         assert adapter.can_handle(_spec(runtime="content")) is False
 
     @pytest.mark.asyncio
-    async def test_load_resolves_handler_refs(self):
+    async def test_load_resolves_handler_refs(self) -> None:
         fake_fn = MagicMock()
         fake_mod = MagicMock()
         fake_mod.func = fake_fn
 
         spec = _spec(tools=(_tool("t1", "mymod:func"),))
         adapter = NativeAdapter()
-        with patch("obscura.plugins.adapters.native.importlib.import_module", return_value=fake_mod):
+        with patch(
+            "obscura.plugins.adapters.native.importlib.import_module",
+            return_value=fake_mod,
+        ):
             result = await adapter.load(spec, {})
         assert "t1" in result["handlers"]
         assert result["handlers"]["t1"] is fake_fn
 
     @pytest.mark.asyncio
-    async def test_load_skips_tools_with_no_handler(self):
+    async def test_load_skips_tools_with_no_handler(self) -> None:
         spec = _spec(tools=(_tool_no_handler("empty"),))
         adapter = NativeAdapter()
         result = await adapter.load(spec, {})
         assert "empty" not in result["handlers"]
 
     @pytest.mark.asyncio
-    async def test_load_handles_resolution_error_gracefully(self):
+    async def test_load_handles_resolution_error_gracefully(self) -> None:
         spec = _spec(tools=(_tool("bad", "no.such:thing"),))
         adapter = NativeAdapter()
         with patch(
@@ -331,19 +335,22 @@ class TestNativeAdapter:
         assert "bad" not in result["handlers"]
 
     @pytest.mark.asyncio
-    async def test_healthcheck_callable_type(self):
+    async def test_healthcheck_callable_type(self) -> None:
         hc = HealthcheckSpec(type="callable", target="mymod:check")
         spec = _spec(healthcheck=hc)
         adapter = NativeAdapter()
         fake_fn = MagicMock(return_value=True)
         fake_mod = MagicMock()
         fake_mod.check = fake_fn
-        with patch("obscura.plugins.adapters.native.importlib.import_module", return_value=fake_mod):
+        with patch(
+            "obscura.plugins.adapters.native.importlib.import_module",
+            return_value=fake_mod,
+        ):
             assert await adapter.healthcheck(spec) is True
         fake_fn.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_healthcheck_callable_failure_returns_false(self):
+    async def test_healthcheck_callable_failure_returns_false(self) -> None:
         hc = HealthcheckSpec(type="callable", target="mymod:check")
         spec = _spec(healthcheck=hc)
         adapter = NativeAdapter()
@@ -354,30 +361,36 @@ class TestNativeAdapter:
             assert await adapter.healthcheck(spec) is False
 
     @pytest.mark.asyncio
-    async def test_healthcheck_no_spec_returns_true(self):
+    async def test_healthcheck_no_spec_returns_true(self) -> None:
         spec = _spec(healthcheck=None)
         adapter = NativeAdapter()
         assert await adapter.healthcheck(spec) is True
 
     @pytest.mark.asyncio
-    async def test_teardown_is_noop(self):
+    async def test_teardown_is_noop(self) -> None:
         adapter = NativeAdapter()
         await adapter.teardown(_spec())  # should not raise
 
 
 class TestResolveHandler:
-    def test_colon_syntax(self):
+    def test_colon_syntax(self) -> None:
         fake_mod = MagicMock()
         fake_mod.my_func = lambda: None
-        with patch("obscura.plugins.adapters.native.importlib.import_module", return_value=fake_mod) as mock_imp:
+        with patch(
+            "obscura.plugins.adapters.native.importlib.import_module",
+            return_value=fake_mod,
+        ) as mock_imp:
             result = _resolve_handler("some.module:my_func")
         mock_imp.assert_called_once_with("some.module")
         assert result is fake_mod.my_func
 
-    def test_dot_syntax_fallback(self):
+    def test_dot_syntax_fallback(self) -> None:
         fake_mod = MagicMock()
         fake_mod.my_func = lambda: None
-        with patch("obscura.plugins.adapters.native.importlib.import_module", return_value=fake_mod) as mock_imp:
+        with patch(
+            "obscura.plugins.adapters.native.importlib.import_module",
+            return_value=fake_mod,
+        ) as mock_imp:
             result = _resolve_handler("some.module.my_func")
         mock_imp.assert_called_once_with("some.module")
         assert result is fake_mod.my_func
@@ -389,16 +402,16 @@ class TestResolveHandler:
 
 
 class TestCLIAdapter:
-    def test_can_handle_cli(self):
+    def test_can_handle_cli(self) -> None:
         adapter = CLIAdapter()
         assert adapter.can_handle(_spec(runtime="cli")) is True
 
-    def test_can_handle_rejects_non_cli(self):
+    def test_can_handle_rejects_non_cli(self) -> None:
         adapter = CLIAdapter()
         assert adapter.can_handle(_spec(runtime="native")) is False
 
     @pytest.mark.asyncio
-    async def test_load_creates_handlers_for_tools(self):
+    async def test_load_creates_handlers_for_tools(self) -> None:
         spec = _spec(runtime="cli", tools=(_tool("grep-tool", "grep {pattern}"),))
         adapter = CLIAdapter()
         result = await adapter.load(spec, {})
@@ -406,32 +419,38 @@ class TestCLIAdapter:
         assert callable(result["handlers"]["grep-tool"])
 
     @pytest.mark.asyncio
-    async def test_load_skips_tools_without_handler(self):
+    async def test_load_skips_tools_without_handler(self) -> None:
         spec = _spec(runtime="cli", tools=(_tool_no_handler("empty"),))
         adapter = CLIAdapter()
         result = await adapter.load(spec, {})
         assert "empty" not in result["handlers"]
 
     @pytest.mark.asyncio
-    async def test_healthcheck_checks_shutil_which(self):
+    async def test_healthcheck_checks_shutil_which(self) -> None:
         hc = HealthcheckSpec(type="binary", target="rg")
         spec = _spec(runtime="cli", healthcheck=hc)
         adapter = CLIAdapter()
-        with patch("obscura.plugins.adapters.cli.shutil.which", return_value="/usr/bin/rg"):
+        with patch(
+            "obscura.plugins.adapters.cli.shutil.which",
+            return_value="/usr/bin/rg",
+        ):
             assert await adapter.healthcheck(spec) is True
         with patch("obscura.plugins.adapters.cli.shutil.which", return_value=None):
             assert await adapter.healthcheck(spec) is False
 
     @pytest.mark.asyncio
-    async def test_healthcheck_no_spec_checks_first_tool_binary(self):
+    async def test_healthcheck_no_spec_checks_first_tool_binary(self) -> None:
         spec = _spec(runtime="cli", tools=(_tool("t", "mytool --flag"),))
         adapter = CLIAdapter()
-        with patch("obscura.plugins.adapters.cli.shutil.which", return_value="/usr/bin/mytool") as mock_w:
+        with patch(
+            "obscura.plugins.adapters.cli.shutil.which",
+            return_value="/usr/bin/mytool",
+        ) as mock_w:
             assert await adapter.healthcheck(spec) is True
             mock_w.assert_called_with("mytool")
 
     @pytest.mark.asyncio
-    async def test_healthcheck_no_spec_no_tools_returns_true(self):
+    async def test_healthcheck_no_spec_no_tools_returns_true(self) -> None:
         spec = _spec(runtime="cli", tools=())
         adapter = CLIAdapter()
         assert await adapter.healthcheck(spec) is True
@@ -439,35 +458,46 @@ class TestCLIAdapter:
 
 class TestCLIHandler:
     @pytest.mark.asyncio
-    async def test_cli_handler_success(self):
+    async def test_cli_handler_success(self) -> None:
         handler = _make_cli_handler("echo {msg}", "echo-tool")
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"hello\n", b"")
         mock_proc.returncode = 0
 
-        with patch("obscura.plugins.adapters.cli.asyncio.create_subprocess_shell", return_value=mock_proc):
+        with patch(
+            "obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
+            return_value=mock_proc,
+        ):
             result = await handler(msg="hello")
         assert result == "hello\n"
 
     @pytest.mark.asyncio
-    async def test_cli_handler_failure_raises(self):
+    async def test_cli_handler_failure_raises(self) -> None:
         handler = _make_cli_handler("false", "fail-tool")
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"", b"error msg")
         mock_proc.returncode = 1
 
-        with patch("obscura.plugins.adapters.cli.asyncio.create_subprocess_shell", return_value=mock_proc):
-            with pytest.raises(RuntimeError, match="fail-tool failed"):
-                await handler()
+        with (
+            patch(
+                "obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
+                return_value=mock_proc,
+            ),
+            pytest.raises(RuntimeError, match="fail-tool failed"),
+        ):
+            await handler()
 
     @pytest.mark.asyncio
-    async def test_cli_handler_substitutes_params(self):
+    async def test_cli_handler_substitutes_params(self) -> None:
         handler = _make_cli_handler("grep {pattern} {file}", "grep-tool")
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"match", b"")
         mock_proc.returncode = 0
 
-        with patch("obscura.plugins.adapters.cli.asyncio.create_subprocess_shell", return_value=mock_proc) as mock_sub:
+        with patch(
+            "obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
+            return_value=mock_proc,
+        ) as mock_sub:
             await handler(pattern="foo", file="bar.txt")
         mock_sub.assert_called_once()
         cmd = mock_sub.call_args[0][0]
@@ -481,27 +511,27 @@ class TestCLIHandler:
 
 
 class TestContentAdapter:
-    def test_can_handle_content(self):
+    def test_can_handle_content(self) -> None:
         adapter = ContentAdapter()
         assert adapter.can_handle(_spec(runtime="content")) is True
 
-    def test_can_handle_rejects_non_content(self):
+    def test_can_handle_rejects_non_content(self) -> None:
         adapter = ContentAdapter()
         assert adapter.can_handle(_spec(runtime="native")) is False
 
     @pytest.mark.asyncio
-    async def test_load_returns_empty_handlers(self):
+    async def test_load_returns_empty_handlers(self) -> None:
         adapter = ContentAdapter()
         result = await adapter.load(_spec(runtime="content"), {})
         assert result == {"handlers": {}}
 
     @pytest.mark.asyncio
-    async def test_healthcheck_always_true(self):
+    async def test_healthcheck_always_true(self) -> None:
         adapter = ContentAdapter()
         assert await adapter.healthcheck(_spec(runtime="content")) is True
 
     @pytest.mark.asyncio
-    async def test_teardown_is_noop(self):
+    async def test_teardown_is_noop(self) -> None:
         adapter = ContentAdapter()
         await adapter.teardown(_spec(runtime="content"))  # should not raise
 
@@ -512,11 +542,11 @@ class TestContentAdapter:
 
 
 class TestProtocolConformance:
-    def test_native_adapter_satisfies_protocol(self):
+    def test_native_adapter_satisfies_protocol(self) -> None:
         assert isinstance(NativeAdapter(), PluginAdapter)
 
-    def test_cli_adapter_satisfies_protocol(self):
+    def test_cli_adapter_satisfies_protocol(self) -> None:
         assert isinstance(CLIAdapter(), PluginAdapter)
 
-    def test_content_adapter_satisfies_protocol(self):
+    def test_content_adapter_satisfies_protocol(self) -> None:
         assert isinstance(ContentAdapter(), PluginAdapter)

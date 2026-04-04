@@ -1,17 +1,25 @@
-import pytest
 import uuid
-from pathlib import Path
+
+import pytest
+
 from obscura.notify.sqlite_impl import SQLiteStorage
 from obscura.notify.storage import Message
 
+
 @pytest.mark.asyncio
-async def test_sqlite_storage_basic(tmp_path):
+async def test_sqlite_storage_basic(tmp_path) -> None:
     db = tmp_path / "notify.db"
     url = f"sqlite:///{db}"
     s = SQLiteStorage(url)
     await s.setup()
     mid = str(uuid.uuid4())
-    msg = Message(id=mid, user_id="u1", channel="slack", payload={"text":"hi"}, status="queued")
+    msg = Message(
+        id=mid,
+        user_id="u1",
+        channel="slack",
+        payload={"text": "hi"},
+        status="queued",
+    )
     await s.save_message(msg)
     fetched = await s.get_message(mid)
     assert fetched is not None

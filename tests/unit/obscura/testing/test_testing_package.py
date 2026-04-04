@@ -17,38 +17,37 @@ from obscura.core.types import (
     StreamChunk,
 )
 from obscura.testing import (
+    FakeAssistantMessage,
+    FakeResultMessage,
+    FakeSystemMessage,
+    # Fakes
+    FakeTextBlock,
+    FakeThinkingBlock,
+    FakeToolUseBlock,
     MockBackend,
     MockBackendBuilder,
     StubAgent,
+    async_echo_handler,
+    async_iter,
+    done_chunk,
+    # Tool helpers
+    echo_handler,
+    error_chunk,
+    failing_handler,
+    make_registry,
     make_stub_agent,
+    make_tool,
+    noop_handler,
     # Chunk helpers
     text_chunk,
     text_chunks,
     thinking_chunk,
     thinking_chunks,
     tool_call_chunks,
-    done_chunk,
-    error_chunk,
-    tool_start_chunk,
     tool_delta_chunk,
     tool_end_chunk,
-    # Tool helpers
-    echo_handler,
-    async_echo_handler,
-    failing_handler,
-    noop_handler,
-    make_tool,
-    make_registry,
-    # Fakes
-    FakeTextBlock,
-    FakeThinkingBlock,
-    FakeToolUseBlock,
-    FakeAssistantMessage,
-    FakeResultMessage,
-    FakeSystemMessage,
-    async_iter,
+    tool_start_chunk,
 )
-
 
 # ---------------------------------------------------------------------------
 # Chunk factories
@@ -173,10 +172,12 @@ class TestToolHelpers:
 class TestMockBackend:
     @pytest.mark.asyncio
     async def test_stream_returns_turns(self) -> None:
-        backend = MockBackend([
-            text_chunks("hello"),
-            text_chunks("world"),
-        ])
+        backend = MockBackend(
+            [
+                text_chunks("hello"),
+                text_chunks("world"),
+            ],
+        )
         chunks: list[StreamChunk] = []
         async for c in backend.stream("prompt1"):
             chunks.append(c)
@@ -215,52 +216,32 @@ class TestMockBackendBuilder:
         assert isinstance(backend, MockBackend)
 
     def test_with_turn(self) -> None:
-        backend = (
-            MockBackendBuilder()
-            .with_turn(text_chunks("hello"))
-            .build()
-        )
+        backend = MockBackendBuilder().with_turn(text_chunks("hello")).build()
         assert backend._turns  # noqa: SLF001
 
     def test_with_text(self) -> None:
-        backend = (
-            MockBackendBuilder()
-            .with_text("hi there")
-            .build()
-        )
+        backend = MockBackendBuilder().with_text("hi there").build()
         assert len(backend._turns) == 1  # noqa: SLF001
         assert backend._turns[0][-1].kind == ChunkKind.DONE  # noqa: SLF001
 
     def test_with_tool_call(self) -> None:
-        backend = (
-            MockBackendBuilder()
-            .with_tool_call("read", {"path": "a.py"})
-            .build()
-        )
+        backend = MockBackendBuilder().with_tool_call("read", {"path": "a.py"}).build()
         assert backend._turns[0][0].kind == ChunkKind.TOOL_USE_START  # noqa: SLF001
 
     def test_with_tool(self) -> None:
         spec = make_tool("my_tool")
-        backend = (
-            MockBackendBuilder()
-            .with_tool(spec)
-            .build()
-        )
+        backend = MockBackendBuilder().with_tool(spec).build()
         assert "my_tool" in backend.get_tool_registry()
 
     def test_with_turns(self) -> None:
         backend = (
-            MockBackendBuilder()
-            .with_turns(text_chunks("a"), text_chunks("b"))
-            .build()
+            MockBackendBuilder().with_turns(text_chunks("a"), text_chunks("b")).build()
         )
         assert len(backend._turns) == 2  # noqa: SLF001
 
     def test_with_tools(self) -> None:
         backend = (
-            MockBackendBuilder()
-            .with_tools(make_tool("a"), make_tool("b"))
-            .build()
+            MockBackendBuilder().with_tools(make_tool("a"), make_tool("b")).build()
         )
         assert "a" in backend.get_tool_registry()
         assert "b" in backend.get_tool_registry()
@@ -268,6 +249,7 @@ class TestMockBackendBuilder:
     @pytest.mark.asyncio
     async def test_builder_with_agent_loop(self) -> None:
         """End-to-end: builder → MockBackend → AgentLoop."""
+
         def read_handler(path: str = "") -> str:
             return f"contents of {path}"
 

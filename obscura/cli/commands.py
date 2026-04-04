@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shlex
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from rich.table import Table
 
+from obscura.cli.control_commands import (
+    cmd_heartbeat,
+    cmd_policies,
+    cmd_replay,
+    cmd_status,
+)
 from obscura.cli.render import (
     console,
     print_error,
@@ -22,9 +31,7 @@ from obscura.cli.render import (
     render_diff_summary,
     render_plan,
 )
-from obscura.core.context_window import estimate_tokens as _cw_estimate_tokens
 from obscura.core.client import ObscuraClient
-from obscura.cli.control_commands import cmd_heartbeat, cmd_policies, cmd_replay, cmd_status
 from obscura.core.context_lazy import (
     EVAL_GRADING_PROMPT,
     EvalSuite,
@@ -34,9 +41,16 @@ from obscura.core.context_lazy import (
     SkillMetadata,
     load_eval_for_command,
 )
-from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.context_window import estimate_tokens as _cw_estimate_tokens
+from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.paths import resolve_obscura_skills_dir
 
+if TYPE_CHECKING:
+    from obscura.agent.interaction import (
+        AgentOutput,
+        AttentionRequest,
+    )
+    from obscura.plugins.broker import ToolBroker
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,7 +65,7 @@ def _estimate_tokens(text: str) -> int:
     return _cw_estimate_tokens(text)
 
 
-def _safe_list_tools(ctx: "REPLContext") -> list[Any]:
+def _safe_list_tools(ctx: REPLContext) -> list[Any]:
     """Best-effort tool list retrieval from the active client."""
     try:
         tools = ctx.client.list_tools()
@@ -74,7 +88,7 @@ def _estimate_tool_schema_tokens(tools: list[Any]) -> int:
                 "name": getattr(t, "name", ""),
                 "description": getattr(t, "description", ""),
                 "parameters": getattr(t, "parameters", {}),
-            }
+            },
         )
     return _estimate_tokens(json.dumps(payload, default=str, ensure_ascii=True))
 
@@ -85,7 +99,9 @@ def _estimate_claude_tool_listing_tokens(tools: list[Any]) -> int:
         return 0
 
     lines = ["## Available Tools", ""]
-    lines.append("You have the following tools. Use these EXACT names when calling tools:")
+    lines.append(
+        "You have the following tools. Use these EXACT names when calling tools:",
+    )
     lines.append("")
     for spec in tools:
         desc = str(getattr(spec, "description", "") or "").split("\n")[0][:120]
@@ -96,7 +112,7 @@ def _estimate_claude_tool_listing_tokens(tools: list[Any]) -> int:
 
 
 def estimate_effective_context_breakdown(
-    ctx: "REPLContext",
+    ctx: REPLContext,
     *,
     pending_user_text: str = "",
     include_response_reserve: bool = True,
@@ -117,12 +133,12 @@ def estimate_effective_context_breakdown(
     tools = _safe_list_tools(ctx)
     tool_schema_tokens = _estimate_tool_schema_tokens(tools)
     claude_tool_listing_tokens = (
-        _estimate_claude_tool_listing_tokens(tools)
-        if ctx.backend == "claude"
-        else 0
+        _estimate_claude_tool_listing_tokens(tools) if ctx.backend == "claude" else 0
     )
 
-    response_reserve_tokens = _RESPONSE_RESERVE_TOKENS if include_response_reserve else 0
+    response_reserve_tokens = (
+        _RESPONSE_RESERVE_TOKENS if include_response_reserve else 0
+    )
 
     total = (
         system_tokens
@@ -144,7 +160,7 @@ def estimate_effective_context_breakdown(
 
 
 def estimate_effective_context_tokens(
-    ctx: "REPLContext",
+    ctx: REPLContext,
     *,
     pending_user_text: str = "",
     include_response_reserve: bool = True,
@@ -168,7 +184,7 @@ _FILE_WRITE_TOOLS = frozenset(
         "create_text_file",
         "patch_file",
         "overwrite_file",
-    }
+    },
 )
 
 
@@ -201,7 +217,8 @@ class REPLContext:
     # File change tracking for /diff (path -> {path, original, modified})
     _file_changes: list[dict[str, str]] = field(default_factory=list, repr=False)
     _pending_file_reads: dict[str, tuple[str, str]] = field(
-        default_factory=dict, repr=False
+        default_factory=dict,
+        repr=False,
     )
 
     # Mode manager (lazy)
@@ -259,10 +276,6 @@ class REPLContext:
         """Get or create the AgentRuntime, wiring InteractionBus to CLI."""
         if self._runtime is None:
             from obscura.agent.agents import AgentRuntime
-            from obscura.agent.interaction import (
-                AgentOutput,
-                AttentionRequest,
-            )
             from obscura.auth.models import AuthenticatedUser
 
             user = AuthenticatedUser(
@@ -323,15 +336,19 @@ class REPLContext:
         )
         await new_client.start()
         if self.tools_enabled:
-            from obscura.tools.system import get_system_tool_specs
             from obscura.cli.app.modes import MODE_TOOL_GROUPS
+            from obscura.tools.system import get_system_tool_specs
+
             all_specs = get_system_tool_specs()
             mm = self._mode_manager
             mode_allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
             # Also apply capability-based filtering from config.toml
             cap_allowed: set[str] | None = None
             try:
-                from obscura.plugins.capabilities import resolve_allowed_tools_from_config
+                from obscura.plugins.capabilities import (
+                    resolve_allowed_tools_from_config,
+                )
+
                 cap_allowed = resolve_allowed_tools_from_config()
             except Exception:
                 pass
@@ -350,11 +367,9 @@ class REPLContext:
 
     def add_file_change(self, path: str, original: str, modified: str) -> None:
         """Track a file change for /diff. Dedupes by path."""
-        self._file_changes = [
-            c for c in self._file_changes if c["path"] != path
-        ]
+        self._file_changes = [c for c in self._file_changes if c["path"] != path]
         self._file_changes.append(
-            {"path": path, "original": original, "modified": modified}
+            {"path": path, "original": original, "modified": modified},
         )
 
     def _get_skill_loader(self) -> LazySkillLoader:
@@ -418,7 +433,10 @@ class REPLContext:
 
     # ── $skill helpers ───────────────────────────────────────────────────
 
-    _dollar_skill_loaders: list[LazySkillLoader] | None = field(default=None, repr=False)
+    _dollar_skill_loaders: list[LazySkillLoader] | None = field(
+        default=None,
+        repr=False,
+    )
 
     def _get_all_skill_loaders(self) -> list[LazySkillLoader]:
         """Get or create skill loaders for all skill directories."""
@@ -434,6 +452,7 @@ class REPLContext:
         """Return built-in default skills as {name: content}."""
         try:
             from obscura.core._default_skills import DEFAULT_SKILLS
+
             return DEFAULT_SKILLS
         except ImportError:
             return {}
@@ -494,7 +513,11 @@ class REPLContext:
         """Return sorted list of available @command names."""
         return self._get_command_loader().command_names()
 
-    def resolve_at_command(self, name: str, arguments: str = "") -> ResolvedCommand | None:
+    def resolve_at_command(
+        self,
+        name: str,
+        arguments: str = "",
+    ) -> ResolvedCommand | None:
         """Resolve an @command by name with argument substitution."""
         return self._get_command_loader().resolve_command(name, arguments)
 
@@ -543,10 +566,14 @@ class REPLContext:
         return load_eval_for_command(cmd)
 
     def build_grading_prompt(
-        self, command_name: str, input_args: str, response: str, criteria: list[str],
+        self,
+        command_name: str,
+        input_args: str,
+        response: str,
+        criteria: list[str],
     ) -> str:
         """Build a grading prompt for the eval system."""
-        criteria_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(criteria))
+        criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria))
         return EVAL_GRADING_PROMPT.format(
             command=command_name,
             input=input_args,
@@ -687,7 +714,7 @@ async def cmd_clear(_args: str, _ctx: REPLContext) -> str | None:
 
 
 async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
-    """Display file contents with syntax highlighting. Usage: /cat <path>"""
+    """Display file contents with syntax highlighting. Usage: /cat <path>."""
     filepath = args.strip()
     if not filepath:
         print_error("Usage: /cat <path>")
@@ -718,7 +745,7 @@ async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
     from rich.syntax import Syntax
 
     suffix = target.suffix.lstrip(".")
-    lexer = suffix if suffix else "text"
+    lexer = suffix or "text"
     try:
         syntax = Syntax(
             text,
@@ -736,7 +763,7 @@ async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
 
 
 async def cmd_tail_trace(args: str, _ctx: REPLContext) -> str | None:
-    """Tail recent JSONL trace entries (from logs/trace.log). Usage: /tail-trace [n]"""
+    """Tail recent JSONL trace entries (from logs/trace.log). Usage: /tail-trace [n]."""
     try:
         n = int(args.strip()) if args.strip() else 50
     except Exception:
@@ -767,7 +794,7 @@ async def cmd_backend(args: str, ctx: REPLContext) -> str | None:
         return None
     if name not in ("copilot", "claude", "codex"):
         print_error(
-            f"Unknown backend: {name}. Use 'copilot', 'claude', or 'codex'."
+            f"Unknown backend: {name}. Use 'copilot', 'claude', or 'codex'.",
         )
         return None
     if name == ctx.backend:
@@ -829,6 +856,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
                 print_info("No tools registered.")
                 return None
             from obscura.cli.render import TOOL_COLOR
+
             table = Table(title="Registered Tools", expand=False)
             table.add_column("#", justify="right", style="dim", width=4)
             table.add_column("status", width=3, justify="center")
@@ -838,7 +866,9 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
                 desc = getattr(t, "description", "") or ""
                 if len(desc) > 55:
                     desc = desc[:52] + "..."
-                status = "[red]off[/]" if registry.is_disabled(t.name) else "[green]on[/]"
+                status = (
+                    "[red]off[/]" if registry.is_disabled(t.name) else "[green]on[/]"
+                )
                 table.add_row(str(i), status, t.name, desc)
             console.print(table)
         except Exception as exc:
@@ -903,7 +933,12 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
         print_info(f"Mode: {mm.current.value}")
         return None
 
-    mode_map = {"ask": TUIMode.ASK, "plan": TUIMode.PLAN, "code": TUIMode.CODE, "diff": TUIMode.DIFF}
+    mode_map = {
+        "ask": TUIMode.ASK,
+        "plan": TUIMode.PLAN,
+        "code": TUIMode.CODE,
+        "diff": TUIMode.DIFF,
+    }
     mode = mode_map.get(val)
     if mode is None:
         print_error("Usage: /mode ask|plan|code|diff")
@@ -913,6 +948,7 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
 
     # Enable tools for any mode that has a non-empty capability group
     from obscura.cli.app.modes import MODE_TOOL_GROUPS
+
     allowed = MODE_TOOL_GROUPS.get(mode)
     ctx.tools_enabled = allowed is None or len(allowed) > 0
 
@@ -1025,7 +1061,10 @@ async def cmd_diff(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _diff_accept_reject(
-    val: str, ctx: REPLContext, *, accept: bool
+    val: str,
+    ctx: REPLContext,
+    *,
+    accept: bool,
 ) -> str | None:
     """Accept or reject hunks."""
     from obscura.cli.app.diff_engine import DiffEngine
@@ -1039,7 +1078,9 @@ async def _diff_accept_reject(
     all_hunks = []
     for fc in ctx._file_changes:
         diff_fc = engine.compute_change(
-            Path(fc["path"]), fc["original"], fc["modified"]
+            Path(fc["path"]),
+            fc["original"],
+            fc["modified"],
         )
         for h in diff_fc.hunks:
             all_hunks.append((fc, h))
@@ -1064,10 +1105,11 @@ async def _diff_accept_reject(
 
 async def _diff_side_by_side(ctx: REPLContext) -> str | None:
     """Render side-by-side diff overlay for all file changes."""
-    from obscura.cli.app.diff_engine import DiffEngine
     from rich.panel import Panel
-    from rich.text import Text
     from rich.syntax import Syntax
+    from rich.text import Text
+
+    from obscura.cli.app.diff_engine import DiffEngine
 
     if not ctx._file_changes:
         print_info("No file changes to display.")
@@ -1096,19 +1138,21 @@ async def _diff_side_by_side(ctx: REPLContext) -> str | None:
 
         # Render with Rich panel + syntax highlighting.
         console.print()
-        console.print(Panel(
-            Text(sbs_text),
-            title=f"[bold]{path}[/] — {stats}",
-            subtitle="[dim]/diff accept|reject to manage hunks[/]",
-            border_style="cyan",
-            expand=False,
-            padding=(0, 1),
-        ))
+        console.print(
+            Panel(
+                Text(sbs_text),
+                title=f"[bold]{path}[/] — {stats}",
+                subtitle="[dim]/diff accept|reject to manage hunks[/]",
+                border_style="cyan",
+                expand=False,
+                padding=(0, 1),
+            ),
+        )
 
     # Also show unified diff with syntax highlighting for each file.
     for fc in ctx._file_changes:
         unified = engine.format_unified(
-            engine.compute_change(Path(fc["path"]), fc["original"], fc["modified"])
+            engine.compute_change(Path(fc["path"]), fc["original"], fc["modified"]),
         )
         if unified.strip():
             console.print(Syntax(unified, "diff", theme="monokai", line_numbers=False))
@@ -1128,7 +1172,9 @@ async def _diff_apply(ctx: REPLContext) -> str | None:
     applied = 0
     for fc in ctx._file_changes:
         diff_fc = engine.compute_change(
-            Path(fc["path"]), fc["original"], fc["modified"]
+            Path(fc["path"]),
+            fc["original"],
+            fc["modified"],
         )
         accepted = [h for h in diff_fc.hunks if h.status == "accepted"]
         if not accepted:
@@ -1163,11 +1209,11 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
         "  "
         f"system={breakdown['system_tokens']:,} "
         f"history={breakdown['history_tokens']:,} "
-        f"tools={breakdown['tool_schema_tokens']:,}"
+        f"tools={breakdown['tool_schema_tokens']:,}",
     )
     if breakdown["claude_tool_listing_tokens"]:
         console.print(
-            f"  claude_tool_listing={breakdown['claude_tool_listing_tokens']:,}"
+            f"  claude_tool_listing={breakdown['claude_tool_listing_tokens']:,}",
         )
     console.print(f"  response_reserve={breakdown['response_reserve_tokens']:,}")
     mm = ctx.get_mode_manager()
@@ -1175,9 +1221,11 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
     # Visual context usage bar.
     try:
         from obscura.core.context_window import get_context_window
+
         cw = get_context_window(ctx.model or "default")
         usage_pct = tokens / cw if cw > 0 else 0.0
         from obscura.cli.tui_effects import context_bar
+
         console.print(f"  Context: {context_bar(usage_pct)}")
     except Exception:
         pass
@@ -1188,9 +1236,10 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_thinking(_args: str, _ctx: REPLContext) -> str | None:
     """Show expanded thinking/reasoning blocks from the last response."""
-    from obscura.cli.render import _active_renderer, console, THINKING_COLOR
     from rich.panel import Panel
     from rich.text import Text
+
+    from obscura.cli.render import THINKING_COLOR, _active_renderer, console
 
     renderer = _active_renderer
     if renderer is None:
@@ -1211,7 +1260,7 @@ async def cmd_thinking(_args: str, _ctx: REPLContext) -> str | None:
                 border_style="dim magenta",
                 expand=False,
                 padding=(0, 1),
-            )
+            ),
         )
     console.print(f"[dim]{len(blocks)} thinking block(s)[/]")
     return None
@@ -1277,7 +1326,6 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     # Store extracted memories if any.
     if extracted_memories:
         try:
-            from obscura.memory import MemoryStore
             # Store in default memory namespace.
             for mem in extracted_memories[:10]:
                 key = mem.get("key", "")
@@ -1297,11 +1345,13 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     await ctx.recreate_client(ctx.backend, ctx.model)
 
     after = estimate_effective_context_tokens(ctx)
-    mem_note = f", {len(extracted_memories)} memories extracted" if extracted_memories else ""
+    mem_note = (
+        f", {len(extracted_memories)} memories extracted" if extracted_memories else ""
+    )
     print_ok(
         f"Compacted: dropped {dropped} messages, "
         f"~{max(0, before - after):,} tokens freed{mem_note}. "
-        f"New session: {ctx.session_id[:12]}"
+        f"New session: {ctx.session_id[:12]}",
     )
     return None
 
@@ -1309,10 +1359,13 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
 async def cmd_jitter(args: str, _ctx: REPLContext) -> str | None:
     """Show or set the reasoning jitter delay (OBSCURA_REASONING_JITTER_MS)."""
     import os as _os
+
     val = args.strip()
     if not val:
         current = _os.environ.get("OBSCURA_REASONING_JITTER_MS", "0")
-        print_info(f"Reasoning jitter: {current}ms  (set with /jitter <ms> or /jitter off)")
+        print_info(
+            f"Reasoning jitter: {current}ms  (set with /jitter <ms> or /jitter off)",
+        )
         return None
     if val == "off":
         _os.environ["OBSCURA_REASONING_JITTER_MS"] = "0"
@@ -1421,7 +1474,7 @@ def _session_print_table(
     if other:
         style = "bold dim" if active else "bold"
         console.print(
-            _build_table(other[:10], f"Completed ({len(other)})", style)
+            _build_table(other[:10], f"Completed ({len(other)})", style),
         )
 
 
@@ -1493,7 +1546,7 @@ async def _session_switch_by_id(
     if len(matches) > 1:
         print_warning(
             f"Ambiguous prefix '{partial_id}' — matches "
-            f"{len(matches)} sessions. Be more specific."
+            f"{len(matches)} sessions. Be more specific.",
         )
         for m in matches[:5]:
             console.print(f"  [cyan]{m.id[:12]}[/] · {m.status.value}")
@@ -1625,7 +1678,7 @@ async def cmd_agent(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
-    """Spawn agent from manifest. Usage: /agent spawn <name> [-m model] [-s system_prompt]"""
+    """Spawn agent from manifest. Usage: /agent spawn <name> [-m model] [-s system_prompt]."""
     tokens = shlex.split(args) if args else []
     if not tokens:
         print_error("Usage: /agent spawn <name> [-m model] [-s system_prompt]")
@@ -1650,8 +1703,8 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # Load manifest from merged agents config (global-wins, local adds)
-    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
     from obscura.manifest.models import AgentManifest  # noqa: PLC0415
+    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
 
     manifest_loaded = False
 
@@ -1665,7 +1718,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                 if cfg.get("type") == "daemon":
                     print_warning(
                         f"'{name}' is a daemon agent (auto-started at session start). "
-                        "Use /agent list to see running daemons."
+                        "Use /agent list to see running daemons.",
                     )
                     return None
 
@@ -1680,11 +1733,14 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                     provider=model_override
                     or cfg.get("provider")
                     or cfg.get("model", ctx.backend),
-                    system_prompt=system_prompt_override or cfg.get("system_prompt", ""),
+                    system_prompt=system_prompt_override
+                    or cfg.get("system_prompt", ""),
                     max_turns=cfg.get("max_turns", 10),
                     tools=cfg.get("tools", []),
                     tags=cfg.get("tags", []),
-                    mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
+                    mcp_servers=cfg.get("mcp_servers", [])
+                    if isinstance(cfg.get("mcp_servers"), list)
+                    else [],
                     skills_config=skills_cfg,
                 )
 
@@ -1696,7 +1752,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                 await agent.start()
                 print_ok(
                     f"Spawned {name} from manifest (id: {agent.id[:12]}, "
-                    f"max_turns: {cfg.get('max_turns', 10)})"
+                    f"max_turns: {cfg.get('max_turns', 10)})",
                 )
                 manifest_loaded = True
                 return None
@@ -1708,7 +1764,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     if not manifest_loaded:
         print_warning(
             f"No manifest found for '{name}' in {agents_file}. "
-            "Using SDK defaults (no skill filters, tool restrictions, or limits)."
+            "Using SDK defaults (no skill filters, tool restrictions, or limits).",
         )
         agent = runtime.spawn(
             name,
@@ -1758,7 +1814,7 @@ async def _agent_stop(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _agent_run(args: str, ctx: REPLContext) -> str | None:
-    """Run a prompt on an agent. Usage: /agent run <id|name> <prompt>"""
+    """Run a prompt on an agent. Usage: /agent run <id|name> <prompt>."""
     parts = args.strip().split(None, 1)
     if len(parts) < 2:
         print_error("Usage: /agent run <id|name> <prompt>")
@@ -1782,14 +1838,6 @@ async def _agent_run(args: str, ctx: REPLContext) -> str | None:
     except Exception as exc:
         print_error(str(exc))
     return None
-
-
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -1837,7 +1885,7 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
     if not tokens:
         print_info(
             "Usage: /delegate [--mode once|loop] [--max-turns N] [--passes N] "
-            "[--done-if TEXT] <task_type|--model MODEL> <prompt>"
+            "[--done-if TEXT] <task_type|--model MODEL> <prompt>",
         )
         return None
     model: str | None = None
@@ -1901,12 +1949,16 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
     agent_name = "delegate-" + (task_type or model) + "-" + uuid.uuid4().hex[:6]
     runtime = await ctx.get_runtime()
     agent = runtime.spawn(
-        agent_name, model=model,
-        system_prompt="You are a specialized " + (task_type or model) + " subagent. Complete the task concisely.",
+        agent_name,
+        model=model,
+        system_prompt="You are a specialized "
+        + (task_type or model)
+        + " subagent. Complete the task concisely.",
     )
     await agent.start()
     print_info("=> Delegating to [" + model + "] in " + mode + " mode...")
     from obscura.cli.render import render_event
+
     collected_output: list[str] = []
     try:
         if mode == "once":
@@ -1938,7 +1990,7 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
                     print_warning(
                         "Delegate did not meet completion criteria within "
                         + str(max_passes)
-                        + " passes."
+                        + " passes.",
                     )
                     break
                 print_info("Completion criteria unmet; continuing delegate pass...")
@@ -1953,15 +2005,14 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
         print_error("Delegation failed: " + str(exc))
         return None
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await agent.stop()
-        except Exception:
-            pass
     if collected_output and ctx.client and hasattr(ctx.client, "inject_context"):
         summary = "\n".join(collected_output)
         ctx.client.inject_context("[Delegated to " + model + "]\n" + summary)
         print_ok("Injected " + str(len(summary)) + " chars into context")
     return None
+
 
 # ---------------------------------------------------------------------------
 # Handlers — interaction bus (attention requests)
@@ -1973,7 +2024,7 @@ async def cmd_attention(args: str, ctx: REPLContext) -> str | None:
     parts = args.strip().split(None, 2)
     sub = parts[0] if parts else ""
 
-    if sub == "respond" or sub == "r":
+    if sub in {"respond", "r"}:
         # /attention respond <request_id_prefix> <action> [text]
         if len(parts) < 3:
             print_error("Usage: /attention respond <id> <action> [text]")
@@ -2045,7 +2096,7 @@ async def cmd_fleet(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
-    """Spawn multiple agents. Usage: /fleet spawn <name1> [name2...] [-m model]"""
+    """Spawn multiple agents. Usage: /fleet spawn <name1> [name2...] [-m model]."""
     tokens = shlex.split(args) if args else []
     if not tokens:
         print_error("Usage: /fleet spawn <name1> [name2...] [-m model]")
@@ -2069,8 +2120,8 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # Load merged agent configs once outside the loop (global-wins, local adds)
-    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
     from obscura.manifest.models import AgentManifest  # noqa: PLC0415
+    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
 
     all_agent_configs = load_agent_configs(include_disabled=True)
 
@@ -2085,12 +2136,16 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
                     s_cfg = {}
                 manifest = AgentManifest(
                     name=cfg.get("name", name),
-                    provider=model or cfg.get("provider") or cfg.get("model", ctx.backend),
+                    provider=model
+                    or cfg.get("provider")
+                    or cfg.get("model", ctx.backend),
                     system_prompt=cfg.get("system_prompt", ""),
                     max_turns=cfg.get("max_turns", 10),
                     tools=cfg.get("tools", []),
                     tags=cfg.get("tags", []),
-                    mcp_servers=cfg.get("mcp_servers", []) if isinstance(cfg.get("mcp_servers"), list) else [],
+                    mcp_servers=cfg.get("mcp_servers", [])
+                    if isinstance(cfg.get("mcp_servers"), list)
+                    else [],
                     skills_config=s_cfg,
                 )
                 agent = runtime.spawn_from_manifest(
@@ -2181,7 +2236,7 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
     if len(tokens) < 2:
         print_error(
             "Usage: /fleet delegate <agent> [--mode once|loop] "
-            "[--max-turns N] [--passes N] [--done-if TEXT] <prompt>"
+            "[--max-turns N] [--passes N] [--done-if TEXT] <prompt>",
         )
         return None
     target = tokens[0]
@@ -2227,7 +2282,7 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
     if not prompt_tokens:
         print_error(
             "Usage: /fleet delegate <agent> [--mode once|loop] "
-            "[--max-turns N] [--passes N] [--done-if TEXT] <prompt>"
+            "[--max-turns N] [--passes N] [--done-if TEXT] <prompt>",
         )
         return None
     if mode == "once" and done_if:
@@ -2271,7 +2326,7 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
                     print_warning(
                         "Delegate did not meet completion criteria within "
                         + str(max_passes)
-                        + " passes."
+                        + " passes.",
                     )
                     break
                 print_info("Completion criteria unmet; continuing delegate pass...")
@@ -2295,7 +2350,7 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _fleet_stop(args: str, ctx: REPLContext) -> str | None:
-    """Stop fleet agents. Usage: /fleet stop [name|all]"""
+    """Stop fleet agents. Usage: /fleet stop [name|all]."""
     target = args.strip()
     runtime = await ctx.get_runtime()
     agents = runtime.list_agents()
@@ -2309,7 +2364,9 @@ async def _fleet_stop(args: str, ctx: REPLContext) -> str | None:
             await a.stop()
         print_ok(f"Stopped {len(agents)} agents.")
     else:
-        matches = [a for a in agents if a.config.name == target or a.id.startswith(target)]
+        matches = [
+            a for a in agents if a.config.name == target or a.id.startswith(target)
+        ]
         if not matches:
             print_error(f"Agent not found: {target}")
             return None
@@ -2327,6 +2384,7 @@ async def _fleet_stop(args: str, ctx: REPLContext) -> str | None:
 @dataclass
 class _SwarmAssignment:
     """A single agent assignment from the swarm planning step."""
+
     agent_name: str
     prompt: str
     rationale: str
@@ -2335,34 +2393,85 @@ class _SwarmAssignment:
 # Keyword → agent mapping for fast (no-LLM) planning
 _SWARM_KEYWORD_MAP: list[tuple[list[str], str, str]] = [
     # (keywords, agent_name, rationale)
-    (["code", "implement", "write", "function", "class", "module", "refactor", "feature"],
-     "code-architect", "Code implementation task"),
-    (["python", "pip", "pytest", "type hint", "pep", "dataclass", "pydantic"],
-     "python-dev", "Python-specific task"),
-    (["test", "unit test", "coverage", "assert", "mock", "fixture"],
-     "python-dev", "Testing task"),
-    (["bug", "fix", "error", "crash", "traceback", "debug", "breakpoint"],
-     "debugger", "Debugging task"),
-    (["review", "pr", "pull request", "code review", "lint"],
-     "github-pr-reviewer", "Code review task"),
-    (["security", "vuln", "cve", "auth", "xss", "injection", "pentest"],
-     "security-researcher", "Security analysis task"),
-    (["deploy", "docker", "k8s", "ci", "cd", "pipeline", "infra", "terraform"],
-     "devops-engineer", "Infrastructure/DevOps task"),
-    (["research", "analyze", "investigate", "compare", "benchmark"],
-     "research-analyst", "Research/analysis task"),
-    (["doc", "readme", "api doc", "changelog", "tutorial"],
-     "technical-writer", "Documentation task"),
-    (["design", "ux", "ui", "wireframe", "mockup", "layout"],
-     "ux-designer", "Design task"),
-    (["data", "ml", "model", "dataset", "train", "predict", "pandas"],
-     "data-scientist", "Data science task"),
-    (["prompt", "system prompt", "instruct"],
-     "prompt-engineer", "Prompt engineering task"),
-    (["product", "prd", "roadmap", "prioritize", "stakeholder"],
-     "product-manager", "Product management task"),
-    (["content", "blog", "copy", "seo", "marketing"],
-     "content-writer", "Content creation task"),
+    (
+        [
+            "code",
+            "implement",
+            "write",
+            "function",
+            "class",
+            "module",
+            "refactor",
+            "feature",
+        ],
+        "code-architect",
+        "Code implementation task",
+    ),
+    (
+        ["python", "pip", "pytest", "type hint", "pep", "dataclass", "pydantic"],
+        "python-dev",
+        "Python-specific task",
+    ),
+    (
+        ["test", "unit test", "coverage", "assert", "mock", "fixture"],
+        "python-dev",
+        "Testing task",
+    ),
+    (
+        ["bug", "fix", "error", "crash", "traceback", "debug", "breakpoint"],
+        "debugger",
+        "Debugging task",
+    ),
+    (
+        ["review", "pr", "pull request", "code review", "lint"],
+        "github-pr-reviewer",
+        "Code review task",
+    ),
+    (
+        ["security", "vuln", "cve", "auth", "xss", "injection", "pentest"],
+        "security-researcher",
+        "Security analysis task",
+    ),
+    (
+        ["deploy", "docker", "k8s", "ci", "cd", "pipeline", "infra", "terraform"],
+        "devops-engineer",
+        "Infrastructure/DevOps task",
+    ),
+    (
+        ["research", "analyze", "investigate", "compare", "benchmark"],
+        "research-analyst",
+        "Research/analysis task",
+    ),
+    (
+        ["doc", "readme", "api doc", "changelog", "tutorial"],
+        "technical-writer",
+        "Documentation task",
+    ),
+    (
+        ["design", "ux", "ui", "wireframe", "mockup", "layout"],
+        "ux-designer",
+        "Design task",
+    ),
+    (
+        ["data", "ml", "model", "dataset", "train", "predict", "pandas"],
+        "data-scientist",
+        "Data science task",
+    ),
+    (
+        ["prompt", "system prompt", "instruct"],
+        "prompt-engineer",
+        "Prompt engineering task",
+    ),
+    (
+        ["product", "prd", "roadmap", "prioritize", "stakeholder"],
+        "product-manager",
+        "Product management task",
+    ),
+    (
+        ["content", "blog", "copy", "seo", "marketing"],
+        "content-writer",
+        "Content creation task",
+    ),
 ]
 
 
@@ -2461,19 +2570,21 @@ async def _swarm_plan_smart(
 
     items = json.loads(raw)
     if not isinstance(items, list):
-        raise ValueError("Expected JSON array from planner")
+        msg = "Expected JSON array from planner"
+        raise ValueError(msg)
 
     assignments: list[_SwarmAssignment] = []
     for item in items:
         name = item.get("agent_name", "assistant")
-        if name not in agent_configs:
-            if "assistant" in agent_configs:
-                name = "assistant"
-        assignments.append(_SwarmAssignment(
-            agent_name=name,
-            prompt=item.get("prompt", task),
-            rationale=item.get("rationale", ""),
-        ))
+        if name not in agent_configs and "assistant" in agent_configs:
+            name = "assistant"
+        assignments.append(
+            _SwarmAssignment(
+                agent_name=name,
+                prompt=item.get("prompt", task),
+                rationale=item.get("rationale", ""),
+            ),
+        )
     return assignments
 
 
@@ -2498,7 +2609,9 @@ async def _swarm_run_agent(
                 s_cfg = {}
             manifest = AgentManifest(
                 name=cfg["name"],
-                provider=model_override or cfg.get("provider") or cfg.get("model", ctx.backend),
+                provider=model_override
+                or cfg.get("provider")
+                or cfg.get("model", ctx.backend),
                 system_prompt=cfg.get("system_prompt", ""),
                 max_turns=cfg.get("max_turns", 25),
                 tools=cfg.get("tools", []),
@@ -2538,10 +2651,8 @@ async def _swarm_run_agent(
 
     finally:
         if agent is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await agent.stop()
-            except Exception:
-                pass
 
 
 async def _swarm_synthesize(
@@ -2550,9 +2661,7 @@ async def _swarm_synthesize(
     ctx: REPLContext,
 ) -> str:
     """Synthesize agent results using the session LLM."""
-    agent_results = "\n\n".join(
-        f"### {name}\n{output}" for name, output in results
-    )
+    agent_results = "\n\n".join(f"### {name}\n{output}" for name, output in results)
     prompt = _SWARM_SYNTH_PROMPT.format(task=task, agent_results=agent_results)
     try:
         message = await ctx.client.send(prompt)
@@ -2596,9 +2705,7 @@ async def _swarm_background(
         if synthesize and len(results) > 1:
             summary = await _swarm_synthesize(task, results, ctx)
         else:
-            summary = "\n\n".join(
-                f"## {name}\n{output}" for name, output in results
-            )
+            summary = "\n\n".join(f"## {name}\n{output}" for name, output in results)
 
         run["summary"] = summary
         run["status"] = "done"
@@ -2606,7 +2713,7 @@ async def _swarm_background(
         # Inject into context
         if summary and ctx.client and hasattr(ctx.client, "inject_context"):
             ctx.client.inject_context(
-                f"[Swarm results for: {task[:80]}]\n{summary}"
+                f"[Swarm results for: {task[:80]}]\n{summary}",
             )
 
         # Notify user
@@ -2640,7 +2747,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
             "  /swarm results [id]      Show results\n"
             "  /swarm stop [id|all]     Cancel swarm(s)\n"
             "\n"
-            "Flags: --model MODEL  --no-synth  --smart"
+            "Flags: --model MODEL  --no-synth  --smart",
         )
         return None
 
@@ -2796,13 +2903,13 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
             model_override=model_override,
             synthesize=synthesize,
             ctx=ctx,
-        )
+        ),
     )
     run_state["_task"] = bg_task
 
     print_ok(
         f"Swarm [{swarm_id}] launched with {len(assignments)} agents — "
-        "prompt is free. Use /swarm status or /swarm results to check."
+        "prompt is free. Use /swarm status or /swarm results to check.",
     )
     return None
 
@@ -2851,7 +2958,7 @@ async def cmd_discover(args: str, ctx: REPLContext) -> str | None:
         console.print(table)
         console.print("\n[dim]Usage: /discover [category] [limit][/]")
         console.print(
-            "[dim]Categories: web, filesystem, git, database, ai, cloud, search[/]\n"
+            "[dim]Categories: web, filesystem, git, database, ai, cloud, search[/]\n",
         )
     except Exception as exc:
         print_error(f"Discovery failed: {exc}")
@@ -2901,7 +3008,8 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     sub = tokens[0]
 
     try:
-        from obscura.plugins.registry import PluginRegistryService, PluginEntry
+        from obscura.plugins.registry import PluginEntry, PluginRegistryService
+
         registry = PluginRegistryService()
     except Exception:
         print_error("Plugin management not available.")
@@ -2913,6 +3021,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
         # Include discovered builtins that aren't in the registry
         try:
             from obscura.plugins.loader import PluginLoader
+
             loader = PluginLoader()
             registered_ids = {p.id for p in plugins}
             for spec in loader.discover_builtins():
@@ -2928,13 +3037,14 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             return None
         for p in plugins:
             status_color = {"enabled": "green", "disabled": "dim", "failed": "red"}.get(
-                p.state, "yellow"
+                p.state,
+                "yellow",
             )
             console.print(
                 f"  • [cyan]{p.id}[/] "
                 f"v{p.version} "
                 f"[{status_color}]{p.state}[/] "
-                f"— {p.description[:60]}"
+                f"— {p.description[:60]}",
             )
         return None
 
@@ -2966,7 +3076,9 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             print_error("Usage: /plugin enable <id>")
             return None
         ok = registry.enable(tokens[1])
-        print_ok(f"Enabled {tokens[1]}") if ok else print_error(f"Cannot enable {tokens[1]}")
+        print_ok(f"Enabled {tokens[1]}") if ok else print_error(
+            f"Cannot enable {tokens[1]}",
+        )
         return None
 
     if sub == "disable":
@@ -2974,7 +3086,9 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             print_error("Usage: /plugin disable <id>")
             return None
         ok = registry.disable(tokens[1])
-        print_ok(f"Disabled {tokens[1]}") if ok else print_error(f"Cannot disable {tokens[1]}")
+        print_ok(f"Disabled {tokens[1]}") if ok else print_error(
+            f"Cannot disable {tokens[1]}",
+        )
         return None
 
     if sub == "info":
@@ -2991,7 +3105,9 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
         if contribs.get("capabilities"):
             console.print(f"  Capabilities: {', '.join(contribs['capabilities'])}")
         if contribs.get("tools"):
-            console.print(f"  Tools ({len(contribs['tools'])}): {', '.join(contribs['tools'][:10])}")
+            console.print(
+                f"  Tools ({len(contribs['tools'])}): {', '.join(contribs['tools'][:10])}",
+            )
         if contribs.get("workflows"):
             console.print(f"  Workflows: {', '.join(contribs['workflows'])}")
         return None
@@ -3001,11 +3117,19 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
         for p in plugins:
             status = p.get("status", "unknown")
             icon = "✓" if status == "enabled" else "✗" if status == "failed" else "○"
-            color = "green" if status == "enabled" else "red" if status == "failed" else "dim"
+            color = (
+                "green"
+                if status == "enabled"
+                else "red"
+                if status == "failed"
+                else "dim"
+            )
             console.print(f"  {icon} [{color}]{p.get('id', '?')}[/] — {status}")
         return None
 
-    print_info("Unknown subcommand. Usage: /plugin [list|install|remove|enable|disable|info|health]")
+    print_info(
+        "Unknown subcommand. Usage: /plugin [list|install|remove|enable|disable|info|health]",
+    )
     return None
 
 
@@ -3049,10 +3173,10 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
             plugins = ", ".join(pack.spec.plugins) if pack.spec.plugins else "none"
             policies = ", ".join(pack.spec.policies) if pack.spec.policies else "none"
             console.print(
-                f"  • [cyan]{name}[/] — {pack.metadata.description[:60]}"
+                f"  • [cyan]{name}[/] — {pack.metadata.description[:60]}",
             )
             console.print(
-                f"    plugins: [dim]{plugins}[/]  policies: [dim]{policies}[/]"
+                f"    plugins: [dim]{plugins}[/]  policies: [dim]{policies}[/]",
             )
         return None
 
@@ -3090,9 +3214,13 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
         if pack.spec.policies:
             console.print(f"  Policies: {', '.join(pack.spec.policies)}")
         if pack.spec.capabilities.grant:
-            console.print(f"  Capabilities (grant): {', '.join(pack.spec.capabilities.grant)}")
+            console.print(
+                f"  Capabilities (grant): {', '.join(pack.spec.capabilities.grant)}",
+            )
         if pack.spec.capabilities.deny:
-            console.print(f"  Capabilities (deny): {', '.join(pack.spec.capabilities.deny)}")
+            console.print(
+                f"  Capabilities (deny): {', '.join(pack.spec.capabilities.deny)}",
+            )
         if pack.spec.config:
             console.print(f"  Config: {pack.spec.config}")
         if pack.spec.instructions.strip():
@@ -3163,7 +3291,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
 
     if not tokens:
         print_info(
-            "Usage: /inspect [workspace|agent|capability|pack] <name>"
+            "Usage: /inspect [workspace|agent|capability|pack] <name>",
         )
         return None
 
@@ -3189,9 +3317,13 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
         if ws.packs:
             console.print(f"  Packs: {', '.join(ws.packs)}")
         if ws.plugin_include:
-            console.print(f"  Plugins (include): {', '.join(sorted(ws.plugin_include))}")
+            console.print(
+                f"  Plugins (include): {', '.join(sorted(ws.plugin_include))}",
+            )
         if ws.plugin_exclude:
-            console.print(f"  Plugins (exclude): {', '.join(sorted(ws.plugin_exclude))}")
+            console.print(
+                f"  Plugins (exclude): {', '.join(sorted(ws.plugin_exclude))}",
+            )
         console.print(f"  Preload plugins: {ws.preload_plugins}")
         if ws.startup_agents:
             console.print(f"  Startup agents: {', '.join(ws.startup_agents)}")
@@ -3215,7 +3347,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             console.print(
                 f"\n  [bold]Memory:[/] namespace={ws.memory.namespace} "
                 f"scope={ws.memory.shared_scope} "
-                f"retention={ws.memory.retention_days}d"
+                f"retention={ws.memory.retention_days}d",
             )
 
         # Config (skip internal _pack_* keys)
@@ -3267,7 +3399,9 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             console.print(f"\n[bold cyan]Agent: {agent.name}[/]")
             console.print(f"  Template: {agent.template_name}")
             console.print(f"  Mode: {agent.mode}  Type: {agent.agent_type}")
-            console.print(f"  Provider: {agent.provider}  Model: {agent.model_id or 'default'}")
+            console.print(
+                f"  Provider: {agent.provider}  Model: {agent.model_id or 'default'}",
+            )
             console.print(f"  Max iterations: {agent.max_iterations}")
 
             if agent.plugins:
@@ -3281,11 +3415,15 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
                     console.print(f"    • {c}")
 
             if agent.tool_allowlist is not None:
-                console.print(f"\n  [bold]Tool allowlist ({len(agent.tool_allowlist)}):[/]")
+                console.print(
+                    f"\n  [bold]Tool allowlist ({len(agent.tool_allowlist)}):[/]",
+                )
                 for t in sorted(agent.tool_allowlist):
                     console.print(f"    • {t}")
             if agent.tool_denylist:
-                console.print(f"\n  [bold]Tool denylist ({len(agent.tool_denylist)}):[/]")
+                console.print(
+                    f"\n  [bold]Tool denylist ({len(agent.tool_denylist)}):[/]",
+                )
                 for t in sorted(agent.tool_denylist):
                     console.print(f"    • {t}")
 
@@ -3323,7 +3461,9 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             cfg = None
 
         if cfg:
-            console.print(f"\n[bold cyan]Agent: {resource_name}[/] [dim](from agents.yaml)[/]")
+            console.print(
+                f"\n[bold cyan]Agent: {resource_name}[/] [dim](from agents.yaml)[/]",
+            )
             console.print(f"  Type: {cfg.get('type', '?')}")
             console.print(f"  Provider: {cfg.get('provider', cfg.get('model', '?'))}")
             console.print(f"  Enabled: {cfg.get('enabled', True)}")
@@ -3348,7 +3488,9 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
                 console.print(f"\n  [bold]System prompt:[/]\n    {preview}")
             return None
 
-        print_error(f"Agent '{resource_name}' not found in compiled workspace or agents.yaml.")
+        print_error(
+            f"Agent '{resource_name}' not found in compiled workspace or agents.yaml.",
+        )
         return None
 
     if resource_type == "capability":
@@ -3377,7 +3519,9 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
         console.print(f"\n[bold cyan]Capability: {cap.id}[/]")
         console.print(f"  Description: {cap.description}")
         console.print(f"  Owner plugin: {owner or 'unknown'}")
-        console.print(f"  Requires approval: {'yes' if cap.requires_approval else 'no'}")
+        console.print(
+            f"  Requires approval: {'yes' if cap.requires_approval else 'no'}",
+        )
         console.print(f"  Default grant: {'yes' if cap.default_grant else 'no'}")
         if cap.tools:
             console.print(f"\n  [bold]Tools ({len(cap.tools)}):[/]")
@@ -3444,7 +3588,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
         return None
 
     print_info(
-        "Unknown resource type. Usage: /inspect [workspace|agent|capability|pack] <name>"
+        "Unknown resource type. Usage: /inspect [workspace|agent|capability|pack] <name>",
     )
     return None
 
@@ -3470,9 +3614,8 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
     sub = tokens[0]
 
     try:
-        from obscura.plugins.registries import CapabilityIndex
         from obscura.plugins.capabilities import CapabilityResolver
-        from obscura.plugins.registries import ToolIndex
+        from obscura.plugins.registries import CapabilityIndex, ToolIndex
     except ImportError:
         print_error("Capability management not available.")
         return None
@@ -3480,6 +3623,7 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
     if sub == "list":
         try:
             from obscura.plugins.loader import PluginLoader
+
             loader = PluginLoader()
             specs = loader.discover_builtins()
             ci = CapabilityIndex()
@@ -3491,9 +3635,13 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
                 print_info("No capabilities registered.")
                 return None
             for cap in caps:
-                approval = " [yellow](requires approval)[/]" if cap.requires_approval else ""
+                approval = (
+                    " [yellow](requires approval)[/]" if cap.requires_approval else ""
+                )
                 default = " [green](default grant)[/]" if cap.default_grant else ""
-                console.print(f"  • [cyan]{cap.id}[/]{approval}{default} — {cap.description}")
+                console.print(
+                    f"  • [cyan]{cap.id}[/]{approval}{default} — {cap.description}",
+                )
                 if cap.tools:
                     console.print(f"    Tools: {', '.join(cap.tools)}")
         except Exception as e:
@@ -3525,7 +3673,9 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
         return None
 
     if sub == "check":
-        print_info(f"Capability '{cap_id}' grant status for agent '{agent_id}': use /capability list to see available capabilities")
+        print_info(
+            f"Capability '{cap_id}' grant status for agent '{agent_id}': use /capability list to see available capabilities",
+        )
         return None
 
     print_info("Unknown subcommand. Usage: /capability [list|grant|deny|check]")
@@ -3564,7 +3714,7 @@ async def cmd_a2a(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
-    """Discover remote A2A agent. Usage: /a2a discover <url>"""
+    """Discover remote A2A agent. Usage: /a2a discover <url>."""
     if not url:
         print_error("Usage: /a2a discover <url>")
         return None
@@ -3572,7 +3722,9 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
-        print_error("A2A integration not available. Install with: pip install obscura[a2a]")
+        print_error(
+            "A2A integration not available. Install with: pip install obscura[a2a]",
+        )
         return None
 
     try:
@@ -3590,7 +3742,10 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
             table.add_row("Protocol", card.protocolVersion)
             table.add_row("Skills", str(len(card.skills)))
             table.add_row("Streaming", "✓" if card.capabilities.streaming else "✗")
-            table.add_row("Push Notifications", "✓" if card.capabilities.pushNotifications else "✗")
+            table.add_row(
+                "Push Notifications",
+                "✓" if card.capabilities.pushNotifications else "✗",
+            )
 
             console.print(table)
 
@@ -3605,7 +3760,7 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
 
 
 async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
-    """Send message to A2A agent. Usage: /a2a send <url> <message>"""
+    """Send message to A2A agent. Usage: /a2a send <url> <message>."""
     parts = args.strip().split(None, 1)
     if len(parts) < 2:
         print_error("Usage: /a2a send <url> <message>")
@@ -3632,7 +3787,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
                     if msg.role == "agent":
                         console.print("\n[bold green]Agent Response:[/bold green]")
                         for part in msg.parts:
-                            if hasattr(part, 'text'):
+                            if hasattr(part, "text"):
                                 console.print(part.text)
 
     except Exception as exc:
@@ -3641,7 +3796,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
-    """Stream message to A2A agent. Usage: /a2a stream <url> <message>"""
+    """Stream message to A2A agent. Usage: /a2a stream <url> <message>."""
     parts = args.strip().split(None, 1)
     if len(parts) < 2:
         print_error("Usage: /a2a stream <url> <message>")
@@ -3662,7 +3817,9 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
                 if event.kind == "status-update":
                     console.print(f"[dim]Status: {event.status.state.value}[/dim]")
                 elif event.kind == "artifact-update":
-                    console.print(f"[green]Artifact: {event.artifact.name or 'unnamed'}[/green]")
+                    console.print(
+                        f"[green]Artifact: {event.artifact.name or 'unnamed'}[/green]",
+                    )
 
     except Exception as exc:
         print_error(f"Stream failed: {exc}")
@@ -3670,7 +3827,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
 
 
 async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
-    """List tasks on remote agent. Usage: /a2a list <url>"""
+    """List tasks on remote agent. Usage: /a2a list <url>."""
     if not url:
         print_error("Usage: /a2a list <url>")
         return None
@@ -3698,7 +3855,7 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
                 table.add_row(
                     task.id[:12] + "...",
                     task.status.state.value,
-                    str(len(task.history))
+                    str(len(task.history)),
                 )
 
             console.print(table)
@@ -3727,7 +3884,7 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
     """Show vector memory stats, search, or clear auto-saved memories."""
     if ctx.vector_store is None:
         print_warning(
-            "Vector memory is disabled. Set OBSCURA_VECTOR_MEMORY=on to enable."
+            "Vector memory is disabled. Set OBSCURA_VECTOR_MEMORY=on to enable.",
         )
         return None
 
@@ -3750,7 +3907,9 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
             return None
         try:
             results = ctx.vector_store.search_reranked(
-                rest, top_k=5, recency_weight=0.2
+                rest,
+                top_k=5,
+                recency_weight=0.2,
             )
             if not results:
                 print_info("No results found.")
@@ -3758,7 +3917,7 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
                 for i, r in enumerate(results, 1):
                     text_preview = r.text[:150].replace("\n", " ")
                     console.print(
-                        f"  [bold]{i}.[/] (score: {r.score:.2f}) {text_preview}"
+                        f"  [bold]{i}.[/] (score: {r.score:.2f}) {text_preview}",
                     )
         except Exception as exc:
             print_error(f"Search failed: {exc}")
@@ -3774,7 +3933,7 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
             if scope in {"mcp", "mcp-logs", "mcp_logs"}:
                 count = clear_mcp_noise_memories(ctx.vector_store)
                 print_ok(
-                    f"Cleared {count} MCP-related auto-saved memories from CLI namespace."
+                    f"Cleared {count} MCP-related auto-saved memories from CLI namespace.",
                 )
             else:
                 count = ctx.vector_store.clear_namespace(CLI_NAMESPACE)
@@ -3810,7 +3969,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
     except WorkspaceExistsError:
         if not force:
             print_warning(
-                ".obscura/ already exists. Use /init --force to reinitialise."
+                ".obscura/ already exists. Use /init --force to reinitialise.",
             )
             if skip_bootstrap:
                 return None
@@ -3837,7 +3996,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
             else:
                 print_warning(
                     "Some dependencies failed. Tools will register but "
-                    "may fail at runtime. Install missing deps manually."
+                    "may fail at runtime. Install missing deps manually.",
                 )
         except Exception as exc:
             print_warning(f"Bootstrap step failed: {exc}")
@@ -3849,6 +4008,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
         try:
             onboarding_prompt = _build_onboarding_prompt()
             from obscura.cli.render import render_event
+
             async for event in _ctx.client.run_loop(onboarding_prompt, max_turns=10):
                 render_event(event)
             if project_md.exists():
@@ -3859,6 +4019,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
     # Phase 3: Show agent definitions
     try:
         from obscura.agent.definitions import resolve_all_definitions
+
         defs = resolve_all_definitions()
         if defs:
             print_info(f"Agent definitions available: {len(defs)}")
@@ -3927,15 +4088,19 @@ async def _running_detail(
 
     # ── Header: agent state snapshot ──
     s_c = "green" if state.status.name == "RUNNING" else "yellow"
-    parts.append(Text.from_markup(
-        f"[bold {s_c}]{state.status.name}[/]"
-        f"  ·  iters: {state.iteration_count}"
-        f"  ·  id: {agent.id[:12]}",
-    ))
+    parts.append(
+        Text.from_markup(
+            f"[bold {s_c}]{state.status.name}[/]"
+            f"  ·  iters: {state.iteration_count}"
+            f"  ·  id: {agent.id[:12]}",
+        ),
+    )
     if state.error_message:
-        parts.append(Text.from_markup(
-            f"[bold red]Error:[/] {state.error_message}",
-        ))
+        parts.append(
+            Text.from_markup(
+                f"[bold red]Error:[/] {state.error_message}",
+            ),
+        )
 
     # ── Current thinking delta / active text ──
     try:
@@ -3947,9 +4112,11 @@ async def _running_detail(
             if len(active_text) > 500:
                 preview = "…" + preview
             parts.append(Text(""))
-            parts.append(Text.from_markup(
-                "[bold]Thinking delta:[/]",
-            ))
+            parts.append(
+                Text.from_markup(
+                    "[bold]Thinking delta:[/]",
+                ),
+            )
             parts.append(Text(preview, style="dim italic"))
     except Exception:
         pass
@@ -3961,9 +4128,11 @@ async def _running_detail(
         entries = tail_entries(30)
         if entries:
             parts.append(Text(""))
-            parts.append(Text.from_markup(
-                "[bold]Recent activity:[/]",
-            ))
+            parts.append(
+                Text.from_markup(
+                    "[bold]Recent activity:[/]",
+                ),
+            )
             shown = 0
             for e in reversed(entries):
                 if shown >= 15:
@@ -3972,21 +4141,13 @@ async def _running_detail(
                 preview = e.get("preview", "")
                 tools = e.get("tool_names", [])
                 ts_raw = e.get("ts", "")
-                ts_short = (
-                    ts_raw[11:19] if len(ts_raw) > 19 else ts_raw
-                )
+                ts_short = ts_raw[11:19] if len(ts_raw) > 19 else ts_raw
                 tool_tag = ""
                 if tools:
-                    tool_tag = (
-                        f" [cyan]({', '.join(tools)})[/]"
-                    )
+                    tool_tag = f" [cyan]({', '.join(tools)})[/]"
                 if len(preview) > 80:
                     preview = preview[:77] + "..."
-                line = (
-                    f"  [dim]{ts_short}[/]"
-                    f" [{_event_color(kind)}]{kind}[/]"
-                    f"{tool_tag}"
-                )
+                line = f"  [dim]{ts_short}[/] [{_event_color(kind)}]{kind}[/]{tool_tag}"
                 if preview:
                     line += f" [dim]{preview}[/]"
                 parts.append(Text.from_markup(line))
@@ -3999,27 +4160,28 @@ async def _running_detail(
         events = await ctx.store.get_events(ctx.session_id)
         if events:
             keep = {
-                "tool_call", "tool_result", "error",
-                "turn_start", "turn_complete",
+                "tool_call",
+                "tool_result",
+                "error",
+                "turn_start",
+                "turn_complete",
                 "context_compact",
             }
-            interesting = [
-                ev for ev in events if ev.kind.value in keep
-            ]
+            interesting = [ev for ev in events if ev.kind.value in keep]
             tail = interesting[-10:]
             if tail:
                 parts.append(Text(""))
-                parts.append(Text.from_markup(
-                    "[bold]Session events:[/]",
-                ))
+                parts.append(
+                    Text.from_markup(
+                        "[bold]Session events:[/]",
+                    ),
+                )
                 for ev in tail:
                     ts = ev.timestamp.strftime("%H:%M:%S")
                     payload = ev.payload
                     detail = ""
                     if ev.kind.value == "tool_call":
-                        detail = (
-                            "→ " + payload.get("tool_name", "?")
-                        )
+                        detail = "→ " + payload.get("tool_name", "?")
                     elif ev.kind.value == "tool_result":
                         detail = str(
                             payload.get("result", ""),
@@ -4029,10 +4191,7 @@ async def _running_detail(
                             payload.get("message", ""),
                         )[:60]
                     c = _event_color(ev.kind.value)
-                    line = (
-                        f"  [dim]{ts}[/]"
-                        f" [{c}]{ev.kind.value}[/]"
-                    )
+                    line = f"  [dim]{ts}[/] [{c}]{ev.kind.value}[/]"
                     if detail:
                         line += f" [dim]{detail}[/]"
                     parts.append(Text.from_markup(line))
@@ -4067,7 +4226,7 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
                 pass
 
     # 2. Cancel all swarm tasks
-    for sid, run in list(ctx._swarm_runs.items()):
+    for _sid, run in list(ctx._swarm_runs.items()):
         task_obj = run.get("_task")
         if task_obj and not task_obj.done():
             task_obj.cancel()
@@ -4078,10 +4237,8 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
     # 3. Stop supervisor (kills all managed daemons)
     if ctx._supervisor_task is not None and not ctx._supervisor_task.done():
         ctx._supervisor_task.cancel()
-        try:
+        with contextlib.suppress(_asyncio.CancelledError, Exception):
             await ctx._supervisor_task
-        except (_asyncio.CancelledError, Exception):
-            pass
         stopped += 1
         ctx._supervisor = None
         ctx._supervisor_task = None
@@ -4109,17 +4266,11 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     # ------------------------------------------------------------------
     # 1. Current session
     # ------------------------------------------------------------------
-    sid_short = (
-        ctx.session_id[:8] if ctx.session_id else "none"
-    )
+    sid_short = ctx.session_id[:8] if ctx.session_id else "none"
     session_rec = (
-        await ctx.store.get_session(ctx.session_id)
-        if ctx.session_id
-        else None
+        await ctx.store.get_session(ctx.session_id) if ctx.session_id else None
     )
-    status_val = (
-        session_rec.status.value if session_rec else "active"
-    )
+    status_val = session_rec.status.value if session_rec else "active"
     session_line = (
         f"  [bold cyan]Session:[/] {sid_short}"
         f" · {ctx.backend or 'default'}"
@@ -4133,10 +4284,8 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     # ------------------------------------------------------------------
     agents_list: list[Any] = []
     if ctx._runtime is not None:
-        try:
+        with contextlib.suppress(Exception):
             agents_list = ctx._runtime.list_agents()
-        except Exception:
-            pass
 
     active_set = {
         AgentStatus.RUNNING,
@@ -4145,13 +4294,8 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     }
 
     if agents_list:
-        active = [
-            a for a in agents_list if a.status in active_set
-        ]
-        terminal = [
-            a for a in agents_list
-            if a.status not in active_set
-        ]
+        active = [a for a in agents_list if a.status in active_set]
+        terminal = [a for a in agents_list if a.status not in active_set]
         has_activity = has_activity or bool(active)
         selectable.extend(agents_list)
 
@@ -4165,16 +4309,14 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
             tbl.add_column("Name", style="green")
             tbl.add_column("Status", style="yellow")
             tbl.add_column(
-                "Iters", style="dim", justify="right",
+                "Iters",
+                style="dim",
+                justify="right",
             )
             tbl.add_column("ID", style="cyan")
             for i, a in enumerate(active, 1):
                 state = a.get_state()
-                sc = (
-                    "bold green"
-                    if a.status == AgentStatus.RUNNING
-                    else "yellow"
-                )
+                sc = "bold green" if a.status == AgentStatus.RUNNING else "yellow"
                 tbl.add_row(
                     str(i),
                     a.config.name,
@@ -4194,7 +4336,9 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
             tbl_d.add_column("Name", style="dim green")
             tbl_d.add_column("Status", style="dim yellow")
             tbl_d.add_column(
-                "Iters", style="dim", justify="right",
+                "Iters",
+                style="dim",
+                justify="right",
             )
             tbl_d.add_column("ID", style="dim cyan")
             off = len(active) if active else 0
@@ -4223,18 +4367,14 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
             SessionStatus.WAITING_FOR_TOOL,
         }
         other = [
-            s for s in all_sessions
-            if s.id != ctx.session_id
-            and s.status in s_active
+            s for s in all_sessions if s.id != ctx.session_id and s.status in s_active
         ]
         if other:
             has_activity = True
             stbl = Table(
                 show_header=True,
                 header_style="bold",
-                title=(
-                    f"Other Sessions ({len(other)} running)"
-                ),
+                title=(f"Other Sessions ({len(other)} running)"),
             )
             stbl.add_column("Session", style="cyan")
             stbl.add_column("Status", style="yellow")
@@ -4268,9 +4408,7 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     # ------------------------------------------------------------------
     if target and selectable:
         match = [
-            a for a in selectable
-            if a.config.name == target
-            or a.id.startswith(target)
+            a for a in selectable if a.config.name == target or a.id.startswith(target)
         ]
         if match:
             await _running_detail(match[0], ctx)
@@ -4286,9 +4424,7 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     # 5. Interactive selection → detail view
     # ------------------------------------------------------------------
     if selectable:
-        choices = [
-            a.config.name for a in selectable
-        ] + ["back"]
+        choices = [a.config.name for a in selectable] + ["back"]
         try:
             from obscura.cli.widgets import (
                 AttentionWidgetRequest,
@@ -4304,10 +4440,7 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
                 ),
             )
             if result.action != "back":
-                match = [
-                    a for a in selectable
-                    if a.config.name == result.action
-                ]
+                match = [a for a in selectable if a.config.name == result.action]
                 if match:
                     await _running_detail(match[0], ctx)
         except Exception:
@@ -4343,10 +4476,8 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
         if tok in ("errors", "denied", "failed"):
             show_errors_only = True
         else:
-            try:
+            with contextlib.suppress(ValueError):
                 limit = int(tok)
-            except ValueError:
-                pass
 
     # The broker is constructed per-session; try to find an active one via
     # the supervisor or fall back to a fresh read from the global singleton.
@@ -4364,14 +4495,18 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
 
     entries = broker.audit_log
     if show_errors_only:
-        entries = [e for e in entries if e.action in ("denied", "approval_denied", "error", "timeout")]
+        entries = [
+            e
+            for e in entries
+            if e.action in ("denied", "approval_denied", "error", "timeout")
+        ]
     entries = entries[-limit:]
 
     if not entries:
         print_info("No audit entries found.")
         return None
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     table = Table(title=f"Broker Audit (last {len(entries)})", expand=False)
     table.add_column("time", style="dim", width=8)
@@ -4382,7 +4517,7 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
     table.add_column("detail", max_width=30)
 
     for e in entries:
-        ts = datetime.fromtimestamp(e.timestamp, tz=timezone.utc).strftime("%H:%M:%S")
+        ts = datetime.fromtimestamp(e.timestamp, tz=UTC).strftime("%H:%M:%S")
         action_color = {
             "executed": "green",
             "denied": "red",
@@ -4411,8 +4546,8 @@ async def cmd_health(_args: str, _ctx: REPLContext) -> str | None:
     Usage: /health
     """
     try:
-        from obscura.plugins.registry import PluginRegistryService, PluginEntry
         from obscura.plugins.loader import PluginLoader
+        from obscura.plugins.registry import PluginEntry, PluginRegistryService
     except ImportError:
         print_error("Plugin system not available.")
         return None
@@ -4449,13 +4584,23 @@ async def cmd_health(_args: str, _ctx: REPLContext) -> str | None:
     table.add_column("trust", style="dim", width=10)
     table.add_column("tools", justify="right", width=5)
 
-    state_order = ["failed", "unhealthy", "disabled", "enabled", "installed", "discovered"]
+    state_order = [
+        "failed",
+        "unhealthy",
+        "disabled",
+        "enabled",
+        "installed",
+        "discovered",
+    ]
     for state in state_order:
         for p in by_state.get(state, []):
             color = {
-                "enabled": "green", "active": "green",
-                "disabled": "dim", "installed": "yellow",
-                "failed": "red", "unhealthy": "red",
+                "enabled": "green",
+                "active": "green",
+                "disabled": "dim",
+                "installed": "yellow",
+                "failed": "red",
+                "unhealthy": "red",
                 "discovered": "dim",
             }.get(p.state, "white")
             n_tools = len(p.contributed_tools) if p.contributed_tools else 0
@@ -4481,7 +4626,7 @@ async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
     Usage: /broker
     """
     try:
-        from obscura.plugins.broker import ToolBroker
+        pass
     except ImportError:
         print_error("Broker module not available.")
         return None
@@ -4505,7 +4650,10 @@ async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
     # Aggregate stats per tool
     tool_stats: dict[str, dict[str, Any]] = {}
     for e in entries:
-        s = tool_stats.setdefault(e.tool, {"ok": 0, "fail": 0, "total_ms": 0, "max_ms": 0})
+        s = tool_stats.setdefault(
+            e.tool,
+            {"ok": 0, "fail": 0, "total_ms": 0, "max_ms": 0},
+        )
         if e.action == "executed":
             s["ok"] += 1
         else:
@@ -4520,14 +4668,26 @@ async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
     table.add_column("avg ms", justify="right", width=7)
     table.add_column("max ms", justify="right", width=7)
 
-    for tool_name in sorted(tool_stats, key=lambda t: tool_stats[t]["ok"] + tool_stats[t]["fail"], reverse=True):
+    for tool_name in sorted(
+        tool_stats,
+        key=lambda t: tool_stats[t]["ok"] + tool_stats[t]["fail"],
+        reverse=True,
+    ):
         s = tool_stats[tool_name]
         total_calls = s["ok"] + s["fail"]
         avg_ms = s["total_ms"] // total_calls if total_calls else 0
-        table.add_row(tool_name, str(s["ok"]), str(s["fail"]), str(avg_ms), str(s["max_ms"]))
+        table.add_row(
+            tool_name,
+            str(s["ok"]),
+            str(s["fail"]),
+            str(avg_ms),
+            str(s["max_ms"]),
+        )
 
     console.print(table)
-    console.print(f"[dim]  {len(entries)} total calls across {len(tool_stats)} tools[/]")
+    console.print(
+        f"[dim]  {len(entries)} total calls across {len(tool_stats)} tools[/]",
+    )
     return None
 
 
@@ -4576,7 +4736,10 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
 
     from obscura.cli.render import TOOL_COLOR
 
-    table = Table(title=f"Tools matching '{query}' ({len(results)} found)", expand=False)
+    table = Table(
+        title=f"Tools matching '{query}' ({len(results)} found)",
+        expand=False,
+    )
     table.add_column("status", width=3, justify="center")
     table.add_column("name", style=TOOL_COLOR, no_wrap=True)
     table.add_column("description", max_width=55)
@@ -4600,7 +4763,7 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
     """Switch permission mode: default, plan, accept_edits, bypass."""
-    from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+    from obscura.core.permission_modes import PermissionMode
 
     mode_str = args.strip().lower()
     if not mode_str:
@@ -4611,7 +4774,9 @@ async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
     try:
         mode = PermissionMode(mode_str)
     except ValueError:
-        print_error(f"Unknown mode: {mode_str}. Options: default, plan, accept_edits, bypass")
+        print_error(
+            f"Unknown mode: {mode_str}. Options: default, plan, accept_edits, bypass",
+        )
         return None
     if mode == PermissionMode.BYPASS:
         if not os.environ.get("OBSCURA_BYPASS_PERMISSIONS"):
@@ -4623,7 +4788,7 @@ async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
-    """Resume a previous session. Usage: /resume [search term]"""
+    """Resume a previous session. Usage: /resume [search term]."""
     import difflib
 
     sessions = await ctx.store.list_sessions()
@@ -4664,17 +4829,27 @@ async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
 
     # If only one match and search was specific, auto-switch.
     if search and len(shown) == 1:
-        target_sid = shown[0].session_id if hasattr(shown[0], "session_id") else str(shown[0])
+        target_sid = (
+            shown[0].session_id if hasattr(shown[0], "session_id") else str(shown[0])
+        )
         ctx.session_id = target_sid
         ctx.message_history = []
         print_ok(f"Resumed session {target_sid[:12]}")
         # Replay last few events as context preview.
         try:
             events = await ctx.store.get_events(target_sid)
-            text_events = [e for e in events if hasattr(e, "kind") and "text" in str(getattr(e, "kind", "")).lower()]
+            text_events = [
+                e
+                for e in events
+                if hasattr(e, "kind") and "text" in str(getattr(e, "kind", "")).lower()
+            ]
             if text_events:
                 last = text_events[-1]
-                preview = getattr(last, "payload", {}).get("text", "")[:200] if hasattr(last, "payload") else ""
+                preview = (
+                    getattr(last, "payload", {}).get("text", "")[:200]
+                    if hasattr(last, "payload")
+                    else ""
+                )
                 if preview:
                     console.print(f"[dim]Last: {preview}...[/]")
         except Exception:
@@ -4725,7 +4900,13 @@ async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
     # Python version
     ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     ok = sys.version_info >= (3, 13)
-    checks.append(("Python", "[green]OK[/]" if ok else "[red]FAIL[/]", f"{ver} {'(3.13+ required)' if not ok else ''}"))
+    checks.append(
+        (
+            "Python",
+            "[green]OK[/]" if ok else "[red]FAIL[/]",
+            f"{ver} {'(3.13+ required)' if not ok else ''}",
+        ),
+    )
 
     # Key binaries
     for binary in ["git", "rg", "uv", "ruff", "pyright"]:
@@ -4737,19 +4918,39 @@ async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
 
     # Obscura home
     from obscura.core.paths import resolve_obscura_global_home
+
     home = resolve_obscura_global_home()
-    checks.append(("Obscura home", "[green]OK[/]" if home.is_dir() else "[yellow]MISS[/]", str(home)))
+    checks.append(
+        (
+            "Obscura home",
+            "[green]OK[/]" if home.is_dir() else "[yellow]MISS[/]",
+            str(home),
+        ),
+    )
 
     # Event store
     db_path = home / "events.db"
-    checks.append(("Event store", "[green]OK[/]" if db_path.exists() else "[yellow]MISS[/]", str(db_path)))
+    checks.append(
+        (
+            "Event store",
+            "[green]OK[/]" if db_path.exists() else "[yellow]MISS[/]",
+            str(db_path),
+        ),
+    )
 
     # Settings
     settings_path = home / "settings.json"
-    checks.append(("Settings", "[green]OK[/]" if settings_path.exists() else "[dim]none[/]", str(settings_path)))
+    checks.append(
+        (
+            "Settings",
+            "[green]OK[/]" if settings_path.exists() else "[dim]none[/]",
+            str(settings_path),
+        ),
+    )
 
     # Agent definitions
     from obscura.agent.definitions import resolve_all_definitions
+
     defs = resolve_all_definitions()
     checks.append(("Agent definitions", "[green]OK[/]", f"{len(defs)} types available"))
 
@@ -4774,7 +4975,7 @@ async def cmd_vim(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     """Set thinking effort level: low, medium, high, max."""
-    from obscura.core.types import EffortLevel, EFFORT_THINKING_BUDGETS
+    from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
     level_str = args.strip().lower()
     if not level_str:
@@ -4794,12 +4995,14 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     if level == EffortLevel.MAX:
         try:
             from obscura.cli.tui_effects import ultrathink_banner
+
             ultrathink_banner()
         except Exception:
             print_ok(f"⚡ ULTRATHINK activated (budget: {budget:,} tokens)")
     else:
         try:
             from obscura.cli.tui_effects import effort_badge
+
             console.print(f"  {effort_badge(level.value)}  (budget: {budget:,} tokens)")
         except Exception:
             print_ok(f"Effort: {level.value} (thinking budget: {budget:,} tokens)")
@@ -4808,8 +5011,6 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
     """Toggle fast/terse mode (low effort + concise output)."""
-    from obscura.core.types import EffortLevel
-
     current = getattr(ctx, "_effort_level", "medium")
     if current == "low":
         ctx._effort_level = "medium"
@@ -4834,7 +5035,9 @@ async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
     results: dict[str, str] = {}
     for key, cmd in cmds.items():
         proc = await _aio.create_subprocess_shell(
-            cmd, stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+            cmd,
+            stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         results[key] = stdout.decode("utf-8", errors="replace").strip()
@@ -4847,20 +5050,20 @@ async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
 
 ## Git Status
 ```
-{results['status']}
+{results["status"]}
 ```
 
 ## Changes (git diff HEAD)
 ```
-{results['diff'][:8000]}
+{results["diff"][:8000]}
 ```
 
 ## Current Branch
-{results['branch']}
+{results["branch"]}
 
 ## Recent Commits (for style reference)
 ```
-{results['log']}
+{results["log"]}
 ```
 
 ## Instructions
@@ -4878,6 +5081,7 @@ Do NOT use --amend, --no-verify, or -i flags. Do NOT commit .env or credential f
 
     # Send to agent loop
     from obscura.cli.render import render_event
+
     try:
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
@@ -4887,12 +5091,14 @@ Do NOT use --amend, --no-verify, or -i flags. Do NOT commit .env or credential f
 
 
 async def cmd_review(args: str, ctx: REPLContext) -> str | None:
-    """AI code review of changes. Usage: /review [PR number or ref]"""
+    """AI code review of changes. Usage: /review [PR number or ref]."""
     import asyncio as _aio
 
     ref = args.strip() or "HEAD"
     proc = await _aio.create_subprocess_shell(
-        f"git diff {ref}", stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+        f"git diff {ref}",
+        stdout=_aio.subprocess.PIPE,
+        stderr=_aio.subprocess.PIPE,
     )
     stdout, _ = await proc.communicate()
     diff = stdout.decode("utf-8", errors="replace").strip()
@@ -4918,6 +5124,7 @@ Provide a thorough review covering:
 Be concise. Focus on real issues, not style preferences."""
 
     from obscura.cli.render import render_event
+
     try:
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
@@ -4927,12 +5134,14 @@ Be concise. Focus on real issues, not style preferences."""
 
 
 async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
-    """Security-focused code review. Usage: /security-review [ref]"""
+    """Security-focused code review. Usage: /security-review [ref]."""
     import asyncio as _aio
 
     ref = args.strip() or "HEAD"
     proc = await _aio.create_subprocess_shell(
-        f"git diff {ref}", stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+        f"git diff {ref}",
+        stdout=_aio.subprocess.PIPE,
+        stderr=_aio.subprocess.PIPE,
     )
     stdout, _ = await proc.communicate()
     diff = stdout.decode("utf-8", errors="replace").strip()
@@ -4973,6 +5182,7 @@ async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
 Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
 
     from obscura.cli.render import render_event
+
     try:
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
@@ -4982,7 +5192,7 @@ Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
 
 
 async def cmd_export(args: str, ctx: REPLContext) -> str | None:
-    """Export conversation to file. Usage: /export [md|txt|json]"""
+    """Export conversation to file. Usage: /export [md|txt|json]."""
     fmt = args.strip().lower() or "md"
     if fmt not in ("md", "txt", "json"):
         print_error("Format must be: md, txt, or json")
@@ -5036,18 +5246,21 @@ async def cmd_coordinator(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
-    """Toggle voice input (push-to-talk). Usage: /voice [on|off]"""
+    """Toggle voice input (push-to-talk). Usage: /voice [on|off]."""
     sub = args.strip().lower()
     current = getattr(ctx, "_voice_enabled", False)
 
     if sub == "on" or (not sub and not current):
         # Check dependencies
         import shutil as _shutil
+
         has_sox = _shutil.which("rec") is not None
         has_arecord = _shutil.which("arecord") is not None
         if not has_sox and not has_arecord:
             print_error("Voice mode requires SoX (rec) or ALSA (arecord).")
-            print_info("Install: brew install sox  (macOS) or apt install sox alsa-utils  (Linux)")
+            print_info(
+                "Install: brew install sox  (macOS) or apt install sox alsa-utils  (Linux)",
+            )
             return None
         ctx._voice_enabled = True
         print_ok("Voice mode ON. Hold Ctrl+Space to record, release to transcribe.")
@@ -5060,7 +5273,7 @@ async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_template(args: str, ctx: REPLContext) -> str | None:
-    """Manage and run task templates. Usage: /template list|run <name>|new <name>"""
+    """Manage and run task templates. Usage: /template list|run <name>|new <name>."""
     from obscura.core.templates import list_templates, load_template
 
     parts = args.strip().split(None, 1)
@@ -5093,6 +5306,7 @@ async def cmd_template(args: str, ctx: REPLContext) -> str | None:
             return None
         prompt = tmpl.render()
         from obscura.cli.render import render_event
+
         try:
             async for event in ctx.client.run_loop(prompt):
                 render_event(event)
@@ -5102,7 +5316,9 @@ async def cmd_template(args: str, ctx: REPLContext) -> str | None:
 
     if sub == "new":
         print_info("Create a template at ~/.obscura/templates/<name>.md")
-        print_info("Use TOML frontmatter (+++ delimiters) with name, description fields.")
+        print_info(
+            "Use TOML frontmatter (+++ delimiters) with name, description fields.",
+        )
         print_info("Template body is the prompt. Use {{variable}} for placeholders.")
         return None
 
@@ -5119,8 +5335,11 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
     # Show a summary of all tool calls from the session.
     if hasattr(collapser, "_group") or True:
         from obscura.core.cost_tracker import get_cost_tracker
+
         tracker = get_cost_tracker()
-        print_info(tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.")
+        print_info(
+            tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.",
+        )
     return None
 
 
@@ -5133,10 +5352,10 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
       /kairos proactive on|off       Toggle proactive tick loop
       /kairos dream on|off           Toggle dream consolidation
     """
-    from obscura.kairos.engine import is_kairos_enabled, set_kairos_mode
-
     import json as _json
     from pathlib import Path as _Path
+
+    from obscura.kairos.engine import is_kairos_enabled, set_kairos_mode
 
     def _write_setting(k: str, v: bool) -> None:
         """Persist toggle under ~/.obscura/settings.json (best-effort)."""
@@ -5167,10 +5386,25 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
         print_info(f"KAIROS mode: {status}")
         # Feature status (resolved on demand by engine at runtime)
         import os as _os
-        pro = _os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").lower() not in ("0", "false", "no", "off")
-        dr = _os.environ.get("OBSCURA_KAIROS_DREAM", "").lower() not in ("0", "false", "no", "off")
-        print_info(f"  - Proactive ticks: {'ON' if pro else 'OFF'}  (OBSCURA_KAIROS_PROACTIVE)")
-        print_info(f"  - Dream consolidation: {'ON' if dr else 'OFF'}  (OBSCURA_KAIROS_DREAM)")
+
+        pro = _os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+        dr = _os.environ.get("OBSCURA_KAIROS_DREAM", "").lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+        print_info(
+            f"  - Proactive ticks: {'ON' if pro else 'OFF'}  (OBSCURA_KAIROS_PROACTIVE)",
+        )
+        print_info(
+            f"  - Dream consolidation: {'ON' if dr else 'OFF'}  (OBSCURA_KAIROS_DREAM)",
+        )
         if is_kairos_enabled():
             print_info("Disable with: /kairos off  (or set OBSCURA_KAIROS=false)")
         else:
@@ -5181,7 +5415,9 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
         enabled = tokens[0] == "on"
         set_kairos_mode(enabled)
         _write_setting("kairos.enabled", enabled)
-        print_ok(f"KAIROS mode {'enabled' if enabled else 'disabled'}. {'Will activate on next session start.' if enabled else ''}")
+        print_ok(
+            f"KAIROS mode {'enabled' if enabled else 'disabled'}. {'Will activate on next session start.' if enabled else ''}",
+        )
         return None
 
     if tokens[0] in ("proactive", "dream"):
@@ -5190,6 +5426,7 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
             return None
         enabled = tokens[1] == "on"
         import os as _os
+
         if tokens[0] == "proactive":
             _os.environ["OBSCURA_KAIROS_PROACTIVE"] = "1" if enabled else "0"
             _write_setting("kairos.proactive", enabled)
@@ -5197,10 +5434,14 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
         else:
             _os.environ["OBSCURA_KAIROS_DREAM"] = "1" if enabled else "0"
             _write_setting("kairos.dream", enabled)
-            print_ok(f"Kairos dream consolidation {'enabled' if enabled else 'disabled'}.")
+            print_ok(
+                f"Kairos dream consolidation {'enabled' if enabled else 'disabled'}.",
+            )
         return None
 
-    print_error("Unknown args. Try: /kairos [status|on|off|proactive on|off|dream on|off]")
+    print_error(
+        "Unknown args. Try: /kairos [status|on|off|proactive on|off|dream on|off]",
+    )
     return None
 
 
@@ -5244,15 +5485,19 @@ async def cmd_ps(_args: str, _ctx: REPLContext) -> str | None:
 
     for s in sessions:
         table.add_row(
-            s["session_id"], str(s["pid"]), s["status"],
-            s["model"], f"{s['uptime_s']}s", s["command"],
+            s["session_id"],
+            str(s["pid"]),
+            s["status"],
+            s["model"],
+            f"{s['uptime_s']}s",
+            s["command"],
         )
     console.print(table)
     return None
 
 
 async def cmd_logs(args: str, _ctx: REPLContext) -> str | None:
-    """Show logs for a background session. Usage: /logs <session_id>"""
+    """Show logs for a background session. Usage: /logs <session_id>."""
     from obscura.kairos.background_sessions import logs
 
     sid = args.strip()
@@ -5265,7 +5510,7 @@ async def cmd_logs(args: str, _ctx: REPLContext) -> str | None:
 
 
 async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
-    """Kill a background session. Usage: /kill-session <session_id>"""
+    """Kill a background session. Usage: /kill-session <session_id>."""
     from obscura.kairos.background_sessions import kill_session
 
     sid = args.strip()
@@ -5280,7 +5525,10 @@ async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
 async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
     """Show context-aware file suggestions based on recent activity."""
     from obscura.core.context_suggestions import suggest_files
-    from obscura.tools.system.file_state import get_recently_modified_files, get_recently_read_files
+    from obscura.tools.system.file_state import (
+        get_recently_modified_files,
+        get_recently_read_files,
+    )
 
     modified = get_recently_modified_files(limit=10)
     read = get_recently_read_files(limit=10)
@@ -5305,7 +5553,6 @@ async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_cache_stats(_args: str, _ctx: REPLContext) -> str | None:
     """Show prompt cache hit/miss statistics."""
-    from obscura.core.prompt_cache import PromptCacheManager
     # This would need to reference the actual cache instance.
     # For now show the concept.
     print_info("Prompt cache tracking available. Stats shown in /cost output.")
@@ -5313,7 +5560,7 @@ async def cmd_cache_stats(_args: str, _ctx: REPLContext) -> str | None:
 
 
 async def cmd_workflow(args: str, ctx: REPLContext) -> str | None:
-    """Run or list workflow scripts. Usage: /workflow list|run <name>"""
+    """Run or list workflow scripts. Usage: /workflow list|run <name>."""
     from obscura.core.workflows import list_workflows, load_workflow, run_workflow
 
     parts = args.strip().split(None, 1)
@@ -5353,7 +5600,12 @@ async def cmd_workflow(args: str, ctx: REPLContext) -> str | None:
             icon = "[green]✓[/]" if status == "ok" else "[red]✗[/]"
             console.print(f"  {icon} {step_name}: {status}")
 
-        results = await run_workflow(wf, ctx.client, on_step_start=on_start, on_step_complete=on_done)
+        results = await run_workflow(
+            wf,
+            ctx.client,
+            on_step_start=on_start,
+            on_step_complete=on_done,
+        )
         ok_count = sum(1 for r in results if r["status"] == "ok")
         print_ok(f"Workflow complete: {ok_count}/{len(results)} steps succeeded")
         return None
@@ -5383,7 +5635,7 @@ async def cmd_peers(_args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_send(args: str, ctx: REPLContext) -> str | None:
-    """Send a message to another session. Usage: /send <session_id> <message>"""
+    """Send a message to another session. Usage: /send <session_id> <message>."""
     from obscura.kairos.uds_messaging import send_message as uds_send
 
     parts = args.strip().split(None, 1)
@@ -5393,12 +5645,15 @@ async def cmd_send(args: str, ctx: REPLContext) -> str | None:
     target = parts[0]
     message_text = parts[1]
 
-    delivered = await uds_send(target, {
-        "type": "text",
-        "from": ctx.session_id[:12] if ctx.session_id else "unknown",
-        "text": message_text,
-        "timestamp": __import__("time").time(),
-    })
+    delivered = await uds_send(
+        target,
+        {
+            "type": "text",
+            "from": ctx.session_id[:12] if ctx.session_id else "unknown",
+            "text": message_text,
+            "timestamp": __import__("time").time(),
+        },
+    )
     if delivered:
         print_ok(f"Message sent to {target[:12]}")
     else:
@@ -5413,7 +5668,7 @@ async def cmd_send(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
-    """Add a directory to the working context. Usage: /add-dir <path>"""
+    """Add a directory to the working context. Usage: /add-dir <path>."""
     target = args.strip()
     if not target:
         print_error("Usage: /add-dir <path>")
@@ -5430,7 +5685,10 @@ async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_files(_args: str, ctx: REPLContext) -> str | None:
     """List files tracked in the current context."""
-    from obscura.tools.system.file_state import get_recently_read_files, get_recently_modified_files
+    from obscura.tools.system.file_state import (
+        get_recently_modified_files,
+        get_recently_read_files,
+    )
 
     read = get_recently_read_files(limit=20)
     modified = get_recently_modified_files(limit=10)
@@ -5453,7 +5711,7 @@ async def cmd_files(_args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_rewind(args: str, ctx: REPLContext) -> str | None:
-    """Undo recent changes by reverting modified files. Usage: /rewind [n]"""
+    """Undo recent changes by reverting modified files. Usage: /rewind [n]."""
     if not ctx._file_changes:
         print_info("No file changes to rewind.")
         return None
@@ -5473,7 +5731,7 @@ async def cmd_rewind(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_rename(args: str, ctx: REPLContext) -> str | None:
-    """Rename the current session. Usage: /rename <title>"""
+    """Rename the current session. Usage: /rename <title>."""
     title = args.strip()
     if not title:
         print_error("Usage: /rename <title>")
@@ -5488,7 +5746,7 @@ async def cmd_rename(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_tag(args: str, ctx: REPLContext) -> str | None:
-    """Tag the current session for search. Usage: /tag <tag>"""
+    """Tag the current session for search. Usage: /tag <tag>."""
     tag = args.strip()
     if not tag:
         print_error("Usage: /tag <tag>")
@@ -5513,14 +5771,18 @@ async def cmd_tag(args: str, ctx: REPLContext) -> str | None:
 async def cmd_version(_args: str, _ctx: REPLContext) -> str | None:
     """Show Obscura version and system info."""
     import sys
+
     try:
         from importlib.metadata import version as pkg_version
+
         ver = pkg_version("obscura")
     except Exception:
         ver = "dev"
 
     console.print(f"[bold]Obscura[/] {ver}")
-    console.print(f"  Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    console.print(
+        f"  Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+    )
     console.print(f"  Platform: {sys.platform}")
     return None
 
@@ -5534,7 +5796,7 @@ async def cmd_usage(_args: str, ctx: REPLContext) -> str | None:
         print_info("No API usage recorded yet.")
         return None
 
-    console.print(f"[bold]API Usage[/]")
+    console.print("[bold]API Usage[/]")
     console.print(f"  Turns:         {tracker.turn_count()}")
     console.print(f"  Input tokens:  {tracker.total_input_tokens():,}")
     console.print(f"  Output tokens: {tracker.total_output_tokens():,}")
@@ -5551,8 +5813,11 @@ async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
         if role == "assistant":
             try:
                 import subprocess
+
                 proc = subprocess.run(
-                    ["pbcopy"] if os.sys.platform == "darwin" else ["xclip", "-selection", "clipboard"],
+                    ["pbcopy"]
+                    if os.sys.platform == "darwin"
+                    else ["xclip", "-selection", "clipboard"],
                     input=text.encode("utf-8"),
                     capture_output=True,
                     timeout=5,
@@ -5578,8 +5843,6 @@ async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_brief(_args: str, ctx: REPLContext) -> str | None:
     """Toggle brief output mode (concise responses)."""
-    from obscura.core.types import EffortLevel
-
     current = getattr(ctx, "_effort_level", "medium")
     if current == "low":
         ctx._effort_level = "medium"
@@ -5593,7 +5856,10 @@ async def cmd_brief(_args: str, ctx: REPLContext) -> str | None:
 async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
     """Show session statistics."""
     from obscura.core.cost_tracker import get_cost_tracker
-    from obscura.tools.system.file_state import get_recently_modified_files, get_recently_read_files
+    from obscura.tools.system.file_state import (
+        get_recently_modified_files,
+        get_recently_read_files,
+    )
 
     tracker = get_cost_tracker()
     user_msgs = sum(1 for r, _ in ctx.message_history if r == "user")
@@ -5628,7 +5894,7 @@ async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
-    """View deep logs. Usage: /log [tail N | path | stats]"""
+    """View deep logs. Usage: /log [tail N | path | stats]."""
     from obscura.core.deep_log import dlog
 
     sub = args.strip().lower()
@@ -5674,19 +5940,28 @@ async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
             data = entry.get("data", {})
 
             import datetime
-            time_str = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "??:??:??"
+
+            time_str = (
+                datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                if ts
+                else "??:??:??"
+            )
 
             if etype == "tool_call":
                 tool = data.get("tool", "?")
                 ok = data.get("ok", True)
                 dur = data.get("duration_ms", 0)
-                icon = f"[green]✓[/]" if ok else f"[red]✗[/]"
-                console.print(f"  [dim]{time_str}[/] {icon} [yellow]{tool}[/] [dim]{dur}ms[/]")
+                icon = "[green]✓[/]" if ok else "[red]✗[/]"
+                console.print(
+                    f"  [dim]{time_str}[/] {icon} [yellow]{tool}[/] [dim]{dur}ms[/]",
+                )
             elif etype == "api_request":
                 model = data.get("model", "?")
                 inp = data.get("input_tokens", 0)
                 out = data.get("output_tokens", 0)
-                console.print(f"  [dim]{time_str}[/] [cyan]API[/] {model} {inp}→{out} tokens")
+                console.print(
+                    f"  [dim]{time_str}[/] [cyan]API[/] {model} {inp}→{out} tokens",
+                )
             elif etype == "session":
                 action = data.get("action", "?")
                 console.print(f"  [dim]{time_str}[/] [bold]SESSION[/] {action}")
@@ -5698,7 +5973,9 @@ async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
         except Exception:
             console.print(f"  [dim]{line[:100]}[/]")
 
-    console.print(f"\n[dim]Showing last {len(recent)} of {len(lines)} entries. /log path for file location.[/]")
+    console.print(
+        f"\n[dim]Showing last {len(recent)} of {len(lines)} entries. /log path for file location.[/]",
+    )
     return None
 
 
@@ -5734,6 +6011,7 @@ async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
             text = str(response)
 
         from rich.markdown import Markdown as RichMarkdown
+
         console.print(RichMarkdown(text))
     except Exception as exc:
         print_error(f"Side question failed: {exc}")
@@ -5780,6 +6058,7 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
                     text += block.text
         if text:
             from rich.markdown import Markdown as RichMarkdown
+
             console.print(RichMarkdown(text))
         else:
             print_info(str(response))
@@ -5794,11 +6073,13 @@ _stash_stack: list[tuple[list[tuple[str, str]], str, list[dict[str, str]]]] = []
 
 async def cmd_stash(_args: str, ctx: REPLContext) -> str | None:
     """Save current conversation context and start fresh (like git stash)."""
-    _stash_stack.append((
-        list(ctx.message_history),
-        ctx.session_id,
-        list(ctx._file_changes),
-    ))
+    _stash_stack.append(
+        (
+            list(ctx.message_history),
+            ctx.session_id,
+            list(ctx._file_changes),
+        ),
+    )
     stash_idx = len(_stash_stack) - 1
 
     # Clear current context.
@@ -5826,7 +6107,9 @@ async def cmd_pop(_args: str, ctx: REPLContext) -> str | None:
     ctx._file_changes.clear()
     ctx._file_changes.extend(file_changes)
 
-    print_ok(f"Popped stash. Restored {len(history)} messages, {len(file_changes)} file changes.")
+    print_ok(
+        f"Popped stash. Restored {len(history)} messages, {len(file_changes)} file changes.",
+    )
     if _stash_stack:
         print_info(f"{len(_stash_stack)} stash(es) remaining.")
     return None
@@ -5967,7 +6250,15 @@ COMPLETIONS: dict[str, list[str]] = {
     "compact": [],
     "agent": ["spawn", "list", "stop", "run"],
     "skill": ["list", "load", "unload", "active", "clear"],
-    "delegate": ["codegen", "review", "analysis", "summarize", "testgen", "support", "--model"],
+    "delegate": [
+        "codegen",
+        "review",
+        "analysis",
+        "summarize",
+        "testgen",
+        "support",
+        "--model",
+    ],
     "fleet": ["spawn", "status", "run", "delegate", "stop"],
     "swarm": ["status", "results", "stop", "--model", "--no-synth", "--smart"],
     "attention": ["respond"],
@@ -6056,28 +6347,24 @@ async def handle_command(raw: str, ctx: REPLContext) -> str | None:
 
 
 # Backwards-compatible stub for cmd_secret used in tests
-async def cmd_secret(command: str, ctx: REPLContext):
+async def cmd_secret(command: str, ctx: REPLContext) -> None:
     """Simple secret command used by tests to toggle secret menu visibility.
 
     Usage: /secret unlock | lock | status
     """
     cmd = (command or "").strip().lower()
     if cmd == "unlock":
-        try:
+        with contextlib.suppress(Exception):
             ctx.secret_menu_unlocked = True
-        except Exception:
-            pass
         set_secret_menu_visibility(True)
-        return None
+        return
     if cmd == "lock":
-        try:
+        with contextlib.suppress(Exception):
             ctx.secret_menu_unlocked = False
-        except Exception:
-            pass
         set_secret_menu_visibility(False)
-        return None
+        return
     # status / other
-    return None
+    return
 
 
 def set_secret_menu_visibility(visible: bool) -> None:
@@ -6101,67 +6388,62 @@ def set_secret_menu_visibility(visible: bool) -> None:
         COMPLETIONS["secret"] = ["status", "unlock", "lock"]
         COMPLETIONS.pop("loglevel", None)
         COMPLETIONS.pop("jitter", None)
-    return None
 
 
 # Minimal test-compatible implementations for cmd_tasks and cmd_menu
-import asyncio
+
 
 async def cmd_tasks(command: str, ctx: REPLContext) -> None:
     cmd = (command or "").strip().lower()
     # ensure lists/dicts exist
-    if not hasattr(ctx, 'background_tasks'):
+    if not hasattr(ctx, "background_tasks"):
         ctx.background_tasks = []
-    if not hasattr(ctx, 'python_tasks'):
+    if not hasattr(ctx, "python_tasks"):
         ctx.python_tasks = []
-    if not hasattr(ctx, '_background_task_refs'):
+    if not hasattr(ctx, "_background_task_refs"):
         ctx._background_task_refs = {}
 
-    if cmd == 'clear':
+    if cmd == "clear":
         ctx.background_tasks.clear()
         ctx.python_tasks.clear()
         return
 
-    if cmd.startswith('interrupt'):
+    if cmd.startswith("interrupt"):
         # interrupt all
-        if 'all' in cmd:
-            for tid, task in list(getattr(ctx, '_background_task_refs', {}).items()):
-                try:
+        if "all" in cmd:
+            for tid, task in list(getattr(ctx, "_background_task_refs", {}).items()):
+                with contextlib.suppress(Exception):
                     task.cancel()
-                except Exception:
-                    pass
                 # mark entry cancelled
                 for entry in ctx.background_tasks:
-                    if entry.get('id') == tid:
-                        entry['status'] = 'cancelled'
+                    if entry.get("id") == tid:
+                        entry["status"] = "cancelled"
             return
         # interrupt specific id
         parts = cmd.split()
         if len(parts) >= 2:
             target = parts[-1]
-            t = getattr(ctx, '_background_task_refs', {}).get(target)
+            t = getattr(ctx, "_background_task_refs", {}).get(target)
             if t:
-                try:
+                with contextlib.suppress(Exception):
                     t.cancel()
-                except Exception:
-                    pass
             for entry in ctx.background_tasks:
-                if entry.get('id') == target:
-                    entry['status'] = 'cancelled'
+                if entry.get("id") == target:
+                    entry["status"] = "cancelled"
         return
 
 
 async def cmd_menu(command: str, ctx: REPLContext) -> None:
     cmd = (command or "").strip()
-    if not hasattr(ctx, 'ui_right_menu_enabled'):
+    if not hasattr(ctx, "ui_right_menu_enabled"):
         ctx.ui_right_menu_enabled = True
-    if not hasattr(ctx, 'ui_menu_items'):
+    if not hasattr(ctx, "ui_menu_items"):
         ctx.ui_menu_items = {}
 
-    if cmd == 'off':
+    if cmd == "off":
         ctx.ui_right_menu_enabled = False
         return
-    if cmd == 'on':
+    if cmd == "on":
         ctx.ui_right_menu_enabled = True
         return
     # Expect forms like 'reasoning off' or 'reasoning on'
@@ -6169,5 +6451,5 @@ async def cmd_menu(command: str, ctx: REPLContext) -> None:
     if len(parts) >= 2:
         key = parts[0]
         val = parts[-1].lower()
-        ctx.ui_menu_items[key] = val in ('on', 'true', '1')
+        ctx.ui_menu_items[key] = val in ("on", "true", "1")
         return

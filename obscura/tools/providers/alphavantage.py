@@ -1,4 +1,5 @@
 """Alpha Vantage financial data provider handlers."""
+
 from __future__ import annotations
 
 import os
@@ -32,13 +33,17 @@ async def _handler_quote(symbol: str, **kwargs: Any) -> dict[str, Any]:
 
 
 async def _handler_intraday(
-    symbol: str, interval: str = "5min", **kwargs: object
+    symbol: str,
+    interval: str = "5min",
+    **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "TIME_SERIES_INTRADAY",
-        "symbol": symbol,
-        "interval": interval,
-    })
+    return await _get(
+        {
+            "function": "TIME_SERIES_INTRADAY",
+            "symbol": symbol,
+            "interval": interval,
+        },
+    )
 
 
 async def _handler_daily(symbol: str, **kwargs: Any) -> dict[str, Any]:
@@ -63,13 +68,15 @@ async def _handler_sma(
     series_type: str = "close",
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "SMA",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-        "series_type": series_type,
-    })
+    return await _get(
+        {
+            "function": "SMA",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+            "series_type": series_type,
+        },
+    )
 
 
 async def _handler_ema(
@@ -79,13 +86,15 @@ async def _handler_ema(
     series_type: str = "close",
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "EMA",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-        "series_type": series_type,
-    })
+    return await _get(
+        {
+            "function": "EMA",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+            "series_type": series_type,
+        },
+    )
 
 
 async def _handler_rsi(
@@ -95,13 +104,15 @@ async def _handler_rsi(
     series_type: str = "close",
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "RSI",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-        "series_type": series_type,
-    })
+    return await _get(
+        {
+            "function": "RSI",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+            "series_type": series_type,
+        },
+    )
 
 
 async def _handler_macd(
@@ -110,12 +121,14 @@ async def _handler_macd(
     series_type: str = "close",
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "MACD",
-        "symbol": symbol,
-        "interval": interval,
-        "series_type": series_type,
-    })
+    return await _get(
+        {
+            "function": "MACD",
+            "symbol": symbol,
+            "interval": interval,
+            "series_type": series_type,
+        },
+    )
 
 
 async def _handler_bbands(
@@ -125,23 +138,29 @@ async def _handler_bbands(
     series_type: str = "close",
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "BBANDS",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-        "series_type": series_type,
-    })
+    return await _get(
+        {
+            "function": "BBANDS",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+            "series_type": series_type,
+        },
+    )
 
 
 async def _handler_stoch(
-    symbol: str, interval: str = "daily", **kwargs: object
+    symbol: str,
+    interval: str = "daily",
+    **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "STOCH",
-        "symbol": symbol,
-        "interval": interval,
-    })
+    return await _get(
+        {
+            "function": "STOCH",
+            "symbol": symbol,
+            "interval": interval,
+        },
+    )
 
 
 async def _handler_adx(
@@ -150,12 +169,14 @@ async def _handler_adx(
     time_period: int = 14,
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "ADX",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-    })
+    return await _get(
+        {
+            "function": "ADX",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+        },
+    )
 
 
 async def _handler_cci(
@@ -164,12 +185,14 @@ async def _handler_cci(
     time_period: int = 20,
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "CCI",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-    })
+    return await _get(
+        {
+            "function": "CCI",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+        },
+    )
 
 
 async def _handler_aroon(
@@ -178,32 +201,42 @@ async def _handler_aroon(
     time_period: int = 14,
     **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "AROON",
-        "symbol": symbol,
-        "interval": interval,
-        "time_period": time_period,
-    })
+    return await _get(
+        {
+            "function": "AROON",
+            "symbol": symbol,
+            "interval": interval,
+            "time_period": time_period,
+        },
+    )
 
 
 async def _handler_ad(
-    symbol: str, interval: str = "daily", **kwargs: object
+    symbol: str,
+    interval: str = "daily",
+    **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "AD",
-        "symbol": symbol,
-        "interval": interval,
-    })
+    return await _get(
+        {
+            "function": "AD",
+            "symbol": symbol,
+            "interval": interval,
+        },
+    )
 
 
 async def _handler_obv(
-    symbol: str, interval: str = "daily", **kwargs: object
+    symbol: str,
+    interval: str = "daily",
+    **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "OBV",
-        "symbol": symbol,
-        "interval": interval,
-    })
+    return await _get(
+        {
+            "function": "OBV",
+            "symbol": symbol,
+            "interval": interval,
+        },
+    )
 
 
 # ── Fundamentals ──────────────────────────────────────────────────────
@@ -233,13 +266,17 @@ async def _handler_earnings(symbol: str, **kwargs: Any) -> dict[str, Any]:
 
 
 async def _handler_currency_exchange_rate(
-    from_currency: str, to_currency: str, **kwargs: object
+    from_currency: str,
+    to_currency: str,
+    **kwargs: object,
 ) -> dict:
-    return await _get({
-        "function": "CURRENCY_EXCHANGE_RATE",
-        "from_currency": from_currency,
-        "to_currency": to_currency,
-    })
+    return await _get(
+        {
+            "function": "CURRENCY_EXCHANGE_RATE",
+            "from_currency": from_currency,
+            "to_currency": to_currency,
+        },
+    )
 
 
 # ── Healthcheck ───────────────────────────────────────────────────────

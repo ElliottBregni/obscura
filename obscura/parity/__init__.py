@@ -1,9 +1,9 @@
 """Parity package: semantic conformance models, runner, scoring, reporting."""
 
-from obscura.parity.features import FEATURES
-from obscura.parity.contracts import CONTRACTS
 from obscura.parity.conformance import evaluate_backend_conformance
+from obscura.parity.contracts import CONTRACTS
 from obscura.parity.defaults import default_backend_conformance
+from obscura.parity.features import FEATURES
 from obscura.parity.models import (
     BackendConformance,
     BackendParityProfile,
@@ -30,8 +30,9 @@ from obscura.parity.scoring import (
 )
 
 __all__ = [
-    "FEATURES",
     "CONTRACTS",
+    "DEFAULT_THRESHOLD_PERCENT",
+    "FEATURES",
     "PROFILES",
     "BackendConformance",
     "BackendParityProfile",
@@ -44,12 +45,11 @@ __all__ = [
     "ScenarioExpectation",
     "ScenarioResult",
     "ScenarioSpec",
-    "run_scenarios",
-    "evaluate_backend_conformance",
-    "default_backend_conformance",
-    "DEFAULT_THRESHOLD_PERCENT",
     "backend_percent",
+    "default_backend_conformance",
+    "evaluate_backend_conformance",
     "parity_percent",
+    "run_scenarios",
     "score_backend",
     "score_report",
     "score_report_with_conformance",

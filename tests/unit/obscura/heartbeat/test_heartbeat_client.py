@@ -1,8 +1,9 @@
 """Tests for sdk.heartbeat.client — AgentHeartbeatClient and HeartbeatClientPool."""
 
-import pytest
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from obscura.heartbeat.client import (
     AgentHeartbeatClient,
@@ -55,7 +56,9 @@ class TestAgentHeartbeatClientLifecycle:
         client = AgentHeartbeatClient("agent-1", "http://localhost:8080", interval=10)
 
         with patch.object(
-            client, "_send_heartbeat", new_callable=AsyncMock
+            client,
+            "_send_heartbeat",
+            new_callable=AsyncMock,
         ) as mock_send:
             mock_send.return_value = True
             await client.start()

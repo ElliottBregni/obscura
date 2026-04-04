@@ -1,4 +1,5 @@
 """Public APIs provider — discover, wrap, and persist public API tools."""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _BASE = "https://api.publicapis.org"
-_PERSIST_PATH = Path(os.environ.get("OBSCURA_DATA_DIR", os.path.expanduser("~/.obscura"))) / "public_apis_tools.json"
+_PERSIST_PATH = (
+    Path(os.environ.get("OBSCURA_DATA_DIR", os.path.expanduser("~/.obscura")))
+    / "public_apis_tools.json"
+)
 
 
 async def _discover(params: dict[str, Any]) -> dict[str, Any]:

@@ -24,14 +24,12 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-
 from obscura.core.compiler.compiled import ToolRoutingConfig
 from obscura.core.tool_router import DEFAULT_PINNED_TOOLS, ToolRouter
 from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import ToolSpec
 from obscura.plugins.models import CapabilitySpec, PluginSpec
 from obscura.plugins.registries.capability_index import CapabilityIndex
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -121,16 +119,25 @@ class TestCapabilityIndexFeedsRouter:
         assert "run_shell" in router._cap_tool_map["shell.exec"]
 
     def test_multiple_plugins_capabilities_merged(self) -> None:
-        p1 = _make_plugin_spec("system-tools", [
-            _make_capability("shell.exec", ("run_shell",)),
-            _make_capability("file.read", ("read_text_file", "list_directory")),
-        ])
-        p2 = _make_plugin_spec("git-plugin", [
-            _make_capability("git.ops", ("git_diff", "git_log", "git_status")),
-        ])
-        p3 = _make_plugin_spec("web-plugin", [
-            _make_capability("web.browse", ("web_fetch", "web_search")),
-        ])
+        p1 = _make_plugin_spec(
+            "system-tools",
+            [
+                _make_capability("shell.exec", ("run_shell",)),
+                _make_capability("file.read", ("read_text_file", "list_directory")),
+            ],
+        )
+        p2 = _make_plugin_spec(
+            "git-plugin",
+            [
+                _make_capability("git.ops", ("git_diff", "git_log", "git_status")),
+            ],
+        )
+        p3 = _make_plugin_spec(
+            "web-plugin",
+            [
+                _make_capability("web.browse", ("web_fetch", "web_search")),
+            ],
+        )
 
         index = CapabilityIndex()
         for plugin in [p1, p2, p3]:
@@ -146,7 +153,11 @@ class TestCapabilityIndexFeedsRouter:
         assert len(router._cap_descriptions) == 4
         assert "git.ops" in router._cap_descriptions
         assert "web.browse" in router._cap_descriptions
-        assert set(router._cap_tool_map["git.ops"]) == {"git_diff", "git_log", "git_status"}
+        assert set(router._cap_tool_map["git.ops"]) == {
+            "git_diff",
+            "git_log",
+            "git_status",
+        }
 
     def test_default_grant_capabilities_produce_pinned_tools(self) -> None:
         """Tools from capabilities with default_grant=True should be added
@@ -154,10 +165,14 @@ class TestCapabilityIndexFeedsRouter:
         pin_default_capabilities=True (the default).
         """
         granted = _make_capability(
-            "shell.exec", ("run_shell",), default_grant=True,
+            "shell.exec",
+            ("run_shell",),
+            default_grant=True,
         )
         not_granted = _make_capability(
-            "security.scan", ("gitleaks_scan",), default_grant=False,
+            "security.scan",
+            ("gitleaks_scan",),
+            default_grant=False,
         )
         index = CapabilityIndex()
         index.register(granted, "system-tools")
@@ -176,7 +191,9 @@ class TestCapabilityIndexFeedsRouter:
         capabilities survive routing even under tight max_tools.
         """
         granted_cap = _make_capability(
-            "file.read", ("read_text_file",), default_grant=True,
+            "file.read",
+            ("read_text_file",),
+            default_grant=True,
         )
         index = CapabilityIndex()
         index.register(granted_cap, "system-tools")
@@ -315,7 +332,10 @@ class TestSetToolRouterOnBackend:
         """Calling set_tool_router twice replaces the router."""
         backend = MagicMock()
         r1 = ToolRouter(config=ToolRoutingConfig(), score_index=ToolScoreIndex())
-        r2 = ToolRouter(config=ToolRoutingConfig(max_tools=10), score_index=ToolScoreIndex())
+        r2 = ToolRouter(
+            config=ToolRoutingConfig(max_tools=10),
+            score_index=ToolScoreIndex(),
+        )
         backend.set_tool_router(r1)
         backend.set_tool_router(r2)
         assert backend.set_tool_router.call_count == 2
@@ -337,7 +357,7 @@ class TestCapabilityMatchingInRouting:
 
         tools = _make_tools(
             ["git_diff", "git_log", "git_commit"]
-            + [f"unrelated_{i}" for i in range(100)]
+            + [f"unrelated_{i}" for i in range(100)],
         )
 
         router = ToolRouter(
@@ -355,9 +375,10 @@ class TestCapabilityMatchingInRouting:
         cap_desc = {"shell.exec": "execute shell commands and run programs"}
         cap_map = {"shell.exec": ["run_shell"]}
 
-        tools = [_make_spec("run_shell")] + _make_tools(
-            [f"other_{i}" for i in range(100)]
-        )
+        tools = [
+            _make_spec("run_shell"),
+            *_make_tools([f"other_{i}" for i in range(100)]),
+        ]
 
         router = ToolRouter(
             config=ToolRoutingConfig(max_tools=15),
@@ -371,14 +392,15 @@ class TestCapabilityMatchingInRouting:
 
     def test_unmatched_prompt_still_gets_pinned(self) -> None:
         """Even if no capability matches, pinned tools are present."""
-        tools = [_make_spec("run_shell")] + _make_tools(
-            [f"t_{i}" for i in range(100)]
-        )
+        tools = [_make_spec("run_shell"), *_make_tools([f"t_{i}" for i in range(100)])]
         router = ToolRouter(
             config=ToolRoutingConfig(max_tools=10),
             score_index=ToolScoreIndex(),
         )
-        result = router.select("something completely unrelated to any capability", tools)
+        result = router.select(
+            "something completely unrelated to any capability",
+            tools,
+        )
         names = {t.name for t in result.tools}
         assert "run_shell" in names
 
@@ -439,34 +461,50 @@ class TestCLIWiringIntegration:
         return mock_backend, router
 
     def test_router_attached_when_tools_enabled(self) -> None:
-        plugin = _make_plugin_spec("system-tools", [
-            _make_capability("shell.exec", ("run_shell",)),
-        ])
+        plugin = _make_plugin_spec(
+            "system-tools",
+            [
+                _make_capability("shell.exec", ("run_shell",)),
+            ],
+        )
         backend, router = self._simulate_wiring(builtins=[plugin])
         assert router is not None
         backend.set_tool_router.assert_called_once()
 
     def test_router_not_attached_when_tools_disabled(self) -> None:
-        plugin = _make_plugin_spec("system-tools", [
-            _make_capability("shell.exec", ("run_shell",)),
-        ])
+        plugin = _make_plugin_spec(
+            "system-tools",
+            [
+                _make_capability("shell.exec", ("run_shell",)),
+            ],
+        )
         backend, router = self._simulate_wiring(
-            tools_enabled=False, builtins=[plugin],
+            tools_enabled=False,
+            builtins=[plugin],
         )
         assert router is None
         backend.set_tool_router.assert_not_called()
 
     def test_router_receives_all_plugin_capabilities(self) -> None:
-        builtin = _make_plugin_spec("system-tools", [
-            _make_capability("shell.exec", ("run_shell",)),
-            _make_capability("file.read", ("read_text_file",)),
-        ])
-        local = _make_plugin_spec("my-local-plugin", [
-            _make_capability("my.custom", ("custom_tool",)),
-        ])
-        user = _make_plugin_spec("user-plugin", [
-            _make_capability("user.feature", ("user_tool",)),
-        ])
+        builtin = _make_plugin_spec(
+            "system-tools",
+            [
+                _make_capability("shell.exec", ("run_shell",)),
+                _make_capability("file.read", ("read_text_file",)),
+            ],
+        )
+        local = _make_plugin_spec(
+            "my-local-plugin",
+            [
+                _make_capability("my.custom", ("custom_tool",)),
+            ],
+        )
+        user = _make_plugin_spec(
+            "user-plugin",
+            [
+                _make_capability("user.feature", ("user_tool",)),
+            ],
+        )
 
         _, router = self._simulate_wiring(
             builtins=[builtin],
@@ -482,9 +520,15 @@ class TestCLIWiringIntegration:
         """Non-builtin plugins (local/user) must also have their tools
         available for capability matching — this was the gap.
         """
-        local = _make_plugin_spec("finance-plugin", [
-            _make_capability("finance.quotes", ("get_stock_price", "get_crypto_price")),
-        ])
+        local = _make_plugin_spec(
+            "finance-plugin",
+            [
+                _make_capability(
+                    "finance.quotes",
+                    ("get_stock_price", "get_crypto_price"),
+                ),
+            ],
+        )
         _, router = self._simulate_wiring(
             builtins=[],
             local_plugins=[local],
@@ -492,16 +536,23 @@ class TestCLIWiringIntegration:
         assert router is not None
         assert "finance.quotes" in router._cap_descriptions
         assert set(router._cap_tool_map["finance.quotes"]) == {
-            "get_stock_price", "get_crypto_price",
+            "get_stock_price",
+            "get_crypto_price",
         }
 
     def test_builtins_skipped_when_load_builtins_false(self) -> None:
-        builtin = _make_plugin_spec("system-tools", [
-            _make_capability("shell.exec", ("run_shell",)),
-        ])
-        local = _make_plugin_spec("local-plugin", [
-            _make_capability("local.cap", ("local_tool",)),
-        ])
+        builtin = _make_plugin_spec(
+            "system-tools",
+            [
+                _make_capability("shell.exec", ("run_shell",)),
+            ],
+        )
+        local = _make_plugin_spec(
+            "local-plugin",
+            [
+                _make_capability("local.cap", ("local_tool",)),
+            ],
+        )
         _, router = self._simulate_wiring(
             builtins=[builtin],
             local_plugins=[local],
@@ -522,8 +573,13 @@ class TestCLIWiringIntegration:
 
     def test_empty_plugins_still_creates_router(self) -> None:
         """Even with no plugins, the router should be created with
-        default pinned tools."""
-        backend, router = self._simulate_wiring(builtins=[], local_plugins=[], user_plugins=[])
+        default pinned tools.
+        """
+        backend, router = self._simulate_wiring(
+            builtins=[],
+            local_plugins=[],
+            user_plugins=[],
+        )
         assert router is not None
         backend.set_tool_router.assert_called_once()
 
@@ -531,12 +587,18 @@ class TestCLIWiringIntegration:
         """If two plugins declare the same capability ID, the last one
         registered wins (with a warning logged).
         """
-        p1 = _make_plugin_spec("plugin-a", [
-            _make_capability("shared.cap", ("tool_a",)),
-        ])
-        p2 = _make_plugin_spec("plugin-b", [
-            _make_capability("shared.cap", ("tool_b",)),
-        ])
+        p1 = _make_plugin_spec(
+            "plugin-a",
+            [
+                _make_capability("shared.cap", ("tool_a",)),
+            ],
+        )
+        p2 = _make_plugin_spec(
+            "plugin-b",
+            [
+                _make_capability("shared.cap", ("tool_b",)),
+            ],
+        )
         _, router = self._simulate_wiring(
             builtins=[p1],
             local_plugins=[p2],
@@ -561,7 +623,8 @@ class TestGracefulFallback:
 
         class BrokenIndex:
             def list_all(self) -> list[Any]:
-                raise RuntimeError("index corrupted")
+                msg = "index corrupted"
+                raise RuntimeError(msg)
 
         router = ToolRouter.from_capability_index(
             config=ToolRoutingConfig(),
@@ -578,7 +641,8 @@ class TestGracefulFallback:
 
         class BadScoreIndex(ToolScoreIndex):
             def get_score(self, tool_name: str) -> Any:
-                raise RuntimeError("score computation failed")
+                msg = "score computation failed"
+                raise RuntimeError(msg)
 
         router = ToolRouter(
             config=ToolRoutingConfig(max_tools=50),
@@ -601,7 +665,7 @@ class TestRoutingResultAttribution:
 
     def test_pinned_tier_populated(self) -> None:
         tools = [_make_spec(n) for n in DEFAULT_PINNED_TOOLS] + _make_tools(
-            [f"extra_{i}" for i in range(50)]
+            [f"extra_{i}" for i in range(50)],
         )
         router = ToolRouter(
             config=ToolRoutingConfig(max_tools=50),
@@ -651,22 +715,36 @@ class TestRealWorldScenarios:
     def _build_production_tools(self) -> list[ToolSpec]:
         """Simulate a realistic tool list with 165 tools."""
         # Core system tools (pinned)
-        core = [_make_spec(n, d) for n, d in [
-            ("run_shell", "Execute a shell command"),
-            ("read_text_file", "Read a file's contents"),
-            ("write_text_file", "Write contents to a file"),
-            ("edit_text_file", "Edit a file with search/replace"),
-            ("list_directory", "List directory contents"),
-            ("grep_files", "Search file contents with regex"),
-            ("find_files", "Find files by glob pattern"),
-            ("git_status", "Show git working tree status"),
-        ]]
+        core = [
+            _make_spec(n, d)
+            for n, d in [
+                ("run_shell", "Execute a shell command"),
+                ("read_text_file", "Read a file's contents"),
+                ("write_text_file", "Write contents to a file"),
+                ("edit_text_file", "Edit a file with search/replace"),
+                ("list_directory", "List directory contents"),
+                ("grep_files", "Search file contents with regex"),
+                ("find_files", "Find files by glob pattern"),
+                ("git_status", "Show git working tree status"),
+            ]
+        ]
 
         # Git tools
-        git_tools = [_make_spec(n) for n in [
-            "git_diff", "git_log", "git_commit", "git_add", "git_branch",
-            "git_checkout", "git_stash", "git_push", "git_pull", "git_reset",
-        ]]
+        git_tools = [
+            _make_spec(n)
+            for n in [
+                "git_diff",
+                "git_log",
+                "git_commit",
+                "git_add",
+                "git_branch",
+                "git_checkout",
+                "git_stash",
+                "git_push",
+                "git_pull",
+                "git_reset",
+            ]
+        ]
 
         # Plugin tools (fd, rg, gitnexus, gitleaks, etc.)
         plugin_tools = [_make_spec(f"plugin_tool_{i}") for i in range(80)]
@@ -706,9 +784,16 @@ class TestRealWorldScenarios:
         cap_desc = {"git.ops": "git version control operations like diff status log"}
         cap_map = {
             "git.ops": [
-                "git_diff", "git_log", "git_commit", "git_add",
-                "git_branch", "git_checkout", "git_stash",
-                "git_push", "git_pull", "git_reset",
+                "git_diff",
+                "git_log",
+                "git_commit",
+                "git_add",
+                "git_branch",
+                "git_checkout",
+                "git_stash",
+                "git_push",
+                "git_pull",
+                "git_reset",
             ],
         }
 
@@ -764,7 +849,7 @@ class TestPriorityTruncate:
 
     def test_core_tools_always_kept(self) -> None:
         """Core tools survive even when they appear last in the list."""
-        from obscura.providers.copilot import _priority_truncate, _CORE_TOOL_NAMES
+        from obscura.providers.copilot import _CORE_TOOL_NAMES, _priority_truncate
 
         # 150 MCP plugin tools, then core tools at the END
         mcp_filler = _make_tools([f"mcp__plugin__tool_{i}" for i in range(150)])
@@ -775,7 +860,9 @@ class TestPriorityTruncate:
         result_names = {t.name for t in result}
 
         for name in _CORE_TOOL_NAMES:
-            assert name in result_names, f"Core tool {name!r} was dropped by truncation!"
+            assert name in result_names, (
+                f"Core tool {name!r} was dropped by truncation!"
+            )
         assert len(result) == 128
 
     def test_mcp_core_variants_kept(self) -> None:
@@ -815,7 +902,7 @@ class TestPriorityTruncate:
         """Reproduce the exact bug: 154 tools → 128, run_shell was at
         position 130+ and got cut by naive slicing.
         """
-        from obscura.providers.copilot import _priority_truncate, _CORE_TOOL_NAMES
+        from obscura.providers.copilot import _CORE_TOOL_NAMES, _priority_truncate
 
         # Simulate real tool ordering: MCP tools registered first, core later
         mcp_tools = _make_tools([f"mcp__obscura_tools__tool_{i}" for i in range(80)])
@@ -824,10 +911,22 @@ class TestPriorityTruncate:
             _make_spec("mcp__obscura_tools__read_text_file"),
             _make_spec("mcp__obscura_tools__write_text_file"),
         ]
-        native_plugins = _make_tools(["fd_find", "rg_search", "report_intent",
-                                       "recall_memory", "store_memory", "semantic_search",
-                                       "todo_write", "ask_user", "user_interact", "fetch_url",
-                                       "web_search", "store_searchable"])
+        native_plugins = _make_tools(
+            [
+                "fd_find",
+                "rg_search",
+                "report_intent",
+                "recall_memory",
+                "store_memory",
+                "semantic_search",
+                "todo_write",
+                "ask_user",
+                "user_interact",
+                "fetch_url",
+                "web_search",
+                "store_searchable",
+            ],
+        )
         gitnexus = _make_tools([f"gitnexus_{i}" for i in range(20)])
         core = [_make_spec(name) for name in _CORE_TOOL_NAMES]
 
@@ -840,7 +939,9 @@ class TestPriorityTruncate:
 
         # ALL core tools must survive
         for name in _CORE_TOOL_NAMES:
-            assert name in result_names, f"Core tool {name!r} dropped in production scenario!"
+            assert name in result_names, (
+                f"Core tool {name!r} dropped in production scenario!"
+            )
 
         # MCP core variants must survive
         assert "mcp__obscura_tools__run_shell" in result_names
@@ -861,25 +962,26 @@ class TestPriorityTruncate:
         from obscura.providers.copilot import _priority_truncate
 
         tools = [
-            _make_spec("mcp__ext__random_tool"),       # tier 4: MCP other
-            _make_spec("native_plugin"),                # tier 3: native
-            _make_spec("mcp__obs__run_shell"),          # tier 2: MCP core
-            _make_spec("run_shell"),                    # tier 1: core
+            _make_spec("mcp__ext__random_tool"),  # tier 4: MCP other
+            _make_spec("native_plugin"),  # tier 3: native
+            _make_spec("mcp__obs__run_shell"),  # tier 2: MCP core
+            _make_spec("run_shell"),  # tier 1: core
         ]
         result = _priority_truncate(tools, 4)
-        assert result[0].name == "run_shell"           # core first
+        assert result[0].name == "run_shell"  # core first
         assert result[1].name == "mcp__obs__run_shell"  # MCP core second
-        assert result[2].name == "native_plugin"        # native third
+        assert result[2].name == "native_plugin"  # native third
         assert result[3].name == "mcp__ext__random_tool"  # MCP other last
 
     def test_empty_list(self) -> None:
         from obscura.providers.copilot import _priority_truncate
+
         result = _priority_truncate([], 128)
         assert result == []
 
     def test_limit_smaller_than_core(self) -> None:
         """Edge case: limit is smaller than the number of core tools."""
-        from obscura.providers.copilot import _priority_truncate, _CORE_TOOL_NAMES
+        from obscura.providers.copilot import _CORE_TOOL_NAMES, _priority_truncate
 
         core = [_make_spec(name) for name in _CORE_TOOL_NAMES]
         mcp = _make_tools([f"mcp__ext__t_{i}" for i in range(50)])

@@ -21,12 +21,12 @@ def evaluate_backend_conformance(
     # ``backend._backend`` doesn't exist consistently; infer from capabilities owner.
     # Every backend implementation here exposes a ``native`` property and capabilities().
     # Backend enum is available from ``backend.native.meta`` only after start, so use class mapping.
+    from obscura.core.types import Backend
     from obscura.providers.claude import ClaudeBackend
     from obscura.providers.copilot import CopilotBackend
     from obscura.providers.localllm import LocalLLMBackend
     from obscura.providers.moonshot import MoonshotBackend
     from obscura.providers.openai import OpenAIBackend
-    from obscura.core.types import Backend
 
     if isinstance(backend, MoonshotBackend):
         backend_enum = Backend.MOONSHOT
@@ -39,7 +39,8 @@ def evaluate_backend_conformance(
     elif isinstance(backend, LocalLLMBackend):
         backend_enum = Backend.LOCALLLM
     else:
-        raise TypeError(f"Unsupported backend type for conformance: {type(backend)!r}")
+        msg = f"Unsupported backend type for conformance: {type(backend)!r}"
+        raise TypeError(msg)
 
     checks: list[ContractCheckResult] = []
     for contract in contracts:
@@ -76,7 +77,7 @@ def evaluate_backend_conformance(
                 missing_methods=tuple(missing_methods),
                 missing_capabilities=tuple(missing_caps),
                 missing_native_features=tuple(missing_native),
-            )
+            ),
         )
 
     return BackendConformance(backend=backend_enum, checks=tuple(checks))

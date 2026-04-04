@@ -1,5 +1,4 @@
-"""
-obscura.kairos.uds_messaging — Cross-session messaging via Unix Domain Sockets.
+"""obscura.kairos.uds_messaging — Cross-session messaging via Unix Domain Sockets.
 
 Enables peer-to-peer messaging between running obscura sessions on
 the same machine. Each session listens on a UDS at
@@ -18,7 +17,10 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,10 @@ class UDSInbox:
         self._on_message: Callable[[dict[str, Any]], None] | None = None
         self._messages: list[dict[str, Any]] = []
 
-    async def start(self, on_message: Callable[[dict[str, Any]], None] | None = None) -> None:
+    async def start(
+        self,
+        on_message: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         """Start listening for messages."""
         self._on_message = on_message
         _SOCKET_DIR.mkdir(parents=True, exist_ok=True)

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from obscura.core.types import ToolCallInfo, ToolSpec
 from obscura.demo.framework import (
     DemoAgentConfig,
     make_demo_user,
     required_args_tool_guard,
     run_demo_prompt,
 )
-from obscura.core.types import ToolCallInfo, ToolSpec
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 class _FakeAgent:
@@ -27,7 +29,7 @@ class _FakeAgent:
                 parameters={"type": "object", "required": ["script"]},
                 handler=lambda: "",
                 required_tier="privileged",
-            )
+            ),
         ]
 
     async def start(self) -> None:
@@ -51,7 +53,7 @@ class _FakeAgent:
         # emulate missing args call being denied
         if on_confirm is not None:
             approved = on_confirm(
-                ToolCallInfo(tool_use_id="1", name="run_shell", input={})
+                ToolCallInfo(tool_use_id="1", name="run_shell", input={}),
             )
             if approved is False:
                 return f"loop-denied:{self.model}:{prompt}"

@@ -1,5 +1,4 @@
-"""
-obscura.a2a.transports.unix_socket — Unix domain socket transport for A2A.
+"""obscura.a2a.transports.unix_socket — Unix domain socket transport for A2A.
 
 Provides a lightweight, zero-network-overhead transport for local
 agent-to-agent communication.  Uses NDJSON (newline-delimited JSON)
@@ -27,17 +26,20 @@ Client usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from obscura.integrations.a2a.service import A2AService
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
 )
+
+if TYPE_CHECKING:
+    from obscura.integrations.a2a.service import A2AService
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +71,12 @@ class UnixSocketServicer:
                 try:
                     request = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError as exc:
-                    await _write_json(writer, {
-                        "error": {"code": -32700, "message": f"Parse error: {exc}"}
-                    })
+                    await _write_json(
+                        writer,
+                        {
+                            "error": {"code": -32700, "message": f"Parse error: {exc}"},
+                        },
+                    )
                     continue
 
                 method = request.get("method", "")
@@ -96,35 +101,45 @@ class UnixSocketServicer:
                         await _write_json(writer, {"result": result})
                     elif method in ("GetAgentCard", "agent/card"):
                         card = self._service.get_agent_card()
-                        await _write_json(writer, {
-                            "result": json.loads(card.model_dump_json())
-                        })
+                        await _write_json(
+                            writer,
+                            {
+                                "result": json.loads(card.model_dump_json()),
+                            },
+                        )
                     else:
-                        await _write_json(writer, {
-                            "error": {
-                                "code": -32601,
-                                "message": f"Unknown method: {method}",
-                            }
-                        })
+                        await _write_json(
+                            writer,
+                            {
+                                "error": {
+                                    "code": -32601,
+                                    "message": f"Unknown method: {method}",
+                                },
+                            },
+                        )
                 except A2AError as exc:
-                    await _write_json(writer, {
-                        "error": {"code": exc.code, "message": exc.message}
-                    })
+                    await _write_json(
+                        writer,
+                        {
+                            "error": {"code": exc.code, "message": exc.message},
+                        },
+                    )
                 except Exception as exc:
                     logger.exception("Error handling method %s", method)
-                    await _write_json(writer, {
-                        "error": {"code": -32000, "message": str(exc)}
-                    })
+                    await _write_json(
+                        writer,
+                        {
+                            "error": {"code": -32000, "message": str(exc)},
+                        },
+                    )
         except asyncio.IncompleteReadError:
             pass
         except ConnectionResetError:
             pass
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await writer.wait_closed()
-            except Exception:
-                pass
             logger.debug("Unix socket connection closed: %s", peer)
 
     async def _handle_send_message(self, params: dict[str, Any]) -> Any:
@@ -138,11 +153,13 @@ class UnixSocketServicer:
         return json.loads(task.model_dump_json())
 
     async def _handle_stream_message(
-        self, params: dict[str, Any]
+        self,
+        params: dict[str, Any],
     ) -> Any:
         message = A2AMessage.model_validate(params.get("message", {}))
         async for event in self._service.message_stream(
-            message, context_id=params.get("contextId")
+            message,
+            context_id=params.get("contextId"),
         ):
             yield json.loads(event.model_dump_json())
 
@@ -200,6 +217,7 @@ async def start_unix_socket_server(
     asyncio.Server
         The running server. Call ``server.close()`` and
         ``await server.wait_closed()`` to stop.
+
     """
     # Remove stale socket file if it exists.
     if os.path.exists(socket_path):
@@ -247,17 +265,15 @@ class UnixSocketA2AClient:
     async def connect(self) -> None:
         """Open a connection to the Unix socket server."""
         self._reader, self._writer = await asyncio.open_unix_connection(
-            self._socket_path
+            self._socket_path,
         )
 
     async def disconnect(self) -> None:
         """Close the connection."""
         if self._writer is not None:
             self._writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await self._writer.wait_closed()
-            except Exception:
-                pass
             self._writer = None
             self._reader = None
 
@@ -283,9 +299,11 @@ class UnixSocketA2AClient:
         -------
         str
             The text content from the task result.
+
         """
         if self._reader is None or self._writer is None:
-            raise RuntimeError("Not connected — call connect() first")
+            msg = "Not connected — call connect() first"
+            raise RuntimeError(msg)
 
         message = {
             "role": "user",
@@ -306,14 +324,16 @@ class UnixSocketA2AClient:
 
         line = await self._reader.readline()
         if not line:
-            raise ConnectionError("Server closed the connection")
+            msg = "Server closed the connection"
+            raise ConnectionError(msg)
 
         response = json.loads(line.decode("utf-8"))
 
         if "error" in response:
             err = response["error"]
+            msg = f"A2A error ({err.get('code', '?')}): {err.get('message', 'unknown')}"
             raise RuntimeError(
-                f"A2A error ({err.get('code', '?')}): {err.get('message', 'unknown')}"
+                msg,
             )
 
         result = response.get("result", {})
@@ -326,14 +346,16 @@ class UnixSocketA2AClient:
     ) -> dict[str, Any]:
         """Send a raw JSON-RPC-style request and return the response."""
         if self._reader is None or self._writer is None:
-            raise RuntimeError("Not connected — call connect() first")
+            msg = "Not connected — call connect() first"
+            raise RuntimeError(msg)
 
         request = {"method": method, "params": params or {}}
         await _write_json(self._writer, request)
 
         line = await self._reader.readline()
         if not line:
-            raise ConnectionError("Server closed the connection")
+            msg = "Server closed the connection"
+            raise ConnectionError(msg)
 
         return json.loads(line.decode("utf-8"))
 

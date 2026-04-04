@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,11 +15,12 @@ from obscura.core.lifecycle import (
     make_preflight_hook,
     make_redact_hook,
 )
-from obscura.core.preflight import PreflightResult, PreflightCheck
+from obscura.core.preflight import PreflightCheck, PreflightResult
 from obscura.core.types import AgentEvent, AgentEventKind
-from obscura.plugins.broker import BrokerAuditEntry
 from obscura.plugins.policy import PolicyAction, PolicyDecision
 
+if TYPE_CHECKING:
+    from obscura.plugins.broker import BrokerAuditEntry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,7 +51,8 @@ def _agent_start_event() -> AgentEvent:
 def _allow_engine() -> MagicMock:
     engine = MagicMock()
     engine.can_execute_tool.return_value = PolicyDecision(
-        action=PolicyAction.ALLOW, reason="ok"
+        action=PolicyAction.ALLOW,
+        reason="ok",
     )
     return engine
 
@@ -57,7 +60,9 @@ def _allow_engine() -> MagicMock:
 def _deny_engine(reason: str = "forbidden") -> MagicMock:
     engine = MagicMock()
     engine.can_execute_tool.return_value = PolicyDecision(
-        action=PolicyAction.DENY, reason=reason, matched_rule="test-deny"
+        action=PolicyAction.DENY,
+        reason=reason,
+        matched_rule="test-deny",
     )
     return engine
 
@@ -261,7 +266,8 @@ class TestMemoryInjectHook:
 
     def test_handles_loader_exception(self) -> None:
         def bad_loader() -> str:
-            raise RuntimeError("memory failed")
+            msg = "memory failed"
+            raise RuntimeError(msg)
 
         hook = make_memory_inject_hook(bad_loader)
         event = _turn_start_event("original")

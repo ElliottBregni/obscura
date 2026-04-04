@@ -1,5 +1,4 @@
-"""
-obscura.core.session_utils — Session lifecycle utilities.
+"""obscura.core.session_utils — Session lifecycle utilities.
 
 Provides:
   - Auto-titling: AI-generate session titles from first message
@@ -11,13 +10,17 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import signal
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +62,11 @@ async def generate_session_title(
             if not text:
                 text = str(response)
             # Clean up: remove quotes, limit length.
-            title = text.strip().strip('"\'').strip()
+            title = text.strip().strip("\"'").strip()
             if len(title) > 60:
                 title = title[:57] + "..."
             return title
-    except (asyncio.TimeoutError, Exception):
+    except (TimeoutError, Exception):
         pass
     return ""
 
@@ -151,7 +154,7 @@ async def stream_with_idle_timeout(
             yield chunk
         except StopAsyncIteration:
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Stream idle timeout after %.0fs — aborting", idle_timeout)
             raise
 
@@ -177,10 +180,8 @@ def install_signal_handlers() -> None:
     def _handle_signal(signum: int, frame: Any) -> None:
         logger.info("Signal %d received — running shutdown handlers", signum)
         for handler in _shutdown_handlers:
-            try:
+            with contextlib.suppress(Exception):
                 handler()
-            except Exception:
-                pass
         # Restore original handler and re-raise.
         if signum == signal.SIGINT and _original_sigint:
             signal.signal(signal.SIGINT, _original_sigint)

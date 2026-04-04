@@ -1,5 +1,4 @@
-"""
-obscura.telemetry.context — Identity-to-span helper.
+"""obscura.telemetry.context — Identity-to-span helper.
 
 Attaches user identity attributes from an :class:`AuthenticatedUser`
 to the current OTel span. Handles the case where auth is not available
@@ -27,6 +26,7 @@ def enrich_span_with_user(span: Any, user: Any | None) -> None:
     user:
         An ``AuthenticatedUser`` dataclass, or ``None`` for CLI / unauthenticated
         contexts.
+
     """
     if user is None:
         span.set_attribute("user.id", "system")

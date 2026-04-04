@@ -8,9 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from obscura.agent.aper_loop_agent import APERLoopAgent
+from obscura.agent.aper_loop_agent import APERLoopAgent, APERMode
 from obscura.core.types import AgentContext, AgentPhase, HookPoint
-
 
 # ---------------------------------------------------------------------------
 # Concrete test subclass
@@ -21,6 +20,7 @@ class ConcreteAPERAgent(APERLoopAgent):
     """Minimal APERLoopAgent that records phase execution."""
 
     def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("aper_mode", APERMode.ALWAYS)
         client = MagicMock()
         client.run_loop_to_completion = AsyncMock(return_value="mock result")
         super().__init__(client, **kwargs)
@@ -237,3 +237,63 @@ class TestInteractionBus:
         bus = InteractionBus()
         agent = ConcreteAPERAgent(name="test", interaction_bus=bus)
         assert agent.interaction_bus is bus
+
+
+# ---------------------------------------------------------------------------
+# Tests: APERMode (opt-in APER)
+# ---------------------------------------------------------------------------
+
+
+class TestAPERMode:
+    @pytest.mark.asyncio
+    async def test_disabled_skips_analyze_plan_respond(self) -> None:
+        agent = ConcreteAPERAgent(name="test", aper_mode=APERMode.DISABLED)
+        await agent.run_once("hello")
+        assert agent.call_order == ["execute"]
+
+    @pytest.mark.asyncio
+    async def test_disabled_fires_execute_hooks(self) -> None:
+        agent = ConcreteAPERAgent(name="test", aper_mode=APERMode.DISABLED)
+        fired: list[str] = []
+        agent.on(HookPoint.PRE_EXECUTE, lambda ctx: fired.append("pre_execute"))
+        agent.on(HookPoint.POST_EXECUTE, lambda ctx: fired.append("post_execute"))
+        await agent.run_once("hello")
+        assert fired == ["pre_execute", "post_execute"]
+
+    @pytest.mark.asyncio
+    async def test_always_runs_full_aper(self) -> None:
+        agent = ConcreteAPERAgent(name="test", aper_mode=APERMode.ALWAYS)
+        await agent.run_once("hello")
+        assert agent.call_order == ["analyze", "plan", "execute", "respond"]
+
+    @pytest.mark.asyncio
+    async def test_auto_simple_input_skips_aper(self) -> None:
+        agent = ConcreteAPERAgent(name="test", aper_mode=APERMode.AUTO)
+        await agent.run_once("hello")
+        assert agent.call_order == ["execute"]
+
+    @pytest.mark.asyncio
+    async def test_auto_complex_input_runs_full_aper(self) -> None:
+        agent = ConcreteAPERAgent(name="test", aper_mode=APERMode.AUTO)
+        await agent.run_once("Please refactor the authentication module")
+        assert agent.call_order == ["analyze", "plan", "execute", "respond"]
+
+    @pytest.mark.asyncio
+    async def test_auto_long_input_runs_full_aper(self) -> None:
+        agent = ConcreteAPERAgent(name="test", aper_mode=APERMode.AUTO)
+        await agent.run_once("x" * 600)
+        assert agent.call_order == ["analyze", "plan", "execute", "respond"]
+
+    @pytest.mark.asyncio
+    async def test_default_mode_is_always_for_test_agent(self) -> None:
+        """ConcreteAPERAgent defaults to ALWAYS for backward compat."""
+        agent = ConcreteAPERAgent(name="test")
+        assert agent.aper_mode is APERMode.ALWAYS
+
+    @pytest.mark.asyncio
+    async def test_default_mode_is_auto(self) -> None:
+        """APERLoopAgent itself defaults to AUTO."""
+        client = MagicMock()
+        client.run_loop_to_completion = AsyncMock(return_value="mock")
+        agent = APERLoopAgent(client, name="test")
+        assert agent.aper_mode is APERMode.AUTO

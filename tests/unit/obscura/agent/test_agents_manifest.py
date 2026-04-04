@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from obscura.agent.agents import AgentConfig
 from obscura.agent.supervisor import SupervisorConfig
@@ -11,6 +11,9 @@ from obscura.manifest.models import (
     MCPServerRef,
     SkillManifest,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestAgentConfigFromManifest:

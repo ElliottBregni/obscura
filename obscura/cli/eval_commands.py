@@ -23,13 +23,21 @@ def eval_group() -> None:
 @click.option("-m", "--model", default=None, help="Model override.")
 @click.option("--tag", multiple=True, help="Filter cases by tag.")
 @click.option("--case", "case_id", default=None, help="Run a specific case by ID.")
-@click.option("--set-baseline", is_flag=True, default=False, help="Promote results as new baseline.")
 @click.option(
-    "--judge-backend", default=None,
+    "--set-baseline",
+    is_flag=True,
+    default=False,
+    help="Promote results as new baseline.",
+)
+@click.option(
+    "--judge-backend",
+    default=None,
     help="Backend for LLM-as-judge (defaults to eval backend).",
 )
 @click.option(
-    "--format", "output_format", default="table",
+    "--format",
+    "output_format",
+    default="table",
     type=click.Choice(["table", "json", "md"]),
     help="Output format.",
 )
@@ -175,7 +183,7 @@ def list_cmd(suites: bool, runs: bool, baselines: bool) -> None:
                     f"  {r['run_id']}  {r['suite_id']}  "
                     f"{r['passed']}/{r['total_cases']}P  "
                     f"avg={r['avg_composite_score']:.2f}  "
-                    f"{r['created_at']}"
+                    f"{r['created_at']}",
                 )
 
         asyncio.run(_list_runs())
@@ -194,23 +202,32 @@ def list_cmd(suites: bool, runs: bool, baselines: bool) -> None:
             for r in results:
                 console.print(
                     f"  {r['case_id']}  suite={r['suite_id']}  "
-                    f"run={r['run_id']}  score={r['score']:.2f}"
+                    f"run={r['run_id']}  score={r['score']:.2f}",
                 )
 
         asyncio.run(_list_baselines())
 
 
 @eval_group.command("report")
-@click.option("--run", "run_id", default=None, help="Show report for a specific run ID.")
+@click.option(
+    "--run",
+    "run_id",
+    default=None,
+    help="Show report for a specific run ID.",
+)
 @click.option("--suite", "suite_id", default=None, help="Show latest run for a suite.")
 @click.option(
-    "--format", "output_format", default="table",
+    "--format",
+    "output_format",
+    default="table",
     type=click.Choice(["table", "json", "md"]),
     help="Output format.",
 )
 def report_cmd(run_id: str | None, suite_id: str | None, output_format: str) -> None:
     """Show eval run reports."""
-    console.print("[yellow]Report retrieval from stored runs not yet implemented.[/yellow]")
+    console.print(
+        "[yellow]Report retrieval from stored runs not yet implemented.[/yellow]",
+    )
     console.print("Use 'obscura eval run' to execute evals with --format option.")
 
 
@@ -227,9 +244,12 @@ def _resolve_backend(backend_name: str, model_name: str) -> object:
     try:
         backend_enum = Backend(backend_name)
     except ValueError:
-        raise click.ClickException(
+        msg = (
             f"Unknown backend '{backend_name}'. "
             "Available: claude, copilot, openai, localllm, moonshot"
+        )
+        raise click.ClickException(
+            msg,
         )
 
     auth = resolve_auth(backend_enum)
@@ -251,9 +271,12 @@ def _resolve_backend(backend_name: str, model_name: str) -> object:
 
             return ClaudeCliEvalBackend(model=model_name)
 
-        raise click.ClickException(
+        msg = (
             "No Anthropic API key found and 'claude' CLI not on PATH. "
             "Set ANTHROPIC_API_KEY or install Claude Code."
+        )
+        raise click.ClickException(
+            msg,
         )
 
     if backend_enum == Backend.COPILOT:
@@ -276,7 +299,8 @@ def _resolve_backend(backend_name: str, model_name: str) -> object:
 
         return MoonshotBackend(auth, model=model_name)
 
-    raise click.ClickException(f"Backend '{backend_name}' not yet supported for evals.")
+    msg = f"Backend '{backend_name}' not yet supported for evals."
+    raise click.ClickException(msg)
 
 
 def _resolve_tool_registry() -> object:

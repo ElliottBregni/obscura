@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from obscura.core.auth import AuthConfig
 from obscura.core.types import Backend, ChunkKind, HookPoint, StreamChunk
 
@@ -290,8 +291,8 @@ class TestOpenAISessions:
 
 class TestOpenAITools:
     def test_register_tool(self) -> None:
-        from obscura.providers.openai import OpenAIBackend
         from obscura.core.types import ToolSpec
+        from obscura.providers.openai import OpenAIBackend
 
         b = OpenAIBackend(_make_auth())
         spec = ToolSpec(
