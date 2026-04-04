@@ -376,6 +376,9 @@ class AgentLoop:
             _current_tool_raw: Any = None
             _seen_tool_use: bool = False
             _emitted_tool_keys: set[str] = set()  # dedup event emissions
+            # Claude SDK executes tools internally via MCP — collect
+            # results from the stream so we don't re-execute them.
+            _sdk_tool_results: list[StreamChunk] = []
 
             try:
                 async for chunk in self._call_stream(current_prompt, kwargs):
@@ -420,6 +423,10 @@ class AgentLoop:
 
                     if chunk.kind == ChunkKind.TOOL_USE_DELTA:
                         _current_tool_input_json += chunk.tool_input_delta
+
+                    # Collect SDK-executed tool results (Claude backend)
+                    if chunk.kind == ChunkKind.TOOL_RESULT:
+                        _sdk_tool_results.append(chunk)
 
                     # TOOL_USE_END — flush accumulated tool immediately
                     if chunk.kind == ChunkKind.TOOL_USE_END:
@@ -560,8 +567,19 @@ class AgentLoop:
                         logger.debug("Failed to mark session completed", exc_info=True)
                 return
 
-            # Execute tool calls and build results for next turn
-            tool_results = await self._execute_tools(tool_calls)
+            # Execute tool calls and build results for next turn.
+            # When Claude SDK already executed tools via its MCP server,
+            # use the results from the stream instead of re-executing.
+            _sdk_executed = (
+                self._backend_name == "claude"
+                and len(_sdk_tool_results) >= len(tool_calls)
+            )
+            if _sdk_executed:
+                tool_results = self._build_results_from_sdk(
+                    tool_calls, _sdk_tool_results,
+                )
+            else:
+                tool_results = await self._execute_tools(tool_calls)
 
             # Yield tool result events
             for result in tool_results:
@@ -754,6 +772,48 @@ class AgentLoop:
     # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_results_from_sdk(
+        tool_calls: list[ToolCallInfo],
+        sdk_chunks: list[StreamChunk],
+    ) -> list[ToolResultEnvelope]:
+        """Build ToolResultEnvelopes from SDK-executed TOOL_RESULT chunks.
+
+        The Claude SDK executes tools internally via its MCP server and
+        streams back ToolResultBlock chunks.  We pair them with our
+        collected tool_calls so the rest of the loop (event emission,
+        structured message building) works identically.
+        """
+        # Build a map from tool_use_id to the SDK result text.
+        sdk_by_id: dict[str, str] = {}
+        for chunk in sdk_chunks:
+            raw = chunk.raw
+            use_id = getattr(raw, "tool_use_id", "") if raw else ""
+            sdk_by_id[use_id] = chunk.text
+
+        results: list[ToolResultEnvelope] = []
+        for i, tc in enumerate(tool_calls):
+            # Match by tool_use_id first, fall back to positional order.
+            result_text = sdk_by_id.get(tc.tool_use_id)
+            if result_text is None and i < len(sdk_chunks):
+                result_text = sdk_chunks[i].text
+            if result_text is None:
+                result_text = ""
+            is_error = getattr(
+                sdk_chunks[i].raw if i < len(sdk_chunks) else None,
+                "is_error", False,
+            )
+            results.append(
+                ToolResultEnvelope(
+                    call_id=tc.tool_use_id,
+                    tool=tc.name,
+                    status="error" if is_error else "ok",
+                    result=result_text,
+                    tool_use_id=tc.tool_use_id,
+                )
+            )
+        return results
 
     async def _execute_tools(
         self,

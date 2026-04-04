@@ -257,8 +257,8 @@ class ToolRegistry:
             "askuserquestion": "ask_user",
             "agent": "task",
             "skill": "task",
-            "enterplanmode": "task",
-            "exitplanmode": "task",
+            "enterplanmode": "enter_plan_mode",
+            "exitplanmode": "exit_plan_mode",
         }
 
     @staticmethod

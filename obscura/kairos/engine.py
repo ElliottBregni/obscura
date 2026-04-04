@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+import json
+from pathlib import Path
 
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
@@ -18,15 +20,60 @@ from obscura.kairos.proactive import ProactiveMode
 logger = logging.getLogger(__name__)
 
 
+def _env_flag(name: str, default: bool = True) -> bool:
+    """Read a boolean env var. Default is True (opt-out pattern)."""
+    val = os.environ.get(name, "").strip().lower()
+    if val in ("0", "false", "no", "off"):
+        return False
+    if val in ("1", "true", "yes", "on"):
+        return True
+    return default
+
+
+def _settings_flag(key: str, default: bool = True) -> bool:
+    """Read a boolean toggle from ~/.obscura/settings.json if present.
+
+    Supports nested keys via dot-notation (e.g., "kairos.enabled"). If the
+    key is missing or the file is unreadable, returns ``default``.
+    """
+    try:
+        settings_path = Path.home() / ".obscura" / "settings.json"
+        if not settings_path.is_file():
+            return default
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+        cur: object = data
+        for part in key.split("."):
+            if isinstance(cur, dict) and part in cur:  # type: ignore[redundant-cast]
+                cur = cur[part]  # type: ignore[index]
+            else:
+                return default
+        if isinstance(cur, bool):
+            return cur
+        if isinstance(cur, str):
+            val = cur.strip().lower()
+            if val in ("0", "false", "no", "off"):
+                return False
+            if val in ("1", "true", "yes", "on"):
+                return True
+        return default
+    except Exception:
+        return default
+
+
 def is_kairos_enabled() -> bool:
-    """Check if KAIROS mode is enabled."""
-    val = os.environ.get("OBSCURA_KAIROS", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    """Check if KAIROS mode is enabled (default: on).
+
+    Resolution order (opt-out):
+      1) ~/.obscura/settings.json → key "kairos.enabled"
+      2) OBSCURA_KAIROS env var
+      3) default True
+    """
+    return _settings_flag("kairos.enabled", _env_flag("OBSCURA_KAIROS", default=True))
 
 
 def set_kairos_mode(enabled: bool) -> None:
     """Enable or disable KAIROS mode."""
-    os.environ["OBSCURA_KAIROS"] = "1" if enabled else ""
+    os.environ["OBSCURA_KAIROS"] = "1" if enabled else "0"
 
 
 class KairosEngine:
@@ -34,9 +81,14 @@ class KairosEngine:
 
     Combines:
       - Daily append-only logging
-      - Proactive tick-based actions
-      - Dream consolidation scheduling
+      - Proactive tick-based actions (opt-out: OBSCURA_KAIROS_PROACTIVE=false)
+      - Dream consolidation scheduling (opt-out: OBSCURA_KAIROS_DREAM=false)
       - Background session monitoring
+
+    Cost-reduction env vars:
+      - OBSCURA_KAIROS=false          Disable entire daemon
+      - OBSCURA_KAIROS_PROACTIVE=false Disable tick loop (saves tokens)
+      - OBSCURA_KAIROS_DREAM=false     Disable dream consolidation (saves tokens)
 
     Usage::
 
@@ -53,9 +105,33 @@ class KairosEngine:
         tick_interval: float = 60.0,
         dream_min_hours: float = 24.0,
         dream_min_sessions: int = 5,
+        # Cost-reduction toggles (None = read from env)
+        proactive_enabled: bool | None = None,
+        dream_enabled: bool | None = None,
     ) -> None:
+        self._proactive_enabled = (
+            proactive_enabled
+            if proactive_enabled is not None
+            else _settings_flag(
+                "kairos.proactive",
+                _env_flag("OBSCURA_KAIROS_PROACTIVE", default=True),
+            )
+        )
+        self._dream_enabled = (
+            dream_enabled
+            if dream_enabled is not None
+            else _settings_flag(
+                "kairos.dream",
+                _env_flag("OBSCURA_KAIROS_DREAM", default=True),
+            )
+        )
+
         self._daily_log = DailyLog()
-        self._proactive = ProactiveMode(tick_interval=tick_interval)
+        self._proactive: ProactiveMode | None = (
+            ProactiveMode(tick_interval=tick_interval)
+            if self._proactive_enabled
+            else None
+        )
         self._dream_min_hours = dream_min_hours
         self._dream_min_sessions = dream_min_sessions
         self._started = False
@@ -76,17 +152,23 @@ class KairosEngine:
         # Log engine start.
         self.log("KAIROS engine started")
 
-        # Start proactive tick loop.
-        await self._proactive.start()
+        # Start proactive tick loop if enabled.
+        if self._proactive is not None:
+            await self._proactive.start()
 
-        logger.info("KAIROS engine started")
+        logger.info(
+            "KAIROS engine started (proactive=%s dream=%s)",
+            self._proactive_enabled,
+            self._dream_enabled,
+        )
 
     async def stop(self) -> None:
         """Stop the KAIROS engine."""
         if not self._started:
             return
 
-        await self._proactive.stop()
+        if self._proactive is not None:
+            await self._proactive.stop()
         self.log("KAIROS engine stopped")
         self._started = False
 
@@ -119,6 +201,8 @@ class KairosEngine:
 
     async def _maybe_dream(self) -> None:
         """Check if dream consolidation should run."""
+        if not self._dream_enabled:
+            return
         from obscura.kairos.dream import DreamConsolidator
 
         consolidator = DreamConsolidator(
@@ -132,7 +216,7 @@ class KairosEngine:
             self.log("Dream consolidation completed")
 
     def get_system_prompt_addition(self) -> str:
-        """Return KAIROS system prompt additions."""
+        """Return KAIROS system prompt additions (including undercover instructions)."""
         parts = [
             "# KAIROS Mode Active\n",
             "You are in KAIROS mode — an autonomous background daemon.",
@@ -144,9 +228,20 @@ class KairosEngine:
             "- Consolidate memories during dream cycles",
             "- Respect the 15-second blocking budget for proactive actions",
         ]
-        if self._proactive.is_running:
+        if self._proactive is not None and self._proactive.is_running:
             parts.append("")
             parts.append(self._proactive.get_system_prompt_addition())
+
+        # Inject undercover instructions if active.
+        try:
+            from obscura.kairos.undercover import UndercoverMode
+            uc_prompt = UndercoverMode().get_system_prompt_addition()
+            if uc_prompt:
+                parts.append("")
+                parts.append(uc_prompt)
+        except Exception:
+            pass
+
         return "\n".join(parts)
 
     def status(self) -> dict[str, object]:
@@ -155,7 +250,9 @@ class KairosEngine:
             "running": self._started,
             "uptime_s": time.time() - self._start_time if self._started else 0,
             "observations": self._observation_count,
-            "tick_count": self._proactive.tick_count,
+            "tick_count": self._proactive.tick_count if self._proactive else 0,
+            "proactive_enabled": self._proactive_enabled,
+            "dream_enabled": self._dream_enabled,
             "daily_log_entries": self._daily_log.entry_count(),
             "daily_log_path": str(self._daily_log.path),
         }

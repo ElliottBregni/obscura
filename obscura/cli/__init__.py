@@ -29,6 +29,8 @@ import click
 
 _log = logging.getLogger("obscura.cli")
 
+_session_state: dict[str, bool] = {"titled": False}
+
 
 def _swallow(label: str, exc: Exception) -> None:
     """Log a swallowed exception at DEBUG level instead of silently ignoring."""
@@ -1003,6 +1005,18 @@ async def _repl(
         except Exception:
             pass
 
+    # Wire the plan-mode toggle so enter_plan_mode / exit_plan_mode tools work
+    if tools_enabled:
+        try:
+            from obscura.tools.system import set_permission_mode_callback
+
+            def _set_permission_mode(mode: str) -> None:
+                ctx._permission_mode = mode
+
+            set_permission_mode_callback(_set_permission_mode)
+        except Exception:
+            pass
+
     # Wire the user_interact callback for permission/notify/question modes
     if tools_enabled:
         try:
@@ -1345,13 +1359,20 @@ async def _repl(
         # Background spinner animation for the toolbar
         spinner_task = asyncio.create_task(animate_spinner(ss))
 
-        # --- KAIROS integration: start engine if enabled ---
+        # --- KAIROS integration: wire into supervisor or start directly ---
         _kairos_engine = None
+        _kairos_hooks_registered = False
         try:
             from obscura.kairos.engine import KairosEngine, is_kairos_enabled
             if is_kairos_enabled():
                 _kairos_engine = KairosEngine()
-                await _kairos_engine.start()
+                if _supervisor is not None and hasattr(_supervisor, "hooks"):
+                    from obscura.kairos.supervisor_hooks import register_kairos_hooks
+                    register_kairos_hooks(_supervisor.hooks, _kairos_engine)
+                    _kairos_hooks_registered = True
+                else:
+                    # No supervisor — start directly (fallback)
+                    await _kairos_engine.start()
         except Exception as _e:
             _swallow("kairos_start", _e)
 
@@ -1363,19 +1384,23 @@ async def _repl(
         except Exception as _e:
             _swallow("tips_init", _e)
 
-        # --- Frustration detector ---
+        # --- Frustration detector (kairos subsystem — gated by is_kairos_enabled) ---
         _frustration_detector = None
         try:
-            from obscura.kairos.frustration import FrustrationDetector
-            _frustration_detector = FrustrationDetector()
+            from obscura.kairos.engine import is_kairos_enabled as _kairos_enabled
+            if _kairos_enabled():
+                from obscura.kairos.frustration import FrustrationDetector
+                _frustration_detector = FrustrationDetector()
         except Exception as _e:
             _swallow("frustration_init", _e)
 
-        # --- Away summary tracker ---
+        # --- Away summary tracker (kairos subsystem — gated by is_kairos_enabled) ---
         _away_tracker = None
         try:
-            from obscura.kairos.away_summary import AwaySummaryTracker
-            _away_tracker = AwaySummaryTracker()
+            from obscura.kairos.engine import is_kairos_enabled as _kairos_enabled
+            if _kairos_enabled():
+                from obscura.kairos.away_summary import AwaySummaryTracker
+                _away_tracker = AwaySummaryTracker()
         except Exception as _e:
             _swallow("away_init", _e)
 
@@ -1435,6 +1460,7 @@ async def _repl(
             _uds_inbox = None
 
         # --- Auto-title tracking (mutable container for closure access) ---
+        global _session_state
         _session_state = {"titled": False}
 
         background_tasks: set[asyncio.Task[str]] = set()
@@ -1997,8 +2023,8 @@ async def _repl(
                 dlog.close()
             except Exception:
                 pass
-            # KAIROS: stop engine + trigger dream consolidation
-            if _kairos_engine is not None:
+            # KAIROS: stop engine if not already handled by supervisor hooks
+            if _kairos_engine is not None and not _kairos_hooks_registered:
                 try:
                     await _kairos_engine.stop()
                 except Exception:

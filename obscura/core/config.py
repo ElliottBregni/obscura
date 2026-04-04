@@ -66,6 +66,14 @@ class ObscuraConfig(BaseModel):
     a2a_agent_name: str = "Obscura Agent"
     a2a_agent_description: str = ""
 
+    # Kairos background daemon (opt-out: set OBSCURA_KAIROS=false to disable)
+    kairos_enabled: bool = True  # default on; OBSCURA_KAIROS=false to disable
+    kairos_proactive: bool = True  # OBSCURA_KAIROS_PROACTIVE=false to save tokens
+    kairos_dream: bool = True  # OBSCURA_KAIROS_DREAM=false to save tokens
+
+    # Undercover mode — strips AI attribution from commits (default on)
+    undercover_enabled: bool = True  # OBSCURA_UNDERCOVER=false to show attribution
+
     @classmethod
     def from_env(cls) -> ObscuraConfig:
         """Build config from environment variables with sensible defaults."""
@@ -122,4 +130,10 @@ class ObscuraConfig(BaseModel):
             a2a_grpc_port=int(os.environ.get("OBSCURA_A2A_GRPC_PORT", "50051")),
             a2a_agent_name=os.environ.get("OBSCURA_A2A_AGENT_NAME", "Obscura Agent"),
             a2a_agent_description=os.environ.get("OBSCURA_A2A_AGENT_DESCRIPTION", ""),
+            # Kairos
+            kairos_enabled=os.environ.get("OBSCURA_KAIROS", "").strip().lower() not in ("0", "false", "no", "off"),
+            kairos_proactive=os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").strip().lower() not in ("0", "false", "no", "off"),
+            kairos_dream=os.environ.get("OBSCURA_KAIROS_DREAM", "").strip().lower() not in ("0", "false", "no", "off"),
+            # Undercover
+            undercover_enabled=os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower() not in ("0", "false", "no", "off"),
         )

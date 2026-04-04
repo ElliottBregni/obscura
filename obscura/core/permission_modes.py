@@ -57,6 +57,8 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset({
     "todo_write",
     "report_intent",
     "ask_user",
+    "enter_plan_mode",
+    "exit_plan_mode",
 })
 
 # Tools auto-approved in ACCEPT_EDITS mode.

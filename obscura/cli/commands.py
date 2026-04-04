@@ -636,7 +636,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /workflow [list|run]   Multi-step workflows",
         "",
         " [bold]KAIROS & Voice[/]",
-        "  /kairos [on|off]       Autonomous daemon mode",
+        "  /kairos [on|off|status|proactive on|off|dream on|off]",
         "  /voice [on|off]        Push-to-talk (Ctrl+Space)",
         "",
         " [bold]Workspace[/]",
@@ -4871,8 +4871,6 @@ async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
 ```
 git commit -m "$(cat <<'EOF'
 Message here.
-
-Co-Authored-By: Obscura Agent <noreply@obscura.dev>
 EOF
 )"
 ```
@@ -5127,21 +5125,82 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
-    """Toggle KAIROS autonomous mode. Usage: /kairos [on|off|status]"""
+    """Toggle KAIROS autonomous mode.
+
+    Usage:
+      /kairos [status]               Show overall + feature status
+      /kairos on|off                 Enable/disable Kairos entirely
+      /kairos proactive on|off       Toggle proactive tick loop
+      /kairos dream on|off           Toggle dream consolidation
+    """
     from obscura.kairos.engine import is_kairos_enabled, set_kairos_mode
 
-    sub = args.strip().lower()
-    if sub == "on":
-        set_kairos_mode(True)
-        print_ok("KAIROS mode enabled. Will activate on next session start.")
-    elif sub == "off":
-        set_kairos_mode(False)
-        print_ok("KAIROS mode disabled.")
-    else:
+    import json as _json
+    from pathlib import Path as _Path
+
+    def _write_setting(k: str, v: bool) -> None:
+        """Persist toggle under ~/.obscura/settings.json (best-effort)."""
+        try:
+            sp = _Path.home() / ".obscura" / "settings.json"
+            sp.parent.mkdir(parents=True, exist_ok=True)
+            data: dict[str, object] = {}
+            if sp.is_file():
+                try:
+                    data = _json.loads(sp.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            # dot-notation like "kairos.enabled"
+            parts = k.split(".")
+            cur: dict[str, object] = data
+            for part in parts[:-1]:
+                if part not in cur or not isinstance(cur[part], dict):
+                    cur[part] = {}
+                cur = cur[part]  # type: ignore[assignment]
+            cur[parts[-1]] = v
+            sp.write_text(_json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    tokens = [t for t in args.strip().split() if t]
+    if not tokens or tokens[0] == "status":
         status = "ON" if is_kairos_enabled() else "OFF"
         print_info(f"KAIROS mode: {status}")
-        if not is_kairos_enabled():
-            print_info("Enable with: /kairos on  (or set OBSCURA_KAIROS=1)")
+        # Feature status (resolved on demand by engine at runtime)
+        import os as _os
+        pro = _os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").lower() not in ("0", "false", "no", "off")
+        dr = _os.environ.get("OBSCURA_KAIROS_DREAM", "").lower() not in ("0", "false", "no", "off")
+        print_info(f"  - Proactive ticks: {'ON' if pro else 'OFF'}  (OBSCURA_KAIROS_PROACTIVE)")
+        print_info(f"  - Dream consolidation: {'ON' if dr else 'OFF'}  (OBSCURA_KAIROS_DREAM)")
+        if is_kairos_enabled():
+            print_info("Disable with: /kairos off  (or set OBSCURA_KAIROS=false)")
+        else:
+            print_info("Enable with: /kairos on  (or unset OBSCURA_KAIROS)")
+        return None
+
+    if tokens[0] in ("on", "off"):
+        enabled = tokens[0] == "on"
+        set_kairos_mode(enabled)
+        _write_setting("kairos.enabled", enabled)
+        print_ok(f"KAIROS mode {'enabled' if enabled else 'disabled'}. {'Will activate on next session start.' if enabled else ''}")
+        return None
+
+    if tokens[0] in ("proactive", "dream"):
+        if len(tokens) < 2 or tokens[1] not in ("on", "off"):
+            print_error("Usage: /kairos proactive on|off   or   /kairos dream on|off")
+            return None
+        enabled = tokens[1] == "on"
+        import os as _os
+        if tokens[0] == "proactive":
+            _os.environ["OBSCURA_KAIROS_PROACTIVE"] = "1" if enabled else "0"
+            _write_setting("kairos.proactive", enabled)
+            print_ok(f"Kairos proactive ticks {'enabled' if enabled else 'disabled'}.")
+        else:
+            _os.environ["OBSCURA_KAIROS_DREAM"] = "1" if enabled else "0"
+            _write_setting("kairos.dream", enabled)
+            print_ok(f"Kairos dream consolidation {'enabled' if enabled else 'disabled'}.")
+        return None
+
+    print_error("Unknown args. Try: /kairos [status|on|off|proactive on|off|dream on|off]")
     return None
 
 

@@ -219,13 +219,13 @@ class CopilotBackend:
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient
-        from copilot.types import SubprocessConfig  # pyright: ignore[reportAttributeAccessIssue,reportUnknownVariableType]
+        from copilot.types import CopilotClientOptions  # pyright: ignore[reportAttributeAccessIssue,reportUnknownVariableType]
 
-        client_config: Any = None
+        client_opts: Any = None
         if self._auth.github_token:
-            client_config = SubprocessConfig(github_token=self._auth.github_token)  # pyright: ignore[reportUnknownVariableType]
+            client_opts = CopilotClientOptions(github_token=self._auth.github_token)  # pyright: ignore[reportUnknownVariableType]
 
-        self._client = CopilotClient(client_config)  # pyright: ignore[reportUnknownArgumentType]
+        self._client = CopilotClient(client_opts)  # pyright: ignore[reportUnknownArgumentType]
         await self._client.start()
 
         # Create default session

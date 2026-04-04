@@ -3150,6 +3150,55 @@ async def report_intent(intent: str) -> str:
     return json.dumps({"ok": True, "intent": intent})
 
 
+# ---------------------------------------------------------------------------
+# Plan-mode toggle — module-level callback set by the CLI layer.
+# ---------------------------------------------------------------------------
+_set_permission_mode_callback: Any = None
+
+
+def set_permission_mode_callback(cb: Any) -> None:
+    """Register the CLI callback that changes the permission mode."""
+    global _set_permission_mode_callback
+    _set_permission_mode_callback = cb
+
+
+@tool(
+    "enter_plan_mode",
+    "Switch to plan mode. In plan mode only read-only tools are allowed. "
+    "Use this when you need to explore the codebase and design an "
+    "implementation plan before making changes.",
+    {
+        "type": "object",
+        "properties": {},
+    },
+)
+async def enter_plan_mode() -> str:
+    if _set_permission_mode_callback is not None:
+        try:
+            _set_permission_mode_callback("plan")
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+    return json.dumps({"ok": True, "mode": "plan"})
+
+
+@tool(
+    "exit_plan_mode",
+    "Exit plan mode and return to default permissions so that write and "
+    "execute tools become available again.",
+    {
+        "type": "object",
+        "properties": {},
+    },
+)
+async def exit_plan_mode() -> str:
+    if _set_permission_mode_callback is not None:
+        try:
+            _set_permission_mode_callback("default")
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+    return json.dumps({"ok": True, "mode": "default"})
+
+
 @tool(
     "list_system_tools",
     "List available built-in system tools and their metadata.",
