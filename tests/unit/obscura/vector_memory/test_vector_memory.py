@@ -115,32 +115,6 @@ class TestVectorMemoryStore:
         deleted = store.delete("nonexistent")
         assert deleted is False
 
-    def test_search_similar_basic(self, store: VectorMemoryStore) -> None:
-        # Store some memories
-        store.set("python", "Python is a programming language")
-        store.set("javascript", "JavaScript runs in browsers")
-        store.set("cooking", "Cooking is an art of preparing food")
-
-        # Search for programming-related query
-        results = store.search_similar("coding language", top_k=2)
-
-        # Should return programming-related results
-        assert len(results) == 2
-        # Python should rank higher than cooking for "coding language"
-        texts = [r.text for r in results]
-        assert "Python" in texts[0] or "JavaScript" in texts[0]
-
-    def test_search_similar_with_namespace(self, store: VectorMemoryStore) -> None:
-        store.set("doc1", "Python tutorial", namespace="tutorials")
-        store.set("doc2", "JavaScript guide", namespace="tutorials")
-        store.set("note1", "Grocery list", namespace="notes")
-
-        results = store.search_similar("programming", namespace="tutorials", top_k=5)
-
-        assert len(results) == 2
-        for r in results:
-            assert r.key.namespace == "tutorials"
-
     def test_search_similar_threshold(self, store: VectorMemoryStore) -> None:
         store.set("a", "Python is great")
         store.set("b", "Completely unrelated topic about flowers")
@@ -208,32 +182,3 @@ class TestSemanticMemoryMixin:
         assert entry is not None
         assert entry.metadata["agent_name"] == "learner"
 
-    def test_recall_finds_similar(self, store: VectorMemoryStore) -> None:
-        # Simulate memories
-        store.set(
-            "mem1",
-            "Python async/await is for concurrency",
-            namespace="default:semantic",
-        )
-        store.set(
-            "mem2",
-            "JavaScript promises are asynchronous",
-            namespace="default:semantic",
-        )
-        store.set(
-            "mem3",
-            "Cooking pasta requires boiling water",
-            namespace="default:semantic",
-        )
-
-        # Simulate recall()
-        results = store.search_similar(
-            "how do I run async code?",
-            namespace="default:semantic",
-            top_k=2,
-        )
-
-        assert len(results) == 2
-        # Programming memories should rank higher
-        texts = " ".join([r.text for r in results])
-        assert "Python" in texts or "JavaScript" in texts

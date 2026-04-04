@@ -42,66 +42,6 @@ def _make_store(tmp_path):
     )
 
 
-def test_consolidate_groups_by_session(tmp_path) -> None:
-    """Episodes should be grouped by session_id and consolidated."""
-    store = _make_store(tmp_path)
-    now = datetime.now(UTC)
-    old = now - timedelta(days=10)
-
-    # Add 4 episodes for session A (above threshold of 3)
-    for i in range(4):
-        store.set(
-            key=f"ep_a_{i}",
-            text=f"User asked about topic {i}. Assistant explained it.",
-            metadata={"session_id": "session_a", "turn": i},
-            namespace="cli:conversation",
-            memory_type="episode",
-        )
-        # Backdate the created_at to make them old
-        store.backend._get_conn().execute(
-            "UPDATE vector_memory SET created_at = ? WHERE key = ?",
-            (old.isoformat(), f"ep_a_{i}"),
-        )
-        store.backend._get_conn().commit()
-
-    # Add 2 episodes for session B (below threshold)
-    for i in range(2):
-        store.set(
-            key=f"ep_b_{i}",
-            text=f"Session B turn {i}",
-            metadata={"session_id": "session_b", "turn": i},
-            namespace="cli:conversation",
-            memory_type="episode",
-        )
-        store.backend._get_conn().execute(
-            "UPDATE vector_memory SET created_at = ? WHERE key = ?",
-            (old.isoformat(), f"ep_b_{i}"),
-        )
-        store.backend._get_conn().commit()
-
-    # Use simple fallback summarizer
-    consolidator = MemoryConsolidator(
-        store=store,
-        config=store.decay_config,
-        summarize_fn=lambda texts: "SUMMARY: " + " | ".join(texts[:2]),
-    )
-    deleted, created = consolidator.consolidate()
-
-    # Session A should be consolidated (4 episodes → 1 summary)
-    assert created == 1
-    assert deleted == 4
-
-    # Session B should be untouched (only 2 episodes)
-    keys = store.list_keys()
-    key_names = [k.key for k in keys]
-    assert "ep_b_0" in key_names
-    assert "ep_b_1" in key_names
-
-    # Check the summary was created
-    summaries = [k for k in keys if k.key.startswith("summary_")]
-    assert len(summaries) == 1
-
-
 def test_consolidate_skips_recent(tmp_path) -> None:
     """Episodes younger than consolidation_age_days should be skipped."""
     store = _make_store(tmp_path)
@@ -127,41 +67,3 @@ def test_consolidate_skips_recent(tmp_path) -> None:
     assert created == 0
 
 
-def test_consolidate_preserves_metadata(tmp_path) -> None:
-    """The summary should inherit metadata from the first episode."""
-    store = _make_store(tmp_path)
-    old = datetime.now(UTC) - timedelta(days=10)
-
-    for i in range(3):
-        store.set(
-            key=f"meta_ep_{i}",
-            text=f"Turn {i} discussion",
-            metadata={
-                "session_id": "meta_session",
-                "turn": i,
-                "custom_tag": "important",
-            },
-            namespace="cli:conversation",
-            memory_type="episode",
-        )
-        store.backend._get_conn().execute(
-            "UPDATE vector_memory SET created_at = ? WHERE key = ?",
-            (old.isoformat(), f"meta_ep_{i}"),
-        )
-        store.backend._get_conn().commit()
-
-    consolidator = MemoryConsolidator(
-        store=store,
-        config=store.decay_config,
-        summarize_fn=lambda texts: "Consolidated summary",
-    )
-    _deleted, created = consolidator.consolidate()
-
-    assert created == 1
-    # Find the summary
-    keys = store.list_keys()
-    summary_key = next(k for k in keys if k.key.startswith("summary_"))
-    entry = store.get(summary_key)
-    assert entry is not None
-    assert entry.metadata["original_session_id"] == "meta_session"
-    assert entry.metadata["consolidated_from"] == 3

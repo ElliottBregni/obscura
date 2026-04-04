@@ -70,6 +70,70 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _get_phantom_message_preamble() -> str:
+    """Return a phantom-mode identity preamble for message responses.
+
+    When phantom mode is active (``OBSCURA_PHANTOM=1``), returns a preamble
+    that makes the agent respond as the user.  Returns empty string otherwise.
+    """
+    import os
+
+    # Check proxy-specific env first, then fall back to global phantom.
+    proxy_env = os.environ.get("OBSCURA_PHANTOM_PROXY", "").strip().lower()
+    global_env = os.environ.get("OBSCURA_PHANTOM", "").strip().lower()
+    if proxy_env not in ("1", "true", "on") and global_env not in ("1", "true", "on"):
+        return ""
+
+    name = "the user"
+    style_hint = ""
+    try:
+        from obscura.auth.context import current_user
+        from obscura.profile.models import ProfileCategory
+        from obscura.profile.store import ProfileStore
+
+        user = current_user()
+        store = ProfileStore.for_user(user)
+
+        identity = store.get_facts_by_category(ProfileCategory.IDENTITY)
+        for f in identity:
+            if "name" in f.key.lower():
+                name = f.value
+                break
+
+        prefs = store.get_facts_by_category(ProfileCategory.PREFERENCE)
+        if prefs:
+            style_hint = f" Style: {'; '.join(f.value for f in prefs[:3])}."
+    except Exception:
+        # Fall back to markdown profile.
+        try:
+            from obscura.kairos.user_profile import UserProfile
+
+            import re
+
+            text = UserProfile().read()
+            m = re.search(r"\*\*Name\*\*:\s*(.+?)(?:\s*\(|$)", text, re.MULTILINE)
+            if m:
+                name = m.group(1).strip()
+        except Exception:
+            pass
+
+    # Read autonomy level for context.
+    level = int(os.environ.get("OBSCURA_PHANTOM_LEVEL", "3"))
+    level_names = {1: "shadow", 2: "copilot", 3: "partner", 4: "lead", 5: "takeover"}
+    level_name = level_names.get(level, "partner")
+    level_hint = ""
+    if level <= 2:
+        level_hint = " Draft replies for approval — do NOT send directly."
+    elif level >= 4:
+        level_hint = " Respond immediately and confidently."
+
+    return (
+        f"IMPORTANT: You ARE {name}. Respond exactly as {name} would — "
+        f"same tone, vocabulary, and energy. Never reveal you are an agent."
+        f"{style_hint} Autonomy: {level_name} (L{level}).{level_hint}\n\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Trigger types
 # ---------------------------------------------------------------------------
@@ -604,9 +668,13 @@ class DaemonAgent:
             role_label = "Them" if turn["role"] == "user" else "You"
             history_lines.append(f"{role_label}: {turn['text']}")
 
+        # Check if phantom mode is active (agent acts as the user).
+        phantom_preamble = _get_phantom_message_preamble()
+
         if history_lines:
             history_block = "\n".join(history_lines)
             prompt = (
+                f"{phantom_preamble}"
                 f"You are in a multi-turn {platform} conversation with {sender_display}.\n\n"
                 f"Conversation so far:\n{history_block}\n\n"
                 f'Their latest message:\n"{text}"\n\n'
@@ -618,6 +686,7 @@ class DaemonAgent:
             )
         else:
             prompt = (
+                f"{phantom_preamble}"
                 f"You received a {platform} message from {sender_display}:\n\n"
                 f'"{text}"\n\n'
                 f"Write your reply message ONLY — just the text you want to send back. "

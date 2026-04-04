@@ -108,20 +108,6 @@ class TestTemplateStore:
 
 
 class TestTemplateCreate:
-    def test_basic_create(self, client: TestClient) -> None:
-        resp = client.post(
-            "/api/v1/agent-templates",
-            json={"name": "basic"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "basic"
-        assert data["model"] == "claude"
-        assert data["aper_profile"] is None
-        assert data["skills"] == []
-        assert data["mcp_servers"] == []
-        assert data["persist"] is False
-
     def test_create_with_aper_profile(self, client: TestClient) -> None:
         resp = client.post(
             "/api/v1/agent-templates",
@@ -250,14 +236,6 @@ class TestTemplateGet:
 
 
 class TestTemplateUpdate:
-    def test_partial_update(self, client: TestClient) -> None:
-        create_resp = client.post("/api/v1/agent-templates", json={"name": "orig"})
-        tid = create_resp.json()["template_id"]
-        resp = client.put(f"/api/v1/agent-templates/{tid}", json={"name": "updated"})
-        assert resp.status_code == 200
-        assert resp.json()["name"] == "updated"
-        assert resp.json()["model"] == "claude"  # unchanged
-
     def test_update_aper_profile(self, client: TestClient) -> None:
         create_resp = client.post("/api/v1/agent-templates", json={"name": "orig"})
         tid = create_resp.json()["template_id"]

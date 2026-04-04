@@ -102,26 +102,6 @@ def test_menu_line_flex_render() -> None:
     assert "R:off" in line
 
 
-def test_session_message_and_toolbar_are_separated() -> None:
-    set_model_space_delta("thinking...")
-    session = create_prompt_session(
-        {"help": []},
-        toolbar_text="ignored",
-        hud_provider=lambda: {
-            "right_enabled": True,
-            "model_enabled": True,
-            "menu_items": [("tasks", "3"), ("approvals", "on"), ("reasoning", "on")],
-        },
-    )
-    msg = str(session.message())
-    bar = str(session.bottom_toolbar())
-    # Modern prompt uses clean `> ` input — no status-lane in idle
-    assert "prompt" in msg or "&gt;" in msg
-    assert "T:3" not in msg
-    # Toolbar shows shortcut hints
-    assert "help" in bar
-
-
 def test_model_delta_only_affects_model_status_lane() -> None:
     session = create_prompt_session(
         {"help": []},

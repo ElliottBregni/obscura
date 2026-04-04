@@ -62,7 +62,9 @@ class ClaudeBackend:
         self._mcp_servers = mcp_servers or []
         self._permission_mode = permission_mode
         self._cwd = cwd
-        self._tool_policy = tool_policy or ToolPolicy.from_env()
+        # Claude backend defaults to allow_native=True so the model can use
+        # its built-in tools (Bash, Read, Edit, etc.) alongside Obscura tools.
+        self._tool_policy = tool_policy or ToolPolicy(allow_native=True)
 
         # SDK objects (set on start())
         self._client: Any = None
@@ -75,11 +77,20 @@ class ClaudeBackend:
             hp: [] for hp in HookPoint
         }
 
+        # Extended thinking budget (set via set_thinking_budget)
+        self._max_thinking_tokens: int | None = None
+
         # Tool routing
         self._tool_router: Any | None = None
 
         # Session tracking
         self._session_store = SessionStore()
+
+    # -- Thinking budget -----------------------------------------------------
+
+    def set_thinking_budget(self, tokens: int | None) -> None:
+        """Set extended thinking budget (requires client restart to take effect)."""
+        self._max_thinking_tokens = tokens
 
     # -- Tool routing --------------------------------------------------------
 
@@ -428,6 +439,14 @@ class ClaudeBackend:
 
     async def _query(self, prompt: str, kwargs: dict[str, Any]) -> None:
         """Issue a Claude query with optional per-request tool policy."""
+        # Pick up thinking budget from kwargs if set (e.g., from /effort).
+        # This updates the backend state so _build_options includes it on
+        # the next client restart.  For the current session, we also try
+        # to pass it as a query kwarg (SDK may or may not support it).
+        max_thinking = kwargs.pop("max_thinking_tokens", None)
+        if max_thinking is not None:
+            self._max_thinking_tokens = int(max_thinking) if int(max_thinking) > 0 else None
+
         query_kwargs = self._build_query_kwargs(kwargs)
         if query_kwargs:
             try:
@@ -589,6 +608,10 @@ class ClaudeBackend:
                 allowed = [f"mcp__obscura_tools__{t.name}" for t in filtered]
                 opts["allowed_tools"] = allowed
 
+        # Extended thinking (set at session level, not per-query)
+        if self._max_thinking_tokens and self._max_thinking_tokens > 0:
+            opts["max_thinking_tokens"] = self._max_thinking_tokens
+
         opts.update(overrides)
         return ClaudeAgentOptions(**opts)
 
@@ -605,10 +628,8 @@ class ClaudeBackend:
             lines.append(f"- `{spec.name}`{cap_tag}: {desc}")
         lines.append("")
         lines.append(
-            "IMPORTANT: Do NOT use tool names from other systems. "
-            "Names like Bash, Read, Edit, Write, Glob, Grep, WebSearch, "
-            "WebFetch, Agent, TodoWrite, NotebookEdit are NOT valid here. "
-            "Use ONLY the exact names listed above.",
+            "Use the exact tool names listed above. "
+            "You also have access to Claude's built-in tools (Bash, Read, Edit, etc.).",
         )
         try:
             from obscura.plugins.capabilities import build_capability_map_section
@@ -653,7 +674,11 @@ class ClaudeBackend:
             return _sync_wrapper
 
         claude_tools: list[Any] = []
+        seen_names: set[str] = set()
         for spec in self._tools:
+            if spec.name in seen_names:
+                continue
+            seen_names.add(spec.name)
             wrapped = _wrap_handler(spec.handler)
             decorated = claude_tool(
                 spec.name,

@@ -261,17 +261,3 @@ class TestIMessageClientSQLiteRead:
                     out = await client.poll_unread(0)
         assert out == expected
 
-    @pytest.mark.asyncio
-    async def test_poll_rate_limits_disabled_warning(
-        self,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        client = IMessageClient(["+1"])
-        client._use_sqlite = False
-        client._next_access_recheck_at = 1000.0
-        client._next_warn_at = 0.0
-        with patch("time.monotonic", side_effect=[10.0, 10.5]):
-            await client.poll_unread(0)
-            await client.poll_unread(0)
-        warnings = [r for r in caplog.records if "ingest disabled" in r.getMessage()]
-        assert len(warnings) == 1

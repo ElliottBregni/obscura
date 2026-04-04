@@ -6,7 +6,7 @@ generating capability tokens, and validating tokens (admin diagnostic).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -22,11 +22,9 @@ from obscura.auth.capability import (
 from obscura.auth.rbac import get_current_user, require_role
 from obscura.deps import audit
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["capabilities"])
-
 
 # ---------------------------------------------------------------------------
 # Request / response models

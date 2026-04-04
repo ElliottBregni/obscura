@@ -283,39 +283,6 @@ class TestAgentSpawn:
         assert kwargs["mcp"].auto_discover is True
         assert kwargs["mcp"].server_names == ["github", "filesystem"]
 
-    @patch("obscura.routes.agents.get_runtime")
-    def test_spawn_agent_top_level_overrides_builder(
-        self,
-        mock_get_runtime: MagicMock,
-        client: TestClient,
-    ) -> None:
-        agent = _make_mock_agent(model="openai")
-        runtime = _make_mock_runtime([agent])
-        mock_get_runtime.return_value = runtime
-
-        resp = client.post(
-            "/api/v1/agents",
-            json={
-                "name": "top-agent",
-                "model": "openai",
-                "system_prompt": "Top level prompt.",
-                "enable_system_tools": True,
-                "builder": {
-                    "name": "builder-agent",
-                    "model": "claude",
-                    "system_prompt": "Builder prompt",
-                    "enable_system_tools": False,
-                    "skills": [{"name": "s1", "content": "S1"}],
-                },
-            },
-        )
-        assert resp.status_code == 200
-        kwargs = runtime.spawn.call_args.kwargs
-        assert kwargs["name"] == "top-agent"
-        assert kwargs["model"] == "openai"
-        assert kwargs["enable_system_tools"] is True
-        assert kwargs["system_prompt"].startswith("Top level prompt.")
-
 
 # ---------------------------------------------------------------------------
 # Agent get (GET /agents/{agent_id})

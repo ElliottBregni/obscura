@@ -208,6 +208,25 @@ def auto_save_turn(
         except Exception as e:
             _logger.debug(f"Auto-save to vector memory failed: {e}")
 
+        # Auto-learn profile facts from user messages (best-effort, silent).
+        try:
+            from obscura.auth.context import current_user
+            from obscura.profile.learner import ProfileLearner
+            from obscura.profile.store import ProfileStore
+
+            user = current_user()
+            profile_store = ProfileStore.for_user(user, vector_store=store)
+            learner = ProfileLearner(profile_store)
+            new_facts = learner.process_turn(user_text)
+            if new_facts:
+                _logger.debug(
+                    "Auto-learned %d profile facts from turn %d",
+                    len(new_facts),
+                    turn_number,
+                )
+        except Exception:
+            _logger.debug("Profile auto-learn skipped", exc_info=True)
+
     thread = threading.Thread(target=_save, daemon=True)
     thread.start()
 

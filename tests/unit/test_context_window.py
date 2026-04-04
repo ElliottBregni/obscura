@@ -217,7 +217,7 @@ class TestCompactHistory:
     def test_empty(self) -> None:
         from obscura.core.compaction import compact_history
 
-        r, d, _mems = asyncio.get_event_loop().run_until_complete(
+        r, d, _mems = asyncio.run(
             compact_history([], "claude-opus-4-5", self._backend()),
         )
         assert r == []
@@ -227,7 +227,7 @@ class TestCompactHistory:
         from obscura.core.compaction import compact_history
 
         msgs = self._msgs(5)
-        _, did, _mems = asyncio.get_event_loop().run_until_complete(
+        _, did, _mems = asyncio.run(
             compact_history(msgs, "claude-opus-4-5", self._backend()),
         )
         assert not did
@@ -237,7 +237,7 @@ class TestCompactHistory:
 
         msgs = self._msgs(50)
         with patch("obscura.core.compaction.get_context_window", return_value=1000):
-            result, did, _mems = asyncio.get_event_loop().run_until_complete(
+            result, did, _mems = asyncio.run(
                 compact_history(msgs, "tiny", self._backend()),
             )
         assert did
@@ -262,7 +262,7 @@ class TestCompactHistory:
             *self._msgs(30),
         ]
         with patch("obscura.core.compaction.get_context_window", return_value=500):
-            result, _, _mems = asyncio.get_event_loop().run_until_complete(
+            result, _, _mems = asyncio.run(
                 compact_history(msgs, "tiny", self._backend()),
             )
         tool_use_ids = {
@@ -454,7 +454,7 @@ class TestMicrocompact:
     def test_empty(self) -> None:
         from obscura.core.compaction import microcompact
 
-        r, did, freed = asyncio.get_event_loop().run_until_complete(
+        r, did, freed = asyncio.run(
             microcompact([], "claude-opus-4-5", self._backend())
         )
         assert r == []
@@ -464,7 +464,7 @@ class TestMicrocompact:
         from obscura.core.compaction import microcompact
 
         msgs = [{"role": "user", "content": f"msg {i}"} for i in range(4)]
-        r, did, freed = asyncio.get_event_loop().run_until_complete(
+        r, did, freed = asyncio.run(
             microcompact(msgs, "claude-opus-4-5", self._backend(), preserve_recent=3)
         )
         assert not did
@@ -479,7 +479,7 @@ class TestMicrocompact:
                 {"role": role, "content": f"Message {i} with some words to pad"}
             )
 
-        r, did, freed = asyncio.get_event_loop().run_until_complete(
+        r, did, freed = asyncio.run(
             microcompact(msgs, "claude-opus-4-5", self._backend(), preserve_recent=4)
         )
         assert did
@@ -570,7 +570,7 @@ class TestTieredCompact:
         from obscura.core.compaction import tiered_compact
 
         msgs = [{"role": "user", "content": "hi"}]
-        r, strategy, freed = asyncio.get_event_loop().run_until_complete(
+        r, strategy, freed = asyncio.run(
             tiered_compact(msgs, "claude-opus-4-5", self._backend())
         )
         assert strategy == "none"
@@ -599,7 +599,7 @@ class TestTieredCompact:
                 preserve_recent=6,
                 context_window=1_000_000,
             )
-            r, strategy, freed = asyncio.get_event_loop().run_until_complete(
+            r, strategy, freed = asyncio.run(
                 tiered_compact(msgs, "claude-opus-4-5", self._backend())
             )
             assert strategy == "snip"

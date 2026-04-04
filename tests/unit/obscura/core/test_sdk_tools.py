@@ -202,6 +202,6 @@ class TestToolRegistry:
         reg.register(browser_navigate_tool.spec)
 
         assert reg.get("Bash") is reg.get("run_shell")
-        assert reg.get("WebSearch") is reg.get("web_search")
+        assert reg.get("web_search") is not None
         assert reg.get("Task") is reg.get("task")
         assert reg.get("BrowserNavigate") is reg.get("browser_navigate")

@@ -133,6 +133,16 @@ class NotifyWidgetRequest:
     priority: str = "normal"  # low / normal / high / critical
 
 
+@dataclass(frozen=True)
+class MultiSelectRequest:
+    """Input for multi-select checkbox widget."""
+
+    question: str
+    choices: tuple[str, ...] = ()
+    min_selections: int = 0
+    max_selections: int = 0  # 0 = unlimited
+
+
 # ---------------------------------------------------------------------------
 # Arg formatting helpers
 # ---------------------------------------------------------------------------
@@ -405,6 +415,88 @@ async def _run_text_input(placeholder: str = "") -> str:
         return ""
 
 
+async def _run_multi_select(
+    choices: list[str],
+    labels: list[str] | None = None,
+) -> list[str]:
+    """Checkbox-style multi-select. Space toggles, Enter confirms.
+
+    Returns the list of selected choice strings.
+    """
+    if not choices:
+        return []
+
+    display_labels = labels or choices
+    selected_idx = [0]
+    checked: set[int] = set()
+    kb = KeyBindings()
+
+    @kb.add("up")
+    @kb.add("k")
+    def _up(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        selected_idx[0] = max(0, selected_idx[0] - 1)
+
+    @kb.add("down")
+    @kb.add("j")
+    def _down(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        selected_idx[0] = min(len(choices) - 1, selected_idx[0] + 1)
+
+    @kb.add(" ")
+    def _toggle(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        idx = selected_idx[0]
+        if idx in checked:
+            checked.discard(idx)
+        else:
+            checked.add(idx)
+
+    @kb.add("enter")
+    def _accept(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        event.app.exit(result=[choices[i] for i in sorted(checked)])
+
+    @kb.add("escape")
+    @kb.add("c-c")
+    def _cancel(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        event.app.exit(result=[])
+
+    @kb.add("a")
+    def _select_all(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        if len(checked) == len(choices):
+            checked.clear()
+        else:
+            checked.update(range(len(choices)))
+
+    def _get_formatted_text() -> FormattedText:
+        parts: list[tuple[str, str]] = []
+        for i, label in enumerate(display_labels):
+            is_cur = i == selected_idx[0]
+            is_chk = i in checked
+            style = "class:selected" if is_cur else "class:unselected"
+            cursor = "\u25b8" if is_cur else " "
+            check = "\u25a0" if is_chk else "\u25a1"
+            parts.append((style, f" {cursor} {check} {label}"))
+            if i < len(display_labels) - 1:
+                parts.append(("", "\n"))
+        parts.append(("class:hint", "\n   space=toggle  a=all  enter=confirm"))
+        return FormattedText(parts)
+
+    app: Application[list[str]] = Application(
+        layout=Layout(
+            Window(
+                FormattedTextControl(_get_formatted_text),
+                height=len(choices) + 1,
+            ),
+        ),
+        key_bindings=kb,
+        style=_WIDGET_STYLE,
+        full_screen=False,
+    )
+
+    with patch_stdout(raw=True):
+        result = await app.run_async()
+
+    return result or []
+
+
 # ---------------------------------------------------------------------------
 # Non-TTY fallback
 # ---------------------------------------------------------------------------
@@ -512,6 +604,44 @@ async def ask_model_question(request: ModelQuestionRequest) -> WidgetResult:
 
     text = await _run_text_input()
     return WidgetResult(action="respond", text=text)
+
+
+async def ask_multi_select(request: MultiSelectRequest) -> WidgetResult:
+    """Widget for multi-select checkbox questions.
+
+    Shows a styled Rich panel with the question, then an interactive
+    checkbox list where the user toggles items with space and confirms
+    with enter.
+    """
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]{request.question}[/]",
+            border_style="blue",
+            padding=(0, 1),
+        ),
+    )
+
+    choices = list(request.choices)
+    if not choices:
+        return WidgetResult(action="respond", text="")
+
+    if not _is_interactive():
+        console.print("  Select by number (comma-separated):")
+        for i, c in enumerate(choices, 1):
+            console.print(f"    {i}. {c}")
+        answer = await _fallback_confirm("  > ")
+        selected = []
+        for part in answer.split(","):
+            part = part.strip()
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(choices):
+                    selected.append(choices[idx])
+        return WidgetResult(action="respond", text=",".join(selected))
+
+    selected = await _run_multi_select(choices)
+    return WidgetResult(action="respond", text=",".join(selected))
 
 
 # ---------------------------------------------------------------------------

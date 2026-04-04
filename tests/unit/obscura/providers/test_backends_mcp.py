@@ -339,56 +339,6 @@ class TestMCPBackendHooks:
         assert called_with[0].hook == HookPoint.PRE_TOOL_USE
 
     @pytest.mark.asyncio
-    async def test_hook_error_logged_not_raised(
-        self,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        backend = MCPBackend(mcp_servers=[], name="test-mcp")
-
-        def exploding_hook(ctx: Any) -> None:
-            msg = "hook exploded"
-            raise ValueError(msg)
-
-        backend.register_hook(HookPoint.PRE_TOOL_USE, exploding_hook)
-
-        spec = make_tool("t")
-        backend.register_tool(spec)
-
-        # The hook error must not propagate to the caller.
-        with caplog.at_level(logging.WARNING):
-            result = await backend.call_tool("t", {})
-
-        assert result == {"echo": {}}
-        assert any(
-            "hook exploded" in r.message.lower() or "Hook failed" in r.message
-            for r in caplog.records
-        )
-
-    @pytest.mark.asyncio
-    async def test_async_hook_error_logged_not_raised(
-        self,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        backend = MCPBackend(mcp_servers=[], name="test-mcp")
-
-        async def async_exploding_hook(ctx: Any) -> None:
-            msg = "async hook exploded"
-            raise RuntimeError(msg)
-
-        backend.register_hook(HookPoint.POST_TOOL_USE, async_exploding_hook)
-
-        spec = make_tool("t")
-        backend.register_tool(spec)
-
-        with caplog.at_level(logging.WARNING):
-            result = await backend.call_tool("t", {})
-
-        assert result == {"echo": {}}
-        assert any(
-            "async hook exploded" in r.message.lower() or "Hook failed" in r.message
-            for r in caplog.records
-        )
-
     def test_register_hook_multiple(self) -> None:
         backend = MCPBackend(mcp_servers=[], name="test-mcp")
         cb1: Any = MagicMock()

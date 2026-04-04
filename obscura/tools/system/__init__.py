@@ -33,7 +33,6 @@ from obscura.tools.system.intelligence import (
     context_snapshot,
     policy_probe,
 )
-from obscura.tools.system.team_prompt import read_team_prompt
 
 
 def _strip_html(raw: str) -> str:
@@ -205,51 +204,6 @@ async def run_python3(
         command,
         "-c",
         code,
-        cwd=(cwd or None),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=timeout_seconds,
-        )
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return _json_error("timeout")
-    return json.dumps(
-        {
-            "ok": proc.returncode == 0,
-            "exit_code": proc.returncode,
-            "stdout": stdout.decode("utf-8", errors="replace"),
-            "stderr": stderr.decode("utf-8", errors="replace"),
-        },
-    )
-
-
-@tool(
-    "run_npx",
-    "Execute an npx command and return stdout/stderr/exit_code.",
-    {
-        "type": "object",
-        "properties": {
-            "args": {"type": "array", "items": {"type": "string"}},
-            "cwd": {"type": "string"},
-            "timeout_seconds": {"type": "number"},
-        },
-        "required": ["args"],
-    },
-)
-async def run_npx(
-    args: list[str],
-    cwd: str = "",
-    timeout_seconds: float = 120.0,
-) -> str:
-    command = _resolve_command("npx")
-    proc = await asyncio.create_subprocess_exec(
-        command,
-        *args,
         cwd=(cwd or None),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -583,27 +537,6 @@ def _html_to_markdown(html_text: str) -> str:
 
 
 @tool(
-    "run_python",
-    "Execute Python code and return stdout/stderr/exit_code. Alias for run_python3.",
-    {
-        "type": "object",
-        "properties": {
-            "code": {"type": "string"},
-            "cwd": {"type": "string"},
-            "timeout_seconds": {"type": "number"},
-        },
-        "required": ["code"],
-    },
-)
-async def run_python(
-    code: str,
-    cwd: str = "",
-    timeout_seconds: float = 30.0,
-) -> str:
-    return await run_python3(code, cwd=cwd, timeout_seconds=timeout_seconds)
-
-
-@tool(
     "web_search",
     (
         "Search the web for a query and return concise result items. "
@@ -808,61 +741,6 @@ async def which_command(command: str) -> str:
             "command": normalized,
             "path": discovered,
             "exists": True,
-        },
-    )
-
-
-@tool(
-    "discover_all_commands",
-    "Discover available shell commands on the host with optional prefix filtering.",
-    {
-        "type": "object",
-        "properties": {
-            "limit": {"type": "integer"},
-            "prefix": {"type": "string"},
-            "include_builtins": {"type": "boolean"},
-        },
-    },
-)
-async def discover_all_commands(
-    limit: int = 500,
-    prefix: str = "",
-    include_builtins: bool = True,
-) -> str:
-    safe_limit = max(1, min(limit, 5000))
-    # Prefer bash compgen (portable), then fall back to shelling out to `which -a`.
-    compgen_type = "-c" if include_builtins else "-A command"
-    payload = json.loads(
-        await run_command(
-            "bash",
-            args=["-lc", f"compgen {compgen_type} | sort -u"],
-            timeout_seconds=30.0,
-        ),
-    )
-    if not payload.get("ok", False):
-        fallback = json.loads(
-            await run_shell(
-                "echo \"$PATH\" | tr ':' '\\n' | while read -r p; do ls -1 \"$p\" 2>/dev/null; done | sort -u",
-                timeout_seconds=30.0,
-            ),
-        )
-        if not fallback.get("ok", False):
-            return json.dumps(payload)
-        payload = fallback
-
-    stdout = str(payload.get("stdout", ""))
-    commands = [line.strip() for line in stdout.splitlines() if line.strip()]
-    if prefix:
-        commands = [cmd for cmd in commands if cmd.startswith(prefix)]
-    commands = commands[:safe_limit]
-    return json.dumps(
-        {
-            "ok": True,
-            "count": len(commands),
-            "limit": safe_limit,
-            "prefix": prefix,
-            "include_builtins": include_builtins,
-            "commands": commands,
         },
     )
 
@@ -1367,147 +1245,6 @@ async def list_listening_ports() -> str:
     if shutil.which("netstat"):
         return await run_command("netstat", args=["-an"], timeout_seconds=30.0)
     return _json_error("no_supported_port_tool", required_any=["lsof", "netstat"])
-
-
-@tool(
-    "security_lookup",
-    "Run common Unix security lookups (world_writable, suid, listening_ports, logged_in_users, failed_logins).",
-    {
-        "type": "object",
-        "properties": {
-            "check": {"type": "string"},
-            "path": {"type": "string"},
-            "max_results": {"type": "integer"},
-        },
-        "required": ["check"],
-    },
-)
-async def security_lookup(
-    check: Literal[
-        "world_writable",
-        "suid",
-        "listening_ports",
-        "logged_in_users",
-        "failed_logins",
-    ],
-    path: str = "/",
-    max_results: int = 100,
-) -> str:
-    limited = max(1, min(max_results, 500))
-    if check == "listening_ports":
-        return await list_listening_ports()
-
-    if check == "logged_in_users":
-        return await run_command("who", timeout_seconds=20.0)
-
-    if check == "failed_logins":
-        if shutil.which("lastb"):
-            return await run_command("lastb", timeout_seconds=20.0)
-        if platform.system() == "Darwin":
-            return await run_command(
-                "log",
-                args=[
-                    "show",
-                    "--last",
-                    "1d",
-                    "--predicate",
-                    'eventMessage CONTAINS[c] "failed"',
-                ],
-                timeout_seconds=20.0,
-            )
-        return _json_error("failed_logins_unsupported")
-
-    if check == "world_writable":
-        target = _resolve_path(path)
-        if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
-            return _json_error("path_not_allowed", path=str(target))
-        return await run_shell(
-            f"find {str(target)!r} -xdev -type f -perm -0002 2>/dev/null | head -n {limited}",
-            timeout_seconds=60.0,
-        )
-
-    # suid
-    target = _resolve_path(path)
-    if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
-        return _json_error("path_not_allowed", path=str(target))
-    return await run_shell(
-        f"find {str(target)!r} -xdev -type f -perm -4000 2>/dev/null | head -n {limited}",
-        timeout_seconds=60.0,
-    )
-
-
-@tool(
-    "manage_crontab",
-    "Manage user cron automation entries (list, add, remove).",
-    {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string"},
-            "schedule": {"type": "string"},
-            "command": {"type": "string"},
-            "marker": {"type": "string"},
-        },
-        "required": ["action"],
-    },
-)
-async def manage_crontab(
-    action: Literal["list", "add", "remove"],
-    schedule: str = "",
-    command: str = "",
-    marker: str = "obscura",
-) -> str:
-    if shutil.which("crontab") is None:
-        return _json_error("crontab_not_found")
-
-    if action == "list":
-        current = await run_command("crontab", args=["-l"], timeout_seconds=20.0)
-        payload = json.loads(current)
-        if payload.get("ok"):
-            lines = str(payload.get("stdout", "")).splitlines()
-            filtered = [line for line in lines if marker in line]
-            payload["filtered_entries"] = filtered
-            payload["filtered_count"] = len(filtered)
-            return json.dumps(payload)
-        # Accept empty crontab as non-fatal
-        stderr = str(payload.get("stderr", ""))
-        if "no crontab for" in stderr.lower():
-            return json.dumps({"ok": True, "entries": [], "filtered_entries": []})
-        return current
-
-    if action == "add":
-        if not schedule.strip() or not command.strip():
-            return _json_error("schedule_and_command_required")
-        list_payload = json.loads(
-            await run_command("crontab", args=["-l"], timeout_seconds=20.0),
-        )
-        existing = ""
-        if list_payload.get("ok"):
-            existing = str(list_payload.get("stdout", ""))
-        entry = f"{schedule} {command} # {marker}".rstrip()
-        new_content = existing.rstrip("\n")
-        new_content = f"{new_content}\n{entry}\n" if new_content else f"{entry}\n"
-        return await run_shell(
-            f"cat <<'EOF' | crontab -\n{new_content}EOF",
-            timeout_seconds=20.0,
-        )
-
-    # remove
-    list_payload = json.loads(
-        await run_command("crontab", args=["-l"], timeout_seconds=20.0),
-    )
-    existing_lines: list[str] = []
-    if list_payload.get("ok"):
-        existing_lines = str(list_payload.get("stdout", "")).splitlines()
-    else:
-        stderr = str(list_payload.get("stderr", ""))
-        if "no crontab for" not in stderr.lower():
-            return json.dumps(list_payload)
-    kept = [line for line in existing_lines if marker not in line]
-    new_content = "\n".join(kept).rstrip("\n")
-    return await run_shell(
-        f"cat <<'EOF' | crontab -\n{new_content}\nEOF",
-        timeout_seconds=20.0,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -2420,216 +2157,223 @@ async def _git(args: list[str], cwd: str = "", timeout: float = 30.0) -> dict[st
 
 
 @tool(
-    "git_status",
-    "Show the working tree status (staged, unstaged, untracked files).",
-    {
-        "type": "object",
-        "properties": {
-            "cwd": {
-                "type": "string",
-                "description": "Repository path (default: current dir).",
-            },
-            "short": {
-                "type": "boolean",
-                "description": "Use short format (default: true).",
-            },
-        },
-    },
-)
-async def git_status(cwd: str = "", short: bool = True) -> str:
-    args = ["status"]
-    if short:
-        args.append("--short")
-    args.append("--branch")
-    result = await _git(args, cwd=cwd)
-    return json.dumps(result)
-
-
-@tool(
-    "git_diff",
-    "Show changes between commits, working tree, or staging area.",
-    {
-        "type": "object",
-        "properties": {
-            "ref": {
-                "type": "string",
-                "description": "Ref to diff against (e.g. 'HEAD', 'main', commit hash).",
-            },
-            "staged": {
-                "type": "boolean",
-                "description": "Show staged changes (--cached).",
-            },
-            "path": {
-                "type": "string",
-                "description": "Limit diff to a specific file/dir.",
-            },
-            "stat_only": {
-                "type": "boolean",
-                "description": "Show diffstat only (--stat).",
-            },
-            "cwd": {"type": "string"},
-        },
-    },
-)
-async def git_diff(
-    ref: str = "",
-    staged: bool = False,
-    path: str = "",
-    stat_only: bool = False,
-    cwd: str = "",
-) -> str:
-    args = ["diff"]
-    if staged:
-        args.append("--cached")
-    if stat_only:
-        args.append("--stat")
-    if ref:
-        args.append(ref)
-    if path:
-        args.extend(["--", path])
-    result = await _git(args, cwd=cwd)
-    # Truncate large diffs
-    if result.get("ok") and len(result.get("stdout", "")) > 100_000:
-        result["stdout"] = result["stdout"][:100_000] + "\n... (truncated)"
-        result["truncated"] = True
-    return json.dumps(result)
-
-
-@tool(
-    "git_log",
-    "Show commit history with optional filters.",
-    {
-        "type": "object",
-        "properties": {
-            "max_count": {
-                "type": "integer",
-                "description": "Number of commits (default 10).",
-            },
-            "oneline": {
-                "type": "boolean",
-                "description": "One-line format (default true).",
-            },
-            "path": {
-                "type": "string",
-                "description": "Limit to commits touching this path.",
-            },
-            "author": {"type": "string", "description": "Filter by author."},
-            "since": {
-                "type": "string",
-                "description": "Show commits after date (e.g. '2024-01-01').",
-            },
-            "ref": {
-                "type": "string",
-                "description": "Branch or ref to show (default: current).",
-            },
-            "cwd": {"type": "string"},
-        },
-    },
-)
-async def git_log(
-    max_count: int = 10,
-    oneline: bool = True,
-    path: str = "",
-    author: str = "",
-    since: str = "",
-    ref: str = "",
-    cwd: str = "",
-) -> str:
-    count = max(1, min(max_count, 100))
-    args = ["log", f"-{count}"]
-    if oneline:
-        args.append("--oneline")
-    else:
-        args.extend(["--format=%H %an %ae %ai%n%s%n%b---"])
-    if author:
-        args.append(f"--author={author}")
-    if since:
-        args.append(f"--since={since}")
-    if ref:
-        args.append(ref)
-    if path:
-        args.extend(["--", path])
-    result = await _git(args, cwd=cwd)
-    return json.dumps(result)
-
-
-@tool(
-    "git_commit",
-    "Stage files and create a git commit.",
-    {
-        "type": "object",
-        "properties": {
-            "message": {"type": "string", "description": "Commit message."},
-            "files": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Files to stage. Use ['.'] for all changes.",
-            },
-            "cwd": {"type": "string"},
-        },
-        "required": ["message"],
-    },
-)
-async def git_commit(
-    message: str,
-    files: list[str] | None = None,
-    cwd: str = "",
-) -> str:
-    if not message.strip():
-        return _json_error("empty_commit_message")
-
-    # Stage files
-    stage_files = files or ["."]
-    add_result = await _git(["add", *stage_files], cwd=cwd)
-    if not add_result.get("ok"):
-        return json.dumps(add_result)
-
-    # Commit
-    result = await _git(["commit", "-m", message], cwd=cwd)
-    return json.dumps(result)
-
-
-@tool(
-    "git_branch",
-    "List, create, or switch git branches.",
+    "git",
+    "Unified git operations: status, diff, log, commit, branch, push, tag.",
     {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "description": "'list', 'create', or 'switch'.",
+                "enum": [
+                    "status",
+                    "diff",
+                    "log",
+                    "commit",
+                    "branch",
+                    "push",
+                    "tag",
+                ],
+                "description": "Git operation to perform.",
             },
-            "name": {
+            "message": {
                 "type": "string",
-                "description": "Branch name (for create/switch).",
+                "description": "Commit message (commit) or tag annotation (tag create).",
+            },
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Files to stage (commit). Use ['.'] for all changes.",
+            },
+            "ref": {
+                "type": "string",
+                "description": "Ref/branch/tag name. Used by diff, log, branch, tag.",
+            },
+            "remote": {
+                "type": "string",
+                "description": "Remote name for push (default 'origin').",
+            },
+            "sub_action": {
+                "type": "string",
+                "description": "Sub-operation: branch='list|create|switch', tag='list|create|delete'.",
+            },
+            "path": {
+                "type": "string",
+                "description": "File/dir path filter (diff, log).",
+            },
+            "staged": {
+                "type": "boolean",
+                "description": "Show staged changes (diff --cached).",
+            },
+            "stat_only": {
+                "type": "boolean",
+                "description": "Show diffstat only (diff --stat).",
+            },
+            "short": {
+                "type": "boolean",
+                "description": "Short format (status, default true).",
+            },
+            "max_count": {
+                "type": "integer",
+                "description": "Number of commits (log, default 10).",
+            },
+            "oneline": {
+                "type": "boolean",
+                "description": "One-line format (log, default true).",
+            },
+            "author": {
+                "type": "string",
+                "description": "Filter by author (log).",
+            },
+            "since": {
+                "type": "string",
+                "description": "Show commits after date (log, e.g. '2024-01-01').",
+            },
+            "set_upstream": {
+                "type": "boolean",
+                "description": "Set upstream tracking (push -u).",
+            },
+            "push_tags": {
+                "type": "boolean",
+                "description": "Push all tags (push --tags).",
             },
             "cwd": {"type": "string"},
         },
         "required": ["action"],
     },
 )
-async def git_branch(
-    action: str = "list",
-    name: str = "",
+async def git(  # noqa: C901 — unified dispatch, complexity is expected
+    action: str,
+    message: str = "",
+    files: list[str] | None = None,
+    ref: str = "",
+    remote: str = "origin",
+    sub_action: str = "list",
+    path: str = "",
+    staged: bool = False,
+    stat_only: bool = False,
+    short: bool = True,
+    max_count: int = 10,
+    oneline: bool = True,
+    author: str = "",
+    since: str = "",
+    set_upstream: bool = False,
+    push_tags: bool = False,
     cwd: str = "",
 ) -> str:
-    if action == "list":
-        result = await _git(["branch", "-a", "--no-color"], cwd=cwd)
+    # -- status --
+    if action == "status":
+        args = ["status"]
+        if short:
+            args.append("--short")
+        args.append("--branch")
+        return json.dumps(await _git(args, cwd=cwd))
+
+    # -- diff --
+    if action == "diff":
+        args = ["diff"]
+        if staged:
+            args.append("--cached")
+        if stat_only:
+            args.append("--stat")
+        if ref:
+            args.append(ref)
+        if path:
+            args.extend(["--", path])
+        result = await _git(args, cwd=cwd)
+        if result.get("ok") and len(result.get("stdout", "")) > 100_000:
+            result["stdout"] = result["stdout"][:100_000] + "\n... (truncated)"
+            result["truncated"] = True
         return json.dumps(result)
-    if action == "create":
-        if not name.strip():
-            return _json_error("branch_name_required")
-        result = await _git(["checkout", "-b", name], cwd=cwd)
-        return json.dumps(result)
-    if action == "switch":
-        if not name.strip():
-            return _json_error("branch_name_required")
-        result = await _git(["checkout", name], cwd=cwd)
-        return json.dumps(result)
+
+    # -- log --
+    if action == "log":
+        count = max(1, min(max_count, 100))
+        args = ["log", f"-{count}"]
+        if oneline:
+            args.append("--oneline")
+        else:
+            args.extend(["--format=%H %an %ae %ai%n%s%n%b---"])
+        if author:
+            args.append(f"--author={author}")
+        if since:
+            args.append(f"--since={since}")
+        if ref:
+            args.append(ref)
+        if path:
+            args.extend(["--", path])
+        return json.dumps(await _git(args, cwd=cwd))
+
+    # -- commit --
+    if action == "commit":
+        if not message.strip():
+            return _json_error("empty_commit_message")
+        stage_files = files or ["."]
+        add_result = await _git(["add", *stage_files], cwd=cwd)
+        if not add_result.get("ok"):
+            return json.dumps(add_result)
+        return json.dumps(await _git(["commit", "-m", message], cwd=cwd))
+
+    # -- branch --
+    if action == "branch":
+        if sub_action == "list":
+            return json.dumps(
+                await _git(["branch", "-a", "--no-color"], cwd=cwd),
+            )
+        if sub_action == "create":
+            if not ref.strip():
+                return _json_error("branch_name_required")
+            return json.dumps(await _git(["checkout", "-b", ref], cwd=cwd))
+        if sub_action == "switch":
+            if not ref.strip():
+                return _json_error("branch_name_required")
+            return json.dumps(await _git(["checkout", ref], cwd=cwd))
+        return _json_error(
+            "invalid_sub_action",
+            sub_action=sub_action,
+            valid=["list", "create", "switch"],
+        )
+
+    # -- push --
+    if action == "push":
+        args = ["push"]
+        if set_upstream:
+            args.append("-u")
+        args.append(remote)
+        if ref:
+            args.append(ref)
+        if push_tags:
+            args.append("--tags")
+        return json.dumps(await _git(args, cwd=cwd, timeout=60.0))
+
+    # -- tag --
+    if action == "tag":
+        if sub_action == "list":
+            return json.dumps(
+                await _git(["tag", "-l", "--sort=-creatordate"], cwd=cwd),
+            )
+        if sub_action == "create":
+            if not ref.strip():
+                return _json_error("tag_name_required")
+            args = ["tag"]
+            if message:
+                args.extend(["-a", ref, "-m", message])
+            else:
+                args.append(ref)
+            return json.dumps(await _git(args, cwd=cwd))
+        if sub_action == "delete":
+            if not ref.strip():
+                return _json_error("tag_name_required")
+            return json.dumps(await _git(["tag", "-d", ref], cwd=cwd))
+        return _json_error(
+            "invalid_sub_action",
+            sub_action=sub_action,
+            valid=["list", "create", "delete"],
+        )
+
     return _json_error(
         "invalid_action",
         action=action,
-        valid=["list", "create", "switch"],
+        valid=["status", "diff", "log", "commit", "branch", "push", "tag"],
     )
 
 
@@ -3250,89 +2994,6 @@ async def code_sandbox(
 # ---------------------------------------------------------------------------
 
 
-@tool(
-    "copilot_query",
-    (
-        "Send a prompt to GitHub Copilot using GPT-5 Mini. "
-        "Runs 'copilot --model gpt-5-mini -p <prompt>' in single-shot mode "
-        "and returns the response. Use this to get a second opinion, "
-        "cross-check answers, generate alternative solutions, or delegate "
-        "subtasks to a fast lightweight model."
-    ),
-    {
-        "type": "object",
-        "properties": {
-            "prompt": {
-                "type": "string",
-                "description": "The prompt to send to Copilot GPT-5 Mini.",
-            },
-            "timeout_seconds": {
-                "type": "number",
-                "description": "Max seconds to wait (default 60, max 300).",
-            },
-            "cwd": {
-                "type": "string",
-                "description": "Working directory for the copilot process.",
-            },
-        },
-        "required": ["prompt"],
-    },
-)
-async def copilot_query(
-    prompt: str,
-    timeout_seconds: float = 60.0,
-    cwd: str = "",
-) -> str:
-    """Run a single-shot copilot query with gpt-5-mini."""
-    timeout_seconds = max(5.0, min(float(timeout_seconds), 300.0))
-
-    cmd = _resolve_command("copilot")
-    if not cmd:
-        return _json_error("command_not_found", command="copilot")
-
-    proc = await asyncio.create_subprocess_exec(
-        cmd,
-        "--model",
-        "gpt-5-mini",
-        "-p",
-        prompt,
-        cwd=(cwd or None),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=dict(os.environ),
-    )
-
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=timeout_seconds,
-        )
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return json.dumps(
-            {
-                "ok": False,
-                "error": "timeout",
-                "timeout_seconds": timeout_seconds,
-            },
-        )
-
-    stdout_text = stdout.decode("utf-8", errors="replace")
-    stderr_text = stderr.decode("utf-8", errors="replace")
-
-    return json.dumps(
-        {
-            "ok": proc.returncode == 0,
-            "exit_code": proc.returncode,
-            "model": "gpt-5-mini",
-            "response": stdout_text[:100_000],
-            "stderr": stderr_text[:10_000] if stderr_text.strip() else "",
-        },
-    )
-
-
 # ---------------------------------------------------------------------------
 # Context window awareness
 # ---------------------------------------------------------------------------
@@ -3803,16 +3464,17 @@ async def _handle_ui_question(
 
 @tool(
     "user_interact",
-    "Interact with the user. Supports three modes: "
-    "'permission' to request approval for an action (with risk level), "
-    "'notify' to alert the user via TUI/OS/bell/sound (no response needed), "
-    "'question' to ask a question with optional choices.",
+    "Interact with the user. "
+    "permission: action + reason + risk → approved true/false. "
+    "notify: title + message + priority (no response). "
+    "question: question + optional choices (free-text if no choices). "
+    "multi_select: question + choices → list of selected items.",
     {
         "type": "object",
         "properties": {
             "mode": {
                 "type": "string",
-                "enum": ["permission", "notify", "question"],
+                "enum": ["permission", "notify", "question", "multi_select"],
                 "description": "Interaction mode.",
             },
             "action": {
@@ -3886,7 +3548,37 @@ async def user_interact(
         return await _handle_ui_notify(title, message, priority, channels)
     if mode == "question":
         return await _handle_ui_question(question, choices, allow_custom)
+    if mode == "multi_select":
+        return await _handle_ui_multi_select(question, choices)
     return _json_error("invalid_mode", detail=f"Unknown mode: {mode}")
+
+
+# ---------------------------------------------------------------------------
+# Focused interaction tools — clean, single-purpose alternatives
+# ---------------------------------------------------------------------------
+
+
+async def _handle_ui_multi_select(
+    question: str,
+    choices: list[str] | None,
+) -> str:
+    """Handle multi_select mode of user_interact."""
+    if _user_interact_callback is None:
+        return _json_error(
+            "no_ui",
+            detail="Interactive UI not available.",
+        )
+    if not choices:
+        return _json_error("no_choices", detail="Multi-select requires choices.")
+    try:
+        result = await _user_interact_callback(
+            mode="multi_select",
+            question=question,
+            choices=choices,
+        )
+        return json.dumps({"ok": True, "selected": result.get("selected", [])})
+    except Exception as exc:
+        return _json_error("multi_select_failed", detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -4207,26 +3899,6 @@ async def tool_search(query: str, max_results: int = 5) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool(
-    "sleep",
-    "Pause execution for a specified number of seconds. Max 300s.",
-    {
-        "type": "object",
-        "properties": {
-            "seconds": {
-                "type": "number",
-                "description": "How long to sleep (max 300).",
-            },
-        },
-        "required": ["seconds"],
-    },
-)
-async def sleep_tool(seconds: float = 10.0) -> str:
-    capped = max(0.0, min(float(seconds), 300.0))
-    await asyncio.sleep(capped)
-    return json.dumps({"ok": True, "slept_seconds": capped})
-
-
 # ---------------------------------------------------------------------------
 # Config tool — read/write settings from within agent
 # ---------------------------------------------------------------------------
@@ -4318,8 +3990,6 @@ def get_system_tool_specs() -> list[ToolSpec]:
     static_specs = [
         # Execution
         cast("ToolSpec", cast("Any", run_python3).spec),
-        cast("ToolSpec", cast("Any", run_python).spec),
-        cast("ToolSpec", cast("Any", run_npx).spec),
         cast("ToolSpec", cast("Any", run_command).spec),
         cast("ToolSpec", cast("Any", run_shell).spec),
         # Web
@@ -4329,7 +3999,6 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", task).spec),
         # System discovery
         cast("ToolSpec", cast("Any", which_command).spec),
-        cast("ToolSpec", cast("Any", discover_all_commands).spec),
         # Filesystem — basic
         cast("ToolSpec", cast("Any", list_directory).spec),
         cast("ToolSpec", cast("Any", read_text_file).spec),
@@ -4347,11 +4016,7 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", tree_directory).spec),
         cast("ToolSpec", cast("Any", diff_files).spec),
         # Git
-        cast("ToolSpec", cast("Any", git_status).spec),
-        cast("ToolSpec", cast("Any", git_diff).spec),
-        cast("ToolSpec", cast("Any", git_log).spec),
-        cast("ToolSpec", cast("Any", git_commit).spec),
-        cast("ToolSpec", cast("Any", git_branch).spec),
+        cast("ToolSpec", cast("Any", git).spec),
         # Utilities
         cast("ToolSpec", cast("Any", download_file).spec),
         cast("ToolSpec", cast("Any", http_request).spec),
@@ -4366,15 +4031,12 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", list_dynamic_tools).spec),
         cast("ToolSpec", cast("Any", code_sandbox).spec),
         # Copilot GPT-5 Mini
-        cast("ToolSpec", cast("Any", copilot_query).spec),
         # System info
         cast("ToolSpec", cast("Any", get_environment).spec),
         cast("ToolSpec", cast("Any", get_system_info).spec),
         cast("ToolSpec", cast("Any", list_processes).spec),
         cast("ToolSpec", cast("Any", signal_process).spec),
         cast("ToolSpec", cast("Any", list_listening_ports).spec),
-        cast("ToolSpec", cast("Any", security_lookup).spec),
-        cast("ToolSpec", cast("Any", manage_crontab).spec),
         cast("ToolSpec", cast("Any", list_unix_capabilities).spec),
         cast("ToolSpec", cast("Any", list_system_tools).spec),
         # Task tracking
@@ -4389,7 +4051,6 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", causal_trace).spec),
         cast("ToolSpec", cast("Any", policy_probe).spec),
         # Team prompt
-        cast("ToolSpec", cast("Any", read_team_prompt).spec),
         # History snip
         cast("ToolSpec", cast("Any", history_snip).spec),
         # Notebook edit
@@ -4397,7 +4058,6 @@ def get_system_tool_specs() -> list[ToolSpec]:
         # Tool search
         cast("ToolSpec", cast("Any", tool_search).spec),
         # Sleep & Config
-        cast("ToolSpec", cast("Any", sleep_tool).spec),
         cast("ToolSpec", cast("Any", config_tool).spec),
     ]
     # Append any dynamically created tools

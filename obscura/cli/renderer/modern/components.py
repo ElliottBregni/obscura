@@ -506,7 +506,10 @@ class SpinnerComponent(Component):
         # Animated status text
         anim_text = self._animated_text
         buf.write_line(
-            region.y, col, anim_text[: region.width - 4], self.text_style,
+            region.y,
+            col,
+            anim_text[: region.width - 4],
+            self.text_style,
         )
         col += len(anim_text) + 2
 

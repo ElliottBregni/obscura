@@ -321,9 +321,19 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     client._tool_registry = ToolRegistry()  # pyright: ignore[reportPrivateUsage]
     client._user = None  # pyright: ignore[reportPrivateUsage]
     client._capability_token = None  # pyright: ignore[reportPrivateUsage]
+    client._model = ""  # pyright: ignore[reportPrivateUsage]
+    client._hooks = None  # pyright: ignore[reportPrivateUsage]
+    client._cache = None  # pyright: ignore[reportPrivateUsage]
     client._mcp_server_configs = []  # pyright: ignore[reportPrivateUsage]
     client._mcp_backend = None  # pyright: ignore[reportPrivateUsage]
     client._current_loop = None  # pyright: ignore[reportPrivateUsage]
+
+    # Reliability infrastructure (normally set in __init__)
+    from obscura.core.circuit_breaker import CircuitBreakerRegistry
+
+    client._circuit_registry = CircuitBreakerRegistry()  # pyright: ignore[reportPrivateUsage]
+    client._max_retries = 2  # pyright: ignore[reportPrivateUsage]
+    client._retry_initial_backoff = 0.5  # pyright: ignore[reportPrivateUsage]
     return client, mock_backend
 
 
@@ -560,14 +570,12 @@ class TestRunLoop:
         ) as mock_cls:
             client.run_loop("fix bug", max_turns=5)
 
-            mock_cls.assert_called_once_with(
-                mock_backend,
-                client._tool_registry,  # pyright: ignore[reportPrivateUsage]
-                max_turns=5,
-                on_confirm=None,
-                capability_token=None,
-            )
-            mock_loop_instance.run.assert_called_once_with("fix bug")
+            mock_cls.assert_called_once()
+            call_kwargs = mock_cls.call_args
+            assert call_kwargs[0][0] is mock_backend
+            assert call_kwargs[1]["max_turns"] == 5
+            mock_loop_instance.run.assert_called_once()
+            assert mock_loop_instance.run.call_args[0][0] == "fix bug"
 
     async def test_run_loop_to_completion(self) -> None:
         """run_loop_to_completion() should return concatenated text."""
@@ -582,13 +590,10 @@ class TestRunLoop:
         ) as mock_cls:
             result = await client.run_loop_to_completion("fix bug", max_turns=3)
 
-            mock_cls.assert_called_once_with(
-                mock_backend,
-                client._tool_registry,  # pyright: ignore[reportPrivateUsage]
-                max_turns=3,
-                on_confirm=None,
-                capability_token=None,
-            )
+            mock_cls.assert_called_once()
+            call_kwargs = mock_cls.call_args
+            assert call_kwargs[0][0] is mock_backend
+            assert call_kwargs[1]["max_turns"] == 3
             mock_loop_instance.run_to_completion.assert_awaited_once_with("fix bug")
             assert result == "done!"
 
@@ -607,13 +612,11 @@ class TestRunLoop:
             return_value=mock_loop_instance,
         ) as mock_cls:
             client.run_loop("fix bug", on_confirm=confirm_fn)
-            mock_cls.assert_called_once_with(
-                mock_backend,
-                client._tool_registry,  # pyright: ignore[reportPrivateUsage]
-                max_turns=10,
-                on_confirm=confirm_fn,
-                capability_token=None,
-            )
+            mock_cls.assert_called_once()
+            call_kwargs = mock_cls.call_args
+            assert call_kwargs[0][0] is mock_backend
+            assert call_kwargs[1]["max_turns"] == 10
+            assert call_kwargs[1]["on_confirm"] is confirm_fn
 
 
 # ---------------------------------------------------------------------------

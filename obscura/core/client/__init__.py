@@ -277,6 +277,21 @@ class ObscuraClient:
     async def __aexit__(self, *exc: object) -> None:
         await self.stop()
 
+    def _apply_default_reasoning_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Apply default reasoning_effort for GPT models if not set."""
+        model = getattr(self, "_model", "") or ""
+        if not model.lower().startswith("gpt"):
+            return kwargs
+        # Don't override explicit settings
+        if "reasoning_effort" in kwargs:
+            return kwargs
+        if "response_create_kwargs" in kwargs:
+            rcr = kwargs["response_create_kwargs"]
+            if isinstance(rcr, dict) and "reasoning" in rcr:
+                return kwargs
+        kwargs.setdefault("reasoning_effort", "medium")
+        return kwargs
+
     # -- Query ---------------------------------------------------------------
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:

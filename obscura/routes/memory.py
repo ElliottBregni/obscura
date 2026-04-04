@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -12,14 +12,12 @@ from fastapi.responses import JSONResponse
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["memory"])
 
 # In-memory namespace config (lateral move from server.py)
 _memory_namespaces: dict[str, dict[str, Any]] = {}
-
 
 # -- list / search / stats ------------------------------------------------
 

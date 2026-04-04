@@ -1,7 +1,7 @@
 +++
 name = "verification"
 description = "Code review and verification agent. Reads code to check correctness, find bugs, and verify implementations."
-tools = ["read_text_file", "grep_files", "find_files", "list_directory", "tree_directory", "git_status", "git_log", "git_diff", "file_info", "run_shell"]
+tools = ["read_text_file", "grep_files", "find_files", "list_directory", "tree_directory", "git", "file_info", "run_shell"]
 model = "inherit"
 max_turns = 30
 +++

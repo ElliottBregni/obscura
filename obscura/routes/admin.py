@@ -12,8 +12,9 @@ from fastapi.responses import JSONResponse
 from obscura.auth.rbac import require_any_role, require_role
 from obscura.deps import audit_logs, get_runtime
 
+from obscura.auth.models import AuthenticatedUser
+
 if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
     from obscura.core.rate_limiter import RateLimiter
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])

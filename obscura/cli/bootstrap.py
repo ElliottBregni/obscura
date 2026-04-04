@@ -247,7 +247,8 @@ async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
             import logging as _sched_log
 
             _sched_log.getLogger(__name__).debug(
-                "Failed to load persisted schedules: %s", _sched_exc,
+                "Failed to load persisted schedules: %s",
+                _sched_exc,
             )
 
         daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)

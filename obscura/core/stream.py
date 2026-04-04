@@ -138,8 +138,13 @@ class EventToIteratorBridge:
             if tool_input is not None:
                 if isinstance(tool_input, str):
                     delta = tool_input
-                else:
+                elif isinstance(tool_input, dict):
                     delta = json.dumps(tool_input)
+                else:
+                    try:
+                        delta = json.dumps(tool_input)
+                    except (TypeError, ValueError):
+                        delta = str(tool_input)
                 self.push(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_DELTA,

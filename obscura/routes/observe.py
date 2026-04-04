@@ -15,10 +15,10 @@ from sse_starlette.sse import EventSourceResponse
 from obscura.approvals import list_tool_approval_requests
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 
+from obscura.auth.models import AuthenticatedUser
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["observe"])
 

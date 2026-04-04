@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-if TYPE_CHECKING:
-    from obscura.schemas.templates import A2ARemoteToolsSpecSchema, APERProfileSchema
+from obscura.schemas.templates import A2ARemoteToolsSpecSchema, APERProfileSchema
 
 
 def _default_dict_list() -> list[dict[str, Any]]:

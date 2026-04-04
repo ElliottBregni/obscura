@@ -11,6 +11,12 @@ Modes:
 
 Also includes dangerous command pattern detection to block
 destructive operations regardless of permission mode.
+
+Action-level policy:
+  Unified tools (like ``git``) expose multiple operations via an ``action``
+  parameter.  ``READ_ONLY_ACTION_RULES`` restricts which actions are
+  permitted in read-only contexts (PLAN mode, DIFF mode).  A tool that
+  appears in this map is allowed **only** with the listed actions.
 """
 
 from __future__ import annotations
@@ -40,9 +46,7 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset(
         "tree_directory",
         "file_info",
         "diff_files",
-        "git_status",
-        "git_log",
-        "git_diff",
+        "git",
         "web_search",
         "web_fetch",
         "which_command",
@@ -61,6 +65,13 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset(
         "exit_plan_mode",
     },
 )
+
+# Action-level restrictions for read-only contexts.
+# Tools in this map are only allowed with the listed actions when the
+# permission mode restricts to read-only operations.
+READ_ONLY_ACTION_RULES: dict[str, frozenset[str]] = {
+    "git": frozenset({"status", "diff", "log"}),
+}
 
 # Tools auto-approved in ACCEPT_EDITS mode.
 FILE_MODIFICATION_TOOLS: frozenset[str] = frozenset(
@@ -108,6 +119,33 @@ class PermissionDecision:
     reason: str = ""
 
 
+def _check_action_rules(
+    tool_name: str,
+    args: dict[str, Any],
+) -> PermissionDecision | None:
+    """Check action-level rules for a tool in read-only context.
+
+    Returns a denial ``PermissionDecision`` if the action is blocked,
+    or ``None`` if allowed.
+    """
+    if tool_name not in READ_ONLY_ACTION_RULES:
+        return None
+    action = args.get("action")
+    if action is None:
+        # No action specified — allow (the tool itself validates required params)
+        return None
+    allowed_actions = READ_ONLY_ACTION_RULES[tool_name]
+    if action not in allowed_actions:
+        return PermissionDecision(
+            allowed=False,
+            reason=(
+                f"action '{action}' on tool '{tool_name}' not allowed "
+                f"in read-only mode (allowed: {', '.join(sorted(allowed_actions))})"
+            ),
+        )
+    return None
+
+
 class PermissionModeEngine:
     """Evaluates tool execution requests against the active permission mode."""
 
@@ -149,6 +187,9 @@ class PermissionModeEngine:
         # 3. PLAN mode: only read-only tools allowed.
         if self._mode == PermissionMode.PLAN:
             if tool_name in READ_ONLY_TOOLS:
+                blocked = _check_action_rules(tool_name, args)
+                if blocked:
+                    return blocked
                 return PermissionDecision(
                     allowed=True,
                     auto_approved=True,
@@ -162,6 +203,11 @@ class PermissionModeEngine:
         # 4. ACCEPT_EDITS mode: auto-approve file tools + read tools.
         if self._mode == PermissionMode.ACCEPT_EDITS:
             if tool_name in READ_ONLY_TOOLS or tool_name in FILE_MODIFICATION_TOOLS:
+                # Action rules still apply in read-only context
+                if tool_name in READ_ONLY_TOOLS:
+                    blocked = _check_action_rules(tool_name, args)
+                    if blocked:
+                        return blocked
                 return PermissionDecision(
                     allowed=True,
                     auto_approved=True,
@@ -208,8 +254,19 @@ class PermissionModeEngine:
 
         return False, ""
 
-    def is_tool_allowed(self, tool_name: str) -> bool:
-        """Quick check if a tool is allowed under the current mode."""
+    def is_tool_allowed(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any] | None = None,
+    ) -> bool:
+        """Quick check if a tool is allowed under the current mode.
+
+        When *tool_args* is provided, action-level rules are also checked
+        for unified tools that have restricted actions in read-only contexts.
+        """
         if self._mode == PermissionMode.PLAN:
-            return tool_name in READ_ONLY_TOOLS
+            if tool_name not in READ_ONLY_TOOLS:
+                return False
+            if tool_args is not None:
+                return _check_action_rules(tool_name, tool_args) is None
         return True

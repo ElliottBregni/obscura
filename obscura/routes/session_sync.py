@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 
 def _safe_json(value: dict[str, Any]) -> str:

@@ -33,16 +33,26 @@ LIGHTNING_BOLT = "↯"
 
 
 # ---------------------------------------------------------------------------
-# Theme constants
+# Theme constants — sourced from Catppuccin Mocha palette
 # ---------------------------------------------------------------------------
 
-ACCENT = "bright_cyan"
-ACCENT_DIM = "cyan"
-TOOL_COLOR = "bright_yellow"
-THINKING_COLOR = "bright_magenta"
-ERROR_COLOR = "bright_red"
-OK_COLOR = "bright_green"
-WARN_COLOR = "yellow"
+from obscura.cli.renderer.modern.theme import (
+    ERROR_HEX,
+    OK_HEX,
+    THINKING_HEX,
+    TOOL_HEX,
+    WARN_HEX,
+    BLUE,
+    SAPPHIRE,
+)
+
+ACCENT = BLUE.hex
+ACCENT_DIM = SAPPHIRE.hex
+TOOL_COLOR = TOOL_HEX
+THINKING_COLOR = THINKING_HEX
+ERROR_COLOR = ERROR_HEX
+OK_COLOR = OK_HEX
+WARN_COLOR = WARN_HEX
 CODE_THEME = "monokai"
 
 
@@ -501,7 +511,10 @@ class StreamRenderer:
         if len(lines) <= max_preview:
             preview = safe
         else:
-            preview = "\n".join(lines[:max_preview]) + f"\n... ({len(lines) - max_preview} more lines)"
+            preview = (
+                "\n".join(lines[:max_preview])
+                + f"\n... ({len(lines) - max_preview} more lines)"
+            )
 
         # Render as dimmed blockquote with left bar
         for line in preview.split("\n"):
@@ -594,7 +607,9 @@ class StreamRenderer:
         if self._ss is not None:
             try:
                 if hasattr(self._ss, "update"):
-                    self._ss.update({"active": True, "text": f"running {summary}...", "preview": ""})
+                    self._ss.update(
+                        {"active": True, "text": f"running {summary}...", "preview": ""}
+                    )
                 else:
                     self._ss.active = True  # type: ignore[attr-defined]
                     self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]

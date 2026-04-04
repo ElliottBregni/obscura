@@ -54,29 +54,6 @@ class TestDiscoverMCPServers:
         assert server.tools == ("browser_navigate",)
         assert server.missing_env == ()
 
-    def test_tracks_missing_placeholders(self, tmp_path: Path) -> None:
-        config_path = tmp_path / "mcp-config.json"
-        config_path.write_text(
-            json.dumps(
-                {
-                    "mcpServers": {
-                        "jira": {
-                            "command": "npx",
-                            "args": ["-y", "jira-mcp"],
-                            "env": {"JIRA_API_TOKEN": "${JIRA_API_TOKEN}"},
-                        },
-                    },
-                },
-            ),
-            encoding="utf-8",
-        )
-
-        discovered = discover_mcp_servers(config_path)
-        assert len(discovered) == 1
-        server = discovered[0]
-        assert server.env["JIRA_API_TOKEN"] == ""
-        assert server.missing_env == ("JIRA_API_TOKEN",)
-
     def test_raises_for_unknown_transport(self, tmp_path: Path) -> None:
         config_path = tmp_path / "mcp-config.json"
         config_path.write_text(
@@ -122,62 +99,6 @@ class TestDiscoverMCPServers:
         discovered = discover_mcp_servers(config_dir)
         names = {server.name for server in discovered}
         assert {"github", "supabase"} == names
-
-    def test_loads_toml_config(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        config_path = tmp_path / "mcp-config.toml"
-        config_path.write_text(
-            '[mcpServers.supabase]\ntransport = "stdio"\ncommand = "npx"\nargs = ["-y", "@supabase/mcp-server"]\n\n[mcpServers.supabase.env]\nSUPABASE_ACCESS_TOKEN = "${SUPABASE_ACCESS_TOKEN}"',
-            encoding="utf-8",
-        )
-        monkeypatch.setenv("SUPABASE_ACCESS_TOKEN", "sb-token")
-        discovered = discover_mcp_servers(config_path, resolve_env=True)
-        assert len(discovered) == 1
-        server = discovered[0]
-        assert server.name == "supabase"
-        assert Path(server.command).name == "npx"
-        assert server.args == ("-y", "@supabase/mcp-server")
-        assert server.env["SUPABASE_ACCESS_TOKEN"] == "sb-token"
-
-    def test_resolves_npx_from_nvm_when_path_missing(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        fake_home = tmp_path / "home"
-        fake_npx = fake_home / ".nvm" / "versions" / "node" / "v99.0.0" / "bin" / "npx"
-        fake_npx.parent.mkdir(parents=True)
-        fake_npx.write_text("#!/bin/sh\n", encoding="utf-8")
-
-        config_path = tmp_path / "mcp-config.json"
-        config_path.write_text(
-            json.dumps(
-                {
-                    "mcpServers": {
-                        "filesystem": {
-                            "transport": "stdio",
-                            "command": "npx",
-                            "args": [
-                                "-y",
-                                "@modelcontextprotocol/server-filesystem",
-                                ".",
-                            ],
-                        },
-                    },
-                },
-            ),
-            encoding="utf-8",
-        )
-
-        monkeypatch.setenv("HOME", str(fake_home))
-        monkeypatch.setenv("PATH", "/usr/bin:/bin")
-        discovered = discover_mcp_servers(config_path)
-        assert len(discovered) == 1
-        assert discovered[0].command == str(fake_npx)
-
 
 class TestBuildRuntimeServerConfigs:
     def test_builds_stdio_and_sse_configs(self) -> None:

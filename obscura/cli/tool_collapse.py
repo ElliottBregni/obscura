@@ -26,9 +26,7 @@ COLLAPSIBLE_TOOLS: frozenset[str] = frozenset(
         "list_directory",
         "tree_directory",
         "file_info",
-        "git_status",
-        "git_log",
-        "git_diff",
+        "git",
         "web_search",
         "web_fetch",
         "tool_search",
@@ -44,9 +42,7 @@ TOOL_CATEGORIES: dict[str, str] = {
     "list_directory": "List",
     "tree_directory": "Tree",
     "file_info": "Info",
-    "git_status": "Git",
-    "git_log": "Git",
-    "git_diff": "Git",
+    "git": "Git",
     "web_search": "Search",
     "web_fetch": "Fetch",
     "tool_search": "Search",
@@ -144,6 +140,6 @@ def _extract_detail(tool_name: str, tool_input: dict[str, Any]) -> str:
         return str(tool_input.get("query", ""))
     if tool_name == "web_fetch":
         return str(tool_input.get("url", ""))[:60]
-    if tool_name in ("git_status", "git_log", "git_diff"):
+    if tool_name == "git":
         return ""
     return ""

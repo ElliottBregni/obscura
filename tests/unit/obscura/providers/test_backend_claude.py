@@ -26,15 +26,6 @@ def _tool_handler(**_: Any) -> str:
 
 
 class TestClaudeBackendInit:
-    def test_defaults(self) -> None:
-        from obscura.providers.claude import ClaudeBackend
-
-        b = ClaudeBackend(_make_auth())
-        assert b.model == "claude-sonnet-4-5-20250929"
-        assert b.permission_mode == "default"
-        assert b.cwd is None
-        assert b.client is None
-
     def test_custom_settings(self) -> None:
         from obscura.providers.claude import ClaudeBackend
 

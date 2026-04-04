@@ -40,10 +40,7 @@ default_grant = true
 id = "git.ops"
 description = "Git operations"
 tools = [
-    "git_diff",
-    "git_log",
-    "git_status",
-    "git_commit",
+    "git",
 ]
 requires_approval = false
 default_grant = true
@@ -94,32 +91,11 @@ side_effects = "write"
 handler = "obscura.tools.system:edit_text_file"
 
 [[tools]]
-name = "git_diff"
-description = "Show git diff"
-capability = "git.ops"
-side_effects = "read"
-handler = "obscura.tools.system:git_diff"
-
-[[tools]]
-name = "git_log"
-description = "Show git log"
-capability = "git.ops"
-side_effects = "read"
-handler = "obscura.tools.system:git_log"
-
-[[tools]]
-name = "git_status"
-description = "Show git status"
-capability = "git.ops"
-side_effects = "read"
-handler = "obscura.tools.system:git_status"
-
-[[tools]]
-name = "git_commit"
-description = "Create a git commit"
+name = "git"
+description = "Unified git operations — status, diff, log, commit, branch, push, tag."
 capability = "git.ops"
 side_effects = "write"
-handler = "obscura.tools.system:git_commit"
+handler = "obscura.tools.system:git"
 
 [[tools]]
 name = "web_search"

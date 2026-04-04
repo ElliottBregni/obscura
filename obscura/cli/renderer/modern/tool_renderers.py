@@ -48,6 +48,7 @@ _S_CODE = Style(fg=250)  # light gray
 # Edit — colored diff
 # ---------------------------------------------------------------------------
 
+
 def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
     if event.is_error or not raw.strip():
@@ -69,6 +70,7 @@ def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 # ---------------------------------------------------------------------------
 # Read — code block with line numbers
 # ---------------------------------------------------------------------------
+
 
 def _read_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
@@ -99,6 +101,7 @@ def _read_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 # ---------------------------------------------------------------------------
 # Grep — grouped search results
 # ---------------------------------------------------------------------------
+
 
 def _grep_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
@@ -138,6 +141,7 @@ def _grep_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 # Directory listing — indented tree
 # ---------------------------------------------------------------------------
 
+
 def _dir_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
     if event.is_error or not raw.strip():
@@ -164,6 +168,7 @@ def _dir_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 # Shell — output block
 # ---------------------------------------------------------------------------
 
+
 def _shell_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
     if event.is_error or not raw.strip():
@@ -183,6 +188,7 @@ def _shell_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 # ---------------------------------------------------------------------------
 # Git diff — colored diff
 # ---------------------------------------------------------------------------
+
 
 def _git_diff_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
@@ -207,6 +213,7 @@ def _git_diff_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 # Git status
 # ---------------------------------------------------------------------------
 
+
 def _git_status_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     raw = event.tool_result or ""
     if event.is_error or not raw.strip():
@@ -230,6 +237,20 @@ def _git_status_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 
 
 # ---------------------------------------------------------------------------
+# Unified git dispatcher
+# ---------------------------------------------------------------------------
+
+
+def _git_result_lines(event: AgentEvent, width: int) -> list[str] | None:
+    action = event.tool_input.get("action", "")
+    if action == "diff":
+        return _git_diff_result_lines(event, width)
+    if action == "status":
+        return _git_status_result_lines(event, width)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -245,7 +266,9 @@ class ToolRendererRegistry:
         self._renderers[tool_name] = renderer
 
     def render_result_lines(
-        self, event: AgentEvent, width: int,
+        self,
+        event: AgentEvent,
+        width: int,
     ) -> list[str] | None:
         """Render a tool result.  Returns None for generic fallback."""
         fn = self._renderers.get(event.tool_name)
@@ -265,5 +288,4 @@ class ToolRendererRegistry:
         self.register("tree_directory", _dir_result_lines)
         self.register("run_shell", _shell_result_lines)
         self.register("run_command", _shell_result_lines)
-        self.register("git_status", _git_status_result_lines)
-        self.register("git_diff", _git_diff_result_lines)
+        self.register("git", _git_result_lines)

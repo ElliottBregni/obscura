@@ -57,6 +57,7 @@ def _sync_guide_files() -> None:
     except OSError as exc:
         _log.debug("Guide file sync failed: %s", exc)
 
+
 _session_state: dict[str, bool] = {"titled": False}
 
 
@@ -1043,6 +1044,14 @@ async def _repl(
         except Exception:
             pass
 
+        # Add user profile tools (profile_get, profile_update, profile_recall, profile_sync)
+        try:
+            from obscura.tools.profile_tools import get_profile_tool_specs
+
+            system_tools.extend(get_profile_tool_specs())
+        except Exception:
+            pass
+
         # Add LSP tool (code navigation)
         try:
             from obscura.tools.lsp import get_lsp_tool_specs
@@ -1210,6 +1219,24 @@ async def _repl(
                         ),
                     )
                     return {}
+
+                if mode == "multi_select":
+                    from obscura.cli.widgets import (
+                        MultiSelectRequest,
+                        ask_multi_select as _ask_multi_select,
+                    )
+
+                    choices = kwargs.get("choices", [])
+                    question = kwargs.get("question", "")
+                    result = await _ask_multi_select(
+                        MultiSelectRequest(
+                            question=question,
+                            choices=tuple(choices),
+                        ),
+                    )
+                    # result.text is comma-separated selections
+                    selected = [s.strip() for s in result.text.split(",") if s.strip()]
+                    return {"selected": selected}
 
                 # question mode (default)
                 from obscura.cli.widgets import (
@@ -1489,16 +1516,38 @@ async def _repl(
 
         def _refresh_prompt_status() -> None:
             """Refresh mutable fields of prompt_status before each prompt."""
+            from obscura.cli.prompt import RunningAgentInfo
+
             prompt_status.mode = mm.current.value
             prompt_status.model = ctx.model or ""
             # Collect running agents from runtime (if active)
             running: list[str] = []
+            details: list[RunningAgentInfo] = []
             if ctx._runtime is not None:
                 try:
+                    from datetime import UTC, datetime
+
                     from obscura.agent.agents import AgentStatus as _AS
 
-                    for agent in ctx._runtime.list_agents(status=_AS.RUNNING):
+                    _active = {_AS.RUNNING, _AS.WAITING, _AS.PENDING}
+                    for agent in ctx._runtime.list_agents():
+                        if agent.status not in _active:
+                            continue
                         running.append(agent.config.name)
+                        elapsed = (
+                            (datetime.now(UTC) - agent.created_at).total_seconds()
+                            if hasattr(agent, "created_at")
+                            else 0.0
+                        )
+                        details.append(
+                            RunningAgentInfo(
+                                name=agent.config.name,
+                                status=agent.status.name.lower(),
+                                elapsed_s=elapsed,
+                                iteration_count=getattr(agent, "iteration_count", 0),
+                                last_tool=getattr(agent, "_last_tool_name", ""),
+                            )
+                        )
                 except Exception:
                     pass
             # Include daemon task if alive
@@ -1511,7 +1560,9 @@ async def _repl(
                 )
                 if label not in running:
                     running.append(label)
+                    details.append(RunningAgentInfo(name=label, status="running"))
             prompt_status.running_agents = running
+            prompt_status.agent_details = details
             # Count active tasks (agents in non-terminal states + daemon)
             task_count = 0
             if ctx._runtime is not None:
@@ -1716,7 +1767,7 @@ async def _repl(
                                 )
                                 daemon_task = None
                     _refresh_prompt_status()
-                    user_input = await bordered_prompt(session)
+                    user_input = await bordered_prompt(session, status=prompt_status)
                 except (EOFError, KeyboardInterrupt):
                     console.print()
                     break
@@ -2450,6 +2501,9 @@ def init(force: bool, no_bootstrap: bool) -> None:
         bootstrap_all_builtins,
         init_workspace,
     )
+
+    # Sync OBSCURA.md ↔ CLAUDE.md as part of workspace init.
+    _sync_guide_files()
 
     try:
         ws = init_workspace(force=force)

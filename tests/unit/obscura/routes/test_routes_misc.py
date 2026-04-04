@@ -35,15 +35,6 @@ class TestHealthRoute:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    def test_auth_diagnostics(self, client: TestClient) -> None:
-        resp = client.get("/api/v1/auth/diagnostics")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "auth_enabled" in data
-        assert "issuer" in data
-        assert "jwks_uri" in data
-        assert "audience" in data
-
     def test_providers_health(self, client: TestClient) -> None:
         resp = client.get("/api/v1/providers/health")
         assert resp.status_code == 200

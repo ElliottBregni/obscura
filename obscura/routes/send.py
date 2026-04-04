@@ -21,10 +21,10 @@ from obscura.deps import ClientFactory, audit
 from obscura.routes.session_sync import sync_session_turn
 from obscura.schemas import SendRequest, SendResponse, StreamRequest
 
+from obscura.auth.models import AuthenticatedUser
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-    from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["agent"])
 

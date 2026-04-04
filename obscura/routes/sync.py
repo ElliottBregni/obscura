@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -13,8 +13,7 @@ from obscura.auth.rbac import require_role
 from obscura.deps import audit, record_sync_metric
 from obscura.schemas import SyncRequest, SyncResponse
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["sync"])
 

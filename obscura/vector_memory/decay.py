@@ -55,6 +55,13 @@ DEFAULT_PROFILES: dict[str, DecayProfile] = {
     "fact": DecayProfile(half_life_days=90.0, min_score_floor=0.005),
     "general": DecayProfile(half_life_days=30.0, min_score_floor=0.01),
     "preference": DecayProfile(immune=True),
+    # Profile-specific decay profiles (per-category).
+    "profile_identity": DecayProfile(immune=True),
+    "profile_career": DecayProfile(half_life_days=90.0, min_score_floor=0.05),
+    "profile_skill": DecayProfile(half_life_days=120.0, min_score_floor=0.05),
+    "profile_preference": DecayProfile(half_life_days=180.0, min_score_floor=0.01),
+    "profile_personal": DecayProfile(half_life_days=60.0, min_score_floor=0.02),
+    "profile_learned": DecayProfile(half_life_days=30.0, min_score_floor=0.01),
 }
 
 

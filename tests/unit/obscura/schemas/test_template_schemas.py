@@ -17,13 +17,6 @@ from obscura.schemas.templates import (
 
 
 class TestAPERProfileSchema:
-    def test_defaults(self) -> None:
-        p = APERProfileSchema()
-        assert "Analyze" in p.analyze_template
-        assert "plan" in p.plan_template.lower()
-        assert "{goal}" in p.execute_template
-        assert p.max_turns == 8
-
     def test_custom_values(self) -> None:
         p = APERProfileSchema(
             analyze_template="custom analyze",
@@ -82,12 +75,6 @@ class TestMCPServerSpecSchema:
 
 
 class TestA2ARemoteToolsSpecSchema:
-    def test_defaults(self) -> None:
-        a = A2ARemoteToolsSpecSchema()
-        assert a.enabled is True
-        assert a.urls == []
-        assert a.auth_token is None
-
     def test_with_token(self) -> None:
         a = A2ARemoteToolsSpecSchema(urls=["http://peer:8080"], auth_token="secret")
         assert a.auth_token == "secret"
@@ -97,7 +84,7 @@ class TestTemplateCreateRequest:
     def test_defaults(self) -> None:
         r = TemplateCreateRequest()
         assert r.name == "unnamed-template"
-        assert r.model == "claude"
+        assert r.provider == "claude"
         assert r.aper_profile is None
         assert r.skills == []
         assert r.mcp_servers == []

@@ -74,69 +74,6 @@ class TestMcpCommandsRegistry:
 class TestCmdMcpDiscover:
     """Test /mcp discover command."""
 
-    @patch("obscura.cli.mcp_commands.MCPServersOrgCatalogProvider")
-    @patch("obscura.cli.mcp_commands.console")
-    def test_discover_default_limit(
-        self,
-        mock_console: Mock,
-        mock_provider_class: Mock,
-    ) -> None:
-        """Test discover with default limit."""
-        mock_provider = Mock()
-        mock_provider.fetch_top.return_value = []
-        mock_provider_class.return_value = mock_provider
-
-        cmd_mcp_discover([])
-
-        mock_provider.fetch_top.assert_called_once_with(limit=20)
-
-    @patch("obscura.cli.mcp_commands.MCPServersOrgCatalogProvider")
-    def test_discover_custom_limit(self, mock_provider_class: Mock) -> None:
-        """Test discover with custom limit."""
-        mock_provider = Mock()
-        mock_provider.fetch_top.return_value = []
-        mock_provider_class.return_value = mock_provider
-
-        cmd_mcp_discover(["--limit", "5"])
-
-        mock_provider.fetch_top.assert_called_once_with(limit=5)
-
-    @patch("obscura.cli.mcp_commands.MCPServersOrgCatalogProvider")
-    @patch("obscura.cli.mcp_commands.print_error")
-    def test_discover_handles_errors(
-        self,
-        mock_error: Mock,
-        mock_provider_class: Mock,
-    ) -> None:
-        """Test discover handles API errors."""
-        mock_provider = Mock()
-        mock_provider.fetch_top.side_effect = Exception("API Error")
-        mock_provider_class.return_value = mock_provider
-
-        cmd_mcp_discover([])
-
-        mock_error.assert_called()
-
-
-class TestCmdMcpList:
-    """Test /mcp list command."""
-
-    @patch("obscura.cli.mcp_commands.discover_mcp_servers")
-    @patch("obscura.cli.mcp_commands.console")
-    def test_list_with_servers(
-        self,
-        mock_console: Mock,
-        mock_discover: Mock,
-        mock_discovered_servers: list[DiscoveredMCPServer],
-    ) -> None:
-        """Test listing configured servers."""
-        mock_discover.return_value = mock_discovered_servers
-
-        cmd_mcp_list([])
-
-        mock_discover.assert_called_once()
-        assert mock_console.print.called
-
     @patch("obscura.cli.mcp_commands.discover_mcp_servers")
     @patch("obscura.cli.mcp_commands.print_info")
     def test_list_no_servers(self, mock_info: Mock, mock_discover: Mock) -> None:

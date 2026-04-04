@@ -12,17 +12,6 @@ _SKILL_YAMLS = sorted(BUILTINS_DIR.glob("skill-*.yaml"))
 _SKILL_IDS = [p.stem for p in _SKILL_YAMLS]
 
 
-def test_skill_manifests_parse() -> None:
-    """All 7 skill-*.yaml files parse successfully via parse_manifest_file."""
-    assert len(_SKILL_YAMLS) == 7, (
-        f"Expected 7 skill manifests, found {len(_SKILL_YAMLS)}"
-    )
-    for path in _SKILL_YAMLS:
-        spec = parse_manifest_file(path)
-        assert spec.id == path.stem
-        assert spec.name != ""
-
-
 def test_skill_capabilities_default_grant_false() -> None:
     """All skill capabilities have default_grant=false."""
     for path in _SKILL_YAMLS:

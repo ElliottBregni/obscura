@@ -328,7 +328,7 @@ class TestNativeAdapterLoad:
             ),
         )
 
-        result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
+        result = asyncio.run(adapter.load(spec, {}))
 
         assert "handlers" in result
         assert result["handlers"]["json_loads"] is json.loads
@@ -340,7 +340,7 @@ class TestNativeAdapterLoad:
             handler_tools=(_MockTool(name="no_handler", handler=""),),
         )
 
-        result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
+        result = asyncio.run(adapter.load(spec, {}))
         assert result["handlers"] == {}
 
     def test_unresolvable_handler_logged_but_skipped(self) -> None:
@@ -349,7 +349,7 @@ class TestNativeAdapterLoad:
             handler_tools=(_MockTool(name="bad", handler="nonexistent.mod:func"),),
         )
 
-        result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
+        result = asyncio.run(adapter.load(spec, {}))
         assert "bad" not in result["handlers"]
 
 
@@ -358,7 +358,7 @@ class TestNativeAdapterHealthcheck:
         adapter = NativeAdapter()
         spec = _make_spec(runtime_type="native")
         assert (
-            asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec))
+            asyncio.run(adapter.healthcheck(spec))
             is True
         )
 
@@ -370,7 +370,7 @@ class TestNativeAdapterHealthcheck:
         )
         # os.path.exists() with no args raises TypeError → returns False
         assert (
-            asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec))
+            asyncio.run(adapter.healthcheck(spec))
             is False
         )
 
@@ -414,7 +414,7 @@ class TestCLIAdapterLoad:
             handler_tools=(_MockTool(name="my_grep", handler="grep {pattern} {file}"),),
         )
 
-        result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
+        result = asyncio.run(adapter.load(spec, {}))
         assert "my_grep" in result["handlers"]
         assert asyncio.iscoroutinefunction(result["handlers"]["my_grep"])
 
@@ -425,7 +425,7 @@ class TestCLIAdapterLoad:
             handler_tools=(_MockTool(name="empty", handler=""),),
         )
 
-        result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
+        result = asyncio.run(adapter.load(spec, {}))
         assert result["handlers"] == {}
 
 
@@ -441,7 +441,7 @@ class TestCLIHandlerExecution:
             "obscura.plugins.adapters.cli.asyncio.create_subprocess_shell",
             return_value=mock_proc,
         ) as mock_shell:
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 handler(msg="hello world"),
             )
 
@@ -464,7 +464,7 @@ class TestCLIHandlerExecution:
             ),
             pytest.raises(RuntimeError, match="failed.*rc=1"),
         ):
-            asyncio.get_event_loop().run_until_complete(handler())
+            asyncio.run(handler())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -491,7 +491,7 @@ class TestContentAdapterLoad:
         adapter = ContentAdapter()
         spec = _make_spec(runtime_type="content")
 
-        result = asyncio.get_event_loop().run_until_complete(adapter.load(spec, {}))
+        result = asyncio.run(adapter.load(spec, {}))
         assert result == {"handlers": {}}
 
 
@@ -500,6 +500,6 @@ class TestContentAdapterHealthcheck:
         adapter = ContentAdapter()
         spec = _make_spec(runtime_type="content")
         assert (
-            asyncio.get_event_loop().run_until_complete(adapter.healthcheck(spec))
+            asyncio.run(adapter.healthcheck(spec))
             is True
         )

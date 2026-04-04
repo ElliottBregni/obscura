@@ -27,19 +27,20 @@ from obscura.core.system_prompts import (
 from obscura.deps import audit, get_runtime
 from obscura.routes import template_store
 
+from obscura.auth.models import AuthenticatedUser
+from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
+from obscura.schemas.templates import (
+    SpawnFromTemplateRequest,
+    TemplateCreateRequest,
+    TemplateUpdateRequest,
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from pydantic import BaseModel
 
-    from obscura.auth.models import AuthenticatedUser
     from obscura.core.types import ToolCallInfo
-    from obscura.schemas.agents import AgentBulkSpawnRequest, AgentSpawnRequest
-    from obscura.schemas.templates import (
-        SpawnFromTemplateRequest,
-        TemplateCreateRequest,
-        TemplateUpdateRequest,
-    )
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 

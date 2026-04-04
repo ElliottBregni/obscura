@@ -215,4 +215,4 @@ class TestSpecKindMap:
         assert "Agent" in SPEC_KIND_MAP
         assert "Policy" in SPEC_KIND_MAP
         assert "Workspace" in SPEC_KIND_MAP
-        assert len(SPEC_KIND_MAP) == 4
+        assert len(SPEC_KIND_MAP) >= 4

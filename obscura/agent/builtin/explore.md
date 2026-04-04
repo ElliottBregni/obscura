@@ -1,7 +1,7 @@
 +++
 name = "explore"
 description = "Fast agent for codebase exploration. Use for searching code, finding files, and answering questions about the codebase."
-tools = ["read_text_file", "grep_files", "find_files", "list_directory", "tree_directory", "git_status", "git_log", "git_diff", "web_search", "web_fetch", "file_info"]
+tools = ["read_text_file", "grep_files", "find_files", "list_directory", "tree_directory", "git", "web_search", "web_fetch", "file_info"]
 model = "inherit"
 max_turns = 30
 +++

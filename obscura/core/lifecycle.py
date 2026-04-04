@@ -456,9 +456,7 @@ def bootstrap_hooks(
 
     # Eval memory injection (before TURN_START)
     if enable_eval_memory:
-        hooks.add_before(
-            make_eval_memory_inject_hook(), AgentEventKind.TURN_START
-        )
+        hooks.add_before(make_eval_memory_inject_hook(), AgentEventKind.TURN_START)
         logger.info("Registered eval memory inject hook")
 
     # Tool pacing (multi-hook)

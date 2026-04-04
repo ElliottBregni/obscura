@@ -9,12 +9,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 _INDEX_FILE = Path.home() / ".obscura" / "agents" / "sessions" / "INDEX.jsonl"
 _OBSCURA_HOME = Path.home() / ".obscura"

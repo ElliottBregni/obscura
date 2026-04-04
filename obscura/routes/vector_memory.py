@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -11,11 +11,9 @@ from fastapi.responses import JSONResponse
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["vector-memory"])
-
 
 # NOTE: Specific routes MUST be registered before the catch-all
 # ``{namespace}/{key}`` pattern, otherwise FastAPI matches the generic

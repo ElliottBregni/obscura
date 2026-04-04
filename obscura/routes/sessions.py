@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -21,8 +21,7 @@ from obscura.routes.session_sync import sync_session_lifecycle
 from obscura.routes.websockets import broadcast_event
 from obscura.schemas import SessionCreateRequest, SessionResponse
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
 

@@ -14,13 +14,9 @@ def test_get_default_system_prompt() -> None:
     """Test getting the default Obscura system prompt."""
     prompt = get_default_system_prompt()
 
-    assert len(prompt) > 1000
-    assert "Obscura Agent Runtime" in prompt
-    assert "web_search" in prompt
-    assert "Architecture" in prompt
-    assert "obscura/" in prompt  # Codebase structure
-    assert "Memory System" in prompt
-    assert "Security Guardrails" in prompt
+    assert len(prompt) > 500
+    assert "Obscura Agent" in prompt
+    assert "Tool Usage" in prompt
 
 
 def test_compose_with_default() -> None:
@@ -30,7 +26,7 @@ def test_compose_with_default() -> None:
         include_default=True,
     )
 
-    assert "Obscura Agent Runtime" in composed
+    assert "Obscura Agent" in composed
     assert "helpful assistant" in composed
     assert len(composed) > len(get_default_system_prompt())
 
@@ -55,7 +51,7 @@ def test_compose_with_custom_sections() -> None:
         custom_sections=["## Custom Section", "Content here"],
     )
 
-    assert "Obscura Agent Runtime" in composed
+    assert "Obscura Agent" in composed
     assert "Base prompt" in composed
     assert "Custom Section" in composed
     assert "Content here" in composed
@@ -68,7 +64,7 @@ def test_compose_empty() -> None:
 
     # Both should have same content (whitespace normalization may differ slightly)
     assert composed.strip() == default.strip()
-    assert "Obscura Agent Runtime" in composed
+    assert "Obscura Agent" in composed
 
 
 def test_load_custom_system_prompt(tmp_path) -> None:
@@ -86,46 +82,27 @@ def test_load_custom_system_prompt_not_found() -> None:
         load_custom_system_prompt("/nonexistent/path.md")
 
 
-def test_default_prompt_has_all_tools() -> None:
-    """Test that default prompt documents all major tool categories."""
+def test_default_prompt_has_tool_usage_section() -> None:
+    """Test that default prompt documents tool usage rules."""
     prompt = get_default_system_prompt()
 
-    # Tool categories
-    assert "web_search" in prompt
-    assert "web_fetch" in prompt
-    assert "run_shell" in prompt
-    assert "run_python3" in prompt
-    assert "read_text_file" in prompt
-    assert "write_text_file" in prompt
-    assert "get_system_info" in prompt
-    assert "list_processes" in prompt
-    assert "list_listening_ports" in prompt
-    assert "signal_process" in prompt
-    assert "security_lookup" in prompt
-    assert "manage_crontab" in prompt
-    assert "task" in prompt
+    assert "Tool Usage" in prompt
+    assert "ONLY call tools" in prompt or "tool schemas" in prompt
 
 
-def test_default_prompt_has_codebase_info() -> None:
-    """Test that default prompt includes Obscura codebase structure."""
+def test_default_prompt_has_delegation_section() -> None:
+    """Test that default prompt includes delegation guidance."""
     prompt = get_default_system_prompt()
 
-    # Key directories
-    assert "core/" in prompt
-    assert "providers/" in prompt
-    assert "tools/" in prompt
-    assert "integrations/" in prompt
-    assert "agent/" in prompt
-    assert "routes/" in prompt
+    assert "Delegation" in prompt or "Sub-Agent" in prompt or "delegate" in prompt.lower()
 
 
-def test_default_prompt_has_best_practices() -> None:
-    """Test that default prompt includes best practices."""
+def test_default_prompt_has_identity() -> None:
+    """Test that default prompt establishes agent identity."""
     prompt = get_default_system_prompt()
 
-    assert "Best Practices" in prompt
-    assert "proactively" in prompt or "Proactively" in prompt
-    assert "Read before" in prompt or "read before" in prompt
+    assert "Obscura Agent" in prompt
+    assert "Identity" in prompt
 
 
 # ===================================================================

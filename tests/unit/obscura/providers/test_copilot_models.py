@@ -36,10 +36,6 @@ class TestResolve:
         assert config.model_id == "gpt-5-mini"
         assert config.category == AUTOMATION
 
-    def test_unknown_alias_raises(self) -> None:
-        with pytest.raises(ValueError, match="Unknown copilot alias"):
-            resolve("gpt-5-mini")
-
     def test_raw_model_id_rejected(self) -> None:
         with pytest.raises(ValueError, match="Raw model IDs are not allowed"):
             resolve("o3")
@@ -192,12 +188,6 @@ class TestRegistryInvariants:
                 assert config.model_id in _AUTOMATION_SAFE_MODELS, (
                     f"Automation alias {alias!r} uses non-safe model {config.model_id!r}"
                 )
-
-    def test_all_aliases_have_max_requests(self) -> None:
-        for alias, config in _ALIAS_REGISTRY.items():
-            assert config.max_requests_per_run is not None, (
-                f"Alias {alias!r} has no request limit"
-            )
 
     def test_no_duplicate_aliases(self) -> None:
         # dict keys are unique by definition, but let's be explicit

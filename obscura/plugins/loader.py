@@ -417,8 +417,50 @@ class PluginLoader:
                     logger.exception("Plugin %s bootstrap error: %s", spec.id, exc)
                     return status
 
-        # 4. Register tools directly on broker
-        #    MCP/service/docker/grpc plugins serve tools externally — skip.
+        # 4a. Runtime override: expose native plugin as MCP server instead.
+        try:
+            from obscura.plugins.runtime_adapter import (
+                RUNTIME_MCP,
+                get_runtime_override,
+                write_mcp_config_for_plugin,
+            )
+
+            if get_runtime_override(spec.id) == RUNTIME_MCP:
+                # Resolve handlers first, then wrap as MCP.
+                from obscura.core.types import ToolSpec
+
+                native_tools: list[ToolSpec] = []
+                for tc in spec.tools:
+                    handler = _resolve_handler(tc.handler_ref)
+                    if handler is None:
+                        handler = _resolve_handler_from_plugin_module(tc.name, spec)
+                    if handler is not None:
+                        native_tools.append(
+                            ToolSpec(
+                                name=tc.name,
+                                description=tc.description,
+                                parameters=tc.parameters,
+                                handler=handler,
+                            )
+                        )
+                if native_tools:
+                    config_path = write_mcp_config_for_plugin(spec.id, native_tools)
+                    if config_path:
+                        logger.info(
+                            "Plugin %s runtime overridden to MCP (%d tools) → %s",
+                            spec.id,
+                            len(native_tools),
+                            config_path,
+                        )
+                status.state = "enabled"
+                status.enabled = True
+                self._specs.append(spec)
+                return status
+        except Exception:
+            pass  # runtime adapter not available — continue normally
+
+        # 4b. Register tools directly on broker
+        #     MCP/service/docker/grpc plugins serve tools externally — skip.
         if spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
             status.state = "enabled"
             status.enabled = True

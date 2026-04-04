@@ -12,7 +12,6 @@ import contextlib
 import html as _html
 import os
 import random
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, override
@@ -41,9 +40,16 @@ if TYPE_CHECKING:
 
 # Gradient palette for "ultrathink" (purple → blue → cyan)
 _GRADIENT = [
-    "#8b5cf6", "#7c3aed", "#6d28d9", "#5b21b6",
-    "#4f46e5", "#4338ca", "#3b82f6", "#2563eb",
-    "#0ea5e9", "#06b6d4",
+    "#8b5cf6",
+    "#7c3aed",
+    "#6d28d9",
+    "#5b21b6",
+    "#4f46e5",
+    "#4338ca",
+    "#3b82f6",
+    "#2563eb",
+    "#0ea5e9",
+    "#06b6d4",
 ]
 
 # Keywords that trigger gradient styling, with their style names
@@ -193,6 +199,25 @@ async def animate_spinner(status: StreamingStatus) -> None:
 
 
 @dataclass
+class RunningAgentInfo:
+    """Snapshot of a single running agent for display."""
+
+    name: str
+    status: str = "running"  # running | waiting | pending
+    elapsed_s: float = 0.0
+    iteration_count: int = 0
+    last_tool: str = ""
+
+    @property
+    def elapsed_display(self) -> str:
+        s = int(self.elapsed_s)
+        if s < 60:
+            return f"{s}s"
+        m, sec = divmod(s, 60)
+        return f"{m}m{sec:02d}s"
+
+
+@dataclass
 class PromptStatus:
     """Mutable state bag read by print_status_banner() on every prompt call."""
 
@@ -205,6 +230,9 @@ class PromptStatus:
     session_id: str = ""
     session_title: str = ""  # auto-generated or manual title
     running_agents: list[str] = field(default_factory=list[str])
+    agent_details: list[RunningAgentInfo] = field(
+        default_factory=list[RunningAgentInfo]
+    )
     task_count: int = 0
 
 
@@ -243,28 +271,26 @@ def print_status_banner(status: PromptStatus) -> None:
         short_id = status.session_id[:8]
         if status.session_title:
             console.print(
-                f"  [bold #cdd6f4]{markup_escape(status.session_title)}[/]"
+                f"  [bold {_C_TEXT.hex}]{markup_escape(status.session_title)}[/]"
                 f"  [dim]({short_id})[/]",
                 highlight=False,
             )
-        # Don't show bare session ID — too noisy
 
     # Line 2: model · tokens · branch · mode
     parts: list[str] = []
 
     if status.model:
-        parts.append(f"[bold #89b4fa]{markup_escape(status.model)}[/]")
+        parts.append(f"[bold {_C_BLUE.hex}]{markup_escape(status.model)}[/]")
 
     if status.ctx_pct > 0 or status.ctx_tokens > 0:
         pct = status.ctx_pct
         if pct >= 80:
-            color = "bold #f38ba8"    # red
+            color = f"bold {_C_RED.hex}"
         elif pct >= 60:
-            color = "#fab387"         # peach
+            color = _C_PEACH.hex
         else:
-            color = "#a6e3a1"         # green
+            color = _C_GREEN.hex
         if status.ctx_tokens:
-            # Format tokens as "12.3k"
             t = status.ctx_tokens
             if t >= 1000:
                 ctx_str = f"{t / 1000:.1f}k tokens ({pct}%)"
@@ -275,7 +301,7 @@ def print_status_banner(status: PromptStatus) -> None:
         parts.append(f"[{color}]{ctx_str}[/]")
 
     if status.branch:
-        parts.append(f"[#94e2d5]⎇ {markup_escape(status.branch)}[/]")
+        parts.append(f"[{_C_TEAL.hex}]⎇ {markup_escape(status.branch)}[/]")
 
     if status.mode:
         parts.append(f"[dim]{markup_escape(status.mode)} mode[/]")
@@ -287,7 +313,7 @@ def print_status_banner(status: PromptStatus) -> None:
     # Running agents line
     if status.running_agents:
         agent_labels = [
-            f"[bold #a6e3a1]{markup_escape(name)}[/] [#a6e3a1]●[/]"
+            f"[bold {_C_GREEN.hex}]{markup_escape(name)}[/] [{_C_GREEN.hex}]●[/]"
             for name in status.running_agents
         ]
         console.print(
@@ -382,17 +408,31 @@ class SlashCommandCompleter(Completer):
 # Styling
 # ---------------------------------------------------------------------------
 
+# Import Catppuccin Mocha hex values from the single source of truth.
+from obscura.cli.renderer.modern.theme import (
+    BLUE as _C_BLUE,
+    GREEN as _C_GREEN,
+    LAVENDER as _C_LAVENDER,
+    OVERLAY0 as _C_OVERLAY0,
+    PEACH as _C_PEACH,
+    RED as _C_RED,
+    SUBTEXT0 as _C_SUBTEXT0,
+    SURFACE1 as _C_SURFACE1,
+    TEAL as _C_TEAL,
+    TEXT as _C_TEXT,
+)
+
 PROMPT_STYLE = Style.from_dict(
     {
-        "prompt": "#b4befe bold",           # lavender prompt char
-        "prompt-border": "#45475a",          # dim border
-        "prompt-border-accent": "#89b4fa",   # blue accent for active border
-        "status-line": "#6c7086",            # subtext
-        "status-spinner": "bold #89b4fa",    # blue spinner
-        "status-preview": "italic #6c7086",  # dim preview
-        "continuation": "#6c7086",
-        "bottom-toolbar": "#a6adc8 noreverse",
-        "bottom-toolbar.key": "bold #89b4fa",
+        "prompt": f"{_C_LAVENDER.hex} bold",
+        "prompt-border": _C_SURFACE1.hex,
+        "prompt-border-accent": _C_BLUE.hex,
+        "status-line": _C_OVERLAY0.hex,
+        "status-spinner": f"bold {_C_BLUE.hex}",
+        "status-preview": f"italic {_C_OVERLAY0.hex}",
+        "continuation": _C_OVERLAY0.hex,
+        "bottom-toolbar": f"{_C_SUBTEXT0.hex} noreverse",
+        "bottom-toolbar.key": f"bold {_C_BLUE.hex}",
         # Keyword gradient colors (used by KeywordHighlighter)
         **_keyword_gradient_styles(),
     },
@@ -412,6 +452,14 @@ _RULE_CHAR = "\u2500"  # ─
 
 def print_separator() -> None:
     """Print a subtle separator between turns."""
+    import sys as _sys
+
+    _sys.stdout.write("\n")
+    _sys.stdout.flush()
+
+
+def print_turn_separator() -> None:
+    """Print a thin visual break between turns — just breathing room."""
     import sys as _sys
 
     _sys.stdout.write("\n")
@@ -526,10 +574,10 @@ expand_thinking = _expand_thinking_action
 
 
 def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
-    """Build a Claude Code-style bottom toolbar.
+    """Build the bottom toolbar: status line + optional agent panel.
 
-    Left side:  session title (or session ID) · model · context %
-    Right side: shortcut hints
+    Line 1: session · model · context % · hints
+    Line 2+: running agent tree (only when agents are active)
     """
     if prompt_status is None:
         return "  <b>!</b> for bash · <b>/help</b> for commands · <b>esc+enter</b> for newline"
@@ -539,12 +587,11 @@ def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
 
     # Session title or short ID
     if prompt_status.session_title:
-        left_parts.append(
-            f"<b>{_html.escape(prompt_status.session_title)}</b>"
-        )
+        left_parts.append(f"<b>{_html.escape(prompt_status.session_title)}</b>")
     elif prompt_status.session_id:
         left_parts.append(
-            f"<style fg='#6c7086'>{_html.escape(prompt_status.session_id[:8])}</style>"
+            f"<style fg='{_C_OVERLAY0.hex}'>"
+            f"{_html.escape(prompt_status.session_id[:8])}</style>"
         )
 
     # Model
@@ -555,9 +602,9 @@ def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
     if prompt_status.ctx_pct > 0:
         pct = prompt_status.ctx_pct
         if pct >= 80:
-            ctx_str = f"<style fg='#f38ba8'>{pct}% context</style>"
+            ctx_str = f"<style fg='{_C_RED.hex}'>{pct}% context</style>"
         elif pct >= 60:
-            ctx_str = f"<style fg='#fab387'>{pct}% context</style>"
+            ctx_str = f"<style fg='{_C_PEACH.hex}'>{pct}% context</style>"
         else:
             ctx_str = f"{pct}% context"
         left_parts.append(ctx_str)
@@ -578,7 +625,47 @@ def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
 
     left = " · ".join(left_parts)
     right = " · ".join(right_parts)
-    return f"  {left}    {right}"
+    status_line = f"  {left}    {right}"
+
+    # ── Agent panel (tree-connected lines below status) ─────────────────
+    agents = prompt_status.agent_details
+    if not agents:
+        return status_line
+
+    lines = [status_line]
+    for i, ag in enumerate(agents):
+        is_last = i == len(agents) - 1
+        tree = "└─" if is_last else "├─"
+
+        # Status indicator
+        if ag.status == "running":
+            bullet = "<style fg='#a6e3a1'>●</style>"
+        elif ag.status == "waiting":
+            bullet = "<style fg='#fab387'>○</style>"
+        else:
+            bullet = "<style fg='#6c7086'>◌</style>"
+
+        name_esc = _html.escape(ag.name)
+        elapsed = _html.escape(ag.elapsed_display)
+
+        agent_line = (
+            f"  <style fg='#45475a'>{tree}</style> "
+            f"{bullet} <b>{name_esc}</b>"
+            f"  <style fg='#6c7086'>{elapsed}</style>"
+        )
+
+        if ag.iteration_count > 0:
+            agent_line += f"  <style fg='#6c7086'>{ag.iteration_count} turns</style>"
+
+        lines.append(agent_line)
+
+        # Last tool activity line
+        if ag.last_tool and ag.status == "running":
+            pad = "   " if is_last else "<style fg='#45475a'>│</style>  "
+            tool_esc = _html.escape(ag.last_tool)
+            lines.append(f"  {pad}<style fg='#89b4fa'>⍿ {tool_esc}</style>")
+
+    return "\n".join(lines)
 
 
 def create_prompt_session(
@@ -601,28 +688,13 @@ def create_prompt_session(
     _status = streaming_status
     _prompt_status = prompt_status
 
-    # Claude Code-style prompt: status line + bordered input
     def _message() -> HTML:
-        width = shutil.get_terminal_size((80, 24)).columns
-
-        # When streaming is active, show spinner in the status lane
+        # When streaming, dim the prompt character
         if _status is not None and _status.active:
-            frame = _html.escape(_status.spinner_char)
-            label = _html.escape(_status.text or "working...")
-            preview = _status.preview
-            label_part = f"<status-spinner>{frame}</status-spinner> {label}"
-            if preview:
-                max_prev = width - len(label) - 10
-                if len(preview) > max_prev:
-                    preview = preview[: max_prev - 3] + "..."
-                label_part = (
-                    label_part
-                    + f" <status-preview>{_html.escape(preview)}</status-preview>"
-                )
-            return HTML(f"{label_part}\n<prompt>&gt; </prompt>")
+            return HTML("<status-line>\u276f </status-line>")
 
-        # Idle: clean `> ` prompt
-        return HTML("<prompt>&gt; </prompt>")
+        # Idle: clean ❯ prompt — no borders, no decoration
+        return HTML("<prompt>\u276f </prompt>")
 
     # If a static hud_provider was supplied, compute a one-shot toolbar
     _static_hud_html: str | None = None
@@ -691,52 +763,18 @@ def create_prompt_session(
 # ---------------------------------------------------------------------------
 
 
-async def bordered_prompt(session: PromptSession[str]) -> str:
-    """Prompt for input, then redraw as a Claude Code-style bordered box.
+async def bordered_prompt(
+    session: PromptSession[str],
+    status: PromptStatus | None = None,  # kept for call-site compat
+) -> str:
+    """Prompt for user input.
 
-    After prompt_toolkit renders ``> user text``, we erase the prompt
-    line and redraw it inside a bordered box::
-
-        ╭──────────────────────────────────────╮
-        │ user text here                       │
-        ╰──────────────────────────────────────╯
+    When Textual TUI is active, awaits the Textual Input widget queue.
+    Otherwise uses prompt_toolkit with the ❯ prompt.
     """
     with patch_stdout(raw=True):
         result = await session.prompt_async()
-
-    text = result.strip()
-    if text:
-        import sys
-
-        # Count lines the prompt occupied (1 for idle, 2 for streaming status + input)
-        sys.stdout.write("\033[A\033[2K")  # up + clear (input line)
-
-        # Redraw as a Claude Code-style bordered box
-        width = shutil.get_terminal_size((80, 24)).columns
-        inner_w = width - 4  # 2 border + 2 padding
-        border_color = "\033[38;5;60m"  # dim blue-gray
-        text_color = "\033[38;5;252m"   # light gray
-        reset = "\033[0m"
-
-        # Wrap text to fit inside the box
-        import textwrap as _tw
-        wrapped = _tw.wrap(text, width=inner_w) if inner_w > 0 else [text]
-        if not wrapped:
-            wrapped = [""]
-
-        # Top border
-        sys.stdout.write(f"{border_color}╭{'─' * (width - 2)}╮{reset}\n")
-        # Content lines
-        for line in wrapped:
-            padded = line + " " * max(0, inner_w - len(line))
-            sys.stdout.write(
-                f"{border_color}│{reset} {text_color}{padded}{reset} {border_color}│{reset}\n"
-            )
-        # Bottom border
-        sys.stdout.write(f"{border_color}╰{'─' * (width - 2)}╯{reset}\n")
-        sys.stdout.flush()
-
-    return text
+    return result.strip()
 
 
 # ---------------------------------------------------------------------------

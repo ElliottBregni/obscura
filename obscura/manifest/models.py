@@ -7,12 +7,10 @@ logic lives here.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _empty_str_list() -> list[str]:

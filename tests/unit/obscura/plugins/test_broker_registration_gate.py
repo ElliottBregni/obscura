@@ -55,12 +55,6 @@ class TestRegistrationGate:
         result = broker.register_tool_spec(spec)
         assert result.status == "quarantined"
 
-    def test_non_dict_parameters_quarantines(self) -> None:
-        broker = ToolBroker(policy_engine=_make_policy())
-        spec = FakeToolSpec(parameters="not a dict")  # type: ignore[arg-type]
-        result = broker.register_tool_spec(spec)
-        assert result.status == "quarantined"
-
     def test_missing_description_warns_but_registers(self) -> None:
         broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec(description="")

@@ -84,7 +84,7 @@ class TestAgentManifest:
         assert a.model == "copilot"
         assert a.system_prompt == ""
         assert a.tools == []
-        assert a.mcp_servers == "auto"
+        assert a.mcp_servers == []
         assert a.can_delegate is False
         assert a.agent_type == "loop"
         assert a.max_turns == 25

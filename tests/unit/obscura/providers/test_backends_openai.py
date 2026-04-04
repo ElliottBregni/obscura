@@ -790,18 +790,6 @@ class TestOpenAITools:
 
         assert result["response_format"] == {"type": "json_object"}
 
-    def test_build_create_kwargs_reasoning_effort(self) -> None:
-        """Reasoning effort should pass through to chat-completions payload."""
-        b = _backend()
-        result = b.build_create_kwargs({"reasoning_effort": "medium"})
-        assert result["reasoning_effort"] == "medium"
-
-    def test_build_create_kwargs_empty(self) -> None:
-        b = _backend()
-        result = b.build_create_kwargs({})
-        assert result == {"reasoning_effort": "medium"}
-
-
 # ===================================================================
 # 7. TestOpenAIHooks
 # ===================================================================

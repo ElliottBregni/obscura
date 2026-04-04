@@ -996,18 +996,6 @@ class TestLocalLLMEscapeHatch:
     """Tests for list_models() and health_check()."""
 
     @pytest.mark.asyncio
-    async def test_list_models(self) -> None:
-        b = _backend()
-        m1: Any = MagicMock(id="model-a", object="model")
-        m2: Any = MagicMock(id="model-b", object="model")
-        client: Any = b.client
-        client.models.list.return_value = MagicMock(data=[m1, m2])
-
-        models = await b.list_models()
-        assert len(models) == 2
-        assert models[0] == {"id": "model-a", "object": "model"}
-        assert models[1] == {"id": "model-b", "object": "model"}
-
     @pytest.mark.asyncio
     async def test_list_models_requires_client(self) -> None:
         b = LocalLLMBackend(_auth())

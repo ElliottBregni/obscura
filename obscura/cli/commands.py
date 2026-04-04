@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 from rich.table import Table
 
 from obscura.cli.control_commands import (
-    cmd_heartbeat,
     cmd_policies,
     cmd_replay,
     cmd_status,
@@ -638,8 +637,8 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         " [bold]Context & Memory[/]",
         "  /context               Context window stats",
         "  /compact [n]           Compress conversation history",
+        "  /context-inject <path> Inject file or clipboard into context",
         "  /memory [cmd]          stats | search | clear",
-        "  /suggestions           File suggestions based on activity",
         "",
         " [bold]Sessions[/]",
         "  /session [cmd]         list | new | switch | <id>",
@@ -647,6 +646,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /rename <title>        Rename current session",
         "  /tag <tag>             Tag current session",
         "  /export [md|txt|json]  Export conversation",
+        "  /stash / /pop          Save/restore context",
         "  /cost                  Token usage & cost breakdown",
         "  /usage                 API usage summary",
         "  /stats                 Session statistics",
@@ -660,68 +660,41 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /peers                 List active sessions",
         "  /send <id> <msg>       Message another session",
         "",
-        " [bold]Skills & Workflows[/]",
-        "  /skill [list|load|unload]  Manage skills",
-        "  /template [list|run]   Task templates",
-        "  /workflow [list|run]   Multi-step workflows",
-        "",
         " [bold]Agent Steering[/]",
         "  /goal <description>    Set a persistent session goal",
-        "  /goal check            Self-assess progress toward goal",
-        "  /persona [preset|text] Set agent persona (senior-backend, security-auditor, ...)",
-        "  /guardrails add <rule> Add runtime constraints (e.g. 'don't modify tests')",
+        "  /persona [preset|text] Set agent persona",
+        "  /guardrails add <rule> Add runtime constraints",
         "  /focus <path>          Restrict agent to specific files/dirs",
-        "  /token-budget <n|$n>   Set token or cost budget",
+        "  /undercover [on|off]   Suppress AI attribution",
         "  /tool-policy [cmd]     allow-all | custom-only | allow/deny <tools>",
         "",
         " [bold]Automation[/]",
         "  /loop <interval> <cmd> Run prompt/command on interval (5m, 30s, 2h)",
-        "  /loop status|stop      Manage active loops",
-        "  /schedule create|list|delete|run  Cron-based scheduled tasks",
-        "  /listen [on|off]       Listen mode (passive, respond only when asked)",
-        "",
-        " [bold]KAIROS & Voice[/]",
-        "  /kairos [on|off|status|proactive on|off|dream on|off]",
+        "  /loop list|stop        Manage active loops",
+        "  /schedule add|list|remove|run  Persistent cron triggers",
+        "  /kairos [on|off|status]  Autonomous daemon mode",
         "  /voice [on|off]        Push-to-talk (Ctrl+Space)",
         "",
-        " [bold]Workspace[/]",
+        " [bold]Workspace & Plugins[/]",
         "  /init                  Init workspace + generate OBSCURA.md",
         "  /doctor                Environment diagnostics",
         "  /discover [cat]        Discover MCP tools",
         "  /mcp [cmd]             MCP server management",
-        "",
-        " [bold]Quick Actions[/]",
-        "  /btw <question>        Side question (doesn't affect context)",
-        "  /summary               Summarize current conversation",
-        "  /recap                 Structured session recap (files, decisions, remaining)",
-        "  /copy                  Copy last response to clipboard",
-        "  /stash / /pop          Save/restore context",
-        "  /checkpoint save|restore  Named conversation snapshots",
-        "  /context-inject <path> Inject file or clipboard into conversation",
-        "  /undercover [on|off]   Suppress AI attribution",
-        "",
-        " [bold]Configuration[/]",
         "  /config [key] [value]  View or edit settings",
         "  /hooks [add|remove]    Manage event hooks",
-        "  /login [provider]      Auth status / login hints",
-        "  /logout <provider>     Clear auth for a provider",
-        "  /terminal-setup        Diagnose terminal capabilities",
-        "  /ide [vscode|jetbrains]  IDE integration",
         "",
         " [bold]Utility[/]",
         "  /cat <path>            Display file contents",
         "  /files                 List files in context",
         "  /add-dir <path>        Change working directory",
         "  /rewind [n]            Undo file changes",
-        "  /vim                   Toggle vim keybindings",
-        "  /sandbox-toggle        Toggle filesystem sandboxing",
-        "  /attribution           AI commit attribution stats",
+        "  /btw <question>        Side question (doesn't affect context)",
+        "  /summary               Summarize conversation",
+        "  /copy                  Copy last response to clipboard",
         "  /bug [report]          View errors / generate bug report",
-        "  /release-notes         Show release notes",
         "",
         " [bold]Control & Logging[/]",
-        "  /heartbeat, /hb        Health check",
-        "  /status                System status",
+        "  /status [--json]       System health & status",
         "  /ps                    Background sessions",
         "  /kill                  Stop all agents",
         "  /running               Active processes",
@@ -3015,16 +2988,21 @@ async def cmd_mcp(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
-    """Manage Obscura plugins.
+    """Manage Obscura and Claude Code plugins.
 
     Usage:
-      /plugin list              — List all plugins with status
-      /plugin install <source>  — Install from path/git/pip
-      /plugin remove <name>     — Uninstall plugin
-      /plugin enable <id>       — Enable a disabled plugin
-      /plugin disable <id>      — Disable without removing
-      /plugin info <id>         — Show manifest, status, contributions
-      /plugin health            — Show health status of all plugins
+      /plugin list                          — List all plugins (native + Claude Code)
+      /plugin install <source>              — Install from path/git/pip (auto-detects format)
+      /plugin install <name>@<marketplace>  — Install from Claude Code marketplace
+      /plugin remove <name>                 — Uninstall plugin
+      /plugin enable <id>                   — Enable a disabled plugin
+      /plugin disable <id>                  — Disable without removing
+      /plugin info <id>                     — Show manifest, status, contributions
+      /plugin health                        — Show health status of all plugins
+      /plugin marketplace add <source>      — Add a Claude Code marketplace (github:org/repo)
+      /plugin marketplace list              — Show registered marketplaces
+      /plugin marketplace remove <name>     — Remove a marketplace
+      /plugin marketplace search <query>    — Search across all marketplaces
     """
     try:
         tokens = shlex.split(args) if args and args.strip() else []
@@ -3062,6 +3040,20 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
         except Exception:
             pass
 
+        # Include discovered Claude Code plugins
+        try:
+            from obscura.plugins.claude_compat.loader import ClaudePluginLoader
+
+            cc_loader = ClaudePluginLoader()
+            cc_specs = cc_loader.discover()
+            for spec in cc_specs:
+                if spec.id not in {p.id for p in plugins}:
+                    plugins.append(PluginEntry.from_spec(spec, source="claude"))
+                    plugins[-1].enabled = True
+                    plugins[-1].state = "enabled"
+        except Exception:
+            pass
+
         if not plugins:
             print_info("No plugins registered.")
             return None
@@ -3070,8 +3062,11 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
                 p.state,
                 "yellow",
             )
+            # Distinguish native vs Claude Code plugins.
+            type_badge = "[dim](claude)[/] " if str(p.id).startswith("claude:") else ""
             console.print(
                 f"  • [cyan]{p.id}[/] "
+                f"{type_badge}"
                 f"v{p.version} "
                 f"[{status_color}]{p.state}[/] "
                 f"— {p.description[:60]}",
@@ -3080,9 +3075,74 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
 
     if sub == "install":
         if len(tokens) < 2:
-            print_error("Usage: /plugin install <source>")
+            print_error(
+                "Usage: /plugin install <source>  OR  /plugin install <name>@<marketplace>"
+            )
             return None
         source = tokens[1]
+
+        # Check for Claude Code marketplace format: name@marketplace
+        if "@" in source and not source.startswith(
+            ("http://", "https://", "git@", "/")
+        ):
+            plugin_name, marketplace_name = source.rsplit("@", 1)
+            print_info(
+                f"Installing {plugin_name} from marketplace {marketplace_name}..."
+            )
+            try:
+                from obscura.plugins.claude_compat.marketplace import (
+                    MarketplaceResolver,
+                )
+
+                resolver = MarketplaceResolver()
+                install_path = resolver.install_plugin(plugin_name, marketplace_name)
+                if install_path:
+                    # Register in Obscura's registry.
+                    from obscura.plugins.claude_compat.manifest_adapter import (
+                        adapt_claude_manifest,
+                    )
+
+                    spec = adapt_claude_manifest(
+                        install_path, marketplace=marketplace_name
+                    )
+                    if spec:
+                        registry.install(spec, source=source, auto_enable=True)
+                        print_ok(f"Installed {source} (Claude Code plugin)")
+                    else:
+                        print_error(
+                            f"Could not parse plugin manifest at {install_path}"
+                        )
+                else:
+                    print_error(
+                        f"Plugin {plugin_name} not found in marketplace {marketplace_name}"
+                    )
+            except Exception as exc:
+                print_error(f"Marketplace install failed: {exc}")
+            return None
+
+        # Check if source is a Claude Code plugin directory.
+        source_path = Path(source).expanduser()
+        if (
+            source_path.is_dir()
+            and (source_path / ".claude-plugin" / "plugin.json").exists()
+        ):
+            print_info(f"Detected Claude Code plugin: {source}")
+            try:
+                from obscura.plugins.claude_compat.manifest_adapter import (
+                    adapt_claude_manifest,
+                )
+
+                spec = adapt_claude_manifest(source_path)
+                if spec:
+                    registry.install(spec, source=source, auto_enable=True)
+                    print_ok(f"Installed {spec.id} (Claude Code plugin)")
+                else:
+                    print_error("Could not parse Claude Code plugin manifest")
+            except Exception as exc:
+                print_error(f"Install failed: {exc}")
+            return None
+
+        # Default: native Obscura plugin install.
         print_info(f"Installing plugin: {source}")
         res = registry.install_from_source(source)
         if res:
@@ -3157,8 +3217,104 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
             console.print(f"  {icon} [{color}]{p.get('id', '?')}[/] — {status}")
         return None
 
+    if sub == "marketplace":
+        sub2 = tokens[1] if len(tokens) > 1 else ""
+        rest2 = tokens[2] if len(tokens) > 2 else ""
+
+        try:
+            from obscura.plugins.claude_compat.marketplace import MarketplaceResolver
+
+            resolver = MarketplaceResolver()
+        except Exception:
+            print_error("Marketplace support not available.")
+            return None
+
+        if sub2 == "add":
+            if not rest2:
+                print_error(
+                    "Usage: /plugin marketplace add <github:org/repo | git:url | path>"
+                )
+                return None
+            # Parse source shorthand.
+            if rest2.startswith("github:"):
+                source = {"source": "github", "repo": rest2[7:]}
+            elif rest2.startswith("git:"):
+                source = {"source": "git", "url": rest2[4:]}
+            elif "/" in rest2 and not rest2.startswith(("http", "/")):
+                # Assume github shorthand: org/repo
+                source = {"source": "github", "repo": rest2}
+            elif Path(rest2).expanduser().is_dir():
+                source = {"source": "directory", "path": rest2}
+            else:
+                source = {"source": "git", "url": rest2}
+
+            name = (
+                tokens[3]
+                if len(tokens) > 3
+                else rest2.split("/")[-1].replace(".git", "")
+            )
+            print_info(f"Adding marketplace: {name}...")
+            if resolver.add_marketplace(name, source):
+                plugins = resolver.list_plugins(name)
+                print_ok(f"Marketplace '{name}' added ({len(plugins)} plugins)")
+            else:
+                print_error(f"Could not fetch marketplace: {name}")
+            return None
+
+        if sub2 == "list":
+            markets = resolver.list_marketplaces()
+            if not markets:
+                print_info(
+                    "No marketplaces registered. Use /plugin marketplace add <source>."
+                )
+                return None
+            for name, src in markets.items():
+                plugins = resolver.list_plugins(name)
+                source_str = src.repo or src.url or src.path or src.source
+                console.print(
+                    f"  • [cyan]{name}[/] ({source_str}) — {len(plugins)} plugins"
+                )
+            return None
+
+        if sub2 == "remove":
+            if not rest2:
+                print_error("Usage: /plugin marketplace remove <name>")
+                return None
+            if resolver.remove_marketplace(rest2):
+                print_ok(f"Marketplace '{rest2}' removed.")
+            else:
+                print_error(f"Marketplace '{rest2}' not found.")
+            return None
+
+        if sub2 == "search":
+            query = " ".join(tokens[2:]).lower() if len(tokens) > 2 else ""
+            if not query:
+                print_error("Usage: /plugin marketplace search <query>")
+                return None
+            markets = resolver.list_marketplaces()
+            found = 0
+            for market_name in markets:
+                for entry in resolver.list_plugins(market_name):
+                    text = f"{entry.name} {entry.description} {' '.join(entry.tags)}".lower()
+                    if query in text:
+                        console.print(
+                            f"  • [cyan]{entry.name}[/]@{market_name} "
+                            f"v{entry.version} — {entry.description[:50]}"
+                        )
+                        found += 1
+            if found == 0:
+                print_info(f"No plugins matching '{query}'.")
+            else:
+                print_info(
+                    f"{found} plugin(s) found. Install with: /plugin install <name>@<marketplace>"
+                )
+            return None
+
+        print_info("Usage: /plugin marketplace [add|list|remove|search]")
+        return None
+
     print_info(
-        "Unknown subcommand. Usage: /plugin [list|install|remove|enable|disable|info|health]",
+        "Unknown subcommand. Usage: /plugin [list|install|remove|enable|disable|info|health|marketplace]",
     )
     return None
 
@@ -5513,10 +5669,18 @@ async def cmd_goals(args: str, ctx: REPLContext) -> str | None:
         table.add_column("Status")
         table.add_column("Progress")
         table.add_column("Title", max_width=40)
-        _prio_colors = {"critical": "red", "high": "yellow", "medium": "blue", "low": "dim"}
+        _prio_colors = {
+            "critical": "red",
+            "high": "yellow",
+            "medium": "blue",
+            "low": "dim",
+        }
         _status_colors = {
-            "active": "green", "in_progress": "cyan",
-            "completed": "dim", "abandoned": "dim", "draft": "dim",
+            "active": "green",
+            "in_progress": "cyan",
+            "completed": "dim",
+            "abandoned": "dim",
+            "draft": "dim",
         }
         for g in goals:
             prio_color = _prio_colors.get(g.priority, "")
@@ -5550,7 +5714,9 @@ async def cmd_goals(args: str, ctx: REPLContext) -> str | None:
             print_error(f"Goal not found: {rest}")
             return None
         console.print(f"\n[bold]{goal.title}[/]  ({goal.id})")
-        console.print(f"  Status: {goal.status}  |  Priority: {goal.priority}  |  Progress: {goal.progress}%")
+        console.print(
+            f"  Status: {goal.status}  |  Priority: {goal.priority}  |  Progress: {goal.progress}%"
+        )
         if goal.acceptance_criteria:
             console.print("  [bold]Acceptance Criteria:[/]")
             for ac in goal.acceptance_criteria:
@@ -5861,9 +6027,7 @@ async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
     # /loop <interval> <body>
     interval_s = _parse_interval(tokens[0])
     if interval_s is None:
-        print_error(
-            f"Invalid interval '{tokens[0]}'. Use e.g. 30s, 5m, 2h."
-        )
+        print_error(f"Invalid interval '{tokens[0]}'. Use e.g. 30s, 5m, 2h.")
         return None
     if len(tokens) < 2 or not tokens[1].strip():
         print_error("Missing prompt or /command after interval.")
@@ -5880,9 +6044,7 @@ async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
             except asyncio.CancelledError:
                 return
             iteration += 1
-            console.print(
-                f"[dim]\\[{loop_id}] iteration {iteration}[/]"
-            )
+            console.print(f"[dim]\\[{loop_id}] iteration {iteration}[/]")
             try:
                 if body.startswith("/"):
                     # Dispatch as slash command
@@ -5892,7 +6054,8 @@ async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
                 else:
                     # Send as prompt to the active client
                     result = await ctx.client.run_loop_to_completion(
-                        body, max_turns=ctx.max_turns,
+                        body,
+                        max_turns=ctx.max_turns,
                     )
                     if result.strip():
                         console.print(result)
@@ -5959,13 +6122,16 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
     def _save_schedules(schedules: list[dict[str, str]]) -> None:
         schedules_path.parent.mkdir(parents=True, exist_ok=True)
         schedules_path.write_text(
-            json.dumps(schedules, indent=2) + "\n", encoding="utf-8",
+            json.dumps(schedules, indent=2) + "\n",
+            encoding="utf-8",
         )
 
     if subcmd == "list":
         schedules = _load_schedules()
         if not schedules:
-            print_info("No scheduled triggers. Add one with: /schedule add <cron> <prompt>")
+            print_info(
+                "No scheduled triggers. Add one with: /schedule add <cron> <prompt>"
+            )
             return None
         table = Table(title="Scheduled Triggers", expand=False)
         table.add_column("ID", width=14)
@@ -5999,7 +6165,7 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
                 print_error("Unterminated quote in cron expression.")
                 return None
             cron_expr = rest[1:end]
-            prompt_text = rest[end + 1:].strip()
+            prompt_text = rest[end + 1 :].strip()
         else:
             # Assume first 5 space-separated tokens are the cron fields
             parts = rest.split()
@@ -6023,12 +6189,14 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
 
         sched_id = f"sched-{uuid.uuid4().hex[:6]}"
         schedules = _load_schedules()
-        schedules.append({
-            "id": sched_id,
-            "cron": cron_expr,
-            "prompt": prompt_text,
-            "notify": True,
-        })
+        schedules.append(
+            {
+                "id": sched_id,
+                "cron": cron_expr,
+                "prompt": prompt_text,
+                "notify": True,
+            }
+        )
         _save_schedules(schedules)
 
         # If there's a running daemon, inject the trigger live
@@ -6057,9 +6225,7 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
             pass  # Daemon may not be running — schedule is persisted for next start
 
         print_ok(
-            f"Created schedule {sched_id}\n"
-            f"  Cron: {cron_expr}\n"
-            f"  Prompt: {prompt_text}"
+            f"Created schedule {sched_id}\n  Cron: {cron_expr}\n  Prompt: {prompt_text}"
         )
         return None
 
@@ -6092,7 +6258,8 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
         print_info(f"Running schedule {target_id}: {prompt_text[:60]}")
         try:
             result = await ctx.client.run_loop_to_completion(
-                prompt_text, max_turns=ctx.max_turns,
+                prompt_text,
+                max_turns=ctx.max_turns,
             )
             if result.strip():
                 console.print(result)
@@ -6100,9 +6267,7 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
             print_error(f"Schedule execution failed: {exc}")
         return None
 
-    print_error(
-        "Unknown subcommand. Use: /schedule list | add | remove | run"
-    )
+    print_error("Unknown subcommand. Use: /schedule list | add | remove | run")
     return None
 
 
@@ -6920,7 +7085,8 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
             "backend": ctx.backend or "",
         }
         (schedule_dir / f"{sched_id}.json").write_text(
-            json.dumps(sched_data, indent=2), encoding="utf-8",
+            json.dumps(sched_data, indent=2),
+            encoding="utf-8",
         )
         print_ok(f"Scheduled task created: {sched_id[:8]}")
         print_info(f"  Cron: {cron}")
@@ -6967,7 +7133,8 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
                 print_error(f"Schedule run error: {exc}")
         sched["last_run"] = __import__("datetime").datetime.now(UTC).isoformat()
         (schedule_dir / f"{sched['id']}.json").write_text(
-            json.dumps(sched, indent=2), encoding="utf-8",
+            json.dumps(sched, indent=2),
+            encoding="utf-8",
         )
         return None
 
@@ -6983,7 +7150,8 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
         new_status = "paused" if sub == "pause" else "active"
         sched["status"] = new_status
         (schedule_dir / f"{sched['id']}.json").write_text(
-            json.dumps(sched, indent=2), encoding="utf-8",
+            json.dumps(sched, indent=2),
+            encoding="utf-8",
         )
         print_ok(f"Schedule {sched_id[:8]} {new_status}.")
         return None
@@ -7119,9 +7287,15 @@ async def cmd_branch(args: str, _ctx: REPLContext) -> str | None:
     await proc.communicate()
     exists = proc.returncode == 0
 
-    cmd = f"git checkout {shlex.quote(name)}" if exists else f"git checkout -b {shlex.quote(name)}"
+    cmd = (
+        f"git checkout {shlex.quote(name)}"
+        if exists
+        else f"git checkout -b {shlex.quote(name)}"
+    )
     proc = await asyncio.create_subprocess_shell(
-        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await proc.communicate()
     if proc.returncode == 0:
@@ -7239,7 +7413,9 @@ async def cmd_hooks(args: str, _ctx: REPLContext) -> str | None:
         hooks = _load().get("hooks", {})
         if not hooks:
             print_info("No hooks configured. Add with: /hooks add <event> <command>")
-            print_info("Events: tool_call, tool_result, turn_start, turn_complete, error")
+            print_info(
+                "Events: tool_call, tool_result, turn_start, turn_complete, error"
+            )
             return None
         table = Table(title="Event Hooks", expand=False)
         table.add_column("Event", width=20)
@@ -7428,8 +7604,12 @@ async def cmd_ide(args: str, _ctx: REPLContext) -> str | None:
     if not sub:
         vsc = (Path.home() / ".vscode" / "extensions").exists()
         jb = (Path.home() / ".config" / "JetBrains").exists()
-        console.print(f"  VS Code:    {'[green]detected[/]' if vsc else '[dim]not detected[/]'}")
-        console.print(f"  JetBrains:  {'[green]detected[/]' if jb else '[dim]not detected[/]'}")
+        console.print(
+            f"  VS Code:    {'[green]detected[/]' if vsc else '[dim]not detected[/]'}"
+        )
+        console.print(
+            f"  JetBrains:  {'[green]detected[/]' if jb else '[dim]not detected[/]'}"
+        )
         print_info("Set up with: /ide vscode  or  /ide jetbrains")
         return None
 
@@ -7441,11 +7621,21 @@ async def cmd_ide(args: str, _ctx: REPLContext) -> str | None:
             tasks_data = {
                 "version": "2.0.0",
                 "tasks": [
-                    {"label": "Obscura: Review", "type": "shell", "command": "obscura '/review'"},
-                    {"label": "Obscura: Commit", "type": "shell", "command": "obscura '/commit'"},
+                    {
+                        "label": "Obscura: Review",
+                        "type": "shell",
+                        "command": "obscura '/review'",
+                    },
+                    {
+                        "label": "Obscura: Commit",
+                        "type": "shell",
+                        "command": "obscura '/commit'",
+                    },
                 ],
             }
-            tasks_file.write_text(json.dumps(tasks_data, indent=2) + "\n", encoding="utf-8")
+            tasks_file.write_text(
+                json.dumps(tasks_data, indent=2) + "\n", encoding="utf-8"
+            )
         print_ok("VS Code integration set up at .vscode/")
         return None
 
@@ -7496,9 +7686,12 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
             import subprocess
 
             subprocess.run(
-                ["pbcopy"] if __import__("sys").platform == "darwin"
+                ["pbcopy"]
+                if __import__("sys").platform == "darwin"
                 else ["xclip", "-selection", "clipboard"],
-                input=report.encode(), capture_output=True, timeout=5,
+                input=report.encode(),
+                capture_output=True,
+                timeout=5,
             )
             print_ok("Template copied to clipboard.")
         except Exception:
@@ -7555,8 +7748,12 @@ async def cmd_terminal_setup(_args: str, _ctx: REPLContext) -> str | None:
     def _c(ok: bool) -> str:
         return "[green]yes[/]" if ok else "[red]no[/]"
 
-    console.print(f"  256-color: {_c(s256)}  True-color: {_c(strue)}  Unicode: {_c(suni)}")
-    console.print(f"  TTY: stdin={_c(_sys.stdin.isatty())} stdout={_c(_sys.stdout.isatty())}")
+    console.print(
+        f"  256-color: {_c(s256)}  True-color: {_c(strue)}  Unicode: {_c(suni)}"
+    )
+    console.print(
+        f"  TTY: stdin={_c(_sys.stdin.isatty())} stdout={_c(_sys.stdout.isatty())}"
+    )
 
     issues: list[str] = []
     if not suni:
@@ -7645,7 +7842,8 @@ async def cmd_goal(args: str, ctx: REPLContext) -> str | None:
     # Persist to session metadata
     try:
         await ctx.store.update_session(
-            ctx.session_id, metadata={"goal": text},
+            ctx.session_id,
+            metadata={"goal": text},
         )
     except Exception:
         pass
@@ -7963,7 +8161,11 @@ async def cmd_undercover(args: str, _ctx: REPLContext) -> str | None:
 
     if not sub:
         status = "ON" if mode.is_active else "OFF"
-        auto = "(auto-detected)" if not hasattr(mode, "_forced") or mode._forced is None else "(forced)"
+        auto = (
+            "(auto-detected)"
+            if not hasattr(mode, "_forced") or mode._forced is None
+            else "(forced)"
+        )
         print_info(f"Undercover mode: {status} {auto}")
         return None
 
@@ -8005,12 +8207,20 @@ async def cmd_token_budget(args: str, ctx: REPLContext) -> str | None:
         used_cost = tracker.session_total_usd()
         if current_budget:
             pct = int(used_tokens / current_budget * 100) if current_budget else 0
-            console.print(f"[bold]Token budget:[/] {used_tokens:,} / {current_budget:,} ({pct}%)")
+            console.print(
+                f"[bold]Token budget:[/] {used_tokens:,} / {current_budget:,} ({pct}%)"
+            )
         elif current_cost_budget:
-            pct = int(used_cost / current_cost_budget * 100) if current_cost_budget else 0
-            console.print(f"[bold]Cost budget:[/] ${used_cost:.4f} / ${current_cost_budget:.2f} ({pct}%)")
+            pct = (
+                int(used_cost / current_cost_budget * 100) if current_cost_budget else 0
+            )
+            console.print(
+                f"[bold]Cost budget:[/] ${used_cost:.4f} / ${current_cost_budget:.2f} ({pct}%)"
+            )
         else:
-            console.print(f"No budget set. Used: {used_tokens:,} tokens, ${used_cost:.4f}")
+            console.print(
+                f"No budget set. Used: {used_tokens:,} tokens, ${used_cost:.4f}"
+            )
         return None
 
     if text == "off":
@@ -8042,7 +8252,9 @@ async def cmd_token_budget(args: str, ctx: REPLContext) -> str | None:
         ctx._cost_budget = None  # type: ignore[attr-defined]
         print_ok(f"Token budget set: {budget:,}")
     except ValueError:
-        print_error("Invalid budget. Use: /token-budget 50000 or /token-budget 50k or /token-budget $0.50")
+        print_error(
+            "Invalid budget. Use: /token-budget 50000 or /token-budget 50k or /token-budget $0.50"
+        )
     return None
 
 
@@ -8068,8 +8280,10 @@ async def cmd_tool_policy(args: str, ctx: REPLContext) -> str | None:
         if current is None:
             print_info("Tool policy: default (custom tools only)")
         else:
-            console.print(f"[bold]Tool policy:[/]")
-            console.print(f"  Native tools: {'allowed' if current.allow_native else 'blocked'}")
+            console.print("[bold]Tool policy:[/]")
+            console.print(
+                f"  Native tools: {'allowed' if current.allow_native else 'blocked'}"
+            )
             if current.allowed_tools is not None:
                 console.print(f"  Allowed: {', '.join(current.allowed_tools)}")
             if current.denied_tools:
@@ -8092,7 +8306,9 @@ async def cmd_tool_policy(args: str, ctx: REPLContext) -> str | None:
         ctx.client._tool_policy = None  # type: ignore[attr-defined]
         print_ok("Tool policy reset to default.")
     else:
-        print_info("Usage: /tool-policy [allow-all|custom-only|allow <t>|deny <t>|reset]")
+        print_info(
+            "Usage: /tool-policy [allow-all|custom-only|allow <t>|deny <t>|reset]"
+        )
     return None
 
 
@@ -8116,9 +8332,11 @@ async def cmd_context_inject(args: str, ctx: REPLContext) -> str | None:
             import subprocess
 
             proc = subprocess.run(
-                ["pbpaste"] if __import__("sys").platform == "darwin"
+                ["pbpaste"]
+                if __import__("sys").platform == "darwin"
                 else ["xclip", "-selection", "clipboard", "-o"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             content = proc.stdout.decode("utf-8", errors="replace")
         except Exception as exc:
@@ -8144,10 +8362,12 @@ async def cmd_context_inject(args: str, ctx: REPLContext) -> str | None:
         content = content[:50_000] + "\n\n... (truncated at 50k chars)"
 
     label = text if text != "--paste" else "clipboard"
-    ctx.message_history.append((
-        "user",
-        f"[CONTEXT INJECTION: {label}]\n\n{content}",
-    ))
+    ctx.message_history.append(
+        (
+            "user",
+            f"[CONTEXT INJECTION: {label}]\n\n{content}",
+        )
+    )
     char_count = len(content)
     if char_count > 1000:
         size_str = f"{char_count / 1000:.1f}k chars"
@@ -8222,6 +8442,692 @@ def _remove_block_from_prompt(ctx: REPLContext, tag: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# /phantom — Obscura becomes the user (three independent sub-modes)
+# ---------------------------------------------------------------------------
+
+# Sub-mode tags for system prompt injection/removal.
+_PHANTOM_TAG = "PHANTOM"
+_GHOST_TAG = "PHANTOM_GHOST"
+_PROXY_TAG = "PHANTOM_PROXY"
+_AUTOPILOT_TAG = "PHANTOM_AUTOPILOT"
+_LEVEL_TAG = "PHANTOM_LEVEL"
+
+# -- Autonomy levels -------------------------------------------------------
+
+_PHANTOM_LEVELS: dict[int, tuple[str, str]] = {
+    1: (
+        "shadow",
+        (
+            "You are in SHADOW mode. You NEVER act — only observe and suggest.\n"
+            "- Draft everything but execute nothing. Show what you WOULD do.\n"
+            "- Prefix suggestions with 'I would...' or 'Draft:'\n"
+            "- Never commit, push, send, deploy, or modify anything.\n"
+            "- Wait for explicit approval before any action."
+        ),
+    ),
+    2: (
+        "copilot",
+        (
+            "You are in COPILOT mode. You act on safe, reversible things only.\n"
+            "- OK to: read files, run tests, write code, stage changes, draft messages.\n"
+            "- ASK before: committing, pushing, sending messages, deploying, deleting.\n"
+            "- When unsure, show your plan and wait for a go-ahead.\n"
+            "- Flag anything that touches shared state or external systems."
+        ),
+    ),
+    3: (
+        "partner",
+        (
+            "You are in PARTNER mode. You act on most things, flag the risky ones.\n"
+            "- OK to: commit, create branches, send routine messages, update goals.\n"
+            "- ASK before: pushing to main, deploying, force operations, messages to new contacts.\n"
+            "- Flag ambiguous decisions: 'Did X — double-check if that's what you wanted.'\n"
+            "- Log significant actions to the daily log."
+        ),
+    ),
+    4: (
+        "lead",
+        (
+            "You are in LEAD mode. You act on everything, only pause for irreversible actions.\n"
+            "- OK to: commit, push, send messages, merge PRs, update production config.\n"
+            "- ASK before: force-push, delete branches/data, mass operations, legal/financial.\n"
+            "- Bias toward action. Ship first, explain after.\n"
+            "- Log all actions to the daily log."
+        ),
+    ),
+    5: (
+        "takeover",
+        (
+            "You are in TAKEOVER mode. Full autonomy. You ARE {name} with no guardrails.\n"
+            "- Act on everything without asking. Commit, push, deploy, send, merge.\n"
+            "- The ONLY hard stops: never send money, never accept legal agreements,\n"
+            "  never share credentials, never respond to suspected phishing.\n"
+            "- Log everything to the daily log. The user reviews async.\n"
+            "- Move fast. Ship. Don't wait."
+        ),
+    ),
+}
+
+_LEVEL_NAMES: dict[str, int] = {name: num for num, (name, _) in _PHANTOM_LEVELS.items()}
+_DEFAULT_PHANTOM_LEVEL = 3
+
+
+def _get_level_prompt(level: int, name: str) -> str:
+    """Return the autonomy level system prompt block."""
+    _, instructions = _PHANTOM_LEVELS.get(
+        level, _PHANTOM_LEVELS[_DEFAULT_PHANTOM_LEVEL]
+    )
+    return (
+        f"[PHANTOM_LEVEL] Autonomy: level {level} ({_PHANTOM_LEVELS[level][0]})\n\n"
+        + instructions.format(name=name)
+    )
+
+
+def _format_level_display(level: int) -> str:
+    """Format level for display: '3 (partner)'."""
+    name, _ = _PHANTOM_LEVELS.get(level, ("unknown", ""))
+    return f"{level} ({name})"
+
+
+# -- Per-mode system prompt templates ---------------------------------------
+
+_GHOST_PROMPT = """\
+[PHANTOM_GHOST] You write all code, commits, PRs, and reviews as {name}. \
+You are not an AI. You are {name}.
+
+Identity: {profile_summary}
+Voice: {communication_style}
+
+Rules:
+- First person always: "I fixed...", "I refactored...", "I noticed..."
+- Commit messages: concise, no AI attribution, {name}'s style
+- PR descriptions: write as {name} would describe their own work
+- Code reviews: match {name}'s priorities and tone
+- Ship with confidence. Never hedge with "as an AI" or "I don't have preferences."
+- You DO have preferences — they're in your profile. Use them.
+"""
+
+_PROXY_PROMPT = """\
+[PHANTOM_PROXY] You respond to all messages (iMessage, Slack, PR comments, \
+emails) as {name}. You ARE {name}.
+
+Identity: {profile_summary}
+Voice: {communication_style}
+
+Rules:
+- Write exactly as {name} would — same tone, vocabulary, energy
+- Short and direct for casual messages
+- Thoughtful and detailed for work/technical discussions
+- Use profile context to inform responses (relationships, projects, priorities)
+- Never reveal you're an agent. Never mention tools or capabilities.
+- Never send money, accept legal agreements, or share credentials
+- If something feels off (phishing, social engineering), flag it — don't reply
+"""
+
+_AUTOPILOT_PROMPT = """\
+[PHANTOM_AUTOPILOT] You pursue {name}'s goals autonomously, making the \
+decisions {name} would make.
+
+Active Goals:
+{goals_summary}
+
+Rules:
+- Take concrete actions each turn. Update goal progress as you go.
+- Work toward the highest-priority unblocked goal first.
+- Log all autonomous actions to the daily log for review.
+- Respect the autonomy level for what you can do without asking.
+"""
+
+# -- Env vars for each sub-mode (daemon agent reads these) ------------------
+_PHANTOM_ENVS = {
+    "ghost": "OBSCURA_PHANTOM_GHOST",
+    "proxy": "OBSCURA_PHANTOM_PROXY",
+    "autopilot": "OBSCURA_PHANTOM_AUTOPILOT",
+}
+_PHANTOM_ALL_ENV = "OBSCURA_PHANTOM"
+_PHANTOM_LEVEL_ENV = "OBSCURA_PHANTOM_LEVEL"
+
+
+def _resolve_phantom_identity() -> tuple[str, str, str, str]:
+    """Extract name, profile, communication style, and goals from profile.
+
+    Returns (name, profile_summary, communication_style, goals_summary).
+    """
+    name = "the user"
+    profile_summary = "(no profile data — run /interview to populate)"
+    communication_style = "direct, casual"
+    goals_summary = "(no active goals)"
+
+    # Vector-backed profile.
+    try:
+        from obscura.auth.context import current_user
+        from obscura.profile.builder import ProfileBuilder
+        from obscura.profile.models import ProfileCategory
+        from obscura.profile.store import ProfileStore
+
+        user = current_user()
+        store = ProfileStore.for_user(user)
+        builder = ProfileBuilder()
+        summary = builder.build_summary(store, max_tokens=600)
+        if summary:
+            profile_summary = summary
+
+        for f in store.get_facts_by_category(ProfileCategory.IDENTITY):
+            if "name" in f.key.lower():
+                name = f.value
+                break
+
+        prefs = store.get_facts_by_category(ProfileCategory.PREFERENCE)
+        if prefs:
+            communication_style = "; ".join(f.value for f in prefs[:3])
+    except Exception:
+        pass
+
+    # Markdown fallback for name.
+    if name == "the user":
+        try:
+            import re
+
+            from obscura.kairos.user_profile import UserProfile
+
+            text = UserProfile().read()
+            if text:
+                m = re.search(r"\*\*Name\*\*:\s*(.+?)(?:\s*\(|$)", text, re.MULTILINE)
+                if m:
+                    name = m.group(1).strip()
+                if profile_summary.startswith("(no"):
+                    profile_summary = UserProfile().active_summary(max_lines=20)
+        except Exception:
+            pass
+
+    # Goals.
+    try:
+        from obscura.kairos.goals import GoalBoard
+
+        gs = GoalBoard().active_summary(max_lines=8)
+        if gs:
+            goals_summary = gs
+    except Exception:
+        pass
+
+    return name, profile_summary, communication_style, goals_summary
+
+
+def _build_mode_prompt(
+    mode: str,
+    name: str,
+    profile_summary: str,
+    communication_style: str,
+    goals_summary: str,
+) -> str:
+    """Build the system prompt block for a single phantom sub-mode."""
+    templates = {
+        "ghost": _GHOST_PROMPT,
+        "proxy": _PROXY_PROMPT,
+        "autopilot": _AUTOPILOT_PROMPT,
+    }
+    tmpl = templates.get(mode, "")
+    if not tmpl:
+        return ""
+    return tmpl.format(
+        name=name,
+        profile_summary=profile_summary,
+        communication_style=communication_style,
+        goals_summary=goals_summary,
+    )
+
+
+def _phantom_status_line(ctx: REPLContext) -> str:
+    """Build a compact status string for phantom modes."""
+    modes = []
+    for mode in ("ghost", "proxy", "autopilot"):
+        if getattr(ctx, f"_phantom_{mode}", False):
+            modes.append(mode)
+    if not modes:
+        return ""
+    name = getattr(ctx, "_phantom_name", "")
+    level = getattr(ctx, "_phantom_level", _DEFAULT_PHANTOM_LEVEL)
+    level_name = _PHANTOM_LEVELS.get(level, ("?", ""))[0]
+    return f"phantom:{'+'.join(modes)} L{level}({level_name})" + (
+        f" ({name})" if name else ""
+    )
+
+
+async def cmd_phantom(args: str, ctx: REPLContext) -> str | None:
+    """Toggle phantom mode — Obscura becomes you.
+
+    Three independent sub-modes you can mix and match, plus an autonomy
+    level that controls how aggressively Obscura acts on your behalf.
+
+    Usage:
+        /phantom                  — toggle all on/off
+        /phantom on               — activate all three modes
+        /phantom off              — deactivate all
+        /phantom ghost            — toggle ghost (code, commits, PRs)
+        /phantom proxy            — toggle proxy (message responses)
+        /phantom autopilot        — toggle autopilot (goal pursuit)
+        /phantom ghost on         — activate ghost only
+        /phantom proxy off        — deactivate proxy only
+        /phantom level            — show current autonomy level
+        /phantom level 4          — set by number (1-5)
+        /phantom level lead       — set by name
+        /phantom status           — show what's active
+
+    Autonomy levels:
+        1 (shadow)    — observe and suggest, never act
+        2 (copilot)   — act on safe things, ask for the rest
+        3 (partner)   — act on most things, flag risky ones [default]
+        4 (lead)      — act on everything, pause for irreversible
+        5 (takeover)  — full autonomy, no check-ins
+    """
+    tokens = args.strip().lower().split()
+    sub = tokens[0] if tokens else ""
+    modifier = tokens[1] if len(tokens) > 1 else ""
+
+    active_modes = {
+        m
+        for m in ("ghost", "proxy", "autopilot")
+        if getattr(ctx, f"_phantom_{m}", False)
+    }
+    any_active = bool(active_modes)
+    current_level = getattr(ctx, "_phantom_level", _DEFAULT_PHANTOM_LEVEL)
+
+    # -- /phantom status -------------------------------------------------------
+    if sub == "status":
+        if any_active:
+            name = getattr(ctx, "_phantom_name", "unknown")
+            mode_list = ", ".join(sorted(active_modes))
+            level_str = _format_level_display(current_level)
+            console.print(
+                f"[bold green]Phantom: ON[/] — [bold]{name}[/]  "
+                f"modes: {mode_list}  level: {level_str}"
+            )
+        else:
+            console.print("[dim]Phantom: OFF[/]")
+        return None
+
+    # -- /phantom level [N|name] -----------------------------------------------
+    if sub == "level":
+        if not modifier:
+            # Show current level + all options.
+            console.print(
+                f"[bold]Current level:[/] {_format_level_display(current_level)}\n"
+            )
+            for num, (lname, desc) in sorted(_PHANTOM_LEVELS.items()):
+                marker = " ←" if num == current_level else ""
+                first_line = desc.split("\n")[0]
+                console.print(f"  [bold]{num}[/] ({lname}){marker} — {first_line}")
+            return None
+
+        # Parse level: by number or name.
+        new_level = _LEVEL_NAMES.get(modifier)
+        if new_level is None:
+            try:
+                new_level = int(modifier)
+            except ValueError:
+                print_error(
+                    f"Unknown level: {modifier}. Use 1-5 or shadow/copilot/partner/lead/takeover."
+                )
+                return None
+        if new_level not in _PHANTOM_LEVELS:
+            print_error(f"Level must be 1-5. Got: {new_level}")
+            return None
+
+        _set_phantom_level(ctx, new_level)
+        print_ok(f"Autonomy level: {_format_level_display(new_level)}")
+        return None
+
+    # -- /phantom off (all) ----------------------------------------------------
+    if sub == "off" or (not sub and any_active):
+        if not any_active:
+            print_info("Phantom is already off.")
+            return None
+        for mode in ("ghost", "proxy", "autopilot"):
+            _phantom_mode_off(ctx, mode)
+        _remove_block_from_prompt(ctx, _LEVEL_TAG)
+        print_ok("Phantom OFF — all modes deactivated.")
+        return None
+
+    # -- /phantom on (all) -----------------------------------------------------
+    if sub == "on" or (not sub and not any_active):
+        name, profile_summary, comm_style, goals_summary = _resolve_phantom_identity()
+        for mode in ("ghost", "proxy", "autopilot"):
+            _phantom_mode_on(
+                ctx, mode, name, profile_summary, comm_style, goals_summary
+            )
+        _set_phantom_level(ctx, current_level)
+        level_str = _format_level_display(current_level)
+        print_ok(
+            f"Phantom ON — ghost + proxy + autopilot as {name} (level {level_str})"
+        )
+        if profile_summary.startswith("(no"):
+            print_warning("Profile is sparse. Run /interview first for best results.")
+        return None
+
+    # -- /phantom <mode> [on|off] — individual toggle --------------------------
+    if sub in ("ghost", "proxy", "autopilot"):
+        is_on = getattr(ctx, f"_phantom_{sub}", False)
+
+        if modifier == "off" or (not modifier and is_on):
+            if not is_on:
+                print_info(f"Phantom {sub} is already off.")
+                return None
+            _phantom_mode_off(ctx, sub)
+            remaining = _phantom_status_line(ctx)
+            if remaining:
+                print_ok(f"Phantom {sub} OFF.  Still active: {remaining}")
+            else:
+                _remove_block_from_prompt(ctx, _LEVEL_TAG)
+                print_ok(f"Phantom {sub} OFF.")
+            return None
+
+        if modifier == "on" or (not modifier and not is_on):
+            name, profile_summary, comm_style, goals_summary = (
+                _resolve_phantom_identity()
+            )
+            _phantom_mode_on(ctx, sub, name, profile_summary, comm_style, goals_summary)
+            # Inject level prompt if this is the first mode being turned on.
+            if not any_active:
+                _set_phantom_level(ctx, current_level)
+            print_ok(
+                f"Phantom {sub} ON as {name} (level {_format_level_display(current_level)})"
+            )
+            return None
+
+        print_error(f"Usage: /phantom {sub} [on|off]")
+        return None
+
+    print_error(
+        f"Unknown: /phantom {sub}. Try /phantom [on|off|ghost|proxy|autopilot|level|status]."
+    )
+    return None
+
+
+def _set_phantom_level(ctx: REPLContext, level: int) -> None:
+    """Set the autonomy level — injects/replaces the level prompt block."""
+    ctx._phantom_level = level  # type: ignore[attr-defined]
+    os.environ[_PHANTOM_LEVEL_ENV] = str(level)
+
+    # Remove old level block if present, then inject new one.
+    _remove_block_from_prompt(ctx, _LEVEL_TAG)
+    name = getattr(ctx, "_phantom_name", "the user")
+    level_block = _get_level_prompt(level, name)
+    ctx.system_prompt += f"\n\n{level_block}"
+
+
+def _phantom_mode_on(
+    ctx: REPLContext,
+    mode: str,
+    name: str,
+    profile_summary: str,
+    communication_style: str,
+    goals_summary: str,
+) -> None:
+    """Activate a single phantom sub-mode."""
+    if getattr(ctx, f"_phantom_{mode}", False):
+        return  # already on
+
+    prompt_block = _build_mode_prompt(
+        mode, name, profile_summary, communication_style, goals_summary
+    )
+    if prompt_block:
+        ctx.system_prompt += f"\n\n{prompt_block}"
+
+    setattr(ctx, f"_phantom_{mode}", True)
+    ctx._phantom_name = name  # type: ignore[attr-defined]
+
+    # Set env vars so daemon agent picks up the mode.
+    env_key = _PHANTOM_ENVS.get(mode)
+    if env_key:
+        os.environ[env_key] = "1"
+    os.environ[_PHANTOM_ALL_ENV] = "1"
+
+    # Force undercover when any phantom mode is on.
+    try:
+        from obscura.kairos.undercover import UndercoverMode
+
+        UndercoverMode().force(True)
+    except Exception:
+        pass
+
+
+def _phantom_mode_off(ctx: REPLContext, mode: str) -> None:
+    """Deactivate a single phantom sub-mode."""
+    tag = {"ghost": _GHOST_TAG, "proxy": _PROXY_TAG, "autopilot": _AUTOPILOT_TAG}.get(
+        mode
+    )
+    if tag:
+        _remove_block_from_prompt(ctx, tag)
+
+    setattr(ctx, f"_phantom_{mode}", False)
+
+    # Clear env var for this mode.
+    env_key = _PHANTOM_ENVS.get(mode)
+    if env_key:
+        os.environ.pop(env_key, None)
+
+    # If no phantom modes remain, clear the global env and restore undercover.
+    remaining = any(
+        getattr(ctx, f"_phantom_{m}", False) for m in ("ghost", "proxy", "autopilot")
+    )
+    if not remaining:
+        os.environ.pop(_PHANTOM_ALL_ENV, None)
+        ctx._phantom_name = ""  # type: ignore[attr-defined]
+        try:
+            from obscura.kairos.undercover import UndercoverMode
+
+            UndercoverMode().auto()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# /interview — Agent-driven onboarding to populate profile + goals
+# ---------------------------------------------------------------------------
+
+_INTERVIEW_PROFILE_PROMPT = """\
+You are conducting a user profile interview. Your job is to learn about the \
+user so you can populate their profile with structured facts.
+
+You ARE the user's second brain. Talk like a peer, not an interviewer. Be \
+direct, casual, curious. Ask follow-up questions when answers are vague.
+
+You have these tools available:
+- profile_set(key, value, category) — store a fact
+- profile_get() — check current profile state
+- goal_create(title, priority, context, acceptance_criteria) — create a goal
+- goal_list() — see existing goals
+
+Categories for profile_set:
+- identity: name, email, location, education (never decays)
+- career: role, company, comp, targets, tenure (90-day half-life)
+- skill: languages, frameworks, expertise (120-day half-life)
+- preference: working style, tool preferences, communication style (180-day half-life)
+- personal: hobbies, interests, habits, travel (60-day half-life)
+- learned: recent/ephemeral observations (30-day half-life)
+
+RULES:
+1. Ask ONE question at a time. Wait for the answer before asking the next.
+2. After each answer, immediately call profile_set or goal_create to persist it.
+3. Start by checking what's already in the profile (profile_get) and skip what's filled.
+4. Cover these areas in order: identity → career → skills → working style → goals → personal
+5. For goals: ask what they're trying to accomplish right now, decompose into \
+   structured goals with acceptance criteria.
+6. Be efficient. If they give a long answer, extract multiple facts from it.
+7. When you've covered all areas, summarize what you stored and end with \
+   "Profile complete. Run /interview anytime to update."
+
+Start by reading the current profile, then ask the first gap-filling question.
+"""
+
+_INTERVIEW_GOALS_PROMPT = """\
+You are helping the user define and structure their goals. Talk like a peer \
+who's helping them think through what they actually want to accomplish.
+
+You have these tools:
+- goal_create(title, priority, context, acceptance_criteria) — create a goal
+- goal_list() — see existing goals
+- goal_update(goal_id, ...) — update an existing goal
+- profile_get() — check user context
+
+RULES:
+1. Start by listing existing goals (goal_list).
+2. Ask what they're working on, what matters most, what's blocking them.
+3. For each goal they describe: create it with clear title, appropriate priority, \
+   and concrete acceptance criteria (things you can check off).
+4. Decompose big goals into smaller ones with depends_on relationships.
+5. Ask ONE question at a time. Be direct.
+6. When done, show a summary of all goals and end with "Goals set."
+"""
+
+_INTERVIEW_FULL_PROMPT = """\
+You are conducting a full onboarding interview to populate the user's profile \
+and goal board. You are their second brain — talk like a peer, not a bot.
+
+You have these tools:
+- profile_set(key, value, category) — store a profile fact
+- profile_get() — check current profile
+- profile_forget(key) — remove a stale fact
+- goal_create(title, priority, context, acceptance_criteria) — create a goal
+- goal_list() — see existing goals
+- goal_update(goal_id, ...) — update a goal
+
+Profile categories (for profile_set):
+- identity: name, email, location (immune to decay)
+- career: role, company, comp, targets (90-day half-life)
+- skill: languages, frameworks, tools (120-day half-life)
+- preference: working style, communication prefs (180-day half-life)
+- personal: hobbies, interests, habits (60-day half-life)
+- learned: recent context (30-day half-life)
+
+RULES:
+1. Start by reading the current profile + goals to see what's already there.
+2. Ask ONE question at a time. After each answer, persist facts immediately.
+3. Cover: identity → career → skills → preferences → current goals → personal
+4. For goals: decompose into concrete objectives with acceptance criteria.
+5. Skip anything already well-populated in the profile.
+6. Be efficient. Extract multiple facts from long answers.
+7. When done, give a compact summary and say "All set."
+"""
+
+
+async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
+    """Agent-driven interview to populate your profile and goals.
+
+    The agent asks you questions and stores the answers as structured
+    profile facts (with proper decay) and goals (on the goal board).
+
+    Usage:
+        /interview              — full onboarding (profile + goals)
+        /interview profile      — profile facts only
+        /interview goals        — goal board only
+        /interview update       — refresh stale facts and add new ones
+    """
+    from obscura.cli.render import render_event
+
+    sub = args.strip().lower()
+
+    if sub == "profile":
+        system_prompt = _INTERVIEW_PROFILE_PROMPT
+        print_info("Starting profile interview...")
+    elif sub in ("goals", "goal"):
+        system_prompt = _INTERVIEW_GOALS_PROMPT
+        print_info("Starting goals interview...")
+    elif sub == "update":
+        system_prompt = (
+            _INTERVIEW_FULL_PROMPT + "\n\nThis is an UPDATE session. Focus on:\n"
+            "1. Facts with low decay scores (profile_get with include_scores=true)\n"
+            "2. Goals that may need progress updates\n"
+            "3. Any new developments since last interview\n"
+            "Ask what's changed recently, then update accordingly."
+        )
+        print_info("Starting profile update interview...")
+    else:
+        system_prompt = _INTERVIEW_FULL_PROMPT
+        print_info("Starting full onboarding interview...")
+
+    console.print(
+        "[dim]The agent will ask you questions. Answer naturally — it'll store everything.[/]"
+    )
+    console.print("[dim]Type 'done' or 'skip' to move on. Ctrl+C to stop.[/]\n")
+
+    # Determine which tools the interview agent can use.
+    interview_tools = [
+        "profile_get",
+        "profile_set",
+        "profile_forget",
+        "profile_sync",
+        "goal_create",
+        "goal_list",
+        "goal_get",
+        "goal_update",
+        "goal_complete",
+        "goal_abandon",
+    ]
+
+    # Save original system prompt and swap in interview prompt.
+    original_prompt = ctx.system_prompt
+    ctx.system_prompt = system_prompt
+
+    try:
+        # First turn: agent reads current state and asks first question.
+        prompt = "Begin the interview. Start by reading what's already in my profile and goals."
+
+        while True:
+            try:
+                async for event in ctx.client.run_loop(
+                    prompt,
+                    max_turns=3,
+                    tool_allowlist=interview_tools,
+                    session_id=ctx.session_id,
+                ):
+                    render_event(event)
+            except Exception as exc:
+                print_error(str(exc))
+                break
+
+            # Get user's answer.
+            console.print()
+            try:
+                answer = await _interview_input()
+            except (KeyboardInterrupt, EOFError):
+                print_info("\nInterview ended.")
+                break
+
+            if not answer or answer.lower() in ("done", "quit", "exit", "stop"):
+                print_ok("Interview complete.")
+                break
+
+            if answer.lower() == "skip":
+                prompt = "The user wants to skip this topic. Move on to the next area."
+                continue
+
+            # Feed answer back as the next prompt.
+            prompt = answer
+
+    finally:
+        # Restore original system prompt.
+        ctx.system_prompt = original_prompt
+
+    return None
+
+
+async def _interview_input() -> str:
+    """Read user input during interview (supports async)."""
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+
+    def _read() -> str:
+        try:
+            return input("  → ")
+        except EOFError:
+            return ""
+
+    return await loop.run_in_executor(None, _read)
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -8237,24 +9143,26 @@ COMMANDS: dict[str, CommandHandler] = {
     "system": cmd_system,
     "tools": cmd_tools,
     "confirm": cmd_confirm,
-    # Modes
+    # Modes & permissions
     "mode": cmd_mode,
     "plan": cmd_plan,
+    "permissions": cmd_permissions,
     "approve": cmd_approve,
     "reject": cmd_reject,
     # Review
     "diff": cmd_diff,
     "context": cmd_context,
+    "context-inject": cmd_context_inject,
     "thinking": cmd_thinking,
     "compact": cmd_compact,
-    # Agents
+    # Agents & delegation
     "agent": cmd_agent,
     "skill": cmd_skill,
     "delegate": cmd_delegate,
     "fleet": cmd_fleet,
     "swarm": cmd_swarm,
+    "coordinator": cmd_coordinator,
     "attention": cmd_attention,
-    "tail-trace": cmd_tail_trace,
     # Session / discovery
     "session": cmd_session,
     "discover": cmd_discover,
@@ -8268,100 +9176,77 @@ COMMANDS: dict[str, CommandHandler] = {
     "memory": cmd_memory,
     # Workspace
     "init": cmd_init,
-    # Control
-    "heartbeat": cmd_heartbeat,
-    "hb": cmd_heartbeat,
+    # Control & status
     "status": cmd_status,
     "policies": cmd_policies,
     "replay": cmd_replay,
     "running": cmd_running,
     "kill": cmd_kill,
-    # Utility
-    "cat": cmd_cat,
-    # Plugin utilities
-    "audit": cmd_audit,
-    "health": cmd_health,
-    "broker": cmd_broker,
-    "search-tools": cmd_search_tools,
-    # Wave 2: permissions, session, cost, diagnostics
-    "permissions": cmd_permissions,
-    "resume": cmd_resume,
-    "cost": cmd_cost,
+    "kill-session": cmd_kill_session,
     "doctor": cmd_doctor,
-    "vim": cmd_vim,
-    # Wave 2: effort, speed, git workflow
-    "effort": cmd_effort,
-    "fast": cmd_fast,
-    "debug": cmd_debug,
+    # Git
     "commit": cmd_commit,
     "review": cmd_review,
     "pr": cmd_pr,
+    "branch": cmd_branch,
     "security-review": cmd_security_review,
-    # Wave 2: export, coordinator, voice
-    "export": cmd_export,
-    "coordinator": cmd_coordinator,
-    "voice": cmd_voice,
-    "template": cmd_template,
-    "tool-summary": cmd_tool_summary,
-    # KAIROS & background
-    "kairos": cmd_kairos,
-    "goals": cmd_goal,
-    "attribution": cmd_attribution,
-    "ps": cmd_ps,
-    "logs": cmd_logs,
-    "kill-session": cmd_kill_session,
-    # Context & cache
-    "suggestions": cmd_suggestions,
-    "cache-stats": cmd_cache_stats,
-    # Workflows & messaging
-    "workflow": cmd_workflow,
-    "peers": cmd_peers,
-    "send": cmd_send,
-    # New from claude-code parity
+    # Utility
+    "cat": cmd_cat,
+    "search-tools": cmd_search_tools,
     "add-dir": cmd_add_dir,
     "files": cmd_files,
     "rewind": cmd_rewind,
     "rename": cmd_rename,
-    "tag": cmd_tag,
-    "version": cmd_version,
-    "usage": cmd_usage,
     "copy": cmd_copy,
-    "brief": cmd_brief,
-    "stats": cmd_stats,
-    # Loop & schedule
-    "loop": cmd_loop,
-    "schedule": cmd_schedule,
-    # Side question, sandbox, stash
-    "btw": cmd_btw,
-    "sandbox-toggle": cmd_sandbox_toggle,
-    "summary": cmd_summary,
+    "vim": cmd_vim,
+    # Plugin utilities
+    "audit": cmd_audit,
+    "health": cmd_health,
+    "broker": cmd_broker,
+    # Session management
+    "resume": cmd_resume,
+    "cost": cmd_cost,
+    "export": cmd_export,
+    "tag": cmd_tag,
     "stash": cmd_stash,
     "pop": cmd_pop,
-    "log": cmd_log,
-    # Claude Code parity
+    # Speed & effort
+    "effort": cmd_effort,
+    "fast": cmd_fast,
+    "debug": cmd_debug,
+    # KAIROS & automation
+    "kairos": cmd_kairos,
     "loop": cmd_loop,
     "schedule": cmd_schedule,
-    "branch": cmd_branch,
-    "config": cmd_config,
-    "hooks": cmd_hooks,
-    "listen": cmd_listen,
-    "login": cmd_login,
-    "logout": cmd_logout,
-    "release-notes": cmd_release_notes,
-    "ide": cmd_ide,
-    "bug": cmd_bug,
-    "terminal-setup": cmd_terminal_setup,
-    # Obscura-specific steering
+    "ps": cmd_ps,
+    "logs": cmd_logs,
+    "log": cmd_log,
+    # Steering
+    "phantom": cmd_phantom,
+    "interview": cmd_interview,
     "goal": cmd_goal,
     "persona": cmd_persona,
     "guardrails": cmd_guardrails,
     "focus": cmd_focus,
-    "checkpoint": cmd_checkpoint,
     "undercover": cmd_undercover,
-    "token-budget": cmd_token_budget,
     "tool-policy": cmd_tool_policy,
-    "context-inject": cmd_context_inject,
-    "recap": cmd_recap,
+    # Info
+    "version": cmd_version,
+    "usage": cmd_usage,
+    "stats": cmd_stats,
+    "attribution": cmd_attribution,
+    # Misc
+    "btw": cmd_btw,
+    "summary": cmd_summary,
+    "brief": cmd_brief,
+    "template": cmd_template,
+    "workflow": cmd_workflow,
+    "peers": cmd_peers,
+    "send": cmd_send,
+    "config": cmd_config,
+    "hooks": cmd_hooks,
+    "bug": cmd_bug,
+    "voice": cmd_voice,
 }
 
 # Subcommand completions for readline tab-complete
@@ -8378,25 +9263,20 @@ COMPLETIONS: dict[str, list[str]] = {
     "confirm": ["on", "off"],
     "mode": ["ask", "plan", "code"],
     "plan": [],
+    "permissions": ["default", "plan", "accept_edits", "bypass"],
     "approve": ["all"],
     "reject": ["all"],
     "diff": ["accept", "reject", "apply"],
     "context": [],
+    "context-inject": ["--paste"],
     "thinking": [],
     "compact": [],
     "agent": ["spawn", "list", "stop", "run"],
     "skill": ["list", "load", "unload", "active", "clear"],
-    "delegate": [
-        "codegen",
-        "review",
-        "analysis",
-        "summarize",
-        "testgen",
-        "support",
-        "--model",
-    ],
+    "delegate": ["codegen", "review", "analysis", "summarize", "testgen", "--model"],
     "fleet": ["spawn", "status", "run", "delegate", "stop"],
     "swarm": ["status", "results", "stop", "--model", "--no-synth", "--smart"],
+    "coordinator": ["on", "off", "status"],
     "attention": ["respond"],
     "session": ["list", "new", "switch"],
     "discover": ["web", "filesystem", "git", "database", "ai", "cloud", "search"],
@@ -8404,90 +9284,93 @@ COMPLETIONS: dict[str, list[str]] = {
     "pack": ["list", "info", "create"],
     "inspect": ["workspace", "agent", "capability", "pack"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
-    "kill": [],
-    "tail-trace": [],
     "init": ["--force"],
     "memory": ["stats", "search", "clear"],
-    "heartbeat": ["--json"],
-    "hb": ["--json"],
     "status": ["--json"],
     "policies": [],
     "replay": [],
     "running": [],
-    "cat": [],
-    "audit": ["errors"],
-    "health": [],
-    "broker": [],
-    "search-tools": [],
-    # Wave 2
-    "permissions": ["default", "plan", "accept_edits", "bypass"],
-    "resume": [],
-    "cost": [],
+    "kill": [],
+    "kill-session": [],
     "doctor": [],
-    "vim": [],
-    "effort": ["low", "medium", "high", "max"],
-    "fast": [],
     "commit": [],
     "review": [],
     "pr": ["main", "master", "develop"],
+    "branch": ["list", "create", "delete"],
     "security-review": [],
-    "export": ["md", "txt", "json"],
-    "coordinator": ["on", "off", "status"],
-    "voice": ["on", "off"],
-    "template": ["list", "run", "new"],
-    "tool-summary": [],
-    "kairos": ["on", "off", "status"],
-    "goals": ["list", "add", "show", "complete", "abandon", "edit"],
-    "attribution": [],
-    "ps": [],
-    "logs": [],
-    "kill-session": [],
-    "suggestions": [],
-    "cache-stats": [],
-    "workflow": ["list", "run"],
-    "peers": [],
-    "send": [],
-    # New from claude-code parity
+    "cat": [],
+    "search-tools": [],
     "add-dir": [],
     "files": [],
     "rewind": [],
     "rename": [],
-    "tag": [],
-    "version": [],
-    "usage": [],
     "copy": [],
-    "brief": [],
-    "stats": [],
-    "btw": [],
-    "sandbox-toggle": [],
-    "summary": [],
+    "vim": [],
+    "audit": ["errors"],
+    "health": [],
+    "broker": [],
+    "resume": [],
+    "cost": [],
+    "export": ["md", "txt", "json"],
+    "tag": [],
     "stash": [],
     "pop": [],
+    "effort": ["low", "medium", "high", "max"],
+    "fast": [],
+    "debug": [],
+    "kairos": ["on", "off", "status"],
+    "loop": ["list", "stop"],
+    "schedule": ["list", "add", "remove", "run"],
+    "ps": [],
+    "logs": [],
     "log": ["tail", "path", "stats"],
-    "loop": ["status", "stop"],
-    "schedule": ["list", "create", "delete", "run", "pause", "resume"],
-    # Claude Code parity
-    "branch": ["list", "create", "delete"],
-    "config": ["reset"],
-    "hooks": ["list", "add", "remove"],
-    "listen": ["on", "off"],
-    "login": ["claude", "openai", "copilot"],
-    "logout": ["claude", "openai", "copilot"],
-    "release-notes": [],
-    "ide": ["vscode", "jetbrains"],
-    "bug": ["report"],
-    "terminal-setup": [],
-    # Obscura-specific steering
+    "phantom": [
+        "on",
+        "off",
+        "status",
+        "ghost",
+        "proxy",
+        "autopilot",
+        "level",
+        "level 1",
+        "level 2",
+        "level 3",
+        "level 4",
+        "level 5",
+        "level shadow",
+        "level copilot",
+        "level partner",
+        "level lead",
+        "level takeover",
+    ],
+    "interview": ["profile", "goals", "update"],
     "goal": ["clear", "check"],
-    "persona": ["clear", "senior-backend", "security-auditor", "code-reviewer", "architect", "junior-friendly"],
+    "persona": [
+        "clear",
+        "senior-backend",
+        "security-auditor",
+        "code-reviewer",
+        "architect",
+    ],
     "guardrails": ["add", "remove", "clear"],
     "focus": ["clear"],
-    "checkpoint": ["save", "list", "restore", "delete"],
     "undercover": ["on", "off", "auto"],
-    "token-budget": ["off"],
     "tool-policy": ["allow-all", "custom-only", "allow", "deny", "reset"],
-    "context-inject": ["--paste"],
-    "recap": [],
+    "version": [],
+    "usage": [],
+    "stats": [],
+    "attribution": [],
+    "btw": [],
+    "summary": [],
+    "brief": [],
+    "template": ["list", "run", "new"],
+    "workflow": ["list", "run"],
+    "peers": [],
+    "send": [],
+    "config": ["reset"],
+    "hooks": ["list", "add", "remove"],
+    "bug": ["report"],
+    "voice": ["on", "off"],
 }
 
 # Add secret menu stub (tests toggle visibility)

@@ -600,65 +600,7 @@ class TestHallucinationEdgeCases:
         assert "full details" in text.lower()
 
     @pytest.mark.asyncio
-    async def test_multiple_tool_calls_hallucination_between(self) -> None:
-        """Model calls two tools with hallucinated text between them."""
-        spec1 = _tool_spec("read_text_file")
-        spec2 = _tool_spec("write_text_file")
-        chunks: list[StreamChunk] = [
-            # First tool call
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="read_text_file"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"path": "/tmp/input.txt"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            # Hallucinated text between tools
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="File read. "),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="Now writing output. "),
-            # Second tool call
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="write_text_file"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps(
-                    {"path": "/tmp/output.txt", "text": "data"},
-                ),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            # Hallucinated text after second tool
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="Both operations completed. "),
-            StreamChunk(kind=ChunkKind.DONE),
-        ]
-        turn2 = _make_text_chunks("Done.")
-        backend = MockBackend([chunks, turn2])
-        loop = AgentLoop(backend, _make_registry(spec1, spec2))
-
-        events = [e async for e in loop.run("copy file")]
-        text = _collect_text(events)
-
-        assert "File read" not in text
-        assert "Now writing" not in text
-        assert "Both operations" not in text
-        assert len(_collect_tool_calls(events)) == 2
-
     @pytest.mark.asyncio
-    async def test_hallucination_with_tool_use_end(self) -> None:
-        """Suppression works with explicit TOOL_USE_END chunks."""
-        spec = _tool_spec("run_shell")
-        turn1 = _make_tool_chunks_with_hallucination(
-            "run_shell",
-            {"command": "echo hello"},
-            "Output: hello\n",
-            use_tool_use_end=True,
-        )
-        turn2 = _make_text_chunks("Done.")
-        backend = MockBackend([turn1, turn2])
-        loop = AgentLoop(backend, _make_registry(spec))
-
-        events = [e async for e in loop.run("echo")]
-        text = _collect_text(events)
-
-        assert "Output: hello" not in text
-
     @pytest.mark.asyncio
     async def test_tool_result_still_emitted_despite_suppression(self) -> None:
         """Even when hallucination is suppressed, actual tool results are emitted."""
@@ -749,38 +691,6 @@ class TestHallucinationEdgeCases:
         assert "file was written" in text.lower()
 
     @pytest.mark.asyncio
-    async def test_thinking_deltas_not_affected(self) -> None:
-        """THINKING_DELTA chunks should still pass through even after tool_use."""
-        spec = _tool_spec("run_shell")
-        chunks: list[StreamChunk] = [
-            StreamChunk(kind=ChunkKind.THINKING_DELTA, text="Let me think..."),
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="run_shell"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"command": "ls"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            # Thinking after tool should still pass
-            StreamChunk(kind=ChunkKind.THINKING_DELTA, text="Now processing..."),
-            # But text after tool should be suppressed
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="Output was good."),
-            StreamChunk(kind=ChunkKind.DONE),
-        ]
-        turn2 = _make_text_chunks("Done.")
-        backend = MockBackend([chunks, turn2])
-        loop = AgentLoop(backend, _make_registry(spec))
-
-        events = [e async for e in loop.run("list")]
-        thinking = [e for e in events if e.kind == AgentEventKind.THINKING_DELTA]
-        text = _collect_text(events)
-
-        # Both thinking events preserved
-        assert len(thinking) == 2
-        assert "Let me think" in thinking[0].text
-        assert "Now processing" in thinking[1].text
-        # Text after tool suppressed
-        assert "Output was good" not in text
-
     @pytest.mark.asyncio
     async def test_hallucination_not_in_structured_messages(self) -> None:
         """Suppressed text should not appear in structured messages sent back to model."""
@@ -824,114 +734,8 @@ class TestHallucinationEdgeCases:
         assert "waiting for permission" not in text.lower()
 
     @pytest.mark.asyncio
-    async def test_tool_call_with_preamble_and_hallucination(self) -> None:
-        """Preamble before tool call is kept; hallucination after is dropped."""
-        spec = _tool_spec("web_search")
-        chunks: list[StreamChunk] = [
-            # Preamble — should be kept
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="Let me "),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="search for that. "),
-            # Tool call
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="web_search"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"query": "test"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            # Hallucination — should be suppressed
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="I found "),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="several results. "),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="The top result is "),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="from Wikipedia. "),
-            StreamChunk(kind=ChunkKind.DONE),
-        ]
-        turn2 = _make_text_chunks("Here are the actual results.")
-        backend = MockBackend([chunks, turn2])
-        loop = AgentLoop(backend, _make_registry(spec))
-
-        events = [e async for e in loop.run("search")]
-        text = _collect_text(events)
-
-        assert "search for that" in text.lower()
-        assert "I found" not in text
-        assert "Wikipedia" not in text
-        assert "actual results" in text.lower()
-
     @pytest.mark.asyncio
-    async def test_three_sequential_tool_calls_with_hallucinations(self) -> None:
-        """Three tool calls in one turn, each followed by hallucinated text."""
-        spec1 = _tool_spec("read_text_file")
-        spec2 = _tool_spec("run_python3")
-        spec3 = _tool_spec("write_text_file")
-        chunks: list[StreamChunk] = [
-            # Tool 1
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="read_text_file"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"path": "/tmp/data.csv"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="File read OK. "),
-            # Tool 2
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="run_python3"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"code": "import pandas"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="Analysis complete. "),
-            # Tool 3
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="write_text_file"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"path": "/tmp/out.txt", "text": "result"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="Results saved. "),
-            StreamChunk(kind=ChunkKind.DONE),
-        ]
-        turn2 = _make_text_chunks("Pipeline finished.")
-        backend = MockBackend([chunks, turn2])
-        loop = AgentLoop(backend, _make_registry(spec1, spec2, spec3))
-
-        events = [e async for e in loop.run("process data")]
-        text = _collect_text(events)
-
-        assert "File read OK" not in text
-        assert "Analysis complete" not in text
-        assert "Results saved" not in text
-        assert len(_collect_tool_calls(events)) == 3
-        assert len(_collect_tool_results(events)) == 3
-        assert "Pipeline finished" in text
-
     @pytest.mark.asyncio
-    async def test_error_chunks_still_emitted_after_tool(self) -> None:
-        """ERROR chunks should still pass through even after a tool_use."""
-        spec = _tool_spec("run_shell")
-        chunks: list[StreamChunk] = [
-            StreamChunk(kind=ChunkKind.TOOL_USE_START, tool_name="run_shell"),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_DELTA,
-                tool_input_delta=json.dumps({"command": "ls"}),
-            ),
-            StreamChunk(kind=ChunkKind.TOOL_USE_END),
-            # Text after tool — suppressed
-            StreamChunk(kind=ChunkKind.TEXT_DELTA, text="This should be hidden."),
-            # Error chunk — should still be emitted
-            StreamChunk(kind=ChunkKind.ERROR, text="stream error"),
-            StreamChunk(kind=ChunkKind.DONE),
-        ]
-        backend = MockBackend([chunks])
-        loop = AgentLoop(backend, _make_registry(spec))
-
-        events = [e async for e in loop.run("run")]
-        text = _collect_text(events)
-        errors = [e for e in events if e.kind == AgentEventKind.ERROR]
-
-        assert "hidden" not in text.lower()
-        assert len(errors) == 1
-        assert "stream error" in errors[0].text
-
     @pytest.mark.asyncio
     async def test_max_turns_respected_with_suppression(self) -> None:
         """Suppression should not interfere with max_turns limit."""

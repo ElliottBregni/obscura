@@ -35,10 +35,13 @@ _DREAM_AGENT_TOOLS: list[str] = [
     "list_directory",
     "find_files",
     "grep_files",
-    "goal_list",
-    "goal_get",
-    "goal_update",
-    "goal_complete",
+    "goal",
+    "profile_get",
+    "profile_update",
+    "profile_recall",
+    "profile_set",
+    "profile_forget",
+    "profile_sync",
 ]
 
 _MEMORY_DIR = Path.home() / ".obscura" / "memory"
@@ -55,6 +58,23 @@ CONSOLIDATION_PROMPT = """\
 You are performing memory consolidation for the KAIROS daemon.
 Review recent observations and existing memories, then update
 the memory files to reflect current truth.
+
+## Phase 0 — User Profile Update
+Before anything else, scan today's daily log and any available session context for
+new facts about the user. For each new fact found:
+1. Categorize it: preference (working style, tool choices, likes/hates),
+   fact (career info, background, skills — 90-day half-life), or
+   episode (current project context, recent events — 7-day half-life)
+2. Call profile_update(fact=<text>, memory_type=<category>) for each new finding
+3. Call profile_get() after to confirm the profile is up to date
+
+Examples of profile-worthy facts:
+- User mentioned switching to a new framework → fact
+- User said they hate confirmation prompts → preference
+- User is currently debugging auth middleware → episode
+- User got promoted / changed role → fact
+
+Do NOT fabricate. Only persist things explicitly observed in the logs.
 
 ## Phase 1 — Orient
 - List the memory directory contents
@@ -102,6 +122,20 @@ Read all goal files in ~/.obscura/goals/ (use goal_list, then goal_get for each)
 3. If all acceptance criteria appear met, mark the goal completed (goal_complete)
 4. If no progress in 7+ days, add a note to the goal suggesting review or abandonment
 5. Do NOT create or delete goals — only update existing ones
+
+## Phase 7 — User Profile Vector Consolidation
+Maintain the vector-backed user profile with per-category decay:
+1. Read current profile with scores: profile_get(include_scores=true)
+2. Scan recent daily logs for profile-relevant information:
+   - Career changes, new skills, role updates → category "career" or "skill"
+   - Stated preferences, working style observations → category "preference"
+   - Personal facts (location, interests, habits) → category "personal"
+   - Ephemeral observations → category "learned"
+3. For new structured facts: use profile_set(key=<dotted.key>, value=<text>, category=<cat>)
+   - Keys should be descriptive: "career.target_company", "personal.location", "skill.primary_language"
+4. For contradicted facts: profile_forget the old key, then profile_set the correction
+5. If user_profile.md exists and vector profile has < 10 facts, run profile_sync to migrate
+6. Do NOT delete identity facts (name, email) — they are immune to decay
 
 Rules:
 - Never fabricate information — only persist what's in the logs/transcripts
@@ -237,11 +271,33 @@ class DreamConsolidator:
             from obscura.core.client import ObscuraClient
             from obscura.core.config import ObscuraConfig
 
+            # Gather the tools the dream agent needs.
+            dream_tools = []
+            try:
+                from obscura.tools.system import get_system_tool_specs
+
+                dream_tools.extend(get_system_tool_specs())
+            except Exception:
+                pass
+            try:
+                from obscura.tools.goal_tools import get_goal_tool_specs
+
+                dream_tools.extend(get_goal_tool_specs())
+            except Exception:
+                pass
+            try:
+                from obscura.tools.profile_tools import get_profile_tool_specs
+
+                dream_tools.extend(get_profile_tool_specs())
+            except Exception:
+                pass
+
             cfg = ObscuraConfig.from_env()
             async with ObscuraClient(
                 cfg.default_backend,
-                model=cfg.default_model or None,
+                model=None,
                 system_prompt=CONSOLIDATION_PROMPT,
+                tools=dream_tools,
             ) as client:
                 result = await client.run_loop_to_completion(
                     "Begin memory consolidation. Follow all phases in the system prompt.",

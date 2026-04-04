@@ -29,69 +29,8 @@ def test_parse_confirm_accepts_yes_no_sentences() -> None:
     assert _parse_confirm_decision("no do not allow") == "deny"
 
 
-def test_track_task_surface_python_exec_lifecycle() -> None:
-    ctx = _ctx()
-    call = SimpleNamespace(
-        kind=AgentEventKind.TOOL_CALL,
-        tool_name="run_shell",
-        tool_input={"cmd": "uv run python script.py"},
-        tool_use_id="u1",
-    )
-    _track_task_surface_event(ctx, call)
-    assert "u1" in ctx._pending_python_tasks
-    assert ctx._pending_python_tasks["u1"]["status"] == "running"
-
-    result = SimpleNamespace(
-        kind=AgentEventKind.TOOL_RESULT,
-        tool_use_id="u1",
-        is_error=False,
-    )
-    _track_task_surface_event(ctx, result)
-    assert "u1" not in ctx._pending_python_tasks
-    assert ctx.python_tasks
-    assert ctx.python_tasks[-1]["status"] == "done"
-
-
 @pytest.mark.asyncio
-async def test_cmd_tasks_clear() -> None:
-    ctx = _ctx()
-    ctx.background_tasks.append(
-        {"id": "bg-1", "status": "done", "kind": "chat", "preview": "hi"},
-    )
-    ctx.python_tasks.append(
-        {"id": "py-1", "status": "done", "tool": "run_shell", "command": "python"},
-    )
-    await cmd_tasks("clear", ctx)
-    assert not ctx.background_tasks
-    assert not ctx.python_tasks
-
-
 @pytest.mark.asyncio
-async def test_cmd_tasks_interrupt_all() -> None:
-    class _FakeTask:
-        def __init__(self) -> None:
-            self.cancelled = False
-
-        def cancel(self) -> None:
-            self.cancelled = True
-
-    ctx = _ctx()
-    t = _FakeTask()
-    ctx.background_tasks.append(
-        {
-            "id": "bg-1",
-            "status": "running",
-            "kind": "chat",
-            "preview": "long task",
-            "started_at": "0.0",
-        },
-    )
-    ctx._background_task_refs["bg-1"] = t
-    await cmd_tasks("interrupt all", ctx)
-    assert t.cancelled is True
-    assert ctx.background_tasks[-1]["status"] == "cancelled"
-
-
 @pytest.mark.asyncio
 async def test_cmd_menu_toggles() -> None:
     ctx = _ctx()

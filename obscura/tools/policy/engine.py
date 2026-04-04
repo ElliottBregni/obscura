@@ -63,6 +63,25 @@ def evaluate_policy(
             matched_rule="allow_list",
         )
 
+    # Action-level restrictions
+    tool_args = args or {}
+    action = tool_args.get("action")
+    if action is not None:
+        if tool_name in policy.denied_actions:
+            if action in policy.denied_actions[tool_name]:
+                return PolicyResult(
+                    allowed=False,
+                    reason=f"action '{action}' on '{tool_name}' is in denied_actions",
+                    matched_rule="denied_actions",
+                )
+        if tool_name in policy.allowed_actions:
+            if action not in policy.allowed_actions[tool_name]:
+                return PolicyResult(
+                    allowed=False,
+                    reason=f"action '{action}' on '{tool_name}' is not in allowed_actions",
+                    matched_rule="allowed_actions",
+                )
+
     if policy.base_dir is not None and tool_name in _FS_TOOLS:
         result = _check_base_dir(policy.base_dir, args or {})
         if not result.allowed:

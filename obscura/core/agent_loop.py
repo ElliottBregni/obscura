@@ -61,7 +61,6 @@ from obscura.core.types import (
     Message,
     Role,
     StreamChunk,
-    StreamMetadata,
     ToolCallContext,
     ToolCallEnvelope,
     ToolCallInfo,
@@ -71,7 +70,6 @@ from obscura.core.types import (
     ToolSpec,
 )
 
-from obscura.core.compaction import compact_history
 from obscura.core.event_store import EventRecord, EventStoreProtocol, SessionStatus
 from obscura.core.hooks import HookRegistry
 
@@ -81,9 +79,7 @@ logger = logging.getLogger(__name__)
 # Tool concurrency
 # ---------------------------------------------------------------------------
 
-MAX_TOOL_CONCURRENCY: int = int(
-    os.environ.get("OBSCURA_MAX_TOOL_CONCURRENCY", "10")
-)
+MAX_TOOL_CONCURRENCY: int = int(os.environ.get("OBSCURA_MAX_TOOL_CONCURRENCY", "10"))
 
 # Maximum times stop hooks can suppress the stop and continue the loop.
 # Prevents infinite loops from greedy hooks that always suppress the stop.
@@ -125,8 +121,12 @@ class StreamingToolExecutor:
         self._order: list[str] = []  # tool_use_ids in submission order
         self._tool_call_map: dict[str, ToolCallInfo] = {}  # tool_use_id -> ToolCallInfo
         self._all_done = asyncio.Event()
-        self._safe_in_flight_count: int = 0  # how many concurrency-safe tools are running
-        self._seen_calls: dict[str, ToolResultEnvelope] = {}  # dedup cache shared across turn
+        self._safe_in_flight_count: int = (
+            0  # how many concurrency-safe tools are running
+        )
+        self._seen_calls: dict[
+            str, ToolResultEnvelope
+        ] = {}  # dedup cache shared across turn
         self._abort = asyncio.Event()  # sibling abort signal
         self._closed = False  # set when stream errors; reject further adds
 
@@ -426,8 +426,6 @@ class TurnMetrics:
     accumulated_chars: int = 0
 
 
-
-
 # ---------------------------------------------------------------------------
 # Error categorisation for retry logic
 # ---------------------------------------------------------------------------
@@ -469,7 +467,11 @@ def categorize_error(exc: Exception) -> ErrorCategory:
         return ErrorCategory.TRANSIENT
 
     # MODEL_ERROR
-    if "context_length_exceeded" in msg or "prompt too long" in msg or "prompt is too long" in msg:
+    if (
+        "context_length_exceeded" in msg
+        or "prompt too long" in msg
+        or "prompt is too long" in msg
+    ):
         return ErrorCategory.MODEL_ERROR
     if "max_tokens" in msg or "output truncated" in msg or "maximum context" in msg:
         return ErrorCategory.MODEL_ERROR
@@ -483,6 +485,7 @@ def categorize_error(exc: Exception) -> ErrorCategory:
         return ErrorCategory.FATAL
 
     return ErrorCategory.FATAL
+
 
 # Type alias for confirmation callbacks.
 # Receives a ToolCallInfo, returns True (approve) or False (deny).
@@ -550,7 +553,9 @@ class AgentLoop:
         self._backend_name = backend_name
         self._model_name = model_name
         self._context_budget = context_budget  # 0 = unlimited (chars)
-        self._turn_timeout_s = turn_timeout_s  # per-turn stream timeout (None = no limit)
+        self._turn_timeout_s = (
+            turn_timeout_s  # per-turn stream timeout (None = no limit)
+        )
         self._accumulated_chars = 0
         self._compiled_agent = compiled_agent
 
@@ -586,7 +591,9 @@ class AgentLoop:
                     score_index=ToolScoreIndex(),
                     backend=self._backend_name or "copilot",
                 )
-                if self._backend is not None and hasattr(self._backend, "set_tool_router"):
+                if self._backend is not None and hasattr(
+                    self._backend, "set_tool_router"
+                ):
                     self._backend.set_tool_router(router)
                 logger.info("Applied tool routing from compiled agent")
             except Exception:
@@ -773,7 +780,9 @@ class AgentLoop:
                 return
 
         try:
-            async for event in self._run_inner(prompt, sid, 0, "", kwargs, initial_messages):
+            async for event in self._run_inner(
+                prompt, sid, 0, "", kwargs, initial_messages
+            ):
                 yield event
         finally:
             # Emit AGENT_STOP
@@ -838,7 +847,11 @@ class AgentLoop:
             resume_kwargs["messages"] = messages
 
         async for event in self._run_inner(
-            resume_prompt, session_id, turn, acc_text, resume_kwargs,
+            resume_prompt,
+            session_id,
+            turn,
+            acc_text,
+            resume_kwargs,
         ):
             yield event
 
@@ -933,7 +946,10 @@ class AgentLoop:
                         # (hallucinated tool output).  Text after TOOL_USE_END but
                         # before the next TOOL_USE_START is kept (legitimate
                         # interleaved explanation).
-                        if chunk.kind == ChunkKind.TEXT_DELTA and state.inside_tool_accumulation:
+                        if (
+                            chunk.kind == ChunkKind.TEXT_DELTA
+                            and state.inside_tool_accumulation
+                        ):
                             continue
 
                         event = self._map_chunk(chunk, state.turn)
@@ -949,7 +965,9 @@ class AgentLoop:
 
                         # Accumulate text
                         if chunk.kind == ChunkKind.TEXT_DELTA:
-                            state = state.replace(turn_text=state.turn_text + chunk.text)
+                            state = state.replace(
+                                turn_text=state.turn_text + chunk.text
+                            )
 
                         # Collect tool calls
                         if chunk.kind == ChunkKind.TOOL_USE_START:
@@ -979,7 +997,8 @@ class AgentLoop:
                         if chunk.kind == ChunkKind.TOOL_USE_DELTA:
                             state = state.replace(
                                 current_tool_input_json=(
-                                    state.current_tool_input_json + chunk.tool_input_delta
+                                    state.current_tool_input_json
+                                    + chunk.tool_input_delta
                                 ),
                             )
 
@@ -1018,7 +1037,9 @@ class AgentLoop:
                         # Fix #6: extract per-turn token usage from DONE metadata
                         if chunk.kind == ChunkKind.DONE and chunk.metadata is not None:
                             usage = chunk.metadata.usage
-                            finish_reason = getattr(chunk.metadata, "finish_reason", "") or ""
+                            finish_reason = (
+                                getattr(chunk.metadata, "finish_reason", "") or ""
+                            )
                             updates: dict[str, Any] = {"finish_reason": finish_reason}
                             if usage is not None:
                                 updates["input_tokens"] = usage.get("input_tokens", 0)
@@ -1060,9 +1081,7 @@ class AgentLoop:
                         current_max_tokens = kwargs.get(
                             "max_tokens", DEFAULT_MAX_TOKENS
                         )
-                        escalated = min(
-                            current_max_tokens * 2, ESCALATED_MAX_TOKENS
-                        )
+                        escalated = min(current_max_tokens * 2, ESCALATED_MAX_TOKENS)
                         kwargs["max_tokens"] = escalated
 
                         logger.warning(
@@ -1104,8 +1123,7 @@ class AgentLoop:
                     _retry_count += 1
                     backoff = 2 ** (_retry_count - 1)
                     logger.warning(
-                        "Turn %d timed out after %ss (attempt %d/%d), "
-                        "retrying in %ds",
+                        "Turn %d timed out after %ss (attempt %d/%d), retrying in %ds",
                         state.turn,
                         self._turn_timeout_s,
                         _retry_count,
@@ -1129,7 +1147,11 @@ class AgentLoop:
                 if emitted is not None:
                     yield emitted
                     await self._post_emit(emitted)
-                if self._auto_complete and self._event_store is not None and session_id is not None:
+                if (
+                    self._auto_complete
+                    and self._event_store is not None
+                    and session_id is not None
+                ):
                     try:
                         await self._event_store.update_status(
                             session_id, SessionStatus.FAILED
@@ -1154,7 +1176,11 @@ class AgentLoop:
                     logger.warning(
                         "Transient error on turn %d (attempt %d/%d), "
                         "retrying in %ds: %s",
-                        state.turn, _retry_count, _max_retries, backoff, exc,
+                        state.turn,
+                        _retry_count,
+                        _max_retries,
+                        backoff,
+                        exc,
                     )
                     await asyncio.sleep(backoff)
                     state = state.replace(turn=state.turn - 1)
@@ -1196,7 +1222,8 @@ class AgentLoop:
                     ) and _retry_count < 1:
                         _retry_count += 1
                         logger.warning(
-                            "Output truncated on turn %d, retrying", state.turn,
+                            "Output truncated on turn %d, retrying",
+                            state.turn,
                         )
                         state = state.replace(turn=state.turn - 1)
                         continue
@@ -1215,7 +1242,11 @@ class AgentLoop:
                     yield emitted
                     await self._post_emit(emitted)
                 # Mark session failed
-                if self._auto_complete and self._event_store is not None and session_id is not None:
+                if (
+                    self._auto_complete
+                    and self._event_store is not None
+                    and session_id is not None
+                ):
                     try:
                         await self._event_store.update_status(
                             session_id, SessionStatus.FAILED
@@ -1367,7 +1398,11 @@ class AgentLoop:
                     yield emitted
                     await self._post_emit(emitted)
                 # Mark session completed
-                if self._auto_complete and self._event_store is not None and session_id is not None:
+                if (
+                    self._auto_complete
+                    and self._event_store is not None
+                    and session_id is not None
+                ):
                     try:
                         await self._event_store.update_status(
                             session_id, SessionStatus.COMPLETED
@@ -1417,7 +1452,9 @@ class AgentLoop:
                         kind=AgentEventKind.TOOL_CALL_FAILURE,
                         tool_name=result.tool,
                         tool_use_id=result.tool_use_id,
-                        tool_result=result.error.message if result.error else "Tool error",
+                        tool_result=result.error.message
+                        if result.error
+                        else "Tool error",
                         is_error=True,
                         turn=state.turn,
                         raw=result,
@@ -1503,9 +1540,15 @@ class AgentLoop:
             yield emitted
             await self._post_emit(emitted)
         # Mark session completed
-        if self._auto_complete and self._event_store is not None and session_id is not None:
+        if (
+            self._auto_complete
+            and self._event_store is not None
+            and session_id is not None
+        ):
             try:
-                await self._event_store.update_status(session_id, SessionStatus.COMPLETED)
+                await self._event_store.update_status(
+                    session_id, SessionStatus.COMPLETED
+                )
             except Exception:
                 logger.debug("Failed to mark session completed", exc_info=True)
 
@@ -1575,10 +1618,14 @@ class AgentLoop:
                 inner_tc = ToolCallInfo(
                     tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
                     name=recipient,
-                    input=cast(dict[str, Any], params) if isinstance(params, dict) else {},
+                    input=cast(dict[str, Any], params)
+                    if isinstance(params, dict)
+                    else {},
                     raw=use,
                 )
-                dedup_key = f"{inner_tc.name}|{json.dumps(inner_tc.input, sort_keys=True)}"
+                dedup_key = (
+                    f"{inner_tc.name}|{json.dumps(inner_tc.input, sort_keys=True)}"
+                )
                 if dedup_key in emitted_keys:
                     continue
                 emitted_keys.add(dedup_key)
@@ -1651,7 +1698,9 @@ class AgentLoop:
         """Run coroutines concurrently with a semaphore-based limit."""
         semaphore = asyncio.Semaphore(limit)
 
-        async def limited(coro: Coroutine[Any, Any, ToolResultEnvelope]) -> ToolResultEnvelope:
+        async def limited(
+            coro: Coroutine[Any, Any, ToolResultEnvelope],
+        ) -> ToolResultEnvelope:
             async with semaphore:
                 return await coro
 
@@ -1697,8 +1746,7 @@ class AgentLoop:
             err = ToolExecutionError(
                 type=ToolErrorType.UNAUTHORIZED,
                 message=(
-                    f"Tool '{tc.name}' not in allowlist. "
-                    f"Available tools: {allowed}"
+                    f"Tool '{tc.name}' not in allowlist. Available tools: {allowed}"
                 ),
                 safe_to_retry=False,
             )
@@ -1753,7 +1801,9 @@ class AgentLoop:
                 suggestions = ", ".join(f"`{m}`" for m in matches)
                 msg = f"Unknown tool: {tc.name}. Did you mean: {suggestions}?"
             else:
-                msg = f"Unknown tool: {tc.name}. Use one of: {', '.join(available[:15])}"
+                msg = (
+                    f"Unknown tool: {tc.name}. Use one of: {', '.join(available[:15])}"
+                )
             err = ToolExecutionError(
                 type=ToolErrorType.NOT_FOUND,
                 message=msg,
@@ -1821,8 +1871,7 @@ class AgentLoop:
                 props = spec.parameters.get("properties", {})
                 if required:
                     param_hints = ", ".join(
-                        f"`{p}` ({props.get(p, {}).get('type', '?')})"
-                        for p in required
+                        f"`{p}` ({props.get(p, {}).get('type', '?')})" for p in required
                     )
                     err = ToolExecutionError(
                         type=err.type,
@@ -1915,8 +1964,7 @@ class AgentLoop:
             if missing:
                 props = spec.parameters.get("properties", {})
                 hints = ", ".join(
-                    f"`{p}` ({props.get(p, {}).get('type', '?')})"
-                    for p in missing
+                    f"`{p}` ({props.get(p, {}).get('type', '?')})" for p in missing
                 )
                 raise TypeError(
                     f"{spec.name}() missing {len(missing)} required "
@@ -1938,8 +1986,7 @@ class AgentLoop:
             # here is a genuine bug, not a cross-agent compat issue.
             sig = inspect.signature(handler)
             if any(
-                p.kind == inspect.Parameter.VAR_KEYWORD
-                for p in sig.parameters.values()
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
             ):
                 raise
             accepted = {
@@ -2035,6 +2082,7 @@ class AgentLoop:
             """Encode as TOON (~40% fewer tokens), fall back to JSON."""
             try:
                 import toons
+
                 return toons.dumps(obj)
             except Exception:
                 return json.dumps(obj, default=str)
@@ -2054,9 +2102,7 @@ class AgentLoop:
             "retry_after_ms": result.error.retry_after_ms,
             "safe_to_retry": result.error.safe_to_retry,
         }
-        return _maybe_truncate_result(
-            _encode(payload), result.tool, result.tool_use_id
-        )
+        return _maybe_truncate_result(_encode(payload), result.tool, result.tool_use_id)
 
     @staticmethod
     def cleanup_result_cache(max_age_hours: int = 24) -> int:
@@ -2274,7 +2320,9 @@ class AgentLoop:
             if result is None:
                 # Emit an explicit error so the LLM knows the call had no result
                 logger.warning(
-                    "Tool result missing for %s (id=%s)", tc.name, tc.tool_use_id,
+                    "Tool result missing for %s (id=%s)",
+                    tc.name,
+                    tc.tool_use_id,
                 )
                 result_blocks.append(
                     ContentBlock(
@@ -2306,11 +2354,19 @@ class AgentLoop:
     def _is_context_too_long(exc: Exception) -> bool:
         """Check if an exception indicates the prompt/context is too large."""
         msg = str(exc).lower()
-        return any(pattern in msg for pattern in (
-            "prompt_too_long", "prompt too long", "prompt is too long",
-            "context_length_exceeded", "too many tokens",
-            "maximum context length", "request too large", "input too long",
-        ))
+        return any(
+            pattern in msg
+            for pattern in (
+                "prompt_too_long",
+                "prompt too long",
+                "prompt is too long",
+                "context_length_exceeded",
+                "too many tokens",
+                "maximum context length",
+                "request too large",
+                "input too long",
+            )
+        )
 
     async def _reactive_compact(
         self,
@@ -2365,7 +2421,9 @@ class AgentLoop:
 
         logger.warning(
             "Reactive compaction on turn %d: removed %d messages, kept %d",
-            state.turn, len(old), keep_count,
+            state.turn,
+            len(old),
+            keep_count,
         )
 
         return new_kwargs, new_state
@@ -2419,9 +2477,7 @@ class AgentLoop:
 
         new_kwargs = {**kwargs, "messages": [summary_msg] + keep}
         self._accumulated_chars = sum(
-            len(getattr(b, "text", "") or "")
-            for m in keep
-            for b in m.content
+            len(getattr(b, "text", "") or "") for m in keep for b in m.content
         )
         return new_kwargs, dropped_pairs, old_chars
 

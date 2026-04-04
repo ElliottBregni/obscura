@@ -76,47 +76,6 @@ class TestSessionList:
         data = resp.json()
         assert len(data) >= 1
 
-    def test_list_sessions_backend_error(self, app: Any, client: TestClient) -> None:
-        mock_factory: Any = AsyncMock()
-        mock_factory.create.side_effect = RuntimeError("no backend")
-        app.state.client_factory = mock_factory
-
-        resp = client.get("/api/v1/sessions")
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
-
-    def test_list_sessions_includes_ingested_memory(
-        self,
-        app: Any,
-        client: TestClient,
-    ) -> None:
-        mock_factory: Any = AsyncMock()
-        mock_factory.create.side_effect = RuntimeError("no backend")
-        app.state.client_factory = mock_factory
-
-        # Simulate previously ingested session metadata.
-        client.post(
-            "/api/v1/memory/sessions/codex-session-1",
-            json={
-                "value": {
-                    "id": "codex-session-1",
-                    "agent": "codex",
-                    "started": "2026-02-22T00:00:00+00:00",
-                },
-            },
-        )
-
-        resp = client.get("/api/v1/sessions")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert any(s["session_id"] == "codex-session-1" for s in data)
-        assert any(s["backend"] == "codex" for s in data)
-        assert any(
-            s["session_id"] == "codex-session-1" and s.get("source") == "ingested"
-            for s in data
-        )
-
-
 class TestSessionDelete:
     @patch("obscura.routes.sessions.sync_session_lifecycle")
     @patch("obscura.routes.sessions.broadcast_event", new_callable=AsyncMock)

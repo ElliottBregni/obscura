@@ -14,8 +14,9 @@ from obscura.providers.model_cache import (
     list_provider_models,
 )
 
+from obscura.auth.models import AuthenticatedUser
+
 if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
     from obscura.providers.registry import ModelInfo
 
 router = APIRouter(prefix="/api/v1", tags=["models"])

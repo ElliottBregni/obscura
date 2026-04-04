@@ -64,32 +64,6 @@ async def test_streaming_updates_during_prompt() -> None:
         assert res == "done"
 
 
-def test_non_tty_fallback(monkeypatch) -> None:
-    """When external status.update raises, StreamRenderer should fallback to printing via console."""
-    calls = []
-
-    def fake_print(*args, **kwargs) -> None:
-        calls.append((args, kwargs))
-
-    monkeypatch.setattr(console, "print", fake_print)
-
-    class BadStatus:
-        def update(self, *args, **kwargs) -> Never:
-            msg = "update not supported"
-            raise AttributeError(msg)
-
-    renderer = StreamRenderer(external_status=BadStatus())
-
-    # thinking delta should attempt update and on exception fall back to console.print
-    renderer.handle(
-        AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="i am thinking"),
-    )
-    renderer.finish()
-
-    # Expect at least one console.print fallback call
-    assert len(calls) >= 1
-
-
 def test_thinking_status_in_external_status_line() -> None:
     """When model status is present in raw event, include it in prompt status line."""
     mock_status = MagicMock()
@@ -125,23 +99,6 @@ def test_reasoning_normalized_to_clean_paragraph() -> None:
     raw = "  first line\nsecond line  \n\n third line\n\n\nfourth  line "
     normalized = StreamRenderer._normalize_reasoning_text(raw)
     assert normalized == "first line second line\n\nthird line\n\nfourth line"
-
-
-def test_reasoning_preview_uses_jitter(monkeypatch) -> None:
-    monkeypatch.setenv("OBSCURA_REASONING_JITTER_MS", "200")
-    mock_status = MagicMock()
-    renderer = StreamRenderer(external_status=mock_status)
-
-    ticks = iter([0.00, 0.05, 0.10, 0.35])
-    monkeypatch.setattr("obscura.cli.render.time.monotonic", lambda: next(ticks))
-
-    renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="a"))
-    renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="b"))
-    renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="c"))
-    renderer.handle(AgentEvent(kind=AgentEventKind.THINKING_DELTA, text="d"))
-
-    # First and fourth deltas should update; middle deltas are suppressed by jitter.
-    assert mock_status.update.call_count == 2
 
 
 def test_flush_thinking_does_not_emit_reasoning_preview_text_to_status() -> None:

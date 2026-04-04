@@ -103,6 +103,10 @@ def inject_subagent_context(
 # ---------------------------------------------------------------------------
 
 
+def _empty_action_map() -> dict[str, frozenset[str]]:
+    return {}
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     """Declarative policy controlling which tools an agent may invoke.
@@ -111,7 +115,8 @@ class ToolPolicy:
     1. ``full_access`` -- if True, allow everything.
     2. ``deny_list`` -- if the tool name matches, deny.
     3. ``allow_list`` -- if non-empty, only listed tools are allowed.
-    4. ``base_dir`` -- if set, file-system tools are restricted to this subtree.
+    4. ``allowed_actions`` / ``denied_actions`` -- action-level gating.
+    5. ``base_dir`` -- if set, file-system tools are restricted to this subtree.
     """
 
     name: str
@@ -119,6 +124,12 @@ class ToolPolicy:
     deny_list: frozenset[str] = field(default_factory=_empty_frozenset)
     base_dir: Path | None = None
     full_access: bool = False
+    allowed_actions: dict[str, frozenset[str]] = field(
+        default_factory=_empty_action_map,
+    )
+    denied_actions: dict[str, frozenset[str]] = field(
+        default_factory=_empty_action_map,
+    )
 
     @classmethod
     def from_permission_config(

@@ -184,6 +184,24 @@ class Supervisor:
         except Exception as exc:
             logger.debug("Could not register eval hooks: %s", exc)
 
+        # Register profile + goal context hooks
+        try:
+            from obscura.core.supervisor.profile_goal_hook import (
+                register_profile_goal_hooks,
+            )
+
+            # Best-effort user resolution for profile injection.
+            _user = None
+            try:
+                from obscura.auth.context import current_user
+
+                _user = current_user()
+            except Exception:
+                pass
+            register_profile_goal_hooks(hooks, user=_user)
+        except Exception as exc:
+            logger.debug("Could not register profile/goal hooks: %s", exc)
+
         # Memory gate
         memory_gate = MemoryCommitGate(
             db_path=self._db_path,
@@ -288,10 +306,11 @@ class Supervisor:
 
             heartbeat.update_state(SupervisorState.BUILDING_CONTEXT)
 
-            # Fire pre-build hooks
+            # Fire pre-build hooks (hooks may inject context via dict mutation)
+            hook_context: dict[str, Any] = {"prompt": prompt, "session_id": session_id}
             await hooks.fire_before(
                 SupervisorHookPoint.PRE_BUILD_CONTEXT,
-                {"prompt": prompt, "session_id": session_id},
+                hook_context,
             )
 
             # Freeze tool registry
@@ -369,6 +388,17 @@ class Supervisor:
                     assembler.set_section("tool_definitions", tool_defs)
             if session_history:
                 assembler.set_section("session_history", session_history)
+
+            # Inject hook-provided context sections (goal board, profile, vector memory).
+            for ctx_key, section_name in (
+                ("_goal_context", "goal_context"),
+                ("_profile_context", "profile_context"),
+                ("_vector_memory_context", "vector_memory_context"),
+            ):
+                ctx_value = hook_context.get(ctx_key)
+                if ctx_value:
+                    assembler.set_section(section_name, ctx_value)
+
             assembler.set_section("user_prompt", prompt)
 
             prompt_snapshot = assembler.freeze()
@@ -489,9 +519,7 @@ class Supervisor:
                             # Transition to RUNNING_TOOLS on tool calls
                             if sm.state == SupervisorState.RUNNING_MODEL:
                                 try:
-                                    t_evt = sm.transition(
-                                        SupervisorState.RUNNING_TOOLS
-                                    )
+                                    t_evt = sm.transition(SupervisorState.RUNNING_TOOLS)
                                     yield t_evt
                                     heartbeat.update_state(
                                         SupervisorState.RUNNING_TOOLS
@@ -502,9 +530,7 @@ class Supervisor:
                             # Transition back to RUNNING_MODEL on new turns
                             if sm.state == SupervisorState.RUNNING_TOOLS:
                                 try:
-                                    t_evt = sm.transition(
-                                        SupervisorState.RUNNING_MODEL
-                                    )
+                                    t_evt = sm.transition(SupervisorState.RUNNING_MODEL)
                                     yield t_evt
                                     heartbeat.update_state(
                                         SupervisorState.RUNNING_MODEL
@@ -525,9 +551,7 @@ class Supervisor:
                         observer.observe(sv_event)
                         yield sv_event
                 except Exception as loop_exc:
-                    logger.error(
-                        "Agent loop error in supervisor: %s", loop_exc
-                    )
+                    logger.error("Agent loop error in supervisor: %s", loop_exc)
                     yield SupervisorEvent(
                         kind=SupervisorEventKind.RUN_FAILED,
                         run_id=run_id,

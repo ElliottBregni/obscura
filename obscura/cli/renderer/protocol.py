@@ -1,8 +1,8 @@
 """obscura.cli.renderer.protocol — Abstract renderer interface.
 
-Defines the contract that all renderers (classic Rich-based and modern
-frame-buffered) must satisfy.  The REPL event loop calls ``handle()``
-for every ``AgentEvent`` and ``finish()`` at the end of a turn.
+Defines the contract that the renderer must satisfy.  The REPL event
+loop calls ``handle()`` for every ``AgentEvent`` and ``finish()`` at
+the end of a turn.
 """
 
 from __future__ import annotations

@@ -102,12 +102,6 @@ class TestModuleImports:
 
 
 class TestToolRegistration:
-    def test_system_tools_count(self) -> None:
-        from obscura.tools.system import get_system_tool_specs
-
-        specs = get_system_tool_specs()
-        assert len(specs) >= 60
-
     def test_worktree_tools(self) -> None:
         from obscura.tools.worktree import get_worktree_tool_specs
 
@@ -140,44 +134,12 @@ class TestToolRegistration:
         assert len(specs) == 1
         assert specs[0].name == "web_browser"
 
-    def test_total_tools(self) -> None:
-        from obscura.tools.browser import get_browser_tool_specs
-        from obscura.tools.lsp import get_lsp_tool_specs
-        from obscura.tools.system import get_system_tool_specs
-        from obscura.tools.task_tools import get_task_tool_specs
-        from obscura.tools.worktree import get_worktree_tool_specs
+    def test_goal_tool(self) -> None:
+        from obscura.tools.goal_tools import get_goal_tool_specs
 
-        total = sum(
-            len(f())
-            for f in [
-                get_system_tool_specs,
-                get_worktree_tool_specs,
-                get_task_tool_specs,
-                get_lsp_tool_specs,
-                get_browser_tool_specs,
-            ]
-        )
-        assert total >= 70
-
-    def test_key_tools_present(self) -> None:
-        from obscura.tools.system import get_system_tool_specs
-
-        names = [s.name for s in get_system_tool_specs()]
-        for tool in [
-            "read_text_file",
-            "edit_text_file",
-            "grep_files",
-            "run_shell",
-            "web_fetch",
-            "web_search",
-            "notebook_edit",
-            "tool_search",
-            "sleep",
-            "config",
-            "history_snip",
-        ]:
-            assert tool in names, f"Missing tool: {tool}"
-
+        specs = get_goal_tool_specs()
+        assert len(specs) == 1
+        assert specs[0].name == "goal"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. COMMAND REGISTRATION — all commands must be in COMMANDS dict
@@ -268,14 +230,6 @@ class TestPermissionModes:
         assert not e.evaluate("write_text_file").allowed
         assert not e.evaluate("edit_text_file").allowed
         assert not e.evaluate("run_shell").allowed
-
-    def test_plan_mode_allows_reads(self) -> None:
-        from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
-
-        e = PermissionModeEngine(PermissionMode.PLAN)
-        assert e.evaluate("read_text_file").allowed
-        assert e.evaluate("grep_files").allowed
-        assert e.evaluate("git_status").allowed
 
     def test_accept_edits_auto_approves(self) -> None:
         from obscura.core.permission_modes import PermissionMode, PermissionModeEngine

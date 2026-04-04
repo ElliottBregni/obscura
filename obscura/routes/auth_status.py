@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -11,8 +11,7 @@ from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.types import Backend
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 

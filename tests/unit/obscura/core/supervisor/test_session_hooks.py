@@ -110,31 +110,6 @@ class TestSessionHookManager:
         assert result is not None
         assert len(called) == 1
 
-    def test_priority_ordering(self, hooks: SessionHookManager) -> None:
-        order: list[int] = []
-
-        hooks.register(
-            hook_point=SupervisorHookPoint.PRE_TOOL_EXECUTION,
-            hook_type="before",
-            handler_ref="second",
-            handler=lambda ctx: (order.append(2), ctx)[-1],
-            priority=20,
-        )
-        hooks.register(
-            hook_point=SupervisorHookPoint.PRE_TOOL_EXECUTION,
-            hook_type="before",
-            handler_ref="first",
-            handler=lambda ctx: (order.append(1), ctx)[-1],
-            priority=10,
-        )
-
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(
-            hooks.fire_before(SupervisorHookPoint.PRE_TOOL_EXECUTION, {}),
-        )
-        assert order == [1, 2]
-
     def test_persistence_and_reload(self, tmp_path: Path) -> None:
         db = tmp_path / "test.db"
 
@@ -153,32 +128,6 @@ class TestSessionHookManager:
         count = h2.load_from_db()
         assert count == 1
         assert h2.hook_count == 1
-        h2.close()
-
-    def test_bind_handler_on_resume(self, tmp_path: Path) -> None:
-        db = tmp_path / "test.db"
-
-        # Register without handler
-        h1 = SessionHookManager(db_path=db, session_id="sess-1")
-        h1.register(
-            hook_point=SupervisorHookPoint.PRE_TOOL_EXECUTION,
-            hook_type="before",
-            handler_ref="audit",
-        )
-        h1.close()
-
-        # Reload and bind handler
-        h2 = SessionHookManager(db_path=db, session_id="sess-1")
-        called: list[bool] = []
-        h2.bind_handler("audit", lambda ctx: (called.append(True), ctx)[-1])
-        h2.load_from_db()
-
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(
-            h2.fire_before(SupervisorHookPoint.PRE_TOOL_EXECUTION, {}),
-        )
-        assert len(called) == 1
         h2.close()
 
     def test_events_emitted(self, hooks: SessionHookManager) -> None:

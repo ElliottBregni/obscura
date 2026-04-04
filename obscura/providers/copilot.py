@@ -56,7 +56,7 @@ _CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "list_directory",
         "grep_files",
         "find_files",
-        "git_status",
+        "git",
     },
 )
 

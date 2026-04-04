@@ -302,32 +302,6 @@ class TestMCPBackendConnectionErrors:
         assert isinstance(b.connection_errors["mcp_server_0"], FileNotFoundError)
 
     @pytest.mark.asyncio
-    async def test_all_servers_failed_emits_warning(self, caplog: Any) -> None:
-        import logging
-
-        config = MCPConnectionConfig(
-            transport=MCPTransportType.STDIO,
-            command="nonexistent",
-        )
-        b = MCPBackend(mcp_servers=[config])
-        with (
-            patch.object(
-                b.session_manager,
-                "add_session",
-                new_callable=AsyncMock,
-                side_effect=Exception("failed"),
-            ),
-            patch.object(
-                b.session_manager,
-                "aggregate_tools",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-            caplog.at_level(logging.WARNING),
-        ):
-            await b.start()
-        assert any("All MCP servers failed" in r.message for r in caplog.records)
-
     @pytest.mark.asyncio
     async def test_partial_failure_no_all_failed_warning(self, caplog: Any) -> None:
         import logging

@@ -20,6 +20,12 @@ Example usage::
         denied_tools=["file_write"]
     )
 
+    # Action-level restrictions on unified tools
+    policy = ToolPolicy(
+        allowed_tools=["git"],
+        allowed_actions={"git": frozenset({"status", "diff", "log"})},
+    )
+
     # From environment variable
     policy = ToolPolicy.from_env()
 """
@@ -27,11 +33,15 @@ Example usage::
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
+
+
+def _empty_action_map() -> dict[str, frozenset[str]]:
+    return {}
 
 
 @dataclass(frozen=True)
@@ -45,11 +55,17 @@ class ToolPolicy:
         allow_native: If False, blocks backend's built-in/native tools (default: False)
         allowed_tools: Whitelist of specific tool names (None = allow all registered)
         denied_tools: Blacklist of specific tool names to block
+        allowed_actions: Per-tool whitelist of allowed ``action`` parameter values.
+            When a tool appears in this map, only the listed actions are permitted.
+            Tools not in the map are unrestricted.
+        denied_actions: Per-tool blacklist of denied ``action`` parameter values.
+            When a tool appears in this map, the listed actions are blocked.
 
     The policy is applied in this order:
     1. If allow_native=False, native backend tools are blocked
     2. If allowed_tools is set, only those tools are available
     3. If denied_tools is set, those tools are removed from the allowed set
+    4. If allowed_actions/denied_actions is set, action parameter is checked
 
     Examples::
 
@@ -71,11 +87,23 @@ class ToolPolicy:
             denied_tools=["execute_code", "shell_exec"]
         )
 
+        # Allow git but only read actions
+        policy = ToolPolicy(
+            allowed_tools=["git"],
+            allowed_actions={"git": frozenset({"status", "diff", "log"})},
+        )
+
     """
 
     allow_native: bool = False
     allowed_tools: list[str] | None = None
     denied_tools: list[str] | None = None
+    allowed_actions: dict[str, frozenset[str]] = field(
+        default_factory=_empty_action_map,
+    )
+    denied_actions: dict[str, frozenset[str]] = field(
+        default_factory=_empty_action_map,
+    )
 
     # -- Factory methods ----------------------------------------------------
 
@@ -187,12 +215,20 @@ class ToolPolicy:
 
     # -- Utility methods ----------------------------------------------------
 
-    def is_tool_allowed(self, tool_name: str, is_native: bool = False) -> bool:
+    def is_tool_allowed(
+        self,
+        tool_name: str,
+        is_native: bool = False,
+        action: str | None = None,
+    ) -> bool:
         """Check if a specific tool is allowed by this policy.
 
         Args:
             tool_name: Name of the tool to check
             is_native: Whether this is a native backend tool
+            action: Optional action parameter value (for unified tools with
+                an ``action`` enum like ``git``).  When provided, the call is
+                also checked against ``allowed_actions`` / ``denied_actions``.
 
         Returns:
             True if the tool is allowed, False otherwise
@@ -202,6 +238,13 @@ class ToolPolicy:
             policy = ToolPolicy.custom_only()
             policy.is_tool_allowed("search", is_native=False)  # True
             policy.is_tool_allowed("native_tool", is_native=True)  # False
+
+            # Action-level check
+            policy = ToolPolicy(
+                allowed_actions={"git": frozenset({"status", "diff", "log"})},
+            )
+            policy.is_tool_allowed("git", action="status")  # True
+            policy.is_tool_allowed("git", action="push")    # False
 
         """
         # Check native tool restriction
@@ -213,10 +256,18 @@ class ToolPolicy:
             return False
 
         # Check allowed list
-        if self.allowed_tools:
-            return tool_name in self.allowed_tools
+        if self.allowed_tools and tool_name not in self.allowed_tools:
+            return False
 
-        # If no allowed list specified, allow by default (unless denied above)
+        # Check action-level restrictions
+        if action is not None:
+            if tool_name in self.denied_actions:
+                if action in self.denied_actions[tool_name]:
+                    return False
+            if tool_name in self.allowed_actions:
+                if action not in self.allowed_actions[tool_name]:
+                    return False
+
         return True
 
     def filter_tools(
@@ -276,6 +327,33 @@ class ToolPolicy:
         # only the filtered tool names are available to the model.
         if not self.allow_native:
             config["allowed_tools"] = [t.name for t in filtered_tools]
+
+    def apply_to_openai(self, config: dict[str, Any], tools: list[ToolSpec]) -> None:
+        """Apply this ToolPolicy to OpenAI backend options in-place.
+
+        Filters the tools list through the policy and stores the result.
+        """
+        if not tools:
+            return
+
+        filtered = self.filter_tools(tools)
+        config["tools"] = filtered
+
+    def apply_to_claude(self, config: dict[str, Any], tools: list[ToolSpec]) -> None:
+        """Apply this ToolPolicy to Claude backend options in-place.
+
+        Claude uses MCP-style naming (``mcp__obscura_tools__<name>``), so
+        the allowed-tools list is mapped accordingly.
+        """
+        if not tools:
+            return
+
+        if self.allow_native and not self.denied_tools and not self.allowed_tools:
+            # allow_all — no restriction needed
+            return
+
+        filtered = self.filter_tools(tools)
+        config["allowed_tools"] = [f"mcp__obscura_tools__{t.name}" for t in filtered]
 
     def __repr__(self) -> str:
         """String representation for debugging."""

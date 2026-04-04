@@ -152,7 +152,6 @@ class ToolRegistry:
             "filesystem_delete": "remove_path",
             "filesystem_remove": "remove_path",
             # web search
-            "websearch": "web_search",
             "searchweb": "web_search",
             "search_web": "web_search",
             "google": "web_search",
@@ -177,12 +176,14 @@ class ToolRegistry:
             "download": "download_file",
             "wget": "download_file",
             "save_url": "download_file",
-            # git
-            "gitstatus": "git_status",
-            "gitdiff": "git_diff",
-            "gitlog": "git_log",
-            "gitcommit": "git_commit",
-            "gitbranch": "git_branch",
+            # git — hallucinated name variants → unified tool
+            "gitstatus": "git",
+            "gitdiff": "git",
+            "gitlog": "git",
+            "gitcommit": "git",
+            "gitbranch": "git",
+            "gitpush": "git",
+            "gittag": "git",
             # clipboard
             "clipboard": "clipboard_read",
             "paste": "clipboard_read",
@@ -223,11 +224,20 @@ class ToolRegistry:
             "plan": "todo_write",
             "think": "todo_write",
             "reasoning": "todo_write",
-            # copilot
-            "copilot": "copilot_query",
-            "gpt5": "copilot_query",
-            "gpt5_mini": "copilot_query",
-            "ask_copilot": "copilot_query",
+            # removed tools → fallback aliases
+            "run_npx": "run_shell",
+            "npx": "run_shell",
+            "manage_crontab": "run_shell",
+            "security_lookup": "run_shell",
+            "discover_all_commands": "which_command",
+            "sleep": "todo_write",
+            # copilot (removed — alias to run_shell for backwards compat)
+            "copilot": "run_shell",
+            "gpt5": "run_shell",
+            "gpt5_mini": "run_shell",
+            "ask_copilot": "run_shell",
+            "copilot_query": "run_shell",
+            "read_team_prompt": "read_text_file",
             # memory
             "remember": "store_searchable",
             "save_memory": "store_searchable",
@@ -532,7 +542,7 @@ def tool(
 
 
 def _traced_tool_call(
-    tool_name: str,
+    _trace_name: str,
     fn: Callable[..., Any],
     *args: Any,
     **kwargs: Any,
@@ -547,15 +557,15 @@ def _traced_tool_call(
 
     import time
 
-    with tracer.start_as_current_span(f"tool.{tool_name}") as span:
-        span.set_attribute("tool.name", tool_name)
+    with tracer.start_as_current_span(f"tool.{_trace_name}") as span:
+        span.set_attribute("tool.name", _trace_name)
         start = time.monotonic()
         try:
             result = fn(*args, **kwargs)
-            _record_tool_metric(tool_name, "success", time.monotonic() - start)
+            _record_tool_metric(_trace_name, "success", time.monotonic() - start)
             return result
         except Exception as exc:
-            _record_tool_metric(tool_name, "error", time.monotonic() - start)
+            _record_tool_metric(_trace_name, "error", time.monotonic() - start)
             try:
                 from opentelemetry.trace import StatusCode
 
@@ -567,7 +577,7 @@ def _traced_tool_call(
 
 
 async def _traced_tool_call_async(
-    tool_name: str,
+    _trace_name: str,
     fn: Callable[..., Any],
     *args: Any,
     **kwargs: Any,
@@ -582,15 +592,15 @@ async def _traced_tool_call_async(
 
     import time
 
-    with tracer.start_as_current_span(f"tool.{tool_name}") as span:
-        span.set_attribute("tool.name", tool_name)
+    with tracer.start_as_current_span(f"tool.{_trace_name}") as span:
+        span.set_attribute("tool.name", _trace_name)
         start = time.monotonic()
         try:
             result = await fn(*args, **kwargs)
-            _record_tool_metric(tool_name, "success", time.monotonic() - start)
+            _record_tool_metric(_trace_name, "success", time.monotonic() - start)
             return result
         except Exception as exc:
-            _record_tool_metric(tool_name, "error", time.monotonic() - start)
+            _record_tool_metric(_trace_name, "error", time.monotonic() - start)
             try:
                 from opentelemetry.trace import StatusCode
 

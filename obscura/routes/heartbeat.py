@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import Annotated, Any, cast
 
 from fastapi import (
     APIRouter,
@@ -19,8 +19,7 @@ from fastapi.responses import JSONResponse
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit, authenticate_websocket
 
-if TYPE_CHECKING:
-    from obscura.auth.models import AuthenticatedUser
+from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["heartbeat"])
 

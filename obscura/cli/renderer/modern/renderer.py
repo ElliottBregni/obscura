@@ -27,17 +27,18 @@ from typing import Any
 
 from obscura.cli.renderer.modern.layout import BorderStyle
 from obscura.cli.renderer.modern.theme import (
+    ERROR_COLOR,
     MUTED,
-    OK_COLOR,
     RESET,
     STYLE_ACCENT,
     STYLE_DEFAULT,
     STYLE_DIM,
     STYLE_ERROR,
+    STYLE_OK,
     STYLE_THINKING,
-    STYLE_TOOL,
     STYLE_WARN,
     THINKING_COLOR,
+    TOOL_COLOR,
     Style,
 )
 from obscura.cli.renderer.modern.layout import get_border_chars
@@ -50,6 +51,11 @@ from obscura.core.types import AgentEvent, AgentEventKind
 
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _PULSE_COLORS = [201, 165, 129, 93, 129, 165]
+
+import platform as _platform
+
+_BLACK_CIRCLE = "⏺" if _platform.system() == "Darwin" else "●"
+_HOOK = "⎿"  # Claude Code's assistant response prefix
 _ERASE_LINE = "\033[2K"
 _CURSOR_UP = "\033[A"
 _HIDE_CURSOR = "\033[?25l"
@@ -179,9 +185,16 @@ class ModernRenderer:
             case AgentEventKind.ERROR:
                 self._flush_all()
                 self._stop_spinner()
-                self._commit_lines([_styled(f"  error: {_sanitize(event.text)}", STYLE_ERROR)])
+                self._commit_lines(
+                    [
+                        _styled(f"  {_HOOK}  ", STYLE_DIM)
+                        + _styled(f"error: {_sanitize(event.text)}", STYLE_ERROR),
+                    ]
+                )
             case AgentEventKind.CONTEXT_COMPACT:
-                self._commit_lines([_styled(f"  ⚡ {_sanitize(event.text)}", STYLE_WARN)])
+                self._commit_lines(
+                    [_styled(f"  ⚡ {_sanitize(event.text)}", STYLE_WARN)]
+                )
             case _:
                 pass
 
@@ -252,15 +265,23 @@ class ModernRenderer:
         self._flush_all()
         try:
             from obscura.cli.tool_summaries import summarize_tool_call
+
             summary = summarize_tool_call(event.tool_name, event.tool_input)
         except Exception:
             summary = f"{event.tool_name}()"
 
-        self._commit_lines([
-            "",
-            _styled(f"  ▶ {_sanitize(summary)}", STYLE_TOOL),
-        ])
-        self._start_spinner(f"running {_sanitize(summary)}")
+        tool_name = _sanitize(event.tool_name or "")
+        self._commit_lines(
+            [
+                "",
+                (
+                    _styled(f"  {_BLACK_CIRCLE} ", Style(fg=TOOL_COLOR))
+                    + _styled(tool_name, Style(fg=TOOL_COLOR, bold=True))
+                    + _styled(f"  {_sanitize(summary)}", Style(fg=MUTED))
+                ),
+            ]
+        )
+        self._start_spinner(f"{_sanitize(summary)}")
 
     def _handle_tool_result(self, event: AgentEvent) -> None:
         self._stop_spinner()
@@ -275,23 +296,41 @@ class ModernRenderer:
         raw = event.tool_result or ""
         if event.is_error:
             snippet = _sanitize(raw[:200]).replace("\n", " ")
-            self._commit_lines([_styled(f"  ✘ {snippet}", STYLE_ERROR)])
+            self._commit_lines(
+                [
+                    _styled("  ✗ ", STYLE_ERROR)
+                    + _styled(snippet, Style(fg=ERROR_COLOR, dim=True)),
+                ]
+            )
         else:
             snippet = _sanitize(raw[:120]).replace("\n", " ")
             if len(snippet) > 80:
                 snippet = snippet[:77] + "..."
-            self._commit_lines([_styled(f"  ✔ {snippet}", Style(fg=OK_COLOR, dim=True))])
+            self._commit_lines(
+                [
+                    _styled("  ✓ ", STYLE_OK)
+                    + _styled(snippet, Style(fg=MUTED, dim=True)),
+                ]
+            )
 
     # ── Flush helpers ─────────────────────────────────────────────────────
 
     def _flush_text(self) -> None:
         """Commit streaming text permanently."""
         self._erase_live_region()
-        # Snap reveal to end
         full_text = "".join(self._stream_buf)
         if full_text.strip():
-            rule = _styled("─" * self._width, Style(fg=MUTED, dim=True))
-            lines = [rule] + _wrap(_sanitize(full_text), self._width)
+            w = self._width
+            # Indent response under the ⎿ hook (like Claude Code)
+            hook_prefix = _styled(f"  {_HOOK}  ", STYLE_DIM)
+            content_lines = _wrap(_sanitize(full_text), max(1, w - 5))
+            lines: list[str] = []
+            for i, cl in enumerate(content_lines):
+                if i == 0:
+                    lines.append(hook_prefix + cl)
+                else:
+                    lines.append("     " + cl)
+            lines.append("")
             self._commit_lines(lines)
         self._stream_buf.clear()
         self._reveal_pos = 0
@@ -303,7 +342,9 @@ class ModernRenderer:
             text = "".join(self._thinking_buf).strip()
             if text:
                 self._thinking_blocks.append(_sanitize(text))
-                panel_lines = self._render_thinking_panel(_sanitize(text), committed=True)
+                panel_lines = self._render_thinking_panel(
+                    _sanitize(text), committed=True
+                )
                 self._commit_lines(panel_lines)
             self._thinking_buf.clear()
         self._in_thinking = False
@@ -342,10 +383,7 @@ class ModernRenderer:
         """Erase the live region by moving cursor up and clearing lines."""
         if self._live_lines_count > 0:
             # Move up and erase each line
-            self._write(
-                (_CURSOR_UP + _ERASE_LINE) * self._live_lines_count
-                + "\r"
-            )
+            self._write((_CURSOR_UP + _ERASE_LINE) * self._live_lines_count + "\r")
             self._live_lines_count = 0
 
     def _build_live_region(self) -> list[str]:
@@ -358,7 +396,8 @@ class ModernRenderer:
             preview_text = "".join(self._thinking_buf).strip()
             if preview_text:
                 panel = self._render_thinking_panel(
-                    _sanitize(preview_text), committed=False,
+                    _sanitize(preview_text),
+                    committed=False,
                 )
                 lines.extend(panel)
 
@@ -366,23 +405,31 @@ class ModernRenderer:
         full_text = "".join(self._stream_buf)
         if full_text:
             revealed = _sanitize(full_text[: self._reveal_pos])
-            wrapped = _wrap(revealed, w)
+            wrapped = _wrap(revealed, max(1, w - 5))
             if wrapped:
-                # Rule above text
-                lines.append(_styled("─" * w, Style(fg=MUTED, dim=True)))
-                for line_text in wrapped:
-                    lines.append(line_text)
+                hook_prefix = _styled(f"  {_HOOK}  ", STYLE_DIM)
+                for i, line_text in enumerate(wrapped):
+                    if i == 0:
+                        lines.append(hook_prefix + line_text)
+                    else:
+                        lines.append("     " + line_text)
                 # Blinking cursor at the reveal edge
                 if self._reveal_pos < len(full_text) and self._cursor_visible:
                     if wrapped:
                         last = wrapped[-1]
+                        pad = "     " if len(wrapped) > 1 else hook_prefix
                         cursor_col = len(last)
-                        if cursor_col < w:
-                            # Replace last line to add cursor
-                            lines[-1] = last + _styled("▌", STYLE_ACCENT)
+                        if cursor_col < (w - 5):
+                            lines[-1] = (
+                                (pad if len(wrapped) > 1 else hook_prefix)
+                                + last
+                                + _styled("▌", STYLE_ACCENT)
+                            )
 
         # 3. Session status bar (shown during active streaming/thinking)
-        if (self._spinner_visible or self._in_thinking or self._stream_buf) and self._session_title:
+        if (
+            self._spinner_visible or self._in_thinking or self._stream_buf
+        ) and self._session_title:
             status_parts: list[str] = []
             if self._session_title:
                 status_parts.append(self._session_title)
@@ -461,9 +508,7 @@ class ModernRenderer:
                 + _styled(f" {v_char}", border_s)
             )
         # Bottom border
-        lines.append(
-            _styled(bl + h_char * (w - 2) + br, border_s)
-        )
+        lines.append(_styled(bl + h_char * (w - 2) + br, border_s))
         return lines
 
     def _draw_live_region(self) -> None:
@@ -588,5 +633,6 @@ class ModernRenderer:
     def _get_tool_registry(self) -> Any:
         if self._tool_registry is None:
             from obscura.cli.renderer.modern.tool_renderers import ToolRendererRegistry
+
             self._tool_registry = ToolRendererRegistry()
         return self._tool_registry

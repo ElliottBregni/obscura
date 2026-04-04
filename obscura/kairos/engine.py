@@ -1,4 +1,4 @@
-"""obscura.kairos.engine — KAIROS daemon engine.
+"""obscura.kairos.engine  KAIROS daemon engine.
 
 The main orchestrator for KAIROS mode: combines daily logging,
 proactive ticks, dream consolidation, and background monitoring
@@ -63,7 +63,7 @@ def is_kairos_enabled() -> bool:
     """Check if KAIROS mode is enabled (default: on).
 
     Resolution order (opt-out):
-      1) ~/.obscura/settings.json → key "kairos.enabled"
+      1) ~/.obscura/settings.json -> key "kairos.enabled"
       2) OBSCURA_KAIROS env var
       3) default True
     """
@@ -76,7 +76,7 @@ def set_kairos_mode(enabled: bool) -> None:
 
 
 class KairosEngine:
-    """KAIROS daemon engine — watches, logs, and acts autonomously.
+    """KAIROS daemon engine.
 
     Combines:
       - Daily append-only logging
@@ -191,11 +191,11 @@ class KairosEngine:
 
     def log_tool_use(self, tool_name: str, args_summary: str) -> None:
         """Log a tool invocation to the daily log."""
-        self.log(f"tool:{tool_name} — {args_summary}", source="tool")
+        self.log(f"tool:{tool_name} \u2014 {args_summary}", source="tool")
 
     def log_user_message(self, message_preview: str) -> None:
         """Log a user message to the daily log."""
-        preview = message_preview[:100].replace("\n", " ")
+        preview = message_preview[:100].replace("\\n", " ")
         self.log(f"user: {preview}", source="user")
 
     def log_agent_event(self, event_kind: str, detail: str = "") -> None:
@@ -203,22 +203,12 @@ class KairosEngine:
         self.log(f"event:{event_kind} {detail}".strip(), source="agent")
 
     def register_agent_loop(self, loop: object) -> None:
-        """Attach the active AgentLoop for proactive tick injection.
-
-        Call this after the ObscuraClient/AgentLoop has started. The loop's
-        ``inject_user_input()`` will receive ``<tick>`` messages on each
-        proactive tick so the model can act within the 15s blocking budget.
-        """
+        """Attach the active AgentLoop for proactive tick injection."""
         self._active_loop = loop
         logger.debug("KairosEngine: AgentLoop registered for tick injection")
 
     def _on_proactive_tick(self, tick_count: int) -> None:
-        """Callback fired by ProactiveMode on each tick.
-
-        Injects a ``<tick>`` prompt into the active AgentLoop so the model
-        can take a proactive action without waiting for user input.
-        Includes the top-priority goal hint so the model has fresh context.
-        """
+        """Callback fired by ProactiveMode on each tick."""
         loop = self._active_loop
         if loop is None:
             return
@@ -230,7 +220,7 @@ class KairosEngine:
                     from obscura.kairos.goals import GoalBoard
 
                     top = GoalBoard().active_goals()
-                    top = [g for g in top if not g.is_blocked][:1]
+                    top = [g for g in top if not g.is_blocked()][:1]
                     if top:
                         goal_hint = f" focus={top[0].id}({top[0].progress}%)"
                 except Exception:
@@ -258,8 +248,8 @@ class KairosEngine:
     def get_system_prompt_addition(self) -> str:
         """Return KAIROS system prompt additions (including undercover instructions)."""
         parts = [
-            "# KAIROS Mode Active\n",
-            "You are in KAIROS mode — an autonomous background daemon.",
+            "# KAIROS Mode Active\\n",
+            "You are in KAIROS mode \u2014 an autonomous background daemon.",
             "You maintain daily logs of observations and can act proactively.",
             "",
             "Behaviors:",
@@ -269,6 +259,37 @@ class KairosEngine:
             "- Respect the 15-second blocking budget for proactive actions",
             "- Work toward active goals on the goal board",
         ]
+
+        # Inject user profile summary (prefer vector-backed, fall back to markdown).
+        profile_injected = False
+        try:
+            from obscura.auth.context import current_user
+            from obscura.profile.builder import ProfileBuilder
+            from obscura.profile.store import ProfileStore
+
+            user = current_user()
+            profile_store = ProfileStore.for_user(user)
+            builder = ProfileBuilder()
+            profile_summary = builder.build_summary(profile_store, max_tokens=400)
+            if profile_summary:
+                parts.append("")
+                parts.append("## User Profile")
+                parts.append(profile_summary)
+                profile_injected = True
+        except Exception:
+            pass
+
+        if not profile_injected:
+            try:
+                from obscura.kairos.user_profile import UserProfile
+
+                profile_summary = UserProfile().active_summary(max_lines=15)
+                if profile_summary:
+                    parts.append("")
+                    parts.append("## User Profile")
+                    parts.append(profile_summary)
+            except Exception:
+                pass
 
         # Inject active goal summary.
         try:
@@ -301,7 +322,7 @@ class KairosEngine:
         except Exception:
             pass
 
-        return "\n".join(parts)
+        return "\\n".join(parts)
 
     def status(self) -> dict[str, object]:
         """Return engine status for diagnostics."""

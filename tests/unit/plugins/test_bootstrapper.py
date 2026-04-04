@@ -125,13 +125,10 @@ class TestIsPipInstalled:
 
     def test_strips_version_specifiers(self) -> None:
         """Handles packages like 'pkg>=1.0' or 'pkg[extra]'."""
-
-        def fake_import(name, *args, **kwargs):
-            if name == "my_pkg":
-                return MagicMock()
-            raise ImportError
-
-        with patch("builtins.__import__", side_effect=fake_import):
+        with (
+            patch("subprocess.run", return_value=_proc(returncode=0)),
+            patch("obscura.plugins.bootstrapper.shutil.which", return_value="/usr/bin/uv"),
+        ):
             assert _is_pip_installed("my-pkg>=1.0") is True
             assert _is_pip_installed("my-pkg[extra]") is True
             assert _is_pip_installed("my-pkg==2.0") is True
@@ -246,7 +243,7 @@ class TestInstallUv:
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
     def test_uv_already_installed_stderr(self, mock_run, mock_binary) -> None:
-        """'already installed' in stderr → still True."""
+        """'already installed' in stderr with rc=1 → False (no special handling)."""
         mock_binary.return_value = True
         mock_run.return_value = _proc(
             returncode=1,
@@ -254,46 +251,26 @@ class TestInstallUv:
         )
         dep = _dep("uv", "ruff")
         ok, _err = _install_uv(dep)
-        assert ok is True
+        assert ok is False
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
-    def test_uv_executable_already_exists_retries_force(
+    def test_uv_executable_already_exists_returns_error(
         self,
         mock_run,
         mock_binary,
     ) -> None:
-        """'Executable already exists' → retry with --force."""
+        """'Executable already exists' → returns error (no retry)."""
         mock_binary.return_value = True
-        first_call = _proc(
+        mock_run.return_value = _proc(
             returncode=1,
             stderr="error: Executable already exists: ruff (use `--force` to overwrite)",
         )
-        second_call = _proc(returncode=0)
-        mock_run.side_effect = [first_call, second_call]
-        dep = _dep("uv", "ruff")
-        ok, err = _install_uv(dep)
-        assert ok is True
-        assert err == ""
-        assert mock_run.call_count == 2
-        retry_cmd = mock_run.call_args_list[1][0][0]
-        assert "--force" in retry_cmd
-
-    @patch("obscura.plugins.bootstrapper._is_binary_available")
-    @patch("subprocess.run")
-    def test_uv_executable_exists_force_also_fails(self, mock_run, mock_binary) -> None:
-        """'Executable already exists' + --force retry also fails → error."""
-        mock_binary.return_value = True
-        first_call = _proc(
-            returncode=1,
-            stderr="error: Executable already exists: ruff (use `--force` to overwrite)",
-        )
-        second_call = _proc(returncode=1, stderr="force install failed")
-        mock_run.side_effect = [first_call, second_call]
         dep = _dep("uv", "ruff")
         ok, err = _install_uv(dep)
         assert ok is False
-        assert "force install failed" in err
+        assert "Executable already exists" in err
+        assert mock_run.call_count == 1
 
     @patch("obscura.plugins.bootstrapper._is_binary_available")
     @patch("subprocess.run")
@@ -520,11 +497,10 @@ class TestRunBootstrap:
         spec = _make_spec(bootstrap=bs)
         result = run_bootstrap(spec)
         assert result.ok is True
-        # post_install should have been called (shell=True)
+        # post_install should have been called via shlex.split
         calls = mock_run.call_args_list
         assert any(
-            c.kwargs.get("shell") is True
-            or (len(c.args) > 0 and c.args[0] == "echo done")
+            len(c.args) > 0 and c.args[0] == ["echo", "done"]
             for c in calls
         )
 
@@ -532,9 +508,14 @@ class TestRunBootstrap:
     @patch("subprocess.run")
     def test_post_install_failure_adds_warning(self, mock_run, _mock_check) -> None:
         """post_install failure adds a warning but ok stays True."""
+        call_count = 0
 
         def side_effect(*args, **kwargs):
-            if kwargs.get("shell"):
+            nonlocal call_count
+            call_count += 1
+            # First call(s) are pip install; last call is post_install
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd == ["failing-cmd"]:
                 return _proc(returncode=1, stderr="post fail")
             return _proc(returncode=0)
 
@@ -563,15 +544,9 @@ class TestRunBootstrap:
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run")
     def test_check_command_failure_adds_warning(self, mock_run, _mock_check) -> None:
-        call_count = 0
-
         def side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if kwargs.get("shell") and "check" in str(args):
-                return _proc(returncode=1, stderr="check fail")
-            # For pip install and shell check_command (can't distinguish by args alone)
-            if kwargs.get("shell"):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd == ["pkg", "--version"]:
                 return _proc(returncode=1, stderr="check fail")
             return _proc(returncode=0)
 

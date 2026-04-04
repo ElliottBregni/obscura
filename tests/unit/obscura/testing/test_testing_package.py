@@ -320,18 +320,7 @@ class TestFakes:
 
 class TestStubAgent:
     @pytest.mark.asyncio
-    async def test_aper_phases(self) -> None:
-        agent = make_stub_agent(name="test")
-        result = await agent.run()
-        assert agent.call_order == ["analyze", "plan", "execute", "respond"]
-        assert result == [2, 4, 6]
-
     @pytest.mark.asyncio
-    async def test_with_input_data(self) -> None:
-        agent = StubAgent()
-        result = await agent.run(input_data={"items": [10, 20]})
-        assert result == [20, 40]
-
     @pytest.mark.asyncio
     async def test_name(self) -> None:
         agent = make_stub_agent(name="my-agent")

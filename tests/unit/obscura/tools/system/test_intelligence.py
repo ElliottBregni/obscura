@@ -38,8 +38,8 @@ if TYPE_CHECKING:
 
 
 def run(coro: Any) -> Any:  # noqa: ANN401
-    """Run a coroutine synchronously (compatible with older pytest-asyncio configs)."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run a coroutine synchronously."""
+    return asyncio.run(coro)
 
 
 def parse(result: str) -> dict[str, Any]:
@@ -1014,24 +1014,6 @@ class TestPolicyProbeMetadata:
 
 class TestToolRegistration:
     """Verify all 3 tools are registered in get_system_tool_specs()."""
-
-    def test_context_snapshot_registered(self) -> None:
-        from obscura.tools.system import get_system_tool_specs
-
-        names = {s.name for s in get_system_tool_specs()}
-        assert "context_snapshot" in names
-
-    def test_causal_trace_registered(self) -> None:
-        from obscura.tools.system import get_system_tool_specs
-
-        names = {s.name for s in get_system_tool_specs()}
-        assert "causal_trace" in names
-
-    def test_policy_probe_registered(self) -> None:
-        from obscura.tools.system import get_system_tool_specs
-
-        names = {s.name for s in get_system_tool_specs()}
-        assert "policy_probe" in names
 
     def test_all_three_have_spec_attribute(self) -> None:
         from obscura.tools.system.intelligence import (

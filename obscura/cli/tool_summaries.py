@@ -99,13 +99,6 @@ def _run_cmd(a: dict[str, Any]) -> str:
     return f"$ {_trunc(full, 60)}" if full else "Running command"
 
 
-def _run_npx(a: dict[str, Any]) -> str:
-    cmd = str(a.get("command", ""))
-    args = a.get("args", [])
-    full = f"npx {cmd} {' '.join(str(x) for x in args[:3])}".strip()
-    return f"$ {_trunc(full, 60)}" if full else "$ npx"
-
-
 def _python(a: dict[str, Any]) -> str:
     code = str(a.get("code", ""))
     first = code.strip().split("\n")[0]
@@ -122,26 +115,17 @@ def _web_search(a: dict[str, Any]) -> str:
     return f"Searching web for '{q}'" if q else "Searching web"
 
 
-def _git_status(_a: dict[str, Any]) -> str:
-    return "git status"
-
-
-def _git_diff(a: dict[str, Any]) -> str:
-    ref = a.get("ref", "")
-    return f"git diff {ref}".strip() if ref else "git diff"
-
-
-def _git_log(_a: dict[str, Any]) -> str:
-    return "git log"
-
-
-def _git_commit(a: dict[str, Any]) -> str:
-    msg = str(a.get("message", ""))
-    return f'git commit -m "{_trunc(msg, 40)}"' if msg else "git commit"
-
-
-def _git_branch(_a: dict[str, Any]) -> str:
-    return "git branch"
+def _git(a: dict[str, Any]) -> str:
+    sub = str(a.get("subcommand", "")).strip()
+    if not sub:
+        return "git"
+    if sub == "commit":
+        msg = str(a.get("message", ""))
+        return f'git commit -m "{_trunc(msg, 40)}"' if msg else "git commit"
+    if sub == "diff":
+        ref = a.get("ref", "")
+        return f"git diff {ref}".strip() if ref else "git diff"
+    return f"git {sub}"
 
 
 def _task(a: dict[str, Any]) -> str:
@@ -204,17 +188,8 @@ def _todo(_a: dict[str, Any]) -> str:
     return "Updating todos"
 
 
-def _copilot_query(a: dict[str, Any]) -> str:
-    q = str(a.get("prompt") or a.get("query", ""))
-    return f"Asking Copilot: {_trunc(q, 40)}" if q else "Querying Copilot"
-
-
 def _which(_a: dict[str, Any]) -> str:
     return "Resolving command path"
-
-
-def _discover_cmds(_a: dict[str, Any]) -> str:
-    return "Discovering commands"
 
 
 def _get_env(_a: dict[str, Any]) -> str:
@@ -237,16 +212,6 @@ def _signal_proc(a: dict[str, Any]) -> str:
 
 def _list_ports(_a: dict[str, Any]) -> str:
     return "Listing listening ports"
-
-
-def _security_lookup(a: dict[str, Any]) -> str:
-    q = str(a.get("query", ""))
-    return f"Security lookup: {_trunc(q, 40)}" if q else "Security lookup"
-
-
-def _manage_crontab(a: dict[str, Any]) -> str:
-    action = a.get("action", "list")
-    return f"Crontab {action}"
 
 
 def _json_query(a: dict[str, Any]) -> str:
@@ -311,8 +276,6 @@ _SUMMARIES: dict[str, Any] = {
     # Execution
     "run_shell": _shell,
     "run_command": _run_cmd,
-    "run_npx": _run_npx,
-    "run_python": _python,
     "run_python3": _python,
     "code_sandbox": _code_sandbox,
     # Web
@@ -321,25 +284,17 @@ _SUMMARIES: dict[str, Any] = {
     "download_file": _download,
     "http_request": _http_req,
     # Git
-    "git_status": _git_status,
-    "git_diff": _git_diff,
-    "git_log": _git_log,
-    "git_commit": _git_commit,
-    "git_branch": _git_branch,
+    "git": _git,
     # Agents / tasks
     "task": _task,
-    "copilot_query": _copilot_query,
     # System
     "which_command": _which,
-    "discover_all_commands": _discover_cmds,
     "get_environment": _get_env,
     "get_system_info": _sys_info,
     "list_processes": _list_procs,
     "signal_process": _signal_proc,
     "list_listening_ports": _list_ports,
     "list_unix_capabilities": _list_unix,
-    "security_lookup": _security_lookup,
-    "manage_crontab": _manage_crontab,
     # Clipboard
     "clipboard_read": _clipboard_read,
     "clipboard_write": _clipboard_write,

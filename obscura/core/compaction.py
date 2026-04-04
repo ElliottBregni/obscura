@@ -159,18 +159,14 @@ def snip_tool_outputs(
                 if text:
                     tok = estimate_tokens(text)
                     if tok > threshold_tokens:
-                        truncated, _ = truncate_to_token_budget(
-                            text, threshold_tokens
-                        )
+                        truncated, _ = truncate_to_token_budget(text, threshold_tokens)
                         freed = tok - estimate_tokens(truncated)
                         tokens_freed += freed
                         snipped_count += 1
                         snip_marker = (
                             f"\n\n[snipped: {tok:,} -> {tok - freed:,} tokens]"
                         )
-                        new_block = _rebuild_block_text(
-                            block, truncated + snip_marker
-                        )
+                        new_block = _rebuild_block_text(block, truncated + snip_marker)
                         new_blocks.append(new_block)
                         msg_changed = True
                         logger.debug(
@@ -660,9 +656,7 @@ async def extract_memories(
         elif hasattr(backend, "chat"):
             result = await backend.chat([{"role": "user", "content": prompt}])
             if isinstance(result, dict):
-                result_text = str(
-                    result.get("content", result.get("text", ""))
-                ).strip()
+                result_text = str(result.get("content", result.get("text", ""))).strip()
             else:
                 result_text = str(result).strip()
 
