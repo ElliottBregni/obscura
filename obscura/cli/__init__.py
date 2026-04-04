@@ -845,6 +845,17 @@ async def _repl(
     except Exception:
         pass  # graceful degradation
 
+    # Inject KAIROS context into system prompt if enabled
+    try:
+        from obscura.kairos.engine import KairosEngine as _KairosEngineProbe, is_kairos_enabled as _kep
+        if _kep():
+            _probe_engine = _KairosEngineProbe()
+            _kairos_sys = _probe_engine.get_system_prompt_addition()
+            if _kairos_sys:
+                custom_sections.append(_kairos_sys)
+    except Exception:
+        pass
+
     combined_system = compose_system_prompt(
         base=system,
         include_default=include_default,
@@ -1114,6 +1125,31 @@ async def _repl(
                 _tool_router_ref.set_file_context(list(_context_router.signals.file_paths))
 
         project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
+
+    # Wire Kairos tool-call and turn-complete logging hooks (closure over _kairos_engine)
+    try:
+        from obscura.kairos.engine import is_kairos_enabled as _kie2
+        if _kie2():
+            from obscura.core.hooks import HookRegistry
+            from obscura.core.types import AgentEventKind as _AEK2
+
+            if project_hooks is None:
+                project_hooks = HookRegistry()
+
+            def _kairos_tool_hook(event: Any) -> None:
+                if _kairos_engine is not None and _kairos_engine.is_running:
+                    tool = getattr(event, "tool_name", "") or ""
+                    args = str(getattr(event, "tool_input", "") or "")[:80]
+                    _kairos_engine.log_tool_use(tool, args)
+
+            def _kairos_turn_hook(event: Any) -> None:
+                if _kairos_engine is not None and _kairos_engine.is_running:
+                    _kairos_engine.log_agent_event("turn_complete")
+
+            project_hooks.add_after(_kairos_tool_hook, _AEK2.TOOL_CALL)
+            project_hooks.add_after(_kairos_turn_hook, _AEK2.TURN_COMPLETE)
+    except Exception:
+        pass
 
     # Build client (MCP servers connect during start())
     async with ObscuraClient(
