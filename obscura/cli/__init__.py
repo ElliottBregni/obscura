@@ -125,9 +125,7 @@ def _sync_provider_settings() -> None:
             }
 
         claude_dir.mkdir(exist_ok=True)
-        settings_file.write_text(
-            json.dumps(merged, indent=2) + "\n", encoding="utf-8"
-        )
+        settings_file.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
         _log.debug("Wrote Claude Code bypass settings → %s", settings_file)
     except OSError as exc:
         _log.debug("Provider settings sync failed (claude): %s", exc)
@@ -141,9 +139,9 @@ def _swallow(label: str, exc: Exception) -> None:
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
 
-import contextlib
+import contextlib  # noqa: E402
 
-from obscura.cli import trace as trace_mod
+from obscura.cli import trace as trace_mod  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # MCP / agent discovery — canonical implementations live in bootstrap.py
@@ -151,37 +149,33 @@ from obscura.cli import trace as trace_mod
 from obscura.cli.bootstrap import (  # noqa: E402
     AgentInfo as AgentInfo,
 )
-from obscura.cli.bootstrap import (
+from obscura.cli.bootstrap import (  # noqa: E402
     _discover_agent_infos,
-    _discover_agents,
     _discover_mcp,
-    _parse_inline_agent_mention,
     _run_inline_agent_from_mention,
 )
-from obscura.cli.commands import (
+from obscura.cli.commands import (  # noqa: E402  # noqa: E402
     _FILE_WRITE_TOOLS,
     COMPLETIONS,
     REPLContext,
     handle_command,
 )
-from obscura.cli.prompt import (
+from obscura.cli.prompt import (  # noqa: E402  # noqa: E402
     PromptStatus,
     StreamingStatus,
     _get_git_branch,
     animate_spinner,
     bordered_prompt,
-    confirm_prompt_async,
     create_prompt_session,
 )
-from obscura.cli.render import (
+from obscura.cli.render import (  # noqa: E402  # noqa: E402
     console,
     print_banner,
-    print_error,
     print_ok,
     print_warning,
     render_plan,
 )
-from obscura.cli.vector_memory_bridge import (
+from obscura.cli.vector_memory_bridge import (  # noqa: E402  # noqa: E402
     auto_save_turn,
     init_vector_store,
     load_startup_memories,
@@ -189,10 +183,10 @@ from obscura.cli.vector_memory_bridge import (
     search_relevant_context,
     search_with_router,
 )
-from obscura.core.client import ObscuraClient
-from obscura.core.event_store import SessionStatus, SQLiteEventStore
-from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir
-from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
+from obscura.core.client import ObscuraClient  # noqa: E402  # noqa: E402
+from obscura.core.event_store import SessionStatus, SQLiteEventStore  # noqa: E402  # noqa: E402
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir  # noqa: E402  # noqa: E402
+from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice  # noqa: E402  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tool confirmation callback
@@ -768,7 +762,7 @@ async def _start_imessage_daemon(
     from obscura.agent.interaction import InteractionBus
     from obscura.agent.supervisor import SupervisorConfig
     from obscura.cli.render import console as _console
-    from obscura.core.client import ObscuraClient
+    from obscura.core.client import ObscuraClient  # noqa: E402  # noqa: E402
 
     config_path = Path.home() / ".obscura" / "agents.yaml"
     if not config_path.exists():
@@ -896,6 +890,12 @@ async def _repl(
     db_path = resolve_obscura_home() / "events.db"
     store = SQLiteEventStore(db_path)
     sid = session_id or uuid.uuid4().hex
+
+    # Resolve backend/model names from arguments or environment defaults
+    import os
+
+    backend_name = backend or os.environ.get("OBSCURA_BACKEND", "")
+    model_name = model or os.environ.get("OBSCURA_MODEL", "")
 
     # Load .env best-effort — global first, then project-local overlay.
     # load_dotenv(override=False) never overwrites already-set vars, so
@@ -2489,7 +2489,7 @@ def main(
 
     import logging as _logging
 
-    from obscura.cli.logger import configure_logger
+    # configure_logger intentionally imported lazily when needed
 
     cli_logger = _logging.getLogger("obscura")
     # Set the InfoHandler threshold to the user's chosen level
@@ -2800,6 +2800,15 @@ def template_inspect(name: str) -> None:
         if len(spec.instructions) > 200:
             preview += "..."
         click.echo(f"  Instructions: {preview}")
+
+
+# ---------------------------------------------------------------------------
+# Kairos goal runtime CLI — registered as `obscura kairos <subcommand>`
+# ---------------------------------------------------------------------------
+
+from obscura.cli.kairos_commands import kairos_group as _kairos_group
+
+main.add_command(_kairos_group)
 
 
 # Backwards-compat aliases added by test harness

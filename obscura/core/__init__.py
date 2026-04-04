@@ -29,6 +29,24 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
+from obscura.core.kairos import (
+    Kairos,
+    KairosConfig,
+    Goal,
+    GoalBudget,
+    GoalStatus,
+    Plan,
+    PlanStatus,
+    Task,
+    TaskStatus,
+    TaskResult,
+    Checkpoint,
+    CheckpointKind,
+    Intervention,
+    InterventionKind,
+    KairosEvent,
+    KairosEventKind,
+)
 
 __all__ = [
     # Types
@@ -61,4 +79,21 @@ __all__ = [
     "ToolSpec",
     "resolve_auth",
     "tool",
+    # Kairos — autonomous goal runtime
+    "Checkpoint",
+    "CheckpointKind",
+    "Goal",
+    "GoalBudget",
+    "GoalStatus",
+    "Intervention",
+    "InterventionKind",
+    "Kairos",
+    "KairosConfig",
+    "KairosEvent",
+    "KairosEventKind",
+    "Plan",
+    "PlanStatus",
+    "Task",
+    "TaskResult",
+    "TaskStatus",
 ]

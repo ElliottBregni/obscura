@@ -77,7 +77,19 @@ export default {
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
       },
+      typography: {
+        DEFAULT: {
+          css: {
+            color: 'hsl(var(--foreground))',
+            a: { color: 'hsl(var(--primary))' },
+            strong: { color: 'hsl(var(--foreground))' },
+            code: { color: 'hsl(185 60% 72%)' },
+            'code::before': { content: '""' },
+            'code::after': { content: '""' },
+          },
+        },
+      },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 }

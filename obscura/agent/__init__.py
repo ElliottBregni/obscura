@@ -27,6 +27,7 @@ from obscura.agent.peers import (
     PeerRegistry,
     RemoteAgentRef,
 )
+from obscura.agent.supervised_runtime import SupervisedRuntime, SupervisedRuntimeConfig
 from obscura.core.agent_loop import AgentLoop
 
 # ---------------------------------------------------------------------------
@@ -63,5 +64,7 @@ __all__ = [
     "RemoteAgentRef",
     "RuntimeLifecycleEvent",
     "RuntimeLifecycleHook",
+    "SupervisedRuntime",
+    "SupervisedRuntimeConfig",
     "UserResponse",
 ]

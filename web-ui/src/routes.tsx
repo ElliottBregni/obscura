@@ -32,6 +32,7 @@ const HealthPage = lazy(() => import('@/features/health/HealthPage'));
 const AgentHealthPage = lazy(() => import('@/features/health/AgentHealthPage'));
 const MCPPage = lazy(() => import('@/features/mcp/MCPPage'));
 const A2APage = lazy(() => import('@/features/a2a/A2APage'));
+const GoalsPage = lazy(() => import('@/features/goals/GoalsPage'));
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return (
@@ -87,6 +88,9 @@ export const router = createBrowserRouter([
           { path: 'workflows/create', element: <LazyPage><WorkflowCreatePage /></LazyPage> },
           { path: 'workflows/:workflowId', element: <LazyPage><WorkflowDetailPage /></LazyPage> },
           { path: 'workflows/executions/:executionId', element: <LazyPage><ExecutionDetailPage /></LazyPage> },
+
+          // Goals (Kairos)
+          { path: 'goals', element: <LazyPage><GoalsPage /></LazyPage> },
 
           // Tool Approvals
           { path: 'approvals', element: <LazyPage><ToolApprovalsPage /></LazyPage> },
