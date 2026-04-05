@@ -485,6 +485,7 @@ def tool(
     description: str,
     parameters: dict[str, Any] | None = None,
     *,
+    output_schema: dict[str, Any] | None = None,
     pydantic_model: type[Any] | None = None,
     required_tier: str = "public",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -520,6 +521,7 @@ def tool(
             description=description,
             parameters=schema or {},
             handler=fn,
+            output_schema=output_schema or {},
             _pydantic_model=pydantic_model,
             required_tier=required_tier,
         )

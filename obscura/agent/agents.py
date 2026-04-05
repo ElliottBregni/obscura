@@ -174,6 +174,11 @@ class AgentConfig(BaseModel):
     pace_tools: bool = True
     max_consecutive_tools: int = 3
 
+    # Tool output formatting — controls result verbosity per agent.
+    # "minimal" | "standard" | "full" | "raw"
+    tool_output_level: str = "standard"
+    tool_output_overrides: dict[str, str] = Field(default_factory=dict)
+
     @property
     def model(self) -> str:
         """Deprecated: use provider instead."""

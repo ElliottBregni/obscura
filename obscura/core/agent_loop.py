@@ -539,6 +539,8 @@ class AgentLoop:
         context_budget: int = 0,
         turn_timeout_s: float | None = None,
         compiled_agent: Any | None = None,
+        tool_output_level: str = "standard",
+        tool_output_overrides: dict[str, str] | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -558,6 +560,8 @@ class AgentLoop:
         )
         self._accumulated_chars = 0
         self._compiled_agent = compiled_agent
+        self._tool_output_level = tool_output_level
+        self._tool_output_overrides = tool_output_overrides or {}
 
         # Apply compiled agent settings if provided
         if compiled_agent is not None:
@@ -1731,12 +1735,19 @@ class AgentLoop:
                 raw=prev.raw,
             )
 
+        output_level = self._tool_output_overrides.get(
+            tc.name, self._tool_output_level
+        )
         call = ToolCallEnvelope(
             call_id=tc.tool_use_id,
             agent_id="agent_loop",
             tool=tc.name,
             args=tc.input,
-            context=ToolCallContext(trace_id=uuid.uuid4().hex, policy="default"),
+            context=ToolCallContext(
+                trace_id=uuid.uuid4().hex,
+                policy="default",
+                output_level=output_level,
+            ),
         )
         started = time.monotonic()
 

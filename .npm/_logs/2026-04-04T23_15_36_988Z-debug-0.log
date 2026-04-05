@@ -1,0 +1,23 @@
+0 verbose cli /opt/homebrew/Cellar/node/25.8.0/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js
+1 info using npm@11.11.0
+2 info using node@v25.8.0
+3 silly config load:file:/opt/homebrew/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/elliottbregni/dev/obscura-main/.npmrc
+5 silly config load:file:/Users/elliottbregni/dev/obscura-main/.home/.npmrc
+6 silly config load:file:/opt/homebrew/etc/npmrc
+7 verbose title npm exec gitnexus analyze
+8 verbose argv "exec" "--yes" "--" "gitnexus" "analyze"
+9 verbose logfile logs-max:10 dir:/Users/elliottbregni/dev/obscura-main/.npm/_logs/2026-04-04T23_15_36_988Z-
+10 verbose logfile /Users/elliottbregni/dev/obscura-main/.npm/_logs/2026-04-04T23_15_36_988Z-debug-0.log
+11 silly logfile start cleaning logs, removing 1 files
+12 silly logfile done cleaning log files
+13 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+14 http fetch GET 200 https://registry.npmjs.org/gitnexus 131ms (cache revalidated)
+15 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+16 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+17 verbose cwd /Users/elliottbregni/dev/obscura-main
+18 verbose os Darwin 25.3.0
+19 verbose node v25.8.0
+20 verbose npm  v11.11.0
+21 verbose exit 0
+22 info ok

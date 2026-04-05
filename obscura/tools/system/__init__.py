@@ -194,6 +194,14 @@ def _resolve_command(command: str) -> str:
         },
         "required": ["code"],
     },
+    output_schema={
+        "x-output-levels": {
+            "minimal": ["ok"],
+            "standard": ["ok", "stdout", "exit_code"],
+            "full": ["ok", "stdout", "stderr", "exit_code"],
+        },
+        "x-default-level": "standard",
+    },
 )
 async def run_python3(
     code: str,
@@ -240,6 +248,14 @@ async def run_python3(
             "timeout_seconds": {"type": "number"},
         },
         "required": ["command"],
+    },
+    output_schema={
+        "x-output-levels": {
+            "minimal": ["ok"],
+            "standard": ["ok", "stdout", "exit_code"],
+            "full": ["ok", "stdout", "stderr", "exit_code", "command"],
+        },
+        "x-default-level": "standard",
     },
 )
 async def run_command(
@@ -322,6 +338,14 @@ async def run_command(
                 "description": "Run async and return a task_id immediately.",
             },
         },
+    },
+    output_schema={
+        "x-output-levels": {
+            "minimal": ["ok"],
+            "standard": ["ok", "stdout", "exit_code"],
+            "full": ["ok", "stdout", "stderr", "exit_code", "command"],
+        },
+        "x-default-level": "standard",
     },
 )
 async def run_shell(
@@ -811,6 +835,18 @@ async def list_directory(path: str) -> str:
             },
         },
         "required": ["path"],
+    },
+    output_schema={
+        "x-output-levels": {
+            "minimal": ["ok", "kind"],
+            "standard": ["ok", "kind", "path", "text"],
+            "full": [
+                "ok", "kind", "path", "text", "line_count",
+                "total_lines", "base64", "media_type", "cells",
+                "pages_read", "total_pages",
+            ],
+        },
+        "x-default-level": "standard",
     },
 )
 async def read_text_file(
@@ -3265,15 +3301,31 @@ async def report_intent(intent: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Plan-mode toggle — module-level callback set by the CLI layer.
+# Plan-mode toggle — module-level callbacks set by the CLI layer.
 # ---------------------------------------------------------------------------
 _set_permission_mode_callback: Any = None
+_plan_approval_callback: Any = None
 
 
 def set_permission_mode_callback(cb: Any) -> None:
     """Register the CLI callback that changes the permission mode."""
     global _set_permission_mode_callback
     _set_permission_mode_callback = cb
+
+
+def set_plan_approval_callback(cb: Any) -> None:
+    """Register the renderer callback that gates plan-mode exit on user approval.
+
+    The callback signature is::
+
+        async def approve(plan_summary: str) -> bool
+
+    It should present the plan to the user and return ``True`` if
+    approved, ``False`` if denied.  When no callback is registered
+    the mode switch happens immediately (backwards-compatible).
+    """
+    global _plan_approval_callback
+    _plan_approval_callback = cb
 
 
 @tool(
@@ -3298,13 +3350,34 @@ async def enter_plan_mode() -> str:
 @tool(
     "exit_plan_mode",
     "Exit plan mode and return to default permissions so that write and "
-    "execute tools become available again.",
+    "execute tools become available again.  Requires user approval via the "
+    "renderer before the mode switch takes effect.",
     {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "plan_summary": {
+                "type": "string",
+                "description": "Short summary of the plan being approved.",
+            },
+        },
     },
 )
-async def exit_plan_mode() -> str:
+async def exit_plan_mode(plan_summary: str = "") -> str:
+    # If a renderer approval callback is registered, gate on it.
+    if _plan_approval_callback is not None:
+        try:
+            approved = _plan_approval_callback(plan_summary)
+            if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
+                approved = await approved
+            if not approved:
+                return json.dumps({
+                    "ok": False,
+                    "error": "Plan not approved by user. Staying in plan mode.",
+                    "mode": "plan",
+                })
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+
     if _set_permission_mode_callback is not None:
         try:
             _set_permission_mode_callback("default")

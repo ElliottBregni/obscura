@@ -1248,12 +1248,33 @@ async def _repl(
     # Wire the plan-mode toggle so enter_plan_mode / exit_plan_mode tools work
     if tools_enabled:
         try:
-            from obscura.tools.system import set_permission_mode_callback
+            from obscura.tools.system import (
+                set_permission_mode_callback,
+                set_plan_approval_callback,
+            )
 
             def _set_permission_mode(mode: str) -> None:
                 ctx._permission_mode = mode
 
             set_permission_mode_callback(_set_permission_mode)
+
+            async def _plan_approval_handler(plan_summary: str) -> bool:
+                """Gate plan-mode exit on user approval via the renderer."""
+                from obscura.cli.widgets import (
+                    PermissionWidgetRequest,
+                    confirm_permission,
+                )
+
+                result = await confirm_permission(
+                    PermissionWidgetRequest(
+                        action="Exit plan mode and begin implementation",
+                        reason=plan_summary or "Agent wants to leave plan mode.",
+                        risk="medium",
+                    ),
+                )
+                return result.action == "approve"
+
+            set_plan_approval_callback(_plan_approval_handler)
         except Exception:
             pass
 

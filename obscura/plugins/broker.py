@@ -357,6 +357,15 @@ class ToolBroker:
         for attempt in range(attempts):
             try:
                 result = await self._invoke(handler, envelope)
+
+                # Format result based on tool's output schema and agent pref
+                spec = self._specs.get(envelope.tool)
+                if spec is not None and getattr(spec, "output_schema", None):
+                    from obscura.plugins.result_formatter import format_tool_result
+
+                    level = envelope.context.output_level or "standard"
+                    result = format_tool_result(result, spec, level)
+
                 latency = int((time.monotonic() - start) * 1000)
                 entry = BrokerAuditEntry(
                     call_id=envelope.call_id,

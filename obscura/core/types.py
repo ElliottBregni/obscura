@@ -466,6 +466,7 @@ class AgentEventKind(enum.Enum):
     TOOL_CALL_FAILURE = "tool_call_failure"
     SUBAGENT_START = "subagent_start"
     TASK_COMPLETED = "task_completed"
+    PLAN_APPROVAL_REQUEST = "plan_approval_request"
 
 
 @dataclass
@@ -499,6 +500,7 @@ class ToolCallContext:
     trace_id: str = ""
     user_id: str = ""
     policy: str = ""
+    output_level: str = ""  # "" = use tool's x-default-level
 
 
 @dataclass(frozen=True)

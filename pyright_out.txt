@@ -1,0 +1,41 @@
+/Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:152:25 - error: Type of "backend" is unknown (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:152:32 - error: Cannot access attribute "backend" for class "ObscuraClient"
+    Attribute "backend" is unknown (reportAttributeAccessIssue)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:153:31 - error: Type of "tool_registry" is unknown (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:153:38 - error: Cannot access attribute "tool_registry" for class "ObscuraClient"
+    Attribute "tool_registry" is unknown (reportAttributeAccessIssue)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:165:25 - error: Type of "backend" is unknown (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:165:32 - error: Cannot access attribute "backend" for class "ObscuraClient"
+    Attribute "backend" is unknown (reportAttributeAccessIssue)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:166:31 - error: Type of "tool_registry" is unknown (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:166:38 - error: Cannot access attribute "tool_registry" for class "ObscuraClient"
+    Attribute "tool_registry" is unknown (reportAttributeAccessIssue)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:170:21 - error: Type of "backend" is unknown (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:170:28 - error: Cannot access attribute "backend" for class "ObscuraClient"
+    Attribute "backend" is unknown (reportAttributeAccessIssue)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:171:27 - error: Type of "tool_registry" is unknown (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/factory.py:171:34 - error: Cannot access attribute "tool_registry" for class "ObscuraClient"
+    Attribute "tool_registry" is unknown (reportAttributeAccessIssue)
+/Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/router.py
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/router.py:163:56 - error: Argument of type "str" cannot be assigned to parameter "content" of type "list[ContentBlock]" in function "__init__"
+    "str" is not assignable to "list[ContentBlock]" (reportArgumentType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/router.py:171:13 - error: No parameter named "system_prompt" (reportCallIssue)
+/Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:360:38 - error: Type of "p" is partially unknown
+    Type of "p" is "Any | Unknown" (reportUnknownVariableType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:362:30 - error: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:362:30 - error: Argument type is unknown
+    Argument corresponds to parameter "object" in function "__new__" (reportUnknownArgumentType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:362:62 - error: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:362:62 - error: Argument type is unknown
+    Argument corresponds to parameter "object" in function "__new__" (reportUnknownArgumentType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:363:21 - error: Type of "x" is partially unknown
+    Type of "x" is "Any | Unknown" (reportUnknownVariableType)
+  /Users/elliottbregni/dev/obscura-main/obscura/integrations/messaging/store.py:900:51 - error: Unnecessary isinstance call; "str" is always an instance of "str" (reportUnnecessaryIsInstance)
+/Users/elliottbregni/dev/obscura-main/obscura/routes/channels.py
+  /Users/elliottbregni/dev/obscura-main/obscura/routes/channels.py:189:17 - error: Type of "append" is partially unknown
+    Type of "append" is "(object: Unknown, /) -> None" (reportUnknownMemberType)
+22 errors, 0 warnings, 0 informations

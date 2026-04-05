@@ -195,6 +195,20 @@ class ModernRenderer:
                 self._commit_lines(
                     [_styled(f"  ⚡ {_sanitize(event.text)}", STYLE_WARN)]
                 )
+            case AgentEventKind.PLAN_APPROVAL_REQUEST:
+                self._flush_all()
+                self._stop_spinner()
+                self._commit_lines(
+                    [
+                        "",
+                        _styled("  ╭─ Plan Approval Required ─╮", STYLE_WARN),
+                        _styled(
+                            f"  │ {_sanitize(event.text or 'Approve plan to exit plan mode?')}",
+                            STYLE_DIM,
+                        ),
+                        _styled("  ╰──────────────────────────╯", STYLE_WARN),
+                    ]
+                )
             case _:
                 pass
 

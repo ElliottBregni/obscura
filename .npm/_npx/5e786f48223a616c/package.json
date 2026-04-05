@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "gitnexus": "^1.5.3"
+  },
+  "_npx": {
+    "packages": [
+      "gitnexus"
+    ]
+  }
+}

@@ -326,3 +326,51 @@ def _print_goal(goal: Any, *, verbose: bool, kairos: Kairos) -> None:
             )
         if goal.created_at:
             click.echo(f"   Created: {goal.created_at.strftime('%Y-%m-%d %H:%M')}")
+
+
+# --- Kairos CLI global settings helpers (enable/disable/status) ---
+
+from obscura.core.paths import resolve_obscura_settings
+
+def _read_settings() -> dict:
+    p = resolve_obscura_settings()
+    try:
+        if p.exists():
+            import json as _json
+            return _json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return {}
+
+def _write_settings(data: dict) -> None:
+    p = resolve_obscura_settings()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    import json as _json
+    p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+
+@kairos_group.command("enable")
+def kairos_enable() -> None:
+    """Enable Kairos background actions for this home (writes .obscura/settings.json)."""
+    cfg = _read_settings()
+    cfg.setdefault("kairos", {})
+    cfg["kairos"]["enabled"] = True
+    cfg["kairos_enabled"] = True
+    _write_settings(cfg)
+    click.echo("Kairos enabled for this home (~/.obscura/settings.json updated).")
+
+@kairos_group.command("disable")
+def kairos_disable() -> None:
+    """Disable Kairos background actions for this home."""
+    cfg = _read_settings()
+    cfg.setdefault("kairos", {})
+    cfg["kairos"]["enabled"] = False
+    cfg["kairos_enabled"] = False
+    _write_settings(cfg)
+    click.echo("Kairos disabled for this home (~/.obscura/settings.json updated).")
+
+@kairos_group.command("enabled")
+def kairos_enabled_status() -> None:
+    """Show whether Kairos is enabled for this home."""
+    cfg = _read_settings()
+    enabled = bool(cfg.get("kairos_enabled") or cfg.get("kairos", {}).get("enabled"))
+    click.echo(f"Kairos enabled: {enabled}")
