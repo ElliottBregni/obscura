@@ -169,6 +169,21 @@ class Supervisor:
         )
         hooks.load_from_db()
 
+        # Best-effort: register Kairos pre-tool guard if available to enforce
+        # safety for background-initiated tool calls (opt-in per-session).
+        try:
+            from obscura.kairos.pretool import register_pretool_guard
+            from obscura.kairos.guards import pre_tool_use_guard
+
+            try:
+                register_pretool_guard(hooks, pre_tool_use_guard)
+                logger.debug("Registered Kairos PRE_TOOL_USE guard on session hooks")
+            except Exception as _reg_exc:
+                logger.debug("Could not bind Kairos PRE_TOOL_USE guard: %s", _reg_exc)
+        except Exception:
+            # Kairos modules not available in this environment; continue silently.
+            logger.debug("Kairos pre-tool guard not available; skipping")
+
         # Register eval hooks (turn-level + session gate)
         try:
             from obscura.core.supervisor.eval_hooks import (
