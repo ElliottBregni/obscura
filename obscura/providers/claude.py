@@ -559,7 +559,15 @@ class ClaudeBackend:
         if prompt:
             opts["system_prompt"] = self._sanitize_system_prompt(prompt)
         if self._permission_mode:
-            opts["permission_mode"] = self._permission_mode
+            # Map Obscura permission modes to Claude SDK permission_mode values.
+            # SDK accepts: 'default', 'acceptEdits', 'plan', 'bypassPermissions'
+            _mode_map = {
+                "bypass": "bypassPermissions",
+                "accept_edits": "acceptEdits",
+            }
+            opts["permission_mode"] = _mode_map.get(
+                self._permission_mode, self._permission_mode
+            )
         if self._cwd:
             opts["cwd"] = self._cwd
 

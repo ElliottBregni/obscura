@@ -1,0 +1,100 @@
+# Obscura Channel Gateway Configuration
+# Copy to ~/.obscura/channels.yaml and fill in credentials.
+# All secrets should be set as environment variables — values here are templates.
+
+channel_router:
+  system_prompt: >
+    You are a helpful assistant. Be concise and friendly.
+    You are replying via a messaging app, so keep responses brief.
+  max_turns: 8
+  session_timeout_seconds: 3600   # Reset conversation history after 1h idle
+  max_history_entries: 40
+  send_typing_indicator: true
+  max_concurrent: 10
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Telegram Bot
+# ─────────────────────────────────────────────────────────────────────────────
+telegram:
+  enabled: false
+
+  # Get a token from @BotFather on Telegram
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+
+  # A random string you choose — must match X-Telegram-Bot-Api-Secret-Token
+  # Set with: https://api.telegram.org/bot<token>/setWebhook?url=...&secret_token=...
+  webhook_secret: "${TELEGRAM_WEBHOOK_SECRET}"
+
+  # Restrict to specific Telegram chat_ids (leave empty to allow all)
+  allowed_chat_ids: []
+
+  # Webhook vs polling:
+  #   webhook: requires a public HTTPS URL (recommended for production)
+  #   polling: works anywhere, no ports needed (good for dev/local)
+  mode: "polling"   # "webhook" or "polling"
+
+  # If mode=webhook, the public URL Telegram should POST updates to
+  # Must be HTTPS. Example: https://yourdomain.com/channels/telegram/webhook
+  webhook_url: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WhatsApp (Meta Cloud API)
+# ─────────────────────────────────────────────────────────────────────────────
+whatsapp:
+  enabled: false
+  provider: "meta"   # "meta" (Cloud API) or "twilio"
+
+  # Meta Cloud API credentials
+  # https://developers.facebook.com/docs/whatsapp/cloud-api/get-started
+  phone_number_id: "${WHATSAPP_PHONE_NUMBER_ID}"
+  access_token: "${WHATSAPP_ACCESS_TOKEN}"
+
+  # A token you choose for the verification handshake
+  verify_token: "${WHATSAPP_VERIFY_TOKEN}"
+
+  # Your Meta App Secret (used to verify X-Hub-Signature-256)
+  app_secret: "${WHATSAPP_APP_SECRET}"
+
+  # Restrict to specific phone numbers (E.164 format, leave empty to allow all)
+  allowed_numbers: []
+
+  # Twilio fallback credentials (only used if provider=twilio)
+  twilio_account_sid: "${TWILIO_ACCOUNT_SID}"
+  twilio_auth_token: "${TWILIO_AUTH_TOKEN}"
+  twilio_from_number: "${TWILIO_WHATSAPP_FROM}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gateway Server
+# ─────────────────────────────────────────────────────────────────────────────
+gateway:
+  host: "0.0.0.0"
+  port: 8443
+
+  # TLS: set to true if running standalone (not behind nginx/caddy)
+  tls:
+    enabled: false
+    cert_path: "/etc/obscura/tls/cert.pem"
+    key_path: "/etc/obscura/tls/key.pem"
+
+  # Set to true if running behind a reverse proxy (nginx/caddy/cloudflare)
+  # When true, the gateway trusts X-Forwarded-* headers
+  behind_reverse_proxy: true
+
+  # Rate limiting per (platform, sender_id)
+  rate_limit:
+    enabled: true
+    max_requests_per_minute: 20
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reverse Proxy (Caddy — recommended)
+# ─────────────────────────────────────────────────────────────────────────────
+# Example Caddyfile snippet:
+#
+#   yourdomain.com {
+#     reverse_proxy /channels/* localhost:8080
+#   }
+#
+# This exposes /channels/telegram/webhook and /channels/whatsapp/webhook
+# publicly over HTTPS without opening any extra ports.
+# The Obscura API server already runs on port 8080 — just add the /channels
+# routes to the existing app (see routes/channels.py).
