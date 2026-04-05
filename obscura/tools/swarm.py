@@ -120,6 +120,8 @@ class SwarmToolContext:
     agent_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
     backend: str = "copilot"
     delegate_allowlist: list[str] = field(default_factory=list)
+    event_store: Any = None  # EventStoreProtocol | None
+    session_id: str = ""
 
 
 # Background agent tracking — maps agent_id to progress info.
@@ -151,7 +153,9 @@ async def _run_background_agent(
     }
     try:
         result = await _run_one_agent(ctx, agent_type, prompt, model)
-        _background_agents[agent_id]["status"] = "completed" if result.get("ok") else "failed"
+        _background_agents[agent_id]["status"] = (
+            "completed" if result.get("ok") else "failed"
+        )
         _background_agents[agent_id]["result"] = result
     except Exception as exc:
         _background_agents[agent_id]["status"] = "failed"
@@ -208,16 +212,18 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     _background_agents[agent_id]["error"] = str(exc)
 
             asyncio.create_task(_bg_run())
-            return json.dumps({
-                "ok": True,
-                "background": True,
-                "agent_id": agent_id,
-                "agent_name": agent_type,
-                "message": (
-                    f"Agent '{agent_type}' launched in background. "
-                    f"Use check_agent(agent_id='{agent_id}') to check progress."
-                ),
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "background": True,
+                    "agent_id": agent_id,
+                    "agent_name": agent_type,
+                    "message": (
+                        f"Agent '{agent_type}' launched in background. "
+                        f"Use check_agent(agent_id='{agent_id}') to check progress."
+                    ),
+                }
+            )
 
         from obscura.manifest.models import (
             AgentManifest,
@@ -319,6 +325,17 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     parent_agent_id=ctx.parent_agent_id,
                 )
 
+            if ctx.event_store is not None:
+                try:
+                    await ctx.event_store.create_session(
+                        agent.id,
+                        agent_type,
+                        source="subagent",
+                        parent_session_id=ctx.session_id or "",
+                    )
+                except Exception:
+                    pass
+
             await agent.start()
 
             # Run full agentic loop
@@ -326,6 +343,16 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
             async for event in agent.stream_loop(prompt):
                 if hasattr(event, "text") and event.text:
                     output_lines.append(event.text)
+
+            if ctx.event_store is not None:
+                try:
+                    from obscura.core.event_store import SessionStatus
+
+                    await ctx.event_store.update_status(
+                        agent.id, SessionStatus.COMPLETED
+                    )
+                except Exception:
+                    pass
 
             result_text = "".join(output_lines)
             return json.dumps(
@@ -338,6 +365,14 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
             )
 
         except Exception as exc:
+            if ctx.event_store is not None and agent is not None:
+                try:
+                    from obscura.core.event_store import SessionStatus
+
+                    await ctx.event_store.update_status(agent.id, SessionStatus.FAILED)
+                except Exception:
+                    pass
+
             logger.warning(
                 "spawn_subagent failed for '%s': %s",
                 agent_type,
@@ -512,14 +547,16 @@ async def _run_one_agent(
                 output_lines.append(event.text)
 
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
-        _team_metrics.append({
-            "agent_name": agent_type,
-            "agent_id": agent.id,
-            "status": "completed",
-            "duration_ms": elapsed_ms,
-            "result_length": len("".join(output_lines)),
-            "iteration_count": agent.iteration_count,
-        })
+        _team_metrics.append(
+            {
+                "agent_name": agent_type,
+                "agent_id": agent.id,
+                "status": "completed",
+                "duration_ms": elapsed_ms,
+                "result_length": len("".join(output_lines)),
+                "iteration_count": agent.iteration_count,
+            }
+        )
 
         return {
             "ok": True,
@@ -530,13 +567,15 @@ async def _run_one_agent(
         }
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
-        _team_metrics.append({
-            "agent_name": agent_type,
-            "agent_id": getattr(agent, "id", "unknown") if agent else "unknown",
-            "status": "failed",
-            "duration_ms": elapsed_ms,
-            "error": str(exc),
-        })
+        _team_metrics.append(
+            {
+                "agent_name": agent_type,
+                "agent_id": getattr(agent, "id", "unknown") if agent else "unknown",
+                "status": "failed",
+                "duration_ms": elapsed_ms,
+                "error": str(exc),
+            }
+        )
         logger.warning("Agent '%s' failed: %s", agent_type, exc, exc_info=True)
         return {
             "ok": False,
@@ -756,14 +795,16 @@ def make_check_agent_tool() -> ToolSpec:
     async def _handler(agent_id: str) -> str:
         info = _background_agents.get(agent_id)
         if info is None:
-            return json.dumps({
-                "ok": False,
-                "error": "not_found",
-                "message": (
-                    f"No background agent with id '{agent_id}'. "
-                    f"Active: {list(_background_agents.keys())}"
-                ),
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "not_found",
+                    "message": (
+                        f"No background agent with id '{agent_id}'. "
+                        f"Active: {list(_background_agents.keys())}"
+                    ),
+                }
+            )
 
         status = info["status"]
         response: dict[str, Any] = {
@@ -776,7 +817,9 @@ def make_check_agent_tool() -> ToolSpec:
         if status == "completed" and info.get("result"):
             response["result"] = info["result"]
         elif status == "failed":
-            response["error"] = info.get("error") or info.get("result", {}).get("message")
+            response["error"] = info.get("error") or info.get("result", {}).get(
+                "message"
+            )
 
         return json.dumps(response)
 
@@ -824,20 +867,24 @@ def make_suggest_agents_tool(ctx: SwarmToolContext) -> ToolSpec:
                 for name, cfg in ctx.agent_configs.items()
                 if cfg.get("type", "loop") != "daemon"
             ]
-            return json.dumps({
-                "ok": True,
-                "matches": [],
-                "message": "No tag matches found.",
-                "all_agents": all_agents,
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "matches": [],
+                    "message": "No tag matches found.",
+                    "all_agents": all_agents,
+                }
+            )
 
-        return json.dumps({
-            "ok": True,
-            "matches": [
-                {"agent": name, "match_count": count, "matched_tags": matched}
-                for name, count, matched in matches
-            ],
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "matches": [
+                    {"agent": name, "match_count": count, "matched_tags": matched}
+                    for name, count, matched in matches
+                ],
+            }
+        )
 
     return ToolSpec(
         name="suggest_agents",
@@ -920,9 +967,7 @@ def make_team_memory_read_tool() -> ToolSpec:
             return json.dumps({"ok": True, "key": ns_key, "entry": entry})
 
         # No key: list all entries in namespace
-        entries = {
-            k: v for k, v in _team_memory.items() if v["namespace"] == namespace
-        }
+        entries = {k: v for k, v in _team_memory.items() if v["namespace"] == namespace}
         return json.dumps({"ok": True, "namespace": namespace, "entries": entries})
 
     return ToolSpec(
@@ -959,11 +1004,13 @@ def make_team_status_tool() -> ToolSpec:
 
     async def _handler() -> str:
         if not _team_metrics:
-            return json.dumps({
-                "ok": True,
-                "message": "No agents have been spawned yet.",
-                "agents_spawned": 0,
-            })
+            return json.dumps(
+                {
+                    "ok": True,
+                    "message": "No agents have been spawned yet.",
+                    "agents_spawned": 0,
+                }
+            )
 
         total = len(_team_metrics)
         completed = [m for m in _team_metrics if m["status"] == "completed"]
@@ -996,22 +1043,24 @@ def make_team_status_tool() -> ToolSpec:
         memory_keys = len(_team_memory)
         bg_agents = len(_background_agents)
 
-        return json.dumps({
-            "ok": True,
-            "agents_spawned": total,
-            "completed": len(completed),
-            "failed": len(failed),
-            "total_duration_ms": total_duration_ms,
-            "max_duration_ms": max_duration_ms,
-            "parallel_speedup": (
-                f"{total_duration_ms / max_duration_ms:.1f}x"
-                if max_duration_ms > 0
-                else "N/A"
-            ),
-            "agent_breakdown": agent_summary,
-            "shared_memory_keys": memory_keys,
-            "background_agents": bg_agents,
-        })
+        return json.dumps(
+            {
+                "ok": True,
+                "agents_spawned": total,
+                "completed": len(completed),
+                "failed": len(failed),
+                "total_duration_ms": total_duration_ms,
+                "max_duration_ms": max_duration_ms,
+                "parallel_speedup": (
+                    f"{total_duration_ms / max_duration_ms:.1f}x"
+                    if max_duration_ms > 0
+                    else "N/A"
+                ),
+                "agent_breakdown": agent_summary,
+                "shared_memory_keys": memory_keys,
+                "background_agents": bg_agents,
+            }
+        )
 
     return ToolSpec(
         name="team_status",

@@ -295,23 +295,52 @@ class ModernRenderer:
 
         raw = event.tool_result or ""
         if event.is_error:
-            snippet = _sanitize(raw[:200]).replace("\n", " ")
-            self._commit_lines(
-                [
-                    _styled("  ✗ ", STYLE_ERROR)
-                    + _styled(snippet, Style(fg=ERROR_COLOR, dim=True)),
-                ]
+            err_lines = _sanitize(raw).split("\n")
+            cap = int(os.environ.get("OBSCURA_TOOL_OUTPUT_MAX_LINES", "80")) or len(
+                err_lines
             )
+            display = err_lines[:cap]
+            out: list[str] = [
+                _styled("  ✗ ", STYLE_ERROR)
+                + _styled(
+                    _sanitize(display[0])[: self._width] if display else "",
+                    Style(fg=ERROR_COLOR, dim=True),
+                ),
+            ]
+            for ln in display[1:]:
+                out.append(
+                    _styled(
+                        f"    {_sanitize(ln)}"[: self._width],
+                        Style(fg=ERROR_COLOR, dim=True),
+                    )
+                )
+            if len(err_lines) > cap:
+                out.append(
+                    _styled(f"    ... ({len(err_lines) - cap} more lines)", STYLE_DIM)
+                )
+            self._commit_lines(out)
         else:
-            snippet = _sanitize(raw[:120]).replace("\n", " ")
-            if len(snippet) > 80:
-                snippet = snippet[:77] + "..."
-            self._commit_lines(
-                [
-                    _styled("  ✓ ", STYLE_OK)
-                    + _styled(snippet, Style(fg=MUTED, dim=True)),
-                ]
+            result_lines = _sanitize(raw).split("\n")
+            cap = int(os.environ.get("OBSCURA_TOOL_OUTPUT_MAX_LINES", "80")) or len(
+                result_lines
             )
+            display = result_lines[:cap]
+            out = [
+                _styled("  ✓ ", STYLE_OK)
+                + _styled(
+                    display[0][: self._width] if display else "",
+                    Style(fg=MUTED, dim=True),
+                ),
+            ]
+            for ln in display[1:]:
+                out.append(f"    {ln}"[: self._width])
+            if len(result_lines) > cap:
+                out.append(
+                    _styled(
+                        f"    ... ({len(result_lines) - cap} more lines)", STYLE_DIM
+                    )
+                )
+            self._commit_lines(out)
 
     # ── Flush helpers ─────────────────────────────────────────────────────
 

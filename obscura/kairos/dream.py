@@ -137,6 +137,24 @@ Maintain the vector-backed user profile with per-category decay:
 5. If user_profile.md exists and vector profile has < 10 facts, run profile_sync to migrate
 6. Do NOT delete identity facts (name, email) — they are immune to decay
 
+## Phase 8 — Vault Sync
+Sync the Obsidian vault at ~/.obscura/vault/ with Obscura state:
+1. Scan `vault/user/` for files with frontmatter meta tags:
+   - `type: goal` → create/update goals on the GoalBoard
+   - `type: profile` → append facts to user profile
+   - `type: task`, `type: reference`, `type: note` → ingest into vector memory
+2. Export current Obscura goals to `vault/agent/goals/` as markdown files
+3. Export a profile summary to `vault/agent/profile-summary.md`
+4. Check `vault/shared/` for conflicts — if both user and agent edited the same
+   file since last sync, fork into `.user.md` and `.agent.md` variants for
+   manual merge
+5. Respect ownership zones:
+   - NEVER write to `vault/user/` — read only
+   - Write freely to `vault/agent/`
+   - Use `write_agent_shared()` for `vault/shared/` to enable fork-merge
+
+The vault sync runs automatically via VaultSync.sync(). Just call it once.
+
 Rules:
 - Never fabricate information — only persist what's in the logs/transcripts
 - Prefer updating existing files over creating new ones
@@ -234,6 +252,10 @@ class DreamConsolidator:
 
             DailyLog().append("Dream consolidation executed", source="dream")
 
+            # Run vault sync before agent consolidation so the agent
+            # sees the latest vault state in goals and memory.
+            await self._run_vault_sync()
+
             # Phase 1-4: Spawn a forked agent with the CONSOLIDATION_PROMPT.
             # Uses the default backend (copilot) with read-only + memory dir
             # write permissions and a capped turn budget.
@@ -257,6 +279,24 @@ class DreamConsolidator:
 
         finally:
             self._update_lock_timestamp()
+
+    async def _run_vault_sync(self) -> None:
+        """Run vault sync as part of dream consolidation."""
+        try:
+            from obscura.kairos.vault_sync import VaultSync
+
+            vault = VaultSync()
+            if not vault._vault.is_dir():
+                logger.debug("Vault directory does not exist, skipping vault sync")
+                return
+
+            report = await vault.sync()
+            from obscura.kairos.daily_log import DailyLog
+
+            DailyLog().append(report.summary(), source="vault")
+            logger.info("Dream vault sync: %s", report.summary())
+        except Exception:
+            logger.warning("Dream vault sync failed", exc_info=True)
 
     async def _run_consolidation_agent(self) -> bool:
         """Spawn a forked ObscuraClient agent to run the 4-phase consolidation.

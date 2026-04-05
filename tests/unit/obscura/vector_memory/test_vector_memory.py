@@ -181,4 +181,3 @@ class TestSemanticMemoryMixin:
         entry = store.get("memory_123", namespace="default:semantic")
         assert entry is not None
         assert entry.metadata["agent_name"] == "learner"
-

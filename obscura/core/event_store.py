@@ -98,6 +98,7 @@ class SessionRecord:
     model: str = ""
     active_agent: str = ""
     source: str = "live"
+    parent_session_id: str = ""
     project: str = ""
     summary: str = ""
     message_count: int = 0
@@ -134,6 +135,7 @@ class EventStoreProtocol(Protocol):
         backend: str = "",
         model: str = "",
         source: str = "live",
+        parent_session_id: str = "",
         project: str = "",
         summary: str = "",
         metadata: dict[str, Any] | None = None,
@@ -175,6 +177,7 @@ class EventStoreProtocol(Protocol):
         status: SessionStatus | None = None,
         backend: str | None = None,
         source: str | None = None,
+        parent_session_id: str | None = None,
     ) -> list[SessionRecord]: ...
 
 
@@ -213,7 +216,7 @@ def _deserialize_payload(raw: str) -> dict[str, Any]:
 
 
 _SESSION_COLS = (
-    "id, status, backend, model, active_agent, source, project, "
+    "id, status, backend, model, active_agent, source, parent_session_id, project, "
     "summary, message_count, metadata, created_at, updated_at"
 )
 
@@ -236,6 +239,7 @@ def _row_to_session(row: sqlite3.Row) -> SessionRecord:
         model=row["model"] or "",
         active_agent=row["active_agent"] or "",
         source=row["source"] or "live",
+        parent_session_id=row["parent_session_id"] or "",
         project=row["project"] or "",
         summary=row["summary"] or "",
         message_count=int(row["message_count"] or 0),
@@ -306,6 +310,7 @@ class SQLiteEventStore:
             ("summary", "TEXT NOT NULL DEFAULT ''"),
             ("message_count", "INTEGER NOT NULL DEFAULT 0"),
             ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+            ("parent_session_id", "TEXT NOT NULL DEFAULT ''"),
         ]
         for col_name, col_def in _migrations:
             try:
@@ -321,6 +326,7 @@ class SQLiteEventStore:
             "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)",
         ]:
             conn.execute(idx_sql)
         conn.commit()
@@ -335,6 +341,7 @@ class SQLiteEventStore:
         backend: str = "",
         model: str = "",
         source: str = "live",
+        parent_session_id: str = "",
         project: str = "",
         summary: str = "",
         metadata: dict[str, Any] | None = None,
@@ -344,9 +351,9 @@ class SQLiteEventStore:
         conn = self._conn()
         conn.execute(
             "INSERT INTO sessions "
-            "(id, status, backend, model, active_agent, source, project, "
+            "(id, status, backend, model, active_agent, source, parent_session_id, project, "
             " summary, message_count, metadata, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
             (
                 session_id,
                 SessionStatus.RUNNING.value,
@@ -354,6 +361,7 @@ class SQLiteEventStore:
                 model,
                 agent,
                 source,
+                parent_session_id,
                 project,
                 summary,
                 meta_json,
@@ -369,6 +377,7 @@ class SQLiteEventStore:
             model=model,
             active_agent=agent,
             source=source,
+            parent_session_id=parent_session_id,
             project=project,
             summary=summary,
             message_count=0,
@@ -519,6 +528,7 @@ class SQLiteEventStore:
         status: SessionStatus | None = None,
         backend: str | None = None,
         source: str | None = None,
+        parent_session_id: str | None = None,
     ) -> list[SessionRecord]:
         conn = self._conn()
         clauses: list[str] = []
@@ -533,6 +543,9 @@ class SQLiteEventStore:
         if source is not None:
             clauses.append("source = ?")
             params.append(source)
+        if parent_session_id is not None:
+            clauses.append("parent_session_id = ?")
+            params.append(parent_session_id)
 
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = conn.execute(
@@ -551,6 +564,7 @@ class SQLiteEventStore:
         backend: str = "",
         model: str = "",
         source: str = "live",
+        parent_session_id: str = "",
         project: str = "",
         summary: str = "",
         metadata: dict[str, Any] | None = None,
@@ -562,6 +576,7 @@ class SQLiteEventStore:
             backend=backend,
             model=model,
             source=source,
+            parent_session_id=parent_session_id,
             project=project,
             summary=summary,
             metadata=metadata,
@@ -576,6 +591,41 @@ class SQLiteEventStore:
         status: SessionStatus,
     ) -> None:
         await asyncio.to_thread(self._update_status_sync, session_id, status)
+
+    # ------------------------------------------------------------------
+    # Session reaper — clean up orphaned sessions from crashed processes
+    # ------------------------------------------------------------------
+
+    def _reap_orphaned_sessions_sync(self) -> int:
+        from obscura.core.session_utils import list_active_sessions
+
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT id FROM sessions WHERE status IN ('running', 'waiting_for_tool', 'waiting_for_user')"
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        alive_ids = {s.get("session_id", "")[:16] for s in list_active_sessions()}
+
+        reaped = 0
+        now = datetime.now(UTC).isoformat()
+        for row in rows:
+            sid = row["id"]
+            if sid[:16] not in alive_ids:
+                conn.execute(
+                    "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+                    (SessionStatus.FAILED.value, now, sid),
+                )
+                reaped += 1
+
+        if reaped:
+            conn.commit()
+        return reaped
+
+    async def reap_orphaned_sessions(self) -> int:
+        return await asyncio.to_thread(self._reap_orphaned_sessions_sync)
 
     async def update_session(
         self,
@@ -614,12 +664,14 @@ class SQLiteEventStore:
         status: SessionStatus | None = None,
         backend: str | None = None,
         source: str | None = None,
+        parent_session_id: str | None = None,
     ) -> list[SessionRecord]:
         return await asyncio.to_thread(
             self._list_sessions_sync,
             status,
             backend,
             source,
+            parent_session_id,
         )
 
     def close(self) -> None:

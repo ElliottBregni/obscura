@@ -92,6 +92,78 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "Could not load persisted agent templates; starting with empty store",
         )
 
+    # Initialize channel router (Telegram / WhatsApp webhooks)
+    # Activates only when platform credentials are present in env.
+    try:
+        _has_telegram = bool(os.environ.get("TELEGRAM_BOT_TOKEN", ""))
+        _has_whatsapp = bool(
+            os.environ.get("TWILIO_ACCOUNT_SID", "")
+            and os.environ.get("TWILIO_AUTH_TOKEN", "")
+        )
+        if _has_telegram or _has_whatsapp:
+            from obscura.integrations.messaging.factory import build_channel_router
+            from obscura.routes.channels import init_channel_router
+
+            channel_router = await build_channel_router()
+            init_channel_router(channel_router)
+            logger.info(
+                "Channel router initialized (telegram=%s, whatsapp=%s)",
+                _has_telegram,
+                _has_whatsapp,
+            )
+        else:
+            logger.debug(
+                "Channel router skipped — set TELEGRAM_BOT_TOKEN or "
+                "TWILIO_ACCOUNT_SID+TWILIO_AUTH_TOKEN to enable"
+            )
+    except Exception:
+        logger.warning(
+            "Could not initialize channel router; webhook endpoints will return 503",
+            exc_info=True,
+        )
+
+    # Apply any spec-driven channel configs persisted in the DB.
+    # This runs regardless of whether env-var credentials were found — DB configs
+    # can register additional channels (or override env-var channels) at startup.
+    try:
+        from obscura.integrations.messaging.store import ChannelConfigStore
+        from obscura.routes.channels import _get_router as _get_channel_router
+
+        _db_config_store = ChannelConfigStore()
+        _enabled_configs = _db_config_store.list_all(enabled_only=True)
+        if _enabled_configs:
+            try:
+                _live_router = _get_channel_router()
+            except Exception:
+                # Router not yet initialized (no env creds); build a minimal one
+                from obscura.integrations.messaging.factory import build_channel_router
+                from obscura.routes.channels import init_channel_router
+
+                _live_router = await build_channel_router()
+                init_channel_router(_live_router)
+
+            _applied = 0
+            for _cfg in _enabled_configs:
+                try:
+                    await _live_router.apply_config(_cfg)
+                    _applied += 1
+                except Exception:
+                    logger.warning(
+                        "Could not apply DB channel config id=%s platform=%s; skipping",
+                        _cfg.id,
+                        _cfg.platform,
+                        exc_info=True,
+                    )
+            if _applied:
+                logger.info(
+                    "Applied %d spec-driven channel config(s) from DB", _applied
+                )
+    except Exception:
+        logger.warning(
+            "Could not load spec-driven channel configs from DB",
+            exc_info=True,
+        )
+
     yield
 
     # Cleanup A2A server

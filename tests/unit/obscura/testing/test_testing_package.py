@@ -26,7 +26,6 @@ from obscura.testing import (
     FakeToolUseBlock,
     MockBackend,
     MockBackendBuilder,
-    StubAgent,
     async_echo_handler,
     async_iter,
     done_chunk,

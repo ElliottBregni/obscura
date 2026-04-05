@@ -16,6 +16,10 @@ def view_file_impl(path: str, start_line: int = 1, end_line: int = -1) -> str:
     """View file with line numbers (Copilot CLI 'view' equivalent)."""
     import os
 
+    # Defensive coercion — Copilot SDK may pass strings for numeric params
+    start_line = int(start_line) if start_line else 1
+    end_line = int(end_line) if end_line else -1
+
     if not os.path.exists(path):
         return f"Error: Path does not exist: {path}"
 

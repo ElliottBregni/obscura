@@ -9,7 +9,6 @@ import pytest
 
 from obscura.cli.mcp_commands import (
     MCP_COMMANDS,
-    cmd_mcp_discover,
     cmd_mcp_env,
     cmd_mcp_install,
     cmd_mcp_list,

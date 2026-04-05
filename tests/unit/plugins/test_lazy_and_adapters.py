@@ -357,10 +357,7 @@ class TestNativeAdapterHealthcheck:
     def test_default_healthcheck_returns_true(self) -> None:
         adapter = NativeAdapter()
         spec = _make_spec(runtime_type="native")
-        assert (
-            asyncio.run(adapter.healthcheck(spec))
-            is True
-        )
+        assert asyncio.run(adapter.healthcheck(spec)) is True
 
     def test_callable_healthcheck_invoked(self) -> None:
         adapter = NativeAdapter()
@@ -369,10 +366,7 @@ class TestNativeAdapterHealthcheck:
             healthcheck=HealthcheckSpec(type="callable", target="os.path:exists"),
         )
         # os.path.exists() with no args raises TypeError → returns False
-        assert (
-            asyncio.run(adapter.healthcheck(spec))
-            is False
-        )
+        assert asyncio.run(adapter.healthcheck(spec)) is False
 
 
 class TestResolveHandler:
@@ -499,7 +493,4 @@ class TestContentAdapterHealthcheck:
     def test_always_true(self) -> None:
         adapter = ContentAdapter()
         spec = _make_spec(runtime_type="content")
-        assert (
-            asyncio.run(adapter.healthcheck(spec))
-            is True
-        )
+        assert asyncio.run(adapter.healthcheck(spec)) is True

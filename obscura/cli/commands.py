@@ -1766,7 +1766,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     # Fallback: spawn with SDK defaults (with warning)
     if not manifest_loaded:
         print_warning(
-            f"No manifest found for '{name}' in {agents_file}. "
+            f"No manifest found for '{name}\. "
             "Using SDK defaults (no skill filters, tool restrictions, or limits).",
         )
         agent = runtime.spawn(
@@ -4544,7 +4544,45 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
         )
 
     # ------------------------------------------------------------------
-    # 3. Other running sessions
+    # 3a. Sub-agents of current session
+    # ------------------------------------------------------------------
+    try:
+        child_sessions = await ctx.store.list_sessions(
+            parent_session_id=ctx.session_id,
+        )
+        if child_sessions:
+            has_activity = True
+            status_colors = {
+                SessionStatus.RUNNING: "bold green",
+                SessionStatus.WAITING_FOR_TOOL: "yellow",
+                SessionStatus.WAITING_FOR_USER: "yellow",
+                SessionStatus.COMPLETED: "dim green",
+                SessionStatus.FAILED: "red",
+                SessionStatus.PAUSED: "dim yellow",
+            }
+            ctbl = Table(
+                show_header=True,
+                header_style="bold",
+                title=f"Sub-agents ({len(child_sessions)})",
+            )
+            ctbl.add_column("Session", style="cyan")
+            ctbl.add_column("Status", style="yellow")
+            ctbl.add_column("Agent", style="green")
+            ctbl.add_column("Source", style="dim")
+            for s in child_sessions:
+                sc = status_colors.get(s.status, "dim")
+                ctbl.add_row(
+                    s.id[:12],
+                    f"[{sc}]{s.status.value}[/]",
+                    s.active_agent or "-",
+                    s.source or "-",
+                )
+            lines.append(ctbl)
+    except Exception:
+        pass
+
+    # ------------------------------------------------------------------
+    # 3b. Other independent sessions
     # ------------------------------------------------------------------
     try:
         all_sessions = await ctx.store.list_sessions()
@@ -4553,14 +4591,18 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
             SessionStatus.WAITING_FOR_TOOL,
         }
         other = [
-            s for s in all_sessions if s.id != ctx.session_id and s.status in s_active
+            s
+            for s in all_sessions
+            if s.id != ctx.session_id
+            and s.status in s_active
+            and s.parent_session_id != ctx.session_id
         ]
         if other:
             has_activity = True
             stbl = Table(
                 show_header=True,
                 header_style="bold",
-                title=(f"Other Sessions ({len(other)} running)"),
+                title=f"Other Sessions ({len(other)} running)",
             )
             stbl.add_column("Session", style="cyan")
             stbl.add_column("Status", style="yellow")

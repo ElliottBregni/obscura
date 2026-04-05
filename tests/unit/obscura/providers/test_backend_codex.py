@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from obscura.core.auth import AuthConfig
-from obscura.core.types import Backend, ChunkKind
+from obscura.core.types import Backend
 from obscura.providers.codex import CodexBackend
 
 

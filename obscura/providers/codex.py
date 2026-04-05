@@ -332,12 +332,22 @@ class CodexBackend:
     def _prepare_input(self, prompt: str) -> str:
         """Prepend system context to user prompt.
 
-        The Codex SDK's ThreadOptions has no system_prompt field, so we
-        inject system instructions by prepending to the user input.
+        The Codex SDK's ThreadOptions has no instructions/system_prompt field,
+        so we inject context by framing it as mandatory operating instructions
+        prepended to every user turn.
         """
         system = self._build_system_prompt()
         if system:
-            return f"<system>\n{system}\n</system>\n\n{prompt}"
+            return (
+                "IMPORTANT — MANDATORY OPERATING INSTRUCTIONS\n"
+                "You MUST follow these instructions for every response. "
+                "They override your default behavior and built-in plans.\n"
+                "─────────────────────────────────────────────\n"
+                f"{system}\n"
+                "─────────────────────────────────────────────\n"
+                "END OF INSTRUCTIONS — Now handle this request:\n\n"
+                f"{prompt}"
+            )
         return prompt
 
     # -- Event mapping -------------------------------------------------------

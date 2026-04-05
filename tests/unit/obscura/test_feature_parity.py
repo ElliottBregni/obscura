@@ -141,6 +141,7 @@ class TestToolRegistration:
         assert len(specs) == 1
         assert specs[0].name == "goal"
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. COMMAND REGISTRATION — all commands must be in COMMANDS dict
 # ═══════════════════════════════════════════════════════════════════════════

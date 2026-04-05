@@ -445,7 +445,9 @@ class ClaudeBackend:
         # to pass it as a query kwarg (SDK may or may not support it).
         max_thinking = kwargs.pop("max_thinking_tokens", None)
         if max_thinking is not None:
-            self._max_thinking_tokens = int(max_thinking) if int(max_thinking) > 0 else None
+            self._max_thinking_tokens = (
+                int(max_thinking) if int(max_thinking) > 0 else None
+            )
 
         query_kwargs = self._build_query_kwargs(kwargs)
         if query_kwargs:
@@ -656,19 +658,31 @@ class ClaudeBackend:
         from claude_agent_sdk import tool as claude_tool
 
         def _wrap_handler(handler: Any) -> Any:
-            """Ensure the handler always returns a plain string for MCP."""
+            """Ensure the handler always returns a plain string for MCP.
+
+            The claude_agent_sdk calls ``handler(arguments)`` with the
+            arguments dict as a single positional arg, but Obscura tool
+            handlers expect keyword arguments.  This wrapper bridges the
+            two calling conventions.
+            """
             if inspect.iscoroutinefunction(handler):
 
                 @functools.wraps(handler)
-                async def _async_wrapper(**kwargs: Any) -> str:
-                    result = await handler(**kwargs)
+                async def _async_wrapper(
+                    arguments: dict[str, Any] | None = None, **kwargs: Any
+                ) -> str:
+                    merged = {**(arguments or {}), **kwargs}
+                    result = await handler(**merged)
                     return str(result) if result is not None else ""
 
                 return _async_wrapper
 
             @functools.wraps(handler)
-            def _sync_wrapper(**kwargs: Any) -> str:
-                result = handler(**kwargs)
+            def _sync_wrapper(
+                arguments: dict[str, Any] | None = None, **kwargs: Any
+            ) -> str:
+                merged = {**(arguments or {}), **kwargs}
+                result = handler(**merged)
                 return str(result) if result is not None else ""
 
             return _sync_wrapper

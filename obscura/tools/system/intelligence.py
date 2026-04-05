@@ -303,6 +303,10 @@ async def causal_trace(
     include_payloads: bool = False,
 ) -> str:
     """Return a causal trace of supervisor events leading to an outcome."""
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError):
+        depth = 20
     depth = min(max(1, depth), 100)
 
     db_path = _get_supervisor_db()

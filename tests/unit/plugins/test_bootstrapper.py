@@ -127,7 +127,9 @@ class TestIsPipInstalled:
         """Handles packages like 'pkg>=1.0' or 'pkg[extra]'."""
         with (
             patch("subprocess.run", return_value=_proc(returncode=0)),
-            patch("obscura.plugins.bootstrapper.shutil.which", return_value="/usr/bin/uv"),
+            patch(
+                "obscura.plugins.bootstrapper.shutil.which", return_value="/usr/bin/uv"
+            ),
         ):
             assert _is_pip_installed("my-pkg>=1.0") is True
             assert _is_pip_installed("my-pkg[extra]") is True
@@ -499,10 +501,7 @@ class TestRunBootstrap:
         assert result.ok is True
         # post_install should have been called via shlex.split
         calls = mock_run.call_args_list
-        assert any(
-            len(c.args) > 0 and c.args[0] == ["echo", "done"]
-            for c in calls
-        )
+        assert any(len(c.args) > 0 and c.args[0] == ["echo", "done"] for c in calls)
 
     @patch("obscura.plugins.bootstrapper._is_pip_installed", return_value=False)
     @patch("subprocess.run")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import difflib
+import fcntl
 import fnmatch
 import html as _html
 import json
@@ -764,16 +765,23 @@ async def list_directory(path: str) -> str:
         return _json_error("not_a_directory", path=str(target))
 
     entries: list[dict[str, object]] = []
-    for child in sorted(target.iterdir(), key=lambda p: p.name):
-        entries.append(
-            {
-                "name": child.name,
-                "path": str(child),
-                "is_dir": child.is_dir(),
-                "is_file": child.is_file(),
-                "size": child.stat().st_size if child.is_file() else 0,
-            },
-        )
+    try:
+        for child in sorted(target.iterdir(), key=lambda p: p.name):
+            try:
+                size = child.stat().st_size if child.is_file() else 0
+            except OSError:
+                size = 0
+            entries.append(
+                {
+                    "name": child.name,
+                    "path": str(child),
+                    "is_dir": child.is_dir(),
+                    "is_file": child.is_file(),
+                    "size": size,
+                },
+            )
+    except PermissionError:
+        return _json_error("permission_denied", path=str(target))
     return json.dumps({"ok": True, "path": str(target), "entries": entries})
 
 
@@ -974,13 +982,17 @@ async def read_text_file(
 def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
     """Parse a page range string like '1-5' or '3' into (start, end) 1-indexed."""
     pages = pages.strip()
-    if "-" in pages:
-        parts = pages.split("-", 1)
-        start = max(1, int(parts[0].strip()))
-        end = min(total, int(parts[1].strip()))
-    else:
-        start = max(1, int(pages))
-        end = start
+    try:
+        if "-" in pages:
+            parts = pages.split("-", 1)
+            start = max(1, int(parts[0].strip()))
+            end = min(total, int(parts[1].strip()))
+        else:
+            start = max(1, int(pages))
+            end = start
+    except (ValueError, TypeError):
+        start = 1
+        end = min(total, 1)
     return start, end
 
 
@@ -1069,10 +1081,13 @@ async def append_text_file(path: str, text: str, create_dirs: bool = True) -> st
         return _json_error("path_not_allowed", path=str(target))
     if target.exists() and target.is_dir():
         return _json_error("path_is_directory", path=str(target))
-    if create_dirs:
-        target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("a", encoding="utf-8") as fh:
-        fh.write(text)
+    try:
+        if create_dirs:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write(text)
+    except OSError as exc:
+        return _json_error("append_failed", path=str(target), detail=str(exc))
     return json.dumps(
         {
             "ok": True,
@@ -1103,7 +1118,10 @@ async def make_directory(
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
-    target.mkdir(parents=parents, exist_ok=exist_ok)
+    try:
+        target.mkdir(parents=parents, exist_ok=exist_ok)
+    except OSError as exc:
+        return _json_error("mkdir_failed", path=str(target), detail=str(exc))
     return json.dumps({"ok": True, "path": str(target)})
 
 
@@ -1320,12 +1338,12 @@ async def list_listening_ports() -> str:
                 "description": "Legacy alias for head_limit.",
             },
         },
-        "required": ["pattern", "path"],
+        "required": ["pattern"],
     },
 )
 async def grep_files(
     pattern: str,
-    path: str,
+    path: str = ".",
     include: str = "",
     glob: str = "",
     output_mode: str = "content",
@@ -1337,6 +1355,7 @@ async def grep_files(
     head_limit: int = 250,
     offset: int = 0,
     max_results: int = 0,
+    type: str = "",  # noqa: A002 — matches JSON schema property name
     **kwargs: Any,
 ) -> str:
     target = _resolve_path(path)
@@ -1347,7 +1366,7 @@ async def grep_files(
 
     # Legacy compat: max_results overrides head_limit when provided.
     effective_limit = max_results if max_results > 0 else head_limit
-    file_type = kwargs.get("type", "")
+    file_type = type or kwargs.get("type", "")
 
     # Try ripgrep first, fall back to Python implementation.
     rg_path = shutil.which("rg")
@@ -1592,7 +1611,29 @@ async def _grep_via_python(
     if target.is_file():
         _search_file(target)
     else:
-        for fp in sorted(target.rglob("*")):
+        _RGLOB_CAP = 100_000
+
+        def _do_rglob() -> list[Path]:
+            out: list[Path] = []
+            for fp in target.rglob("*"):
+                out.append(fp)
+                if len(out) >= _RGLOB_CAP:
+                    break
+            return sorted(out)
+
+        try:
+            rglob_paths = await asyncio.wait_for(
+                asyncio.to_thread(_do_rglob),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            return _json_error(
+                "timeout",
+                path=str(target),
+                detail="rglob timed out after 30s",
+            )
+
+        for fp in rglob_paths:
             if not fp.is_file():
                 continue
             if include and not fnmatch.fnmatch(fp.name, include):
@@ -1658,7 +1699,10 @@ async def _grep_via_python(
     {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Directory to search in."},
+            "path": {
+                "type": "string",
+                "description": "Directory to search in (default: current directory).",
+            },
             "pattern": {
                 "type": "string",
                 "description": "Glob pattern (e.g. '*.py', '**/*.ts').",
@@ -1670,11 +1714,11 @@ async def _grep_via_python(
             "max_results": {"type": "integer"},
             "file_type": {"type": "string", "description": "'file', 'dir', or 'any'."},
         },
-        "required": ["path"],
+        "required": [],
     },
 )
 async def find_files(
-    path: str,
+    path: str = ".",
     pattern: str = "**/*",
     name: str = "",
     max_results: int = 200,
@@ -1689,9 +1733,32 @@ async def find_files(
         return _json_error("not_a_directory", path=str(target))
 
     limit = max(1, min(max_results, 2000))
-    results: list[dict[str, object]] = []
 
-    for fp in sorted(target.glob(pattern)):
+    # Cap the glob iterator to avoid unbounded traversal, then sort.
+    _GLOB_CAP = limit * 10  # over-fetch so filtering still yields enough
+
+    def _do_glob() -> list[Path]:
+        out: list[Path] = []
+        for fp in target.glob(pattern):
+            out.append(fp)
+            if len(out) >= _GLOB_CAP:
+                break
+        return sorted(out)
+
+    try:
+        glob_paths = await asyncio.wait_for(
+            asyncio.to_thread(_do_glob),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        return _json_error(
+            "timeout",
+            path=str(target),
+            detail="Glob timed out after 30s",
+        )
+
+    results: list[dict[str, object]] = []
+    for fp in glob_paths:
         if len(results) >= limit:
             break
         if file_type == "file" and not fp.is_file():
@@ -1769,45 +1836,54 @@ async def edit_text_file(
     if not target.is_file():
         return _json_error("not_a_file", path=str(target))
 
-    # Staleness check — reject if file changed since last read.
-    staleness_err = check_staleness(target)
-    if staleness_err is not None:
-        return _json_error("stale_file", path=str(target), detail=staleness_err)
+    # Acquire an exclusive advisory lock around the read-modify-write
+    # cycle to prevent TOCTOU races with other agents/processes.
+    with target.open("r+", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            # Staleness check — must happen inside the lock so no
+            # concurrent writer can slip in between check and read.
+            staleness_err = check_staleness(target)
+            if staleness_err is not None:
+                return _json_error("stale_file", path=str(target), detail=staleness_err)
 
-    # Read content — no awaits between here and write (atomic).
-    content = target.read_text(encoding="utf-8")
+            content = fh.read()
 
-    # Try exact match first, then quote-normalized fallback.
-    actual_old = old_text
-    if old_text not in content:
-        normalized_old = _normalize_quotes(old_text)
-        normalized_content = _normalize_quotes(content)
-        if normalized_old in normalized_content:
-            # Find the actual substring in original content by position.
-            pos = normalized_content.index(normalized_old)
-            actual_old = content[pos : pos + len(old_text)]
-            if actual_old not in content:
-                return _json_error(
-                    "text_not_found",
-                    path=str(target),
-                    old_text=old_text[:200],
-                )
-        else:
-            return _json_error(
-                "text_not_found",
-                path=str(target),
-                old_text=old_text[:200],
-            )
+            # Try exact match first, then quote-normalized fallback.
+            actual_old = old_text
+            if old_text not in content:
+                normalized_old = _normalize_quotes(old_text)
+                normalized_content = _normalize_quotes(content)
+                if normalized_old in normalized_content:
+                    # Find the actual substring in original content by position.
+                    pos = normalized_content.index(normalized_old)
+                    actual_old = content[pos : pos + len(old_text)]
+                    if actual_old not in content:
+                        return _json_error(
+                            "text_not_found",
+                            path=str(target),
+                            old_text=old_text[:200],
+                        )
+                else:
+                    return _json_error(
+                        "text_not_found",
+                        path=str(target),
+                        old_text=old_text[:200],
+                    )
 
-    if replace_all:
-        new_content = content.replace(actual_old, new_text)
-        count = content.count(actual_old)
-    else:
-        new_content = content.replace(actual_old, new_text, 1)
-        count = 1
+            if replace_all:
+                new_content = content.replace(actual_old, new_text)
+                count = content.count(actual_old)
+            else:
+                new_content = content.replace(actual_old, new_text, 1)
+                count = 1
 
-    # Atomic write — no async between staleness check and here.
-    target.write_text(new_content, encoding="utf-8")
+            # Write back while still holding the lock.
+            fh.seek(0)
+            fh.write(new_content)
+            fh.truncate()
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
     # Generate structured diff for the response.
     diff = compute_unified_diff(content, new_content, str(target))
@@ -2020,6 +2096,14 @@ async def tree_directory(
     if not target.is_dir():
         return _json_error("not_a_directory", path=str(target))
 
+    try:
+        max_depth = int(max_depth)
+    except (TypeError, ValueError):
+        max_depth = 3
+    try:
+        max_entries = int(max_entries)
+    except (TypeError, ValueError):
+        max_entries = 500
     depth = max(1, min(max_depth, 10))
     limit = max(1, min(max_entries, 5000))
     lines: list[str] = [str(target)]
@@ -2102,6 +2186,10 @@ async def diff_files(file_a: str, file_b: str, context_lines: int = 3) -> str:
     except OSError as exc:
         return _json_error("read_failed", detail=str(exc))
 
+    try:
+        context_lines = int(context_lines)
+    except (TypeError, ValueError):
+        context_lines = 3
     ctx = max(0, min(context_lines, 20))
     diff = list(
         difflib.unified_diff(
@@ -2287,6 +2375,10 @@ async def git(  # noqa: C901 — unified dispatch, complexity is expected
 
     # -- log --
     if action == "log":
+        try:
+            max_count = int(max_count)
+        except (TypeError, ValueError):
+            max_count = 10
         count = max(1, min(max_count, 100))
         args = ["log", f"-{count}"]
         if oneline:
@@ -3635,6 +3727,15 @@ async def history_snip(
             },
         )
 
+    try:
+        start_turn = int(start_turn)
+    except (TypeError, ValueError):
+        start_turn = 0
+    try:
+        end_turn = int(end_turn)
+    except (TypeError, ValueError):
+        end_turn = 0
+
     total = len(_snip_message_history)
     if start_turn < 0 or end_turn >= total or start_turn > end_turn:
         return json.dumps(
@@ -3720,6 +3821,11 @@ async def notebook_edit(
         return _json_error("notebook_parse_error", detail=str(exc))
 
     cells = nb_data.get("cells", [])
+
+    try:
+        cell_index = int(cell_index)
+    except (TypeError, ValueError):
+        cell_index = 0
 
     if edit_mode == "delete":
         if cell_index < 0 or cell_index >= len(cells):
@@ -3844,6 +3950,10 @@ async def tool_search(query: str, max_results: int = 5) -> str:
         return _json_error("no_registry", detail="Tool registry not available")
 
     all_specs = _tool_registry_ref.all()
+    try:
+        max_results = int(max_results)
+    except (TypeError, ValueError):
+        max_results = 5
     cap = max(1, min(max_results, 50))
 
     # Exact match mode: "select:ToolName,OtherTool"

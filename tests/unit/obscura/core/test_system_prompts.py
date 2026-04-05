@@ -94,7 +94,9 @@ def test_default_prompt_has_delegation_section() -> None:
     """Test that default prompt includes delegation guidance."""
     prompt = get_default_system_prompt()
 
-    assert "Delegation" in prompt or "Sub-Agent" in prompt or "delegate" in prompt.lower()
+    assert (
+        "Delegation" in prompt or "Sub-Agent" in prompt or "delegate" in prompt.lower()
+    )
 
 
 def test_default_prompt_has_identity() -> None:

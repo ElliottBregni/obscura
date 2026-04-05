@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.vector_memory.backends.sqlite_backend import SQLiteBackend
@@ -65,5 +64,3 @@ def test_consolidate_skips_recent(tmp_path) -> None:
 
     assert deleted == 0
     assert created == 0
-
-

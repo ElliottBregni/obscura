@@ -32,6 +32,16 @@ if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
 
 
+def _notify_vault_profile() -> None:
+    """Best-effort vault sync on profile mutation."""
+    try:
+        from obscura.kairos.vault_sync import notify_profile_changed
+
+        notify_profile_changed()
+    except Exception:
+        pass
+
+
 def _profile() -> Any:
     from obscura.kairos.user_profile import UserProfile
 
@@ -78,7 +88,7 @@ def _json_error(error: str, **extra: object) -> str:
             "compact": {
                 "type": "boolean",
                 "description": "If true (default), return a compact summary. "
-                               "If false, return the full profile text.",
+                "If false, return the full profile text.",
             },
             "include_scores": {
                 "type": "boolean",
@@ -114,7 +124,9 @@ def profile_get(compact: bool = True, include_scores: bool = False) -> str:
     # Fall back to markdown file.
     p = _profile()
     if not p.exists():
-        return _json_error("profile_not_found", hint="Use profile_update to start building it.")
+        return _json_error(
+            "profile_not_found", hint="Use profile_update to start building it."
+        )
     if compact:
         return _json_ok(summary=p.active_summary(), source="markdown")
     return _json_ok(profile=p.read(), source="markdown")
@@ -184,6 +196,7 @@ def profile_update(fact: str, memory_type: str = "fact") -> str:
             pass  # vector store is best-effort
 
     if appended:
+        _notify_vault_profile()
         return _json_ok(appended=True, fact=fact, memory_type=memory_type)
     return _json_ok(appended=False, reason="duplicate", fact=fact)
 
@@ -263,7 +276,14 @@ def profile_sync() -> str:
             },
             "category": {
                 "type": "string",
-                "enum": ["identity", "career", "skill", "preference", "personal", "learned"],
+                "enum": [
+                    "identity",
+                    "career",
+                    "skill",
+                    "preference",
+                    "personal",
+                    "learned",
+                ],
                 "description": "Fact category (determines decay rate).",
             },
         },
@@ -290,6 +310,7 @@ def profile_set(key: str, value: str, category: str) -> str:
         source="user_stated",
     )
     store.set_fact(fact)
+    _notify_vault_profile()
     return _json_ok(key=key, value=value, category=category)
 
 
@@ -314,6 +335,7 @@ def profile_forget(key: str) -> str:
 
     deleted = store.forget(key)
     if deleted:
+        _notify_vault_profile()
         return _json_ok(key=key, deleted=True)
     return _json_error(f"Fact not found: {key}")
 

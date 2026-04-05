@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from obscura.cli.__init__ import _parse_confirm_decision, _track_task_surface_event
-from obscura.cli.commands import REPLContext, cmd_menu, cmd_tasks
-from obscura.core.types import AgentEventKind
+from obscura.cli.__init__ import _parse_confirm_decision
+from obscura.cli.commands import REPLContext, cmd_menu
 
 
 def _ctx() -> REPLContext:

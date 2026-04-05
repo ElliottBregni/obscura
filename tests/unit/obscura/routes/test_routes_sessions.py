@@ -76,6 +76,7 @@ class TestSessionList:
         data = resp.json()
         assert len(data) >= 1
 
+
 class TestSessionDelete:
     @patch("obscura.routes.sessions.sync_session_lifecycle")
     @patch("obscura.routes.sessions.broadcast_event", new_callable=AsyncMock)

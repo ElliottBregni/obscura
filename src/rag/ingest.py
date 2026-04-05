@@ -3,6 +3,7 @@
 This module provides a minimal ingest pipeline placeholder for the Vertical RAG POC.
 Replace with real ingestion, chunking, embedding, and vector-store logic.
 """
+
 from typing import Iterable
 
 

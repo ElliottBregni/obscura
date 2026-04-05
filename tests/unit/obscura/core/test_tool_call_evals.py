@@ -18,7 +18,6 @@ import json
 from typing import Any, override
 from collections.abc import AsyncIterator, Callable
 
-import pytest
 
 from obscura.core.agent_loop import PARAMETER_ALIASES, AgentLoop
 from obscura.core.tools import ToolRegistry
@@ -35,7 +34,6 @@ from obscura.core.types import (
     Role,
     SessionRef,
     StreamChunk,
-    ToolErrorType,
     ToolSpec,
 )
 
@@ -189,10 +187,14 @@ class TestParameterAliases:
         spec = _tool_spec("write_text_file", handler=_handler)
 
         # LLM sends "content" (OpenAI convention), alias maps to "text"
-        backend = MockBackend([
-            _make_tool_call_chunks("write_text_file", {"path": "/tmp/f", "content": "hello"}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks(
+                    "write_text_file", {"path": "/tmp/f", "content": "hello"}
+                ),
+                _make_text_chunks("done"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(backend, reg)
         await _collect_events(loop)
@@ -210,13 +212,19 @@ class TestParameterAliases:
             return "ok"
 
         spec = _tool_spec("write_text_file", handler=_handler)
-        backend = MockBackend([
-            _make_tool_call_chunks(
-                "write_text_file",
-                {"path": "/tmp/f", "content": "from_alias", "text": "from_canonical"},
-            ),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks(
+                    "write_text_file",
+                    {
+                        "path": "/tmp/f",
+                        "content": "from_alias",
+                        "text": "from_canonical",
+                    },
+                ),
+                _make_text_chunks("done"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(backend, reg)
         await _collect_events(loop)
@@ -233,13 +241,15 @@ class TestParameterAliases:
             return "ok"
 
         spec = _tool_spec("edit_text_file", handler=_handler)
-        backend = MockBackend([
-            _make_tool_call_chunks(
-                "edit_text_file",
-                {"file_path": "/tmp/f", "old_string": "a", "new_string": "b"},
-            ),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks(
+                    "edit_text_file",
+                    {"file_path": "/tmp/f", "old_string": "a", "new_string": "b"},
+                ),
+                _make_text_chunks("done"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(backend, reg)
         await _collect_events(loop)
@@ -255,7 +265,9 @@ class TestParameterAliases:
             for alias, canonical in aliases.items():
                 assert isinstance(alias, str)
                 assert isinstance(canonical, str)
-                assert alias != canonical, f"{tool_name}: alias '{alias}' maps to itself"
+                assert alias != canonical, (
+                    f"{tool_name}: alias '{alias}' maps to itself"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -269,10 +281,12 @@ class TestAllowlistRejection:
     async def test_rejection_includes_available_tools(self) -> None:
         """When a tool is blocked by allowlist, error message lists what IS allowed."""
         spec = _tool_spec("run_shell")
-        backend = MockBackend([
-            _make_tool_call_chunks("run_shell", {"command": "ls"}),
-            _make_text_chunks("ok"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("run_shell", {"command": "ls"}),
+                _make_text_chunks("ok"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(
             backend,
@@ -291,10 +305,12 @@ class TestAllowlistRejection:
     async def test_allowed_tool_passes(self) -> None:
         """Tools in the allowlist execute normally."""
         spec = _tool_spec("read_text_file", handler=lambda **kw: "content")
-        backend = MockBackend([
-            _make_tool_call_chunks("read_text_file", {"path": "/tmp/f"}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("read_text_file", {"path": "/tmp/f"}),
+                _make_text_chunks("done"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(
             backend,
@@ -322,28 +338,30 @@ class TestNotFoundCounter:
         reg = _make_registry(spec)
 
         # Run 1: call nonexistent tool 2 times (below hard-stop threshold)
-        backend1 = MockBackend([
-            _make_tool_call_chunks("fake_tool", {}),
-            _make_tool_call_chunks("fake_tool", {}),
-            _make_text_chunks("giving up"),
-        ])
+        backend1 = MockBackend(
+            [
+                _make_tool_call_chunks("fake_tool", {}),
+                _make_tool_call_chunks("fake_tool", {}),
+                _make_text_chunks("giving up"),
+            ]
+        )
         loop = AgentLoop(backend1, reg)
         events1 = await _collect_events(loop)
 
         # Run 2: same loop instance, call fake_tool again — count should be 1, not 3
-        backend2 = MockBackend([
-            _make_tool_call_chunks("fake_tool", {}),
-            _make_text_chunks("ok"),
-        ])
+        backend2 = MockBackend(
+            [
+                _make_tool_call_chunks("fake_tool", {}),
+                _make_text_chunks("ok"),
+            ]
+        )
         loop._backend = backend2  # type: ignore[assignment]
         events2 = await _collect_events(loop)
 
         result_events = _events_of_kind(events2, AgentEventKind.TOOL_RESULT)
         # Should NOT contain the hard-stop "STOP:" message (which triggers at count >= 3)
         for e in result_events:
-            assert "STOP:" not in e.tool_result, (
-                "Not-found counter leaked across runs"
-            )
+            assert "STOP:" not in e.tool_result, "Not-found counter leaked across runs"
 
     async def test_unknown_tool_suggests_available(self) -> None:
         """Unknown tool error should list available tools."""
@@ -351,10 +369,12 @@ class TestNotFoundCounter:
         reg = _make_registry(spec)
 
         # Use a name that won't fuzzy-match to anything
-        backend = MockBackend([
-            _make_tool_call_chunks("zzz_nonexistent_tool", {}),
-            _make_text_chunks("ok"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks("zzz_nonexistent_tool", {}),
+                _make_text_chunks("ok"),
+            ]
+        )
         loop = AgentLoop(backend, reg)
         events = await _collect_events(loop)
 
@@ -482,6 +502,7 @@ class TestDroppedKwargs:
 
     async def test_extra_kwargs_dropped_tool_still_works(self) -> None:
         """Extra kwargs that the handler doesn't accept are dropped, tool still runs."""
+
         def _handler(path: str) -> str:
             return f"read {path}"
 
@@ -495,13 +516,15 @@ class TestDroppedKwargs:
             },
         )
 
-        backend = MockBackend([
-            _make_tool_call_chunks(
-                "read_text_file",
-                {"path": "/tmp/f", "encoding": "utf-8", "extra_nonsense": True},
-            ),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                _make_tool_call_chunks(
+                    "read_text_file",
+                    {"path": "/tmp/f", "encoding": "utf-8", "extra_nonsense": True},
+                ),
+                _make_text_chunks("done"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(backend, reg)
         events = await _collect_events(loop)
@@ -523,6 +546,7 @@ class TestRequiredParamValidation:
 
     async def test_missing_required_param_error(self) -> None:
         """When a required param is missing, error message names the param."""
+
         def _handler(path: str, text: str) -> str:
             return "ok"
 
@@ -539,11 +563,13 @@ class TestRequiredParamValidation:
             },
         )
 
-        backend = MockBackend([
-            # Only sends path, missing text
-            _make_tool_call_chunks("write_text_file", {"path": "/tmp/f"}),
-            _make_text_chunks("done"),
-        ])
+        backend = MockBackend(
+            [
+                # Only sends path, missing text
+                _make_tool_call_chunks("write_text_file", {"path": "/tmp/f"}),
+                _make_text_chunks("done"),
+            ]
+        )
         reg = _make_registry(spec)
         loop = AgentLoop(backend, reg)
         events = await _collect_events(loop)

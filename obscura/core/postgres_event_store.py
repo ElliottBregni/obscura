@@ -86,6 +86,7 @@ class PostgreSQLEventStore:
         backend="",
         model="",
         source="live",
+        parent_session_id="",
         project="",
         summary="",
         metadata=None,
@@ -97,6 +98,7 @@ class PostgreSQLEventStore:
             backend,
             model,
             source,
+            parent_session_id,
             project,
             summary,
             metadata,
@@ -109,6 +111,7 @@ class PostgreSQLEventStore:
         backend,
         model,
         source,
+        parent_session_id,
         project,
         summary,
         metadata,
@@ -118,7 +121,7 @@ class PostgreSQLEventStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO events.sessions (id, status, backend, model, active_agent, source, project, summary, message_count, metadata, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s)",
+                    "INSERT INTO events.sessions (id, status, backend, model, active_agent, source, parent_session_id, project, summary, message_count, metadata, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s)",
                     (
                         session_id,
                         SessionStatus.RUNNING.value,
@@ -126,6 +129,7 @@ class PostgreSQLEventStore:
                         model,
                         agent,
                         source,
+                        parent_session_id,
                         project,
                         summary,
                         json.dumps(metadata or {}),
@@ -143,6 +147,7 @@ class PostgreSQLEventStore:
             model=model,
             active_agent=agent,
             source=source,
+            parent_session_id=parent_session_id,
             project=project,
             summary=summary,
             message_count=0,
@@ -160,12 +165,15 @@ class PostgreSQLEventStore:
     async def get_events(self, session_id, *, after_seq=0):
         return await asyncio.to_thread(self._get_events_sync, session_id, after_seq)
 
-    async def list_sessions(self, *, status=None, backend=None, source=None):
+    async def list_sessions(
+        self, *, status=None, backend=None, source=None, parent_session_id=None
+    ):
         return await asyncio.to_thread(
             self._list_sessions_sync,
             status,
             backend,
             source,
+            parent_session_id,
         )
 
     def _get_session_sync(self, session_id):
@@ -263,7 +271,7 @@ class PostgreSQLEventStore:
         finally:
             self._put_conn(conn)
 
-    def _list_sessions_sync(self, status, backend, source):
+    def _list_sessions_sync(self, status, backend, source, parent_session_id=None):
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -277,6 +285,9 @@ class PostgreSQLEventStore:
                 if source:
                     query += " AND source = %s"
                     params.append(source)
+                if parent_session_id is not None:
+                    query += " AND parent_session_id = %s"
+                    params.append(parent_session_id)
                 query += " ORDER BY updated_at DESC"
                 cur.execute(query, params)
                 return [
@@ -287,6 +298,7 @@ class PostgreSQLEventStore:
                         model=r["model"],
                         active_agent=r["active_agent"],
                         source=r["source"],
+                        parent_session_id=r.get("parent_session_id", "") or "",
                         project=r["project"],
                         summary=r["summary"],
                         message_count=r["message_count"],

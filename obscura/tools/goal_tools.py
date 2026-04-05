@@ -30,8 +30,22 @@ def _board() -> Any:
     return GoalBoard()
 
 
+def _notify_vault(goal_id: str) -> None:
+    """Best-effort vault sync on goal mutation."""
+    try:
+        from obscura.kairos.vault_sync import notify_goal_changed
+
+        notify_goal_changed(goal_id)
+    except Exception:
+        pass
+
+
 def _emit_goal_event(
-    goal_id: str, title: str, event: str, detail: str = "", priority: str = "medium",
+    goal_id: str,
+    title: str,
+    event: str,
+    detail: str = "",
+    priority: str = "medium",
 ) -> None:
     """Emit a goal lifecycle event to vector memory for semantic search."""
     try:
@@ -109,8 +123,13 @@ def _goal_dict(goal: Any) -> dict[str, Any]:
             "action": {
                 "type": "string",
                 "enum": [
-                    "create", "list", "get", "update",
-                    "complete", "abandon", "add_task",
+                    "create",
+                    "list",
+                    "get",
+                    "update",
+                    "complete",
+                    "abandon",
+                    "add_task",
                 ],
                 "description": "The operation to perform.",
             },
@@ -194,7 +213,9 @@ def goal_tool(
 
     if action == "create":
         if not title:
-            return _json_error("missing_title", detail="'title' is required for create.")
+            return _json_error(
+                "missing_title", detail="'title' is required for create."
+            )
         g = board.create(
             title,
             priority=priority,
@@ -203,6 +224,7 @@ def goal_tool(
             depends_on=depends_on,
         )
         _emit_goal_event(g.id, title, "created", f"priority={priority}", priority)
+        _notify_vault(g.id)
         return _json_ok(goal_id=g.id, goal=_goal_dict(g))
 
     if action == "list":
@@ -238,6 +260,7 @@ def goal_tool(
             return _json_error("goal_not_found_or_invalid_transition", goal_id=goal_id)
         detail = ", ".join(f"{k}={v}" for k, v in fields.items() if v is not None)
         _emit_goal_event(goal_id, g.title, "updated", detail, g.priority)
+        _notify_vault(goal_id)
         return _json_ok(goal=_goal_dict(g))
 
     if action == "complete":
@@ -247,6 +270,7 @@ def goal_tool(
         if g is None:
             return _json_error("goal_not_found_or_invalid_transition", goal_id=goal_id)
         _emit_goal_event(goal_id, g.title, "completed", "100%", g.priority)
+        _notify_vault(goal_id)
         return _json_ok(goal=_goal_dict(g))
 
     if action == "abandon":
@@ -256,6 +280,7 @@ def goal_tool(
         if g is None:
             return _json_error("goal_not_found_or_invalid_transition", goal_id=goal_id)
         _emit_goal_event(goal_id, g.title, "abandoned", reason, g.priority)
+        _notify_vault(goal_id)
         return _json_ok(goal=_goal_dict(g))
 
     if action == "add_task":
@@ -264,6 +289,7 @@ def goal_tool(
         g = board.link_task(goal_id, task_id)
         if g is None:
             return _json_error("goal_not_found", goal_id=goal_id)
+        _notify_vault(goal_id)
         return _json_ok(goal=_goal_dict(g))
 
     return _json_error("invalid_action", detail=f"Unknown action: {action}")

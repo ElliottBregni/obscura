@@ -1971,6 +1971,38 @@ class AgentLoop:
                     f"positional arguments: {hints}"
                 )
 
+        # Coerce inputs to match JSON Schema types.  LLMs frequently send
+        # string values for integer/number/boolean params (e.g. "5" instead
+        # of 5).  Doing this centrally avoids per-tool int() casts.
+        props = spec.parameters.get("properties", {})
+        for key, value in list(inputs.items()):
+            if value is None:
+                continue
+            prop_schema = props.get(key)
+            if not prop_schema:
+                continue
+            expected = prop_schema.get("type")
+            try:
+                if expected == "integer" and not isinstance(value, int):
+                    inputs[key] = int(value)
+                elif expected == "number" and not isinstance(value, (int, float)):
+                    inputs[key] = float(value)
+                elif expected == "boolean" and not isinstance(value, bool):
+                    if isinstance(value, str):
+                        inputs[key] = value.lower() not in ("", "0", "false", "no")
+                    else:
+                        inputs[key] = bool(value)
+                elif expected == "string" and not isinstance(value, str):
+                    inputs[key] = str(value)
+            except (ValueError, TypeError):
+                logger.debug(
+                    "Tool %s: could not coerce %s=%r to %s",
+                    spec.name,
+                    key,
+                    value,
+                    expected,
+                )
+
         try:
             if inspect.iscoroutinefunction(handler):
                 return await handler(**inputs)

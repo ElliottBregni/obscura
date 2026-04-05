@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-from unittest.mock import patch
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.routes import session_ingest
@@ -33,5 +30,3 @@ def test_preflight_reports_expected_keys() -> None:
     assert "agent_sync_script" in checks
     assert "obscura_home" in checks
     assert "cwd" in checks
-
-

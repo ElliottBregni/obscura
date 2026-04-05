@@ -22,6 +22,7 @@ from obscura.kairos.frustration import FrustrationDetector
 from obscura.kairos.goals import GoalBoard
 from obscura.kairos.proactive import ProactiveMode
 from obscura.kairos.undercover import UndercoverMode, is_undercover
+from obscura.kairos.vault_sync import VaultSync
 
 __all__ = [
     "DailyLog",
@@ -31,6 +32,7 @@ __all__ = [
     "KairosEngine",
     "ProactiveMode",
     "UndercoverMode",
+    "VaultSync",
     "generate_away_summary",
     "is_undercover",
 ]

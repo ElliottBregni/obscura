@@ -250,9 +250,7 @@ class TestAgentLoopEventStore:
         stored_kinds = [e.kind.value for e in stored]
         # STOP_CHECK appears in stored events right before AGENT_DONE
         assert len(stored) == len(events) + 1
-        assert stored_kinds == [
-            k for k in stored_kinds
-        ]  # sanity — all valid
+        assert stored_kinds == [k for k in stored_kinds]  # sanity — all valid
         # Remove STOP_CHECK from stored to compare with yielded
         filtered = [k for k in stored_kinds if k != "stop_check"]
         assert filtered == yielded_kinds

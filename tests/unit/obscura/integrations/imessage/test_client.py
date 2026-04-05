@@ -260,4 +260,3 @@ class TestIMessageClientSQLiteRead:
                 ):
                     out = await client.poll_unread(0)
         assert out == expected
-

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
+from obscura.kairos.vault_sync import VaultSync
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class KairosEngine:
         # Cost-reduction toggles (None = read from env)
         proactive_enabled: bool | None = None,
         dream_enabled: bool | None = None,
+        vault_sync_enabled: bool | None = None,
     ) -> None:
         self._proactive_enabled = (
             proactive_enabled
@@ -125,7 +127,17 @@ class KairosEngine:
             )
         )
 
+        self._vault_sync_enabled = (
+            vault_sync_enabled
+            if vault_sync_enabled is not None
+            else _settings_flag(
+                "kairos.vault_sync",
+                _env_flag("OBSCURA_KAIROS_VAULT_SYNC", default=True),
+            )
+        )
+
         self._daily_log = DailyLog()
+        self._vault_sync = VaultSync() if self._vault_sync_enabled else None
         self._active_loop: object | None = None
         self._proactive: ProactiveMode | None = (
             ProactiveMode(
@@ -155,14 +167,19 @@ class KairosEngine:
         # Log engine start.
         self.log("KAIROS engine started")
 
+        # Bootstrap vault directory structure.
+        if self._vault_sync is not None:
+            self._vault_sync.bootstrap()
+
         # Start proactive tick loop if enabled.
         if self._proactive is not None:
             await self._proactive.start()
 
         logger.info(
-            "KAIROS engine started (proactive=%s dream=%s)",
+            "KAIROS engine started (proactive=%s dream=%s vault_sync=%s)",
             self._proactive_enabled,
             self._dream_enabled,
+            self._vault_sync_enabled,
         )
 
     async def stop(self) -> None:
@@ -172,6 +189,10 @@ class KairosEngine:
 
         if self._proactive is not None:
             await self._proactive.stop()
+
+        # Run vault sync before dream consolidation.
+        await self._maybe_vault_sync()
+
         self.log("KAIROS engine stopped")
         self._started = False
 
@@ -228,6 +249,18 @@ class KairosEngine:
                 inject(f"<tick>#{tick_count}{goal_hint}</tick>")
         except Exception:
             logger.debug("Proactive tick injection failed", exc_info=True)
+
+    async def _maybe_vault_sync(self) -> None:
+        """Run vault sync if enabled."""
+        if self._vault_sync is None:
+            return
+        try:
+            self.log("Vault sync started")
+            report = await self._vault_sync.sync()
+            self.log(report.summary(), source="vault")
+        except Exception:
+            logger.warning("Vault sync failed", exc_info=True)
+            self.log("Vault sync failed", source="vault")
 
     async def _maybe_dream(self) -> None:
         """Check if dream consolidation should run."""
@@ -307,6 +340,27 @@ class KairosEngine:
                 )
         except Exception:
             pass
+        # Inject vault sync status.
+        if self._vault_sync is not None:
+            try:
+                vault_status = self._vault_sync.status()
+                if vault_status.get("exists"):
+                    zones = vault_status.get("zones", {})
+                    parts.append("")
+                    parts.append("## Vault Sync")
+                    parts.append(
+                        f"Vault at {vault_status['vault_path']} — "
+                        f"user:{zones.get('user', 0)} agent:{zones.get('agent', 0)} "
+                        f"shared:{zones.get('shared', 0)} files"
+                    )
+                    parts.append(
+                        "Read from user/ and shared/ zones. "
+                        "Write only to agent/ zone. "
+                        "Use write_agent_shared() for shared files to enable fork-merge."
+                    )
+            except Exception:
+                pass
+
         if self._proactive is not None and self._proactive.is_running:
             parts.append("")
             parts.append(self._proactive.get_system_prompt_addition())
@@ -326,13 +380,17 @@ class KairosEngine:
 
     def status(self) -> dict[str, object]:
         """Return engine status for diagnostics."""
-        return {
+        result: dict[str, object] = {
             "running": self._started,
             "uptime_s": time.time() - self._start_time if self._started else 0,
             "observations": self._observation_count,
             "tick_count": self._proactive.tick_count if self._proactive else 0,
             "proactive_enabled": self._proactive_enabled,
             "dream_enabled": self._dream_enabled,
+            "vault_sync_enabled": self._vault_sync_enabled,
             "daily_log_entries": self._daily_log.entry_count(),
             "daily_log_path": str(self._daily_log.path),
         }
+        if self._vault_sync is not None:
+            result["vault"] = self._vault_sync.status()
+        return result

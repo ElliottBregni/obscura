@@ -1,3 +1,3 @@
-"""Vertical RAG package placeholder
-"""
+"""Vertical RAG package placeholder"""
+
 __all__ = ["ingest"]

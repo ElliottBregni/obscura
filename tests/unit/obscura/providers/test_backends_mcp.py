@@ -7,7 +7,6 @@ hooks, sessions, send/stream, and server management.
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 

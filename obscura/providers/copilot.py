@@ -794,6 +794,15 @@ class CopilotBackend:
     _SEND_ALLOWED_KEYS = {"prompt", "attachments", "mode"}
     _SEND_AND_WAIT_ALLOWED_KEYS = {"prompt", "attachments", "mode", "timeout"}
 
+    def set_thinking_budget(self, tokens: int | None) -> None:
+        """No-op: Copilot backend does not support extended thinking budgets."""
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "set_thinking_budget(%s) ignored — Copilot backend does not support extended thinking.",
+            tokens,
+        )
+
     def _build_message_options(
         self,
         prompt: str,
@@ -803,8 +812,12 @@ class CopilotBackend:
 
         Returns a dict suitable for ``**``-unpacking into the SDK methods.
         The ``prompt`` key is always present as a positional-ready value.
-        Keys not accepted by the SDK (e.g. ``tool_choice``) are dropped.
+        Keys not accepted by the SDK (e.g. ``tool_choice``, ``max_thinking_tokens``) are dropped.
         """
+        # Drain effort/thinking keys — Copilot SDK does not support them.
+        # We do this explicitly so callers don't see silent drops or type errors.
+        kwargs.pop("max_thinking_tokens", None)
+
         msg_options: dict[str, Any] = {"prompt": self._truncate_prompt(prompt)}
         options = kwargs.get("options")
         if isinstance(options, dict):

@@ -1,6 +1,5 @@
 import asyncio
 import json
-from typing import Never
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,7 +8,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
 from obscura.cli.prompt import bordered_prompt
-from obscura.cli.render import OutputManager, StreamRenderer, console
+from obscura.cli.render import OutputManager, StreamRenderer
 from obscura.core.types import AgentEvent, AgentEventKind
 
 

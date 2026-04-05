@@ -47,6 +47,8 @@ class DynamicToolDiscovery:
         min_rank: int | None = None,
     ) -> list[ToolCapability]:
         """Discover top N popular tool capabilities."""
+        limit = int(limit) if limit else 50
+        min_rank = int(min_rank) if min_rank is not None else None
         capabilities: list[ToolCapability] = []
 
         # Try official registry first
@@ -82,6 +84,7 @@ class DynamicToolDiscovery:
         limit: int = 20,
     ) -> list[ToolCapability]:
         """Discover tools by category (e.g., 'filesystem', 'database', 'web')."""
+        limit = int(limit) if limit else 20
         # Fetch from cache or get fresh data (avoid pagination issues)
         try:
             all_capabilities = self.discover_popular(limit=50)

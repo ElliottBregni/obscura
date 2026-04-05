@@ -790,6 +790,7 @@ class TestOpenAITools:
 
         assert result["response_format"] == {"type": "json_object"}
 
+
 # ===================================================================
 # 7. TestOpenAIHooks
 # ===================================================================

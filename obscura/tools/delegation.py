@@ -71,6 +71,7 @@ class DelegationContext:
     max_delegation_depth: int = 3
     current_depth: int = 0
     caller_agent_id: str = ""
+    session_id: str = ""
 
 
 def make_task_tool(ctx: DelegationContext) -> ToolSpec:
@@ -151,6 +152,8 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
                 await ctx.event_store.create_session(
                     child_session_id,
                     f"delegate:{target}",
+                    source="delegation",
+                    parent_session_id=ctx.session_id or "",
                 )
             except Exception:
                 logger.debug("Could not create child session", exc_info=True)

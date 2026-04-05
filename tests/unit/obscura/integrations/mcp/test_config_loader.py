@@ -100,6 +100,7 @@ class TestDiscoverMCPServers:
         names = {server.name for server in discovered}
         assert {"github", "supabase"} == names
 
+
 class TestBuildRuntimeServerConfigs:
     def test_builds_stdio_and_sse_configs(self) -> None:
         discovered = [

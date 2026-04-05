@@ -35,6 +35,7 @@ export const SECTION_ROLES: Record<string, readonly Role[]> = {
   agents: AGENT_READ_ROLES,
   memory: AGENT_READ_ROLES,
   workflows: AGENT_READ_ROLES,
+  goals: AGENT_READ_ROLES,
   approvals: AGENT_READ_ROLES,
   webhooks: AGENT_READ_ROLES,
   audit: AGENT_READ_ROLES,

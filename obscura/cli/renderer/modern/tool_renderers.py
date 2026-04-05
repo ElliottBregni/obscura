@@ -7,6 +7,8 @@ that the ``ModernRenderer`` commits directly to the terminal.  Returns
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from collections.abc import Callable
 
@@ -22,6 +24,10 @@ from obscura.core.types import AgentEvent
 
 # Renderer function type: event + terminal width → ANSI lines or None
 ResultLinesFn = Callable[[AgentEvent, int], list[str] | None]
+
+# Configurable output cap — set OBSCURA_TOOL_OUTPUT_MAX_LINES to override.
+# 0 = unlimited.
+_MAX_LINES = int(os.environ.get("OBSCURA_TOOL_OUTPUT_MAX_LINES", "80"))
 
 
 def _sanitize(s: str) -> str:
@@ -54,15 +60,55 @@ def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     if event.is_error or not raw.strip():
         return None
 
+    # Tool returns JSON with structured diff — parse it.
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+
+    diff = data.get("diff")
+    if not isinstance(diff, dict):
+        return None
+
+    path = data.get("path", "")
+    summary = diff.get("summary", "")
+    hunks = diff.get("hunks", [])
+
     lines: list[str] = []
-    for raw_line in raw.split("\n")[:30]:
-        stripped = raw_line.strip()
-        if stripped.startswith("+"):
-            lines.append(_styled(f"  + {_sanitize(stripped[1:])}"[:width], _S_ADD))
-        elif stripped.startswith("-"):
-            lines.append(_styled(f"  - {_sanitize(stripped[1:])}"[:width], _S_DEL))
-        elif stripped:
-            lines.append(_styled(f"    {_sanitize(stripped)}"[:width], _S_CTX))
+
+    # File header
+    if path:
+        header = f"  {path}"
+        if summary:
+            header += f"  ({summary})"
+        lines.append(_styled(header, _S_FILE))
+
+    # Render each hunk
+    cap = _MAX_LINES or float("inf")
+    total_lines = 0
+    for hunk in hunks:
+        hunk_header = hunk.get("header", "")
+        if hunk_header:
+            lines.append(_styled(f"  {hunk_header}", _S_CTX))
+        for diff_line in hunk.get("lines", []):
+            if total_lines >= cap:
+                remaining = sum(len(h.get("lines", [])) for h in hunks) - total_lines
+                if remaining > 0:
+                    lines.append(_styled(f"  ... ({remaining} more lines)", _S_CTX))
+                break
+            if diff_line.startswith("+"):
+                lines.append(_styled(f"  + {_sanitize(diff_line[1:])}"[:width], _S_ADD))
+            elif diff_line.startswith("-"):
+                lines.append(_styled(f"  - {_sanitize(diff_line[1:])}"[:width], _S_DEL))
+            else:
+                lines.append(_styled(f"    {_sanitize(diff_line)}"[:width], _S_CTX))
+            total_lines += 1
+        else:
+            continue
+        break  # hit the 60-line cap
 
     return lines if lines else None
 
@@ -78,8 +124,9 @@ def _read_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         return None
 
     raw_lines = raw.split("\n")
-    truncated = len(raw_lines) > 50
-    display_lines = raw_lines[:50]
+    cap = _MAX_LINES or len(raw_lines)
+    truncated = len(raw_lines) > cap
+    display_lines = raw_lines[:cap]
 
     # Gutter width
     max_ln = len(display_lines)
@@ -93,7 +140,7 @@ def _read_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         lines.append(f"  {gutter}{code}")
 
     if truncated:
-        lines.append(_styled(f"  ... ({len(raw_lines) - 50} more lines)", _S_CTX))
+        lines.append(_styled(f"  ... ({len(raw_lines) - cap} more lines)", _S_CTX))
 
     return lines if lines else None
 
@@ -109,8 +156,9 @@ def _grep_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         return None
 
     # Parse "filepath:line:content" format
+    cap = _MAX_LINES or 500
     groups: dict[str, list[tuple[int, str]]] = {}
-    for raw_line in raw.split("\n")[:100]:
+    for raw_line in raw.split("\n")[:cap]:
         m = re.match(r"^(.+?):(\d+):(.*)$", raw_line)
         if m:
             fpath, lineno, content = m.groups()
@@ -122,17 +170,18 @@ def _grep_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         # Files-only output
         files = [_sanitize(ln.strip()) for ln in raw.split("\n") if ln.strip()]
         if files:
-            return [_styled(f"  {f}"[:width], _S_FILE) for f in files[:30]]
+            return [_styled(f"  {f}"[:width], _S_FILE) for f in files[:cap]]
         return None
 
+    per_file = max(cap // max(len(groups), 1), 5)
     lines: list[str] = []
     for fpath, matches in groups.items():
         lines.append(_styled(f"  {fpath}", _S_FILE))
-        for lineno, content in matches[:10]:
+        for lineno, content in matches[:per_file]:
             prefix = _styled(f"    {lineno:>4}: ", _S_LINE)
             lines.append(f"{prefix}{content}"[:width])
-        if len(matches) > 10:
-            lines.append(_styled(f"    ... ({len(matches) - 10} more)", _S_CTX))
+        if len(matches) > per_file:
+            lines.append(_styled(f"    ... ({len(matches) - per_file} more)", _S_CTX))
 
     return lines
 
@@ -148,7 +197,8 @@ def _dir_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         return None
 
     lines: list[str] = []
-    for raw_line in raw.split("\n")[:50]:
+    cap = _MAX_LINES or 500
+    for raw_line in raw.split("\n")[:cap]:
         stripped = raw_line.strip()
         if not stripped:
             continue
@@ -175,12 +225,13 @@ def _shell_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         return None
 
     raw_lines = raw.split("\n")
-    truncated = len(raw_lines) > 40
-    display = raw_lines[:40]
+    cap = _MAX_LINES or len(raw_lines)
+    truncated = len(raw_lines) > cap
+    display = raw_lines[:cap]
 
     lines = [f"  {_sanitize(ln)}"[:width] for ln in display]
     if truncated:
-        lines.append(_styled(f"  ... ({len(raw_lines) - 40} more lines)", _S_CTX))
+        lines.append(_styled(f"  ... ({len(raw_lines) - cap} more lines)", _S_CTX))
 
     return lines
 
@@ -196,7 +247,8 @@ def _git_diff_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         return None
 
     lines: list[str] = []
-    for raw_line in raw.split("\n")[:80]:
+    cap = _MAX_LINES or 500
+    for raw_line in raw.split("\n")[:cap]:
         if raw_line.startswith("+") and not raw_line.startswith("+++"):
             lines.append(_styled(f"  {_sanitize(raw_line)}"[:width], _S_ADD))
         elif raw_line.startswith("-") and not raw_line.startswith("---"):
@@ -220,7 +272,8 @@ def _git_status_result_lines(event: AgentEvent, width: int) -> list[str] | None:
         return None
 
     lines: list[str] = []
-    for raw_line in raw.split("\n")[:40]:
+    cap = _MAX_LINES or 500
+    for raw_line in raw.split("\n")[:cap]:
         sanitized = _sanitize(raw_line)
         if sanitized.startswith("M ") or sanitized.startswith(" M"):
             lines.append(_styled(f"  {sanitized}"[:width], Style(fg=OK_COLOR)))
@@ -281,6 +334,8 @@ class ToolRendererRegistry:
 
     def _register_defaults(self) -> None:
         self.register("edit_text_file", _edit_result_lines)
+        self.register("write_text_file", _edit_result_lines)
+        self.register("append_text_file", _edit_result_lines)
         self.register("read_text_file", _read_result_lines)
         self.register("grep_files", _grep_result_lines)
         self.register("find_files", _grep_result_lines)

@@ -26,6 +26,40 @@ On macOS, also install SoX and FFmpeg:
 brew install sox ffmpeg
 ```
 
+## Architecture
+
+Obscura is composed of several layered subsystems:
+
+| Subsystem | Description |
+|-----------|-------------|
+| **Supervisor** | Deterministic single-writer session coordinator. Freezes tools, prompt, and memory during context assembly to prevent mid-turn flicker. 16 modules, SQLite-backed, 7-state FSM. |
+| **Kairos** | Autonomous background goal runtime. Runs long-horizon goals asynchronously, surfacing progress through the Goals page in the Web UI. |
+| **A2A** | Agent-to-agent protocol bridge. Supports JSON-RPC and gRPC transports so agents can delegate tasks to each other across process boundaries. |
+| **Channels** | Messaging channel integrations (Telegram, WhatsApp, Slack). Routes inbound messages to the agent runtime and delivers replies back to the channel. |
+| **Web UI** | React 18 admin dashboard. Provides live views of agents, sessions, memory, workflows, goals, approvals, and system health. Runs at `localhost:5173` in dev. |
+
+## Web UI
+
+```bash
+cd web-ui
+npm install
+npm run dev  # http://localhost:5173
+```
+
+See [docs/web-ui.md](docs/web-ui.md) for the full reference (pages, auth, theme, adding new pages).
+
+## Docs
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture deep-dive |
+| [kairos.md](docs/kairos.md) | Kairos autonomous goal runtime |
+| [web-ui.md](docs/web-ui.md) | Web UI reference (React admin portal) |
+| [WIKI.md](docs/WIKI.md) | General project wiki |
+| [CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) | All environment variables and config options |
+| [COMMANDS.md](docs/COMMANDS.md) | Slash command reference |
+| [channels-setup.md](docs/channels-setup.md) | Telegram, WhatsApp, and Slack channel setup |
+
 ## CLI Usage
 
 ```bash
