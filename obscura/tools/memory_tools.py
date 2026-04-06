@@ -6,6 +6,7 @@ and VectorMemoryStore APIs.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from obscura.core.types import ToolSpec
@@ -70,23 +71,49 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
         """Store key-value data in agent memory."""
         store = MemoryStore.for_user(user)
         store.set(namespace=namespace, key=key, value=value)
-        return f"✅ Stored {key} in namespace {namespace}"
+        return json.dumps(
+            {
+                "ok": True,
+                "action": "store",
+                "namespace": namespace,
+                "key": key,
+                "value_keys": list(value.keys()) if isinstance(value, dict) else None,
+            },
+        )
 
-    def recall_memory_impl(namespace: str, key: str) -> dict[str, Any] | None:
+    def recall_memory_impl(namespace: str, key: str) -> str:
         """Retrieve data from agent memory."""
         store = MemoryStore.for_user(user)
         result = store.get(namespace=namespace, key=key)
-        return result if result is not None else None
+        if result is None:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "found": False,
+                    "namespace": namespace,
+                    "key": key,
+                    "value": None,
+                },
+            )
+        return json.dumps(
+            {
+                "ok": True,
+                "found": True,
+                "namespace": namespace,
+                "key": key,
+                "value": result,
+            },
+        )
 
     def semantic_search_impl(
         query: str,
         top_k: int = 5,
         namespace: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> str:
         """Search memory using semantic similarity, optionally in a specific namespace."""
         store = VectorMemoryStore.for_user(user)
         results = store.search_similar(query, namespace=namespace, top_k=top_k)
-        return [
+        items = [
             {
                 "key": str(r.key),
                 "namespace": r.key.namespace if hasattr(r.key, "namespace") else "",
@@ -98,6 +125,15 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
             }
             for r in results
         ]
+        return json.dumps(
+            {
+                "ok": True,
+                "query": query,
+                "namespace": namespace,
+                "count": len(items),
+                "results": items,
+            },
+        )
 
     def store_searchable_impl(
         key: str,
@@ -115,7 +151,16 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
             memory_type=memory_type,
             metadata=metadata or {},
         )
-        return f"✅ Stored in {namespace} ({memory_type}): {key}"
+        return json.dumps(
+            {
+                "ok": True,
+                "action": "store_searchable",
+                "namespace": namespace,
+                "key": key,
+                "memory_type": memory_type,
+                "text_length": len(text),
+            },
+        )
 
     return [
         ToolSpec(

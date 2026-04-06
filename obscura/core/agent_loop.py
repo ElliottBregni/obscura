@@ -72,6 +72,10 @@ from obscura.core.types import (
 
 from obscura.core.event_store import EventRecord, EventStoreProtocol, SessionStatus
 from obscura.core.hooks import HookRegistry
+from obscura.core.predictive_tools import (
+    PredictiveToolCache,
+    ToolPredictor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +350,73 @@ PARAMETER_ALIASES: dict[str, dict[str, str]] = {
         "oldText": "old_text",
         "newText": "new_text",
     },
+    "run_shell": {
+        "timeout": "timeout_seconds",
+    },
+    "find_files": {
+        "head_limit": "max_results",
+    },
+    "task": {
+        "subagent_type": "target",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Tool bridge — structural transforms for cross-backend compatibility
+# ---------------------------------------------------------------------------
+# These handle cases where simple parameter renames aren't enough — the
+# input or output shape is fundamentally different between backends.
+# Each entry is a tuple of (input_transform, output_transform).
+# Either can be None to skip that direction.
+
+def _bridge_grep_input(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Map Claude Code Grep flags to grep_files canonical params."""
+    # -i (case insensitive) → case_sensitive=False
+    if "-i" in inputs:
+        val = inputs.pop("-i")
+        if val and "case_sensitive" not in inputs:
+            inputs["case_sensitive"] = False
+    # -A, -B, -C context flags
+    if "-A" in inputs:
+        inputs.setdefault("after_context", inputs.pop("-A"))
+    if "-B" in inputs:
+        inputs.setdefault("before_context", inputs.pop("-B"))
+    if "-C" in inputs:
+        inputs.setdefault("context", inputs.pop("-C"))
+    # -n (line numbers) — always on in Obscura, just drop it
+    inputs.pop("-n", None)
+    return inputs
+
+
+def _bridge_task_input(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Map Claude Code Agent params to task tool."""
+    # Drop unsupported params that would cause TypeError
+    inputs.pop("description", None)
+    inputs.pop("isolation", None)
+    inputs.pop("run_in_background", None)
+    inputs.pop("model", None)
+    return inputs
+
+
+def _bridge_run_shell_input(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Map Claude Code Bash params to run_shell."""
+    inputs.pop("dangerouslyDisableSandbox", None)
+    return inputs
+
+
+# Registry: canonical_tool_name → (input_transform, output_transform)
+# output_transform receives the raw result string and returns a new string.
+TOOL_BRIDGES: dict[
+    str,
+    tuple[
+        Callable[[dict[str, Any]], dict[str, Any]] | None,
+        Callable[[str], str] | None,
+    ],
+] = {
+    "grep_files": (_bridge_grep_input, None),
+    "task": (_bridge_task_input, None),
+    "run_shell": (_bridge_run_shell_input, None),
 }
 
 
@@ -573,6 +644,13 @@ class AgentLoop:
         # Pause / mid-run input state
         self._should_pause = False
         self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
+
+        # Predictive tool calling — speculative prefetch of read-only tools
+        self._predictive_enabled = os.environ.get(
+            "OBSCURA_PREDICTIVE_TOOLS", "1"
+        ).strip() not in ("0", "false", "no")
+        self._predictive_cache = PredictiveToolCache()
+        self._predictor: ToolPredictor | None = None
 
     # ------------------------------------------------------------------
     # Compiled agent application
@@ -936,6 +1014,17 @@ class AgentLoop:
             # the model stream, not after the full response completes.
             executor = StreamingToolExecutor(self)
 
+            # Predictive tool calling: speculatively prefetch read-only
+            # tools based on the model's text output before it even emits
+            # a tool_use block.
+            if self._predictive_enabled:
+                self._predictive_cache.clear()
+                self._predictor = ToolPredictor(
+                    tool_registry=dict(self._tools.items())
+                    if hasattr(self._tools, "items")
+                    else {},
+                )
+
             def _feed_new_tools_to_executor() -> None:
                 """Hand any newly-flushed tool calls to the executor."""
                 fed = len(executor._order)
@@ -972,6 +1061,10 @@ class AgentLoop:
                             state = state.replace(
                                 turn_text=state.turn_text + chunk.text
                             )
+                            # Feed text to predictive tool caller
+                            if self._predictor is not None:
+                                self._predictor.feed(chunk.text)
+                                self._fire_predictions()
 
                         # Collect tool calls
                         if chunk.kind == ChunkKind.TOOL_USE_START:
@@ -1477,6 +1570,17 @@ class AgentLoop:
             )
             current_prompt = ""
 
+            # Log predictive cache stats and reset for next turn
+            if self._predictive_enabled:
+                stats = self._predictive_cache.stats
+                if stats["hits"] or stats["misses"]:
+                    logger.info(
+                        "Predictive tools: %d hits, %d misses, %d still pending",
+                        stats["hits"],
+                        stats["misses"],
+                        stats["pending"],
+                    )
+
             # Pass structured messages via kwargs so backends can
             # persist full tool call/result history.  Merge rather
             # than replace so callers' kwargs (e.g. tool_choice) survive.
@@ -1672,6 +1776,35 @@ class AgentLoop:
         return None, None
 
     # ------------------------------------------------------------------
+    # Predictive tool calling
+    # ------------------------------------------------------------------
+
+    def _fire_predictions(self) -> None:
+        """Check the predictor for new predictions and prefetch them."""
+        if self._predictor is None:
+            return
+        for pred in self._predictor.predict():
+            if self._predictive_cache.has(pred.tool, pred.args):
+                continue
+            # Only prefetch if not already in cache
+            seen: dict[str, ToolResultEnvelope] = {}
+            tc = ToolCallInfo(
+                tool_use_id=f"predict-{uuid.uuid4().hex[:8]}",
+                name=pred.tool,
+                input=dict(pred.args),
+            )
+            task = asyncio.create_task(
+                self._execute_single_tool(tc, seen),
+                name=f"prefetch-{pred.tool}",
+            )
+            self._predictive_cache.put(pred.tool, pred.args, task)
+            logger.debug(
+                "Predictive prefetch fired: %s(%s)",
+                pred.tool,
+                list(pred.args.keys()),
+            )
+
+    # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
 
@@ -1717,9 +1850,30 @@ class AgentLoop:
     ) -> ToolResultEnvelope:
         """Execute a single tool call and return a canonical result envelope.
 
-        Handles deduplication, allowlist enforcement, confirmation gates,
-        capability token checks, and error normalization.
+        Handles predictive cache hits, deduplication, allowlist enforcement,
+        confirmation gates, capability token checks, and error normalization.
         """
+        # Check predictive cache first — if we already prefetched this
+        # exact call speculatively, return the cached result instantly.
+        if self._predictive_enabled and not tc.tool_use_id.startswith("predict-"):
+            cached = await self._predictive_cache.get(tc.name, tc.input)
+            if cached is not None:
+                logger.info(
+                    "Predictive cache hit: %s (saved %dms)",
+                    tc.name,
+                    cached.latency_ms,
+                )
+                return ToolResultEnvelope(
+                    call_id=tc.tool_use_id,
+                    tool=cached.tool,
+                    status=cached.status,
+                    result=cached.result,
+                    error=cached.error,
+                    latency_ms=0,
+                    tool_use_id=tc.tool_use_id,
+                    raw=cached.raw,
+                )
+
         dedup_key = f"{tc.name}|{json.dumps(tc.input, sort_keys=True)}"
         if dedup_key in seen_calls:
             prev = seen_calls[dedup_key]
@@ -1735,9 +1889,7 @@ class AgentLoop:
                 raw=prev.raw,
             )
 
-        output_level = self._tool_output_overrides.get(
-            tc.name, self._tool_output_level
-        )
+        output_level = self._tool_output_overrides.get(tc.name, self._tool_output_level)
         call = ToolCallEnvelope(
             call_id=tc.tool_use_id,
             agent_id="agent_loop",
@@ -1862,6 +2014,14 @@ class AgentLoop:
 
         try:
             result = await self._call_handler(spec, tc.input)
+
+            # Apply output bridge transform if registered
+            bridge = TOOL_BRIDGES.get(spec.name)
+            if bridge is not None:
+                _, output_transform = bridge
+                if output_transform is not None and isinstance(result, str):
+                    result = output_transform(result)
+
             envelope = ToolResultEnvelope(
                 call_id=call.call_id,
                 tool=call.tool,
@@ -1947,6 +2107,13 @@ class AgentLoop:
         enumerate every LLM-convention parameter.
         """
         handler = spec.handler
+
+        # Apply structural bridge transforms (cross-backend schema compat)
+        bridge = TOOL_BRIDGES.get(spec.name)
+        if bridge is not None:
+            input_transform, _ = bridge
+            if input_transform is not None:
+                inputs = input_transform(inputs)
 
         # Normalize parameter names based on known aliases
         if spec.name in PARAMETER_ALIASES:

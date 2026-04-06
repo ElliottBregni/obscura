@@ -140,7 +140,9 @@ async def web_browser(
                     return clone.body ? clone.body.innerText : document.documentElement.innerText;
                 }
             """)
-            text = str(content)[:50_000]
+            full_text = str(content)
+            truncated = len(full_text) > 50_000
+            text = full_text[:50_000]
             return json.dumps(
                 {
                     "ok": True,
@@ -149,6 +151,8 @@ async def web_browser(
                     "title": await page.title(),
                     "content": text,
                     "length": len(text),
+                    "full_length": len(full_text),
+                    "truncated": truncated,
                 },
             )
 
@@ -200,11 +204,17 @@ async def web_browser(
                     },
                 )
             result = await page.evaluate(value)
+            result_str = str(result)
+            truncated = len(result_str) > 10_000
             return json.dumps(
                 {
                     "ok": True,
                     "operation": "evaluate",
-                    "result": str(result)[:10_000],
+                    "url": page.url,
+                    "expression": value[:200],
+                    "result": result_str[:10_000],
+                    "truncated": truncated,
+                    "result_length": len(result_str),
                 },
             )
 

@@ -296,14 +296,22 @@ async def task_output(task_id: str) -> str:
     bg_task = mgr.get(task_id)
     if bg_task is None:
         return _json_error("task_not_found", task_id=task_id)
+    stdout_full = bg_task.stdout or ""
+    stderr_full = bg_task.stderr or ""
+    stdout_truncated = len(stdout_full) > 50_000
+    stderr_truncated = len(stderr_full) > 10_000
     return json.dumps(
         {
             "ok": True,
             "task_id": bg_task.task_id,
             "status": bg_task.status,
             "command": bg_task.command,
-            "stdout": bg_task.stdout[-50_000:] if bg_task.stdout else "",
-            "stderr": bg_task.stderr[-10_000:] if bg_task.stderr else "",
+            "stdout": stdout_full[-50_000:],
+            "stderr": stderr_full[-10_000:],
+            "stdout_truncated": stdout_truncated,
+            "stderr_truncated": stderr_truncated,
+            "stdout_full_size": len(stdout_full),
+            "stderr_full_size": len(stderr_full),
             "exit_code": bg_task.exit_code,
             "started_at": bg_task.started_at,
             "completed_at": bg_task.completed_at,

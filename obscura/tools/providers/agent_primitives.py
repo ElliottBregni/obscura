@@ -5,9 +5,14 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import time
 from typing import Any
 
 import httpx
+
+# Max inline sizes before truncation.
+_MAX_BODY = 500_000
+_MAX_CLI_OUTPUT = 100_000
 
 
 async def _http_json(
@@ -20,6 +25,7 @@ async def _http_json(
     data: dict[str, Any] | None = None,
     timeout: float = 30.0,
 ) -> dict[str, Any]:
+    t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.request(
@@ -30,20 +36,40 @@ async def _http_json(
                 json=json_body,
                 data=data,
             )
+            elapsed = round(time.monotonic() - t0, 2)
             content_type = resp.headers.get("content-type", "")
             payload: Any
             if "application/json" in content_type:
                 payload = resp.json()
             else:
-                payload = {"text": resp.text}
-            return {
+                raw_text = resp.text
+                truncated = len(raw_text) > _MAX_BODY
+                payload = {"text": raw_text[:_MAX_BODY]}
+                if truncated:
+                    payload["truncated"] = True
+                    payload["full_size"] = len(raw_text)
+            result: dict[str, Any] = {
                 "ok": resp.is_success,
                 "status_code": resp.status_code,
+                "method": method.upper(),
                 "url": str(resp.url),
+                "content_type": content_type,
                 "data": payload,
+                "duration_seconds": elapsed,
             }
+            if not resp.is_success:
+                result["error"] = f"HTTP {resp.status_code}"
+            return result
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "url": url}
+        elapsed = round(time.monotonic() - t0, 2)
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "detail": str(exc),
+            "method": method.upper(),
+            "url": url,
+            "duration_seconds": elapsed,
+        }
 
 
 def _env(name: str) -> str:
@@ -55,17 +81,48 @@ def _env(name: str) -> str:
 
 
 def _run_cli(command: list[str]) -> dict[str, Any]:
+    cmd_str = " ".join(shlex.quote(c) for c in command)
+    t0 = time.monotonic()
     try:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=60)
-        return {
+        elapsed = round(time.monotonic() - t0, 2)
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        stdout_truncated = len(stdout) > _MAX_CLI_OUTPUT
+        stderr_truncated = len(stderr) > _MAX_CLI_OUTPUT
+        result: dict[str, Any] = {
             "ok": proc.returncode == 0,
-            "returncode": proc.returncode,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "command": " ".join(shlex.quote(c) for c in command),
+            "exit_code": proc.returncode,
+            "command": cmd_str,
+            "stdout": stdout[-_MAX_CLI_OUTPUT:] if stdout_truncated else stdout,
+            "stderr": stderr[-_MAX_CLI_OUTPUT:] if stderr_truncated else stderr,
+            "stdout_lines": stdout.count("\n") + (1 if stdout else 0),
+            "duration_seconds": elapsed,
+        }
+        if stdout_truncated:
+            result["stdout_truncated"] = True
+            result["stdout_full_size"] = len(stdout)
+        if stderr_truncated:
+            result["stderr_truncated"] = True
+            result["stderr_full_size"] = len(stderr)
+        return result
+    except subprocess.TimeoutExpired:
+        elapsed = round(time.monotonic() - t0, 2)
+        return {
+            "ok": False,
+            "error": "timeout",
+            "command": cmd_str,
+            "duration_seconds": elapsed,
         }
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "command": command}
+        elapsed = round(time.monotonic() - t0, 2)
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "detail": str(exc),
+            "command": cmd_str,
+            "duration_seconds": elapsed,
+        }
 
 
 async def securitytrails_domain(domain: str, **_: Any) -> dict[str, Any]:
@@ -202,6 +259,7 @@ def jq_eval(filter_expr: str, input_json: str, **_: Any) -> dict[str, Any]:
 
 
 def fzf_filter(query: str, input_text: str, **_: Any) -> dict[str, Any]:
+    t0 = time.monotonic()
     try:
         proc = subprocess.run(
             ["fzf", "--filter", query],
@@ -210,14 +268,27 @@ def fzf_filter(query: str, input_text: str, **_: Any) -> dict[str, Any]:
             text=True,
             timeout=30,
         )
+        matches = [ln for ln in proc.stdout.splitlines() if ln]
         return {
             "ok": proc.returncode == 0,
-            "returncode": proc.returncode,
+            "exit_code": proc.returncode,
+            "command": f"fzf --filter {shlex.quote(query)}",
+            "query": query,
+            "matches": matches,
+            "match_count": len(matches),
+            "input_lines": input_text.count("\n") + (1 if input_text else 0),
             "stdout": proc.stdout,
             "stderr": proc.stderr,
+            "duration_seconds": round(time.monotonic() - t0, 2),
         }
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "detail": str(exc),
+            "query": query,
+            "duration_seconds": round(time.monotonic() - t0, 2),
+        }
 
 
 def fd_find(pattern: str, path: str = ".", **_: Any) -> dict[str, Any]:
@@ -225,6 +296,7 @@ def fd_find(pattern: str, path: str = ".", **_: Any) -> dict[str, Any]:
 
 
 def duckdb_query(query: str, database: str = ":memory:", **_: Any) -> dict[str, Any]:
+    t0 = time.monotonic()
     try:
         import duckdb  # type: ignore
 
@@ -232,12 +304,31 @@ def duckdb_query(query: str, database: str = ":memory:", **_: Any) -> dict[str, 
         rows = conn.execute(query).fetchall()
         cols = [d[0] for d in (conn.description or [])]
         conn.close()
-        return {"ok": True, "columns": cols, "rows": rows}
+        truncated = len(rows) > 1000
+        return {
+            "ok": True,
+            "query": query,
+            "database": database,
+            "columns": cols,
+            "rows": rows[:1000],
+            "row_count": len(rows),
+            "column_count": len(cols),
+            "truncated": truncated,
+            "duration_seconds": round(time.monotonic() - t0, 2),
+        }
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "detail": str(exc),
+            "query": query,
+            "database": database,
+            "duration_seconds": round(time.monotonic() - t0, 2),
+        }
 
 
 def datafusion_query(query: str, **_: Any) -> dict[str, Any]:
+    t0 = time.monotonic()
     try:
         from datafusion import SessionContext  # type: ignore
 
@@ -246,11 +337,19 @@ def datafusion_query(query: str, **_: Any) -> dict[str, Any]:
         batches = df.collect()
         return {
             "ok": True,
+            "query": query,
             "rows": [str(b) for b in batches],
             "batch_count": len(batches),
+            "duration_seconds": round(time.monotonic() - t0, 2),
         }
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "detail": str(exc),
+            "query": query,
+            "duration_seconds": round(time.monotonic() - t0, 2),
+        }
 
 
 async def wikidata_sparql(query: str, **_: Any) -> dict[str, Any]:
@@ -354,7 +453,7 @@ async def overpass_query(query: str, **_: Any) -> dict[str, Any]:
 
 
 async def healthcheck(**_: Any) -> dict[str, Any]:
-    return {"ok": True, "provider": "agent_primitives"}
+    return {"ok": True, "provider": "agent_primitives", "status": "healthy"}
 
 
 # ---------------------------------------------------------------------------

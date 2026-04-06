@@ -196,9 +196,17 @@ def _resolve_command(command: str) -> str:
     },
     output_schema={
         "x-output-levels": {
-            "minimal": ["ok"],
-            "standard": ["ok", "stdout", "exit_code"],
-            "full": ["ok", "stdout", "stderr", "exit_code"],
+            "minimal": ["ok", "exit_code"],
+            "standard": ["ok", "stdout", "exit_code", "command", "cwd", "stdout_lines"],
+            "full": [
+                "ok",
+                "stdout",
+                "stderr",
+                "exit_code",
+                "command",
+                "cwd",
+                "stdout_lines",
+            ],
         },
         "x-default-level": "standard",
     },
@@ -226,12 +234,17 @@ async def run_python3(
         proc.kill()
         await proc.wait()
         return _json_error("timeout")
+    stdout_str = stdout.decode("utf-8", errors="replace")
+    stderr_str = stderr.decode("utf-8", errors="replace")
     return json.dumps(
         {
             "ok": proc.returncode == 0,
             "exit_code": proc.returncode,
-            "stdout": stdout.decode("utf-8", errors="replace"),
-            "stderr": stderr.decode("utf-8", errors="replace"),
+            "command": "python3 -c <code>",
+            "cwd": cwd or str(Path.cwd()),
+            "stdout": stdout_str,
+            "stderr": stderr_str,
+            "stdout_lines": stdout_str.count("\n") + (1 if stdout_str else 0),
         },
     )
 
@@ -251,9 +264,18 @@ async def run_python3(
     },
     output_schema={
         "x-output-levels": {
-            "minimal": ["ok"],
-            "standard": ["ok", "stdout", "exit_code"],
-            "full": ["ok", "stdout", "stderr", "exit_code", "command"],
+            "minimal": ["ok", "exit_code"],
+            "standard": ["ok", "stdout", "exit_code", "command", "cwd", "stdout_lines"],
+            "full": [
+                "ok",
+                "stdout",
+                "stderr",
+                "exit_code",
+                "command",
+                "args",
+                "cwd",
+                "stdout_lines",
+            ],
         },
         "x-default-level": "standard",
     },
@@ -301,13 +323,18 @@ async def run_command(
         await proc.wait()
         return _json_error("timeout")
 
+    stdout_str = stdout.decode("utf-8", errors="replace")
+    stderr_str = stderr.decode("utf-8", errors="replace")
     return json.dumps(
         {
             "ok": proc.returncode == 0,
             "exit_code": proc.returncode,
-            "stdout": stdout.decode("utf-8", errors="replace"),
-            "stderr": stderr.decode("utf-8", errors="replace"),
             "command": normalized_command,
+            "args": process_args,
+            "cwd": cwd or str(Path.cwd()),
+            "stdout": stdout_str,
+            "stderr": stderr_str,
+            "stdout_lines": stdout_str.count("\n") + (1 if stdout_str else 0),
         },
     )
 
@@ -341,9 +368,34 @@ async def run_command(
     },
     output_schema={
         "x-output-levels": {
-            "minimal": ["ok"],
-            "standard": ["ok", "stdout", "exit_code"],
-            "full": ["ok", "stdout", "stderr", "exit_code", "command"],
+            "minimal": ["ok", "exit_code"],
+            "standard": [
+                "ok",
+                "stdout",
+                "exit_code",
+                "command",
+                "cwd",
+                "stdout_lines",
+                "description",
+            ],
+            "full": [
+                "ok",
+                "stdout",
+                "stderr",
+                "exit_code",
+                "command",
+                "cwd",
+                "stdout_lines",
+                "description",
+                "background",
+                "task_id",
+                "stdout_truncated",
+                "stderr_truncated",
+                "stdout_full_path",
+                "stderr_full_path",
+                "stdout_full_size",
+                "stderr_full_size",
+            ],
         },
         "x-default-level": "standard",
     },
@@ -386,8 +438,15 @@ async def run_shell(
         timeout_seconds=float(timeout_seconds),
     )
 
-    # Post-process: truncate large output and persist to disk.
+    # Post-process: add context and truncate large output.
     result = json.loads(result_json)
+    result["command"] = actual_script
+    result["cwd"] = cwd or str(Path.cwd())
+    if description:
+        result["description"] = description
+    stdout_val = result.get("stdout", "")
+    result["stdout_lines"] = stdout_val.count("\n") + (1 if stdout_val else 0)
+
     _MAX_INLINE_OUTPUT = 100_000  # 100KB
     for key in ("stdout", "stderr"):
         val = result.get(key, "")
@@ -841,9 +900,17 @@ async def list_directory(path: str) -> str:
             "minimal": ["ok", "kind"],
             "standard": ["ok", "kind", "path", "text"],
             "full": [
-                "ok", "kind", "path", "text", "line_count",
-                "total_lines", "base64", "media_type", "cells",
-                "pages_read", "total_pages",
+                "ok",
+                "kind",
+                "path",
+                "text",
+                "line_count",
+                "total_lines",
+                "base64",
+                "media_type",
+                "cells",
+                "pages_read",
+                "total_pages",
             ],
         },
         "x-default-level": "standard",
@@ -1112,11 +1179,22 @@ async def write_text_file(
     },
 )
 async def append_text_file(path: str, text: str, create_dirs: bool = True) -> str:
+    from obscura.tools.system.diff_utils import compute_unified_diff
+
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
     if target.exists() and target.is_dir():
         return _json_error("path_is_directory", path=str(target))
+
+    is_new = not target.exists()
+    original = ""
+    if not is_new:
+        try:
+            original = target.read_text(encoding="utf-8")
+        except OSError:
+            original = ""
+
     try:
         if create_dirs:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -1124,11 +1202,18 @@ async def append_text_file(path: str, text: str, create_dirs: bool = True) -> st
             fh.write(text)
     except OSError as exc:
         return _json_error("append_failed", path=str(target), detail=str(exc))
+
+    after = original + text
+    diff = compute_unified_diff(original, after, str(target))
+    total_lines = after.count("\n") + (1 if after and not after.endswith("\n") else 0)
     return json.dumps(
         {
             "ok": True,
             "path": str(target),
             "bytes_appended": len(text.encode("utf-8")),
+            "is_new": is_new,
+            "total_lines": total_lines,
+            "diff": diff,
         },
     )
 
@@ -2271,10 +2356,12 @@ async def _git(args: list[str], cwd: str = "", timeout: float = 30.0) -> dict[st
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        return {"ok": False, "error": "timeout"}
+        return {"ok": False, "error": "timeout", "git_args": args, "cwd": work_dir}
     return {
         "ok": proc.returncode == 0,
         "exit_code": proc.returncode,
+        "git_command": f"git {' '.join(args)}",
+        "cwd": work_dir,
         "stdout": stdout.decode("utf-8", errors="replace"),
         "stderr": stderr.decode("utf-8", errors="replace"),
     }
@@ -2609,9 +2696,13 @@ async def http_request(
         data=payload,
     )
 
+    _MAX_RESPONSE_BYTES = 500_000
     try:
         with url_request.urlopen(req, timeout=timeout_seconds) as resp:
-            raw = resp.read(500_000)
+            raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+            truncated = len(raw) > _MAX_RESPONSE_BYTES
+            if truncated:
+                raw = raw[:_MAX_RESPONSE_BYTES]
             text = raw.decode("utf-8", errors="replace")
             response_headers = dict(resp.headers.items())
             content_type = response_headers.get("Content-Type", "")
@@ -2625,6 +2716,7 @@ async def http_request(
                 "headers": response_headers,
                 "body": text,
                 "bytes_read": len(raw),
+                "truncated": truncated,
             }
 
             # Try to parse JSON response
@@ -3370,11 +3462,13 @@ async def exit_plan_mode(plan_summary: str = "") -> str:
             if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
                 approved = await approved
             if not approved:
-                return json.dumps({
-                    "ok": False,
-                    "error": "Plan not approved by user. Staying in plan mode.",
-                    "mode": "plan",
-                })
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "Plan not approved by user. Staying in plan mode.",
+                        "mode": "plan",
+                    }
+                )
         except Exception as exc:
             return json.dumps({"ok": False, "error": str(exc)})
 
@@ -3488,6 +3582,140 @@ async def ask_user(
         return json.dumps({"ok": True, "selected": result})
     except Exception as exc:
         return _json_error("ask_user_failed", detail=str(exc))
+
+
+@tool(
+    "user_ask",
+    "Present the user with one or more structured questions.  Accepts the "
+    "Claude Code AskUserQuestion format — an array of question objects each "
+    "containing a question string, header, options with labels/descriptions, "
+    "and a multiSelect flag.  Returns the user's answers.",
+    {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "description": "One or more questions to present to the user.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The full question text.",
+                        },
+                        "header": {
+                            "type": "string",
+                            "description": "Short label displayed as a chip/tag.",
+                        },
+                        "options": {
+                            "type": "array",
+                            "description": "Available choices.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "description": "Display text for the option.",
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "Explanation of what this option means.",
+                                    },
+                                },
+                                "required": ["label", "description"],
+                            },
+                        },
+                        "multiSelect": {
+                            "type": "boolean",
+                            "description": "Allow multiple selections.",
+                        },
+                    },
+                    "required": ["question"],
+                },
+            },
+            "question": {
+                "type": "string",
+                "description": "Simple question text (flat format, alternative to questions array).",
+            },
+            "choices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Flat list of choices (used with question param).",
+            },
+        },
+    },
+)
+async def user_ask(
+    questions: list[dict[str, Any]] | None = None,
+    question: str | None = None,
+    choices: list[str] | None = None,
+) -> str:
+    """Handle Claude Code AskUserQuestion format by flattening into ask_user calls.
+
+    Accepts either the structured ``questions`` array (Claude Code style) or a
+    flat ``question`` string + optional ``choices`` list (Copilot / simple style).
+    """
+    global _ask_user_called
+    _ask_user_called = True
+
+    if _ask_user_callback is None:
+        return _json_error(
+            "no_ui",
+            detail="Interactive UI not available. "
+            "Ask the user directly in your text response instead.",
+        )
+
+    # Flat question fallback (Copilot or simple invocation)
+    if not questions and question:
+        questions = [{"question": question, "options": [{"label": c, "description": ""} for c in (choices or [])]}]
+
+    if not questions:
+        return _json_error("invalid_args", detail="No questions provided.")
+
+    answers: dict[str, str] = {}
+    for q_obj in questions:
+        q_text = q_obj.get("question", "")
+        if not q_text:
+            continue
+        header = q_obj.get("header", "")
+        options = q_obj.get("options", [])
+        multi = q_obj.get("multiSelect", False)
+
+        # Build choice labels from structured options
+        choice_labels: list[str] = []
+        for opt in options:
+            label = opt.get("label", "")
+            desc = opt.get("description", "")
+            if label and desc:
+                choice_labels.append(f"{label} — {desc}")
+            elif label:
+                choice_labels.append(label)
+
+        prompt = f"[{header}] {q_text}" if header else q_text
+
+        try:
+            result = await _ask_user_callback(
+                question=prompt,
+                choices=choice_labels,
+                allow_custom=True,
+                multi_select=multi,
+            )
+            answers[q_text] = result
+        except TypeError:
+            # Callback doesn't support multi_select — fall back
+            try:
+                result = await _ask_user_callback(
+                    question=prompt,
+                    choices=choice_labels,
+                    allow_custom=True,
+                )
+                answers[q_text] = result
+            except Exception as exc:
+                answers[q_text] = f"error: {exc}"
+        except Exception as exc:
+            answers[q_text] = f"error: {exc}"
+
+    return json.dumps({"ok": True, "answers": answers})
 
 
 # ---------------------------------------------------------------------------
@@ -4228,6 +4456,7 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", report_intent).spec),
         # User interaction
         cast("ToolSpec", cast("Any", ask_user).spec),
+        cast("ToolSpec", cast("Any", user_ask).spec),
         cast("ToolSpec", cast("Any", user_interact).spec),
         # Intelligence tools (context_snapshot, causal_trace, policy_probe)
         cast("ToolSpec", cast("Any", context_snapshot).spec),

@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from obscura.agent.peers import (
@@ -149,6 +150,7 @@ async def _execute_delegation(
             },
         )
 
+    t0 = time.monotonic()
     try:
         if isinstance(ref, AgentRef):
             result = await _invoke_local(runtime, ref, prompt, mode)
@@ -167,6 +169,7 @@ async def _execute_delegation(
                 },
             )
 
+        elapsed = round(time.monotonic() - t0, 2)
         return json.dumps(
             {
                 "ok": True,
@@ -174,9 +177,12 @@ async def _execute_delegation(
                 "transport": ref.kind,
                 "result": result,
                 "prompt": prompt,
+                "duration_seconds": elapsed,
+                "result_length": len(result) if isinstance(result, str) else None,
             },
         )
     except Exception as exc:
+        elapsed = round(time.monotonic() - t0, 2)
         return json.dumps(
             {
                 "ok": False,
@@ -184,6 +190,7 @@ async def _execute_delegation(
                 "message": str(exc),
                 "agent": agent,
                 "prompt": prompt,
+                "duration_seconds": elapsed,
             },
         )
 
