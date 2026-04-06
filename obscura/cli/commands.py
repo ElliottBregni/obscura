@@ -8977,8 +8977,8 @@ direct, casual, curious. Ask follow-up questions when answers are vague.
 You have these tools available:
 - profile_set(key, value, category) — store a fact
 - profile_get() — check current profile state
-- goal_create(title, priority, context, acceptance_criteria) — create a goal
-- goal_list() — see existing goals
+- goal(action="create", title, priority, context, acceptance_criteria) — create a goal
+- goal(action="list") — see existing goals
 
 Categories for profile_set:
 - identity: name, email, location, education (never decays)
@@ -8990,7 +8990,7 @@ Categories for profile_set:
 
 RULES:
 1. Ask ONE question at a time. Wait for the answer before asking the next.
-2. After each answer, immediately call profile_set or goal_create to persist it.
+2. After each answer, immediately call profile_set or goal(action="create") to persist it.
 3. Start by checking what's already in the profile (profile_get) and skip what's filled.
 4. Cover these areas in order: identity → career → skills → working style → goals → personal
 5. For goals: ask what they're trying to accomplish right now, decompose into \
@@ -9007,13 +9007,13 @@ You are helping the user define and structure their goals. Talk like a peer \
 who's helping them think through what they actually want to accomplish.
 
 You have these tools:
-- goal_create(title, priority, context, acceptance_criteria) — create a goal
-- goal_list() — see existing goals
-- goal_update(goal_id, ...) — update an existing goal
+- goal(action="create", title, priority, context, acceptance_criteria) — create a goal
+- goal(action="list") — see existing goals
+- goal(action="update", goal_id, ...) — update an existing goal
 - profile_get() — check user context
 
 RULES:
-1. Start by listing existing goals (goal_list).
+1. Start by listing existing goals: goal(action="list").
 2. Ask what they're working on, what matters most, what's blocking them.
 3. For each goal they describe: create it with clear title, appropriate priority, \
    and concrete acceptance criteria (things you can check off).
@@ -9030,9 +9030,9 @@ You have these tools:
 - profile_set(key, value, category) — store a profile fact
 - profile_get() — check current profile
 - profile_forget(key) — remove a stale fact
-- goal_create(title, priority, context, acceptance_criteria) — create a goal
-- goal_list() — see existing goals
-- goal_update(goal_id, ...) — update a goal
+- goal(action="create", title, priority, context, acceptance_criteria) — create a goal
+- goal(action="list") — see existing goals
+- goal(action="update", goal_id, ...) — update a goal
 
 Profile categories (for profile_set):
 - identity: name, email, location (immune to decay)
@@ -9099,12 +9099,7 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
         "profile_set",
         "profile_forget",
         "profile_sync",
-        "goal_create",
-        "goal_list",
-        "goal_get",
-        "goal_update",
-        "goal_complete",
-        "goal_abandon",
+        "goal",
     ]
 
     # Save original system prompt and swap in interview prompt.

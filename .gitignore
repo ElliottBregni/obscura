@@ -78,3 +78,4 @@ docs/*
 # Pyright and pytest output
 pyright_out.json
 pytest-report.xml
+OBSCURA.md
