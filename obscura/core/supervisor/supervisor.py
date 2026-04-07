@@ -199,6 +199,30 @@ class Supervisor:
         except Exception as exc:
             logger.debug("Could not register eval hooks: %s", exc)
 
+        # Register Arbiter judge hooks (quality gating for agents).
+        try:
+            from obscura.arbiter.hooks import register_arbiter_hooks
+            from obscura.arbiter.notify import set_hook_manager
+
+            register_arbiter_hooks(
+                hooks,
+                session_id=session_id,
+                run_id=run_id,
+            )
+            set_hook_manager(hooks)
+            logger.debug("Arbiter hooks registered")
+        except Exception as exc:
+            logger.debug("Could not register Arbiter hooks: %s", exc)
+
+        # Register vault sync hooks (ingest on build, export on finalize).
+        try:
+            from obscura.core.supervisor.vault_hook import register_vault_hooks
+
+            register_vault_hooks(hooks)
+            logger.debug("Vault hooks registered")
+        except Exception as exc:
+            logger.debug("Could not register vault hooks: %s", exc)
+
         # Register profile + goal context hooks
         try:
             from obscura.core.supervisor.profile_goal_hook import (
@@ -409,6 +433,7 @@ class Supervisor:
                 ("_goal_context", "goal_context"),
                 ("_profile_context", "profile_context"),
                 ("_vector_memory_context", "vector_memory_context"),
+                ("_vault_context", "vault_context"),
             ):
                 ctx_value = hook_context.get(ctx_key)
                 if ctx_value:

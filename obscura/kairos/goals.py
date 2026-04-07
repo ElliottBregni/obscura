@@ -219,7 +219,56 @@ class GoalBoard:
 
         updated = replace(goal, **updates)
         self._write(updated)
+
+        # Auto-decompose: when a goal enters in_progress with acceptance
+        # criteria but no linked tasks, push each criterion as a queue task.
+        if (
+            new_status == "in_progress"
+            and goal.status != "in_progress"
+            and updated.acceptance_criteria
+            and not updated.tasks
+        ):
+            self._auto_decompose(updated)
+            # Reload to pick up linked task IDs.
+            updated = self.load(goal_id) or updated
+
         return updated
+
+    def _auto_decompose(self, goal: Goal) -> None:
+        """Push acceptance criteria as tasks into the queue and link them."""
+        try:
+            from obscura.core.task_queue import TaskQueue
+
+            q = TaskQueue()
+            priority = goal.priority_rank * 25  # critical=0, high=25, medium=50, low=75
+            task_ids: list[str] = []
+            prev_id: str | None = None
+
+            for criterion in goal.acceptance_criteria:
+                # Chain tasks sequentially: each blocked by the previous one.
+                blocked_by = [prev_id] if prev_id else []
+                task_id = q.enqueue(
+                    criterion,
+                    description=f"Acceptance criterion for goal: {goal.title}",
+                    priority=priority,
+                    goal_id=goal.id,
+                    blocked_by=blocked_by,
+                )
+                task_ids.append(task_id)
+                prev_id = task_id
+
+            # Link all tasks to the goal.
+            if task_ids:
+                self.update(goal.id, tasks=list(goal.tasks) + task_ids)
+                logger.info(
+                    "Auto-decomposed goal %s into %d tasks",
+                    goal.id,
+                    len(task_ids),
+                )
+        except Exception:
+            logger.warning(
+                "Auto-decomposition failed for goal %s", goal.id, exc_info=True
+            )
 
     def complete(self, goal_id: str) -> Goal | None:
         """Mark a goal as completed."""

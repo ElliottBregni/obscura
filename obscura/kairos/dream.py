@@ -286,7 +286,7 @@ class DreamConsolidator:
             from obscura.kairos.vault_sync import VaultSync
 
             vault = VaultSync()
-            if not vault._vault.is_dir():
+            if not vault.vault_dir.is_dir():
                 logger.debug("Vault directory does not exist, skipping vault sync")
                 return
 

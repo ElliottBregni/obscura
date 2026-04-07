@@ -5251,6 +5251,62 @@ async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
+    """Prevent macOS from sleeping while Obscura is running.
+
+    Usage: /caffeinate [on|off|status]
+    """
+    import os as _os
+    import signal as _signal
+    import subprocess as _sp
+
+    sub = args.strip().lower()
+
+    pid_attr = "_caffeinate_pid"
+    current_pid: int | None = getattr(cmd_caffeinate, pid_attr, None)
+
+    def _is_alive(pid: int) -> bool:
+        try:
+            _os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+    if sub in ("", "on"):
+        if current_pid and _is_alive(current_pid):
+            print_info(f"Already caffeinated (pid {current_pid})")
+            return None
+        proc = _sp.Popen(
+            ["caffeinate", "-dims"],
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+        )
+        setattr(cmd_caffeinate, pid_attr, proc.pid)
+        print_ok(f"Caffeinated — system sleep blocked (pid {proc.pid})")
+        return None
+
+    if sub == "off":
+        if current_pid and _is_alive(current_pid):
+            _os.kill(current_pid, _signal.SIGTERM)
+            setattr(cmd_caffeinate, pid_attr, None)
+            print_ok("Caffeinate stopped — system can sleep again")
+        else:
+            setattr(cmd_caffeinate, pid_attr, None)
+            print_info("Not currently caffeinated")
+        return None
+
+    if sub == "status":
+        if current_pid and _is_alive(current_pid):
+            print_info(f"Caffeinated (pid {current_pid})")
+        else:
+            setattr(cmd_caffeinate, pid_attr, None)
+            print_info("Not caffeinated")
+        return None
+
+    print_error("Usage: /caffeinate [on|off|status]")
+    return None
+
+
 async def cmd_debug(_args: str, ctx: REPLContext) -> str | None:
     """Toggle debug mode (verbose logging + internal output)."""
     import obscura.config as _cfg
@@ -9150,6 +9206,17 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
         # Restore original system prompt.
         ctx.system_prompt = original_prompt
 
+    # Sync vault after interview so profile + goals are exported.
+    try:
+        from obscura.kairos.vault_sync import VaultSync
+
+        vs = VaultSync()
+        if vs.vault_dir.is_dir():
+            await vs.sync()
+            print_info("Vault synced with interview results.")
+    except Exception:
+        pass
+
     return None
 
 
@@ -9255,6 +9322,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "effort": cmd_effort,
     "fast": cmd_fast,
     "debug": cmd_debug,
+    "caffeinate": cmd_caffeinate,
     # KAIROS & automation
     "kairos": cmd_kairos,
     "loop": cmd_loop,
@@ -9412,6 +9480,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "hooks": ["list", "add", "remove"],
     "bug": ["report"],
     "voice": ["on", "off"],
+    "caffeinate": ["on", "off", "status"],
 }
 
 # Add secret menu stub (tests toggle visibility)

@@ -86,9 +86,19 @@ def init_workspace(
         "plugins",
         "commands",
         "evals",
+        "goals",
     ):
         (ws / subdir).mkdir(parents=True, exist_ok=True)
         logger.info("Created %s/", ws / subdir)
+
+    # -- vault zone structure (always at ~/.obscura/vault/) -----------------
+    try:
+        from obscura.kairos.vault_sync import VaultSync
+
+        VaultSync().bootstrap()  # defaults to ~/.obscura/vault/
+        logger.info("Vault zones bootstrapped at ~/.obscura/vault/")
+    except Exception as exc:
+        logger.debug("Vault bootstrap skipped: %s", exc)
 
     # -- specs/ scaffold -----------------------------------------------------
     for specs_subdir in (

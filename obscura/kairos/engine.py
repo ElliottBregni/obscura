@@ -229,24 +229,80 @@ class KairosEngine:
         logger.debug("KairosEngine: AgentLoop registered for tick injection")
 
     def _on_proactive_tick(self, tick_count: int) -> None:
-        """Callback fired by ProactiveMode on each tick."""
+        """Callback fired by ProactiveMode on each tick.
+
+        Strategy: try to claim the next ready task from the queue and inject
+        a structured ``<task>`` element.  If the queue is empty, fall back to
+        injecting a goal-level hint so the agent can improvise.
+        """
         loop = self._active_loop
         if loop is None:
             return
         try:
             inject = getattr(loop, "inject_user_input", None)
-            if callable(inject):
-                goal_hint = ""
-                try:
-                    from obscura.kairos.goals import GoalBoard
+            if not callable(inject):
+                return
 
-                    top = GoalBoard().active_goals()
-                    top = [g for g in top if not g.is_blocked()][:1]
-                    if top:
-                        goal_hint = f" focus={top[0].id}({top[0].progress}%)"
+            # --- Watchdog sweep (every 5th tick) ---
+            if tick_count % 5 == 0:
+                try:
+                    from obscura.arbiter.watchdog import ArbiterWatchdog
+
+                    wd = ArbiterWatchdog()
+                    actions = wd.sweep()
+                    if actions:
+                        results = wd.execute(actions)
+                        for r in results:
+                            self.log(f"watchdog: {r}", source="arbiter")
                 except Exception:
-                    pass
-                inject(f"<tick>#{tick_count}{goal_hint}</tick>")
+                    logger.debug("Watchdog sweep failed", exc_info=True)
+
+            # --- Try structured task claim first ---
+            try:
+                from obscura.core.task_queue import TaskQueue
+
+                q = TaskQueue()
+                # Reclaim any stale claims from crashed workers.
+                q.reclaim_stale()
+                task = q.next_ready(worker_id="kairos")
+                if task is not None and q.claim(task["task_id"], "kairos"):
+                    goal_ctx = ""
+                    if task.get("goal_id"):
+                        goal_ctx = f' goal="{task["goal_id"]}"'
+                    inject(
+                        f"<tick>#{tick_count}</tick>\n"
+                        f'<task id="{task["task_id"]}" '
+                        f"priority={task['priority']}{goal_ctx}>\n"
+                        f"{task['subject']}\n"
+                        f"{task.get('description', '')}\n"
+                        f"</task>\n"
+                        f"Work this task. When done call "
+                        f'task_update(task_id="{task["task_id"]}", '
+                        f'status="completed").'
+                    )
+                    self.log(
+                        f"tick #{tick_count}: claimed task {task['task_id']} "
+                        f"— {task['subject']}",
+                        source="kairos",
+                    )
+                    return
+            except Exception:
+                logger.debug(
+                    "Task queue pull failed, falling back to goal hint", exc_info=True
+                )
+
+            # --- Fallback: goal-level hint (no specific task) ---
+            goal_hint = ""
+            try:
+                from obscura.kairos.goals import GoalBoard
+
+                top = GoalBoard().active_goals()
+                top = [g for g in top if not g.is_blocked()][:1]
+                if top:
+                    goal_hint = f" focus={top[0].id}({top[0].progress}%)"
+            except Exception:
+                pass
+            inject(f"<tick>#{tick_count}{goal_hint}</tick>")
         except Exception:
             logger.debug("Proactive tick injection failed", exc_info=True)
 
@@ -291,6 +347,12 @@ class KairosEngine:
             "- Consolidate memories during dream cycles",
             "- Respect the 15-second blocking budget for proactive actions",
             "- Work toward active goals on the goal board",
+            "",
+            "Task queue protocol:",
+            "- On <tick> with a <task> element: work the claimed task to completion.",
+            '- When done: call task_update(task_id="...", status="completed").',
+            '- On failure: call task_update(task_id="...", status="failed", error="...").',
+            "- If no <task> is present, improvise toward the top goal.",
         ]
 
         # Inject user profile summary (prefer vector-backed, fall back to markdown).

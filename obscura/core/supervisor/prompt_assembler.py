@@ -31,6 +31,12 @@ SECTION_ORDER: tuple[str, ...] = (
     "system_prompt",
     "context_instructions",
     "agent_definition",
+    # Hook-injected context (populated by PRE_BUILD_CONTEXT hooks).
+    "goal_context",
+    "profile_context",
+    "vault_context",
+    "vector_memory_context",
+    # End hook-injected context.
     "tool_definitions",
     "memory_snippets",
     "session_history",

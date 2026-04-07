@@ -40,6 +40,44 @@ def _notify_vault(goal_id: str) -> None:
         pass
 
 
+def _notify_arbiter(goal: Any) -> None:
+    """Best-effort Arbiter notification on goal transition."""
+    try:
+        from obscura.arbiter.notify import fire_goal_transition
+
+        import asyncio
+
+        goal_dict = _goal_dict(goal)
+        # Resolve linked task statuses for the Arbiter.
+        task_statuses: list[str] = []
+        if goal.tasks:
+            try:
+                from obscura.tools.task_tools import _get_db
+
+                db = _get_db()
+                for tid in goal.tasks:
+                    row = db.execute(
+                        "SELECT status FROM tasks WHERE task_id = ?", (tid,)
+                    ).fetchone()
+                    task_statuses.append(row["status"] if row else "unknown")
+                db.close()
+            except Exception:
+                pass
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                fire_goal_transition(goal_dict, linked_task_statuses=task_statuses)
+            )
+        except RuntimeError:
+            # No running loop — skip async fire.
+            pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+
 def _emit_goal_event(
     goal_id: str,
     title: str,
@@ -271,6 +309,7 @@ def goal_tool(
             return _json_error("goal_not_found_or_invalid_transition", goal_id=goal_id)
         _emit_goal_event(goal_id, g.title, "completed", "100%", g.priority)
         _notify_vault(goal_id)
+        _notify_arbiter(g)
         return _json_ok(goal=_goal_dict(g))
 
     if action == "abandon":
@@ -281,6 +320,7 @@ def goal_tool(
             return _json_error("goal_not_found_or_invalid_transition", goal_id=goal_id)
         _emit_goal_event(goal_id, g.title, "abandoned", reason, g.priority)
         _notify_vault(goal_id)
+        _notify_arbiter(g)
         return _json_ok(goal=_goal_dict(g))
 
     if action == "add_task":

@@ -1,15 +1,18 @@
 """obscura.tools.task_tools — Background task management tools.
 
-Provides six tools for creating, tracking, and managing background tasks:
-  - task_create: Create a new task
+Provides tools for creating, tracking, and managing tasks:
+  - task_create: Create a new task (routed through TaskQueue)
   - task_get: Get task details by ID
   - task_list: List all tasks
   - task_update: Update task status/metadata
-  - task_output: Get output of a background task
-  - task_stop: Stop a running task
+  - task_output: Get output of a background shell task
+  - task_stop: Stop a running background shell task
 
 Tasks are persisted in SQLite at ``~/.obscura/tasks.db``.
-Pattern borrowed from claude-code's TaskCreate/Get/List/Update/Output/Stop tools.
+
+Queue semantics (priority, claiming, heartbeat, retry) are handled by
+:mod:`obscura.core.task_queue`.  Use the ``queue_next`` tool for workers
+to atomically claim the next ready task.
 """
 
 from __future__ import annotations
@@ -17,8 +20,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.tools import tool
@@ -27,29 +28,16 @@ if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
 
 
+# ---------------------------------------------------------------------------
+# DB helpers (kept for task_get / task_list / task_update which read directly)
+# ---------------------------------------------------------------------------
+
+
 def _get_db() -> sqlite3.Connection:
-    """Open (or create) the tasks database."""
-    db_path = Path.home() / ".obscura" / "tasks.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            task_id TEXT PRIMARY KEY,
-            subject TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'pending',
-            owner TEXT NOT NULL DEFAULT '',
-            active_form TEXT NOT NULL DEFAULT '',
-            metadata TEXT NOT NULL DEFAULT '{}',
-            blocks TEXT NOT NULL DEFAULT '[]',
-            blocked_by TEXT NOT NULL DEFAULT '[]',
-            created_at REAL NOT NULL,
-            updated_at REAL NOT NULL
-        )
-    """)
-    conn.commit()
-    return conn
+    """Open (or create) the tasks database, applying queue schema."""
+    from obscura.core.task_queue import _open  # noqa: PLC2701
+
+    return _open()
 
 
 def _json_error(error: str, **extra: object) -> str:
@@ -60,10 +48,18 @@ def _json_error(error: str, **extra: object) -> str:
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
-    d["metadata"] = json.loads(d.get("metadata", "{}"))
-    d["blocks"] = json.loads(d.get("blocks", "[]"))
-    d["blocked_by"] = json.loads(d.get("blocked_by", "[]"))
+    for key in ("metadata", "blocks", "blocked_by"):
+        if key in d and isinstance(d[key], str):
+            try:
+                d[key] = json.loads(d[key])
+            except Exception:
+                d[key] = {} if key == "metadata" else []
     return d
+
+
+# ---------------------------------------------------------------------------
+# task_create
+# ---------------------------------------------------------------------------
 
 
 @tool(
@@ -78,6 +74,30 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
                 "type": "string",
                 "description": "Present continuous form (e.g. 'Running tests').",
             },
+            "priority": {
+                "type": "integer",
+                "description": (
+                    "Priority: 0=critical, 25=high, 50=medium (default), "
+                    "75=low, 100=lowest."
+                ),
+            },
+            "goal_id": {
+                "type": "string",
+                "description": "Parent goal ID to associate this task with.",
+            },
+            "blocked_by": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Task IDs that must complete before this one is ready.",
+            },
+            "run_after": {
+                "type": "number",
+                "description": "Unix timestamp: earliest time this task should be dequeued.",
+            },
+            "max_retries": {
+                "type": "integer",
+                "description": "Max automatic retries on failure (default 3).",
+            },
             "metadata": {"type": "object", "description": "Arbitrary metadata."},
         },
         "required": ["subject"],
@@ -87,30 +107,45 @@ async def task_create(
     subject: str,
     description: str = "",
     active_form: str = "",
+    priority: int = 50,
+    goal_id: str = "",
+    blocked_by: list[str] | None = None,
+    run_after: float = 0.0,
+    max_retries: int = 3,
     metadata: dict[str, Any] | None = None,
 ) -> str:
-    task_id = uuid.uuid4().hex[:12]
-    now = time.time()
-    db = _get_db()
-    try:
-        db.execute(
-            """INSERT INTO tasks
-               (task_id, subject, description, status, active_form, metadata, created_at, updated_at)
-               VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
-            (
-                task_id,
-                subject,
-                description,
-                active_form,
-                json.dumps(metadata or {}),
-                now,
-                now,
-            ),
-        )
-        db.commit()
-    finally:
-        db.close()
+    from obscura.core.task_queue import TaskQueue
+
+    q = TaskQueue()
+    task_id = q.enqueue(
+        subject,
+        description=description,
+        priority=priority,
+        goal_id=goal_id,
+        blocked_by=blocked_by,
+        run_after=run_after,
+        max_retries=max_retries,
+        metadata=metadata,
+    )
+
+    # Back-fill active_form if provided (not in TaskQueue.enqueue signature).
+    if active_form:
+        db = _get_db()
+        try:
+            db.execute(
+                "UPDATE tasks SET active_form = ? WHERE task_id = ?",
+                (active_form, task_id),
+            )
+            db.commit()
+        finally:
+            db.close()
+
     return json.dumps({"ok": True, "task_id": task_id, "subject": subject})
+
+
+# ---------------------------------------------------------------------------
+# task_get
+# ---------------------------------------------------------------------------
 
 
 @tool(
@@ -135,19 +170,43 @@ async def task_get(task_id: str) -> str:
     return json.dumps({"ok": True, "task": _row_to_dict(row)})
 
 
+# ---------------------------------------------------------------------------
+# task_list
+# ---------------------------------------------------------------------------
+
+
 @tool(
     "task_list",
     "List all tracked tasks.",
     {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "status": {
+                "type": "string",
+                "description": "Filter by status (pending/in_progress/completed/failed). Omit for all.",
+            },
+            "goal_id": {
+                "type": "string",
+                "description": "Filter by parent goal ID.",
+            },
+        },
     },
 )
-async def task_list() -> str:
+async def task_list(status: str = "", goal_id: str = "") -> str:
     db = _get_db()
     try:
+        where_clauses = ["status != 'deleted'"]
+        params: list[Any] = []
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if goal_id:
+            where_clauses.append("goal_id = ?")
+            params.append(goal_id)
+        where = " AND ".join(where_clauses)
         rows = db.execute(
-            "SELECT * FROM tasks WHERE status != 'deleted' ORDER BY created_at DESC",
+            f"SELECT * FROM tasks WHERE {where} ORDER BY priority ASC, created_at DESC",
+            params,
         ).fetchall()
     finally:
         db.close()
@@ -155,6 +214,11 @@ async def task_list() -> str:
     # Filter out internal tasks.
     tasks = [t for t in tasks if not t.get("metadata", {}).get("_internal")]
     return json.dumps({"ok": True, "tasks": tasks, "count": len(tasks)})
+
+
+# ---------------------------------------------------------------------------
+# task_update
+# ---------------------------------------------------------------------------
 
 
 @tool(
@@ -172,6 +236,18 @@ async def task_list() -> str:
             "description": {"type": "string"},
             "active_form": {"type": "string"},
             "owner": {"type": "string"},
+            "priority": {
+                "type": "integer",
+                "description": "0=critical … 100=lowest.",
+            },
+            "output": {
+                "type": "string",
+                "description": "Store task result / output text.",
+            },
+            "error": {
+                "type": "string",
+                "description": "Store error message for failed tasks.",
+            },
             "add_blocks": {"type": "array", "items": {"type": "string"}},
             "add_blocked_by": {"type": "array", "items": {"type": "string"}},
             "metadata": {"type": "object"},
@@ -186,6 +262,9 @@ async def task_update(
     description: str = "",
     active_form: str = "",
     owner: str = "",
+    priority: int | None = None,
+    output: str = "",
+    error: str = "",
     add_blocks: list[str] | None = None,
     add_blocked_by: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
@@ -239,6 +318,27 @@ async def task_update(
             )
             updated_fields.append("owner")
 
+        if priority is not None:
+            db.execute(
+                "UPDATE tasks SET priority = ?, updated_at = ? WHERE task_id = ?",
+                (priority, now, task_id),
+            )
+            updated_fields.append("priority")
+
+        if output:
+            db.execute(
+                "UPDATE tasks SET output = ?, updated_at = ? WHERE task_id = ?",
+                (output, now, task_id),
+            )
+            updated_fields.append("output")
+
+        if error:
+            db.execute(
+                "UPDATE tasks SET error = ?, updated_at = ? WHERE task_id = ?",
+                (error, now, task_id),
+            )
+            updated_fields.append("error")
+
         if add_blocks:
             blocks = current["blocks"]
             blocks.extend(b for b in add_blocks if b not in blocks)
@@ -273,6 +373,11 @@ async def task_update(
     return json.dumps(
         {"ok": True, "task_id": task_id, "updated_fields": updated_fields},
     )
+
+
+# ---------------------------------------------------------------------------
+# task_output  (background shell tasks)
+# ---------------------------------------------------------------------------
 
 
 @tool(
@@ -319,6 +424,11 @@ async def task_output(task_id: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# task_stop  (background shell tasks)
+# ---------------------------------------------------------------------------
+
+
 @tool(
     "task_stop",
     "Stop a running background task.",
@@ -340,6 +450,196 @@ async def task_stop(task_id: str) -> str:
     return json.dumps({"ok": True, "task_id": task_id, "stopped": True})
 
 
+# ---------------------------------------------------------------------------
+# queue_next — claim next ready task
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "queue_next",
+    "Claim the next ready task from the queue. Returns the task or null if empty.",
+    {
+        "type": "object",
+        "properties": {
+            "worker_id": {
+                "type": "string",
+                "description": "Worker identity. Defaults to 'agent'.",
+            },
+        },
+    },
+)
+async def queue_next(worker_id: str = "agent") -> str:
+    from obscura.core.task_queue import TaskQueue
+
+    q = TaskQueue()
+    q.reclaim_stale()
+    task = q.next_ready(worker_id=worker_id)
+    if task is None:
+        return json.dumps(
+            {"ok": True, "task": None, "message": "Queue empty or all blocked."}
+        )
+    if not q.claim(task["task_id"], worker_id):
+        return json.dumps(
+            {"ok": True, "task": None, "message": "Claim race lost, retry."}
+        )
+    return json.dumps({"ok": True, "task": task, "claimed_by": worker_id})
+
+
+# ---------------------------------------------------------------------------
+# queue_complete — mark a claimed task done
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "queue_complete",
+    "Mark a claimed task as completed with optional output.",
+    {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string"},
+            "output": {"type": "string", "description": "Result summary."},
+        },
+        "required": ["task_id"],
+    },
+)
+async def queue_complete(task_id: str, output: str = "") -> str:
+    from obscura.core.task_queue import TaskQueue
+
+    q = TaskQueue()
+    ok = q.complete(task_id, output=output)
+    if not ok:
+        return _json_error("task_not_found", task_id=task_id)
+
+    # Sync progress on parent goal if linked.
+    _sync_goal_progress(task_id)
+
+    # Fire Arbiter POST_TASK_COMPLETE hook (scoring + audit).
+    arbiter_feedback = ""
+    task = q.get(task_id)
+    if task:
+        try:
+            from obscura.arbiter.notify import fire_task_complete
+
+            result = await fire_task_complete(task)
+            if result and result.get("arbiter_feedback"):
+                arbiter_feedback = str(result["arbiter_feedback"])
+        except ImportError:
+            pass
+
+    payload: dict[str, Any] = {"ok": True, "task_id": task_id, "status": "completed"}
+    if arbiter_feedback:
+        payload["arbiter_feedback"] = arbiter_feedback
+    return json.dumps(payload)
+
+
+# ---------------------------------------------------------------------------
+# queue_fail — mark a claimed task failed (with optional retry)
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "queue_fail",
+    "Mark a claimed task as failed. Retries automatically if retries remain.",
+    {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string"},
+            "error": {"type": "string", "description": "Error description."},
+            "retry": {
+                "type": "boolean",
+                "description": "Allow automatic retry (default true).",
+            },
+        },
+        "required": ["task_id", "error"],
+    },
+)
+async def queue_fail(task_id: str, error: str, retry: bool = True) -> str:
+    from obscura.core.task_queue import TaskQueue
+
+    ok = TaskQueue().fail(task_id, error, retry=retry)
+    if not ok:
+        return _json_error("task_not_found", task_id=task_id)
+    return json.dumps(
+        {"ok": True, "task_id": task_id, "error": error, "will_retry": retry}
+    )
+
+
+# ---------------------------------------------------------------------------
+# queue_heartbeat — keep a claim alive during long tasks
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "queue_heartbeat",
+    "Send a heartbeat to keep a task claim alive during long-running work.",
+    {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string"},
+            "worker_id": {"type": "string"},
+        },
+        "required": ["task_id"],
+    },
+)
+async def queue_heartbeat(task_id: str, worker_id: str = "agent") -> str:
+    from obscura.core.task_queue import TaskQueue
+
+    ok = TaskQueue().heartbeat(task_id, worker_id)
+    if not ok:
+        return _json_error("heartbeat_failed", task_id=task_id)
+    return json.dumps({"ok": True, "task_id": task_id})
+
+
+# ---------------------------------------------------------------------------
+# queue_depth — diagnostics
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "queue_depth",
+    "Show queue depth grouped by priority bucket.",
+    {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "description": "Filter by status (default 'pending').",
+            },
+        },
+    },
+)
+async def queue_depth(status: str = "pending") -> str:
+    from obscura.core.task_queue import TaskQueue
+
+    depth = TaskQueue().queue_depth(status=status)
+    total = sum(depth.values())
+    return json.dumps({"ok": True, "depth": depth, "total": total})
+
+
+# ---------------------------------------------------------------------------
+# Helper: sync goal progress after task completion
+# ---------------------------------------------------------------------------
+
+
+def _sync_goal_progress(task_id: str) -> None:
+    """If the completed task is linked to a goal, update goal progress."""
+    try:
+        from obscura.core.task_queue import TaskQueue
+
+        task = TaskQueue().get(task_id)
+        if task and task.get("goal_id"):
+            from obscura.kairos.goals import GoalBoard
+
+            GoalBoard().sync_task_progress(task["goal_id"])
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Spec registration
+# ---------------------------------------------------------------------------
+
+
 def get_task_tool_specs() -> list[ToolSpec]:
     """Return task management tool specs for registration."""
     return [
@@ -349,4 +649,9 @@ def get_task_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", task_update.spec),
         cast("ToolSpec", task_output.spec),
         cast("ToolSpec", task_stop.spec),
+        cast("ToolSpec", queue_next.spec),
+        cast("ToolSpec", queue_complete.spec),
+        cast("ToolSpec", queue_fail.spec),
+        cast("ToolSpec", queue_heartbeat.spec),
+        cast("ToolSpec", queue_depth.spec),
     ]

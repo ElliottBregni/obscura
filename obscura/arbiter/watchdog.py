@@ -1,0 +1,253 @@
+"""obscura.arbiter.watchdog — Proactive task and agent health monitoring.
+
+Unlike the reactive evaluation in ``engine.py`` (which scores actions
+as they happen), the watchdog runs periodically and looks for problems
+that nobody reported:
+
+- **Zombie tasks**: Claimed but no heartbeat for too long.
+- **Spinning tasks**: Failed N times with the same error.
+- **Orphan tasks**: Parent goal was abandoned.
+- **Score decay**: Agent quality declining over the session.
+- **Drift**: Agent working on something unrelated to its assigned task.
+
+The watchdog is called from the KAIROS tick loop (one check per tick,
+lightweight, <50ms).
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WatchdogAction:
+    """An action the watchdog recommends."""
+
+    action: str  # "kill_task", "release_claim", "deprioritize", "alert"
+    target_id: str
+    reason: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class ArbiterWatchdog:
+    """Proactive health monitor. Call ``sweep()`` periodically."""
+
+    def __init__(
+        self,
+        *,
+        zombie_timeout: float = 300.0,  # 5 min with no heartbeat
+        max_same_error: int = 3,
+        score_decay_window: int = 5,  # look at last N turns
+        score_decay_threshold: float = 0.15,  # per-turn drop
+    ) -> None:
+        self._zombie_timeout = zombie_timeout
+        self._max_same_error = max_same_error
+        self._score_decay_window = score_decay_window
+        self._score_decay_threshold = score_decay_threshold
+        self._turn_scores: list[float] = []
+
+    def record_turn_score(self, score: float) -> None:
+        """Feed in each turn's composite score for decay tracking."""
+        self._turn_scores.append(score)
+
+    def sweep(self) -> list[WatchdogAction]:
+        """Run all proactive checks. Returns recommended actions."""
+        actions: list[WatchdogAction] = []
+        actions.extend(self._check_zombie_tasks())
+        actions.extend(self._check_spinning_tasks())
+        actions.extend(self._check_orphan_tasks())
+        actions.extend(self._check_score_decay())
+        return actions
+
+    # ------------------------------------------------------------------
+    # Zombie tasks: claimed but no heartbeat
+    # ------------------------------------------------------------------
+
+    def _check_zombie_tasks(self) -> list[WatchdogAction]:
+        actions: list[WatchdogAction] = []
+        try:
+            now = time.time()
+            # Find all claimed pending tasks.
+            # We check directly since list_claimed requires a worker_id.
+            from obscura.core.task_queue import _open
+
+            conn = _open()
+            try:
+                rows = conn.execute(
+                    """SELECT task_id, subject, claimed_by, claimed_at, last_heartbeat
+                       FROM tasks
+                       WHERE status = 'pending'
+                         AND claimed_by != ''
+                         AND claimed_at < ?""",
+                    (now - self._zombie_timeout,),
+                ).fetchall()
+                for row in rows:
+                    last_beat = row["last_heartbeat"] or row["claimed_at"]
+                    if now - last_beat > self._zombie_timeout:
+                        actions.append(
+                            WatchdogAction(
+                                action="release_claim",
+                                target_id=row["task_id"],
+                                reason=(
+                                    f"Zombie: claimed by {row['claimed_by']} "
+                                    f"{int(now - row['claimed_at'])}s ago, "
+                                    f"no heartbeat for {int(now - last_beat)}s"
+                                ),
+                                metadata={"claimed_by": row["claimed_by"]},
+                            )
+                        )
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("Zombie task check failed", exc_info=True)
+        return actions
+
+    # ------------------------------------------------------------------
+    # Spinning tasks: same error repeated
+    # ------------------------------------------------------------------
+
+    def _check_spinning_tasks(self) -> list[WatchdogAction]:
+        actions: list[WatchdogAction] = []
+        try:
+            from obscura.core.task_queue import _open
+
+            conn = _open()
+            try:
+                rows = conn.execute(
+                    """SELECT task_id, subject, error, retry_count, max_retries
+                       FROM tasks
+                       WHERE status = 'pending'
+                         AND retry_count >= ?
+                         AND error != ''""",
+                    (self._max_same_error,),
+                ).fetchall()
+                for row in rows:
+                    actions.append(
+                        WatchdogAction(
+                            action="kill_task",
+                            target_id=row["task_id"],
+                            reason=(
+                                f"Spinning: {row['retry_count']} retries "
+                                f"with error: {row['error'][:80]}"
+                            ),
+                        )
+                    )
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("Spinning task check failed", exc_info=True)
+        return actions
+
+    # ------------------------------------------------------------------
+    # Orphan tasks: parent goal abandoned
+    # ------------------------------------------------------------------
+
+    def _check_orphan_tasks(self) -> list[WatchdogAction]:
+        actions: list[WatchdogAction] = []
+        try:
+            from obscura.core.task_queue import _open
+            from obscura.kairos.goals import GoalBoard
+
+            board = GoalBoard()
+            conn = _open()
+            try:
+                rows = conn.execute(
+                    """SELECT task_id, subject, goal_id
+                       FROM tasks
+                       WHERE status = 'pending'
+                         AND goal_id != ''""",
+                ).fetchall()
+                for row in rows:
+                    goal = board.load(row["goal_id"])
+                    if goal is not None and goal.status == "abandoned":
+                        actions.append(
+                            WatchdogAction(
+                                action="kill_task",
+                                target_id=row["task_id"],
+                                reason=(
+                                    f"Orphan: parent goal '{row['goal_id']}' "
+                                    f"was abandoned"
+                                ),
+                            )
+                        )
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("Orphan task check failed", exc_info=True)
+        return actions
+
+    # ------------------------------------------------------------------
+    # Score decay: quality dropping over turns
+    # ------------------------------------------------------------------
+
+    def _check_score_decay(self) -> list[WatchdogAction]:
+        actions: list[WatchdogAction] = []
+        window = self._turn_scores[-self._score_decay_window :]
+        if len(window) < self._score_decay_window:
+            return actions
+
+        # Check for monotonic decline.
+        declines = sum(1 for i in range(1, len(window)) if window[i] < window[i - 1])
+        if declines >= len(window) - 1:
+            total_drop = window[0] - window[-1]
+            if total_drop >= self._score_decay_threshold * len(window):
+                actions.append(
+                    WatchdogAction(
+                        action="alert",
+                        target_id="session",
+                        reason=(
+                            f"Score decay: {window[0]:.2f} → {window[-1]:.2f} "
+                            f"over last {len(window)} turns "
+                            f"(total drop: {total_drop:.2f})"
+                        ),
+                        metadata={"scores": window},
+                    )
+                )
+        return actions
+
+    # ------------------------------------------------------------------
+    # Execute recommended actions
+    # ------------------------------------------------------------------
+
+    def execute(self, actions: list[WatchdogAction]) -> list[str]:
+        """Execute watchdog actions against the task queue. Returns summaries."""
+        results: list[str] = []
+        for action in actions:
+            try:
+                if action.action == "release_claim":
+                    from obscura.core.task_queue import TaskQueue
+
+                    q = TaskQueue()
+                    worker = action.metadata.get("claimed_by", "")
+                    if worker:
+                        q.release(action.target_id, worker)
+                    else:
+                        q.reclaim_stale()
+                    results.append(f"Released: {action.target_id} — {action.reason}")
+
+                elif action.action == "kill_task":
+                    from obscura.core.task_queue import TaskQueue
+
+                    TaskQueue().fail(
+                        action.target_id,
+                        f"Killed by watchdog: {action.reason}",
+                        retry=False,
+                    )
+                    results.append(f"Killed: {action.target_id} — {action.reason}")
+
+                elif action.action == "alert":
+                    results.append(f"Alert: {action.reason}")
+
+                else:
+                    results.append(f"Unknown action: {action.action}")
+
+            except Exception as exc:
+                results.append(f"Failed {action.action} on {action.target_id}: {exc}")
+                logger.debug("Watchdog action failed", exc_info=True)
+
+        return results

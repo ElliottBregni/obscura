@@ -135,6 +135,8 @@ class SupervisorHookPoint(enum.Enum):
     POST_FINALIZE = "post_finalize"
     ON_ERROR = "on_error"
     ON_HEARTBEAT = "on_heartbeat"
+    POST_TASK_COMPLETE = "post_task_complete"
+    POST_GOAL_TRANSITION = "post_goal_transition"
 
 
 # ---------------------------------------------------------------------------
