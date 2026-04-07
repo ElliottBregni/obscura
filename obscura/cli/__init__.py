@@ -193,14 +193,8 @@ from obscura.cli import trace as trace_mod  # noqa: E402
 # ---------------------------------------------------------------------------
 # Bootstrap helpers imported lazily to avoid circular import during submodule imports
 # CLI command helpers imported lazily to avoid circular import during package import
-from obscura.cli.prompt import (  # noqa: E402  # noqa: E402
-    PromptStatus,
-    StreamingStatus,
-    _get_git_branch,
-    animate_spinner,
-    bordered_prompt,
-    create_prompt_session,
-)
+# Prompt utilities moved to runtime import points to keep package import cheap.
+# Import at call sites instead of at module import time.
 # Provide a tiny lazy compatibility wrapper so tests can import _discover_mcp from
 # obscura.cli without reintroducing earlier circular-imports. The wrapper imports
 # bootstrap on call instead of at module import time.
@@ -1569,6 +1563,16 @@ async def _repl(
 
         # --- Interactive REPL ---
         mm = ctx.get_mode_manager()
+        # Import prompt utilities lazily to avoid heavy imports at package import time.
+        from obscura.cli.prompt import (
+            StreamingStatus,
+            PromptStatus,
+            _get_git_branch,
+            animate_spinner,
+            bordered_prompt,
+            create_prompt_session,
+        )
+
         ss = StreamingStatus()
 
         # Lazy agent discovery — reads agents.yaml metadata, no runtime created
