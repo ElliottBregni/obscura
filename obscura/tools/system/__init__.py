@@ -4476,3 +4476,99 @@ def get_system_tool_specs() -> list[ToolSpec]:
     for spec in _dynamic_tools.values():
         static_specs.append(spec)
     return static_specs
+
+@tool(
+    "copilot_query",
+    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
+    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+)
+async def copilot_query(query: str) -> str:
+    """Minimal stub for copilot_query used in tests. Returns a JSON string.
+
+    Real installations may replace this with a tool that queries the Copilot
+    service. Tests tolerate failures, so the stub returns an ok=False payload.
+    """
+    try:
+        return json.dumps({"ok": False, "error": "copilot not available", "query": query})
+    except Exception as exc:
+        return _json_error(str(exc))
+
+@tool(
+    "copilot_query",
+    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
+    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+)
+async def copilot_query(query: str) -> str:
+    """Minimal stub for copilot_query used in tests. Returns a JSON string.
+
+    Real installations may replace this with a tool that queries the Copilot
+    service. Tests tolerate failures, so the stub returns an ok=False payload.
+    """
+    try:
+        return json.dumps({"ok": False, "error": "copilot not available", "query": query})
+    except Exception as exc:
+        return _json_error(str(exc))
+
+@tool(
+    "copilot_query",
+    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
+    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+)
+async def copilot_query(query: str) -> str:
+    """Minimal stub for copilot_query used in tests. Returns a JSON string.
+
+    Real installations may replace this with a tool that queries the Copilot
+    service. Tests tolerate failures, so the stub returns an ok=False payload.
+    """
+    try:
+        return json.dumps({"ok": False, "error": "copilot not available", "query": query})
+    except Exception as exc:
+        return _json_error(str(exc))
+
+@tool(
+    "copilot_query",
+    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
+    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+)
+async def copilot_query(query: str) -> str:
+    """Minimal stub for copilot_query used in tests. Returns a JSON string.
+
+    Real installations may replace this with a tool that queries the Copilot
+    service. Tests tolerate failures, so the stub returns an ok=False payload.
+    """
+    try:
+        return json.dumps({"ok": False, "error": "copilot not available", "query": query})
+    except Exception as exc:
+        return _json_error(str(exc))
+
+@tool(
+    "copilot_query",
+    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
+    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+)
+async def copilot_query(query: str) -> str:
+    """Minimal stub for copilot_query used in tests. Returns a JSON string.
+
+    Real installations may replace this with a tool that queries the Copilot
+    service. Tests tolerate failures, so the stub returns an ok=False payload.
+    """
+    try:
+        return json.dumps({"ok": False, "error": "copilot not available", "query": query})
+    except Exception as exc:
+        return _json_error(str(exc))
+
+@tool(
+    "copilot_query",
+    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
+    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+)
+async def copilot_query(query: str) -> str:
+    """Minimal stub for copilot_query used in tests. Returns a JSON string.
+
+    Real installations may replace this with a tool that queries the Copilot
+    service. Tests tolerate failures, so the stub returns an ok=False payload.
+    """
+    try:
+        return json.dumps({"ok": False, "error": "copilot not available", "query": query})
+    except Exception as exc:
+        return _json_error(str(exc))
