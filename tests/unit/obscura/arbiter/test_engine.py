@@ -211,3 +211,93 @@ async def test_retry_spiral_flagged_on_model_turn(engine: ArbiterEngine) -> None
     )
     assert score.composite < 0.8
     assert any("spiral" in d.lower() or "stuck" in d.lower() for d in score.details)
+
+
+# ---------------------------------------------------------------------------
+# Phantom level verdict adjustments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_phantom_low_downgrades_deny_to_revise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phantom 1-3: non-safety DENY → REVISE (steer, don't stop)."""
+    monkeypatch.setenv("OBSCURA_PHANTOM_LEVEL", "2")
+    config = ArbiterConfig(judge_mode="never", accept_threshold=0.8, revise_threshold=0.3)
+    eng = ArbiterEngine(config=config, session_id="test")
+    eng.start()
+
+    # This would normally DENY (empty output + errors = low score).
+    score = await eng.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    assert score.verdict == ArbiterVerdict.REVISE
+    assert "STEER" in score.feedback
+
+
+@pytest.mark.asyncio
+async def test_phantom_high_escalates_deny_to_kill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phantom 4-5: non-safety DENY → KILL (don't waste tokens steering)."""
+    monkeypatch.setenv("OBSCURA_PHANTOM_LEVEL", "5")
+    config = ArbiterConfig(judge_mode="never", accept_threshold=0.8, revise_threshold=0.3)
+    eng = ArbiterEngine(config=config, session_id="test")
+    eng.start()
+
+    score = await eng.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    assert score.verdict == ArbiterVerdict.KILL
+    assert "KILLED" in score.feedback or "Wasting" in score.feedback
+
+
+@pytest.mark.asyncio
+async def test_daemon_escalates_deny_to_kill() -> None:
+    """Daemon agents: DENY → KILL."""
+    config = ArbiterConfig(judge_mode="never", is_daemon=True)
+    eng = ArbiterEngine(config=config, session_id="test")
+    eng.start()
+
+    score = await eng.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    assert score.verdict == ArbiterVerdict.KILL
+
+
+@pytest.mark.asyncio
+async def test_safety_always_kills_regardless_of_phantom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safety violations KILL even at phantom 1 (steer mode)."""
+    monkeypatch.setenv("OBSCURA_PHANTOM_LEVEL", "1")
+    config = ArbiterConfig(judge_mode="never")
+    eng = ArbiterEngine(config=config, session_id="test")
+    eng.start()
+
+    score = await eng.evaluate(
+        ArbiterCheckKind.TOOL_CALL,
+        {"tool_name": "run_shell", "args": {"command": "rm -rf /"}},
+    )
+    assert score.verdict == ArbiterVerdict.KILL
+
+
+@pytest.mark.asyncio
+async def test_phantom_zero_normal_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phantom 0 (off): normal DENY, no adjustment."""
+    monkeypatch.setenv("OBSCURA_PHANTOM_LEVEL", "0")
+    config = ArbiterConfig(judge_mode="never", accept_threshold=0.8, revise_threshold=0.3)
+    eng = ArbiterEngine(config=config, session_id="test")
+    eng.start()
+
+    score = await eng.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    assert score.verdict == ArbiterVerdict.DENY

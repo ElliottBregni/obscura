@@ -56,6 +56,11 @@ class ArbiterConfig:
     """Configuration for the Arbiter engine.
 
     Loaded from env / settings.json at startup; immutable per session.
+
+    *phantom_level* (0-5) is read from ``OBSCURA_PHANTOM_LEVEL``.
+    At level 4+ (lead/takeover), non-safety verdicts are capped at
+    REVISE — the agent gets steering feedback instead of hard blocks.
+    Level 0 means phantom is off (normal Arbiter behavior).
     """
 
     enabled: bool = True
@@ -65,6 +70,8 @@ class ArbiterConfig:
     max_retries: int = 2
     max_judge_calls_per_session: int = 10
     kill_on_safety_violation: bool = True
+    phantom_level: int = 0  # 0=off, 1-5 = shadow..takeover
+    is_daemon: bool = False  # True for daemon/background agents
 
 
 @dataclass(frozen=True)

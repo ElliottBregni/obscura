@@ -335,24 +335,64 @@ class ArbiterEngine:
         kind: ArbiterCheckKind,
         context: dict[str, Any],
     ) -> ArbiterVerdict:
-        """Map composite score + issues to a verdict."""
-        # Safety violations → immediate KILL.
-        if self._config.kill_on_safety_violation:
-            if any(issue.startswith("SAFETY:") for issue in issues):
-                return ArbiterVerdict.KILL
+        """Map composite score + issues to a verdict.
 
+        Phantom level adjusts non-safety verdicts:
+        - Level 0 (off): normal behavior
+        - Level 1-3 (shadow/copilot/partner): DENY/KILL downgraded to
+          REVISE — steer the agent back on track, give it a chance.
+        - Level 4-5 (lead/takeover): DENY upgraded to KILL — at high
+          autonomy the agent should know better. If it's wasting
+          resources, cut it off fast instead of burning more tokens
+          trying to steer.
+        Safety violations (``SAFETY:`` prefix) always KILL regardless
+        of phantom level.
+        """
+        # Safety violations → immediate KILL at any phantom level.
+        has_safety = any(issue.startswith("SAFETY:") for issue in issues)
+        if self._config.kill_on_safety_violation and has_safety:
+            return ArbiterVerdict.KILL
+
+        # Compute raw verdict from score thresholds.
         if composite >= self._config.accept_threshold:
-            return ArbiterVerdict.ACCEPT
-        if composite >= self._config.revise_threshold:
+            raw = ArbiterVerdict.ACCEPT
+        elif composite >= self._config.revise_threshold:
+            raw = ArbiterVerdict.REVISE
+        else:
+            raw = ArbiterVerdict.DENY
+
+        # Daemons and high-autonomy agents (phantom 4-5): escalate DENY → KILL.
+        # They run unsupervised — if they're wasting resources, kill fast.
+        phantom = self._resolve_phantom_level()
+        is_autonomous = phantom >= 4 or self._config.is_daemon
+
+        if is_autonomous and raw == ArbiterVerdict.DENY:
+            return ArbiterVerdict.KILL
+
+        # Phantom 1-3 (interactive, lower autonomy): steer, don't stop.
+        # Downgrade hard blocks to REVISE — give the agent a chance.
+        if 1 <= phantom <= 3 and raw in (ArbiterVerdict.DENY, ArbiterVerdict.KILL):
             return ArbiterVerdict.REVISE
-        return ArbiterVerdict.DENY
+
+        return raw
+
+    def _resolve_phantom_level(self) -> int:
+        """Get the current phantom level (config override > env var > 0)."""
+        if self._config.phantom_level > 0:
+            return self._config.phantom_level
+        import os
+
+        try:
+            return int(os.environ.get("OBSCURA_PHANTOM_LEVEL", "0"))
+        except (ValueError, TypeError):
+            return 0
 
     # ------------------------------------------------------------------
     # Feedback generation
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _generate_feedback(
+        self,
         verdict: ArbiterVerdict,
         issues: list[str],
         judge_reasoning: str,
@@ -366,12 +406,26 @@ class ArbiterEngine:
             parts.append("Issues: " + "; ".join(issues))
         if judge_reasoning:
             parts.append("Judge: " + judge_reasoning)
+
+        phantom = self._resolve_phantom_level()
+
+        is_autonomous = phantom >= 4 or self._config.is_daemon
+
         if verdict == ArbiterVerdict.KILL:
-            parts.insert(0, "CRITICAL: Action aborted by Arbiter.")
+            if is_autonomous:
+                parts.insert(0, "KILLED: Wasting resources. Task aborted.")
+            else:
+                parts.insert(0, "CRITICAL: Action aborted by Arbiter.")
         elif verdict == ArbiterVerdict.DENY:
             parts.insert(0, "DENIED: Action blocked by Arbiter.")
         elif verdict == ArbiterVerdict.REVISE:
-            parts.insert(0, "REVISE: Please fix the following and retry.")
+            if 1 <= phantom <= 3:
+                parts.insert(
+                    0,
+                    "STEER: You're off-track. Correct course:",
+                )
+            else:
+                parts.insert(0, "REVISE: Please fix the following and retry.")
         return " ".join(parts)
 
     # ------------------------------------------------------------------

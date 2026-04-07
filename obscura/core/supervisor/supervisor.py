@@ -203,9 +203,18 @@ class Supervisor:
         try:
             from obscura.arbiter.hooks import register_arbiter_hooks
             from obscura.arbiter.notify import set_hook_manager
+            from obscura.arbiter.types import ArbiterConfig
 
+            # Detect daemon/background context from metadata.
+            _meta = metadata or {}
+            _is_daemon = bool(
+                _meta.get("agent_type") == "daemon"
+                or _meta.get("is_daemon")
+                or _meta.get("initiator") in ("daemon", "background", "kairos")
+            )
             register_arbiter_hooks(
                 hooks,
+                config=ArbiterConfig(is_daemon=_is_daemon),
                 session_id=session_id,
                 run_id=run_id,
             )
