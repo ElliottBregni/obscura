@@ -10,6 +10,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      OBSCURA_ENABLE_SHIM_DEPRECATION: '1'
     strategy:
       matrix:
         python-version: ['3.13.5']
