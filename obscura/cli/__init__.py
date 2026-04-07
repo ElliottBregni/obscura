@@ -1722,6 +1722,16 @@ async def _repl(
             except Exception as _e:
                 _swallow("kairos_loop_wire", _e)
 
+        # Wire AgentLoop into Arbiter for mechanical kill.
+        try:
+            from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
+
+            _al = getattr(client, "_loop", None)
+            if _al is not None:
+                _reg_arbiter_loop(_al)
+        except Exception as _e:
+            _swallow("arbiter_loop_wire", _e)
+
         # --- Tips scheduler ---
         _tip_scheduler = None
         try:

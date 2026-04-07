@@ -22,10 +22,17 @@ logger = logging.getLogger(__name__)
 
 # Module-level engine instance, shared across hooks in a session.
 _engine: ArbiterEngine | None = None
+_agent_loop: Any = None  # AgentLoop reference for mechanical kill.
 
 
 def get_engine() -> ArbiterEngine | None:
     return _engine
+
+
+def register_agent_loop(loop: Any) -> None:
+    """Attach the active AgentLoop so the Arbiter can kill it mechanically."""
+    global _agent_loop  # noqa: PLW0603
+    _agent_loop = loop
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +59,7 @@ async def _pre_tool_handler(context: dict[str, Any]) -> dict[str, Any] | bool:
     if score.verdict == ArbiterVerdict.KILL:
         context["arbiter_killed"] = True
         context["arbiter_feedback"] = score.feedback
+        _kill_loop(score.feedback)
         return False  # Block the tool call.
     if score.verdict == ArbiterVerdict.DENY:
         context["arbiter_denied"] = True
@@ -81,6 +89,8 @@ async def _post_turn_handler(context: dict[str, Any]) -> dict[str, Any]:
 
     context["arbiter_score"] = score.composite
     context["arbiter_verdict"] = score.verdict.value
+    if score.verdict == ArbiterVerdict.KILL:
+        _kill_loop(score.feedback)
     if score.feedback:
         context["arbiter_feedback"] = score.feedback
     return context
@@ -215,3 +225,17 @@ def _register(
         hooks.add(point, handler)
     else:
         logger.warning("Unknown hook manager API; could not register %s", ref)
+
+
+def _kill_loop(reason: str) -> None:
+    """Mechanically kill the agent loop. Not prompt injection — the loop stops."""
+    loop = _agent_loop
+    if loop is None:
+        return
+    try:
+        kill_fn = getattr(loop, "arbiter_kill", None)
+        if callable(kill_fn):
+            kill_fn(reason)
+            logger.info("Arbiter killed agent loop: %s", reason[:100])
+    except Exception:
+        logger.debug("Failed to kill agent loop", exc_info=True)

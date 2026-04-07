@@ -370,6 +370,7 @@ PARAMETER_ALIASES: dict[str, dict[str, str]] = {
 # Each entry is a tuple of (input_transform, output_transform).
 # Either can be None to skip that direction.
 
+
 def _bridge_grep_input(inputs: dict[str, Any]) -> dict[str, Any]:
     """Map Claude Code Grep flags to grep_files canonical params."""
     # -i (case insensitive) → case_sensitive=False
@@ -632,6 +633,8 @@ class AgentLoop:
         self._accumulated_chars = 0
         self._compiled_agent = compiled_agent
         self._tool_output_level = tool_output_level
+        self._arbiter_killed = False  # Set by Arbiter to force-stop the loop.
+        self._arbiter_kill_reason = ""
         self._tool_output_overrides = tool_output_overrides or {}
 
         # Apply compiled agent settings if provided
@@ -737,6 +740,17 @@ class AgentLoop:
         USER_INPUT event is emitted.  Thread-safe.
         """
         self._user_input_queue.put_nowait(text)
+
+    def arbiter_kill(self, reason: str = "") -> None:
+        """Signal the Arbiter to mechanically stop this loop.
+
+        The loop will emit an AGENT_DONE event with the kill reason
+        and return on the next turn boundary.  This is **not** prompt
+        injection — the loop terminates because code says stop.
+        Thread-safe.
+        """
+        self._arbiter_killed = True
+        self._arbiter_kill_reason = reason or "Killed by Arbiter"
 
     @property
     def max_turns(self) -> int:
@@ -979,6 +993,16 @@ class AgentLoop:
         _max_tokens_retries: int = 0
 
         while state.turn < self._max_turns:
+            # Arbiter kill: mechanical stop — no prompt injection, loop ends.
+            if self._arbiter_killed:
+                kill_event = AgentEvent(
+                    kind=AgentEventKind.AGENT_DONE,
+                    turn=state.turn,
+                    text=f"[Arbiter KILL] {self._arbiter_kill_reason}",
+                )
+                await self._emit(kill_event, session_id)
+                break
+
             state = state.replace(turn=state.turn + 1)
 
             # Fresh per-turn state (carry over accumulated_text/chars/tokens)
