@@ -337,3 +337,18 @@ async def send_message(
         pass
 
     return response_text
+
+
+# Extracted helper for prompt/session construction
+def build_prompt_session(ctx, ss):
+    from obscura.cli.prompt import create_prompt_session, animate_spinner
+    prompt_status = ctx._prompt_status if hasattr(ctx, '_prompt_status') else None
+    session = create_prompt_session(
+        getattr(ctx, 'COMPLETIONS', {}),
+        streaming_status=ss,
+        prompt_status=prompt_status,
+        at_command_names=ctx.discover_at_commands,
+        dollar_skill_names=ctx.discover_dollar_skills,
+    )
+    spinner_task = __import__('asyncio').create_task(animate_spinner(ss))
+    return session, prompt_status, spinner_task
