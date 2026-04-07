@@ -118,7 +118,8 @@ class TestToolRegistration:
         assert "task_create" in names
         assert "task_list" in names
         assert "task_stop" in names
-        assert len(specs) == 6
+        # 6 original + 5 queue tools (queue_next/complete/fail/heartbeat/depth)
+        assert len(specs) == 11
 
     def test_lsp_tool(self) -> None:
         from obscura.tools.lsp import get_lsp_tool_specs
