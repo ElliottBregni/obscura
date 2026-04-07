@@ -1719,16 +1719,8 @@ async def _repl(
             prompt_status.ctx_window = window
             prompt_status.ctx_pct = int(tokens / window * 100) if window else 0
 
-        session = create_prompt_session(
-            COMPLETIONS,
-            streaming_status=ss,
-            prompt_status=prompt_status,
-            at_command_names=ctx.discover_at_commands,
-            dollar_skill_names=ctx.discover_dollar_skills,
-        )
-
-        # Background spinner animation for the toolbar
-        spinner_task = asyncio.create_task(animate_spinner(ss))
+        # Build prompt session lazily via obscura.cli.repl
+        session, prompt_status, spinner_task = build_prompt_session(ctx, ss)
 
         # --- KAIROS integration: wire into supervisor or start directly ---
         _kairos_engine = None
