@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from obscura.arbiter.checks import (
     check_drift,
+    check_file_quality,
+    check_file_relevance,
     check_goal_transition,
     check_model_turn,
     check_retry_spiral,
@@ -368,3 +372,143 @@ def test_retry_spiral_identical_errors_severe() -> None:
     ])
     assert score <= 0.3
     assert any("stuck" in i.lower() or "near-identical" in i.lower() for i in issues)
+
+
+# ---------------------------------------------------------------------------
+# check_task_complete — output relevance (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+def test_task_complete_relevant_output() -> None:
+    score, issues = check_task_complete(
+        {
+            "subject": "Fix database migration",
+            "description": "Apply schema_v3 migration to production",
+            "output": "Applied migration schema_v3 to production database successfully",
+            "error": "",
+        },
+    )
+    assert score == 1.0
+
+
+def test_task_complete_irrelevant_output() -> None:
+    score, issues = check_task_complete(
+        {
+            "subject": "Fix database migration",
+            "description": "Apply schema_v3 migration to production",
+            "output": "Hello world this is a greeting message",
+            "error": "",
+        },
+    )
+    assert score < 1.0
+    assert any("relevance" in i.lower() or "unrelated" in i.lower() for i in issues)
+
+
+def test_task_complete_relevance_with_output_text_param() -> None:
+    """output_text kwarg fills in when task dict output is empty."""
+    score, issues = check_task_complete(
+        {
+            "subject": "Fix login bug",
+            "description": "The login form crashes on submit",
+            "output": "",
+        },
+        output_text="Fixed the null pointer in login form submit handler",
+    )
+    # output_text is used as fallback — should NOT get "no output" penalty.
+    # Should also have good relevance (login, form, submit overlap).
+    assert score >= 0.7
+
+
+# ---------------------------------------------------------------------------
+# check_file_quality (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+def test_file_quality_clean_python(tmp_path: "Path") -> None:
+    f = tmp_path / "clean.py"
+    f.write_text("from __future__ import annotations\n\nx: int = 1\n")
+    score, issues = check_file_quality([str(f)])
+    assert score == 1.0
+
+
+def test_file_quality_syntax_error(tmp_path: "Path") -> None:
+    f = tmp_path / "broken.py"
+    f.write_text("def foo(\n")
+    score, issues = check_file_quality([str(f)])
+    assert score < 1.0
+    assert any("broken.py" in i for i in issues)
+
+
+def test_file_quality_bad_yaml(tmp_path: "Path") -> None:
+    f = tmp_path / "bad.yaml"
+    f.write_text("key: [unclosed\n")
+    score, issues = check_file_quality([str(f)])
+    assert score < 1.0
+    assert any("bad.yaml" in i for i in issues)
+
+
+def test_file_quality_bad_json(tmp_path: "Path") -> None:
+    f = tmp_path / "bad.json"
+    f.write_text("{invalid json")
+    score, issues = check_file_quality([str(f)])
+    assert score < 1.0
+
+
+def test_file_quality_nonexistent_file() -> None:
+    score, issues = check_file_quality(["/tmp/nonexistent_12345.py"])
+    assert score == 1.0
+
+
+def test_file_quality_multiple_errors_capped(tmp_path: "Path") -> None:
+    """Penalty capped at -0.5 even with many bad files."""
+    files = []
+    for i in range(10):
+        f = tmp_path / f"bad{i}.py"
+        f.write_text("def (\n")
+        files.append(str(f))
+    score, issues = check_file_quality(files)
+    assert score >= 0.5  # Capped at -0.5 penalty.
+
+
+# ---------------------------------------------------------------------------
+# check_file_relevance (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+def test_file_relevance_all_relevant() -> None:
+    score, issues = check_file_relevance(
+        "Fix login validation",
+        "The login form needs input validation",
+        ["auth/login.py", "auth/validation.py"],
+    )
+    assert score == 1.0
+
+
+def test_file_relevance_all_irrelevant() -> None:
+    score, issues = check_file_relevance(
+        "Fix login validation",
+        "The login form needs input validation",
+        ["payment/stripe.py", "billing/invoice.py", "shipping/fedex.py"],
+    )
+    assert score <= 0.3
+    assert any("unrelated" in i.lower() for i in issues)
+
+
+def test_file_relevance_mixed() -> None:
+    score, issues = check_file_relevance(
+        "Fix login validation",
+        "The login form needs input validation",
+        ["auth/login.py", "payment/stripe.py"],
+    )
+    # 1/2 irrelevant = 50% → score 0.6
+    assert score <= 0.6
+
+
+def test_file_relevance_empty_files() -> None:
+    score, issues = check_file_relevance("Fix bug", "details", [])
+    assert score == 1.0
+
+
+def test_file_relevance_no_task() -> None:
+    score, issues = check_file_relevance("", "", ["some/file.py"])
+    assert score == 1.0

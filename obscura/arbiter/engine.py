@@ -30,6 +30,8 @@ from typing import Any
 
 from obscura.arbiter.checks import (
     check_drift,
+    check_file_quality,
+    check_file_relevance,
     check_goal_transition,
     check_model_turn,
     check_retry_spiral,
@@ -68,6 +70,7 @@ class ArbiterEngine:
         self._run_id = run_id
         self._judge_calls = 0
         self._retry_counts: dict[str, int] = {}
+        self._session_errors: dict[str, list[str]] = {}  # cross-turn error memory
         self._events: list[ArbiterEvent] = []
         self._started = False
 
@@ -118,6 +121,14 @@ class ArbiterEngine:
         - TASK_COMPLETE: task (dict from TaskQueue.get)
         - GOAL_TRANSITION: goal (dict), linked_task_statuses?
         """
+        # 0. Inject historical errors for cross-turn spiral detection.
+        target_id_early = self._extract_target_id(kind, context)
+        if kind == ArbiterCheckKind.MODEL_TURN:
+            historical = self._session_errors.get(target_id_early, [])
+            if historical:
+                existing_recent = context.get("recent_errors") or []
+                context["recent_errors"] = historical + list(existing_recent)
+
         # 1. Deterministic checks
         det_score, issues = self._run_checks(kind, context)
 
@@ -195,6 +206,14 @@ class ArbiterEngine:
         self._events.append(event)
         self._persist_event(event)
 
+        # Record errors for cross-turn memory.
+        if issues:
+            error_list = self._session_errors.setdefault(target_id, [])
+            error_list.extend(issues)
+            # Cap history at 20 per target.
+            if len(error_list) > 20:
+                self._session_errors[target_id] = error_list[-20:]
+
         if verdict != ArbiterVerdict.ACCEPT:
             logger.info(
                 "Arbiter %s: %s [%s] score=%.2f — %s",
@@ -230,7 +249,10 @@ class ArbiterEngine:
 
         if kind == ArbiterCheckKind.TASK_COMPLETE:
             task = context.get("task") or {}
-            return check_task_complete(task)
+            return check_task_complete(
+                task,
+                output_text=str(context.get("output_text", "")),
+            )
 
         if kind == ArbiterCheckKind.GOAL_TRANSITION:
             goal = context.get("goal") or {}
@@ -296,6 +318,21 @@ class ArbiterEngine:
             spiral_score, spiral_issues = check_retry_spiral(recent_errors)
             scores.append(spiral_score)
             all_issues.extend(spiral_issues)
+
+        # 5. File quality (if files_touched available).
+        files_touched = context.get("files_touched") or []
+        if files_touched:
+            fq_score, fq_issues = check_file_quality(files_touched)
+            scores.append(fq_score)
+            all_issues.extend(fq_issues)
+
+        # 6. File relevance (if task context + files available).
+        if task_subject and files_touched:
+            fr_score, fr_issues = check_file_relevance(
+                task_subject, task_description, files_touched
+            )
+            scores.append(fr_score)
+            all_issues.extend(fr_issues)
 
         # Composite: take the minimum — one bad signal is enough to flag.
         final_score = min(scores) if scores else 1.0

@@ -213,8 +213,13 @@ def check_model_turn(
 
 def check_task_complete(
     task: Mapping[str, Any],
+    *,
+    output_text: str = "",
 ) -> tuple[float, list[str]]:
     """Score a task that has been marked completed.
+
+    *output_text* is the agent's output for relevance checking against
+    the task subject/description.
 
     Returns (score, issues).
     """
@@ -222,7 +227,7 @@ def check_task_complete(
     score = 1.0
 
     # Output should be non-empty for completed tasks
-    output = str(task.get("output", "") or "")
+    output = str(task.get("output", "") or output_text or "")
     if not output.strip():
         issues.append("task completed with no output")
         score -= 0.3
@@ -241,6 +246,29 @@ def check_task_complete(
         if retry_ratio >= 0.5:
             issues.append(f"task used {retry_count}/{max_retries} retries")
             score -= 0.2 * retry_ratio
+
+    # Output-task relevance: does the output relate to the task?
+    subject = str(task.get("subject", "") or "")
+    description = str(task.get("description", "") or "")
+    task_text = f"{subject} {description}"
+    task_keywords = _extract_keywords(task_text)
+    if task_keywords and output.strip():
+        output_keywords = _extract_keywords(output)
+        if output_keywords:
+            overlap = task_keywords & output_keywords
+            ratio = len(overlap) / len(task_keywords)
+            if ratio < 0.05:
+                issues.append(
+                    f"Output has {ratio:.0%} relevance to task "
+                    f"'{subject[:50]}' — may be unrelated"
+                )
+                score -= 0.3
+            elif ratio < 0.15:
+                issues.append(
+                    f"Low output relevance: {ratio:.0%} keyword overlap "
+                    f"with task '{subject[:50]}'"
+                )
+                score -= 0.15
 
     return max(score, 0.0), issues
 
@@ -395,6 +423,225 @@ def check_token_budget(
     issues.append(
         f"Token budget critical: {usage_pct:.0%} budget used with only "
         f"{progress_pct:.0%} progress (efficiency={efficiency:.2f})"
+    )
+    return 0.3, issues
+
+
+# ---------------------------------------------------------------------------
+# Test results check
+# ---------------------------------------------------------------------------
+
+
+def check_test_results(
+    outcome: Mapping[str, Any],
+) -> tuple[float, list[str]]:
+    """Score based on test runner outcome.
+
+    *outcome* should have keys: passed, failed, errors, failed_tests,
+    timeout_exceeded.
+
+    Returns (score, issues).
+    """
+    issues: list[str] = []
+
+    if outcome.get("timeout_exceeded"):
+        issues.append("Test run timed out")
+        return 0.5, issues
+
+    failed = int(outcome.get("failed", 0))
+    errors = int(outcome.get("errors", 0))
+    passed = int(outcome.get("passed", 0))
+    total = passed + failed + errors
+
+    if total == 0:
+        return 1.0, []  # No tests found — can't penalize.
+
+    if failed == 0 and errors == 0:
+        return 1.0, []  # All green.
+
+    # Failures
+    failed_names = outcome.get("failed_tests") or ()
+    if failed > 0:
+        names = ", ".join(str(t) for t in list(failed_names)[:3])
+        issues.append(f"{failed} test(s) failed: {names}")
+
+    if errors > 0:
+        issues.append(f"{errors} test error(s)")
+
+    # Score based on failure ratio.
+    failure_ratio = (failed + errors) / total
+    if failure_ratio >= 0.5:
+        return 0.1, issues
+    if failure_ratio >= 0.2:
+        return 0.3, issues
+    return 0.5, issues
+
+
+# ---------------------------------------------------------------------------
+# File quality check (wires eval_checks.py pipeline)
+# ---------------------------------------------------------------------------
+
+
+def check_file_quality(
+    files_touched: Sequence[str],
+    *,
+    skip_pyright: bool = True,
+) -> tuple[float, list[str]]:
+    """Run the eval_checks.py pipeline on recently modified files.
+
+    Delegates to the existing deterministic checkers: Python syntax,
+    ruff, imports, YAML/TOML/JSON validation, shell syntax, etc.
+
+    *skip_pyright* defaults to True because pyright has a 30s timeout
+    that's too slow for per-turn checks.  Set False for task completion.
+
+    Returns (score, issues).  Score penalty: -0.1 per file with errors,
+    capped at -0.5.
+    """
+    import os
+
+    issues: list[str] = []
+    files_with_errors = 0
+
+    for fpath in files_touched:
+        if not os.path.isfile(fpath):
+            continue
+
+        # Determine which check to run based on extension.
+        error_text = _run_file_check(fpath, skip_pyright=skip_pyright)
+        if error_text:
+            files_with_errors += 1
+            # Truncate per-file error to avoid bloating the issues list.
+            issues.append(f"{os.path.basename(fpath)}: {error_text[:120]}")
+
+    if not files_with_errors:
+        return 1.0, []
+
+    penalty = min(0.1 * files_with_errors, 0.5)
+    return max(1.0 - penalty, 0.0), issues
+
+
+def _run_file_check(path: str, *, skip_pyright: bool = True) -> str:
+    """Run appropriate eval checks on a single file. Returns error text or ''."""
+    try:
+        from obscura.core.eval_checks import (
+            check_python_syntax,
+            check_shell_syntax,
+            check_written_json,
+            check_written_yaml_toml,
+        )
+
+        tool_input = {"file_path": path, "path": path}
+        errors: list[str] = []
+
+        if path.endswith(".py"):
+            # Syntax check (instant).
+            r = check_python_syntax("write_file", tool_input, "")
+            if r:
+                errors.append(r)
+            # Ruff (fast, <1s).
+            try:
+                from obscura.core.eval_checks import check_python_ruff
+
+                r = check_python_ruff("write_file", tool_input, "")
+                if r:
+                    errors.append(r)
+            except ImportError:
+                pass
+            # Pyright (slow, optional).
+            if not skip_pyright:
+                try:
+                    from obscura.core.eval_checks import check_python_pyright
+
+                    r = check_python_pyright("write_file", tool_input, "")
+                    if r:
+                        errors.append(r)
+                except ImportError:
+                    pass
+        elif path.endswith((".yaml", ".yml", ".toml")):
+            r = check_written_yaml_toml("write_file", tool_input, "")
+            if r:
+                errors.append(r)
+        elif path.endswith(".json"):
+            r = check_written_json("write_file", tool_input, "")
+            if r:
+                errors.append(r)
+        elif path.endswith((".sh", ".bash")):
+            r = check_shell_syntax("write_file", tool_input, "")
+            if r:
+                errors.append(r)
+
+        return " | ".join(errors) if errors else ""
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# File change relevance
+# ---------------------------------------------------------------------------
+
+
+def check_file_relevance(
+    task_subject: str,
+    task_description: str,
+    files_touched: Sequence[str],
+) -> tuple[float, list[str]]:
+    """Check whether modified files are relevant to the task.
+
+    Extracts keywords from file path components and compares against
+    task keywords.  Files with zero keyword overlap are flagged as
+    potentially irrelevant.
+
+    Returns (score, issues).
+    """
+    issues: list[str] = []
+    if not files_touched:
+        return 1.0, []
+
+    task_keywords = _extract_keywords(f"{task_subject} {task_description}")
+    if not task_keywords:
+        return 1.0, []
+
+    irrelevant: list[str] = []
+    for fpath in set(files_touched):
+        # Extract keywords from path components.
+        import os
+
+        parts = os.path.normpath(fpath).replace("\\", "/").split("/")
+        # Split each part on common separators.
+        path_words: set[str] = set()
+        for part in parts:
+            # Strip extension.
+            name = part.rsplit(".", 1)[0] if "." in part else part
+            tokens = re.split(r"[-_./]", name.lower())
+            path_words.update(t for t in tokens if len(t) > 2 and t not in _STOP_WORDS)
+
+        if not path_words:
+            continue
+
+        overlap = path_words & task_keywords
+        if not overlap:
+            irrelevant.append(os.path.basename(fpath))
+
+    if not irrelevant:
+        return 1.0, []
+
+    total = len(set(files_touched))
+    irrelevant_ratio = len(irrelevant) / total
+
+    if irrelevant_ratio <= 0.25:
+        return 1.0, []
+
+    if irrelevant_ratio <= 0.5:
+        issues.append(
+            f"{len(irrelevant)}/{total} modified files appear unrelated to task: "
+            f"{', '.join(irrelevant[:5])}"
+        )
+        return 0.6, issues
+
+    issues.append(
+        f"{len(irrelevant)}/{total} modified files unrelated to "
+        f"'{task_subject[:40]}': {', '.join(irrelevant[:5])}"
     )
     return 0.3, issues
 

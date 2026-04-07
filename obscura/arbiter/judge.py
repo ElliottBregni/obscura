@@ -63,9 +63,13 @@ async def maybe_judge(
         logger.debug("Judge budget exhausted (%d calls)", session_judge_calls)
         return None, "budget_exhausted"
 
+    # High-stakes checks always get judged (budget permitting).
+    _HIGH_STAKES = {"task_complete", "goal_transition"}
+
     if config.judge_mode == "on_ambiguity":
-        # Only invoke when deterministic score is ambiguous.
-        if deterministic_score >= 0.8 or deterministic_score < 0.3:  # noqa: PLR2004
+        if str(check_kind) in _HIGH_STAKES:
+            pass  # Always invoke for high-stakes decisions.
+        elif deterministic_score >= 0.8 or deterministic_score < 0.3:  # noqa: PLR2004
             return None, ""
 
     # Build prompt.

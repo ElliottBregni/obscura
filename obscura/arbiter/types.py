@@ -68,7 +68,7 @@ class ArbiterConfig:
     accept_threshold: float = 0.8
     revise_threshold: float = 0.3
     max_retries: int = 2
-    max_judge_calls_per_session: int = 10
+    max_judge_calls_per_session: int = 15
     kill_on_safety_violation: bool = True
     phantom_level: int = 0  # 0=off, 1-5 = shadow..takeover
     is_daemon: bool = False  # True for daemon/background agents

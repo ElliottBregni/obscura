@@ -76,6 +76,15 @@ async def _post_turn_handler(context: dict[str, Any]) -> dict[str, Any]:
     if engine is None or not engine.is_running:
         return context
 
+    # Enrich context with recently modified files for quality + relevance checks.
+    files_touched: list[str] = []
+    try:
+        from obscura.tools.system.file_state import get_recently_modified_files
+
+        files_touched = get_recently_modified_files(limit=20)
+    except Exception:
+        pass
+
     score = await engine.evaluate(
         ArbiterCheckKind.MODEL_TURN,
         {
@@ -84,6 +93,13 @@ async def _post_turn_handler(context: dict[str, Any]) -> dict[str, Any]:
             "repeated_errors": context.get("repeated_errors", 0),
             "lint_errors": context.get("eval_errors"),
             "summary": context.get("turn_summary", ""),
+            "files_touched": files_touched,
+            "task_subject": context.get("task_subject", ""),
+            "task_description": context.get("task_description", ""),
+            "tool_call_count": context.get("tool_call_count", 0),
+            "turn_count": context.get("turn_count", 0),
+            "recent_tool_calls": context.get("recent_tool_calls") or [],
+            "recent_errors": context.get("recent_errors") or [],
         },
     )
 
@@ -115,9 +131,43 @@ async def _task_complete_handler(context: dict[str, Any]) -> dict[str, Any] | bo
     if score.verdict in (ArbiterVerdict.DENY, ArbiterVerdict.KILL):
         context["arbiter_feedback"] = score.feedback
         return False  # Block completion.
+
+    # Run related tests on ACCEPT — downgrade if failures found.
+    if score.verdict == ArbiterVerdict.ACCEPT:
+        test_feedback = await _run_tests_on_complete()
+        if test_feedback:
+            context["arbiter_verdict"] = "revise"
+            context["arbiter_feedback"] = test_feedback
+            return context
+
     if score.feedback:
         context["arbiter_feedback"] = score.feedback
     return context
+
+
+async def _run_tests_on_complete() -> str:
+    """Run related tests on task completion. Returns feedback string if failures."""
+    try:
+        from obscura.arbiter.checks import check_test_results
+        from obscura.arbiter.test_runner import run_related_tests
+        from obscura.tools.system.file_state import get_recently_modified_files
+
+        files = get_recently_modified_files(limit=20)
+        if not files:
+            return ""
+
+        outcome = await run_related_tests(files, timeout_s=10.0)
+        if outcome.failed == 0 and outcome.errors == 0:
+            return ""
+
+        from dataclasses import asdict
+
+        test_score, test_issues = check_test_results(asdict(outcome))
+        if test_issues:
+            return f"Test failures after completion: {'; '.join(test_issues)}"
+        return ""
+    except Exception:
+        return ""
 
 
 async def _goal_transition_handler(context: dict[str, Any]) -> dict[str, Any] | bool:
