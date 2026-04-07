@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         print_banner,
     )
     from .bootstrap import _discover_agent_infos
+    from .prompt import PromptStatus, StreamingStatus
     from obscura.core.types import AgentEventKind
 
 import click
