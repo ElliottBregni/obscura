@@ -235,6 +235,198 @@ class A2AService:
             yield event
 
     # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Context APIs (thin wrappers around the store)
+    # ------------------------------------------------------------------
+
+    async def context_get(self, context_id: str):
+        """Return context metadata by id."""
+        return await self._store.get_context(context_id)
+
+    async def context_list(self, state: TaskState | None = None, cursor: str | None = None, limit: int = 20):
+        """List contexts with optional state filter and pagination."""
+        return await self._store.list_contexts(state=state, cursor=cursor, limit=limit)
+
+    async def context_delete(self, context_id: str) -> None:
+        """Delete a context and its tasks."""
+        return await self._store.delete_context(context_id)
+
+    async def context_update(self, context_id: str, *, metadata: dict[str, Any] | None = None, state: TaskState | None = None):
+        """Update context metadata or state."""
+        return await self._store.update_context(context_id, metadata=metadata, state=state)
+
+    async def context_history(self, context_id: str, limit: int | None = None):
+        """Return aggregated history for a context."""
+        return await self._store.get_context_history(context_id, limit=limit)
+
+    # ------------------------------------------------------------------
     # Confirmation bridge: on_confirm → INPUT_REQUIRED
     # ------------------------------------------------------------------
 
