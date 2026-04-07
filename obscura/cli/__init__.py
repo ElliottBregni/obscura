@@ -15,80 +15,33 @@ Usage::
     obscura "explain this code"
     obscura -b claude -m claude-sonnet-4-5-20250929 "summarize"
 """
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
 
 
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
 
 
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
 
 
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
 
-__all__ = ["api"]
-
-
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
-
-
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
-
-
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
-
-
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
-
-
-# Import-safe public API: keep this very small so tests can import the package
-# without triggering heavy runtime subsystems. Use obscura.cli.api for the
-# stable surface; more exports may be added to compat layers during refactor.
-from . import api as api  # noqa: E402
-
-__all__ = ["api"]
 
 
 
 from __future__ import annotations
+
+# Import-safe public API: keep this very small so tests can import the package
+# without triggering heavy runtime subsystems. Use obscura.cli.api for the
+# stable surface; more exports may be added to compat layers during refactor.
+from . import api as api  # noqa: E402
+
+__all__ = ["api"]
+
+
+
+
+
+
+
+
+
 
 import asyncio
 import logging
