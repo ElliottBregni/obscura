@@ -290,14 +290,78 @@ async def test_safety_always_kills_regardless_of_phantom(
 async def test_phantom_zero_normal_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Phantom 0 (off): normal DENY, no adjustment."""
+    """Phantom 0 (off): first DENY → CHALLENGE (revise), second → real DENY."""
     monkeypatch.setenv("OBSCURA_PHANTOM_LEVEL", "0")
     config = ArbiterConfig(judge_mode="never", accept_threshold=0.8, revise_threshold=0.3)
     eng = ArbiterEngine(config=config, session_id="test")
     eng.start()
 
+    # First offense: challenge instead of DENY.
     score = await eng.evaluate(
         ArbiterCheckKind.MODEL_TURN,
         {"output_text": "", "tool_error_count": 5},
     )
-    assert score.verdict == ArbiterVerdict.DENY
+    assert score.verdict == ArbiterVerdict.REVISE
+    assert "CHALLENGE" in score.feedback
+
+    # Second offense (retry exhausted): real DENY.
+    score2 = await eng.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    # After max_retries=2, should escalate.
+    # Third time:
+    score3 = await eng.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    assert score3.verdict == ArbiterVerdict.DENY
+
+
+# ---------------------------------------------------------------------------
+# Challenge before kill
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_challenge_before_kill(engine: ArbiterEngine) -> None:
+    """First DENY for a target → CHALLENGE (REVISE). Agent gets a chance."""
+    score = await engine.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+    assert score.verdict == ArbiterVerdict.REVISE
+    assert "CHALLENGE" in score.feedback
+    assert "justify" in score.feedback.lower()
+
+
+@pytest.mark.asyncio
+async def test_challenge_not_on_safety() -> None:
+    """Safety violations skip the challenge — immediate KILL."""
+    config = ArbiterConfig(judge_mode="never")
+    eng = ArbiterEngine(config=config, session_id="test")
+    eng.start()
+
+    score = await eng.evaluate(
+        ArbiterCheckKind.TOOL_CALL,
+        {"tool_name": "run_shell", "args": {"command": "rm -rf /"}},
+    )
+    assert score.verdict == ArbiterVerdict.KILL
+    assert "CHALLENGE" not in score.feedback
+
+
+@pytest.mark.asyncio
+async def test_challenge_then_recover(engine: ArbiterEngine) -> None:
+    """After a CHALLENGE, if the agent fixes the issue, counter resets."""
+    # Trigger challenge.
+    await engine.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "", "tool_error_count": 5},
+    )
+
+    # Agent recovers.
+    score = await engine.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {"output_text": "I realized the issue and changed my approach. All tests pass now."},
+    )
+    assert score.verdict == ArbiterVerdict.ACCEPT

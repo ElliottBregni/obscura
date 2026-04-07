@@ -138,9 +138,28 @@ class ArbiterEngine:
         # 5. Feedback generation
         feedback = self._generate_feedback(verdict, issues, judge_reasoning)
 
-        # 6. Retry tracking
+        # 6. Challenge: before killing, ask the agent to justify continuing.
+        # On first DENY for a target, downgrade to REVISE with a pointed
+        # question. If the next evaluation still fails → real DENY/KILL.
+        # Skip challenge for: safety violations, daemons, phantom 4-5 (autonomous).
         target_id = self._extract_target_id(kind, context)
         retry_count = self._retry_counts.get(target_id, 0)
+        phantom = self._resolve_phantom_level()
+        is_autonomous = phantom >= 4 or self._config.is_daemon
+
+        if verdict in (ArbiterVerdict.DENY, ArbiterVerdict.KILL):
+            has_safety = any(i.startswith("SAFETY:") for i in issues)
+            if not has_safety and not is_autonomous and retry_count == 0:
+                # First offense, interactive agent: challenge instead of killing.
+                verdict = ArbiterVerdict.REVISE
+                feedback = (
+                    "CHALLENGE: Arbiter is about to stop you. "
+                    "Briefly justify why this work is necessary and on-track, "
+                    "or acknowledge the issue and change approach. "
+                    f"Original issues: {'; '.join(issues)}"
+                )
+
+        # 7. Retry tracking
         if verdict == ArbiterVerdict.REVISE:
             self._retry_counts[target_id] = retry_count + 1
             # Escalate to DENY after max retries.
