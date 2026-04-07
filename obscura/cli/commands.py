@@ -256,11 +256,12 @@ class REPLContext:
     _collapser: Any = field(default=None, repr=False)
 
     def get_mode_manager(self) -> Any:
-        """Get or create the ModeManager."""
+        """Get or create the ModeManager via a lazy runtime helper."""
         if self._mode_manager is None:
-            from obscura.cli.app.modes import ModeManager, TUIMode
+            # Defer heavy imports into obscura.cli.runtime
+            from obscura.cli.runtime import get_mode_manager_instance
 
-            self._mode_manager = ModeManager(TUIMode.CODE)
+            self._mode_manager = get_mode_manager_instance()
         return self._mode_manager
 
     def get_effective_system_prompt(self) -> str:
