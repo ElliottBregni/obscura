@@ -97,9 +97,88 @@ class InMemoryTaskStore:
     def __init__(self) -> None:
         self._tasks: dict[str, Task] = {}
         self._context_tasks: dict[str, list[str]] = defaultdict(list)
+        # Context metadata store: context_id -> ContextInfo
+        from obscura.integrations.a2a.types import ContextInfo
+
+        self._contexts: dict[str, ContextInfo] = {}
         self._subscribers: dict[str, list[asyncio.Queue[StreamEvent]]] = defaultdict(
             list,
         )
+
+    # ------------------------------------------------------------------
+    # Context helpers (lightweight, in-memory implementations for tests)
+    # ------------------------------------------------------------------
+
+    async def get_context(self, context_id: str) -> "ContextInfo" | None:
+        return self._contexts.get(context_id)
+
+    async def list_contexts(
+        self,
+        state: "TaskState" | None = None,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> tuple[list["ContextInfo"], str | None]:
+        limit = max(1, min(limit, 100))
+        ctxs = list(self._contexts.values())
+        if state is not None:
+            ctxs = [c for c in ctxs if c.state == state]
+
+        # Sort by id for stable ordering
+        ctxs.sort(key=lambda c: c.id)
+
+        start_idx = 0
+        if cursor:
+            try:
+                start_idx = int(base64.b64decode(cursor).decode())
+            except Exception:
+                start_idx = 0
+
+        page = ctxs[start_idx : start_idx + limit]
+        next_cursor: str | None = None
+        if start_idx + limit < len(ctxs):
+            next_cursor = base64.b64encode(str(start_idx + limit).encode()).decode()
+        return page, next_cursor
+
+    async def update_context(
+        self,
+        context_id: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        state: "TaskState" | None = None,
+    ) -> "ContextInfo":
+        from obscura.integrations.a2a.types import ContextNotFoundError
+
+        ctx = self._contexts.get(context_id)
+        if ctx is None:
+            raise ContextNotFoundError(context_id)
+        if metadata is not None:
+            ctx.metadata = metadata
+        if state is not None:
+            ctx.state = state
+        return ctx
+
+    async def delete_context(self, context_id: str) -> None:
+        from obscura.integrations.a2a.types import ContextNotFoundError
+
+        if context_id not in self._contexts:
+            raise ContextNotFoundError(context_id)
+        # remove tasks under this context
+        for tid in list(self._context_tasks.get(context_id, [])):
+            self._tasks.pop(tid, None)
+        self._context_tasks.pop(context_id, None)
+        self._contexts.pop(context_id, None)
+
+    async def get_context_history(self, context_id: str, limit: int | None = None) -> list[A2AMessage]:
+        task_ids = self._context_tasks.get(context_id, [])
+        msgs: list[A2AMessage] = []
+        for tid in task_ids:
+            task = self._tasks.get(tid)
+            if not task:
+                continue
+            msgs.extend(task.history)
+        if limit is not None:
+            return msgs[-limit:]
+        return msgs
 
     async def create_task(self, context_id: str, initial_message: A2AMessage) -> Task:
         task_id = f"task-{uuid.uuid4().hex[:12]}"
@@ -114,6 +193,13 @@ class InMemoryTaskStore:
 
         self._tasks[task_id] = task
         self._context_tasks[context_id].append(task_id)
+        # Ensure context metadata exists and increment count
+        from obscura.integrations.a2a.types import ContextInfo, ContextState
+
+        if context_id not in self._contexts:
+            self._contexts[context_id] = ContextInfo(id=context_id, state=ContextState.ACTIVE, taskCount=1)
+        else:
+            self._contexts[context_id].taskCount += 1
         return task
 
     async def get_task(self, task_id: str) -> Task | None:
