@@ -351,3 +351,29 @@ class UnsupportedOperationError(A2AError):
 class VersionNotSupportedError(A2AError):
     def __init__(self, version: str) -> None:
         super().__init__(-32005, f"Version not supported: {version}")
+
+
+# ---------------------------------------------------------------------------
+# Context types (tests expect these)
+# ---------------------------------------------------------------------------
+
+class ContextState(enum.StrEnum):
+    """Context lifecycle states used by the A2A context APIs."""
+
+    ACTIVE = "active"
+    CLOSED = "closed"
+    ARCHIVED = "archived"
+
+
+class ContextInfo(BaseModel):
+    """Lightweight context metadata surfaced by the context APIs."""
+
+    id: str
+    state: ContextState = ContextState.ACTIVE
+    taskCount: int = 0
+    metadata: dict[str, Any] | None = None
+
+
+class ContextNotFoundError(A2AError):
+    def __init__(self, ctx_id: str) -> None:
+        super().__init__(-32006, f"Context not found: {ctx_id}", {"contextId": ctx_id})
