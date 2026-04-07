@@ -79,10 +79,37 @@ console: object = _NullConsole()
 async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
     from .prompt import confirm_prompt_async as _real
 
+    import warnings
+
+    warnings.warn(
+        "obscura.cli.confirm_prompt_async is deprecated; import from obscura.cli.prompt instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     return await _real(message)
 
 # Set a safe default for file-write tool names; tests may override this.
 _FILE_WRITE_TOOLS = frozenset()
+
+# Emit DeprecationWarning when top-level console is accessed to signal
+# migration to the public API. Tests can still monkeypatch console.print,
+# but production callers should migrate to obscura.cli.api.get_console().
+
+def _get_console() -> object:
+    import warnings
+
+    warnings.warn(
+        "obscura.cli.console is deprecated; use obscura.cli.api.get_console() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return console
+
+
+# Backwards-compatible alias for tests that expect obscura.cli.console to be
+# present at import time. Access via _get_console() to emit a warning when used.
+console = _get_console()
 
 _log = logging.getLogger("obscura.cli")
 
