@@ -34,12 +34,22 @@ from . import api as api  # noqa: E402
 
 __all__ = ["api"]
 
+# Minimal compatibility surface for tests that monkeypatch top-level symbols.
+# Keep these lightweight and safe to import at module import time.
+class _NullConsole:
+    def print(self, *a, **k):
+        return None
 
+# Export a console object so tests can monkeypatch obscura.cli.console.print
+console: object = _NullConsole()
+# Simple async wrapper that lazily imports the real prompt implementation.
+async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
+    from .prompt import confirm_prompt_async as _real
 
+    return await _real(message)
 
-
-
-
+# Set a safe default for file-write tool names; tests may override this.
+_FILE_WRITE_TOOLS = frozenset()
 
 
 
@@ -247,7 +257,13 @@ async def _cli_confirm(
 
 def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
     """Track file modifications for /diff."""
-    if ev.kind == AgentEventKind.TOOL_CALL and ev.tool_name in _FILE_WRITE_TOOLS:
+    # Import file-write tool set lazily to keep package import cheap.
+    try:
+        from .commands import _FILE_WRITE_TOOLS as _WRITE_TOOLS
+    except Exception:
+        _WRITE_TOOLS = _FILE_WRITE_TOOLS
+
+    if ev.kind == AgentEventKind.TOOL_CALL and ev.tool_name in _WRITE_TOOLS:
         path = ev.tool_input.get("path") or ev.tool_input.get("file_path", "")
         if path:
             try:
@@ -2907,8 +2923,8 @@ from obscura.cli._compat import (
     _discover_mcp,
     _parse_inline_agent_mention,
     _run_inline_agent_from_mention,
-    _cli_confirm,
 )  # noqa: E402  # lazy wrappers
+# Use the top-level _cli_confirm defined above (avoid delegating through _compat to prevent recursion)
 
 # Load extra CLI commands (caffeinate)
 try:

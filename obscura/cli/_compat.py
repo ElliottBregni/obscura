@@ -29,4 +29,7 @@ def _run_inline_agent_from_mention(*a, **k):
 
 
 def _cli_confirm(*a, **k):
-    return _import_bootstrap()._cli_confirm(*a, **k)
+    # Forward to the top-level _cli_confirm to avoid importing bootstrap at module import time.
+    from obscura.cli import _cli_confirm as _c
+
+    return _c(*a, **k)

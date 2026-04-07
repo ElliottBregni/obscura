@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .render import console
-
 SOFT_BUDGET = 50_000
 
 
@@ -58,5 +56,15 @@ def emit_context_warnings(ctx: Any, tokens: int, context_window: int) -> None:
             f"Context usage has crossed {current_level}%. ({int(pct)}% used)."
             + budget_msg
         )
-        console.print(msg)
+        try:
+            import importlib
+
+            try:
+                _cli = importlib.import_module("obscura.cli.__init__")
+            except Exception:
+                _cli = importlib.import_module("obscura.cli")
+            _cli.console.print(msg)
+        except Exception:
+            # Fall back to stdout if console not available
+            print(msg)
         ctx._last_context_warning_level = current_level
