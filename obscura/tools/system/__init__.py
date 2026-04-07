@@ -2357,13 +2357,18 @@ async def _git(args: list[str], cwd: str = "", timeout: float = 30.0) -> dict[st
         proc.kill()
         await proc.wait()
         return {"ok": False, "error": "timeout", "git_args": args, "cwd": work_dir}
+    out = stdout.decode("utf-8", errors="replace")
+    err = stderr.decode("utf-8", errors="replace")
+    # Git writes many confirmations (commit, push, branch) to stderr.
+    # Merge into stdout so the LLM backend always sees the output.
+    combined = out or err if proc.returncode == 0 else out
     return {
         "ok": proc.returncode == 0,
         "exit_code": proc.returncode,
         "git_command": f"git {' '.join(args)}",
         "cwd": work_dir,
-        "stdout": stdout.decode("utf-8", errors="replace"),
-        "stderr": stderr.decode("utf-8", errors="replace"),
+        "stdout": combined,
+        "stderr": err,
     }
 
 

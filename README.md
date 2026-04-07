@@ -2,71 +2,87 @@
 
 Multi-backend AI agent runtime — CLI, REST API, Web UI, and MCP server. Supports GitHub Copilot, Claude, OpenAI, and local LLMs with 100+ tools, vector memory, multi-agent orchestration, and 49 plugin integrations.
 
-## Requirements
+## Getting Started
 
-- Python 3.13+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Node.js ≥18 (for the Web UI only)
-- Qdrant (optional — falls back to SQLite for vector memory)
+### 1. Prerequisites
 
-## Install
+- **Python 3.13+**
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **Node.js ≥18** — only needed if you want the Web UI
+- **Qdrant** — optional, only needed for vector memory (falls back to SQLite automatically)
+
+### 2. Clone and install
 
 ```bash
 git clone <repo-url>
 cd obscura
-
-# Install Python dependencies
-uv sync
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env — add your LLM backend credentials (see Configuration below)
-
-# Run the CLI
-obscura
+uv sync                 # installs deps into .venv automatically
 ```
 
-### Development install
+For development (adds pytest, pyright, ruff):
 
 ```bash
 uv sync --group dev
+```
+
+### 3. Set up credentials
+
+The CLI auto-loads `.env` from the project root on startup — no sourcing required.
+
+```bash
+cp .env.example .env
+# Open .env and add credentials for whichever backend(s) you want to use
+```
+
+At minimum you need one of:
+
+```bash
+# GitHub Copilot (default backend — also works via `gh auth login`)
+GITHUB_TOKEN=ghp_...
+
+# OR Anthropic Claude
+ANTHROPIC_API_KEY=sk-ant-...
+
+# OR OpenAI
+OPENAI_API_KEY=sk-...
+```
+
+### 4. Run it
+
+```bash
+uv run obscura           # starts the interactive REPL
+```
+
+Or if the venv is already activated (`source .venv/bin/activate`):
+
+```bash
+obscura                  # default backend: copilot
+obscura -b claude        # use Claude
+obscura -b codex         # use OpenAI Codex
+obscura -b claude -m claude-sonnet-4-5-20250929  # specific model
+obscura "explain this code"                       # single-shot, no REPL
+```
+
+`.env` load order (later entries do **not** override earlier ones):
+
+```
+shell environment  >  ~/.obscura/.env  >  .obscura/.env  >  ./.env
 ```
 
 ### Voice mode
 
 ```bash
 uv sync --extra voice
-
-# macOS: also install SoX and FFmpeg
-brew install sox ffmpeg
-```
-
-## Quick Start
-
-```bash
-# Interactive REPL (default backend: copilot)
-obscura
-
-# Choose a backend
-obscura -b claude
-obscura -b copilot
-obscura -b codex
-
-# Specify a model
-obscura -b claude -m claude-sonnet-4-5-20250929
-
-# Single-shot prompt (no REPL)
-obscura -p "summarize this file"
-obscura "explain this code"
+brew install sox ffmpeg   # macOS only
 ```
 
 ## Configuration
 
 ### Backend credentials
 
-| Backend | Environment Variable(s) |
-|---------|------------------------|
-| Copilot | `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth login` |
+| Backend | Environment Variable |
+|---------|---------------------|
+| Copilot | `GITHUB_TOKEN` or `GH_TOKEN` (or `gh auth login`) |
 | Claude | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Moonshot | `MOONSHOT_API_KEY` |
@@ -82,7 +98,6 @@ obscura "explain this code"
 | `OBSCURA_VECTOR_BACKEND` | `qdrant` | `qdrant` or `none` |
 | `OBSCURA_QDRANT_URL` | — | Qdrant server URL |
 | `OBSCURA_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `OBSCURA_OUTPUT_MODE` | `plain` | `plain` or `json` |
 | `OBSCURA_UNDERCOVER` | `1` | Strip AI attribution from commits/PRs |
 
 See [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full reference.

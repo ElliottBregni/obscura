@@ -4223,20 +4223,24 @@ def _build_onboarding_prompt() -> str:
     return """\
 Explore this repository and create a OBSCURA.md file in the root directory.
 
-The OBSCURA.md should contain:
+For a **code repository**, the OBSCURA.md should contain:
 1. **Build & Development** — How to install, build, run, and test
 2. **Architecture** — Key modules, data flow, important patterns
 3. **Key Patterns** — Coding conventions, naming, imports
 4. **Testing** — How to run tests, test conventions
 
+For a **non-code repository** (documentation, data, notes, config, etc.),
+adapt the guide to what's actually here — describe the structure, key files,
+conventions, and how to work with the content effectively.
+
 Steps:
 1. Read README.md, package.json/pyproject.toml, Makefile/Dockerfile if they exist
 2. Explore the directory structure (tree, ls)
-3. Read 3-5 key source files to understand patterns
+3. Read 3-5 key files to understand the project and its patterns
 4. Write OBSCURA.md with the information you found
 
 Keep it concise (under 200 lines). Focus on what an AI agent needs to know
-to work effectively in this codebase. Use code blocks for commands.
+to work effectively in this project. Use code blocks for commands.
 Do NOT make up information — only document what you can verify."""
 
 
