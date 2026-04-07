@@ -1720,6 +1720,8 @@ async def _repl(
             prompt_status.ctx_pct = int(tokens / window * 100) if window else 0
 
         # Build prompt session lazily via obscura.cli.repl
+        from obscura.cli.repl import build_prompt_session
+
         session, prompt_status, spinner_task = build_prompt_session(ctx, ss)
 
         # --- KAIROS integration: wire into supervisor or start directly ---
