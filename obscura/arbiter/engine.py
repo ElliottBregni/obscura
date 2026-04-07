@@ -334,13 +334,34 @@ class ArbiterEngine:
         return f"turn:{int(time.time())}"
 
     def _persist_event(self, event: ArbiterEvent) -> None:
-        """Best-effort persistence to the verdict store."""
+        """Best-effort persistence to the verdict store and daily log."""
         try:
             from obscura.arbiter.store import ArbiterStore
 
             ArbiterStore().record(event)
         except Exception:
             logger.debug("Could not persist arbiter event", exc_info=True)
+
+        # Write non-ACCEPT verdicts to the KAIROS daily log.
+        if event.verdict != ArbiterVerdict.ACCEPT:
+            self._log_to_daily(event)
+
+    @staticmethod
+    def _log_to_daily(event: ArbiterEvent) -> None:
+        """Append an Arbiter verdict to the KAIROS daily log."""
+        try:
+            from obscura.kairos.daily_log import DailyLog
+
+            feedback_short = event.score.feedback[:80] if event.score.feedback else ""
+            entry = (
+                f"arbiter {event.verdict.value}: {event.kind.value} "
+                f"[{event.target_id}] score={event.score.composite:.2f}"
+            )
+            if feedback_short:
+                entry += f" — {feedback_short}"
+            DailyLog().append(entry, source="arbiter")
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Introspection

@@ -5870,6 +5870,149 @@ async def cmd_goals(args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# /arbiter — Arbiter judge status and control
+# ---------------------------------------------------------------------------
+
+
+async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
+    """Show Arbiter judge status, recent verdicts, and watchdog activity.
+
+    Usage:
+      /arbiter                — Overview: status + last 10 verdicts
+      /arbiter verdicts [n]   — Show last n verdicts (default 20)
+      /arbiter stats          — Aggregate verdict stats
+      /arbiter watchdog       — Run a watchdog sweep now
+    """
+    sub = args.strip().lower()
+    tokens = sub.split()
+    sub_cmd = tokens[0] if tokens else ""
+
+    # -- Default: overview ---------------------------------------------------
+    if not sub_cmd or sub_cmd == "status":
+        try:
+            from obscura.arbiter.hooks import get_engine
+
+            engine = get_engine()
+            if engine is None:
+                print_info("Arbiter is not active in this session.")
+                return None
+
+            status = engine.status()
+            print_info("Arbiter Status")
+            console.print(f"  Running:      {status['running']}")
+            console.print(f"  Evaluations:  {status['evaluations']}")
+            console.print(f"  Judge calls:  {status['judge_calls']}")
+
+            vc = status.get("verdict_counts", {})
+            if vc:
+                parts = [f"{k}={v}" for k, v in sorted(vc.items())]
+                console.print(f"  Verdicts:     {', '.join(parts)}")
+
+            retries = status.get("active_retries", {})
+            if retries:
+                console.print(f"  Active retries: {retries}")
+
+            # Show last few verdicts.
+            recent = engine.events[-5:]
+            if recent:
+                console.print("\n[bold]Recent verdicts:[/bold]")
+                for e in reversed(recent):
+                    ts = e.timestamp.strftime("%H:%M:%S")
+                    v = e.verdict.value.upper()
+                    color = {
+                        "accept": "green",
+                        "revise": "yellow",
+                        "deny": "red",
+                        "kill": "bold red",
+                    }.get(e.verdict.value, "white")
+                    fb = f" — {e.score.feedback[:60]}" if e.score.feedback else ""
+                    console.print(
+                        f"  {ts} [{color}]{v:7s}[/] {e.kind.value} "
+                        f"[dim]{e.target_id}[/] score={e.score.composite:.2f}{fb}"
+                    )
+        except Exception as exc:
+            print_error(f"Could not read Arbiter status: {exc}")
+        return None
+
+    # -- /arbiter verdicts [n] -----------------------------------------------
+    if sub_cmd == "verdicts":
+        limit = 20
+        if len(tokens) > 1:
+            with contextlib.suppress(ValueError):
+                limit = int(tokens[1])
+        try:
+            from obscura.arbiter.store import ArbiterStore
+
+            store = ArbiterStore()
+            recent = store.recent(limit=limit)
+            if not recent:
+                print_info("No verdicts recorded yet.")
+                return None
+
+            console.print(f"[bold]Last {len(recent)} verdicts:[/bold]")
+            for row in recent:
+                import datetime as _dt
+
+                ts = _dt.datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M")
+                v = row["verdict"].upper()
+                color = {
+                    "accept": "green",
+                    "revise": "yellow",
+                    "deny": "red",
+                    "kill": "bold red",
+                }.get(row["verdict"], "white")
+                fb = row.get("feedback", "")[:60]
+                fb_str = f" — {fb}" if fb else ""
+                console.print(
+                    f"  {ts} [{color}]{v:7s}[/] {row['kind']} "
+                    f"[dim]{row['target_id']}[/] score={row['composite']:.2f}{fb_str}"
+                )
+        except Exception as exc:
+            print_error(f"Could not read verdicts: {exc}")
+        return None
+
+    # -- /arbiter stats ------------------------------------------------------
+    if sub_cmd == "stats":
+        try:
+            from obscura.arbiter.store import ArbiterStore
+
+            store = ArbiterStore()
+            stats = store.stats()
+            print_info("Arbiter Stats")
+            console.print(f"  Total evaluations: {stats['total']}")
+            console.print(f"  Avg composite:     {stats['avg_composite_score']:.3f}")
+            by_v = stats.get("by_verdict", {})
+            if by_v:
+                for v, cnt in sorted(by_v.items()):
+                    pct = (cnt / stats["total"] * 100) if stats["total"] else 0
+                    console.print(f"  {v:10s}: {cnt:4d} ({pct:.0f}%)")
+        except Exception as exc:
+            print_error(f"Could not read stats: {exc}")
+        return None
+
+    # -- /arbiter watchdog ---------------------------------------------------
+    if sub_cmd == "watchdog":
+        try:
+            from obscura.arbiter.watchdog import ArbiterWatchdog
+
+            wd = ArbiterWatchdog()
+            actions = wd.sweep()
+            if not actions:
+                print_ok("Watchdog sweep: all clear.")
+                return None
+            print_warning(f"Watchdog found {len(actions)} issue(s):")
+            results = wd.execute(actions)
+            for r in results:
+                console.print(f"  {r}")
+        except Exception as exc:
+            print_error(f"Watchdog sweep failed: {exc}")
+        return None
+
+    print_error(f"Unknown subcommand: {sub_cmd}. Try /arbiter, /arbiter verdicts, /arbiter stats, /arbiter watchdog")
+    return None
+
+
 async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
     """Toggle KAIROS autonomous mode.
 
@@ -9324,6 +9467,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "debug": cmd_debug,
     "caffeinate": cmd_caffeinate,
     # KAIROS & automation
+    "arbiter": cmd_arbiter,
     "kairos": cmd_kairos,
     "loop": cmd_loop,
     "schedule": cmd_schedule,
@@ -9427,6 +9571,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "effort": ["low", "medium", "high", "max"],
     "fast": [],
     "debug": [],
+    "arbiter": ["status", "verdicts", "stats", "watchdog"],
     "kairos": ["on", "off", "status"],
     "loop": ["list", "stop"],
     "schedule": ["list", "add", "remove", "run"],
