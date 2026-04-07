@@ -34,23 +34,6 @@ from . import api as api  # noqa: E402
 
 __all__ = ["api"]
 
-# Minimal compatibility surface for tests that monkeypatch top-level symbols.
-# Keep these lightweight and safe to import at module import time.
-class _NullConsole:
-    def print(self, *a, **k):
-        return None
-
-# Export a console object so tests can monkeypatch obscura.cli.console.print
-console: object = _NullConsole()
-# Simple async wrapper that lazily imports the real prompt implementation.
-async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
-    from .prompt import confirm_prompt_async as _real
-
-    return await _real(message)
-
-# Set a safe default for file-write tool names; tests may override this.
-_FILE_WRITE_TOOLS = frozenset()
-
 
 
 import asyncio
@@ -82,6 +65,24 @@ if TYPE_CHECKING:
     from obscura.core.types import AgentEventKind
 
 import click
+
+# Minimal compatibility surface for tests that monkeypatch top-level symbols.
+# Keep these lightweight and safe to import at module import time.
+class _NullConsole:
+    def print(self, *a, **k):
+        return None
+
+# Export a console object so tests can monkeypatch obscura.cli.console.print
+console: object = _NullConsole()
+
+# Simple async wrapper that lazily imports the real prompt implementation.
+async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
+    from .prompt import confirm_prompt_async as _real
+
+    return await _real(message)
+
+# Set a safe default for file-write tool names; tests may override this.
+_FILE_WRITE_TOOLS = frozenset()
 
 _log = logging.getLogger("obscura.cli")
 
@@ -210,7 +211,7 @@ from obscura.cli import trace as trace_mod  # noqa: E402
 # obscura.cli without reintroducing earlier circular-imports. The wrapper imports
 # bootstrap on call instead of at module import time.
 
-# render helpers imported lazily to avoid circular imports at package import time
+# re-export commonly used helpers from module-level thin wrappers (lazy imports)
 from obscura.cli.vector_memory_bridge import (  # noqa: E402  # noqa: E402
     auto_save_turn,
     init_vector_store,
@@ -223,6 +224,33 @@ from obscura.core.client import ObscuraClient  # noqa: E402  # noqa: E402
 from obscura.core.event_store import SessionStatus, SQLiteEventStore  # noqa: E402  # noqa: E402
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir  # noqa: E402  # noqa: E402
 from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice  # noqa: E402  # noqa: E402
+
+
+# Thin lazy wrappers to expose bootstrap helpers without importing heavy subsystems
+# at package import time. These call into obscura.cli.bootstrap at runtime.
+
+def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
+    from obscura.cli.bootstrap import _discover_mcp as _impl
+
+    return _impl()
+
+
+def _discover_agent_infos() -> list[object]:
+    from obscura.cli.bootstrap import _discover_agent_infos as _impl
+
+    return _impl()
+
+
+def _parse_inline_agent_mention(text: str) -> tuple[str, str] | None:
+    from obscura.cli.bootstrap import _parse_inline_agent_mention as _impl
+
+    return _impl(text)
+
+
+async def _run_inline_agent_from_mention(ctx: "REPLContext", text: str) -> str | None:
+    from obscura.cli.bootstrap import _run_inline_agent_from_mention as _impl
+
+    return await _impl(ctx, text)
 
 # ---------------------------------------------------------------------------
 # Tool confirmation callback
