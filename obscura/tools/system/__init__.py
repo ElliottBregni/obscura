@@ -22,6 +22,7 @@ from typing import Any, Literal, cast
 from urllib import error as url_error
 from urllib import parse as url_parse
 from urllib import request as url_request
+import base64
 
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec

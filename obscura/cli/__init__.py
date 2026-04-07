@@ -48,7 +48,27 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Type-only imports to keep runtime imports cheap; these names are used
+    # throughout this god-module but importing them at runtime recreates the
+    # import-time cycles the refactor is trying to eliminate.
+    from .commands import (
+        REPLContext,
+        _FILE_WRITE_TOOLS,
+        COMPLETIONS,
+        handle_command,
+    )
+    from .render import (
+        console,
+        render_plan,
+        print_ok,
+        print_warning,
+        print_banner,
+    )
+    from .bootstrap import _discover_agent_infos
+    from obscura.core.types import AgentEventKind
 
 import click
 
