@@ -146,20 +146,8 @@ from obscura.cli import trace as trace_mod  # noqa: E402
 # ---------------------------------------------------------------------------
 # MCP / agent discovery — canonical implementations live in bootstrap.py
 # ---------------------------------------------------------------------------
-from obscura.cli.bootstrap import (  # noqa: E402
-    AgentInfo as AgentInfo,
-)
-from obscura.cli.bootstrap import (  # noqa: E402
-    _discover_agent_infos,
-    _discover_mcp,
-    _run_inline_agent_from_mention,
-)
-from obscura.cli.commands import (  # noqa: E402  # noqa: E402
-    _FILE_WRITE_TOOLS,
-    COMPLETIONS,
-    REPLContext,
-    handle_command,
-)
+# Bootstrap helpers imported lazily to avoid circular import during submodule imports
+# CLI command helpers imported lazily to avoid circular import during package import
 from obscura.cli.prompt import (  # noqa: E402  # noqa: E402
     PromptStatus,
     StreamingStatus,
@@ -168,13 +156,7 @@ from obscura.cli.prompt import (  # noqa: E402  # noqa: E402
     bordered_prompt,
     create_prompt_session,
 )
-from obscura.cli.render import (  # noqa: E402  # noqa: E402
-    console,
-    print_banner,
-    print_ok,
-    print_warning,
-    render_plan,
-)
+# render helpers imported lazily to avoid circular imports at package import time
 from obscura.cli.vector_memory_bridge import (  # noqa: E402  # noqa: E402
     auto_save_turn,
     init_vector_store,

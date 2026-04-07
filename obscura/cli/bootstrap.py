@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from obscura.cli.render import console, print_warning
 from obscura.core.client import ObscuraClient
 
 if TYPE_CHECKING:
@@ -93,7 +92,7 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
         return None
     agent_name, prompt = parsed
     runtime = await ctx.get_runtime()
-    from obscura.cli.render import LabeledStreamRenderer
+    from obscura.cli.render import LabeledStreamRenderer, print_warning, console
     from obscura.manifest.models import AgentManifest
 
     manifest: AgentManifest | None = None
