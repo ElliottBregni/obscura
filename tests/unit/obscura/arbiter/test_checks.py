@@ -6,6 +6,8 @@ from obscura.arbiter.checks import (
     check_drift,
     check_goal_transition,
     check_model_turn,
+    check_retry_spiral,
+    check_scope_creep,
     check_task_complete,
     check_token_budget,
     check_tool_call,
@@ -260,3 +262,109 @@ def test_token_budget_critical() -> None:
 def test_token_budget_no_limit() -> None:
     score, issues = check_token_budget(50000, 0, 0.5)
     assert score == 1.0
+
+
+# ---------------------------------------------------------------------------
+# check_scope_creep
+# ---------------------------------------------------------------------------
+
+
+def test_scope_creep_small_task_in_budget() -> None:
+    score, issues = check_scope_creep(
+        "Fix typo in README",
+        "Change 'teh' to 'the'",
+        tool_call_count=3,
+        files_touched=["README.md"],
+        turn_count=2,
+    )
+    assert score == 1.0
+    assert issues == []
+
+
+def test_scope_creep_small_task_over_budget() -> None:
+    score, issues = check_scope_creep(
+        "Fix typo in README",
+        "Change 'teh' to 'the'",
+        tool_call_count=25,
+        files_touched=["README.md", "a.py", "b.py", "c.py", "d.py", "e.py"],
+        turn_count=6,
+    )
+    assert score < 1.0
+    assert any("scope" in i.lower() or "creep" in i.lower() for i in issues)
+
+
+def test_scope_creep_small_task_severe() -> None:
+    score, issues = check_scope_creep(
+        "Add a log line",
+        "Add logging to the auth handler",
+        tool_call_count=50,
+        files_touched=[f"file{i}.py" for i in range(15)],
+        turn_count=12,
+    )
+    assert score <= 0.3
+    assert any("gold-plating" in i.lower() or "yak-shaving" in i.lower() for i in issues)
+
+
+def test_scope_creep_large_task_in_budget() -> None:
+    score, issues = check_scope_creep(
+        "Refactor the authentication system",
+        "Rewrite the auth middleware, migrate to JWT, update all tests and docs",
+        tool_call_count=60,
+        files_touched=[f"file{i}.py" for i in range(15)],
+        turn_count=10,
+    )
+    assert score == 1.0
+    assert issues == []
+
+
+def test_scope_creep_medium_task() -> None:
+    score, issues = check_scope_creep(
+        "Update the login page styles",
+        "Fix the CSS and add responsive breakpoints",
+        tool_call_count=15,
+        files_touched=["login.css", "login.html", "app.css"],
+        turn_count=4,
+    )
+    assert score == 1.0
+
+
+# ---------------------------------------------------------------------------
+# check_retry_spiral
+# ---------------------------------------------------------------------------
+
+
+def test_retry_spiral_no_errors() -> None:
+    score, issues = check_retry_spiral([])
+    assert score == 1.0
+
+
+def test_retry_spiral_diverse_errors() -> None:
+    score, issues = check_retry_spiral([
+        "ImportError: no module named foo",
+        "TypeError: expected int got str",
+        "FileNotFoundError: /tmp/x.py",
+    ])
+    assert score == 1.0
+
+
+def test_retry_spiral_similar_errors() -> None:
+    score, issues = check_retry_spiral([
+        "TypeError: cannot add int and str at line 42",
+        "TypeError: cannot add int and str at line 45",
+        "TypeError: cannot add int and str at line 48",
+        "TypeError: cannot add int and str at line 50",
+    ])
+    assert score < 1.0
+    assert any("spiral" in i.lower() or "retry" in i.lower() for i in issues)
+
+
+def test_retry_spiral_identical_errors_severe() -> None:
+    score, issues = check_retry_spiral([
+        "ConnectionRefusedError: port 5432",
+        "ConnectionRefusedError: port 5432",
+        "ConnectionRefusedError: port 5432",
+        "ConnectionRefusedError: port 5432",
+        "ConnectionRefusedError: port 5432",
+    ])
+    assert score <= 0.3
+    assert any("stuck" in i.lower() or "near-identical" in i.lower() for i in issues)

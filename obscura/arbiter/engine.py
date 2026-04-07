@@ -29,8 +29,11 @@ import time
 from typing import Any
 
 from obscura.arbiter.checks import (
+    check_drift,
     check_goal_transition,
     check_model_turn,
+    check_retry_spiral,
+    check_scope_creep,
     check_task_complete,
     check_tool_call,
 )
@@ -204,12 +207,7 @@ class ArbiterEngine:
             )
 
         if kind == ArbiterCheckKind.MODEL_TURN:
-            return check_model_turn(
-                output_text=str(context.get("output_text", "")),
-                tool_error_count=int(context.get("tool_error_count", 0)),
-                repeated_errors=int(context.get("repeated_errors", 0)),
-                lint_errors=context.get("lint_errors"),
-            )
+            return self._check_model_turn(context)
 
         if kind == ArbiterCheckKind.TASK_COMPLETE:
             task = context.get("task") or {}
@@ -223,6 +221,66 @@ class ArbiterEngine:
             )
 
         return 1.0, []
+
+    # ------------------------------------------------------------------
+    # Combined model-turn check
+    # ------------------------------------------------------------------
+
+    def _check_model_turn(self, context: dict[str, Any]) -> tuple[float, list[str]]:
+        """Run all model-turn checks and combine scores.
+
+        Runs the base turn check (empty output, lint, spinning) plus
+        optional scope-creep, drift, and retry-spiral checks when the
+        context provides the necessary data.
+        """
+        all_issues: list[str] = []
+
+        # 1. Base turn check (always).
+        base_score, base_issues = check_model_turn(
+            output_text=str(context.get("output_text", "")),
+            tool_error_count=int(context.get("tool_error_count", 0)),
+            repeated_errors=int(context.get("repeated_errors", 0)),
+            lint_errors=context.get("lint_errors"),
+        )
+        all_issues.extend(base_issues)
+        scores = [base_score]
+
+        # 2. Scope creep (if task context available).
+        task_subject = str(context.get("task_subject", ""))
+        task_description = str(context.get("task_description", ""))
+        if task_subject:
+            scope_score, scope_issues = check_scope_creep(
+                task_subject=task_subject,
+                task_description=task_description,
+                tool_call_count=int(context.get("tool_call_count", 0)),
+                files_touched=context.get("files_touched") or [],
+                turn_count=int(context.get("turn_count", 0)),
+            )
+            scores.append(scope_score)
+            all_issues.extend(scope_issues)
+
+        # 3. Drift (if task context + recent activity available).
+        recent_tool_calls = context.get("recent_tool_calls") or []
+        if task_subject and recent_tool_calls:
+            drift_score, drift_issues = check_drift(
+                task_subject=task_subject,
+                task_description=task_description,
+                recent_tool_calls=recent_tool_calls,
+                recent_output=str(context.get("output_text", "")),
+            )
+            scores.append(drift_score)
+            all_issues.extend(drift_issues)
+
+        # 4. Retry spiral (if recent errors available).
+        recent_errors = context.get("recent_errors") or []
+        if len(recent_errors) >= 3:
+            spiral_score, spiral_issues = check_retry_spiral(recent_errors)
+            scores.append(spiral_score)
+            all_issues.extend(spiral_issues)
+
+        # Composite: take the minimum — one bad signal is enough to flag.
+        final_score = min(scores) if scores else 1.0
+        return max(final_score, 0.0), all_issues
 
     # ------------------------------------------------------------------
     # LLM judge

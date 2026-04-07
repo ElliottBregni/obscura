@@ -169,3 +169,45 @@ async def test_status(engine: ArbiterEngine) -> None:
     assert status["running"] is True
     assert status["evaluations"] == 1
     assert "accept" in status["verdict_counts"]
+
+
+# ---------------------------------------------------------------------------
+# Combined model turn checks (scope creep, drift, spiral)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scope_creep_flagged_on_model_turn(engine: ArbiterEngine) -> None:
+    """A small task with excessive tool calls should get REVISE or DENY."""
+    score = await engine.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {
+            "output_text": "I refactored everything.",
+            "task_subject": "Fix typo",
+            "task_description": "Change 'teh' to 'the' in README",
+            "tool_call_count": 50,
+            "files_touched": [f"f{i}.py" for i in range(15)],
+            "turn_count": 10,
+        },
+    )
+    assert score.composite < 0.8
+    assert any("scope" in d.lower() or "excessive" in d.lower() for d in score.details)
+
+
+@pytest.mark.asyncio
+async def test_retry_spiral_flagged_on_model_turn(engine: ArbiterEngine) -> None:
+    """Repeated similar errors should get flagged."""
+    score = await engine.evaluate(
+        ArbiterCheckKind.MODEL_TURN,
+        {
+            "output_text": "Trying again...",
+            "recent_errors": [
+                "ConnectionRefusedError: port 5432",
+                "ConnectionRefusedError: port 5432",
+                "ConnectionRefusedError: port 5432",
+                "ConnectionRefusedError: port 5432",
+            ],
+        },
+    )
+    assert score.composite < 0.8
+    assert any("spiral" in d.lower() or "stuck" in d.lower() for d in score.details)

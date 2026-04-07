@@ -397,3 +397,195 @@ def check_token_budget(
         f"{progress_pct:.0%} progress (efficiency={efficiency:.2f})"
     )
     return 0.3, issues
+
+
+# ---------------------------------------------------------------------------
+# Scope creep / unnecessary work detection
+# ---------------------------------------------------------------------------
+
+# Heuristic complexity tiers based on task description length and keywords.
+_COMPLEXITY_SIGNALS_SMALL = frozenset(
+    {
+        "add",
+        "fix",
+        "typo",
+        "rename",
+        "bump",
+        "update",
+        "remove",
+        "delete",
+        "log",
+        "print",
+        "comment",
+        "toggle",
+        "flag",
+        "env",
+        "config",
+    }
+)
+_COMPLEXITY_SIGNALS_LARGE = frozenset(
+    {
+        "refactor",
+        "migrate",
+        "rewrite",
+        "redesign",
+        "architect",
+        "overhaul",
+        "implement",
+        "build",
+        "create",
+        "integrate",
+        "system",
+        "pipeline",
+        "framework",
+        "engine",
+    }
+)
+
+
+def _estimate_task_complexity(subject: str, description: str) -> str:
+    """Estimate task complexity as 'small', 'medium', or 'large'.
+
+    Uses description length + keyword signals.  This is intentionally
+    crude — it's a heuristic, not a judgment.
+    """
+    text = f"{subject} {description}".lower()
+    words = set(text.split())
+    total_len = len(text)
+
+    large_hits = words & _COMPLEXITY_SIGNALS_LARGE
+    small_hits = words & _COMPLEXITY_SIGNALS_SMALL
+
+    # Strong signal: explicit large-scope keywords
+    if large_hits and total_len > 80:
+        return "large"
+    # Strong signal: tiny task with small-scope keywords
+    if small_hits and not large_hits and total_len < 60:
+        return "small"
+
+    # Fall back to description length
+    if total_len > 200:
+        return "large"
+    if total_len < 40:
+        return "small"
+    return "medium"
+
+
+# Expected tool-call budgets per complexity tier.
+_SCOPE_BUDGETS: dict[str, dict[str, int]] = {
+    "small": {"tool_calls": 10, "files_touched": 3, "turns": 4},
+    "medium": {"tool_calls": 30, "files_touched": 8, "turns": 8},
+    "large": {"tool_calls": 80, "files_touched": 20, "turns": 15},
+}
+
+
+def check_scope_creep(
+    task_subject: str,
+    task_description: str,
+    tool_call_count: int,
+    files_touched: Sequence[str],
+    turn_count: int,
+) -> tuple[float, list[str]]:
+    """Detect gold-plating, yak-shaving, and scope creep.
+
+    Compares the volume of agent activity against a complexity estimate
+    derived from the task description.  When the agent is doing 3x more
+    work than expected for a task of this size, it's flagged.
+
+    Returns (score, issues).
+    """
+    issues: list[str] = []
+    complexity = _estimate_task_complexity(task_subject, task_description)
+    budget = _SCOPE_BUDGETS[complexity]
+
+    unique_files = len(set(files_touched))
+
+    # Check each dimension.  Ratio > 1.0 = over budget.
+    tool_ratio = tool_call_count / budget["tool_calls"] if budget["tool_calls"] else 0
+    file_ratio = (
+        unique_files / budget["files_touched"] if budget["files_touched"] else 0
+    )
+    turn_ratio = turn_count / budget["turns"] if budget["turns"] else 0
+
+    # Take the worst dimension.
+    worst = max(tool_ratio, file_ratio, turn_ratio)
+
+    if worst <= 1.5:
+        return 1.0, []  # Within reasonable bounds.
+
+    if worst <= 3.0:
+        over_dims: list[str] = []
+        if tool_ratio > 1.5:
+            over_dims.append(
+                f"{tool_call_count} tool calls (budget: {budget['tool_calls']})"
+            )
+        if file_ratio > 1.5:
+            over_dims.append(
+                f"{unique_files} files (budget: {budget['files_touched']})"
+            )
+        if turn_ratio > 1.5:
+            over_dims.append(f"{turn_count} turns (budget: {budget['turns']})")
+        issues.append(f"Scope creep ({complexity} task): {'; '.join(over_dims)}")
+        return 0.5, issues
+
+    # Severe: 3x+ over budget
+    over_dims_severe: list[str] = []
+    if tool_ratio > 1.5:
+        over_dims_severe.append(f"{tool_call_count}/{budget['tool_calls']} tools")
+    if file_ratio > 1.5:
+        over_dims_severe.append(f"{unique_files}/{budget['files_touched']} files")
+    if turn_ratio > 1.5:
+        over_dims_severe.append(f"{turn_count}/{budget['turns']} turns")
+    issues.append(
+        f"Excessive work for {complexity} task: "
+        f"{', '.join(over_dims_severe)}. "
+        f"Agent may be gold-plating or yak-shaving."
+    )
+    return 0.2, issues
+
+
+def check_retry_spiral(
+    recent_errors: Sequence[str],
+    *,
+    similarity_threshold: float = 0.5,
+) -> tuple[float, list[str]]:
+    """Detect agents retrying the same failing approach with minor variations.
+
+    Unlike the watchdog's identical-error check, this catches *similar*
+    errors (e.g. different line numbers but same exception type).
+
+    Returns (score, issues).
+    """
+    issues: list[str] = []
+    if len(recent_errors) < 3:
+        return 1.0, []
+
+    # Compare consecutive error pairs for similarity.
+    similar_pairs = 0
+    for i in range(1, len(recent_errors)):
+        prev_kw = _extract_keywords(recent_errors[i - 1])
+        curr_kw = _extract_keywords(recent_errors[i])
+        if not prev_kw or not curr_kw:
+            continue
+        overlap = len(prev_kw & curr_kw) / max(len(prev_kw), len(curr_kw))
+        if overlap >= similarity_threshold:
+            similar_pairs += 1
+
+    similarity_ratio = similar_pairs / (len(recent_errors) - 1)
+
+    if similarity_ratio < 0.5:
+        return 1.0, []  # Errors are diverse — probably making progress.
+
+    if similarity_ratio < 0.8:
+        issues.append(
+            f"Possible retry spiral: {similar_pairs}/{len(recent_errors) - 1} "
+            f"consecutive error pairs are similar ({similarity_ratio:.0%})"
+        )
+        return 0.5, issues
+
+    issues.append(
+        f"Retry spiral: {similar_pairs}/{len(recent_errors) - 1} errors are "
+        f"near-identical ({similarity_ratio:.0%}). Agent is stuck on the same "
+        f"approach — needs a different strategy."
+    )
+    return 0.2, issues
