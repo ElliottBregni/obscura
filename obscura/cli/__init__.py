@@ -2837,7 +2837,7 @@ def template_inspect(name: str) -> None:
 # Kairos goal runtime CLI — registered as `obscura kairos <subcommand>`
 # ---------------------------------------------------------------------------
 
-from obscura.cli.kairos_commands import kairos_group as _kairos_group
+from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E402
 
 main.add_command(_kairos_group)
 
