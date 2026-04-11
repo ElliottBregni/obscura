@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,16 @@ __all__ = ["NativeNotifier"]
 logger = logging.getLogger(__name__)
 
 _IS_MACOS = sys.platform == "darwin"
+
+_NON_PRINTABLE_RE = re.compile(r"[^\x20-\x7e]")
+
+
+def _escape_applescript(value: str) -> str:
+    """Escape a string for safe embedding in an AppleScript double-quoted literal."""
+    value = value.replace("\\", "\\\\")
+    value = value.replace('"', '\\"')
+    value = _NON_PRINTABLE_RE.sub("", value)
+    return value
 
 
 class NativeNotifier:
@@ -103,8 +114,8 @@ class NativeNotifier:
         sound: bool = True,
     ) -> None:
         """Banner notification via ``osascript``."""
-        escaped_title = title.replace('"', '\\"')
-        escaped_msg = message.replace('"', '\\"')
+        escaped_title = _escape_applescript(title)
+        escaped_msg = _escape_applescript(message)
         sound_clause = ' sound name "Glass"' if sound else ""
         script = (
             f'display notification "{escaped_msg}" '
@@ -129,9 +140,9 @@ class NativeNotifier:
         buttons: list[str],
     ) -> str:
         """Modal dialog via ``osascript``.  Returns the clicked button."""
-        escaped_title = title.replace('"', '\\"')
-        escaped_msg = message.replace('"', '\\"')
-        button_list = ", ".join(f'"{b}"' for b in buttons)
+        escaped_title = _escape_applescript(title)
+        escaped_msg = _escape_applescript(message)
+        button_list = ", ".join(f'"{_escape_applescript(b)}"' for b in buttons)
         script = (
             f'display dialog "{escaped_msg}" '
             f'with title "{escaped_title}" '

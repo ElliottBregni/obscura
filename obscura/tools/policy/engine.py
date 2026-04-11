@@ -10,12 +10,17 @@ from obscura.tools.policy.models import PolicyResult, ToolPolicy
 # Tools that operate on file-system paths.
 _FS_TOOLS: frozenset[str] = frozenset(
     {
-        "read_file",
-        "write_file",
+        "read_text_file",
+        "write_text_file",
+        "edit_text_file",
+        "find_files",
+        "grep_files",
+        "append_text_file",
+        "copy_path",
+        "move_path",
+        "remove_path",
         "list_directory",
-        "search_files",
-        "create_directory",
-        "delete_file",
+        "tree_directory",
     },
 )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import shutil
 from typing import TYPE_CHECKING, Any
 
@@ -53,7 +54,7 @@ def _make_cli_handler(handler_template: str, tool_name: str):
     async def _handler(**kwargs: Any) -> str:
         cmd = handler_template
         for key, value in kwargs.items():
-            cmd = cmd.replace(f"{{{key}}}", str(value))
+            cmd = cmd.replace(f"{{{key}}}", shlex.quote(str(value)))
 
         logger.debug("CLI tool %s executing: %s", tool_name, cmd)
         proc = await asyncio.create_subprocess_shell(

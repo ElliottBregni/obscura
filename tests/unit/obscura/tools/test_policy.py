@@ -90,12 +90,12 @@ class TestEvaluatePolicy:
     def test_base_dir_allows_within(self, tmp_path: Path) -> None:
         policy = ToolPolicy(name="sandboxed", base_dir=tmp_path)
         child = tmp_path / "subdir" / "file.txt"
-        result = evaluate_policy(policy, "read_file", {"path": str(child)})
+        result = evaluate_policy(policy, "read_text_file", {"path": str(child)})
         assert result.allowed is True
 
     def test_base_dir_blocks_escape(self, tmp_path: Path) -> None:
         policy = ToolPolicy(name="sandboxed", base_dir=tmp_path)
-        result = evaluate_policy(policy, "read_file", {"path": "/etc/passwd"})
+        result = evaluate_policy(policy, "read_text_file", {"path": "/etc/passwd"})
         assert result.allowed is False
         assert "escapes base_dir" in result.reason
 

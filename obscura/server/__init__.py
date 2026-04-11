@@ -234,15 +234,33 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     if config.auth_enabled:
         app.add_middleware(APIKeyAuthMiddleware)
+    else:
+        bind_all = config.host in ("0.0.0.0", "::")
+        if bind_all:
+            logger.warning(
+                "Authentication is DISABLED and server binds to %s — "
+                "all API endpoints are publicly accessible. "
+                "Set OBSCURA_AUTH_ENABLED=true for production.",
+                config.host,
+            )
+        else:
+            logger.warning(
+                "Authentication is DISABLED. "
+                "Set OBSCURA_AUTH_ENABLED=true for production.",
+            )
 
     cors_origins = os.environ.get(
         "OBSCURA_CORS_ORIGINS",
         "http://localhost:5173,http://localhost:8080,http://localhost:3000",
     ).split(",")
+    cors_regex = os.environ.get(
+        "OBSCURA_CORS_ORIGIN_REGEX",
+        r"http://localhost:(3000|5173|8080|8081)",
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_origin_regex=r"http://localhost:\d+",
+        allow_origin_regex=cors_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -251,10 +269,10 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     # -- global exception handler ------------------------------------------
 
     async def _handle_exception(request: Request, exc: Exception) -> JSONResponse:
-        logger.error(f"Unhandled error: {exc}")
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
         return JSONResponse(
             status_code=500,
-            content={"detail": str(exc)},
+            content={"detail": "Internal server error"},
         )
 
     app.add_exception_handler(Exception, _handle_exception)

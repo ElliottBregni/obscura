@@ -96,9 +96,8 @@ def filter_prompt(prompt: str, tier: CapabilityTier) -> FilterResult:
     For ``PRIVILEGED`` tier: no filtering (operators need raw access).
     For ``PUBLIC`` tier: detect and sanitise injection attempts.
     """
-    # Current policy: both PUBLIC and PRIVILEGED behave like Tier B (no filtering).
-    # Keep behaviour consistent with tests that expect no filtering for PUBLIC.
-    if tier in (CapabilityTier.PRIVILEGED, CapabilityTier.PUBLIC):
+    # PRIVILEGED tier bypasses filtering — operators need raw prompt access.
+    if tier is CapabilityTier.PRIVILEGED:
         return FilterResult(original=prompt, filtered=prompt, was_modified=False)
 
     flags: list[str] = []

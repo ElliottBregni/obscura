@@ -938,7 +938,7 @@ class TestPolicyProbeMetadata:
         result = parse(
             run(
                 policy_probe(
-                    tool_name="read_file",
+                    tool_name="read_text_file",
                     policy_override={"full_access": True},
                 ),
             ),
@@ -961,7 +961,7 @@ class TestPolicyProbeMetadata:
         result = parse(
             run(
                 policy_probe(
-                    tool_name="read_file",
+                    tool_name="read_text_file",
                     policy_override={"full_access": True},
                     args={"path": "/tmp/foo.txt"},
                 ),

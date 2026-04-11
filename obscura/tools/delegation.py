@@ -176,10 +176,17 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
 
             inject_subagent_context(agent, tool_allowlist=allowlist)
         except Exception:
-            logger.warning(
-                "inject_subagent_context failed for '%s' — proceeding without constraints",
+            logger.error(
+                "inject_subagent_context failed for '%s' — refusing to run unconstrained",
                 target,
                 exc_info=True,
+            )
+            return json.dumps(
+                {
+                    "ok": False,
+                    "target": target,
+                    "error": "delegation_aborted: failed to apply subagent constraints",
+                },
             )
 
         # Execute delegate

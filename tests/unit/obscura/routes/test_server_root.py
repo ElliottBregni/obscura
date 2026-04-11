@@ -302,7 +302,7 @@ class TestGlobalExceptionHandler:
         resp = client.get("/test-kaboom")
         assert resp.status_code == 500
         body = resp.json()
-        assert "kaboom error" in body["detail"]
+        assert body["detail"] == "Internal server error"
 
     def test_unhandled_runtime_error(self) -> None:
         """RuntimeError should also be caught by the global handler."""
@@ -316,7 +316,7 @@ class TestGlobalExceptionHandler:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/test-runtime")
         assert resp.status_code == 500
-        assert "runtime boom" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 # ---------------------------------------------------------------------------

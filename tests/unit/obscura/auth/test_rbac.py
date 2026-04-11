@@ -125,7 +125,7 @@ class TestGetCurrentUser:
         assert resp.status_code == 200
         data = resp.json()
         assert data["user_id"] == "dev-user"
-        assert "admin" in data["roles"]
+        assert "agent:read" in data["roles"]
 
     def test_401_without_api_key(self, client: TestClient) -> None:
         resp = client.get("/api/v1/me")
@@ -145,22 +145,20 @@ class TestGetCurrentUser:
 
 
 class TestRequireRole:
-    def test_admin_role_required_and_present(self, client: TestClient) -> None:
-        # Default dev key has admin role
+    def test_admin_role_required_but_not_present(self, client: TestClient) -> None:
+        # Default dev key now has agent:read only, not admin
         resp = client.get("/api/v1/admin-only", headers=_API_KEY_HEADER)
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
-    def test_sync_write_role(self, client: TestClient) -> None:
-        # Default dev key has sync:write role
+    def test_sync_write_role_not_present(self, client: TestClient) -> None:
+        # Default dev key now has agent:read only, not sync:write
         resp = client.post("/api/v1/sync", headers=_API_KEY_HEADER)
-        assert resp.status_code == 200
-        assert resp.json()["synced"] is True
+        assert resp.status_code == 403
 
-    def test_admin_passes_any_role_check(self, client: TestClient) -> None:
-        """Admin role should bypass any specific role requirement."""
-        # Default dev key has admin role, which should pass sync:write check
+    def test_no_admin_fails_specific_role_check(self, client: TestClient) -> None:
+        """Default dev key no longer has admin, so sync:write check should fail."""
         resp = client.post("/api/v1/sync", headers=_API_KEY_HEADER)
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_missing_api_key_returns_401(self, client: TestClient) -> None:
         resp = client.post("/api/v1/sync")
@@ -169,11 +167,12 @@ class TestRequireRole:
 
 class TestRequireAnyRole:
     def test_any_agent_role_passes(self, client: TestClient) -> None:
-        # Default dev key has admin which passes any role check
+        # Default dev key has agent:read which matches the require_any_role check
         resp = client.post("/api/v1/agent", headers=_API_KEY_HEADER)
         assert resp.status_code == 200
 
-    def test_admin_passes(self, client: TestClient) -> None:
+    def test_agent_read_passes(self, client: TestClient) -> None:
+        # Default dev key has agent:read which is in the allowed set
         resp = client.post("/api/v1/agent", headers=_API_KEY_HEADER)
         assert resp.status_code == 200
 

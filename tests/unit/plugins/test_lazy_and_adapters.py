@@ -441,7 +441,7 @@ class TestCLIHandlerExecution:
 
         mock_shell.assert_called_once()
         call_cmd = mock_shell.call_args[0][0]
-        assert call_cmd == "echo hello world"
+        assert call_cmd == "echo 'hello world'"
         assert result == "hello world\n"
 
     def test_nonzero_return_raises(self) -> None:

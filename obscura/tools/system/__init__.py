@@ -86,6 +86,73 @@ def _unsafe_full_access_enabled() -> bool:
     return _env_flag("OBSCURA_SYSTEM_TOOLS_UNSAFE_FULL_ACCESS", default=False)
 
 
+def _validate_url(url: str) -> str:
+    """Validate a URL against SSRF attacks.
+
+    - Only http:// and https:// schemes allowed.
+    - DNS is resolved pre-flight; private/internal IPs are blocked.
+    - Set OBSCURA_ALLOW_PRIVATE_URLS=true to bypass (dev/testing only).
+
+    Returns the validated URL string.
+    Raises ValueError on blocked URLs.
+    """
+    import ipaddress
+    import socket
+
+    if _env_flag("OBSCURA_ALLOW_PRIVATE_URLS", default=False):
+        return url
+
+    parsed = url_parse.urlparse(url)
+
+    # --- Scheme check ---
+    if parsed.scheme not in ("http", "https"):
+        msg = (
+            f"URL scheme {parsed.scheme!r} is not allowed. "
+            "Only http:// and https:// URLs are permitted."
+        )
+        raise ValueError(msg)
+
+    hostname = parsed.hostname
+    if not hostname:
+        msg = "URL has no hostname."
+        raise ValueError(msg)
+
+    # --- DNS resolution (pre-flight to defeat rebinding) ---
+    try:
+        addrinfos = socket.getaddrinfo(
+            hostname, parsed.port or 443, proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        msg = f"DNS resolution failed for {hostname!r}: {exc}"
+        raise ValueError(msg) from exc
+
+    _BLOCKED_NETWORKS = (
+        ipaddress.ip_network("127.0.0.0/8"),
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+        ipaddress.ip_network("169.254.0.0/16"),  # link-local / cloud metadata
+        ipaddress.ip_network("0.0.0.0/8"),
+        ipaddress.ip_network("::1/128"),
+        ipaddress.ip_network("fd00::/8"),
+        ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    )
+
+    for _family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip_str = sockaddr[0]
+        addr = ipaddress.ip_address(ip_str)
+        for net in _BLOCKED_NETWORKS:
+            if addr in net:
+                msg = (
+                    f"URL {url!r} resolves to private/internal address {ip_str} "
+                    f"(in {net}). Request blocked to prevent SSRF. "
+                    "Set OBSCURA_ALLOW_PRIVATE_URLS=true to override."
+                )
+                raise ValueError(msg)
+
+    return url
+
+
 def _normalize_list(values: str) -> set[str]:
     return {part.strip() for part in values.split(",") if part.strip()}
 
@@ -524,6 +591,10 @@ async def web_fetch(
     max_bytes = int(max_bytes)
     request_headers = headers or {}
     payload = body.encode("utf-8") if body else None
+    try:
+        url = _validate_url(url)
+    except ValueError as exc:
+        return _json_error("ssrf_blocked", url=url, detail=str(exc))
     req = url_request.Request(
         url=url,
         method=method.upper(),
@@ -2630,6 +2701,10 @@ async def download_file(
         return _json_error("path_not_allowed", path=str(target))
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        url = _validate_url(url)
+    except ValueError as exc:
+        return _json_error("ssrf_blocked", url=url, detail=str(exc))
     req = url_request.Request(
         url,
         headers={
@@ -2694,6 +2769,10 @@ async def http_request(
     elif body:
         payload = body.encode("utf-8")
 
+    try:
+        url = _validate_url(url)
+    except ValueError as exc:
+        return _json_error("ssrf_blocked", url=url, detail=str(exc))
     req = url_request.Request(
         url=url,
         method=method.upper(),
@@ -2979,20 +3058,27 @@ async def create_tool(
 
     # Build the async handler function
     # Available imports inside the sandbox
+    _SAFE_BUILTINS: dict[str, Any] = {
+        "len": len, "range": range, "enumerate": enumerate, "zip": zip,
+        "map": map, "filter": filter, "sorted": sorted, "reversed": reversed,
+        "list": list, "dict": dict, "set": set, "tuple": tuple,
+        "str": str, "int": int, "float": float, "bool": bool,
+        "isinstance": isinstance, "hasattr": hasattr, "getattr": getattr,
+        "print": print, "type": type,
+        "None": None, "True": True, "False": False,
+        "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+        "any": any, "all": all,
+        "ValueError": ValueError, "TypeError": TypeError,
+        "KeyError": KeyError, "RuntimeError": RuntimeError,
+        "Exception": Exception,
+    }
     sandbox_globals: dict[str, Any] = {
-        "__builtins__": __builtins__,
+        "__builtins__": _SAFE_BUILTINS,
         "json": json,
-        "os": os,
         "re": re,
         "Path": Path,
         "asyncio": asyncio,
-        "subprocess": subprocess,
-        "platform": platform,
-        "shutil": shutil,
-        "url_request": url_request,
-        "url_parse": url_parse,
-        "url_error": url_error,
-        "base64": base64,
+        "base64": __import__("base64"),
         "time": _time,
     }
 

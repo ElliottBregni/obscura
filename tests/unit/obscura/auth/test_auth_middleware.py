@@ -55,7 +55,7 @@ class TestAPIKeyAuthMiddleware:
             assert resp.status_code == 200
             data = resp.json()
             assert data["user_id"] == "dev-user"
-            assert "admin" in data["roles"]
+            assert "agent:read" in data["roles"]
             assert data["token_type"] == "api_key"
 
     @pytest.mark.asyncio

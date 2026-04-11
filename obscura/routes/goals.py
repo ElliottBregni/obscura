@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from obscura.auth.models import AuthenticatedUser
+from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from pydantic import BaseModel, Field
 
 from obscura.core.kairos import GoalBudget, GoalStatus
@@ -77,6 +80,7 @@ class CreateGoalRequest(BaseModel):
 
 @router.get("/goals")
 async def list_goals(
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -97,7 +101,10 @@ async def list_goals(
 
 
 @router.post("/goals", status_code=201)
-async def create_goal(body: CreateGoalRequest) -> dict[str, Any]:
+async def create_goal(
+    body: CreateGoalRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, Any]:
     """Create a new goal."""
     store = _get_store()
     try:
@@ -124,7 +131,10 @@ async def create_goal(body: CreateGoalRequest) -> dict[str, Any]:
 
 
 @router.get("/goals/{goal_id}")
-async def get_goal(goal_id: str) -> dict[str, Any]:
+async def get_goal(
+    goal_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+) -> dict[str, Any]:
     """Get a single goal by ID."""
     store = _get_store()
     try:
@@ -137,7 +147,10 @@ async def get_goal(goal_id: str) -> dict[str, Any]:
 
 
 @router.post("/goals/{goal_id}/pause")
-async def pause_goal(goal_id: str) -> dict[str, Any]:
+async def pause_goal(
+    goal_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, Any]:
     """Pause a running goal."""
     store = _get_store()
     try:
@@ -155,7 +168,10 @@ async def pause_goal(goal_id: str) -> dict[str, Any]:
 
 
 @router.post("/goals/{goal_id}/resume")
-async def resume_goal(goal_id: str) -> dict[str, Any]:
+async def resume_goal(
+    goal_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, Any]:
     """Resume a paused goal."""
     store = _get_store()
     try:
@@ -173,7 +189,10 @@ async def resume_goal(goal_id: str) -> dict[str, Any]:
 
 
 @router.post("/goals/{goal_id}/cancel")
-async def cancel_goal(goal_id: str) -> dict[str, Any]:
+async def cancel_goal(
+    goal_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, Any]:
     """Cancel a goal (terminal state)."""
     store = _get_store()
     try:
@@ -191,7 +210,10 @@ async def cancel_goal(goal_id: str) -> dict[str, Any]:
 
 
 @router.get("/goals/{goal_id}/tasks")
-async def list_goal_tasks(goal_id: str) -> dict[str, Any]:
+async def list_goal_tasks(
+    goal_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+) -> dict[str, Any]:
     """List all tasks for a goal."""
     store = _get_store()
     try:

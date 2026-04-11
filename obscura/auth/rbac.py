@@ -19,12 +19,15 @@ Roles
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 
 from obscura.auth.models import AuthenticatedUser
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -67,17 +70,16 @@ def _load_api_keys() -> None:
     global _api_keys
     keys_env = os.environ.get("OBSCURA_API_KEYS", "")
     if not keys_env:
-        # Default test key for convenience
+        logger.warning(
+            "OBSCURA_API_KEYS is not set — using default dev key with VIEWER-ONLY "
+            "access. Set OBSCURA_API_KEYS to configure production credentials.",
+        )
         _api_keys = {
             "obscura-dev-key-123": {
                 "user_id": "dev-user",
                 "email": "dev@obscura.local",
                 "roles": [
-                    "admin",
-                    *AGENT_WRITE_ROLES,
                     "agent:read",
-                    "sync:write",
-                    "sessions:manage",
                 ],
             },
         }

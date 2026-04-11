@@ -25,9 +25,12 @@ import hmac
 import json
 import logging
 import os
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+
+from obscura.auth.models import AuthenticatedUser
+from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -293,7 +296,10 @@ class ChannelConfigPatch(BaseModel):
 
 
 @router.post("/configs", status_code=201)
-async def create_channel_config(body: ChannelConfigCreate) -> dict[str, Any]:
+async def create_channel_config(
+    body: ChannelConfigCreate,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, Any]:
     """Register a new channel configuration."""
     store = _get_config_store()
     record = store.create(
@@ -309,14 +315,20 @@ async def create_channel_config(body: ChannelConfigCreate) -> dict[str, Any]:
 
 
 @router.get("/configs")
-async def list_channel_configs(enabled_only: bool = False) -> list[dict[str, Any]]:
+async def list_channel_configs(
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+    enabled_only: bool = False,
+) -> list[dict[str, Any]]:
     """List all channel configurations."""
     store = _get_config_store()
     return [r.to_dict() for r in store.list_all(enabled_only=enabled_only)]
 
 
 @router.get("/configs/{config_id}")
-async def get_channel_config(config_id: str) -> dict[str, Any]:
+async def get_channel_config(
+    config_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+) -> dict[str, Any]:
     """Get a single channel configuration by ID."""
     store = _get_config_store()
     record = store.get(config_id)
@@ -326,7 +338,11 @@ async def get_channel_config(config_id: str) -> dict[str, Any]:
 
 
 @router.patch("/configs/{config_id}")
-async def update_channel_config(config_id: str, body: ChannelConfigPatch) -> dict[str, Any]:
+async def update_channel_config(
+    config_id: str,
+    body: ChannelConfigPatch,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, Any]:
     """Update a channel configuration (partial update)."""
     store = _get_config_store()
     try:
@@ -345,7 +361,10 @@ async def update_channel_config(config_id: str, body: ChannelConfigPatch) -> dic
 
 
 @router.delete("/configs/{config_id}", status_code=204)
-async def delete_channel_config(config_id: str) -> None:
+async def delete_channel_config(
+    config_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> None:
     """Delete a channel configuration."""
     store = _get_config_store()
     removed = store.delete(config_id)
@@ -354,7 +373,10 @@ async def delete_channel_config(config_id: str) -> None:
 
 
 @router.post("/configs/{config_id}/apply")
-async def apply_channel_config(config_id: str) -> dict[str, str]:
+async def apply_channel_config(
+    config_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
+) -> dict[str, str]:
     """Hot-reload: apply a saved config to the live ChannelRouter immediately.
 
     Builds and registers (or deregisters if disabled) the platform adapter
