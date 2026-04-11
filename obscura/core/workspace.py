@@ -94,9 +94,22 @@ def init_workspace(
     # -- vault zone structure (always at ~/.obscura/vault/) -----------------
     try:
         from obscura.kairos.vault_sync import VaultSync
+        from obscura.vault_provisioner import VaultProvisionError, provision_vault
 
-        VaultSync().bootstrap()  # defaults to ~/.obscura/vault/
-        logger.info("Vault zones bootstrapped at ~/.obscura/vault/")
+        vault_dir = _resolve_global_home() / "vault"
+        if not vault_dir.exists():
+            try:
+                provision_vault(
+                    "vault",
+                    repo_type="vault",
+                    destination=_resolve_global_home(),
+                )
+                logger.info("Vault repo provisioned at %s", vault_dir)
+            except VaultProvisionError as exc:
+                logger.warning("Vault repo provisioning failed: %s", exc)
+
+        VaultSync(vault_dir=vault_dir).bootstrap()
+        logger.info("Vault zones bootstrapped at %s", vault_dir)
     except Exception as exc:
         logger.debug("Vault bootstrap skipped: %s", exc)
 

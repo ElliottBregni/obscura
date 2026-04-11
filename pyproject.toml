@@ -8,6 +8,7 @@ version = "0.2.0"
 description = "Obscura - Multi-agent context management with TUI"
 requires-python = ">=3.13"
 dependencies = [
+    "vault-gen",
     "github-copilot-sdk>=0.2.0",
     "claude-agent-sdk>=0.1.0",
     "openai-codex-sdk",
@@ -195,3 +196,9 @@ ignore = ["E501"]
 "tests/unit/obscura/providers/test_copilot_models.py" = ["F405"]
 "demos/a2a/agents.py" = ["E402"]
 "demos/backend_agents/common.py" = ["F811"]
+
+[tool.uv.workspace]
+members = ["packages/vault-gen"]
+
+[tool.uv.sources]
+vault-gen = { workspace = true }

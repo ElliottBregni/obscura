@@ -1,0 +1,25 @@
+# Plugin registry for ${name}
+# Lists all plugins available in this config vault.
+
+[[plugins]]
+name = "vault-access"
+version = "0.1.0"
+type = "builtin"
+description = "Core vault read/write/search tools"
+enabled = true
+
+[[plugins]]
+name = "git-ops"
+version = "0.1.0"
+type = "builtin"
+description = "git history, diff, sync"
+enabled = true
+
+# Add community or custom plugins below:
+#
+# [[plugins]]
+# name = "my-plugin"
+# version = "1.0.0"
+# type = "community"
+# source = "https://github.com/example/my-plugin"
+# enabled = false
