@@ -5,10 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="be8f37ff-8afc-4ebb-8dd3-9a707d9d1630" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/obscura/cli/render.py" beforeDir="false" afterPath="$PROJECT_DIR$/obscura/cli/render.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obscura/core/feature_flags.py" beforeDir="false" afterPath="$PROJECT_DIR$/obscura/core/feature_flags.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obscura/tools/providers/agent_primitives.py" beforeDir="false" afterPath="$PROJECT_DIR$/obscura/tools/providers/agent_primitives.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/obscura/vector_memory/backends/qdrant_backend.py" beforeDir="false" afterPath="$PROJECT_DIR$/obscura/vector_memory/backends/qdrant_backend.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/pyproject.toml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/uv.lock" beforeDir="false" afterPath="$PROJECT_DIR$/uv.lock" afterDir="false" />
     </list>
@@ -18,7 +15,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="11411" />
+    <option name="cachedIndexableFilesCount" value="36539" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="Git.Settings">
@@ -48,13 +45,6 @@
     &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.appearance&quot;
   }
 }</component>
-  <component name="SharedIndexes">
-    <attachedChunks>
-      <set>
-        <option value="bundled-jdk-30f59d01ecdd-2fc7cc6b9a17-intellij.indexing.shared.core-IU-253.30387.90" />
-      </set>
-    </attachedChunks>
-  </component>
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
       <changelist id="be8f37ff-8afc-4ebb-8dd3-9a707d9d1630" name="Changes" comment="" />

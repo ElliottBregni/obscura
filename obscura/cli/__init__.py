@@ -2841,6 +2841,22 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 
 main.add_command(_kairos_group)
 
+# ---------------------------------------------------------------------------
+# Browser extension CLI — registered as `obscura browser <subcommand>`
+# ---------------------------------------------------------------------------
+
+from obscura.cli.browser_commands import browser_group as _browser_group  # noqa: E402
+
+main.add_command(_browser_group)
+
+# ---------------------------------------------------------------------------
+# Supabase auth CLI — registered as `obscura auth <login|logout|whoami>`
+# ---------------------------------------------------------------------------
+
+from obscura.cli.auth_commands import auth_group as _auth_group  # noqa: E402
+
+main.add_command(_auth_group)
+
 
 # Backwards-compat aliases added by test harness
 def _emit_context_warnings(*args, **kwargs):

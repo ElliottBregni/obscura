@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { decodeJWT, extractUser, isTokenExpired } from '@/lib/jwt';
 import type { DecodedUser } from '@/lib/jwt';
+import { supabase } from '@/lib/supabase';
 
 interface AuthState {
   token: string | null;
@@ -49,6 +50,11 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         set({ token: null, apiKey: null, user: null, isAuthenticated: false });
+        // Fire-and-forget Supabase sign-out so a browser refresh doesn't
+        // silently re-authenticate the user via a cached refresh token.
+        if (supabase) {
+          void supabase.auth.signOut().catch(() => undefined);
+        }
       },
 
       hasRole: (role: string) => {

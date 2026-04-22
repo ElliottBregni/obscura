@@ -8,7 +8,8 @@ COMPOSE := ./scripts/compose-env.sh
 	dev-up dev-down dev-restart dev-logs dev-watch dev-check dev-auth-fix \
 	staging-up staging-down staging-restart staging-logs staging-check \
 	prod-up prod-down prod-restart prod-logs prod-check \
-	dist brew-formula brew-install lint test
+	dist brew-formula brew-install lint test \
+	ext-install ext-reload ext-logs ext-status ext-id
 
 help:
 	@echo "Obscura SDLC Commands"
@@ -147,3 +148,35 @@ typecheck:
 
 test:
 	pytest tests/ -v -m "not e2e"
+
+# --- Browser extension ---------------------------------------------------
+
+EXT_DIR := packages/browser-extension
+EXT_ID_FILE := $(EXT_DIR)/.keys/EXTENSION_ID
+
+ext-id:
+	@cat $(EXT_ID_FILE)
+
+ext-install:
+	@echo "→ installing native-messaging host for $(shell cat $(EXT_ID_FILE))"
+	@cd $(EXT_DIR)/native-host && ./install.sh
+	@echo ""
+	@echo "→ load the unpacked extension once if you haven't:"
+	@echo "    open -a 'Google Chrome' 'chrome://extensions'"
+	@echo "    toggle Developer mode → Load unpacked → $(CURDIR)/$(EXT_DIR)"
+
+ext-reload:
+	@pkill -f obscura_native_host.py 2>/dev/null || true
+	@echo "killed running native host; reload the Obscura card on chrome://extensions"
+
+ext-logs:
+	@tail -f $${OBSCURA_HOME:-$$HOME/.obscura}/logs/browser-extension-host.log
+
+ext-status:
+	@echo "extension id      : $$(cat $(EXT_ID_FILE))"
+	@echo "manifest installed: $$(ls -1 \
+		$$HOME/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.obscura.host.json \
+		$$HOME/.config/google-chrome/NativeMessagingHosts/com.obscura.host.json \
+		2>/dev/null | head -1 || echo 'NOT INSTALLED — run make ext-install')"
+	@echo "host process(es)  :"
+	@ps -ax -o pid,command | grep obscura_native_host.py | grep -v grep || echo "  (none running)"

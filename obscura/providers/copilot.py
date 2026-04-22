@@ -225,8 +225,7 @@ class CopilotBackend:
 
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
-        from copilot import CopilotClient
-        from copilot.types import SubprocessConfig
+        from copilot import CopilotClient, SubprocessConfig
 
         client_opts: Any = None
         if self._auth.github_token:
@@ -624,7 +623,7 @@ class CopilotBackend:
         ``^[a-zA-Z0-9_-]{1,128}$`` (dots and other special chars replaced
         with underscores).
         """
-        from copilot.types import Tool
+        from copilot.client import Tool
 
         converted: list[Any] = []
         for spec in tools:
@@ -634,7 +633,7 @@ class CopilotBackend:
                 async def wrapped(invocation: Any) -> Any:
                     import inspect as _inspect
 
-                    from copilot.types import ToolResult as CopilotToolResult
+                    from copilot.client import ToolResult as CopilotToolResult
 
                     try:
                         raw_args = invocation.arguments
@@ -683,7 +682,7 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
-        from copilot.types import PermissionRequestResult
+        from copilot.session import PermissionRequestResult
 
         def _approve_all(
             request: PermissionRequest,

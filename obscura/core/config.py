@@ -28,6 +28,14 @@ class ObscuraConfig(BaseModel):
         False  # default off for dev; set OBSCURA_AUTH_ENABLED=true in prod
     )
 
+    # Supabase OAuth (primary identity provider for human users).
+    # Service/machine callers continue to use X-API-Key as a local bypass.
+    supabase_url: str = ""  # e.g. https://xxxx.supabase.co
+    supabase_jwt_secret: str = ""  # HS256 shared secret from Supabase project
+    supabase_jwks_url: str = ""  # RS256 JWKS URL; takes precedence over the secret
+    supabase_audience: str = "authenticated"  # default Supabase audience claim
+    supabase_issuer: str = ""  # auto-derived from supabase_url when blank
+
     # Telemetry (OpenTelemetry)
     otel_enabled: bool = True
     otel_endpoint: str = "http://127.0.0.1:4317"
@@ -84,6 +92,12 @@ class ObscuraConfig(BaseModel):
             # Auth
             auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "false").lower()
             == "true",
+            # Supabase OAuth
+            supabase_url=os.environ.get("SUPABASE_URL", ""),
+            supabase_jwt_secret=os.environ.get("SUPABASE_JWT_SECRET", ""),
+            supabase_jwks_url=os.environ.get("SUPABASE_JWKS_URL", ""),
+            supabase_audience=os.environ.get("SUPABASE_AUDIENCE", "authenticated"),
+            supabase_issuer=os.environ.get("SUPABASE_ISSUER", ""),
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
             otel_endpoint=os.environ.get(

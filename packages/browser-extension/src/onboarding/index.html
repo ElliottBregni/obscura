@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>obscura · setup</title>
+    <link rel="stylesheet" href="onboarding.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand">● obscura</div>
+        <div class="tag">browser extension · first-run setup</div>
+      </header>
+
+      <section class="status">
+        <div class="row">
+          <span class="key">extension id</span>
+          <code id="ext-id">loading…</code>
+          <button class="copy" data-copy="#ext-id">copy</button>
+        </div>
+        <div class="row">
+          <span class="key">native host</span>
+          <span id="host-status" class="pill pending">checking…</span>
+        </div>
+      </section>
+
+      <section class="step" id="step-host">
+        <h2>1 · install the native host</h2>
+        <p>
+          The extension talks to <code>obscura</code> through a native
+          messaging host — a tiny shell script that spawns the agent
+          runtime. Install it once with either of these:
+        </p>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="make">make</button>
+          <button class="tab" data-tab="cli">obscura-browser</button>
+          <button class="tab" data-tab="raw">raw install.sh</button>
+        </div>
+
+        <pre class="cmd" data-tab="make" data-active><code>cd $OBSCURA_REPO
+make ext-install</code><button class="copy" data-copy="self">copy</button></pre>
+
+        <pre class="cmd" data-tab="cli" hidden><code>obscura-browser install</code><button class="copy" data-copy="self">copy</button></pre>
+
+        <pre class="cmd" data-tab="raw" hidden><code>cd $OBSCURA_REPO/packages/browser-extension/native-host
+./install.sh</code><button class="copy" data-copy="self">copy</button></pre>
+
+        <p class="hint">
+          Each writes <code>com.obscura.host.json</code> into every
+          Chrome-family browser dir on the machine, kills any stale host
+          process, and prints the resolved python path.
+        </p>
+      </section>
+
+      <section class="step" id="step-secrets">
+        <h2>2 · (optional) inject backend secrets</h2>
+        <p>
+          Chrome launches the host with an empty environment. For
+          Copilot the launcher auto-reads <code>gh auth token</code>. For
+          Anthropic, OpenAI, etc., drop an env file:
+        </p>
+        <pre class="cmd"><code># ~/.obscura/browser-host.env
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...</code><button class="copy" data-copy="self">copy</button></pre>
+      </section>
+
+      <section class="step" id="step-test">
+        <h2>3 · open the side panel</h2>
+        <p>
+          Pin the <span class="brand-inline">● obscura</span> icon, then
+          click it — or open Chrome's side-panel launcher on the right of
+          the address bar.
+        </p>
+        <div class="actions">
+          <button id="open-panel" class="primary">open side panel</button>
+          <button id="reload-host">reload host</button>
+          <a href="#" id="open-extensions" class="link">chrome://extensions</a>
+        </div>
+      </section>
+
+      <section class="step" id="step-logs">
+        <h2>debugging</h2>
+        <p>When something's off:</p>
+        <pre class="cmd"><code>obscura-browser status
+obscura-browser logs -f</code><button class="copy" data-copy="self">copy</button></pre>
+      </section>
+    </main>
+
+    <script type="module" src="onboarding.js"></script>
+  </body>
+</html>
