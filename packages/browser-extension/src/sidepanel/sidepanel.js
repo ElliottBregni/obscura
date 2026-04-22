@@ -19,6 +19,8 @@ const sbHost = $("#sb-host");
 const sbGit = $("#sb-git");
 const sbKairos = $("#sb-kairos");
 const sbRewind = $("#sb-rewind");
+const sbFleet = $("#sb-fleet");
+const sbMcp = $("#sb-mcp");
 const sbDiag = $("#sb-diag");
 const sbExport = $("#sb-export");
 const sbTheme = $("#sb-theme");
@@ -32,11 +34,27 @@ const diagClose = $("#diag-close");
 const authGate = $("#auth-gate");
 const authTokenInput = $("#auth-token-input");
 const authSubmit = $("#auth-submit");
+const warningBanner = $("#warning-banner");
+const warningText = $("#warning-text");
+const checkpointModal = $("#checkpoint-modal");
+const checkpointClose = $("#checkpoint-close");
+const checkpointNameInput = $("#checkpoint-name-input");
+const checkpointSaveBtn = $("#checkpoint-save-btn");
+const checkpointList = $("#checkpoint-list");
+const fleetOverlay = $("#fleet-overlay");
+const fleetClose = $("#fleet-close");
+const fleetContent = $("#fleet-content");
+const mcpOverlay = $("#mcp-overlay");
+const mcpClose = $("#mcp-close");
+const mcpDiscoverBtn = $("#mcp-discover-btn");
+const mcpContent = $("#mcp-content");
+const micBtn = $("#mic-btn");
 
 const SETTINGS_KEY = "obscura.settings.v1";
 const TRANSCRIPT_KEY = "obscura.transcript.v1";
 const SESSIONS_KEY = "obscura.sessions.v1";
 const THEME_KEY = "obscura_theme";
+const TOOL_PERMS_KEY = "obscura_tool_perms";
 
 let port = null;
 let sessionId = null;            // per-panel conversation id (from host)
@@ -52,6 +70,9 @@ let historyDraft = "";           // saved current input when stepping into histo
 let kairosState = "off";        // "on" | "off"
 let pendingImages = [];          // { dataUrl, name }[] for drag-drop / paste
 let pendingTextFiles = [];       // { name, content }[] for drag-drop
+let checkpointPendingId = null;  // msgId of the in-flight /checkpoint command
+let fleetPendingId = null;       // msgId of the in-flight /agent list command
+let mcpPendingId = null;         // msgId of the in-flight /mcp list|discover command
 
 // ---------------------------------------------------------------------------
 // Multi-session tabs
@@ -571,6 +592,34 @@ function renderRichDetail(detail, toolName) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-tool permission persistence (Feature 2)
+
+async function getToolPerm(toolName) {
+  if (!toolName) return null;
+  try {
+    const store = await chrome.storage.local.get(TOOL_PERMS_KEY);
+    const perms = store[TOOL_PERMS_KEY] || {};
+    return perms[toolName] || null;
+  } catch { return null; }
+}
+
+async function setToolPerm(toolName, perm) {
+  if (!toolName) return;
+  try {
+    const store = await chrome.storage.local.get(TOOL_PERMS_KEY);
+    const perms = store[TOOL_PERMS_KEY] || {};
+    perms[toolName] = perm;
+    await chrome.storage.local.set({ [TOOL_PERMS_KEY]: perms });
+  } catch {}
+}
+
+async function clearToolPerms() {
+  try {
+    await chrome.storage.local.remove(TOOL_PERMS_KEY);
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
 // Widgets
 
 function renderWidget(msg) {
@@ -616,6 +665,7 @@ function renderWidget(msg) {
     : ["ok"];
   const actionsRow = document.createElement("div");
   actionsRow.className = "w-actions";
+  const widgetToolName = (msg.kind === "tool_confirm" && msg.detail?.tool_name) ? msg.detail.tool_name : "";
 
   for (const action of actions) {
     const btn = document.createElement("button");
@@ -624,7 +674,7 @@ function renderWidget(msg) {
     btn.dataset.action = action;
     if (action === msg.default) btn.classList.add("default");
     btn.textContent = action.replace(/_/g, " ");
-    btn.addEventListener("click", () => resolveWidget(msg.id, action, wrap));
+    btn.addEventListener("click", () => resolveWidget(msg.id, action, wrap, "", widgetToolName));
     actionsRow.appendChild(btn);
   }
 
@@ -637,7 +687,7 @@ function renderWidget(msg) {
     textInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        resolveWidget(msg.id, "reply", wrap, textInput.value);
+        resolveWidget(msg.id, "reply", wrap, textInput.value, widgetToolName);
       }
     });
     body.appendChild(textInput);
@@ -723,7 +773,7 @@ function renderPlanApprovalWidget(msg) {
   approveBtn.focus();
 }
 
-function resolveWidget(widgetId, action, bubbleEl, text = "") {
+function resolveWidget(widgetId, action, bubbleEl, text = "", toolName = "") {
   try {
     port?.postMessage({
       type: "widget-response",
@@ -732,6 +782,10 @@ function resolveWidget(widgetId, action, bubbleEl, text = "") {
       text,
     });
   } catch {}
+  // Persist always_allow pref
+  if (action === "always_allow" && toolName) {
+    setToolPerm(toolName, "always_allow");
+  }
   for (const b of bubbleEl.querySelectorAll(".w-btn")) {
     b.disabled = true;
     if (b.dataset.action === action) b.classList.add("chosen");
@@ -1090,17 +1144,103 @@ sbKairos.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Checkpoint / rewind
 
-sbRewind.addEventListener("click", () => {
-  // Send /checkpoint list as a command
+function showCheckpointModal() {
+  checkpointModal.classList.remove("hidden");
+  checkpointNameInput.value = "";
+  checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+  // Send /checkpoint list
   const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
-  const bubble = addMessage("assistant", "");
-  bubble.parentElement?.classList.add("cursor");
-  pending.set(id, { bubble, streamedText: "" });
-  setBusy(true);
-  setLiveStatus("checkpoint…");
+  checkpointPendingId = id;
+  // Suppress default message rendering by not adding a visible bubble
+  const bubble = document.createElement("div");
+  pending.set(id, { bubble, streamedText: "", silent: true });
   try {
     port?.postMessage({ type: "command", id, raw: "/checkpoint list", backend: backendSel.value });
   } catch {}
+}
+
+function hideCheckpointModal() {
+  checkpointModal.classList.add("hidden");
+  checkpointPendingId = null;
+}
+
+function parseCheckpointList(text) {
+  // Extract checkpoint names from lines like "  · name" or "name" or "- name"
+  const names = [];
+  for (const line of text.split("\n")) {
+    const m = /^\s*[·\-\*]?\s*([^\s][^\n]+)$/.exec(line.trim());
+    if (m && m[1] && !m[1].startsWith("checkpoint") && !m[1].startsWith("No ") && !m[1].startsWith("Usage")) {
+      names.push(m[1].trim());
+    }
+  }
+  return names;
+}
+
+function renderCheckpointList(text) {
+  checkpointList.innerHTML = "";
+  const names = parseCheckpointList(text);
+  if (names.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "checkpoint-empty";
+    empty.textContent = "no checkpoints saved";
+    checkpointList.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = "checkpoint-row";
+    const nameEl = document.createElement("span");
+    nameEl.className = "cp-name";
+    nameEl.textContent = name;
+    const restoreBtn = document.createElement("button");
+    restoreBtn.className = "cp-restore";
+    restoreBtn.textContent = "restore";
+    restoreBtn.addEventListener("click", () => {
+      hideCheckpointModal();
+      sendSilentCommand(`/checkpoint restore ${name}`);
+    });
+    row.append(nameEl, restoreBtn);
+    checkpointList.appendChild(row);
+  }
+}
+
+function sendSilentCommand(raw) {
+  const id = crypto.randomUUID?.() ?? `sc-${Date.now()}`;
+  const bubble = document.createElement("div");
+  pending.set(id, { bubble, streamedText: "", silent: true });
+  try {
+    port?.postMessage({ type: "command", id, raw, backend: backendSel.value });
+  } catch {}
+}
+
+sbRewind.addEventListener("click", showCheckpointModal);
+
+checkpointClose.addEventListener("click", hideCheckpointModal);
+checkpointModal.addEventListener("click", (e) => {
+  if (e.target === checkpointModal) hideCheckpointModal();
+});
+
+checkpointSaveBtn.addEventListener("click", () => {
+  const name = checkpointNameInput.value.trim();
+  if (!name) return;
+  sendSilentCommand(`/checkpoint save ${name}`);
+  checkpointNameInput.value = "";
+  // Refresh list after a short delay
+  setTimeout(() => {
+    const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
+    checkpointPendingId = id;
+    checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+    const bubble = document.createElement("div");
+    pending.set(id, { bubble, streamedText: "", silent: true });
+    try {
+      port?.postMessage({ type: "command", id, raw: "/checkpoint list", backend: backendSel.value });
+    } catch {}
+  }, 600);
+});
+
+checkpointNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); checkpointSaveBtn.click(); }
+  if (e.key === "Escape") { e.preventDefault(); hideCheckpointModal(); }
 });
 
 // ---------------------------------------------------------------------------
@@ -1256,6 +1396,23 @@ function connect() {
       }
       case "done": {
         const st = pending.get(msg.id);
+        // Handle special silent command responses
+        if (st?.silent) {
+          const text = st.streamedText || "";
+          if (msg.id === checkpointPendingId) {
+            renderCheckpointList(text);
+            checkpointPendingId = null;
+          } else if (msg.id === fleetPendingId) {
+            renderFleetContent(null, text);
+            fleetPendingId = null;
+          } else if (msg.id === mcpPendingId) {
+            renderMcpContent(text);
+            mcpPendingId = null;
+          }
+          pending.delete(msg.id);
+          if (pending.size === 0) { setBusy(false); setLiveStatus(""); }
+          break;
+        }
         if (st) {
           st.bubble.parentElement?.classList.remove("cursor");
           if (st.streamedText) {
@@ -1288,11 +1445,40 @@ function connect() {
         break;
       }
       case "widget": {
-        renderWidget(msg);
+        // For tool_confirm, check if the user has an always_allow perm stored.
+        if (msg.kind === "tool_confirm") {
+          const toolName = msg.detail?.tool_name || "";
+          getToolPerm(toolName).then((perm) => {
+            if (perm === "always_allow") {
+              // Auto-approve without showing widget
+              try {
+                port?.postMessage({
+                  type: "widget-response",
+                  widget_id: msg.id,
+                  action: "allow",
+                  text: "",
+                });
+              } catch {}
+            } else {
+              renderWidget(msg);
+            }
+          });
+        } else {
+          renderWidget(msg);
+        }
         break;
       }
       case "diag": {
-        showDiagOverlay(msg);
+        // If the fleet overlay is open and waiting for diag data, populate it
+        if (!fleetOverlay.classList.contains("hidden") && fleetPendingId === null) {
+          renderFleetContent(msg, null);
+        } else {
+          showDiagOverlay(msg);
+        }
+        break;
+      }
+      case "warning": {
+        showWarningBanner(msg.message || "Warning");
         break;
       }
       case "auth_required": {
@@ -1634,6 +1820,21 @@ input.addEventListener("blur", () => {
 document.addEventListener("keydown", (e) => {
   // Esc: close overlays / stop generation
   if (e.key === "Escape") {
+    if (!checkpointModal.classList.contains("hidden")) {
+      e.preventDefault();
+      hideCheckpointModal();
+      return;
+    }
+    if (!fleetOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      hideFleetOverlay();
+      return;
+    }
+    if (!mcpOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      hideMcpOverlay();
+      return;
+    }
     if (!diagOverlay.classList.contains("hidden")) {
       e.preventDefault();
       hideDiagOverlay();
@@ -1835,6 +2036,19 @@ function showDiagOverlay(data) {
   }
 
   diagContent.appendChild(table);
+
+  // "Clear tool permissions" action link
+  const clearLink = document.createElement("button");
+  clearLink.type = "button";
+  clearLink.textContent = "clear tool permissions";
+  clearLink.style.cssText = "margin-top:10px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
+  clearLink.addEventListener("click", async () => {
+    await clearToolPerms();
+    clearLink.textContent = "cleared ✓";
+    setTimeout(() => { clearLink.textContent = "clear tool permissions"; }, 1500);
+  });
+  diagContent.appendChild(clearLink);
+
   diagOverlay.classList.remove("hidden");
 }
 
@@ -1846,6 +2060,251 @@ diagClose.addEventListener("click", hideDiagOverlay);
 diagOverlay.addEventListener("click", (e) => {
   if (e.target === diagOverlay) hideDiagOverlay();
 });
+
+// ---------------------------------------------------------------------------
+// Warning banner (Feature 4)
+
+function showWarningBanner(message) {
+  warningText.textContent = message;
+  warningBanner.classList.remove("hidden");
+}
+
+warningBanner.querySelector(".warning-dismiss").addEventListener("click", () => {
+  warningBanner.classList.add("hidden");
+});
+
+// ---------------------------------------------------------------------------
+// Fleet overlay (Feature 3)
+
+function showFleetOverlay() {
+  fleetOverlay.classList.remove("hidden");
+  fleetContent.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+  // Send /agent list command
+  const id = crypto.randomUUID?.() ?? `fl-${Date.now()}`;
+  fleetPendingId = id;
+  const bubble = document.createElement("div");
+  pending.set(id, { bubble, streamedText: "", silent: true });
+  try {
+    port?.postMessage({ type: "command", id, raw: "/agent list", backend: backendSel.value });
+  } catch {
+    // Fallback: request diag data
+    port?.postMessage({ type: "diag", id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
+  }
+}
+
+function hideFleetOverlay() {
+  fleetOverlay.classList.add("hidden");
+  fleetPendingId = null;
+}
+
+function renderFleetContent(diagData, agentListText) {
+  fleetContent.innerHTML = "";
+
+  // If we have diag data, render a card grid
+  if (diagData) {
+    const cards = document.createElement("div");
+    cards.className = "fleet-cards";
+    const add = (key, val) => {
+      const card = document.createElement("div");
+      card.className = "fleet-card";
+      const k = document.createElement("div");
+      k.className = "fleet-card-key";
+      k.textContent = key;
+      const v = document.createElement("div");
+      v.className = "fleet-card-val";
+      v.textContent = String(val ?? "—");
+      card.append(k, v);
+      cards.appendChild(card);
+    };
+    add("kairos", diagData.kairos?.active ? "on" : "off");
+    add("backend", diagData.backend || "—");
+    add("workspace", diagData.workspace || "(none)");
+    add("tools", diagData.tool_count ?? "—");
+    add("turns", diagData.turn_count ?? "—");
+    add("session active", diagData.session_active ? "yes" : "no");
+    fleetContent.appendChild(cards);
+    return;
+  }
+
+  // Parse /agent list text
+  if (agentListText) {
+    const lines = agentListText.split("\n").map((l) => l.trim()).filter(Boolean);
+    const agents = lines.filter((l) => !l.startsWith("No ") && !l.startsWith("Usage") && !l.startsWith("#"));
+    if (agents.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "mcp-empty";
+      empty.textContent = "no agents running";
+      fleetContent.appendChild(empty);
+      return;
+    }
+    for (const line of agents) {
+      const row = document.createElement("div");
+      row.className = "fleet-agent-row";
+      const name = document.createElement("span");
+      name.className = "fleet-agent-name";
+      name.textContent = line;
+      const stat = document.createElement("span");
+      stat.className = "fleet-agent-status";
+      stat.textContent = "active";
+      row.append(name, stat);
+      fleetContent.appendChild(row);
+    }
+  }
+}
+
+sbFleet.addEventListener("click", showFleetOverlay);
+fleetClose.addEventListener("click", hideFleetOverlay);
+fleetOverlay.addEventListener("click", (e) => {
+  if (e.target === fleetOverlay) hideFleetOverlay();
+});
+
+// ---------------------------------------------------------------------------
+// MCP overlay (Feature 6)
+
+function showMcpOverlay() {
+  mcpOverlay.classList.remove("hidden");
+  mcpContent.innerHTML = '<div class="mcp-empty">loading…</div>';
+  const id = crypto.randomUUID?.() ?? `mcp-${Date.now()}`;
+  mcpPendingId = id;
+  const bubble = document.createElement("div");
+  pending.set(id, { bubble, streamedText: "", silent: true });
+  try {
+    port?.postMessage({ type: "command", id, raw: "/mcp list", backend: backendSel.value });
+  } catch {}
+}
+
+function hideMcpOverlay() {
+  mcpOverlay.classList.add("hidden");
+  mcpPendingId = null;
+}
+
+function renderMcpContent(text) {
+  mcpContent.innerHTML = "";
+  if (!text || !text.trim()) {
+    const empty = document.createElement("div");
+    empty.className = "mcp-empty";
+    empty.textContent = "no MCP servers connected";
+    mcpContent.appendChild(empty);
+    return;
+  }
+  // Each line may describe a server: parse "name [status] [tools: N]"
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const servers = lines.filter((l) => !l.startsWith("Usage") && !l.startsWith("#") && !l.startsWith("No "));
+  if (servers.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "mcp-empty";
+    empty.textContent = "no MCP servers connected";
+    mcpContent.appendChild(empty);
+    return;
+  }
+  for (const line of servers) {
+    const card = document.createElement("div");
+    card.className = "mcp-server-card";
+    const name = document.createElement("div");
+    name.className = "mcp-server-name";
+    // Try to extract name and status
+    const parts = line.split(/\s{2,}|\t/);
+    name.textContent = parts[0] || line;
+    card.appendChild(name);
+    if (parts.length > 1) {
+      const detail = document.createElement("div");
+      detail.className = "mcp-server-detail";
+      detail.textContent = parts.slice(1).join("  ");
+      card.appendChild(detail);
+    }
+    mcpContent.appendChild(card);
+  }
+}
+
+sbMcp.addEventListener("click", showMcpOverlay);
+mcpClose.addEventListener("click", hideMcpOverlay);
+mcpOverlay.addEventListener("click", (e) => {
+  if (e.target === mcpOverlay) hideMcpOverlay();
+});
+
+mcpDiscoverBtn.addEventListener("click", () => {
+  mcpContent.innerHTML = '<div class="mcp-empty">discovering…</div>';
+  const id = crypto.randomUUID?.() ?? `mcp-${Date.now()}`;
+  mcpPendingId = id;
+  const bubble = document.createElement("div");
+  pending.set(id, { bubble, streamedText: "", silent: true });
+  try {
+    port?.postMessage({ type: "command", id, raw: "/mcp discover", backend: backendSel.value });
+  } catch {}
+});
+
+// ---------------------------------------------------------------------------
+// Voice input (Feature 5)
+
+{
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    micBtn?.classList.add("hidden");
+  } else {
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language;
+    let recording = false;
+    let interimSpan = null;
+
+    function clearInterim() {
+      if (interimSpan) { interimSpan.remove(); interimSpan = null; }
+    }
+
+    micBtn.addEventListener("click", () => {
+      if (recording) {
+        recognition.stop();
+        recording = false;
+        micBtn.classList.remove("recording");
+        clearInterim();
+      } else {
+        try {
+          recognition.start();
+          recording = true;
+          micBtn.classList.add("recording");
+        } catch {}
+      }
+    });
+
+    recognition.onresult = (e) => {
+      let interim = "";
+      let final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          final += e.results[i][0].transcript;
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      if (final) {
+        clearInterim();
+        input.value = (input.value + " " + final).trim();
+        autosize();
+      } else if (interim) {
+        // Show interim result as a ghost preview
+        clearInterim();
+        interimSpan = document.createElement("span");
+        interimSpan.className = "voice-interim";
+        interimSpan.textContent = interim;
+        interimSpan.style.cssText = "color:var(--fg-ghost);font-style:italic;font-size:11px;margin-left:4px;";
+        status.parentElement?.insertBefore(interimSpan, status.nextSibling);
+      }
+    };
+
+    recognition.onerror = () => {
+      recording = false;
+      micBtn.classList.remove("recording");
+      clearInterim();
+    };
+
+    recognition.onend = () => {
+      recording = false;
+      micBtn.classList.remove("recording");
+      clearInterim();
+    };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Export conversation
