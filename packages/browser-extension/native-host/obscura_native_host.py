@@ -331,7 +331,7 @@ _current_msg_id: str = ""  # contextvar-lite: set before send(), read in handle(
 class BrowserRenderer:
     """Implements ``RendererProtocol``. Emits frames to the side panel."""
 
-    def __init__(self, _streaming_status: Any = None) -> None:
+    def __init__(self, **_kwargs: Any) -> None:
         self._acc: list[str] = []
         self._thinking: list[str] = []
         self._last_thinking: str = ""
@@ -392,7 +392,7 @@ class BrowserRenderer:
                 try:
                     result = json.dumps(cast("dict[str, Any] | list[Any]", result), ensure_ascii=False, indent=2)
                 except Exception:
-                    result = str(result)
+                    result = str(cast("Any", result))
             is_error = bool(getattr(event, "is_error", False))
             _post(
                 {
@@ -445,9 +445,7 @@ class BrowserRenderer:
     def get_last_thinking(self) -> str:
         return self._last_thinking
 
-    def set_session_context(
-        self, _title: str = "", _model: str = "", _ctx_pct: int = 0
-    ) -> None:
+    def set_session_context(self, **_kwargs: Any) -> None:
         # No-op: the side panel has its own status bar.
         pass
 
@@ -890,6 +888,32 @@ async def _handle_diag(msg: dict[str, Any]) -> None:
     await _write_frame(diag)
 
 
+async def _handle_ping(msg: dict[str, Any]) -> None:
+    msg_id = str(msg.get("id") or "")
+    await _write_frame({"type": "pong", "id": msg_id})
+
+
+async def _handle_browser_tool_response(msg: dict[str, Any]) -> None:
+    rid = msg.get("id") or ""
+    if isinstance(rid, str):
+        _resolve_browser_tool(
+            rid,
+            bool(msg.get("ok", False)),
+            msg.get("result"),
+            str(msg.get("error") or ""),
+        )
+
+
+async def _handle_widget_response(msg: dict[str, Any]) -> None:
+    wid = msg.get("widget_id") or ""
+    if isinstance(wid, str):
+        _resolve_widget(
+            wid,
+            str(msg.get("action") or ""),
+            str(msg.get("text") or ""),
+        )
+
+
 async def _handle_sessions(msg: dict[str, Any]) -> None:
     """List recent sessions for the session picker UI."""
     msg_id = str(msg.get("id") or "")
@@ -1062,10 +1086,37 @@ def _release_pid_lock() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Message routing table
+#
+# Each entry: (handler_fn, requires_auth, track_in_active_sends)
+# "shutdown" is handled separately because it breaks the loop.
+
+# (handler_fn, requires_auth, track_in_active_sends)
+_MSG_HANDLERS: dict[str, tuple[Any, bool, bool]] = {}
+
+
+def _register_handlers() -> None:
+    global _MSG_HANDLERS
+    _MSG_HANDLERS = {
+        "send":                 (_handle_send,                 True,  True),
+        "command":              (_handle_command,              True,  True),
+        "cancel":               (_handle_cancel,               False, False),
+        "kairos":               (_handle_kairos,               False, False),
+        "diag":                 (_handle_diag,                 False, False),
+        "list_sessions":        (_handle_sessions,             False, False),
+        "ping":                 (_handle_ping,                 False, False),
+        "browser-tool-response": (_handle_browser_tool_response, False, False),
+        "widget-response":      (_handle_widget_response,      False, False),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 
 
 async def _main() -> None:
+    _register_handlers()
+
     _install_widget_broker()
     _install_renderer_factory()
     _install_console_proxy()
@@ -1107,8 +1158,21 @@ async def _main() -> None:
             msg_type = msg.get("type")
             msg_id = str(msg.get("id") or "")
 
-            # Auth gate: check on send/command messages when auth is enabled.
-            if msg_type in ("send", "command") and not _check_auth(msg):
+            # Shutdown is handled inline because it breaks the loop.
+            if msg_type == "shutdown":
+                log.info("shutdown requested")
+                for t in list(_active_sends.values()):
+                    t.cancel()
+                break
+
+            spec = _MSG_HANDLERS.get(msg_type)
+            if spec is None:
+                log.debug("unhandled message type: %r", msg_type)
+                continue
+
+            handler_fn, requires_auth, track = spec
+
+            if requires_auth and not _check_auth(msg):
                 await _write_frame(
                     {
                         "type": "auth_required",
@@ -1118,51 +1182,10 @@ async def _main() -> None:
                 )
                 continue
 
-            if msg_type == "send":
-                task = asyncio.create_task(_handle_send(msg))
-                if msg_id:
-                    _active_sends[msg_id] = task
-                    task.add_done_callback(lambda __t, k=msg_id: _active_sends.pop(k, None))
-            elif msg_type == "command":
-                task = asyncio.create_task(_handle_command(msg))
-                if msg_id:
-                    _active_sends[msg_id] = task
-                    task.add_done_callback(lambda __t, k=msg_id: _active_sends.pop(k, None))
-            elif msg_type == "cancel":
-                asyncio.create_task(_handle_cancel(msg))
-            elif msg_type == "kairos":
-                asyncio.create_task(_handle_kairos(msg))
-            elif msg_type == "diag":
-                asyncio.create_task(_handle_diag(msg))
-            elif msg_type == "list_sessions":
-                asyncio.create_task(_handle_sessions(msg))
-            elif msg_type == "ping":
-                await _write_frame({"type": "pong", "id": msg_id})
-            elif msg_type == "browser-tool-response":
-                rid = msg.get("id") or ""
-                if isinstance(rid, str):
-                    _resolve_browser_tool(
-                        rid,
-                        bool(msg.get("ok", False)),
-                        msg.get("result"),
-                        str(msg.get("error") or ""),
-                    )
-            elif msg_type == "widget-response":
-                wid = msg.get("widget_id") or ""
-                if isinstance(wid, str):
-                    _resolve_widget(
-                        wid,
-                        str(msg.get("action") or ""),
-                        str(msg.get("text") or ""),
-                    )
-            elif msg_type == "shutdown":
-                log.info("shutdown requested")
-                # Cancel any in-flight sends.
-                for t in list(_active_sends.values()):
-                    t.cancel()
-                break
-            else:
-                log.info("unhandled message type: %r", msg_type)
+            task = asyncio.create_task(handler_fn(msg))
+            if track and msg_id:
+                _active_sends[msg_id] = task
+                task.add_done_callback(lambda _, k=msg_id: _active_sends.pop(k, None))
     finally:
         _release_pid_lock()
 
