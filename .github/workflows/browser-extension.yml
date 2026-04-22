@@ -29,5 +29,33 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run browser extension tests
+      - name: Run browser extension tests (Python)
         run: uv run pytest tests/browser_extension/ -m browser -v
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install JS dependencies
+        working-directory: packages/browser-extension
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax check panel + SW
+        working-directory: packages/browser-extension
+        run: npm run check
+
+      - name: Run JS unit tests (Vitest)
+        working-directory: packages/browser-extension
+        run: npm test
+
+      - name: Install Xvfb for headful Chrome on CI
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Run E2E smoke tests (Puppeteer, layer 1)
+        working-directory: packages/browser-extension
+        # Puppeteer's bundled Chrome for Testing blocks native messaging
+        # under CI; layer 1 covers manifest/JS/element-id regressions
+        # without needing the host chain. Layer 2 (full handshake) is
+        # gated on OBSCURA_E2E_FULL=1 and only makes sense locally.
+        run: xvfb-run --auto-servernum npm run test:e2e

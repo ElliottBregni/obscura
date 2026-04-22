@@ -91,11 +91,17 @@ const mcpDiscoverBtn = $("#mcp-discover-btn");
 const mcpContent = $("#mcp-content");
 const micBtn = $("#mic-btn");
 
+// Storage keys. Bump STORAGE_VERSION any time a stored schema changes and
+// add a migration in `migrateStorage()`. chrome.storage.local is already
+// per-Chrome-profile, so these keys don't need profile scoping.
+const STORAGE_VERSION = 1;
+const STORAGE_VERSION_KEY = "obscura.storage.version";
 const SETTINGS_KEY = "obscura.settings.v1";
 const TRANSCRIPT_KEY = "obscura.transcript.v1";
 const SESSIONS_KEY = "obscura.sessions.v1";
 const THEME_KEY = "obscura_theme";
 const TOOL_PERMS_KEY = "obscura_tool_perms";
+const PROFILE_ID_KEY = "obscura.profile_id";
 
 let port = null;
 let sessionId = null;            // per-panel conversation id (from host)
@@ -409,40 +415,18 @@ function setBusy(v) {
 // Minimal markdown → DOM renderer.
 // Zero-dep; handles fenced code, inline code, bold, italic, links, lists.
 
-function escHtml(s) {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]),
-  );
-}
+import { escHtml, markdownToHtml } from "./markdown.js";
+import { withProfileId } from "./messaging.js";
 
 function renderMarkdown(target, raw) {
   // Freeze the source so the transcript saver can grab original markdown.
   target.parentElement.dataset.raw = raw;
 
-  // Tokenize on fenced code blocks first so we don't mangle their contents.
-  const parts = [];
-  const fenceRe = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g;
-  let lastIdx = 0;
-  let m;
-  while ((m = fenceRe.exec(raw)) !== null) {
-    if (m.index > lastIdx) parts.push({ kind: "text", raw: raw.slice(lastIdx, m.index) });
-    parts.push({ kind: "code", lang: m[1] || "", raw: m[2] });
-    lastIdx = fenceRe.lastIndex;
-  }
-  if (lastIdx < raw.length) parts.push({ kind: "text", raw: raw.slice(lastIdx) });
+  // Delegate the pure transform to ./markdown.js (covered by vitest).
+  target.innerHTML = markdownToHtml(raw);
 
-  let html = "";
-  for (const p of parts) {
-    if (p.kind === "code") {
-      const langLabel = p.lang ? `<span class="code-lang">${escHtml(p.lang)}</span>` : "";
-      html += `<pre class="code">${langLabel}<code>${escHtml(p.raw)}</code></pre>`;
-    } else {
-      html += renderInline(p.raw);
-    }
-  }
-  target.innerHTML = html;
-
-  // Add copy buttons to all code blocks.
+  // Attach live copy buttons to each code block — DOM side effects stay
+  // here because markdown.js is deliberately DOM-free.
   for (const pre of target.querySelectorAll("pre.code")) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -455,61 +439,6 @@ function renderMarkdown(target, raw) {
     });
     pre.appendChild(btn);
   }
-}
-
-function renderInline(text) {
-  const lines = text.split("\n");
-  let out = "";
-  let inList = false;
-
-  const finishList = () => {
-    if (inList) { out += "</ul>"; inList = false; }
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const listMatch = /^\s*[-*]\s+(.*)$/.exec(line);
-    const headMatch = /^(#{1,6})\s+(.*)$/.exec(line);
-
-    if (listMatch) {
-      if (!inList) { out += "<ul>"; inList = true; }
-      out += `<li>${inlineTokens(listMatch[1])}</li>`;
-      continue;
-    }
-    finishList();
-
-    if (headMatch) {
-      const level = Math.min(headMatch[1].length, 6);
-      out += `<h${level}>${inlineTokens(headMatch[2])}</h${level}>`;
-      continue;
-    }
-
-    if (line.trim() === "") {
-      out += "<br>";
-    } else {
-      out += inlineTokens(line) + "<br>";
-    }
-  }
-  finishList();
-  return out;
-}
-
-function inlineTokens(s) {
-  // Order matters: code first (inside-out escaping), then links, then emphasis.
-  s = escHtml(s);
-  // `inline code`
-  s = s.replace(/`([^`\n]+)`/g, (_m, g1) => `<code class="inline">${g1}</code>`);
-  // [text](url)
-  s = s.replace(
-    /\[([^\]]+)\]\((https?:[^\s)]+)\)/g,
-    (_m, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`,
-  );
-  // **bold**
-  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-  // *italic* / _italic_
-  s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g, "$1<em>$2</em>");
-  s = s.replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?]|$)/g, "$1<em>$2</em>");
-  return s;
 }
 
 // ---------------------------------------------------------------------------
@@ -1376,9 +1305,28 @@ function hideDisconnectBanner() {
 // ---------------------------------------------------------------------------
 // Port wiring
 
+/**
+ * Wrap ``port.postMessage`` so every outbound frame is tagged with
+ * ``profile_id`` without touching each call site. The raw Chrome port
+ * is not reused anywhere else, so this is safe.
+ */
+function wrapPortForProfileId(p) {
+  const origPost = p.postMessage.bind(p);
+  p.postMessage = (msg) => {
+    try {
+      return origPost(tagMessage(msg));
+    } catch (err) {
+      // Fall back to the untagged message if tagging threw — never break
+      // the wire because of instrumentation.
+      return origPost(msg);
+    }
+  };
+}
+
 function connect() {
   hideDisconnectBanner();
   port = chrome.runtime.connect({ name: "sidepanel" });
+  wrapPortForProfileId(port);
 
   port.onMessage.addListener((msg) => {
     if (!msg || typeof msg !== "object") return;
@@ -2512,12 +2460,65 @@ sbTheme?.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Storage migration
+//
+// When a stored schema changes, bump STORAGE_VERSION and add a migration
+// step here. Never silently rewrite: a teammate pulling without a
+// migration will see their panel state reset on next launch, so the
+// commit that bumps the version MUST ship the migration.
+
+async function migrateStorage() {
+  try {
+    const store = await chrome.storage.local.get(STORAGE_VERSION_KEY);
+    const current = store[STORAGE_VERSION_KEY] ?? 0;
+    if (current === STORAGE_VERSION) return;
+
+    // Future: for (let v = current + 1; v <= STORAGE_VERSION; v++) { … }
+
+    await chrome.storage.local.set({ [STORAGE_VERSION_KEY]: STORAGE_VERSION });
+  } catch (err) {
+    // Logged-only: we never block boot on storage problems.
+    console.warn("[obscura] storage migration failed", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Profile id — stable UUID generated the first time the extension runs in
+// this Chrome profile. Attached to every message so the host can log it;
+// the host uses it only for diagnostics (multi-profile collisions).
+
+let profileId = null;
+
+async function ensureProfileId() {
+  try {
+    const store = await chrome.storage.local.get(PROFILE_ID_KEY);
+    if (store[PROFILE_ID_KEY]) {
+      profileId = store[PROFILE_ID_KEY];
+      return;
+    }
+    profileId = crypto.randomUUID?.() ?? `p-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    await chrome.storage.local.set({ [PROFILE_ID_KEY]: profileId });
+  } catch {
+    // If storage fails we fall back to ephemeral — better than blocking.
+    profileId = `p-${Date.now()}`;
+  }
+}
+
+// Tag an outbound message with the current profile id. Thin wrapper
+// around the pure helper in ./messaging.js.
+const tagMessage = (msg) => withProfileId(msg, profileId);
+
+// ---------------------------------------------------------------------------
 // Boot
 
-loadTheme();
-loadSettings();
-loadSessionPicker();
-// Per-tab state is loaded via tab_context message from background after connect().
-// We also try to load it eagerly if chromeTabId is already known (e.g. reopened panel).
-loadTabState();
-connect();
+(async () => {
+  await migrateStorage();
+  await ensureProfileId();
+  loadTheme();
+  loadSettings();
+  loadSessionPicker();
+  // Per-tab state is loaded via tab_context message from background after connect().
+  // We also try to load it eagerly if chromeTabId is already known (e.g. reopened panel).
+  loadTabState();
+  connect();
+})();

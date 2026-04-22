@@ -1,0 +1,19 @@
+{
+  "name": "obscura-browser-extension",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome side-panel extension for the Obscura agent runtime.",
+  "scripts": {
+    "check": "node --check src/sidepanel/sidepanel.js && node --check src/background.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.js"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0",
+    "jsdom": "^24.1.0",
+    "@vitest/ui": "^1.6.0",
+    "puppeteer": "^22.15.0"
+  }
+}
