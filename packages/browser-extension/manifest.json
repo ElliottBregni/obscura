@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Obscura",
+  "short_name": "Obscura",
+  "description": "Chat with Obscura from any tab. Side-panel agent with optional page context.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0ZIwvphSoaTVEph8C7ekrb2UnNdoVNC81ux8RGd5mVOMoChTKb/kgsIswYSMw+gbcftKfqKYC/m7BY8AXGHRH3W6whykXr5rblsIMEm1uc0PNtQIM7Rn8tqmobkHnlQo+q+8SMgUU7C6mHh14/YvZbIhMsxAXjs0ba4rBL27wYLG8mro8ds7RTm2YBbycxu5eImOKSxoOmgetE95tl4r+Q7ad4dXM3/vLRWmn5TVQUFswWfzqwFP/mqS7yOnrDpdNKXB5OwpDb+5wu+mrz2ShQ4Lddk2sGaRp5QwZhRNAN4nKK/zMiMK/Cc9o2lVdIiThWkwV7ZFb4yd8PFNb4exQwIDAQAB",
+  "action": {
+    "default_title": "Open Obscura"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "permissions": [
+    "sidePanel",
+    "nativeMessaging",
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
