@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>obscura</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="title">obscura</div>
+      <div class="controls">
+        <select id="backend" title="Backend">
+          <option value="copilot" selected>copilot</option>
+          <option value="claude">claude</option>
+          <option value="openai">openai</option>
+          <option value="codex">codex</option>
+          <option value="moonshot">moonshot</option>
+          <option value="localllm">localllm</option>
+        </select>
+        <select id="workspace" title="Workspace">
+          <option value="">(none)</option>
+        </select>
+        <select id="session-picker" title="Recent sessions">
+          <option value="">current</option>
+        </select>
+        <label class="toggle" title="Attach the current tab's URL, title, and selection">
+          <input type="checkbox" id="include-context" checked />
+          <span>ctx</span>
+        </label>
+        <button id="reload-host" type="button" title="Restart the native host (picks up env / launcher changes)">↻</button>
+        <button id="clear" type="button" title="New session">new</button>
+      </div>
+    </header>
+
+    <div id="tab-strip" class="tab-strip">
+      <!-- tabs rendered dynamically -->
+    </div>
+
+    <main id="log" class="log" aria-live="polite"></main>
+
+    <form id="composer" class="composer">
+      <textarea
+        id="prompt"
+        rows="1"
+        spellcheck="false"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        placeholder="ask obscura…"
+        autofocus
+      ></textarea>
+      <div id="drop-preview" class="drop-preview" hidden></div>
+      <div class="row">
+        <span id="status" class="status"></span>
+        <span class="hint"><kbd>⌘</kbd>+<kbd>↵</kbd> to send · <kbd>?</kbd> shortcuts</span>
+        <button id="stop" type="button" class="stop" hidden title="Stop (Esc)">stop</button>
+        <button id="send" type="submit">send</button>
+      </div>
+    </form>
+
+    <footer class="statusbar" id="statusbar">
+      <span class="sb-item" id="sb-backend">—</span>
+      <span class="sb-sep">·</span>
+      <span class="sb-item" id="sb-host">host: disconnected</span>
+      <span class="sb-sep">·</span>
+      <span class="sb-item" id="sb-git">—</span>
+      <span class="sb-sep">·</span>
+      <button id="sb-kairos" class="sb-kairos" type="button" title="Toggle KAIROS daemon">kairos</button>
+      <span class="sb-sep">·</span>
+      <button id="sb-rewind" class="sb-rewind" type="button" title="Checkpoint / rewind">⟲</button>
+      <span class="sb-sep">·</span>
+      <button id="sb-diag" class="sb-diag" type="button" title="Diagnostics">diag</button>
+      <span class="sb-sep">·</span>
+      <button id="sb-export" class="sb-export" type="button" title="Export conversation">⬇</button>
+    </footer>
+
+    <!-- Keyboard shortcuts overlay -->
+    <div id="shortcuts-overlay" class="shortcuts-overlay">
+      <div class="shortcuts-card">
+        <h3>keyboard shortcuts</h3>
+        <table>
+          <tr><td><kbd>⌘</kbd>+<kbd>↵</kbd></td><td>Send message</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>K</kbd></td><td>New session</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>T</kbd></td><td>New tab</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>W</kbd></td><td>Close tab</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Stop generation / close overlay</td></tr>
+          <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Navigate prompt history</td></tr>
+          <tr><td><kbd>Tab</kbd></td><td>Accept autocomplete</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Slash commands</td></tr>
+          <tr><td><kbd>$</kbd></td><td>Skills</td></tr>
+          <tr><td><kbd>@</kbd></td><td>User commands</td></tr>
+          <tr><td><kbd>?</kbd></td><td>This help</td></tr>
+        </table>
+        <button id="shortcuts-close" type="button">close</button>
+      </div>
+    </div>
+
+    <!-- Diagnostics overlay -->
+    <div id="diag-overlay" class="diag-overlay hidden">
+      <div class="diag-panel">
+        <div class="diag-header">
+          <span class="diag-title">diagnostics</span>
+          <button id="diag-close" class="diag-close" type="button">×</button>
+        </div>
+        <div id="diag-content" class="diag-content"></div>
+      </div>
+    </div>
+
+    <!-- Auth gate overlay -->
+    <div id="auth-gate" class="auth-gate hidden">
+      <div class="auth-panel">
+        <div class="auth-title">authentication required</div>
+        <input id="auth-token-input" type="password" placeholder="Enter auth token" autocomplete="off" />
+        <button id="auth-submit" type="button">submit</button>
+      </div>
+    </div>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
