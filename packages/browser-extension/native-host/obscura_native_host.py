@@ -55,7 +55,13 @@ except Exception:
 
 log = logging.getLogger("obscura.browser-host")
 
-VERSION = "0.3.0"  # plan widgets, diagnostics, workspace discovery, auth, sessions
+VERSION = "0.4.0"  # multi-profile safety: per-host pid files, profile_id tagging
+
+# Browser profile id — learned from the first frame that carries one.
+# Panels generate a stable UUID per Chrome profile and send it on every
+# send / command / ping message. Host logs it so teammates sharing a
+# machine can tell whose session is whose.
+_profile_id: str | None = None
 
 log.info(
     "boot: python=%s version=%s cwd=%s pid=%d",
@@ -1049,29 +1055,66 @@ def _available_workspaces() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Multi-profile PID lock
+# Multi-profile PID tracking
+#
+# Each Chrome profile spawns its own native host process. Using a single
+# shared `browser-host.pid` file produces bogus "another host is running"
+# warnings when two profiles are legitimately both running. Instead we
+# write `browser-hosts/<pid>.pid` per-process — collisions are impossible,
+# and `obscura-browser status` can enumerate the directory.
 
-_pid_file = _LOG_DIR.parent / "browser-host.pid"
+_pid_dir = _LOG_DIR.parent / "browser-hosts"
+_pid_file = _pid_dir / f"{os.getpid()}.pid"
 
 
+# Each running host has its own pid file, so false-positive collisions are
+# gone. ``peer_hosts()`` surfaces the other live hosts for diagnostics —
+# two pids is expected when two Chrome profiles are open.
 _multi_instance_detected = False
 
 
+def _peer_hosts() -> list[int]:
+    """Return PIDs of other live obscura host processes (not us)."""
+    try:
+        if not _pid_dir.is_dir():
+            return []
+        peers: list[int] = []
+        for f in _pid_dir.glob("*.pid"):
+            try:
+                pid = int(f.stem)
+            except ValueError:
+                continue
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, 0)
+                peers.append(pid)
+            except (OSError, ProcessLookupError):
+                # stale — clean up proactively so `obscura-browser status`
+                # doesn't lie.
+                try:
+                    f.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        return peers
+    except Exception:
+        return []
+
+
 async def _acquire_pid_lock() -> None:
-    """Write PID file. Warn if another host is running."""
+    """Write our PID file and log any peer hosts for observability."""
     global _multi_instance_detected
     try:
-        if _pid_file.exists():
-            old_pid_str = _pid_file.read_text().strip()
-            if old_pid_str:
-                old_pid = int(old_pid_str)
-                try:
-                    os.kill(old_pid, 0)  # check if alive
-                    log.warning("another browser host is running (pid=%d)", old_pid)
-                    _multi_instance_detected = True
-                except (OSError, ProcessLookupError):
-                    pass  # stale
+        _pid_dir.mkdir(parents=True, exist_ok=True)
         _pid_file.write_text(str(os.getpid()))
+        peers = _peer_hosts()
+        if peers:
+            log.info(
+                "peer browser hosts running: %s (one per Chrome profile is "
+                "expected)",
+                peers,
+            )
+            _multi_instance_detected = True
     except Exception:
         log.debug("pid lock failed", exc_info=True)
 
@@ -1092,22 +1135,18 @@ def _release_pid_lock() -> None:
 # "shutdown" is handled separately because it breaks the loop.
 
 # (handler_fn, requires_auth, track_in_active_sends)
-_MSG_HANDLERS: dict[str, tuple[Any, bool, bool]] = {}
-
-
-def _register_handlers() -> None:
-    global _MSG_HANDLERS
-    _MSG_HANDLERS = {
-        "send":                 (_handle_send,                 True,  True),
-        "command":              (_handle_command,              True,  True),
-        "cancel":               (_handle_cancel,               False, False),
-        "kairos":               (_handle_kairos,               False, False),
-        "diag":                 (_handle_diag,                 False, False),
-        "list_sessions":        (_handle_sessions,             False, False),
-        "ping":                 (_handle_ping,                 False, False),
-        "browser-tool-response": (_handle_browser_tool_response, False, False),
-        "widget-response":      (_handle_widget_response,      False, False),
-    }
+# (handler_fn, requires_auth, track_in_active_sends)
+_MSG_HANDLERS: dict[str, tuple[Any, bool, bool]] = {
+    "send":                  (_handle_send,                  True,  True),
+    "command":               (_handle_command,               True,  True),
+    "cancel":                (_handle_cancel,                False, False),
+    "kairos":                (_handle_kairos,                False, False),
+    "diag":                  (_handle_diag,                  False, False),
+    "list_sessions":         (_handle_sessions,              False, False),
+    "ping":                  (_handle_ping,                  False, False),
+    "browser-tool-response": (_handle_browser_tool_response, False, False),
+    "widget-response":       (_handle_widget_response,       False, False),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1115,8 +1154,6 @@ def _register_handlers() -> None:
 
 
 async def _main() -> None:
-    _register_handlers()
-
     _install_widget_broker()
     _install_renderer_factory()
     _install_console_proxy()
@@ -1136,15 +1173,22 @@ async def _main() -> None:
             "at_commands": _available_at_commands(),
             "workspaces": _available_workspaces(),
             "pid": os.getpid(),
+            "peers": _peer_hosts(),
         }
     )
 
     if _multi_instance_detected:
+        peers = _peer_hosts()
         await _write_frame(
             {
                 "type": "warning",
                 "code": "multi_instance",
-                "message": "Another Obscura session is already running.",
+                "message": (
+                    f"Found {len(peers)} other obscura host(s) running "
+                    "(one per Chrome profile is normal). PIDs: "
+                    + ", ".join(str(p) for p in peers)
+                ),
+                "peers": peers,
             }
         )
 
@@ -1155,8 +1199,20 @@ async def _main() -> None:
             msg = await loop.run_in_executor(None, _read_frame)
             if msg is None:
                 break
-            msg_type = msg.get("type")
+            msg_type: str = str(msg.get("type") or "")
             msg_id = str(msg.get("id") or "")
+
+            # Capture profile_id from the first frame that carries one.
+            # Every subsequent log line is tagged so teammates sharing a
+            # machine can correlate their session against this host.
+            pid_in_msg = msg.get("profile_id")
+            if isinstance(pid_in_msg, str) and pid_in_msg:
+                global _profile_id
+                if _profile_id != pid_in_msg:
+                    _profile_id = pid_in_msg
+                    log.info(
+                        "profile_id=%s (host pid=%d)", _profile_id, os.getpid()
+                    )
 
             # Shutdown is handled inline because it breaks the loop.
             if msg_type == "shutdown":

@@ -52,6 +52,19 @@ helm/obscura/charts/
 helm/obscura/Chart.lock
 scripts/test_private_key.pem
 scripts/test_jwks.json
+
+# Browser-extension signing keys.
+# The public key + derived extension id are committed so the unpacked
+# extension has a stable identity (.keys/EXTENSION_ID, extension.pub.b64).
+# The private key must NEVER be committed — anyone with it can sign a
+# malicious CRX that Chrome treats as equivalent to ours.
+packages/browser-extension/.keys/*.pem
+packages/browser-extension/.keys/*.key
+
+# Local browser-extension artefacts
+packages/browser-extension/dist/
+packages/browser-extension/node_modules/
+packages/browser-extension/native-host/obscura-native-host
 obscura.egg-info
 logs/
 audit.jsonl
