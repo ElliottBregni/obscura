@@ -2,6 +2,47 @@
 // proxies to the native messaging host running obscura.
 
 const $ = (sel) => document.querySelector(sel);
+
+const MsgType = {
+  BRIDGE_READY: "bridge-ready",
+  READY: "ready",
+  CHUNK: "chunk",
+  THINKING: "thinking",
+  TOOL_START: "tool_start",
+  TOOL_DELTA: "tool_delta",
+  TOOL_END: "tool_end",
+  TOOL_RESULT: "tool_result",
+  DONE: "done",
+  WIDGET: "widget",
+  WIDGET_RESPONSE: "widget_response",
+  ERROR: "error",
+  WARNING: "warning",
+  KAIROS: "kairos",
+  DIAG: "diag",
+  FLEET: "fleet",
+  SEND: "send",
+  COMMAND: "command",
+  CANCEL: "cancel",
+  PING: "ping",
+  PONG: "pong",
+};
+
+const StorageManager = {
+  async get(keys) {
+    try { return await chrome.storage.local.get(keys); } catch { return {}; }
+  },
+  async set(obj) {
+    try { await chrome.storage.local.set(obj); } catch (e) { console.warn("storage write failed", e); }
+  },
+  async load(key, defaults = {}) {
+    const store = await this.get([key]);
+    return { ...defaults, ...(store[key] ?? {}) };
+  },
+  async save(key, value) {
+    await this.set({ [key]: value });
+  },
+};
+
 const log = $("#log");
 const form = $("#composer");
 const input = $("#prompt");
@@ -74,56 +115,86 @@ let checkpointPendingId = null;  // msgId of the in-flight /checkpoint command
 let fleetPendingId = null;       // msgId of the in-flight /agent list command
 let mcpPendingId = null;         // msgId of the in-flight /mcp list|discover command
 
+// Per-Chrome-tab session persistence: track which Chrome tab this panel belongs to.
+let chromeTabId = null;
+chrome.tabs.getCurrent().then(tab => { chromeTabId = tab?.id ?? null; }).catch(() => {});
+
 // ---------------------------------------------------------------------------
 // Multi-session tabs
 
-const MAX_TABS = 8;
-let tabs = [];       // [{ id, label, sessionId, logHTML, pending, streamStates }]
-let activeTabIdx = 0;
+class TabManager {
+  constructor(maxTabs = 8) {
+    this._tabs = [];
+    this._activeIdx = 0;
+    this._maxTabs = maxTabs;
+  }
 
-function newTabId() {
-  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  get count() { return this._tabs.length; }
+  get activeIdx() { return this._activeIdx; }
+  get active() { return this._tabs[this._activeIdx] ?? null; }
+  get all() { return this._tabs; }
+
+  create(label = "new") {
+    if (this._tabs.length >= this._maxTabs) return false;
+    const tab = { id: crypto.randomUUID(), label, sessionId: null, logHTML: "", pending: new Map(), streamStates: {} };
+    this._tabs.push(tab);
+    return tab;
+  }
+
+  close(idx) {
+    if (this._tabs.length <= 1) return false;
+    this._tabs.splice(idx, 1);
+    if (this._activeIdx >= this._tabs.length) this._activeIdx = this._tabs.length - 1;
+    return true;
+  }
+
+  saveActive(logHTML, sessionId, pending, streamStates) {
+    const t = this.active;
+    if (!t) return;
+    t.logHTML = logHTML;
+    t.sessionId = sessionId;
+    t.pending = pending;
+    t.streamStates = streamStates ?? {};
+  }
+
+  activate(idx) {
+    if (idx < 0 || idx >= this._tabs.length || idx === this._activeIdx) return false;
+    this._activeIdx = idx;
+    return true;
+  }
+
+  getById(id) {
+    return this._tabs.find(t => t.id === id) ?? null;
+  }
 }
 
+const tabManager = new TabManager();
+
 function createTab(label = "new", activate = true) {
-  if (tabs.length >= MAX_TABS) return;
-  const tab = {
-    id: newTabId(),
-    label: label.slice(0, 20) || "new",
-    sessionId: null,
-    logHTML: "",
-    pending: new Map(),
-    streamStates: {},
-  };
-  tabs.push(tab);
-  if (activate) switchTab(tabs.length - 1);
+  const tab = tabManager.create((label || "new").slice(0, 20));
+  if (!tab) return;
+  if (activate) switchTab(tabManager.count - 1);
   renderTabs();
 }
 
 function closeTab(idx) {
-  if (tabs.length <= 1) return;
-  tabs.splice(idx, 1);
-  if (activeTabIdx >= tabs.length) activeTabIdx = tabs.length - 1;
-  if (activeTabIdx < 0) activeTabIdx = 0;
-  restoreTab(activeTabIdx);
+  tabManager.saveActive(log.innerHTML, sessionId, pending);
+  if (!tabManager.close(idx)) return;
+  restoreTab(tabManager.activeIdx);
   renderTabs();
 }
 
 function switchTab(idx) {
-  if (idx === activeTabIdx && tabs.length > 0) return;
+  if (idx === tabManager.activeIdx && tabManager.count > 0) return;
   // save current tab state
-  if (tabs[activeTabIdx]) {
-    tabs[activeTabIdx].logHTML = log.innerHTML;
-    tabs[activeTabIdx].sessionId = sessionId;
-    tabs[activeTabIdx].pending = pending;
-  }
-  activeTabIdx = idx;
+  tabManager.saveActive(log.innerHTML, sessionId, pending);
+  tabManager.activate(idx);
   restoreTab(idx);
   renderTabs();
 }
 
 function restoreTab(idx) {
-  const tab = tabs[idx];
+  const tab = tabManager.all[idx];
   if (!tab) return;
   log.innerHTML = tab.logHTML;
   sessionId = tab.sessionId;
@@ -133,10 +204,10 @@ function restoreTab(idx) {
 
 function renderTabs() {
   tabStrip.innerHTML = "";
-  if (tabs.length <= 1) return; // hide tab strip when only 1 tab
-  tabs.forEach((tab, i) => {
+  if (tabManager.count <= 1) return; // hide tab strip when only 1 tab
+  tabManager.all.forEach((tab, i) => {
     const el = document.createElement("div");
-    el.className = "tab-item" + (i === activeTabIdx ? " active" : "");
+    el.className = "tab-item" + (i === tabManager.activeIdx ? " active" : "");
     const label = document.createElement("span");
     label.className = "tab-label";
     label.textContent = tab.label;
@@ -158,21 +229,14 @@ function renderTabs() {
 }
 
 // Initialize first tab
-tabs.push({
-  id: newTabId(),
-  label: "session",
-  sessionId: null,
-  logHTML: "",
-  pending: new Map(),
-  streamStates: {},
-});
+tabManager.create("session");
 
 // ---------------------------------------------------------------------------
 // Settings + transcript persistence
 
 async function loadSettings() {
   try {
-    const store = await chrome.storage.local.get([SETTINGS_KEY, TRANSCRIPT_KEY]);
+    const store = await StorageManager.get([SETTINGS_KEY, TRANSCRIPT_KEY]);
     const s = store[SETTINGS_KEY];
     if (s?.backend) backendSel.value = s.backend;
     if (typeof s?.includeContext === "boolean") ctxToggle.checked = s.includeContext;
@@ -199,12 +263,10 @@ async function loadSettings() {
 }
 
 function saveSettings() {
-  chrome.storage.local.set({
-    [SETTINGS_KEY]: {
-      backend: backendSel.value,
-      includeContext: ctxToggle.checked,
-      history: userHistory.slice(-100),
-    },
+  StorageManager.save(SETTINGS_KEY, {
+    backend: backendSel.value,
+    includeContext: ctxToggle.checked,
+    history: userHistory.slice(-100),
   });
 }
 
@@ -235,12 +297,41 @@ backendSel.addEventListener("change", saveSettings);
 ctxToggle.addEventListener("change", saveSettings);
 
 // ---------------------------------------------------------------------------
+// Per-Chrome-tab state persistence
+
+async function loadTabState() {
+  if (!chromeTabId) return;
+  const key = `tab_state_${chromeTabId}`;
+  try {
+    const store = await chrome.storage.local.get([key]);
+    const state = store[key];
+    if (state?.logHTML) {
+      log.innerHTML = state.logHTML;
+      sessionId = state.sessionId ?? null;
+      scrollToBottom();
+    }
+  } catch {}
+}
+
+async function saveTabState() {
+  if (!chromeTabId) return;
+  const key = `tab_state_${chromeTabId}`;
+  try {
+    await chrome.storage.local.set({
+      [key]: { logHTML: log.innerHTML, sessionId, timestamp: Date.now() },
+    });
+  } catch {}
+}
+
+window.addEventListener("beforeunload", saveTabState);
+
+// ---------------------------------------------------------------------------
 // Session metadata persistence
 
 async function saveSessionMeta(sid, firstPrompt) {
   if (!sid) return;
   try {
-    const store = await chrome.storage.local.get(SESSIONS_KEY);
+    const store = await StorageManager.get([SESSIONS_KEY]);
     let sessions = store[SESSIONS_KEY] || [];
     // Remove duplicate
     sessions = sessions.filter((s) => s.id !== sid);
@@ -251,14 +342,14 @@ async function saveSessionMeta(sid, firstPrompt) {
     });
     // Keep max 10
     sessions = sessions.slice(0, 10);
-    await chrome.storage.local.set({ [SESSIONS_KEY]: sessions });
+    await StorageManager.set({ [SESSIONS_KEY]: sessions });
     renderSessionPicker(sessions);
   } catch {}
 }
 
 async function loadSessionPicker() {
   try {
-    const store = await chrome.storage.local.get(SESSIONS_KEY);
+    const store = await StorageManager.get([SESSIONS_KEY]);
     const sessions = store[SESSIONS_KEY] || [];
     renderSessionPicker(sessions);
   } catch {}
@@ -280,7 +371,7 @@ sessionPicker.addEventListener("change", () => {
   if (!sid) return;
   // Tell host to resume this session
   try {
-    port?.postMessage({ type: "send", id: crypto.randomUUID?.() ?? `r-${Date.now()}`, prompt: `/resume ${sid}`, backend: backendSel.value });
+    port?.postMessage({ type: MsgType.SEND, id: crypto.randomUUID?.() ?? `r-${Date.now()}`, prompt: `/resume ${sid}`, backend: backendSel.value });
   } catch {}
 });
 
@@ -776,7 +867,7 @@ function renderPlanApprovalWidget(msg) {
 function resolveWidget(widgetId, action, bubbleEl, text = "", toolName = "") {
   try {
     port?.postMessage({
-      type: "widget-response",
+      type: MsgType.WIDGET_RESPONSE,
       widget_id: widgetId,
       action,
       text,
@@ -1137,7 +1228,7 @@ async function getPageContext() {
 sbKairos.addEventListener("click", () => {
   const newState = kairosState === "on" ? "off" : "on";
   try {
-    port?.postMessage({ type: "kairos", action: newState });
+    port?.postMessage({ type: MsgType.KAIROS, action: newState });
   } catch {}
 });
 
@@ -1155,7 +1246,7 @@ function showCheckpointModal() {
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
   try {
-    port?.postMessage({ type: "command", id, raw: "/checkpoint list", backend: backendSel.value });
+    port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value });
   } catch {}
 }
 
@@ -1209,7 +1300,7 @@ function sendSilentCommand(raw) {
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
   try {
-    port?.postMessage({ type: "command", id, raw, backend: backendSel.value });
+    port?.postMessage({ type: MsgType.COMMAND, id, raw, backend: backendSel.value });
   } catch {}
 }
 
@@ -1233,7 +1324,7 @@ checkpointSaveBtn.addEventListener("click", () => {
     const bubble = document.createElement("div");
     pending.set(id, { bubble, streamedText: "", silent: true });
     try {
-      port?.postMessage({ type: "command", id, raw: "/checkpoint list", backend: backendSel.value });
+      port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value });
     } catch {}
   }, 600);
 });
@@ -1269,7 +1360,7 @@ function showDisconnectBanner() {
   diagnoseBtn.textContent = "Diagnose";
   diagnoseBtn.addEventListener("click", () => {
     try {
-      port?.postMessage({ type: "diag", id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
+      port?.postMessage({ type: MsgType.DIAG, id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
     } catch {
       chrome.tabs.create({ url: chrome.runtime.getURL("src/onboarding/index.html") });
     }
@@ -1303,10 +1394,24 @@ function connect() {
   port.onMessage.addListener((msg) => {
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {
-      case "bridge-ready":
+      case MsgType.BRIDGE_READY:
         status.textContent = "";
         break;
-      case "ready":
+      case "tab_context":
+        // Background tells us which Chrome tab this panel is associated with.
+        chromeTabId = msg.tabId ?? chromeTabId;
+        loadTabState();
+        break;
+      case "tab_switched":
+        // User switched to a different Chrome tab — swap the conversation.
+        if (msg.tabId !== chromeTabId) {
+          saveTabState().then(() => {
+            chromeTabId = msg.tabId;
+            loadTabState();
+          });
+        }
+        break;
+      case MsgType.READY:
         updateStatusbar(msg);
         if (Array.isArray(msg.commands)) commandIndex = msg.commands;
         if (Array.isArray(msg.skills)) skillIndex = msg.skills;
@@ -1330,7 +1435,7 @@ function connect() {
           );
         }
         break;
-      case "thinking": {
+      case MsgType.THINKING: {
         setLiveStatus("thinking…");
         // Accumulate thinking text
         if (msg.id && msg.text) {
@@ -1361,7 +1466,7 @@ function connect() {
         }
         break;
       }
-      case "kairos": {
+      case MsgType.KAIROS: {
         // KAIROS state update from host
         if (msg.state === "on" || msg.state === "already_on") {
           kairosState = "on";
@@ -1372,20 +1477,20 @@ function connect() {
         }
         break;
       }
-      case "tool_start":
+      case MsgType.TOOL_START:
         toolStart(msg.id, msg.tool_use_id, msg.tool_name);
         break;
-      case "tool_delta":
+      case MsgType.TOOL_DELTA:
         toolDelta(msg.id, msg.tool_use_id, msg.delta || "");
         break;
-      case "tool_end":
+      case MsgType.TOOL_END:
         toolEnd(msg.id, msg.tool_use_id);
         setLiveStatus("thinking…");
         break;
-      case "tool_result":
+      case MsgType.TOOL_RESULT:
         toolResult(msg.id, msg.tool_use_id, msg.text || "");
         break;
-      case "chunk": {
+      case MsgType.CHUNK: {
         const st = pending.get(msg.id);
         if (!st) return;
         st.streamedText = (st.streamedText || "") + (msg.text ?? "");
@@ -1394,7 +1499,7 @@ function connect() {
         scrollToBottom();
         break;
       }
-      case "done": {
+      case MsgType.DONE: {
         const st = pending.get(msg.id);
         // Handle special silent command responses
         if (st?.silent) {
@@ -1430,10 +1535,10 @@ function connect() {
         if (msg.session_id) {
           sessionId = msg.session_id;
           // Update tab label if it's the first message
-          if (tabs[activeTabIdx] && tabs[activeTabIdx].label === "session") {
+          if (tabManager.active && tabManager.active.label === "session") {
             const firstUser = log.querySelector(".msg.user .body");
             if (firstUser) {
-              tabs[activeTabIdx].label = (firstUser.textContent || "").slice(0, 20) || "session";
+              tabManager.active.label = (firstUser.textContent || "").slice(0, 20) || "session";
               renderTabs();
             }
           }
@@ -1444,7 +1549,7 @@ function connect() {
         if (pending.size === 0) { setBusy(false); setLiveStatus(""); }
         break;
       }
-      case "widget": {
+      case MsgType.WIDGET: {
         // For tool_confirm, check if the user has an always_allow perm stored.
         if (msg.kind === "tool_confirm") {
           const toolName = msg.detail?.tool_name || "";
@@ -1453,7 +1558,7 @@ function connect() {
               // Auto-approve without showing widget
               try {
                 port?.postMessage({
-                  type: "widget-response",
+                  type: MsgType.WIDGET_RESPONSE,
                   widget_id: msg.id,
                   action: "allow",
                   text: "",
@@ -1468,7 +1573,7 @@ function connect() {
         }
         break;
       }
-      case "diag": {
+      case MsgType.DIAG: {
         // If the fleet overlay is open and waiting for diag data, populate it
         if (!fleetOverlay.classList.contains("hidden") && fleetPendingId === null) {
           renderFleetContent(msg, null);
@@ -1477,7 +1582,7 @@ function connect() {
         }
         break;
       }
-      case "warning": {
+      case MsgType.WARNING: {
         showWarningBanner(msg.message || "Warning");
         break;
       }
@@ -1489,7 +1594,7 @@ function connect() {
         handleBrowserTool(msg);
         break;
       }
-      case "error": {
+      case MsgType.ERROR: {
         const st = msg.id ? pending.get(msg.id) : null;
         if (st?.bubble) {
           const bubble = st.bubble;
@@ -1521,7 +1626,7 @@ function connect() {
   // `ready` frame (which carries commands / skills / workspaces / pid) never
   // arrives until the user types something.
   try {
-    port.postMessage({ type: "ping", id: "boot" });
+    port.postMessage({ type: MsgType.PING, id: "boot" });
   } catch {}
 }
 
@@ -1781,7 +1886,7 @@ input.addEventListener("keydown", (e) => {
   // ⌘/Ctrl+W = close tab
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") {
     e.preventDefault();
-    closeTab(activeTabIdx);
+    closeTab(tabManager.activeIdx);
     return;
   }
 
@@ -1867,7 +1972,7 @@ document.addEventListener("keydown", (e) => {
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") {
     e.preventDefault();
-    closeTab(activeTabIdx);
+    closeTab(tabManager.activeIdx);
     return;
   }
 });
@@ -1906,8 +2011,8 @@ form.addEventListener("submit", async (e) => {
   addMessage("user", displayText);
 
   // Update tab label to first prompt
-  if (tabs[activeTabIdx] && (tabs[activeTabIdx].label === "new" || tabs[activeTabIdx].label === "session")) {
-    tabs[activeTabIdx].label = (prompt || "file").slice(0, 20);
+  if (tabManager.active && (tabManager.active.label === "new" || tabManager.active.label === "session")) {
+    tabManager.active.label = (prompt || "file").slice(0, 20);
     renderTabs();
   }
 
@@ -1949,7 +2054,7 @@ form.addEventListener("submit", async (e) => {
     if (!port) connect();
     if (isCommand) {
       port.postMessage({
-        type: "command",
+        type: MsgType.COMMAND,
         id,
         raw: prompt,
         backend: backendSel.value,
@@ -1957,7 +2062,7 @@ form.addEventListener("submit", async (e) => {
       });
     } else {
       port.postMessage({
-        type: "send",
+        type: MsgType.SEND,
         id,
         prompt,
         backend: backendSel.value,
@@ -1988,7 +2093,7 @@ clearBtn.addEventListener("click", () => {
 stopBtn.addEventListener("click", () => {
   if (!pending.size) return;
   for (const id of pending.keys()) {
-    try { port?.postMessage({ type: "cancel", target_id: id }); } catch {}
+    try { port?.postMessage({ type: MsgType.CANCEL, target_id: id }); } catch {}
   }
 });
 
@@ -2008,7 +2113,7 @@ reloadHostBtn.addEventListener("click", () => {
 
 sbDiag.addEventListener("click", () => {
   try {
-    port?.postMessage({ type: "diag", id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
+    port?.postMessage({ type: MsgType.DIAG, id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
   } catch {}
 });
 
@@ -2085,10 +2190,10 @@ function showFleetOverlay() {
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
   try {
-    port?.postMessage({ type: "command", id, raw: "/agent list", backend: backendSel.value });
+    port?.postMessage({ type: MsgType.COMMAND, id, raw: "/agent list", backend: backendSel.value });
   } catch {
     // Fallback: request diag data
-    port?.postMessage({ type: "diag", id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
+    port?.postMessage({ type: MsgType.DIAG, id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
   }
 }
 
@@ -2169,7 +2274,7 @@ function showMcpOverlay() {
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
   try {
-    port?.postMessage({ type: "command", id, raw: "/mcp list", backend: backendSel.value });
+    port?.postMessage({ type: MsgType.COMMAND, id, raw: "/mcp list", backend: backendSel.value });
   } catch {}
 }
 
@@ -2229,7 +2334,7 @@ mcpDiscoverBtn.addEventListener("click", () => {
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
   try {
-    port?.postMessage({ type: "command", id, raw: "/mcp discover", backend: backendSel.value });
+    port?.postMessage({ type: MsgType.COMMAND, id, raw: "/mcp discover", backend: backendSel.value });
   } catch {}
 });
 
@@ -2399,7 +2504,7 @@ function updateThemeBtn(theme) {
 
 async function loadTheme() {
   try {
-    const store = await chrome.storage.local.get([THEME_KEY]);
+    const store = await StorageManager.get([THEME_KEY]);
     const theme = store[THEME_KEY] || "dark";
     document.documentElement.setAttribute("data-theme", theme);
     updateThemeBtn(theme);
@@ -2423,4 +2528,7 @@ sbTheme?.addEventListener("click", () => {
 loadTheme();
 loadSettings();
 loadSessionPicker();
+// Per-tab state is loaded via tab_context message from background after connect().
+// We also try to load it eagerly if chromeTabId is already known (e.g. reopened panel).
+loadTabState();
 connect();
