@@ -713,6 +713,36 @@ async function clearToolPerms() {
 // ---------------------------------------------------------------------------
 // Widgets
 
+function createBaseWidget(kind, question, actions) {
+  const wrap = document.createElement("div");
+  wrap.className = `msg widget widget-${kind}`;
+  const r = document.createElement("div");
+  r.className = "role";
+  r.textContent = "?";
+  const body = document.createElement("div");
+  body.className = "body";
+
+  const questionEl = document.createElement("div");
+  questionEl.className = "w-question";
+  questionEl.textContent = question;
+  body.appendChild(questionEl);
+
+  const actionsRow = document.createElement("div");
+  actionsRow.className = "w-actions";
+  for (const { label, className, dataset, onClick } of actions) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = className || "w-btn";
+    if (dataset) Object.assign(btn.dataset, dataset);
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    actionsRow.appendChild(btn);
+  }
+
+  wrap.append(r, body);
+  return { wrap, body, questionEl, actionsRow };
+}
+
 function renderWidget(msg) {
   // Plan approval widget
   if (msg.kind === "plan_approval") {
@@ -720,25 +750,23 @@ function renderWidget(msg) {
     return;
   }
 
-  const wrap = document.createElement("div");
-  wrap.className = `msg widget widget-${msg.kind || "confirm"}`;
-  const r = document.createElement("div");
-  r.className = "role";
-  r.textContent = "?";
-  const body = document.createElement("div");
-  body.className = "body";
+  const widgetToolName = (msg.kind === "tool_confirm" && msg.detail?.tool_name) ? msg.detail.tool_name : "";
+  const actionList = Array.isArray(msg.actions) && msg.actions.length > 0 ? msg.actions : ["ok"];
+  const actionDefs = actionList.map((action) => ({
+    label: action.replace(/_/g, " "),
+    className: "w-btn" + (action === msg.default ? " default" : ""),
+    dataset: { action },
+    onClick: () => resolveWidget(msg.id, action, wrap, "", widgetToolName),
+  }));
 
-  const q = document.createElement("div");
-  q.className = "w-question";
-  q.textContent = msg.question || "(no question)";
-  body.appendChild(q);
+  const { wrap, body, actionsRow } = createBaseWidget(msg.kind || "confirm", msg.question || "(no question)", actionDefs);
 
   if (msg.detail) {
     // Rich detail for tool_confirm
     if (msg.kind === "tool_confirm" && typeof msg.detail === "object") {
       const toolName = msg.detail.tool_name || "";
       const toolInput = msg.detail.input || msg.detail;
-      body.appendChild(renderRichDetail(toolInput, toolName));
+      body.insertBefore(renderRichDetail(toolInput, toolName), actionsRow);
     } else {
       const det = document.createElement("pre");
       det.className = "w-detail";
@@ -747,26 +775,8 @@ function renderWidget(msg) {
       } catch {
         det.textContent = String(msg.detail);
       }
-      body.appendChild(det);
+      body.insertBefore(det, actionsRow);
     }
-  }
-
-  const actions = Array.isArray(msg.actions) && msg.actions.length > 0
-    ? msg.actions
-    : ["ok"];
-  const actionsRow = document.createElement("div");
-  actionsRow.className = "w-actions";
-  const widgetToolName = (msg.kind === "tool_confirm" && msg.detail?.tool_name) ? msg.detail.tool_name : "";
-
-  for (const action of actions) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "w-btn";
-    btn.dataset.action = action;
-    if (action === msg.default) btn.classList.add("default");
-    btn.textContent = action.replace(/_/g, " ");
-    btn.addEventListener("click", () => resolveWidget(msg.id, action, wrap, "", widgetToolName));
-    actionsRow.appendChild(btn);
   }
 
   let textInput = null;
@@ -781,11 +791,10 @@ function renderWidget(msg) {
         resolveWidget(msg.id, "reply", wrap, textInput.value, widgetToolName);
       }
     });
-    body.appendChild(textInput);
+    body.insertBefore(textInput, actionsRow);
   }
 
   body.appendChild(actionsRow);
-  wrap.append(r, body);
   log.appendChild(wrap);
   scrollToBottom();
 
@@ -793,24 +802,34 @@ function renderWidget(msg) {
 }
 
 function renderPlanApprovalWidget(msg) {
-  const wrap = document.createElement("div");
-  wrap.className = "msg widget widget-plan_approval";
-  const r = document.createElement("div");
-  r.className = "role";
-  r.textContent = "?";
-  const body = document.createElement("div");
-  body.className = "body";
+  const actionDefs = [
+    {
+      label: "approve",
+      className: "w-btn default",
+      dataset: { action: "approve" },
+      onClick: () => resolveWidget(msg.id, "approve", wrap),
+    },
+    {
+      label: "reject",
+      className: "w-btn",
+      dataset: { action: "reject" },
+      onClick: () => resolveWidget(msg.id, "reject", wrap),
+    },
+    {
+      label: "modify",
+      className: "w-btn",
+      dataset: { action: "modify" },
+      onClick: () => { modifyWrap.hidden = !modifyWrap.hidden; if (!modifyWrap.hidden) modifyInput.focus(); },
+    },
+  ];
 
-  const q = document.createElement("div");
-  q.className = "w-question";
-  q.textContent = msg.question || "Plan approval requested";
-  body.appendChild(q);
+  const { wrap, body, actionsRow } = createBaseWidget("plan_approval", msg.question || "Plan approval requested", actionDefs);
 
   // Plan text block
   const planBlock = document.createElement("div");
   planBlock.className = "w-plan-block";
   planBlock.textContent = msg.plan_text || msg.detail?.plan_text || msg.text || "(no plan)";
-  body.appendChild(planBlock);
+  body.insertBefore(planBlock, actionsRow);
 
   // Modify input (hidden by default)
   const modifyWrap = document.createElement("div");
@@ -826,42 +845,12 @@ function renderPlanApprovalWidget(msg) {
     }
   });
   modifyWrap.appendChild(modifyInput);
-  body.appendChild(modifyWrap);
+  body.insertBefore(modifyWrap, actionsRow);
 
-  // Action buttons
-  const actionsRow = document.createElement("div");
-  actionsRow.className = "w-actions";
-
-  const approveBtn = document.createElement("button");
-  approveBtn.type = "button";
-  approveBtn.className = "w-btn default";
-  approveBtn.dataset.action = "approve";
-  approveBtn.textContent = "approve";
-  approveBtn.addEventListener("click", () => resolveWidget(msg.id, "approve", wrap));
-
-  const rejectBtn = document.createElement("button");
-  rejectBtn.type = "button";
-  rejectBtn.className = "w-btn";
-  rejectBtn.dataset.action = "reject";
-  rejectBtn.textContent = "reject";
-  rejectBtn.addEventListener("click", () => resolveWidget(msg.id, "reject", wrap));
-
-  const modifyBtn = document.createElement("button");
-  modifyBtn.type = "button";
-  modifyBtn.className = "w-btn";
-  modifyBtn.dataset.action = "modify";
-  modifyBtn.textContent = "modify";
-  modifyBtn.addEventListener("click", () => {
-    modifyWrap.hidden = !modifyWrap.hidden;
-    if (!modifyWrap.hidden) modifyInput.focus();
-  });
-
-  actionsRow.append(approveBtn, rejectBtn, modifyBtn);
   body.appendChild(actionsRow);
-  wrap.append(r, body);
   log.appendChild(wrap);
   scrollToBottom();
-  approveBtn.focus();
+  actionsRow.querySelector(".default")?.focus();
 }
 
 function resolveWidget(widgetId, action, bubbleEl, text = "", toolName = "") {
