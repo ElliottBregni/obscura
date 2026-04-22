@@ -1,8 +1,28 @@
 /* Obscura side panel — dark terminal aesthetic. */
 
+/* Fallback / default (dark) so CSS renders correctly before JS runs. */
 :root {
   color-scheme: dark;
 
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, "DejaVu Sans Mono",
+    Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* Smooth transition when switching themes. */
+html {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Dark theme (default) */
+:root[data-theme="dark"],
+:root:not([data-theme]) {
   /* Palette — low-contrast background, warm accents. */
   --bg: #0b0c0e;
   --bg-alt: #101216;
@@ -18,9 +38,25 @@
   --amber: #e0b25a;        /* status / system */
   --red: #e06c6c;          /* errors */
   --blue: #6aa0ff;
+}
 
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, "DejaVu Sans Mono",
-    Consolas, monospace;
+/* Light theme */
+:root[data-theme="light"] {
+  --bg: #f5f5f5;
+  --bg-alt: #ebebeb;
+  --bg-deep: #ebebeb;
+  --bg-lift: #ffffff;
+  --fg: #1a1a1a;
+  --fg-dim: #555555;
+  --fg-ghost: #888888;
+  --line: rgba(0, 0, 0, 0.12);
+  --line-strong: rgba(0, 0, 0, 0.22);
+
+  --accent: #1a7f5a;       /* prompt caret + user */
+  --accent-dim: #14604a;
+  --amber: #c07a00;        /* status / system */
+  --red: #c0392b;          /* errors */
+  --blue: #1a5f8f;
 }
 
 * {
@@ -1277,10 +1313,11 @@ details.tool-card.has-result .tool-dot {
   font-size: 0.85em;
 }
 
-/* ---------- Statusbar diag + export buttons -------------------------- */
+/* ---------- Statusbar diag + export + theme buttons ------------------ */
 
 .sb-diag,
-.sb-export {
+.sb-export,
+.sb-theme {
   font: inherit;
   font-size: 10.5px;
   color: var(--fg-ghost);
@@ -1293,7 +1330,8 @@ details.tool-card.has-result .tool-dot {
 }
 
 .sb-diag:hover,
-.sb-export:hover {
+.sb-export:hover,
+.sb-theme:hover {
   color: var(--fg-dim);
   border-color: var(--line-strong);
 }

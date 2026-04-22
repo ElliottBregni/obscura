@@ -21,6 +21,7 @@ const sbKairos = $("#sb-kairos");
 const sbRewind = $("#sb-rewind");
 const sbDiag = $("#sb-diag");
 const sbExport = $("#sb-export");
+const sbTheme = $("#sb-theme");
 const tabStrip = $("#tab-strip");
 const shortcutsOverlay = $("#shortcuts-overlay");
 const shortcutsClose = $("#shortcuts-close");
@@ -35,6 +36,7 @@ const authSubmit = $("#auth-submit");
 const SETTINGS_KEY = "obscura.settings.v1";
 const TRANSCRIPT_KEY = "obscura.transcript.v1";
 const SESSIONS_KEY = "obscura.sessions.v1";
+const THEME_KEY = "obscura_theme";
 
 let port = null;
 let sessionId = null;            // per-panel conversation id (from host)
@@ -1923,8 +1925,43 @@ authGate.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Theme switching
+
+function updateThemeBtn(theme) {
+  if (!sbTheme) return;
+  if (theme === "light") {
+    sbTheme.textContent = "○";
+    sbTheme.title = "Switch to dark theme";
+  } else {
+    sbTheme.textContent = "◐";
+    sbTheme.title = "Switch to light theme";
+  }
+}
+
+async function loadTheme() {
+  try {
+    const store = await chrome.storage.local.get([THEME_KEY]);
+    const theme = store[THEME_KEY] || "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    updateThemeBtn(theme);
+  } catch {
+    document.documentElement.setAttribute("data-theme", "dark");
+    updateThemeBtn("dark");
+  }
+}
+
+sbTheme?.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") || "dark";
+  const next = current === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  chrome.storage.local.set({ [THEME_KEY]: next });
+  updateThemeBtn(next);
+});
+
+// ---------------------------------------------------------------------------
 // Boot
 
+loadTheme();
 loadSettings();
 loadSessionPicker();
 connect();
