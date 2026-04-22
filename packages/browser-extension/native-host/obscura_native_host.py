@@ -331,7 +331,7 @@ _current_msg_id: str = ""  # contextvar-lite: set before send(), read in handle(
 class BrowserRenderer:
     """Implements ``RendererProtocol``. Emits frames to the side panel."""
 
-    def __init__(self, streaming_status: Any = None) -> None:
+    def __init__(self, _streaming_status: Any = None) -> None:
         self._acc: list[str] = []
         self._thinking: list[str] = []
         self._last_thinking: str = ""
@@ -390,7 +390,7 @@ class BrowserRenderer:
             result: Any = getattr(event, "tool_result", "") or ""
             if isinstance(result, (dict, list)):
                 try:
-                    result = json.dumps(result, ensure_ascii=False, indent=2)
+                    result = json.dumps(cast("dict[str, Any] | list[Any]", result), ensure_ascii=False, indent=2)
                 except Exception:
                     result = str(result)
             is_error = bool(getattr(event, "is_error", False))
@@ -446,7 +446,7 @@ class BrowserRenderer:
         return self._last_thinking
 
     def set_session_context(
-        self, title: str = "", model: str = "", ctx_pct: int = 0
+        self, _title: str = "", _model: str = "", _ctx_pct: int = 0
     ) -> None:
         # No-op: the side panel has its own status bar.
         pass
@@ -460,7 +460,7 @@ def _install_renderer_factory() -> None:
         return
 
     def _factory(streaming_status: Any = None) -> Any:
-        return BrowserRenderer(streaming_status=streaming_status)
+        return BrowserRenderer(_streaming_status=streaming_status)
 
     _renderer_mod.create_renderer = _factory
     log.info("renderer factory installed (BrowserRenderer)")
@@ -1122,12 +1122,12 @@ async def _main() -> None:
                 task = asyncio.create_task(_handle_send(msg))
                 if msg_id:
                     _active_sends[msg_id] = task
-                    task.add_done_callback(lambda _t, k=msg_id: _active_sends.pop(k, None))
+                    task.add_done_callback(lambda __t, k=msg_id: _active_sends.pop(k, None))
             elif msg_type == "command":
                 task = asyncio.create_task(_handle_command(msg))
                 if msg_id:
                     _active_sends[msg_id] = task
-                    task.add_done_callback(lambda _t, k=msg_id: _active_sends.pop(k, None))
+                    task.add_done_callback(lambda __t, k=msg_id: _active_sends.pop(k, None))
             elif msg_type == "cancel":
                 asyncio.create_task(_handle_cancel(msg))
             elif msg_type == "kairos":
