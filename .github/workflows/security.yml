@@ -1,0 +1,75 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly scan against latest rule sets — picks up CVEs disclosed
+    # after our dependency lock was last refreshed.
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so PR scans can diff against base and push
+          # scans can walk the tree.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: true
+          GITLEAKS_ENABLE_SUMMARY: true
+
+  bandit:
+    name: Python SAST (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install bandit
+        run: python -m pip install --quiet "bandit[toml]==1.7.10"
+
+      - name: Run bandit
+        # -ll = report medium and high severity only; low-severity issues
+        #       are too noisy for a gating check and tend to be stylistic.
+        # -iii = only report high-confidence findings.
+        # Scope to our source tree — never scan .venv/, tests/, or vendored deps.
+        run: bandit -r obscura -ll -iii -f txt
+
+  trivy-fs:
+    name: Dependency CVE scan (trivy fs)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          # Scan the Python dependency manifests and lockfile.
+          # Fail the build on HIGH or CRITICAL findings with a known fix.
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          # Skip the virtualenv + tests + vendored node_modules.
+          skip-dirs: .venv,tests,packages/browser-extension/node_modules
+          format: table
