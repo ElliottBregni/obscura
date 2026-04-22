@@ -1,0 +1,64 @@
+# Dependabot configuration — keeps dependencies current and surfaces CVEs
+# disclosed after uv.lock was last refreshed.
+#
+# Rationale per ecosystem:
+# - pip: our primary runtime dependency manager (uv uses pip-compatible indices)
+# - github-actions: pinned action versions drift; CVEs in actions are common
+# - docker: base image in Dockerfile accumulates CVEs independent of our code
+# - npm: the browser extension has its own supply chain
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    groups:
+      # Batch minor/patch updates together so we don't drown in PR noise.
+      # Major updates still come as individual PRs for review.
+      python-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: npm
+    directory: /packages/browser-extension
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npm
+      - browser-extension
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
