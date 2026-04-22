@@ -26,12 +26,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Required for cosign keyless signing via GitHub OIDC.
+      id-token: write
+      # Required for trivy to upload SARIF results to the Security tab.
+      security-events: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/obscura
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -43,16 +49,99 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Build first to a local image so we can scan before pushing.
+      # Pushing only happens after Trivy passes.
+      - name: Build (single-arch, local load for scan)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}:scan-${{ github.sha }}
+          build-args: |
+            INSTALL_HF=${{ inputs.install_hf }}
+            INSTALL_GWS=${{ inputs.install_gws }}
+            INSTALL_M365=${{ inputs.install_m365 }}
+          # Load only supports single-arch; we rebuild multi-arch
+          # after the scan passes.
+          platforms: linux/amd64
+
+      - name: Scan image for CVEs (trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-${{ github.sha }}
+          # Block the push on fixable HIGH/CRITICAL. Fixed vulns mean
+          # we're publishing an image that could have been patched.
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Scan image for CVEs (SARIF for Security tab)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-${{ github.sha }}
+          severity: MEDIUM,HIGH,CRITICAL
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image
+
+      - name: Build and push (multi-arch)
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/obscura:latest
-            ghcr.io/${{ github.repository_owner }}/obscura:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
             INSTALL_HF=${{ inputs.install_hf }}
             INSTALL_GWS=${{ inputs.install_gws }}
             INSTALL_M365=${{ inputs.install_m365 }}
           platforms: linux/amd64,linux/arm64
+          # Emit provenance + SBOM attestations in-line; buildx attaches
+          # them to the image manifest.
+          provenance: true
+          sbom: true
+
+      # Generate an explicit CycloneDX SBOM as a separate artifact.
+      # buildx's sbom attestation is great for supply-chain tooling, but
+      # procurement reviews and SOC2 evidence want a human-readable file.
+      - name: Generate SBOM (syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: obscura-sbom.cdx.json
+          upload-artifact: true
+
+      # Keyless signing via GitHub OIDC — no long-lived key material to
+      # manage or rotate. Customers verify with:
+      #   cosign verify ghcr.io/<owner>/obscura:<sha> \
+      #     --certificate-identity-regexp 'https://github.com/<owner>/.+' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Attest SBOM to image (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign attest --yes --predicate obscura-sbom.cdx.json \
+            --type cyclonedx "${IMAGE}@${DIGEST}"
