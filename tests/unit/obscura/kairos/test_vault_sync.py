@@ -172,6 +172,10 @@ def test_export_goals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     goals_dir = tmp_path / "goals"
 
     monkeypatch.setattr("obscura.kairos.goals._GOALS_DIR", goals_dir)
+    # Isolate from any real kairos.db on disk so only GoalBoard goals are exported.
+    monkeypatch.setattr(
+        "obscura.core.paths.resolve_obscura_home", lambda cwd=None: tmp_path
+    )
 
     vs = VaultSync(vault_dir=vault)
     vs.bootstrap()

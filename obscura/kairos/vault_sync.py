@@ -1,8 +1,9 @@
 """obscura.kairos.vault_sync — Vault sync engine.
 
 Manages bidirectional sync between the user's vault (``~/.obscura/vault/``)
-and Obscura's internal data stores (GoalBoard, TaskQueue, VectorMemory,
-Profile).
+and Obscura's internal data stores (GoalStore/SQLite, TaskQueue, VectorMemory,
+Profile). Goal exports read from GoalStore (kairos.db) as the canonical source,
+with GoalBoard (markdown files) as a supplemental fallback for legacy goals.
 
 Zone model:
   - ``vault/user/``   — User-authored. Obscura reads only, never writes.
@@ -34,6 +35,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -370,20 +372,80 @@ class VaultSync:
         return count
 
     def _export_goals(self) -> int:
-        """Export active goals to vault/agent/goals/."""
+        """Export active goals to vault/agent/goals/.
+
+        Reads from GoalStore (SQLite kairos.db) as the canonical source.
+        Falls back to GoalBoard (markdown files) for goals not yet in SQLite.
+        """
+        goals_dir = self.vault_dir / "agent" / "goals"
+        goals_dir.mkdir(parents=True, exist_ok=True)
+
+        # Clean stale exports.
+        for old in goals_dir.glob("*.md"):
+            old.unlink()
+
+        count = 0
+        exported_ids: set[str] = set()
+
+        # --- Primary source: GoalStore (SQLite) ---
+        try:
+            from obscura.core.kairos.goal_store import GoalStore
+            from obscura.core.paths import resolve_obscura_home
+
+            _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+
+            db_path = resolve_obscura_home() / "kairos.db"
+            if db_path.exists():
+                store = GoalStore(str(db_path))
+                try:
+                    goals = store.list_goals()
+                finally:
+                    store.close()
+
+                for goal in goals:
+                    status_val = (
+                        goal.status.value
+                        if hasattr(goal.status, "value")
+                        else str(goal.status)
+                    )
+                    if status_val in _TERMINAL_STATUSES:
+                        continue
+
+                    created_iso = (
+                        goal.created_at.isoformat()
+                        if hasattr(goal.created_at, "isoformat")
+                        else str(goal.created_at)
+                    )
+                    data = {
+                        "id": goal.goal_id,
+                        "title": goal.title,
+                        "status": status_val,
+                        "created_at": created_iso,
+                        "success_criteria": list(goal.success_criteria),
+                        "tags": list(goal.tags),
+                    }
+                    fm = yaml.dump(data, default_flow_style=False, sort_keys=False)
+                    body = goal.description or ""
+                    content = f"---\n{fm}---\n\n{body}\n"
+                    (goals_dir / f"{goal.goal_id}.md").write_text(
+                        content, encoding="utf-8"
+                    )
+                    exported_ids.add(goal.goal_id)
+                    count += 1
+        except Exception:
+            logger.debug(
+                "GoalStore export failed, will fall back to GoalBoard", exc_info=True
+            )
+
+        # --- Fallback / supplement: GoalBoard (markdown files) ---
+        # Export any goal whose ID isn't already covered by GoalStore above.
         try:
             from obscura.kairos.goals import GoalBoard
 
             board = GoalBoard()
-            goals_dir = self.vault_dir / "agent" / "goals"
-            goals_dir.mkdir(parents=True, exist_ok=True)
-
-            # Clean stale exports.
-            for old in goals_dir.glob("*.md"):
-                old.unlink()
-
-            count = 0
             for goal in board.load_all():
+                if goal.id in exported_ids:
+                    continue
                 if goal.status in ("completed", "abandoned"):
                     continue
                 data = {
@@ -392,6 +454,8 @@ class VaultSync:
                     "status": goal.status,
                     "priority": goal.priority,
                     "progress": goal.progress,
+                    "created_at": goal.created,
+                    "updated_at": goal.updated,
                     "acceptance_criteria": list(goal.acceptance_criteria),
                     "tasks": list(goal.tasks),
                 }
@@ -399,10 +463,10 @@ class VaultSync:
                 content = f"---\n{fm}---\n\n{goal.body or ''}\n"
                 (goals_dir / f"{goal.id}.md").write_text(content, encoding="utf-8")
                 count += 1
-            return count
         except Exception:
-            logger.debug("Goal export failed", exc_info=True)
-            return 0
+            logger.debug("GoalBoard export failed", exc_info=True)
+
+        return count
 
     def _export_queue_snapshot(self) -> int:
         """Export pending tasks to vault/agent/tasks/queue-snapshot.md."""
@@ -419,7 +483,7 @@ class VaultSync:
             lines = [
                 "---",
                 "type: queue_snapshot",
-                f"generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"generated: {datetime.now(UTC).isoformat()}",
                 f"total_pending: {total}",
                 "---",
                 "",
@@ -462,7 +526,7 @@ class VaultSync:
             lines = [
                 "---",
                 "type: arbiter_verdicts",
-                f"generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"generated: {datetime.now(UTC).isoformat()}",
                 "---",
                 "",
                 "# Recent Arbiter Verdicts",
@@ -512,7 +576,7 @@ class VaultSync:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(
                 f"---\ntype: profile_summary\n"
-                f"generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n---\n\n{summary}\n",
+                f"generated: {datetime.now(UTC).isoformat()}\n---\n\n{summary}\n",
                 encoding="utf-8",
             )
             return 1
