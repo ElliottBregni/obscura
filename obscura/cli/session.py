@@ -167,6 +167,12 @@ class SessionConfig:
     no_default_prompt: bool = False
     supervise: bool = True
     compiled_ws: Any | None = None
+    # Caller-supplied MCP servers that should be added to whatever the
+    # session discovers from ``~/.obscura/mcp/``.  Used by the browser
+    # extension's native host to inject an ephemeral in-process MCP
+    # server exposing the browser tools on Codex sessions.  Safe to
+    # leave as ``None`` — equivalent to an empty list.
+    extra_mcp_servers: list[dict[str, Any]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1008,10 +1014,22 @@ class ObscuraSession:
         self,
         config: SessionConfig,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Discover MCP servers.  Returns (configs, names)."""
+        """Discover MCP servers.  Returns (configs, names).
+
+        Merges any ``config.extra_mcp_servers`` passed by the caller with
+        the set auto-discovered from ``~/.obscura/mcp/``.  The injected
+        entries are appended, so user-configured servers take precedence
+        on name collisions via downstream deduplication if any.
+        """
         if not config.tools_enabled:
             return [], []
-        return _discover_mcp()
+        configs, names = _discover_mcp()
+        for extra in config.extra_mcp_servers or []:
+            configs.append(extra)
+            name = str(extra.get("name") or "")
+            if name:
+                names.append(name)
+        return configs, names
 
     def _init_vector_memory(self) -> None:
         """Initialize vector store and memory channels."""

@@ -181,19 +181,31 @@ class ObscuraClient:
         # Current agent loop (set during run_loop, exposed for mid-run input)
         self._current_loop: Any = None
 
-        # Store MCP server configs for lazy initialization in start().
-        # MCP tools are connected via Obscura's own MCPBackend so they
-        # appear in the ToolRegistry and work with AgentLoop.
-        self._mcp_server_configs = mcp_servers or []
+        # MCP server routing.
+        #
+        # Default path (Claude, Copilot, OpenAI, LocalLLM, Moonshot):
+        #   Obscura's MCPBackend connects to each server on start(),
+        #   re-exposes their tools through the ToolRegistry, and routes
+        #   calls through the shared tool executor. The underlying model
+        #   backend sees MCP tools the same way it sees native ones.
+        #
+        # Codex path:
+        #   Codex runs its own closed tool loop and cannot dispatch into
+        #   Obscura's executor. Forward MCP server configs directly to
+        #   the Codex SDK (which renders them as ``-c mcp_servers.<...>``
+        #   config overrides) and suppress MCPBackend so we don't also
+        #   connect obscura-side — that would double-bind the server
+        #   without giving Codex anything useful.
+        codex_native_mcp = backend == Backend.CODEX
+        self._mcp_server_configs = [] if codex_native_mcp else (mcp_servers or [])
         self._mcp_backend: Any = None  # MCPBackend, set in start()
 
-        # Create backend (mcp_servers NOT forwarded — Obscura handles them)
         self._backend = self._create_backend(
             backend=backend,
             auth=resolved_auth,
             model=resolved_model,
             system_prompt=system_prompt,
-            mcp_servers=None,
+            mcp_servers=mcp_servers if codex_native_mcp else None,
             permission_mode=permission_mode,
             cwd=cwd,
             streaming=streaming,
