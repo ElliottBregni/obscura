@@ -59,7 +59,15 @@ class KairosState:
             # Only use known fields to avoid breakage on schema changes
             known = {f.name for f in cls.__dataclass_fields__.values()}
             filtered = {k: v for k, v in raw.items() if k in known}
-            return cls(**filtered)
+            state = cls(**filtered)
+            # Enforce caps on load so old bloated state files are cleaned up
+            state.project_roots_seen = list(dict.fromkeys(state.project_roots_seen))[-100:]
+            if len(state.common_errors) > 50:
+                sorted_errors = sorted(
+                    state.common_errors.items(), key=lambda x: x[1], reverse=True,
+                )
+                state.common_errors = dict(sorted_errors[:50])
+            return state
         except (json.JSONDecodeError, OSError, TypeError) as exc:
             logger.warning("Failed to load KAIROS state: %s", exc)
             return cls()
@@ -97,7 +105,11 @@ class KairosState:
         self.last_proactive_tick = datetime.now(UTC).isoformat()
 
     def record_error(self, error_key: str, max_tracked: int = 50) -> None:
-        """Track a recurring error pattern."""
+        """Track a recurring error pattern, capped at ``max_tracked`` keys.
+
+        When the cap is exceeded the least-frequent entry is dropped so that
+        high-signal errors are always retained.
+        """
         self.common_errors[error_key] = self.common_errors.get(error_key, 0) + 1
         # Prune least common if over limit
         if len(self.common_errors) > max_tracked:
@@ -106,12 +118,35 @@ class KairosState:
             )
             self.common_errors = dict(sorted_errors[:max_tracked])
 
-    def record_project(self, project_root: str, max_tracked: int = 20) -> None:
-        """Track a project directory seen by KAIROS."""
-        if project_root and project_root not in self.project_roots_seen:
-            self.project_roots_seen.append(project_root)
-            if len(self.project_roots_seen) > max_tracked:
-                self.project_roots_seen = self.project_roots_seen[-max_tracked:]
+    def add_project_root(self, root: str) -> None:
+        """Record a project root directory, deduplicating and capping at 100.
+
+        Duplicate entries are ignored.  When the list would exceed 100 entries
+        the oldest entry is dropped (FIFO).
+        """
+        if not root or root in self.project_roots_seen:
+            return
+        self.project_roots_seen.append(root)
+        if len(self.project_roots_seen) > 100:
+            self.project_roots_seen = self.project_roots_seen[-100:]
+
+    def record_project(self, project_root: str, max_tracked: int = 100) -> None:
+        """Track a project directory seen by KAIROS.
+
+        Deprecated in favour of :meth:`add_project_root`.  The ``max_tracked``
+        parameter is kept for backward compatibility but capped internally at
+        100 to prevent unbounded growth.
+        """
+        self.add_project_root(project_root)
+
+    def record_log_entry(self) -> None:
+        """Record a daily log entry, updating the date stamp and total count.
+
+        ``last_log_date`` is stored as ``YYYY-MM-DD`` (date-only) so that
+        entries can be grouped by day without timestamp noise.
+        """
+        self.total_log_entries += 1
+        self.last_log_date = datetime.now(UTC).strftime("%Y-%m-%d")
 
     def can_dream(self, min_hours: int = 24, min_sessions: int = 5) -> bool:
         """Check if enough time and sessions have passed for a dream run."""

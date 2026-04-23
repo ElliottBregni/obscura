@@ -365,3 +365,275 @@ def test_goal_no_decompose_if_already_has_tasks(
     assert updated is not None
     # Should still have only the pre-linked task — no decomposition.
     assert list(updated.tasks) == ["existing-task-id"]
+
+
+# ---------------------------------------------------------------------------
+# Goal progress auto-sync on task completion
+# ---------------------------------------------------------------------------
+
+
+def _setup_goal_with_tasks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    n_tasks: int = 2,
+) -> tuple["GoalBoard", str, list[str]]:
+    """Create a goal with *n_tasks* linked tasks and return (board, goal_id, task_ids)."""
+    from obscura.kairos.goals import GoalBoard
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+    # Also patch the path used inside task_tools._sync_goal_progress.
+    monkeypatch.setattr("obscura.tools.task_tools._get_db.__wrapped__", None, raising=False)
+
+    goals_dir = tmp_path / "goals"
+    board = GoalBoard(goals_dir=goals_dir)
+
+    goal = board.create("Progress test", priority="medium")
+    q = TaskQueue()
+    task_ids: list[str] = []
+    for i in range(n_tasks):
+        tid = q.enqueue(f"Task {i}", goal_id=goal.id)
+        board.link_task(goal.id, tid)
+        task_ids.append(tid)
+
+    return board, goal.id, task_ids
+
+
+def test_goal_progress_syncs_via_task_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """task_update to 'completed' should auto-sync goal progress."""
+    import asyncio
+
+    from obscura.kairos.goals import GoalBoard
+    from obscura.tools.task_tools import task_update
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+
+    goals_dir = tmp_path / "goals"
+    board = GoalBoard(goals_dir=goals_dir)
+
+    goal = board.create("Progress test", priority="medium")
+    q = TaskQueue()
+    task_ids: list[str] = []
+    for i in range(2):
+        tid = q.enqueue(f"Task {i}", goal_id=goal.id)
+        board.link_task(goal.id, tid)
+        task_ids.append(tid)
+
+    # Complete first task — goal should be at ~50%.
+    asyncio.run(task_update(task_id=task_ids[0], status="completed"))
+    goal_mid = board.load(goal.id)
+    assert goal_mid is not None
+    assert goal_mid.progress == 50
+
+    # Complete second task — goal should reach 100%.
+    asyncio.run(task_update(task_id=task_ids[1], status="completed"))
+    goal_done = board.load(goal.id)
+    assert goal_done is not None
+    assert goal_done.progress == 100
+
+
+def test_goal_progress_syncs_via_queue_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """queue_complete should auto-sync goal progress and set last_worked."""
+    import asyncio
+
+    from obscura.kairos.goals import GoalBoard
+    from obscura.tools.task_tools import queue_complete
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+
+    goals_dir = tmp_path / "goals"
+    board = GoalBoard(goals_dir=goals_dir)
+
+    goal = board.create("Queue complete test", priority="high")
+    q = TaskQueue()
+    task_ids: list[str] = []
+    for i in range(2):
+        tid = q.enqueue(f"QC Task {i}", goal_id=goal.id)
+        board.link_task(goal.id, tid)
+        task_ids.append(tid)
+
+    # Complete first task via queue_complete — expect 50%.
+    asyncio.run(queue_complete(task_id=task_ids[0], output="done"))
+    goal_mid = board.load(goal.id)
+    assert goal_mid is not None
+    assert goal_mid.progress == 50
+    assert goal_mid.last_worked is not None  # last_worked was set
+
+    # Complete second task — expect 100%.
+    asyncio.run(queue_complete(task_id=task_ids[1], output="done"))
+    goal_done = board.load(goal.id)
+    assert goal_done is not None
+    assert goal_done.progress == 100
+
+
+def test_goal_sync_failure_does_not_fail_task_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken GoalBoard must not prevent task_update from succeeding."""
+    import asyncio
+
+    from obscura.tools.task_tools import task_update
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+
+    q = TaskQueue()
+    tid = q.enqueue("Orphan task", goal_id="nonexistent-goal")
+
+    # Force GoalBoard.sync_task_progress to raise.
+    def _bad_sync(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("storage failure")
+
+    monkeypatch.setattr("obscura.kairos.goals.GoalBoard.sync_task_progress", _bad_sync)
+
+    result_raw = asyncio.run(task_update(task_id=tid, status="completed"))
+    import json as _json
+    result = _json.loads(result_raw)
+    assert result["ok"] is True
+    assert "status" in result["updated_fields"]
+    # Task itself must be completed.
+    task = q.get(tid)
+    assert task is not None
+    assert task["status"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# Goal progress auto-sync on task completion
+# ---------------------------------------------------------------------------
+
+
+def _setup_goal_with_tasks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    n_tasks: int = 2,
+) -> tuple["GoalBoard", str, list[str]]:
+    """Create a goal with *n_tasks* linked tasks and return (board, goal_id, task_ids)."""
+    from obscura.kairos.goals import GoalBoard
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+    # Also patch the path used inside task_tools._sync_goal_progress.
+    monkeypatch.setattr("obscura.tools.task_tools._get_db.__wrapped__", None, raising=False)
+
+    goals_dir = tmp_path / "goals"
+    board = GoalBoard(goals_dir=goals_dir)
+
+    goal = board.create("Progress test", priority="medium")
+    q = TaskQueue()
+    task_ids: list[str] = []
+    for i in range(n_tasks):
+        tid = q.enqueue(f"Task {i}", goal_id=goal.id)
+        board.link_task(goal.id, tid)
+        task_ids.append(tid)
+
+    return board, goal.id, task_ids
+
+
+def test_goal_progress_syncs_via_task_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """task_update to 'completed' should auto-sync goal progress."""
+    import asyncio
+
+    from obscura.kairos.goals import GoalBoard
+    from obscura.tools.task_tools import task_update
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+
+    goals_dir = tmp_path / "goals"
+    board = GoalBoard(goals_dir=goals_dir)
+
+    goal = board.create("Progress test", priority="medium")
+    q = TaskQueue()
+    task_ids: list[str] = []
+    for i in range(2):
+        tid = q.enqueue(f"Task {i}", goal_id=goal.id)
+        board.link_task(goal.id, tid)
+        task_ids.append(tid)
+
+    # Complete first task — goal should be at ~50%.
+    asyncio.run(task_update(task_id=task_ids[0], status="completed"))
+    goal_mid = board.load(goal.id)
+    assert goal_mid is not None
+    assert goal_mid.progress == 50
+
+    # Complete second task — goal should reach 100%.
+    asyncio.run(task_update(task_id=task_ids[1], status="completed"))
+    goal_done = board.load(goal.id)
+    assert goal_done is not None
+    assert goal_done.progress == 100
+
+
+def test_goal_progress_syncs_via_queue_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """queue_complete should auto-sync goal progress and set last_worked."""
+    import asyncio
+
+    from obscura.kairos.goals import GoalBoard
+    from obscura.tools.task_tools import queue_complete
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+
+    goals_dir = tmp_path / "goals"
+    board = GoalBoard(goals_dir=goals_dir)
+
+    goal = board.create("Queue complete test", priority="high")
+    q = TaskQueue()
+    task_ids: list[str] = []
+    for i in range(2):
+        tid = q.enqueue(f"QC Task {i}", goal_id=goal.id)
+        board.link_task(goal.id, tid)
+        task_ids.append(tid)
+
+    # Complete first task via queue_complete — expect 50%.
+    asyncio.run(queue_complete(task_id=task_ids[0], output="done"))
+    goal_mid = board.load(goal.id)
+    assert goal_mid is not None
+    assert goal_mid.progress == 50
+    assert goal_mid.last_worked is not None  # last_worked was set
+
+    # Complete second task — expect 100%.
+    asyncio.run(queue_complete(task_id=task_ids[1], output="done"))
+    goal_done = board.load(goal.id)
+    assert goal_done is not None
+    assert goal_done.progress == 100
+
+
+def test_goal_sync_failure_does_not_fail_task_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken GoalBoard must not prevent task_update from succeeding."""
+    import asyncio
+
+    from obscura.tools.task_tools import task_update
+
+    db_file = tmp_path / "tasks.db"
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+
+    q = TaskQueue()
+    tid = q.enqueue("Orphan task", goal_id="nonexistent-goal")
+
+    # Force GoalBoard.sync_task_progress to raise.
+    def _bad_sync(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("storage failure")
+
+    monkeypatch.setattr("obscura.kairos.goals.GoalBoard.sync_task_progress", _bad_sync)
+
+    result_raw = asyncio.run(task_update(task_id=tid, status="completed"))
+    import json as _json
+    result = _json.loads(result_raw)
+    assert result["ok"] is True
+    assert "status" in result["updated_fields"]
+    # Task itself must be completed.
+    task = q.get(tid)
+    assert task is not None
+    assert task["status"] == "completed"

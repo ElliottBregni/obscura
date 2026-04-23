@@ -4531,11 +4531,41 @@ async def config_tool(
     return _json_error("invalid_action", detail=f"Unknown action: {action}")
 
 
+def _merge_lines(old: list[str], new: list[str]) -> tuple[list[str], bool]:
+    """Merge new content into old using line-level difflib opcodes.
+
+    Returns (merged_lines, had_conflict). When both sides changed the same
+    lines the conflicting region is wrapped in standard conflict markers so
+    the caller can detect and surface the situation.
+    """
+    import difflib
+
+    matcher = difflib.SequenceMatcher(None, old, new)
+    result: list[str] = []
+    had_conflict = False
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            result.extend(old[i1:i2])
+        elif tag == "replace":
+            # Both sides differ — emit conflict markers.
+            result.append("<<<<<<< agent\n")
+            result.extend(new[j1:j2])
+            result.append("=======\n")
+            result.extend(old[i1:i2])
+            result.append(">>>>>>> previous\n")
+            had_conflict = True
+        elif tag == "insert":
+            result.extend(new[j1:j2])
+        elif tag == "delete":
+            pass  # old content removed by new version
+    return result, had_conflict
+
+
 @tool(
     "write_agent_shared",
     (
-        "Write to the shared vault zone. Creates a backup of the previous version "
-        "before overwriting."
+        "Write to the shared vault zone. Backs up the previous version and "
+        "attempts a line-level fork-merge. Returns merged/conflict flags."
     ),
     {
         "type": "object",
@@ -4571,13 +4601,17 @@ async def write_agent_shared(path: str, text: str) -> str:
         )
 
     backed_up = False
+    merged = False
+    had_conflict = False
+
     if candidate.exists():
         ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%S")
         backup_dir = shared_root / ".backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_path = backup_dir / f"{candidate.name}.{ts}.bak"
         try:
-            backup_path.write_bytes(candidate.read_bytes())
+            old_bytes = candidate.read_bytes()
+            backup_path.write_bytes(old_bytes)
             backed_up = True
         except OSError as exc:
             return _json_error(
@@ -4586,13 +4620,30 @@ async def write_agent_shared(path: str, text: str) -> str:
                 detail=str(exc),
             )
 
+        # Fork-merge: split both versions into lines and reconcile.
+        old_lines = old_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+        new_lines = text.splitlines(keepends=True)
+        merged_lines, had_conflict = _merge_lines(old_lines, new_lines)
+        final_text = "".join(merged_lines)
+        merged = True
+    else:
+        final_text = text
+
     try:
         candidate.parent.mkdir(parents=True, exist_ok=True)
-        candidate.write_text(text, encoding="utf-8")
+        candidate.write_text(final_text, encoding="utf-8")
     except OSError as exc:
         return _json_error("write_failed", path=str(candidate), detail=str(exc))
 
-    return json.dumps({"ok": True, "path": str(candidate), "backed_up": backed_up})
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(candidate),
+            "backed_up": backed_up,
+            "merged": merged,
+            "conflict": had_conflict,
+        }
+    )
 
 
 def get_system_tool_specs() -> list[ToolSpec]:
