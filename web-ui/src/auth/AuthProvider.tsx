@@ -15,7 +15,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const setApiKey = useAuthStore((s) => s.setApiKey);
   const setGithubToken = useAuthStore((s) => s.setGithubToken);
   const logout = useAuthStore((s) => s.logout);
-  const setAuthEnabled = useSystemStore((s) => s.setAuthEnabled);
   const setServerReachable = useSystemStore((s) => s.setServerReachable);
   const devApiKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
   // Security: refuse the dev-key bypass in production builds even if
@@ -85,18 +84,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       try {
         const resp = await fetch(healthEndpoint, { headers });
-        if (resp.ok || resp.status === 401) {
-          setAuthEnabled(true);
-          setServerReachable(true);
-          if (!token && !apiKey && devApiKey) {
-            setApiKey(devApiKey);
-          }
-        } else {
-          setAuthEnabled(true);
-          setServerReachable(true);
+        setServerReachable(true);
+        if ((resp.ok || resp.status === 401) && !token && !apiKey && devApiKey) {
+          setApiKey(devApiKey);
         }
       } catch {
-        setAuthEnabled(true);
         setServerReachable(false);
       }
     }
@@ -107,7 +99,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     devApiKey,
     forceDevApiKey,
     setApiKey,
-    setAuthEnabled,
     setServerReachable,
     token,
   ]);

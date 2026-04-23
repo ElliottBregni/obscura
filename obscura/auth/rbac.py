@@ -50,16 +50,6 @@ AGENT_WRITE_ROLES = (
 AGENT_READ_ROLES = (*AGENT_WRITE_ROLES, "agent:read")
 """Roles that may send prompts or read agent state."""
 
-# Mock user for when auth is disabled
-_MOCK_USER = AuthenticatedUser(
-    user_id="anonymous",
-    email="anonymous@obscura.local",
-    roles=("admin", *AGENT_WRITE_ROLES, "agent:read", "sync:write", "sessions:manage"),
-    org_id="local",
-    token_type="anonymous",
-    raw_token="",
-)
-
 # API Keys - loaded from env var OBSCURA_API_KEYS (comma-separated key:name:role1,role2)
 # Example: OBSCURA_API_KEYS="key1:dev-user:admin,agent:copilot;key2:readonly-user:agent:read"
 _api_keys: dict[str, dict[str, str | list[str]]] = {}
@@ -180,27 +170,18 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
 
     Checks in order:
     1. X-API-Key header
-    2. Mock user (if auth is disabled)
-    3. User from middleware (set in request.state.user)
+    2. User from middleware (set in request.state.user)
 
     Raises:
         HTTPException(401): if no valid auth found.
 
     """
-    # Check if auth is disabled via app config
-    config = getattr(request.app.state, "config", None)
-    auth_enabled = getattr(config, "auth_enabled", True) if config else True
-
-    # 1. Check API key header (works even when auth is enabled)
+    # 1. Check API key header
     api_user = user_from_api_key(request.headers.get("X-API-Key"))
     if api_user is not None:
         return api_user
 
-    # 2. If auth is disabled, return mock user
-    if not auth_enabled:
-        return _MOCK_USER
-
-    # 3. Check JWT token from middleware
+    # 2. Check JWT token from middleware
     user: AuthenticatedUser | None = getattr(request.state, "user", None)
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")

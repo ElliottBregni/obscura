@@ -42,9 +42,7 @@ async def auth_diagnostics(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Report ingress auth mode and server-side auth configuration."""
-    config = request.app.state.config
     payload = {
-        "auth_enabled": bool(config.auth_enabled),
         "auth_mode": "api_key",
         "request_auth_type": user.token_type,
         "request_user_id": user.user_id,

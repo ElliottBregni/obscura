@@ -23,11 +23,6 @@ class ObscuraConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
 
-    # Auth
-    auth_enabled: bool = (
-        False  # default off for dev; set OBSCURA_AUTH_ENABLED=true in prod
-    )
-
     # Supabase OAuth (primary identity provider for human users).
     # Service/machine callers continue to use X-API-Key as a local bypass.
     supabase_url: str = ""  # e.g. https://xxxx.supabase.co
@@ -89,9 +84,6 @@ class ObscuraConfig(BaseModel):
         return cls(
             host=os.environ.get("OBSCURA_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_PORT", "8080")),
-            # Auth
-            auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "false").lower()
-            == "true",
             # Supabase OAuth
             supabase_url=os.environ.get("SUPABASE_URL", ""),
             supabase_jwt_secret=os.environ.get("SUPABASE_JWT_SECRET", ""),

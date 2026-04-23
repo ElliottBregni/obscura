@@ -274,30 +274,17 @@ def record_sync_metric(status: str) -> None:
 async def authenticate_websocket(
     websocket: WebSocket,
 ) -> AuthenticatedUser | None:
-    """Validate API key from WebSocket query params."""
+    """Validate API key from WebSocket query params.
+
+    Browsers can't set arbitrary headers in the WebSocket handshake, so we
+    accept the API key via a query param. Returns None if authentication fails.
+    """
     from obscura.auth.rbac import user_from_api_key
 
     api_key = websocket.query_params.get("api_key", "")
-    config: ObscuraConfig | None = getattr(websocket.app.state, "config", None)
-
-    # API keys are accepted for websocket clients because browsers cannot set
-    # arbitrary headers in the WebSocket handshake.
     api_user = user_from_api_key(api_key)
     if api_user is not None:
         return api_user
 
-    if config is None or not config.auth_enabled:
-        from obscura.auth.rbac import AGENT_READ_ROLES
-
-        return AuthenticatedUser(
-            user_id="local-dev",
-            email="dev@obscura.dev",
-            roles=AGENT_READ_ROLES,
-            org_id="local",
-            token_type="user",
-            raw_token="",
-        )
-
-    # Auth enabled but no valid API key
     logger.warning("WebSocket auth failed: no valid API key")
     return None

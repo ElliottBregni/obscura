@@ -93,7 +93,6 @@ brew install sox ffmpeg   # macOS only
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OBSCURA_PORT` | `8080` | API server port |
-| `OBSCURA_AUTH_ENABLED` | `false` | Enforce auth on `/api/` routes |
 | `OBSCURA_API_KEYS` | — | `token:user:scope1,scope2` (`;` separates multiple) |
 | `OBSCURA_VECTOR_BACKEND` | `qdrant` | `qdrant` or `none` |
 | `OBSCURA_QDRANT_URL` | — | Qdrant server URL |
@@ -101,6 +100,70 @@ brew install sox ffmpeg   # macOS only
 | `OBSCURA_UNDERCOVER` | `1` | Strip AI attribution from commits/PRs |
 
 See [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full reference.
+
+## Authentication
+
+Obscura's server accepts two credential types on `/api/*`, `/mcp/*`, and `/a2a/*`:
+
+1. **Supabase bearer tokens** — issued to users who sign in through the Web UI (primary path)
+2. **API keys** — long-lived tokens for scripts, CI, and MCP clients (`OBSCURA_API_KEYS`)
+
+### Sign in with GitHub (end users)
+
+If the operator has configured GitHub OAuth (see below), signing in is one click:
+
+1. Open the Web UI (`http://localhost:5173` for dev, or your deployed URL)
+2. Click **Sign in with GitHub**
+3. Authorize the OAuth app on GitHub
+4. You're redirected back, authenticated via Supabase
+
+The access token is held in `sessionStorage` under `obscura.supabase.auth` and sent as `Authorization: Bearer <token>` on every API call. Tokens expire after 15 minutes (`jwt_exp=900`) and refresh automatically while the tab is open.
+
+Your role in Obscura comes from `app_metadata.roles` on your Supabase user — set it from the Supabase dashboard (Auth → Users → your user → edit `app_metadata`). Valid roles: `admin`, `operator`, `agent:read`, `agent:claude`, `agent:copilot`, etc. — see `obscura/auth/models.py` for the full list. New GitHub sign-ups default to `agent:read`.
+
+### Configure GitHub OAuth (operators)
+
+One-time setup when standing up a new Supabase project.
+
+**1. Create a GitHub OAuth App** — https://github.com/settings/developers → **New OAuth App**
+
+| Field | Value |
+|-------|-------|
+| Application name | Obscura (or your deployment name) |
+| Homepage URL | `https://your-domain` (or `http://localhost:5173` for dev) |
+| Authorization callback URL | `https://<project-ref>.supabase.co/auth/v1/callback` |
+
+Copy the **Client ID**, generate a **Client Secret**.
+
+**2. Enable GitHub in Supabase** — `https://supabase.com/dashboard/project/<project-ref>/auth/providers`
+
+Toggle **GitHub** on, paste the Client ID and Client Secret, Save.
+
+**3. Point Obscura at your Supabase project** — in `.env`:
+
+```bash
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<public anon key from Supabase API settings>
+SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+```
+
+Auth is always enforced on `/api/*`, `/mcp/*`, and `/a2a/*`; there is no off-switch.
+
+Obscura validates tokens by fetching the JWKS on first use — no shared secret to paste or rotate. If your project is still on legacy HS256, either migrate to asymmetric keys (Dashboard → Project Settings → JWT Signing Keys → Rotate) or set `SUPABASE_JWT_SECRET` instead of `SUPABASE_JWKS_URL`.
+
+**4. Rotating the GitHub secret** — generate a new one in the GitHub OAuth App, paste into the Supabase dashboard (same page as step 2), Save. Then revoke the old secret on GitHub. No Obscura restart or code change needed.
+
+### API key alternative (CI / scripts)
+
+For headless callers that can't do OAuth, use long-lived API keys:
+
+```bash
+OBSCURA_API_KEYS="mykey:service-account:agent:read,agent:copilot"
+# then:
+curl -H "Authorization: Bearer mykey" http://localhost:8080/api/v1/whoami
+```
+
+Format is `token:user_id:role1,role2` — separate multiple keys with `;`.
 
 ## Architecture
 

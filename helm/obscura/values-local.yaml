@@ -11,10 +11,6 @@ service:
   type: NodePort
   nodePort: 30080
 
-# Disable auth for local dev
-auth:
-  enabled: false
-
 # Local telemetry endpoints
 telemetry:
   enabled: true

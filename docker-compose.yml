@@ -56,9 +56,16 @@ services:
         target: /home/obscura/.claude.json
         read_only: true
     environment:
-      # Auth
-      OBSCURA_AUTH_ENABLED: "true"
-      OBSCURA_API_KEYS: "${OBSCURA_API_KEYS:-obscura-dev-key-123:dev-user:admin,agent:copilot,agent:claude,agent:localllm,agent:openai,agent:moonshot,agent:read,sync:write,sessions:manage}"
+      # Auth is always on — primary path is Supabase OAuth. API keys only
+      # load when OBSCURA_API_KEYS is set explicitly in your local .env;
+      # leaving this blank forces users to sign in via the web UI / CLI
+      # rather than relying on a shared secret baked into version control.
+      OBSCURA_API_KEYS: "${OBSCURA_API_KEYS:-}"
+      # Supabase (required unless you only use API keys above).
+      SUPABASE_URL: "${SUPABASE_URL:-}"
+      SUPABASE_JWT_SECRET: "${SUPABASE_JWT_SECRET:-}"
+      SUPABASE_JWKS_URL: "${SUPABASE_JWKS_URL:-}"
+      SUPABASE_AUDIENCE: "${SUPABASE_AUDIENCE:-authenticated}"
       # Telemetry (OpenTelemetry)
       OTEL_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"

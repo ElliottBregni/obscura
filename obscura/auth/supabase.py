@@ -7,9 +7,11 @@ Two verification modes are supported:
 
 * **HS256 shared secret** — set ``SUPABASE_JWT_SECRET`` to the project's JWT
   secret.
-* **RS256 via JWKS** — set ``SUPABASE_JWKS_URL`` (e.g.
+* **Asymmetric via JWKS** — set ``SUPABASE_JWKS_URL`` (e.g.
   ``https://<project>.supabase.co/auth/v1/.well-known/jwks.json``); takes
-  precedence over the HS256 secret when set.
+  precedence over the HS256 secret when set. Supports RS256 and ES256
+  (Supabase's asymmetric rotation offers both; ECC P-256 / ES256 is the
+  modern default).
 
 Role mapping follows the Supabase skill's guidance: roles come from
 ``app_metadata.roles`` (NOT ``user_metadata``, which is user-editable and
@@ -94,7 +96,7 @@ class SupabaseVerifier:
             return jwt.decode(  # type: ignore[no-any-return]
                 token,
                 signing_key,
-                algorithms=["RS256"],
+                algorithms=["RS256", "ES256"],
                 audience=self._settings.audience,
                 issuer=issuer,
                 options=options,

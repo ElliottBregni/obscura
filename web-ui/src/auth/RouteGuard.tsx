@@ -2,20 +2,17 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
-import { useSystemStore } from '@/stores/systemStore';
 import { supabase, supabaseEnabled } from '@/lib/supabase';
 
 type LoginMode = 'oauth' | 'magiclink' | 'apikey';
 
 export function RouteGuard() {
   const { isAuthenticated, setApiKey } = useAuth();
-  const authEnabled = useSystemStore((s) => s.authEnabled);
   const [mode, setMode] = useState<LoginMode>(supabaseEnabled ? 'oauth' : 'apikey');
   const [email, setEmail] = useState('');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  if (!authEnabled) return <Outlet />;
   if (isAuthenticated) return <Outlet />;
 
   const handleOAuth = async (provider: 'github' | 'google') => {
