@@ -1218,6 +1218,14 @@ class ObscuraSession:
         except Exception:
             pass
 
+        # Arbiter tools
+        try:
+            from obscura.tools.arbiter_tools import get_arbiter_tool_specs
+
+            system_tools.extend(get_arbiter_tool_specs())
+        except Exception:
+            pass
+
         # Profile tools
         try:
             from obscura.tools.profile_tools import get_profile_tool_specs
