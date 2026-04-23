@@ -141,7 +141,7 @@ chrome.sidePanel
 
 // First-run onboarding: open the setup page when the extension is installed
 // or updated across a breaking host-protocol change. Also verify the native
-// host is reachable — if not, open onboarding automatically.
+// host is reachable  if not, open onboarding automatically.
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === "install") {
     const healthy = await healthCheck(5000);
@@ -153,16 +153,73 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-// Service worker startup health check — verify native host connectivity.
+// Service worker startup health check  verify native host connectivity.
 (async () => {
   try {
     const healthy = await healthCheck(5000);
     if (!healthy) {
-      // Native host not responding — panels will show the disconnect banner.
+      // Native host not responding  panels will show the disconnect banner.
       // No action needed here beyond logging for debugging.
       console.warn("[obscura] native host health check failed on startup");
     }
   } catch {
-    // Swallow — best-effort check.
+    // Swallow  best-effort check.
   }
 })();
+
+// -- Page bridge handler ----------------------------------------------------
+// Handle messages forwarded from the content script (page bridge). Keep a
+// small whitelist of allowed commands and implement batching for convenience.
+
+const PAGE_BRIDGE_WHITELIST = new Set(['ping', 'getToken', 'batch']);
+
+async function handleBridgeCommand(cmd, payload, sender) {
+  if (cmd === 'ping') return { result: 'pong' };
+  if (cmd === 'getToken') {
+    // Example: retrieve auth token from storage (never expose raw secrets into page)
+    const s = await chrome.storage.local.get(['authToken']);
+    return { result: s.authToken || null };
+  }
+  if (cmd === 'batch') {
+    // payload: [{cmd, payload}, ...]
+    if (!Array.isArray(payload)) return { error: 'invalid-batch' };
+    const results = [];
+    for (const item of payload) {
+      if (!item || typeof item.cmd !== 'string' || !PAGE_BRIDGE_WHITELIST.has(item.cmd)) {
+        results.push({ error: 'cmd-not-allowed' });
+        continue;
+      }
+      try {
+        const r = await handleBridgeCommand(item.cmd, item.payload, sender);
+        results.push(r);
+      } catch (err) {
+        results.push({ error: String(err) });
+      }
+    }
+    return { result: results };
+  }
+  return { error: 'unsupported' };
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Messages from content script are expected to have 'from: page-bridge'
+  if (!msg || msg.from !== 'page-bridge') return; // ignore other messages
+
+  // basic validation
+  if (typeof msg.cmd !== 'string' || !PAGE_BRIDGE_WHITELIST.has(msg.cmd)) {
+    sendResponse({ error: 'cmd-not-allowed' });
+    return;
+  }
+
+  // Process command
+  (async () => {
+    try {
+      const out = await handleBridgeCommand(msg.cmd, msg.payload, sender);
+      sendResponse(out);
+    } catch (err) {
+      sendResponse({ error: String(err) });
+    }
+  })();
+
+  return true; // async
+});
