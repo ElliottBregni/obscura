@@ -38,6 +38,12 @@
       "matches": ["https://*/*"],
       "js": ["src/content_scripts/extbridge_content.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": ["https://*/*"],
+      "js": ["src/content_scripts/extbridge_main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "icons": {

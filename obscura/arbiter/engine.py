@@ -29,6 +29,7 @@ import time
 from typing import Any
 
 from obscura.arbiter.checks import (
+    check_acceptance_criteria,
     check_drift,
     check_file_quality,
     check_file_relevance,
@@ -530,6 +531,58 @@ class ArbiterEngine:
             DailyLog().append(entry, source="arbiter")
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    # Agent self-awareness
+    # ------------------------------------------------------------------
+
+    def get_recent_verdict_summary(self, limit: int = 5) -> str:
+        """Return a short summary of recent verdicts for agent self-awareness.
+
+        Injected into the agent's system prompt so it can adjust its
+        behavior based on recent quality signals.
+        """
+        recent = self._events[-limit:] if self._events else []
+        if not recent:
+            return ""
+
+        lines = ["## Recent Arbiter Verdicts", ""]
+        verdict_counts: dict[str, int] = {}
+        for event in reversed(recent):
+            v = event.verdict.value
+            verdict_counts[v] = verdict_counts.get(v, 0) + 1
+            feedback = event.score.feedback
+            details = "; ".join(event.score.details[:3]) if event.score.details else ""
+            summary = feedback[:120] if feedback else details[:120]
+            lines.append(
+                f"- [{v.upper()}] {event.kind.value}: {summary}" if summary
+                else f"- [{v.upper()}] {event.kind.value}"
+            )
+
+        # Add behavioral guidance based on patterns
+        lines.append("")
+        if verdict_counts.get("revise", 0) >= 3:
+            lines.append(
+                "_Pattern: High revision rate. Double-check your output "
+                "quality, ensure responses are complete, and verify tool "
+                "calls before executing._"
+            )
+        if verdict_counts.get("deny", 0) >= 2:
+            lines.append(
+                "_Pattern: Multiple denials. You may be drifting from the "
+                "task scope. Re-read the original request before continuing._"
+            )
+        if verdict_counts.get("accept", 0) >= 4:
+            lines.append(
+                "_Pattern: Strong acceptance rate. Current approach is working well._"
+            )
+
+        return "\n".join(lines)
+
+    @property
+    def has_quality_signal(self) -> bool:
+        """True if there are enough events to provide meaningful feedback."""
+        return len(self._events) >= 3
 
     # ------------------------------------------------------------------
     # Introspection

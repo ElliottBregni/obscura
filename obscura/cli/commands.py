@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shlex
 import uuid
 from collections.abc import Awaitable, Callable
@@ -962,14 +963,107 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
     return None
 
 
-async def cmd_plan(_args: str, ctx: REPLContext) -> str | None:
-    """Show the current plan."""
+async def cmd_plan(args: str, ctx: REPLContext) -> str | None:
+    """Structured planning. Usage: /plan [show|save|execute|clear] or /plan <description>."""
+    from obscura.cli.app.modes import Plan, TUIMode
+
     mm = ctx.get_mode_manager()
-    plan = mm.active_plan
-    if plan is None:
-        print_info("No active plan. Use /mode plan and ask the model to create one.")
+    val = args.strip()
+    sub = val.split(None, 1)[0].lower() if val else ""
+
+    # /plan (no args) or /plan show — display current plan
+    if not val or sub == "show":
+        plan = mm.active_plan
+        if plan is None:
+            print_info(
+                "No active plan. Use /plan <description> to create one, "
+                "or /mode plan and describe what you want to build."
+            )
+            return None
+        render_plan(plan)
         return None
-    render_plan(plan)
+
+    # /plan clear — discard the active plan
+    if sub == "clear":
+        mm.active_plan = None
+        print_ok("Plan cleared.")
+        return None
+
+    # /plan save — persist to vault
+    if sub == "save":
+        plan = mm.active_plan
+        if plan is None:
+            print_error("No active plan to save.")
+            return None
+        vault_dir = Path.home() / ".obscura" / "vault" / "shared" / "decisions"
+        vault_dir.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", plan.title.lower()).strip("-")[:50]
+        path = vault_dir / f"plan-{slug}.md"
+        content = plan.to_markdown()
+        path.write_text(content, encoding="utf-8")
+        print_ok(f"Plan saved to {path}")
+        return None
+
+    # /plan execute — switch to code mode and inject approved steps
+    if sub == "execute":
+        plan = mm.active_plan
+        if plan is None:
+            print_error("No active plan to execute.")
+            return None
+        approved = [s for s in plan.steps if s.status in ("approved", "edited")]
+        if not approved:
+            print_error("No approved steps. Use /approve <n|all> first.")
+            return None
+        mm.switch(TUIMode.CODE)
+        ctx.tools_enabled = True
+        await ctx.recreate_client(ctx.backend, ctx.model)
+        print_ok(
+            f"Switched to code mode with {len(approved)} approved steps. "
+            "The plan is injected into context."
+        )
+        return None
+
+    # /plan <description> — create a new plan via the agent
+    # Switch to plan mode if not already there
+    if mm.current != TUIMode.PLAN:
+        mm.switch(TUIMode.PLAN)
+        allowed = mm.get_allowed_tool_names()
+        ctx.tools_enabled = allowed is None or len(allowed) > 0
+        await ctx.recreate_client(ctx.backend, ctx.model)
+
+    prompt = (
+        f"Create a structured implementation plan for: {val}\n\n"
+        "Research the codebase first using file reading and grep tools, "
+        "then produce a numbered plan. Each step should include the files "
+        "it touches and any risks."
+    )
+
+    from obscura.cli.render import render_event
+
+    collected: list[str] = []
+    try:
+        async for event in ctx.client.run_loop(prompt):
+            render_event(event)
+            if hasattr(event, "text") and event.text:
+                collected.append(event.text)
+    except Exception as exc:
+        print_error(str(exc))
+        return None
+
+    # Parse the response into a Plan
+    full_text = "".join(collected)
+    if full_text.strip():
+        plan = Plan.parse(full_text)
+        if plan.steps:
+            mm.active_plan = plan
+            console.print()
+            print_ok(
+                f"Plan created with {len(plan.steps)} steps. "
+                "Use /approve <n|all>, /reject <n|all>, then /plan execute."
+            )
+        else:
+            print_warning("Could not parse numbered steps from the response.")
+
     return None
 
 
@@ -4138,6 +4232,47 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+async def cmd_migrate(args: str, _ctx: REPLContext) -> str | None:
+    """Detect and import external agent configs (Cursor, Copilot, Claude, ...).
+
+    Usage:
+        /migrate external          Prompt to import any detected sources
+        /migrate external --force  Re-run including sources marked "never"
+        /migrate external --list   Show detected sources without importing
+    """
+    from obscura.core.migrate_external import (
+        clear_decisions,
+        migrate_all,
+        scan,
+    )
+
+    parts = args.split()
+    target = parts[0] if parts else "external"
+    if target != "external":
+        print_error(f"Unknown migrate target: {target}. Try /migrate external.")
+        return None
+
+    cwd = Path.cwd()
+    if "--force" in parts:
+        clear_decisions(cwd)
+
+    sources = scan(cwd)
+    if not sources:
+        print_info("No external agent configs detected.")
+        return None
+
+    if "--list" in parts:
+        print_info(f"Detected {len(sources)} source(s):")
+        for s in sources:
+            print_info(f"  • [{s.scope}] {s.label}  →  {s.dest}")
+        return None
+
+    print_info(f"Importing {len(sources)} source(s):")
+    imported = migrate_all(sources, cwd, emit=print_info)
+    print_ok(f"Imported {imported} of {len(sources)}.")
+    return None
+
+
 async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
     """Initialise a local .obscura/ workspace and bootstrap plugins."""
     from obscura.core.workspace import (
@@ -5399,8 +5534,8 @@ async def cmd_review(args: str, ctx: REPLContext) -> str | None:
     import asyncio as _aio
 
     ref = args.strip() or "HEAD"
-    proc = await _aio.create_subprocess_shell(
-        f"git diff {ref}",
+    proc = await _aio.create_subprocess_exec(
+        "git", "diff", ref,
         stdout=_aio.subprocess.PIPE,
         stderr=_aio.subprocess.PIPE,
     )
@@ -5534,8 +5669,8 @@ async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
     import asyncio as _aio
 
     ref = args.strip() or "HEAD"
-    proc = await _aio.create_subprocess_shell(
-        f"git diff {ref}",
+    proc = await _aio.create_subprocess_exec(
+        "git", "diff", ref,
         stdout=_aio.subprocess.PIPE,
         stderr=_aio.subprocess.PIPE,
     )
@@ -5584,6 +5719,257 @@ Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
             render_event(event)
     except Exception as exc:
         print_error(str(exc))
+    return None
+
+
+async def cmd_ultrareview(args: str, ctx: REPLContext) -> str | None:
+    """Multi-agent parallel code review. Usage: /ultrareview [PR#|ref]."""
+    import asyncio as _aio
+
+    ref = args.strip()
+
+    # If a PR number is given, fetch the diff from GitHub
+    if ref and ref.isdigit():
+        proc = await _aio.create_subprocess_exec(
+            "gh", "pr", "diff", ref,
+            stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        diff = stdout.decode("utf-8", errors="replace").strip()
+        if not diff:
+            print_warning(f"Could not fetch PR #{ref} diff via gh: {stderr.decode()[:200]}")
+            return None
+        review_target = f"PR #{ref}"
+    else:
+        # Local diff — use subprocess_exec to prevent shell injection
+        git_ref = ref or "HEAD"
+        proc = await _aio.create_subprocess_exec(
+            "git", "diff", git_ref,
+            stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        diff = stdout.decode("utf-8", errors="replace").strip()
+        if not diff:
+            print_info(f"No changes found for ref: {git_ref}")
+            return None
+        review_target = f"ref {git_ref}"
+
+    # --- Split diff into per-file hunks ---
+    file_diffs: list[tuple[str, str]] = []
+    current_file = ""
+    current_lines: list[str] = []
+    for line in diff.split("\n"):
+        if line.startswith("diff --git"):
+            if current_file and current_lines:
+                file_diffs.append((current_file, "\n".join(current_lines)))
+            parts = line.split(" b/", 1)
+            current_file = parts[1] if len(parts) > 1 else line
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+    if current_file and current_lines:
+        file_diffs.append((current_file, "\n".join(current_lines)))
+
+    total_files = len(file_diffs)
+    total_bytes = len(diff)
+    print_info(
+        f"Launching ultrareview of {review_target}: "
+        f"{total_files} files, {total_bytes:,} bytes"
+    )
+
+    # --- Distribute file diffs across 5 specialists ---
+    # Each specialist gets a DIFFERENT slice of files, not the same truncated prefix.
+    # Budget: ~30k chars per specialist (fits comfortably in most context windows).
+    _BUDGET_PER_AGENT = 30000
+
+    specialists: list[tuple[str, str, str]] = [
+        (
+            "security",
+            "You are a security expert.",
+            "Focus ONLY on security issues: injection flaws, auth bypass, "
+            "privilege escalation, data exposure, hardcoded secrets, crypto "
+            "weaknesses, path traversal, deserialization. Report only HIGH/MEDIUM "
+            "confidence findings with file:line references.",
+        ),
+        (
+            "correctness",
+            "You are a logic and correctness expert.",
+            "Focus ONLY on correctness: logic errors, off-by-one, null/None "
+            "handling, race conditions, async bugs, type mismatches, edge cases, "
+            "error handling gaps. Report with file:line references.",
+        ),
+        (
+            "architecture",
+            "You are a software architect.",
+            "Focus ONLY on architecture and design: coupling, cohesion, API "
+            "design, naming, abstraction levels, dependency direction, breaking "
+            "changes, backwards compatibility. Report structural concerns only.",
+        ),
+        (
+            "test-coverage",
+            "You are a testing specialist.",
+            "Focus ONLY on test coverage: missing tests for new code paths, "
+            "untested edge cases, test quality (are assertions meaningful?), "
+            "mock correctness, integration vs unit balance. Report gaps only.",
+        ),
+        (
+            "performance",
+            "You are a performance engineer.",
+            "Focus ONLY on performance: N+1 queries, unnecessary allocations, "
+            "blocking in async code, missing caching opportunities, O(n²) "
+            "algorithms, large payload handling. Report with file:line references.",
+        ),
+    ]
+    num_specialists = len(specialists)
+
+    # Build per-specialist diff chunks by round-robin distributing files
+    specialist_chunks: list[str] = [""] * num_specialists
+    specialist_files: list[list[str]] = [[] for _ in range(num_specialists)]
+    for i, (fname, fdiff) in enumerate(file_diffs):
+        slot = i % num_specialists
+        # Respect per-agent budget
+        if len(specialist_chunks[slot]) + len(fdiff) <= _BUDGET_PER_AGENT:
+            specialist_chunks[slot] += fdiff + "\n"
+            specialist_files[slot].append(fname)
+        else:
+            # Over budget — try to fit in any slot with room
+            placed = False
+            for s in range(num_specialists):
+                if len(specialist_chunks[s]) + len(fdiff) <= _BUDGET_PER_AGENT:
+                    specialist_chunks[s] += fdiff + "\n"
+                    specialist_files[s].append(fname)
+                    placed = True
+                    break
+            if not placed:
+                # All slots full — truncate this file diff and add to original slot
+                remaining = _BUDGET_PER_AGENT - len(specialist_chunks[slot])
+                if remaining > 500:
+                    specialist_chunks[slot] += fdiff[:remaining] + "\n[truncated]\n"
+                    specialist_files[slot].append(f"{fname} (truncated)")
+
+    # Show distribution
+    for i, (name, _, _) in enumerate(specialists):
+        fcount = len(specialist_files[i])
+        chars = len(specialist_chunks[i])
+        if fcount:
+            fnames = ", ".join(specialist_files[i][:5])
+            if fcount > 5:
+                fnames += f", ... (+{fcount - 5} more)"
+            print_info(f"  {name}: {fcount} files, {chars:,} chars — {fnames}")
+
+    console.print()
+    runtime = await ctx.get_runtime()
+
+    async def _run_specialist(
+        idx: int, name: str, persona: str, focus: str,
+    ) -> tuple[str, str]:
+        chunk = specialist_chunks[idx]
+        files = specialist_files[idx]
+        if not chunk.strip():
+            return name, "No files assigned to this specialist."
+
+        agent_name = f"ultrareview-{name}-{uuid.uuid4().hex[:4]}"
+        agent = runtime.spawn(
+            agent_name,
+            model=ctx.backend,
+            system_prompt=f"{persona} You are reviewing code changes.",
+        )
+        await agent.start()
+        file_list = "\n".join(f"- {f}" for f in files)
+        prompt = f"""{focus}
+
+You are reviewing {len(files)} files:
+{file_list}
+
+```diff
+{chunk}
+```
+
+Rules:
+- Be concise. One paragraph per finding.
+- Include file:line references.
+- Rate each finding: HIGH or MEDIUM severity.
+- If you find nothing significant, say "No issues found."
+- Do NOT repeat findings across categories — stay in your lane.
+"""
+        output_lines: list[str] = []
+        try:
+            async for event in agent.stream_loop(prompt, max_turns=3):
+                if hasattr(event, "text") and event.text:
+                    output_lines.append(event.text)
+        except Exception as exc:
+            output_lines.append(f"Error: {exc}")
+        return name, "".join(output_lines)
+
+    # Run all 5 in parallel
+    results: list[tuple[str, str]] = await _aio.gather(
+        *[_run_specialist(i, n, p, f) for i, (n, p, f) in enumerate(specialists)],
+    )
+
+    # Display per-specialist results
+    from rich.markdown import Markdown
+    from rich.rule import Rule
+
+    colors = ["red", "yellow", "blue", "green", "magenta"]
+    for idx, (name, output) in enumerate(results):
+        color = colors[idx % len(colors)]
+        fcount = len(specialist_files[idx])
+        console.print(Rule(
+            f"[bold {color}]{name.upper()}[/] ({fcount} files)",
+            style=color,
+        ))
+        if output.strip() and output.strip() != "No files assigned to this specialist.":
+            console.print(Markdown(output))
+        else:
+            console.print("[dim]No issues found.[/]")
+        console.print()
+
+    # Verification pass — synthesize, deduplicate, and rank
+    print_info("Running verification pass...")
+    all_findings = "\n\n".join(
+        f"## {name.upper()} ({len(specialist_files[i])} files)\n{output}"
+        for i, (name, output) in enumerate(results)
+        if output.strip() and output.strip() != "No files assigned to this specialist."
+    )
+
+    verifier_prompt = f"""You are a senior engineer doing a final review pass. Below are findings
+from 5 specialist reviewers. Each reviewer examined DIFFERENT files from the same PR.
+
+Your job:
+1. DEDUPLICATE: remove any findings that appear more than once
+2. VERIFY: remove obvious false positives
+3. PRIORITIZE: rank remaining findings by impact
+4. CROSS-CUT: add any concerns that span multiple specialists' file sets
+5. Output a unified report — do NOT repeat findings:
+
+### Critical (must fix before merge)
+- Finding with file:line
+
+### Important (should fix)
+- Finding with file:line
+
+### Minor (nice to have)
+- Finding with file:line
+
+### Summary
+One paragraph overall assessment. Mention total files reviewed: {total_files}.
+
+--- SPECIALIST FINDINGS ---
+
+{all_findings[:20000]}
+"""
+
+    from obscura.cli.render import render_event
+
+    console.print(Rule("[bold white]UNIFIED REPORT[/]", style="white"))
+    try:
+        async for event in ctx.client.run_loop(verifier_prompt):
+            render_event(event)
+    except Exception as exc:
+        print_error(f"Verification pass failed: {exc}")
+
     return None
 
 
@@ -9427,6 +9813,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "memory": cmd_memory,
     # Workspace
     "init": cmd_init,
+    "migrate": cmd_migrate,
     # Control & status
     "status": cmd_status,
     "policies": cmd_policies,
@@ -9441,6 +9828,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "pr": cmd_pr,
     "branch": cmd_branch,
     "security-review": cmd_security_review,
+    "ultrareview": cmd_ultrareview,
     # Utility
     "cat": cmd_cat,
     "search-tools": cmd_search_tools,
@@ -9515,7 +9903,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "tools": ["on", "off", "list", "enable", "disable"],
     "confirm": ["on", "off"],
     "mode": ["ask", "plan", "code"],
-    "plan": [],
+    "plan": ["show", "save", "execute", "clear"],
     "permissions": ["default", "plan", "accept_edits", "bypass"],
     "approve": ["all"],
     "reject": ["all"],
@@ -9538,6 +9926,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "inspect": ["workspace", "agent", "capability", "pack"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "init": ["--force"],
+    "migrate": ["external", "--force", "--list"],
     "memory": ["stats", "search", "clear"],
     "status": ["--json"],
     "policies": [],
@@ -9551,6 +9940,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "pr": ["main", "master", "develop"],
     "branch": ["list", "create", "delete"],
     "security-review": [],
+    "ultrareview": [],
     "cat": [],
     "search-tools": [],
     "add-dir": [],

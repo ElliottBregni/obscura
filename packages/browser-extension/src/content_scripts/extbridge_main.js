@@ -1,25 +1,12 @@
-// ==UserScript==
-// @name         ExtBridge Page Injector
-// @namespace    http://local.obscura/
-// @version      0.4
-// @match        https://*/*
-// @grant        none
-// @run-at       document-start
-// ==/UserScript==
+// Runs in the page's MAIN world (see manifest.json → content_scripts.world).
 //
-// This userscript is a FALLBACK for pages where the Obscura extension's
-// content script can't reach (chrome://, some restricted PDFs, etc.).  On
-// every normal https:// page the extension installs `window.ExtBridge`
-// itself via a MAIN-world content script, and this userscript no-ops.
-//
-// If you have the Obscura extension installed, the userscript is optional
-// and you can disable it in Tampermonkey.  If you keep it installed, make
-// sure you've imported v0.4+ — older revisions used a `<script>`-injection
-// trick that fires CSP violations on strict sites (GitHub, Office, AWS).
-(function () {
+// This exposes window.ExtBridge directly — no DOM <script> injection, so it
+// does NOT trip strict page CSPs (GitHub, Office, AWS Console, etc.).  It
+// communicates with the isolated-world content script (extbridge_content.js)
+// via window.postMessage, and that script is the only thing with
+// chrome.runtime access.
+(function installExtBridge() {
   'use strict';
-
-  // If the extension already installed the bridge, get out of its way.
   if (window.ExtBridge) return;
 
   const ALLOWED_SIZE = 200_000; // bytes
@@ -27,8 +14,8 @@
 
   const pending = new Map();
   let _hmacKey = null;
-  const allowed = (cmd) => typeof cmd === 'string' && cmd.length < 64;
 
+  const allowed = (cmd) => typeof cmd === 'string' && cmd.length < 64;
   const handshake = crypto.randomUUID();
 
   async function initHandshake() {
@@ -113,12 +100,16 @@
       if (typeof cb !== 'function') return;
       window.addEventListener('message', (e) => {
         const d = e.data;
+        // Stream frames from the content script carry `stream: true`.
         if (!d || d.__to !== 'ExtBridge' || !d.stream) return;
         cb(d);
       });
     },
   };
 
+  // The isolated-world content script sends responses with
+  // `{ __to: 'ExtBridge', id, result | error }`.  Match on id and skip
+  // stream/our-own-outgoing frames.
   window.addEventListener('message', (ev) => {
     const d = ev.data;
     if (!d || d.__to !== 'ExtBridge' || d.stream) return;

@@ -60,6 +60,9 @@ scripts/test_jwks.json
 # malicious CRX that Chrome treats as equivalent to ours.
 packages/browser-extension/.keys/*.pem
 packages/browser-extension/.keys/*.key
+# Canonical location — OUTSIDE the loaded extension dir so Chrome's unpacked
+# loader doesn't scan/ship private keys. Whole directory is ignored.
+packages/browser-extension-keys/
 
 # Local browser-extension artefacts
 packages/browser-extension/dist/

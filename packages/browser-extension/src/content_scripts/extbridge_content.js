@@ -1,17 +1,13 @@
-// Content script: relays page messages to the extension background and returns responses
-// Also injects a page-level bootstrap so sites don't need Tampermonkey.
-(function injectPageBridge(){
-  try{
-    const src = chrome.runtime.getURL('src/tools/extbridge.user.js');
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => s.remove();
-    (document.head || document.documentElement).appendChild(s);
-  }catch(e){
-    // Best-effort; if injection fails, the userscript can be installed via Tampermonkey.
-    console.debug('extbridge injection failed', e);
-  }
-})();
+// Isolated-world content script: the only script in this extension with
+// `chrome.runtime` access.  It relays messages between the page's MAIN-world
+// bridge (extbridge_main.js, registered separately in manifest.json) and the
+// background service worker.
+//
+// The bridge is exposed to the page by `extbridge_main.js` running in the
+// MAIN world via manifest `world: "MAIN"` — no DOM <script> injection, so
+// strict page CSPs (GitHub, Office, AWS Console) no longer fire on us.  The
+// `src/tools/extbridge.user.js` Tampermonkey userscript is kept as a fallback
+// for pages where content-script injection is blocked entirely.
 
 const PAGE_MARK = 'ExtBridge';
 const RESPONSE_MARK = 'ExtBridgeResponse';

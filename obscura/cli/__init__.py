@@ -1395,7 +1395,10 @@ async def _repl(
 
         project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
 
-    # Wire Kairos tool-call and turn-complete logging hooks (closure over _kairos_engine)
+    # Wire Kairos tool-call and turn-complete logging hooks (closure over
+    # _kairos_engine). The real engine is assigned later (see ~L1698); bind
+    # a placeholder here so the hook's free variable has a cell at call time.
+    _kairos_engine: Any = None
     try:
         from obscura.kairos.engine import is_kairos_enabled as _kie2
 
@@ -2534,6 +2537,16 @@ def main(
 
     # Disable provider permission layers — Obscura's policy engine is authoritative.
     _sync_provider_settings()
+
+    # Detect and optionally import external agent configs (Cursor, Copilot,
+    # Windsurf, Gemini, Claude Code, Codex) into canonical Obscura locations.
+    # Skipped for single-shot invocations (-p) to avoid blocking pipelines.
+    try:
+        from obscura.core.migrate_external import run_startup_migration
+
+        run_startup_migration(interactive=prompt is None)
+    except Exception as exc:
+        _log.debug("External migration check failed: %s", exc)
 
     # Compile workspace if specified
     compiled_ws = None

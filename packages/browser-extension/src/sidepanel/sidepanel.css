@@ -347,6 +347,30 @@ body {
   color: var(--red);
 }
 
+/* Queued user turns: visible, but dimmed so it's clear they haven't
+   started yet. Becomes fully-lit once the turn dispatches. */
+.msg.queued .body {
+  opacity: 0.55;
+  font-style: italic;
+}
+.msg.queued .body::after {
+  content: " · queued";
+  opacity: 0.7;
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* User hit Stop before this queued turn dispatched. */
+.msg.cancelled .body {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+.msg.cancelled .body::after {
+  content: " · cancelled";
+  text-decoration: none;
+  font-size: 11px;
+}
+
 /* Hide the generic ".role" text node value — we use ::before glyphs. */
 .msg .role {
   font-size: 0;

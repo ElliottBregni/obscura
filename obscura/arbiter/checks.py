@@ -88,6 +88,66 @@ _STOP_WORDS = frozenset(
 )
 
 # ---------------------------------------------------------------------------
+# Lightweight suffix stemmer (for keyword extraction)
+# ---------------------------------------------------------------------------
+
+
+def _stem(word: str) -> str:
+    """Lightweight English suffix stripper for keyword matching.
+
+    Not a full Porter stemmer — just handles the most common suffixes
+    that cause arbiter drift/relevance false negatives.
+    """
+    if len(word) <= 3:
+        return word
+    # Order matters: longest suffixes first
+    for suffix, replacement in (
+        ("ational", "ate"),
+        ("tional", "tion"),
+        ("encies", "ence"),
+        ("ation", "ate"),
+        ("izing", "ize"),
+        ("ising", "ise"),
+        ("ating", "ate"),
+        ("ities", "ity"),
+        ("iness", "y"),
+        ("ments", "ment"),
+        ("ness", ""),
+        ("ment", ""),
+        ("ting", "t"),
+        ("ling", "l"),
+        ("ious", ""),
+        ("eous", ""),
+        ("ible", ""),
+        ("able", ""),
+        ("ally", ""),
+        ("ful", ""),
+        ("ing", ""),
+        ("ies", "y"),
+        ("ion", ""),
+        ("ors", "or"),
+        ("ers", "er"),
+        ("ent", ""),
+        ("ant", ""),
+        ("ous", ""),
+        ("ive", ""),
+        ("ize", ""),
+        ("ise", ""),
+        ("ed", ""),
+        ("ly", ""),
+        ("es", ""),
+        ("er", ""),
+        ("or", ""),
+        ("al", ""),
+        ("s", ""),
+    ):
+        if word.endswith(suffix):
+            stem = word[: -len(suffix)] + replacement
+            return stem if len(stem) >= 2 else word
+    return word
+
+
+# ---------------------------------------------------------------------------
 # Dangerous shell patterns (SAFETY-level)
 # ---------------------------------------------------------------------------
 
@@ -326,9 +386,53 @@ def check_goal_transition(
 
 
 def _extract_keywords(text: str) -> set[str]:
-    """Extract meaningful keywords from text (lowercase, no stop words)."""
-    words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())
-    return {w for w in words if w not in _STOP_WORDS}
+    """Extract meaningful keywords from text (lowercase, stemmed, no stop words)."""
+    raw = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())) - _STOP_WORDS
+    return {_stem(w) for w in raw}
+
+
+def check_acceptance_criteria(
+    criteria: Sequence[str],
+    output_text: str,
+    *,
+    files_changed: Sequence[str] = (),
+) -> tuple[float, list[str]]:
+    """Score whether acceptance criteria are satisfied.
+
+    Each criterion is a plain-text description. We check for keyword
+    overlap between the criterion and the combined output + file list.
+    This is a heuristic — the LLM judge handles nuanced evaluation.
+
+    Returns (score, issues).
+    """
+    if not criteria:
+        return 1.0, []
+
+    issues: list[str] = []
+    evidence = f"{output_text} {' '.join(files_changed)}"
+    evidence_keywords = _extract_keywords(evidence)
+
+    met = 0
+    for criterion in criteria:
+        criterion_keywords = _extract_keywords(criterion)
+        if not criterion_keywords:
+            met += 1
+            continue
+        overlap = criterion_keywords & evidence_keywords
+        ratio = len(overlap) / len(criterion_keywords)
+        if ratio >= 0.3:
+            met += 1
+        else:
+            issues.append(
+                f"Criterion may be unmet ({ratio:.0%} match): "
+                f"'{criterion[:80]}'"
+            )
+
+    score = met / len(criteria) if criteria else 1.0
+    if score < 0.5:
+        issues.insert(0, f"Only {met}/{len(criteria)} acceptance criteria appear met")
+
+    return max(score, 0.0), issues
 
 
 def check_drift(
@@ -614,7 +718,9 @@ def check_file_relevance(
             # Strip extension.
             name = part.rsplit(".", 1)[0] if "." in part else part
             tokens = re.split(r"[-_./]", name.lower())
-            path_words.update(t for t in tokens if len(t) > 2 and t not in _STOP_WORDS)
+            path_words.update(
+                _stem(t) for t in tokens if len(t) > 2 and t not in _STOP_WORDS
+            )
 
         if not path_words:
             continue

@@ -287,7 +287,7 @@ packages/browser-extension/
 ├── .keys/
 │   ├── EXTENSION_ID                  Pinned id derived from public key
 │   ├── extension.pub.b64             Public key for manifest.json "key" field
-│   ├── extension.pem                 (gitignored) private key for signing CRX
+│   │                                 (private key lives in ../../browser-extension-keys/extension.pem)
 │   └── README.md                     Key management notes
 ├── icons/                            16/32/48/128 PNGs
 └── tests/                            see ../../tests/browser_extension/

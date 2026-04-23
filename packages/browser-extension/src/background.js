@@ -13,6 +13,12 @@ const panelPorts = new Set();
 // Per-Chrome-tab state tracking
 const tabPanelState = new Map(); // chromeTabId -> { sessionId, lastLabel }
 
+// Route host replies back to the panel that sent the request.
+// msgId -> originating panel Port. Without this, every panel receives every
+// reply and overwrites its own sessionId from another tab's conversation.
+/** @type {Map<string, chrome.runtime.Port>} */
+const requestOrigin = new Map();
+
 // Handshake keys: handshakeId -> CryptoKey (HMAC key)
 const handshakeKeys = new Map();
 
@@ -52,7 +58,23 @@ function ensureNative() {
   }
 
   nativePort.onMessage.addListener((msg) => {
-    broadcastToPanels(msg);
+    const id = msg?.id;
+    const origin = id != null ? requestOrigin.get(id) : null;
+    if (origin) {
+      try {
+        origin.postMessage(msg);
+      } catch {
+        // origin panel gone; fall through to cleanup
+      }
+      // Terminal messages close the request — drop the route entry.
+      const t = msg?.type;
+      if (t === "done" || t === "error" || t === "cancelled") {
+        requestOrigin.delete(id);
+      }
+    } else {
+      // Unsolicited (ready, warnings without id, etc.) — broadcast.
+      broadcastToPanels(msg);
+    }
   });
 
   nativePort.onDisconnect.addListener(() => {
@@ -109,11 +131,17 @@ chrome.runtime.onConnect.addListener((port) => {
 
   port.onDisconnect.addListener(() => {
     panelPorts.delete(port);
+    for (const [id, p] of requestOrigin) {
+      if (p === port) requestOrigin.delete(id);
+    }
   });
 
   port.onMessage.addListener((msg) => {
     const host = ensureNative();
     if (!host) return;
+    if (msg?.id != null) {
+      requestOrigin.set(msg.id, port);
+    }
     try {
       host.postMessage(msg);
     } catch (err) {

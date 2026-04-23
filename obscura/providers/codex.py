@@ -1,8 +1,8 @@
-"""obscura.codex_backend -- BackendProtocol implementation for Python Codex SDK.
+"""obscura.providers.codex — BackendProtocol implementation for the official Codex SDK.
 
-This backend uses the official OpenAI Codex SDK module:
-- ``openai_codex_sdk``
-- ``openai_codex`` (legacy module name)
+This backend uses OpenAI's ``codex_app_server`` SDK (PyPI: ``codex-app-server-sdk``),
+which drives the local ``codex`` binary via its ``app-server`` subcommand over
+JSON-RPC. Reference: https://developers.openai.com/codex/sdk
 """
 
 from __future__ import annotations
@@ -43,8 +43,11 @@ if TYPE_CHECKING:
     from obscura.core.auth import AuthConfig
 
 
+_SDK_MODULE = "codex_app_server"
+
+
 class CodexBackend:
-    """BackendProtocol implementation using a Python Codex SDK."""
+    """BackendProtocol implementation backed by ``codex_app_server.AsyncCodex``."""
 
     def __init__(
         self,
@@ -56,7 +59,7 @@ class CodexBackend:
         reasoning_effort: str | None = None,
     ) -> None:
         self._auth = auth
-        self._model = model or "gpt-5"
+        self._model = model or "gpt-5.5"
         self._system_prompt = system_prompt
         self._mcp_servers = mcp_servers or []
         self._reasoning_effort = reasoning_effort or "medium"
@@ -68,33 +71,47 @@ class CodexBackend:
         }
         self._session_store = SessionStore()
         self._active_session: str | None = None
-        self._thread_by_session: dict[str, str] = {}
-        self._thread_obj_by_id: dict[str, Any] = {}
+        self._thread_id_by_session: dict[str, str] = {}
         self._started = False
 
         self._sdk_client: Any = None
         self._sdk_module_name = ""
-
-        # Delta tracking: SDK sends full accumulated text on item.updated,
-        # not true deltas. Track chars already emitted per item ID.
-        self._seen_text: dict[str, int] = {}
+        # SDK symbols cached at start() so we don't re-import on every turn.
+        self._sdk_syms: dict[str, Any] = {}
 
     # -- Provider Registry overrides -----------------------------------------
 
     async def list_models(self) -> list[RegistryModelInfo]:
         """List models available for Codex."""
+        entries: list[tuple[str, str]] = [
+            (
+                "gpt-5.5",
+                "Frontier model for complex coding, research, and real-world work.",
+            ),
+            ("gpt-5.4", "Strong model for everyday coding."),
+            (
+                "gpt-5.4-mini",
+                "Small, fast, and cost-efficient model for simpler coding tasks.",
+            ),
+            ("gpt-5.3-codex", "Coding-optimized model."),
+            (
+                "gpt-5.2",
+                "Optimized for professional work and long-running agents.",
+            ),
+        ]
         return [
             RegistryModelInfo(
-                id="gpt-5",
-                name="GPT-5 (Codex)",
+                id=mid,
+                name=f"{mid} — {desc}",
                 provider="codex",
                 supports_tools=True,
                 supports_vision=False,
-            ),
+            )
+            for mid, desc in entries
         ]
 
     def get_default_model(self) -> str:
-        return "gpt-5"
+        return "gpt-5.5"
 
     def validate_model(self, model_id: str) -> bool:
         return True  # Codex validates internally
@@ -104,7 +121,7 @@ class CodexBackend:
             client=self._sdk_client,
             session=self._active_session,
             meta={
-                "provider": self._sdk_module_name or "openai_codex_sdk",
+                "provider": self._sdk_module_name or _SDK_MODULE,
                 "model": self._model,
             },
         )
@@ -114,22 +131,39 @@ class CodexBackend:
             supports_streaming=True,
             supports_tool_calls=False,  # Codex manages its own tools autonomously
             supports_tool_choice=False,
-            supports_usage=True,  # TurnCompletedEvent provides token counts
+            supports_usage=True,
             supports_remote_sessions=True,
             supports_native_mode=True,
-            native_features=("openai_codex_sdk", "sdk_threads", "autonomous_agent"),
+            native_features=(_SDK_MODULE, "sdk_threads", "autonomous_agent"),
         )
 
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
         sdk_cls, module_name = self._import_sdk_class()
-        self._sdk_client = self._build_sdk_client(sdk_cls, module_name)
         self._sdk_module_name = module_name
+        self._sdk_client = await self._build_sdk_client(sdk_cls)
         self._started = True
 
     async def stop(self) -> None:
+        client = self._sdk_client
+        self._sdk_client = None
         self._started = False
+        if client is None:
+            return
+        aexit = getattr(client, "__aexit__", None)
+        if callable(aexit):
+            try:
+                await self._maybe_await(aexit(None, None, None))
+                return
+            except Exception:
+                pass
+        close = getattr(client, "close", None)
+        if callable(close):
+            try:
+                await self._maybe_await(close())
+            except Exception:
+                pass
 
     # -- Send / Stream -------------------------------------------------------
 
@@ -140,29 +174,30 @@ class CodexBackend:
             HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
         )
 
-        thread = self._resolve_thread()
-        prepared = self._prepare_input(prompt)
-        turn = await thread.run(prepared)
+        thread = await self._resolve_thread()
+        run_kwargs = self._build_run_kwargs()
+        result = await self._maybe_await(thread.run(prompt, **run_kwargs))
 
-        text = turn.final_response
+        text = getattr(result, "final_response", None) or ""
+        items = list(getattr(result, "items", None) or [])
+
         if not text:
-            # Fallback: extract from agent_message items
-            for item in turn.items:
-                if getattr(item, "type", "") == "agent_message":
-                    text = getattr(item, "text", "")
+            # Fallback: pick the last agentMessage's text from items.
+            for raw in reversed(items):
+                inner = self._unwrap_item(raw)
+                if getattr(inner, "type", "") == "agentMessage":
+                    text = getattr(inner, "text", "") or ""
                     if text:
                         break
         if not text:
-            msg = "Codex Python SDK returned an empty response"
+            msg = "Codex SDK returned an empty response"
             raise RuntimeError(msg)
 
-        # Track thread/session mapping
         thread_id = getattr(thread, "id", "") or ""
         if self._active_session and thread_id:
-            self._thread_by_session[self._active_session] = thread_id
-            self._thread_obj_by_id[thread_id] = thread
+            self._thread_id_by_session[self._active_session] = thread_id
 
-        content_blocks = self._items_to_content_blocks(turn.items, text)
+        content_blocks = self._items_to_content_blocks(items, text)
 
         await self._run_hooks(HookContext(hook=HookPoint.STOP))
         return Message(
@@ -171,7 +206,7 @@ class CodexBackend:
             backend=Backend.CODEX,
             model=self._model,
             session_id=self._active_session,
-            raw=turn,
+            raw=result,
         )
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
@@ -181,12 +216,10 @@ class CodexBackend:
             HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
         )
 
-        # Clear delta tracking for this stream call
-        self._seen_text.clear()
-
-        thread = self._resolve_thread()
-        prepared = self._prepare_input(prompt)
-        streamed_turn = await thread.run_streamed(prepared)
+        thread = await self._resolve_thread()
+        run_kwargs = self._build_run_kwargs()
+        wire_input = self._wrap_text_input(prompt)
+        turn_handle = await self._maybe_await(thread.turn(wire_input, **run_kwargs))
 
         yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
@@ -194,36 +227,42 @@ class CodexBackend:
         finish_reason = "stop"
 
         try:
-            async for event in streamed_turn.events:
-                event_type = getattr(event, "type", "")
+            event_stream = turn_handle.stream()
+            async for event in event_stream:
+                method = getattr(event, "method", "") or ""
+                payload = getattr(event, "payload", None)
 
-                # Track thread_id from ThreadStartedEvent
-                if event_type == "thread.started":
-                    thread_id = getattr(event, "thread_id", "")
-                    if self._active_session and thread_id:
-                        self._thread_by_session[self._active_session] = thread_id
-                        self._thread_obj_by_id[thread_id] = thread
+                if method == "thread/started":
+                    tid = getattr(payload, "thread_id", "") or ""
+                    if self._active_session and tid:
+                        self._thread_id_by_session[self._active_session] = tid
 
-                # Map event to StreamChunks
-                for chunk in self._map_thread_event_to_chunks(event):
+                for chunk in self._map_notification_to_chunks(method, payload):
                     yield chunk
 
-                # Extract usage from TurnCompletedEvent
-                if event_type == "turn.completed":
-                    u = getattr(event, "usage", None)
-                    if u:
+                if method == "thread/tokenUsage/updated":
+                    tu = getattr(payload, "token_usage", None)
+                    total = getattr(tu, "total", None)
+                    if total is not None:
                         usage_data = {
-                            "input_tokens": getattr(u, "input_tokens", 0),
-                            "output_tokens": getattr(u, "output_tokens", 0),
+                            "input_tokens": getattr(total, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(total, "output_tokens", 0) or 0,
                             "cached_input_tokens": getattr(
-                                u,
+                                total,
                                 "cached_input_tokens",
                                 0,
-                            ),
+                            )
+                            or 0,
                         }
 
-                # Track failures
-                if event_type == "turn.failed":
+                if method == "turn/completed":
+                    turn = getattr(payload, "turn", None)
+                    status = getattr(turn, "status", None)
+                    status_val = getattr(status, "value", status) if status else ""
+                    if status_val == "failed":
+                        finish_reason = "error"
+
+                if method == "error":
                     finish_reason = "error"
 
         except Exception as exc:
@@ -263,9 +302,7 @@ class CodexBackend:
 
     async def delete_session(self, ref: SessionRef) -> None:
         self._session_store.remove(ref.session_id)
-        thread_id = self._thread_by_session.pop(ref.session_id, None)
-        if thread_id:
-            self._thread_obj_by_id.pop(thread_id, None)
+        self._thread_id_by_session.pop(ref.session_id, None)
         if self._active_session == ref.session_id:
             self._active_session = None
 
@@ -291,9 +328,35 @@ class CodexBackend:
             raise RuntimeError(msg)
 
     @staticmethod
+    async def _maybe_await(value: Any) -> Any:
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
+    @staticmethod
     def _sanitize_tool_name(name: str) -> str:
         """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
         return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:128]
+
+    @staticmethod
+    def _unwrap_item(item: Any) -> Any:
+        """Unwrap a pydantic RootModel wrapper (``ThreadItem.root``) if present."""
+        if item is None:
+            return None
+        root = getattr(item, "root", None)
+        return root if root is not None else item
+
+    @staticmethod
+    def _summarize_file_changes(item: Any) -> str:
+        """Render a ``fileChange`` item's changes as a short comma-separated string."""
+        raw: Any = getattr(item, "changes", None) or []
+        parts: list[str] = []
+        for change in raw:
+            c: Any = change
+            kind = getattr(c, "kind", None) or getattr(c, "type", "?")
+            path = getattr(c, "path", "?")
+            parts.append(f"{kind}:{path}")
+        return ", ".join(parts)
 
     def _build_tool_listing(self) -> str:
         """Build a human-readable tool listing for the system prompt."""
@@ -304,8 +367,12 @@ class CodexBackend:
         lines.append("")
         for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
-            cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
-            lines.append(f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}")
+            cap_tag = (
+                f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
+            )
+            lines.append(
+                f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}",
+            )
         lines.append("")
         lines.append(
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
@@ -329,263 +396,319 @@ class CodexBackend:
             prompt = f"{prompt}\n\n{tool_section}" if prompt else tool_section
         return prompt
 
-    def _prepare_input(self, prompt: str) -> str:
-        """Prepend system context to user prompt.
+    def _wrap_text_input(self, prompt: str) -> Any:
+        """Wrap a prompt string in the SDK's ``TextInput`` payload type.
 
-        The Codex SDK's ThreadOptions has no instructions/system_prompt field,
-        so we inject context by framing it as mandatory operating instructions
-        prepended to every user turn.
+        ``AsyncThread.run`` auto-normalizes strings, but ``AsyncThread.turn``
+        takes typed ``Input`` only, so we construct the wrapper explicitly.
         """
+        text_cls = self._sdk_syms.get("TextInput")
+        if text_cls is None:
+            return prompt
+        try:
+            return text_cls(prompt)
+        except Exception:
+            return prompt
+
+    # -- Thread lifecycle ----------------------------------------------------
+
+    async def _resolve_thread(self) -> Any:
+        """Resume an existing thread for the active session or start a new one."""
+        client = self._sdk_client
+        start_kwargs = self._build_thread_start_kwargs()
+        thread_id = (
+            self._thread_id_by_session.get(self._active_session, "")
+            if self._active_session
+            else ""
+        )
+
+        if thread_id:
+            resume = getattr(client, "thread_resume", None) or getattr(
+                client,
+                "resume_thread",
+                None,
+            )
+            if resume is not None:
+                return await self._maybe_await(resume(thread_id, **start_kwargs))
+
+        start = getattr(client, "thread_start", None) or getattr(
+            client,
+            "start_thread",
+            None,
+        )
+        if start is None:
+            msg = "Codex SDK client has no thread_start/start_thread method"
+            raise RuntimeError(msg)
+        thread = await self._maybe_await(start(**start_kwargs))
+        tid = getattr(thread, "id", "") or ""
+        if self._active_session and tid:
+            self._thread_id_by_session[self._active_session] = tid
+        return thread
+
+    def _build_thread_start_kwargs(self) -> dict[str, Any]:
+        """Assemble kwargs for ``AsyncCodex.thread_start``."""
+        kwargs: dict[str, Any] = {}
+        if self._model:
+            kwargs["model"] = self._model
+
+        cwd = os.getcwd()
+        if cwd:
+            kwargs["cwd"] = cwd
+
+        # Obscura handles approval/sandbox itself; tell Codex to never prompt.
+        ask_cls = self._sdk_syms.get("AskForApproval")
+        if ask_cls is not None:
+            try:
+                kwargs["approval_policy"] = ask_cls("never")
+            except Exception:
+                try:
+                    kwargs["approval_policy"] = ask_cls(root="never")
+                except Exception:
+                    pass
+
+        sandbox_cls = self._sdk_syms.get("SandboxMode")
+        if sandbox_cls is not None:
+            try:
+                kwargs["sandbox"] = sandbox_cls("workspace-write")
+            except Exception:
+                pass
+
         system = self._build_system_prompt()
         if system:
-            return (
-                "IMPORTANT — MANDATORY OPERATING INSTRUCTIONS\n"
-                "You MUST follow these instructions for every response. "
-                "They override your default behavior and built-in plans.\n"
-                "─────────────────────────────────────────────\n"
-                f"{system}\n"
-                "─────────────────────────────────────────────\n"
-                "END OF INSTRUCTIONS — Now handle this request:\n\n"
-                f"{prompt}"
-            )
-        return prompt
+            kwargs["developer_instructions"] = system
 
-    # -- Event mapping -------------------------------------------------------
+        return kwargs
 
-    def _map_thread_event_to_chunks(self, event: Any) -> list[StreamChunk]:
-        """Map a Codex SDK ThreadEvent to zero or more StreamChunks."""
-        chunks: list[StreamChunk] = []
-        event_type = getattr(event, "type", "")
+    def _build_run_kwargs(self) -> dict[str, Any]:
+        """Assemble kwargs for ``AsyncThread.run`` / ``AsyncThread.turn``."""
+        kwargs: dict[str, Any] = {}
+        effort_cls = self._sdk_syms.get("ReasoningEffort")
+        if effort_cls is not None and self._reasoning_effort:
+            try:
+                kwargs["effort"] = effort_cls(self._reasoning_effort)
+            except Exception:
+                pass
+        if self._model:
+            kwargs["model"] = self._model
+        return kwargs
 
-        # Item events carry ThreadItem payloads
-        item = getattr(event, "item", None)
-        if item is None:
-            # ThreadErrorEvent
-            if event_type == "error":
-                msg = getattr(event, "message", "Unknown thread error")
-                chunks.append(StreamChunk(kind=ChunkKind.ERROR, text=msg, raw=event))
+    # -- Notification → StreamChunk mapping ----------------------------------
+
+    def _map_notification_to_chunks(
+        self,
+        method: str,
+        payload: Any,
+    ) -> list[StreamChunk]:
+        """Map a Codex app-server notification to zero or more StreamChunks."""
+        if payload is None:
+            return []
+
+        if method == "item/agentMessage/delta":
+            delta = getattr(payload, "delta", "")
+            if not delta:
+                return []
+            return [StreamChunk(kind=ChunkKind.TEXT_DELTA, text=delta, raw=payload)]
+
+        if method in (
+            "item/reasoning/textDelta",
+            "item/reasoning/summaryTextDelta",
+        ):
+            delta = getattr(payload, "delta", "")
+            if not delta:
+                return []
+            return [
+                StreamChunk(kind=ChunkKind.THINKING_DELTA, text=delta, raw=payload),
+            ]
+
+        if method in ("item/started", "item/completed"):
+            item = self._unwrap_item(getattr(payload, "item", None))
+            if item is None:
+                return []
+            started = method == "item/started"
+            item_type = getattr(item, "type", "")
+            if item_type == "commandExecution":
+                return self._command_execution_chunks(item, started=started)
+            if item_type == "mcpToolCall":
+                return self._mcp_tool_call_chunks(item, started=started)
+            if item_type == "fileChange" and not started:
+                return self._file_change_chunks(item)
+            if item_type == "webSearch":
+                return self._web_search_chunks(item, started=started)
+            return []
+
+        if method == "error":
+            err = getattr(payload, "error", None)
+            msg = getattr(err, "message", None) or "Unknown error"
+            return [StreamChunk(kind=ChunkKind.ERROR, text=msg, raw=payload)]
+
+        return []
+
+    def _command_execution_chunks(
+        self,
+        item: Any,
+        *,
+        started: bool,
+    ) -> list[StreamChunk]:
+        item_id = getattr(item, "id", "") or ""
+        if started:
+            chunks = [
+                StreamChunk(
+                    kind=ChunkKind.TOOL_USE_START,
+                    tool_name="shell_command",
+                    tool_use_id=item_id,
+                    raw=item,
+                ),
+            ]
+            cmd = getattr(item, "command", "")
+            if cmd:
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_input_delta=json.dumps({"command": cmd}),
+                        raw=item,
+                    ),
+                )
             return chunks
 
-        item_type = getattr(item, "type", "")
+        output = getattr(item, "aggregated_output", "") or ""
+        exit_code = getattr(item, "exit_code", None)
+        text = output[:4096]
+        if exit_code is not None:
+            text = f"{text}\n[exit_code: {exit_code}]"
+        return [
+            StreamChunk(
+                kind=ChunkKind.TOOL_RESULT,
+                text=text,
+                tool_use_id=item_id,
+                raw=item,
+            ),
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_END,
+                tool_name="shell_command",
+                tool_use_id=item_id,
+                raw=item,
+            ),
+        ]
 
-        if item_type == "agent_message":
-            text = getattr(item, "text", "")
-            item_id = getattr(item, "id", "")
-            if text and event_type in ("item.updated", "item.completed"):
-                # Emit only the new delta (SDK sends full accumulated text)
-                prev_len = self._seen_text.get(item_id, 0)
-                delta = text[prev_len:]
-                if delta:
-                    self._seen_text[item_id] = len(text)
-                    chunks.append(
-                        StreamChunk(
-                            kind=ChunkKind.TEXT_DELTA,
-                            text=delta,
-                            raw=item,
-                            native_event=event,
-                        ),
-                    )
-
-        elif item_type == "reasoning":
-            text = getattr(item, "text", "")
-            item_id = getattr(item, "id", "")
-            if text and event_type in ("item.updated", "item.completed"):
-                prev_len = self._seen_text.get(item_id, 0)
-                delta = text[prev_len:]
-                if delta:
-                    self._seen_text[item_id] = len(text)
-                    chunks.append(
-                        StreamChunk(
-                            kind=ChunkKind.THINKING_DELTA,
-                            text=delta,
-                            raw=item,
-                            native_event=event,
-                        ),
-                    )
-
-        elif item_type == "command_execution":
-            item_id = getattr(item, "id", "")
-            if event_type == "item.started":
-                cmd = getattr(item, "command", "")
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_START,
-                        tool_name="shell_command",
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                if cmd:
-                    chunks.append(
-                        StreamChunk(
-                            kind=ChunkKind.TOOL_USE_DELTA,
-                            tool_input_delta=json.dumps({"command": cmd}),
-                            raw=item,
-                            native_event=event,
-                        ),
-                    )
-            elif event_type == "item.completed":
-                output = getattr(item, "aggregated_output", "")
-                exit_code = getattr(item, "exit_code", None)
-                result_text = output[:4096]
-                if exit_code is not None:
-                    result_text += f"\n[exit_code: {exit_code}]"
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_RESULT,
-                        text=result_text,
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_END,
-                        tool_name="shell_command",
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-
-        elif item_type == "mcp_tool_call":
-            item_id = getattr(item, "id", "")
-            server = getattr(item, "server", "")
-            tool = getattr(item, "tool", "")
-            tool_name = self._sanitize_tool_name(f"{server}_{tool}")
-            if event_type == "item.started":
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_START,
-                        tool_name=tool_name,
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                args = getattr(item, "arguments", None)
-                if args:
-                    args_str = json.dumps(args) if not isinstance(args, str) else args
-                    chunks.append(
-                        StreamChunk(
-                            kind=ChunkKind.TOOL_USE_DELTA,
-                            tool_input_delta=args_str,
-                            raw=item,
-                            native_event=event,
-                        ),
-                    )
-            elif event_type == "item.completed":
-                result_text = ""
-                error_obj = getattr(item, "error", None)
-                result_obj = getattr(item, "result", None)
-                if error_obj:
-                    result_text = (
-                        f"Error: {getattr(error_obj, 'message', str(error_obj))}"
-                    )
-                elif result_obj:
-                    content = getattr(result_obj, "content", [])
-                    result_text = json.dumps(content) if content else ""
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_RESULT,
-                        text=result_text[:4096],
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_END,
-                        tool_name=tool_name,
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-
-        elif item_type == "file_change":
-            item_id = getattr(item, "id", "")
-            if event_type == "item.completed":
-                changes = getattr(item, "changes", [])
-                summary = ", ".join(
-                    f"{getattr(c, 'kind', '?')}:{getattr(c, 'path', '?')}"
-                    for c in changes
-                )
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_START,
-                        tool_name="file_change",
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_RESULT,
-                        text=summary,
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_END,
-                        tool_name="file_change",
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-
-        elif item_type == "web_search":
-            item_id = getattr(item, "id", "")
-            if event_type in ("item.started", "item.completed"):
-                query = getattr(item, "query", "")
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_START,
-                        tool_name="web_search",
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-                if query:
-                    chunks.append(
-                        StreamChunk(
-                            kind=ChunkKind.TOOL_USE_DELTA,
-                            tool_input_delta=json.dumps({"query": query}),
-                            raw=item,
-                            native_event=event,
-                        ),
-                    )
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_END,
-                        tool_name="web_search",
-                        tool_use_id=item_id,
-                        raw=item,
-                        native_event=event,
-                    ),
-                )
-
-        elif item_type == "error":
-            msg = getattr(item, "message", "Unknown error")
-            chunks.append(
+    def _mcp_tool_call_chunks(
+        self,
+        item: Any,
+        *,
+        started: bool,
+    ) -> list[StreamChunk]:
+        item_id = getattr(item, "id", "") or ""
+        server = getattr(item, "server", "") or ""
+        tool = getattr(item, "tool", "") or ""
+        name = self._sanitize_tool_name(f"{server}_{tool}")
+        if started:
+            chunks: list[StreamChunk] = [
                 StreamChunk(
-                    kind=ChunkKind.ERROR,
-                    text=msg,
+                    kind=ChunkKind.TOOL_USE_START,
+                    tool_name=name,
+                    tool_use_id=item_id,
                     raw=item,
-                    native_event=event,
                 ),
-            )
+            ]
+            args = getattr(item, "arguments", None)
+            if args is not None:
+                try:
+                    args_str = args if isinstance(args, str) else json.dumps(args)
+                except (TypeError, ValueError):
+                    args_str = str(args)
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_input_delta=args_str,
+                        raw=item,
+                    ),
+                )
+            return chunks
 
-        return chunks
+        error = getattr(item, "error", None)
+        result_obj = getattr(item, "result", None)
+        if error is not None:
+            text = f"Error: {getattr(error, 'message', None) or error}"
+        elif result_obj is not None:
+            content = getattr(result_obj, "content", None)
+            try:
+                text = json.dumps(content) if content is not None else ""
+            except (TypeError, ValueError):
+                text = str(content)
+        else:
+            text = ""
+        return [
+            StreamChunk(
+                kind=ChunkKind.TOOL_RESULT,
+                text=text[:4096],
+                tool_use_id=item_id,
+                raw=item,
+            ),
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_END,
+                tool_name=name,
+                tool_use_id=item_id,
+                raw=item,
+            ),
+        ]
+
+    def _file_change_chunks(self, item: Any) -> list[StreamChunk]:
+        item_id = getattr(item, "id", "") or ""
+        summary = self._summarize_file_changes(item)
+        return [
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_START,
+                tool_name="file_change",
+                tool_use_id=item_id,
+                raw=item,
+            ),
+            StreamChunk(
+                kind=ChunkKind.TOOL_RESULT,
+                text=summary,
+                tool_use_id=item_id,
+                raw=item,
+            ),
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_END,
+                tool_name="file_change",
+                tool_use_id=item_id,
+                raw=item,
+            ),
+        ]
+
+    def _web_search_chunks(
+        self,
+        item: Any,
+        *,
+        started: bool,
+    ) -> list[StreamChunk]:
+        item_id = getattr(item, "id", "") or ""
+        query = getattr(item, "query", "")
+        if started:
+            chunks = [
+                StreamChunk(
+                    kind=ChunkKind.TOOL_USE_START,
+                    tool_name="web_search",
+                    tool_use_id=item_id,
+                    raw=item,
+                ),
+            ]
+            if query:
+                chunks.append(
+                    StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_input_delta=json.dumps({"query": query}),
+                        raw=item,
+                    ),
+                )
+            return chunks
+        return [
+            StreamChunk(
+                kind=ChunkKind.TOOL_USE_END,
+                tool_name="web_search",
+                tool_use_id=item_id,
+                raw=item,
+            ),
+        ]
 
     # -- Content block helpers -----------------------------------------------
 
@@ -594,202 +717,148 @@ class CodexBackend:
         items: list[Any],
         final_text: str,
     ) -> list[ContentBlock]:
-        """Convert Codex Turn items into Obscura ContentBlocks."""
+        """Convert Codex thread items into Obscura ContentBlocks."""
         blocks: list[ContentBlock] = []
         has_text = False
 
-        for item in items:
+        for raw in items:
+            item = self._unwrap_item(raw)
+            if item is None:
+                continue
             item_type = getattr(item, "type", "")
 
-            if item_type == "agent_message":
+            if item_type == "agentMessage":
                 blocks.append(
-                    ContentBlock(kind="text", text=getattr(item, "text", "")),
+                    ContentBlock(kind="text", text=getattr(item, "text", "") or ""),
                 )
                 has_text = True
 
             elif item_type == "reasoning":
-                blocks.append(
-                    ContentBlock(kind="thinking", text=getattr(item, "text", "")),
-                )
+                content = list(getattr(item, "content", None) or [])
+                summary = list(getattr(item, "summary", None) or [])
+                text = "\n".join(str(s) for s in content + summary)
+                if text:
+                    blocks.append(ContentBlock(kind="thinking", text=text))
 
-            elif item_type == "command_execution":
+            elif item_type == "commandExecution":
                 blocks.append(
                     ContentBlock(
                         kind="tool_use",
                         tool_name="shell_command",
-                        tool_input={"command": getattr(item, "command", "")},
-                        tool_use_id=getattr(item, "id", ""),
+                        tool_input={"command": getattr(item, "command", "") or ""},
+                        tool_use_id=getattr(item, "id", "") or "",
                     ),
                 )
 
-            elif item_type == "mcp_tool_call":
-                server = getattr(item, "server", "")
-                tool = getattr(item, "tool", "")
+            elif item_type == "mcpToolCall":
+                server = getattr(item, "server", "") or ""
+                tool = getattr(item, "tool", "") or ""
                 blocks.append(
                     ContentBlock(
                         kind="tool_use",
                         tool_name=self._sanitize_tool_name(f"{server}_{tool}"),
-                        tool_input=getattr(item, "arguments", {}) or {},
-                        tool_use_id=getattr(item, "id", ""),
+                        tool_input=getattr(item, "arguments", None) or {},
+                        tool_use_id=getattr(item, "id", "") or "",
                     ),
                 )
 
-            elif item_type == "file_change":
-                changes = getattr(item, "changes", [])
-                summary = ", ".join(
-                    f"{getattr(c, 'kind', '?')}:{getattr(c, 'path', '?')}"
-                    for c in changes
-                )
+            elif item_type == "fileChange":
                 blocks.append(
                     ContentBlock(
                         kind="tool_use",
                         tool_name="file_change",
-                        tool_input={"changes": summary},
-                        tool_use_id=getattr(item, "id", ""),
+                        tool_input={"changes": self._summarize_file_changes(item)},
+                        tool_use_id=getattr(item, "id", "") or "",
                     ),
                 )
 
-            elif item_type == "error":
-                blocks.append(
-                    ContentBlock(
-                        kind="text",
-                        text=f"[Error] {getattr(item, 'message', '')}",
-                        is_error=True,
-                    ),
-                )
-
-        # Ensure we have at least one text block
         if not has_text:
             blocks.insert(0, ContentBlock(kind="text", text=final_text))
 
         return blocks
 
-    # -- Thread management ---------------------------------------------------
-
-    def _resolve_thread(self) -> Any:
-        """Resolve or create a thread for the current session."""
-        thread_options = self._make_thread_options()
-        thread_id = (
-            self._thread_by_session.get(self._active_session, "")
-            if self._active_session
-            else ""
-        )
-
-        # Reuse cached thread object
-        if thread_id and thread_id in self._thread_obj_by_id:
-            return self._thread_obj_by_id[thread_id]
-
-        # Resume existing thread
-        if thread_id and hasattr(self._sdk_client, "resume_thread"):
-            thread = self._sdk_client.resume_thread(thread_id, thread_options)
-            self._thread_obj_by_id[thread_id] = thread
-            return thread
-
-        # Start new thread
-        thread = self._sdk_client.start_thread(thread_options)
-        tid = getattr(thread, "id", "") or ""
-        if tid:
-            self._thread_obj_by_id[tid] = thread
-            if self._active_session:
-                self._thread_by_session[self._active_session] = tid
-        return thread
-
-    def _make_thread_options(self) -> Any:
-        """Create ThreadOptions with full capability configuration."""
-        mod_name = self._sdk_module_name
-        if not mod_name:
-            return None
-        try:
-            mod = importlib.import_module(mod_name)
-        except Exception:
-            return None
-
-        thread_opts_cls = getattr(mod, "ThreadOptions", None)
-        if thread_opts_cls is None:
-            return None
-
-        kwargs: dict[str, Any] = {
-            "skip_git_repo_check": True,
-            "approval_policy": "never",
-            "network_access_enabled": True,
-            "web_search_enabled": True,
-        }
-
-        if self._model:
-            kwargs["model"] = self._model
-
-        cwd = os.getcwd()
-        if cwd:
-            kwargs["working_directory"] = cwd
-
-        if self._reasoning_effort:
-            kwargs["model_reasoning_effort"] = self._reasoning_effort
-
-        try:
-            return thread_opts_cls(**kwargs)
-        except Exception:
-            # Fallback: try without newer fields for older SDK versions
-            try:
-                return thread_opts_cls(
-                    model=self._model,
-                    working_directory=cwd or None,
-                    skip_git_repo_check=True,
-                )
-            except Exception:
-                return None
-
     # -- SDK bootstrapping ---------------------------------------------------
 
     def _import_sdk_class(self) -> tuple[type[Any], str]:
-        module_candidates = ("openai_codex_sdk", "openai_codex")
-        class_candidates = ("Codex", "CodexClient", "Client")
-        import_errors: list[str] = []
-
-        for mod_name in module_candidates:
-            try:
-                mod = importlib.import_module(mod_name)
-            except ImportError as exc:
-                import_errors.append(f"{mod_name}: {exc}")
-                continue
-
-            for cls_name in class_candidates:
-                sdk_cls = getattr(mod, cls_name, None)
-                if inspect.isclass(sdk_cls):
-                    return sdk_cls, mod_name
-
-        py_exe = sys.executable
-        msg = (
-            "Official OpenAI Codex SDK not found or invalid. Install with: "
-            f"`{py_exe} -m pip install openai-codex-sdk` "
-            "(or run via your project environment, e.g. `uv run obscura ...`). "
-            f"Tried modules: {', '.join(module_candidates)}. "
-            f"Import errors: {'; '.join(import_errors) or 'none'}."
-        )
-        raise RuntimeError(
-            msg,
-        )
-
-    def _build_sdk_client(self, sdk_cls: type[Any], module_name: str) -> Any:
-        """Construct SDK client, forcing codex binary path when supported."""
-        codex_path = os.environ.get("OBSCURA_CODEX_PATH", "").strip() or shutil.which(
-            "codex",
-        )
+        """Import ``codex_app_server`` and cache the symbols we use."""
         try:
-            mod = importlib.import_module(module_name)
-            options_cls = getattr(mod, "CodexOptions", None)
-            if options_cls is not None:
-                kwargs: dict[str, Any] = {}
-                if codex_path:
-                    kwargs["codex_path_override"] = codex_path
-                if self._auth.openai_base_url:
-                    kwargs["base_url"] = self._auth.openai_base_url
-                if self._auth.openai_api_key:
-                    kwargs["api_key"] = self._auth.openai_api_key
-                opts = options_cls(**kwargs)
-                return sdk_cls(opts)
-        except Exception:
-            pass
-        return sdk_cls()
+            mod = importlib.import_module(_SDK_MODULE)
+        except ImportError as exc:
+            py_exe = sys.executable
+            msg = (
+                "Official OpenAI Codex SDK not found. Install with: "
+                f"`{py_exe} -m pip install codex-app-server-sdk`. "
+                "See https://developers.openai.com/codex/sdk for details. "
+                f"Import error: {exc}"
+            )
+            raise RuntimeError(msg) from exc
+
+        sdk_cls = getattr(mod, "AsyncCodex", None) or getattr(mod, "Codex", None)
+        if not inspect.isclass(sdk_cls):
+            msg = (
+                f"{_SDK_MODULE} is installed but exposes no AsyncCodex/Codex class. "
+                "Expected codex-app-server-sdk >= 0.2.0."
+            )
+            raise RuntimeError(msg)
+
+        for sym in (
+            "AppServerConfig",
+            "AskForApproval",
+            "SandboxMode",
+            "ReasoningEffort",
+            "TextInput",
+        ):
+            val = getattr(mod, sym, None)
+            if val is not None:
+                self._sdk_syms[sym] = val
+
+        return sdk_cls, _SDK_MODULE
+
+    async def _build_sdk_client(self, sdk_cls: type[Any]) -> Any:
+        """Construct and initialize the SDK client."""
+        codex_path = (
+            os.environ.get("OBSCURA_CODEX_PATH", "").strip()
+            or shutil.which("codex")
+        )
+
+        # Pass OpenAI credentials through to the spawned codex process.
+        env: dict[str, str] = {}
+        if self._auth.openai_api_key:
+            env["OPENAI_API_KEY"] = self._auth.openai_api_key
+            env["CODEX_API_KEY"] = self._auth.openai_api_key
+        if self._auth.openai_base_url:
+            env["OPENAI_BASE_URL"] = self._auth.openai_base_url
+
+        config_cls = self._sdk_syms.get("AppServerConfig")
+        client: Any
+        if config_cls is not None:
+            cfg_kwargs: dict[str, Any] = {}
+            if codex_path:
+                cfg_kwargs["codex_bin"] = codex_path
+            cwd = os.getcwd()
+            if cwd:
+                cfg_kwargs["cwd"] = cwd
+            if env:
+                cfg_kwargs["env"] = env
+            try:
+                config = config_cls(**cfg_kwargs)
+                client = sdk_cls(config=config)
+            except Exception:
+                client = sdk_cls()
+        else:
+            client = sdk_cls()
+
+        # AsyncCodex initializes lazily via __aenter__; sync Codex initializes
+        # in __init__. Support both and honor any ``start`` bootstrapping hook
+        # used by test fakes.
+        aenter = getattr(client, "__aenter__", None)
+        if callable(aenter):
+            client = await client.__aenter__()
+        else:
+            start = getattr(client, "start", None)
+            if callable(start):
+                await self._maybe_await(start())
+        return client
 
     # -- Hooks ---------------------------------------------------------------
 

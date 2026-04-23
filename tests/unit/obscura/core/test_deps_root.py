@@ -28,7 +28,7 @@ class TestClientFactory:
     async def test_create_client(self) -> None:
         from obscura.deps import ClientFactory
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         factory = ClientFactory(config)
 
         with patch("obscura.deps.ObscuraClient") as MockClient:
@@ -44,7 +44,7 @@ class TestClientFactory:
     async def test_create_client_with_model(self) -> None:
         from obscura.deps import ClientFactory
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         factory = ClientFactory(config)
 
         with patch("obscura.deps.ObscuraClient") as MockClient:
@@ -157,40 +157,11 @@ class TestRecordSyncMetric:
 
 class TestAuthenticateWebsocket:
     @pytest.mark.asyncio
-    async def test_auth_disabled_returns_dev_user(self) -> None:
-        from obscura.deps import authenticate_websocket
-
-        mock_ws = MagicMock()
-        mock_ws.query_params = {"token": "fake"}
-        mock_app_state = MagicMock()
-        mock_app_state.config = ObscuraConfig(auth_enabled=False)
-        mock_ws.app.state = mock_app_state
-
-        user = await authenticate_websocket(mock_ws)
-        assert user is not None
-        assert user.user_id == "local-dev"
-
-    @pytest.mark.asyncio
-    async def test_auth_disabled_no_config(self) -> None:
-        from obscura.deps import authenticate_websocket
-
-        mock_ws = MagicMock()
-        mock_ws.query_params = {"token": "fake"}
-        mock_app_state = MagicMock(spec=[])  # no config attr
-        mock_ws.app.state = mock_app_state
-
-        user = await authenticate_websocket(mock_ws)
-        assert user is not None
-
-    @pytest.mark.asyncio
     async def test_api_key_query_param_authenticates(self) -> None:
         from obscura.deps import authenticate_websocket
 
         mock_ws = MagicMock()
         mock_ws.query_params = {"api_key": "obscura-dev-key-123"}
-        mock_app_state = MagicMock()
-        mock_app_state.config = ObscuraConfig(auth_enabled=True)
-        mock_ws.app.state = mock_app_state
 
         with patch(
             "obscura.auth.rbac.user_from_api_key",
@@ -214,9 +185,16 @@ class TestAuthenticateWebsocket:
 
         mock_ws = MagicMock()
         mock_ws.query_params = {"api_key": "invalid-key"}
-        mock_app_state = MagicMock()
-        mock_app_state.config = ObscuraConfig(auth_enabled=True)
-        mock_ws.app.state = mock_app_state
+
+        user = await authenticate_websocket(mock_ws)
+        assert user is None
+
+    @pytest.mark.asyncio
+    async def test_missing_api_key_returns_none(self) -> None:
+        from obscura.deps import authenticate_websocket
+
+        mock_ws = MagicMock()
+        mock_ws.query_params = {}
 
         user = await authenticate_websocket(mock_ws)
         assert user is None

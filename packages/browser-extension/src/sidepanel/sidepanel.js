@@ -107,7 +107,7 @@ let port = null;
 let sessionId = null;            // per-panel conversation id (from host)
 let pending = new Map();         // msgId -> { bubble, toolBox, toolMap, streamedText, thinkingText, thinkingEl }
 let busy = false;
-let authToken = null;            // auth token for OBSCURA_AUTH_ENABLED sessions
+let authToken = null;            // shared-secret token for the native host (OBSCURA_AUTH_TOKEN)
 let commandIndex = [];           // from ready.commands ({name, doc, subcommands})
 let skillIndex = [];             // from ready.skills       (string[])
 let atCommandIndex = [];         // from ready.at_commands  (string[])
@@ -403,12 +403,32 @@ function scrollToBottom() {
   log.scrollTop = log.scrollHeight;
 }
 
+// Queue of prompts the user typed while a turn was in flight.  Each entry is
+// a SendDescriptor: { id, prompt, isCommand, context, userBubble }.  We
+// render the user bubble immediately (dimmed via `.queued`) so the panel
+// feels responsive, and drain one item at a time as turns complete.
+let sendQueue = [];
+let _liveStatus = "";
+
 function setBusy(v) {
   busy = v;
-  sendBtn.disabled = v;
+  // Keep the send button enabled — users can queue follow-ups while a turn
+  // is streaming; see sendQueue / dispatchSend below.
+  sendBtn.disabled = false;
   stopBtn.hidden = !v;
-  status.textContent = v ? "running…" : "";
-  status.classList.toggle("busy", v);
+  renderStatus();
+}
+
+function setLiveStatus(text) {
+  _liveStatus = text || "";
+  renderStatus();
+}
+
+function renderStatus() {
+  const base = busy ? _liveStatus || "running…" : _liveStatus;
+  const q = sendQueue.length;
+  status.textContent = q > 0 ? (base ? `${base} · ${q} queued` : `${q} queued`) : base;
+  status.classList.toggle("busy", busy);
 }
 
 // ---------------------------------------------------------------------------
@@ -537,12 +557,9 @@ function toolResult(msgId, toolUseId, text) {
 }
 
 // ---------------------------------------------------------------------------
-// Live status (inside sidepanel, not just the footer)
-
-function setLiveStatus(text) {
-  status.textContent = text;
-  status.classList.toggle("busy", busy);
-}
+// Live status (inside sidepanel, not just the footer).
+// The canonical implementation lives next to setBusy — this block is kept
+// as a documentation anchor for the former signature.
 
 // ---------------------------------------------------------------------------
 // Rich widget detail rendering
@@ -982,6 +999,83 @@ async function runBrowserOp(op, args) {
     case "screenshot": {
       const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
       return { dataUrl };
+    }
+    case "wait_for_selector": {
+      const { selector, timeout_ms = 10000 } = args;
+      const res = await execInTab(tab.id, async (sel, timeoutMs) => {
+        const deadline = Date.now() + timeoutMs;
+        const poll = () => {
+          const el = document.querySelector(sel);
+          if (el) {
+            return {
+              ok: true,
+              tag: el.tagName.toLowerCase(),
+              text: (el.innerText || "").slice(0, 400),
+            };
+          }
+          return null;
+        };
+        let hit = poll();
+        if (hit) return hit;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 100));
+          hit = poll();
+          if (hit) return hit;
+        }
+        return { ok: false, error: "timeout" };
+      }, [selector, timeout_ms]);
+      return res;
+    }
+    case "get_selection": {
+      return await execInTab(tab.id, () => {
+        const sel = window.getSelection();
+        const text = sel ? sel.toString() : "";
+        let anchor = null;
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const node = range.startContainer.nodeType === 1
+            ? range.startContainer
+            : range.startContainer.parentElement;
+          if (node) {
+            anchor = {
+              tag: node.tagName?.toLowerCase() || "",
+              id: node.id || "",
+              class: node.className || "",
+            };
+          }
+        }
+        return { text, anchor, url: location.href };
+      });
+    }
+    case "scroll_to": {
+      const { selector, behavior = "smooth" } = args;
+      return await execInTab(tab.id, (sel, bhv) => {
+        const el = document.querySelector(sel);
+        if (!el) return { ok: false, error: "no match" };
+        el.scrollIntoView({ behavior: bhv, block: "center", inline: "nearest" });
+        return { ok: true };
+      }, [selector, behavior]);
+    }
+    case "new_tab": {
+      const { url, active = true } = args;
+      const created = await chrome.tabs.create({ url, active });
+      return { id: created.id, url: created.url };
+    }
+    case "close_tab": {
+      await chrome.tabs.remove(args.tab_id);
+      return { ok: true };
+    }
+    case "reload_tab": {
+      await chrome.tabs.reload(tab.id, { bypassCache: !!args.bypass_cache });
+      return { ok: true };
+    }
+    case "go_back": {
+      await chrome.tabs.goBack(tab.id);
+      return { ok: true };
+    }
+    case "go_forward": {
+      await chrome.tabs.goForward(tab.id);
+      return { ok: true };
     }
     default:
       throw new Error(`unknown op: ${op}`);
@@ -1452,7 +1546,7 @@ function connect() {
             mcpPendingId = null;
           }
           pending.delete(msg.id);
-          if (pending.size === 0) { setBusy(false); setLiveStatus(""); }
+          if (pending.size === 0) { setBusy(false); setLiveStatus(""); drainQueue(); }
           break;
         }
         if (st) {
@@ -1469,7 +1563,9 @@ function connect() {
           scheduleTranscriptSave();
         }
         pending.delete(msg.id);
-        if (msg.session_id) {
+        // Only adopt session_id if we actually sent this request. Otherwise a
+        // stray broadcast from another tab's conversation can clobber ours.
+        if (msg.session_id && st) {
           sessionId = msg.session_id;
           // Update tab label if it's the first message
           if (tabManager.active && tabManager.active.label === "session") {
@@ -1483,7 +1579,7 @@ function connect() {
           const firstUser = log.querySelector(".msg.user .body");
           saveSessionMeta(sessionId, firstUser?.textContent || "");
         }
-        if (pending.size === 0) { setBusy(false); setLiveStatus(""); }
+        if (pending.size === 0) { setBusy(false); setLiveStatus(""); drainQueue(); }
         break;
       }
       case MsgType.WIDGET: {
@@ -1544,7 +1640,7 @@ function connect() {
           renderErrorWithTrace(body, msg.message || "Unknown error", msg.trace);
         }
         if (msg.id) pending.delete(msg.id);
-        if (pending.size === 0) { setBusy(false); setLiveStatus(""); }
+        if (pending.size === 0) { setBusy(false); setLiveStatus(""); drainQueue(); }
         break;
       }
     }
@@ -1919,7 +2015,6 @@ document.addEventListener("keydown", (e) => {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (busy) return;
   const prompt = input.value.trim();
   if (!prompt && pendingImages.length === 0 && pendingTextFiles.length === 0) return;
   input.value = "";
@@ -1945,22 +2040,13 @@ form.addEventListener("submit", async (e) => {
   historyCursor = -1;
   saveSettings();
 
-  addMessage("user", displayText);
+  const userBubble = addMessage("user", displayText);
 
   // Update tab label to first prompt
   if (tabManager.active && (tabManager.active.label === "new" || tabManager.active.label === "session")) {
     tabManager.active.label = (prompt || "file").slice(0, 20);
     renderTabs();
   }
-
-  const bubble = addMessage("assistant", "");
-  bubble.parentElement?.classList.add("cursor");
-
-  const id =
-    crypto.randomUUID?.() ?? `m-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  pending.set(id, { bubble, streamedText: "", thinkingText: "", thinkingEl: null });
-  setBusy(true);
-  setLiveStatus("thinking…");
 
   // `/foo` = slash command (routed to obscura.cli.handle_command).
   // `$skill` / `@cmd` prefixes are real REPL tokens the host expands into
@@ -1973,52 +2059,86 @@ form.addEventListener("submit", async (e) => {
     context.images = pendingImages.map((i) => i.dataUrl);
   }
   if (pendingTextFiles.length > 0) {
-    // Inject text file contents as code blocks appended to the prompt
-    let fileText = "";
-    for (const f of pendingTextFiles) {
-      fileText += `\n\n\`\`\`${f.name}\n${f.content}\n\`\`\``;
-    }
-    // We'll include it in the prompt itself
     context.attached_files = pendingTextFiles.map((f) => ({ name: f.name, content: f.content }));
   }
 
-  // Clear pending files
+  // Snapshot composer state — the queue entry owns its images/files even if
+  // the user drops new ones before this turn fires.
   pendingImages = [];
   pendingTextFiles = [];
   renderDropPreview();
 
+  const id =
+    crypto.randomUUID?.() ?? `m-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const desc = { id, prompt, isCommand, context, userBubble };
+
+  if (busy) {
+    // Queue for later; render the user bubble in a dimmed "queued" state
+    // until its turn actually dispatches.
+    userBubble.parentElement?.classList.add("queued");
+    sendQueue.push(desc);
+    renderStatus();
+    return;
+  }
+
+  dispatchSend(desc);
+});
+
+// Send a previously-prepared descriptor immediately.  Called either
+// directly from submit when the panel is idle, or from drainQueue() when
+// a turn completes.
+function dispatchSend(desc) {
+  desc.userBubble?.parentElement?.classList.remove("queued");
+
+  const bubble = addMessage("assistant", "");
+  bubble.parentElement?.classList.add("cursor");
+  pending.set(desc.id, { bubble, streamedText: "", thinkingText: "", thinkingEl: null });
+
+  setBusy(true);
+  setLiveStatus("thinking…");
+
   try {
     if (!port) connect();
-    if (isCommand) {
+    if (desc.isCommand) {
       port.postMessage({
         type: MsgType.COMMAND,
-        id,
-        raw: prompt,
+        id: desc.id,
+        raw: desc.prompt,
         backend: backendSel.value,
         ...(authToken ? { auth_token: authToken } : {}),
       });
     } else {
       port.postMessage({
         type: MsgType.SEND,
-        id,
-        prompt,
+        id: desc.id,
+        prompt: desc.prompt,
         backend: backendSel.value,
         session_id: sessionId,
         workspace: workspaceSel.value || undefined,
-        context,
+        context: desc.context,
         ...(authToken ? { auth_token: authToken } : {}),
       });
     }
   } catch (err) {
-    pending.delete(id);
+    pending.delete(desc.id);
     setBusy(false);
     setLiveStatus("");
     bubble.parentElement?.classList.remove("cursor");
     bubble.parentElement.classList.remove("assistant");
     bubble.parentElement.classList.add("error");
     bubble.textContent = `Error: ${err.message}`;
+    drainQueue();
   }
-});
+}
+
+// Fire the next queued descriptor when the current turn completes.  Safe
+// to call whenever `busy` flips to false; no-ops if the queue is empty.
+function drainQueue() {
+  if (busy || sendQueue.length === 0) return;
+  const next = sendQueue.shift();
+  renderStatus();
+  dispatchSend(next);
+}
 
 clearBtn.addEventListener("click", () => {
   sessionId = null;
@@ -2028,6 +2148,16 @@ clearBtn.addEventListener("click", () => {
 });
 
 stopBtn.addEventListener("click", () => {
+  // Drop anything queued behind the in-flight turn so a single Stop press
+  // clears the whole backlog rather than letting queued turns fire next.
+  if (sendQueue.length) {
+    for (const q of sendQueue) {
+      q.userBubble?.parentElement?.classList.remove("queued");
+      q.userBubble?.parentElement?.classList.add("cancelled");
+    }
+    sendQueue = [];
+    renderStatus();
+  }
   if (!pending.size) return;
   for (const id of pending.keys()) {
     try { port?.postMessage({ type: MsgType.CANCEL, target_id: id }); } catch {}

@@ -28,7 +28,7 @@ def _clear_templates() -> Generator[None]:  # pyright: ignore[reportUnusedFuncti
 
 @pytest.fixture
 def app() -> FastAPI:
-    config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+    config = ObscuraConfig(otel_enabled=False)
     from obscura.server import create_app
 
     return create_app(config)
@@ -36,7 +36,7 @@ def app() -> FastAPI:
 
 @pytest.fixture
 def client(app: FastAPI) -> TestClient:
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def _make_mock_agent(

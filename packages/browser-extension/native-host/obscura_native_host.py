@@ -145,18 +145,21 @@ _authenticated = False
 
 
 def _check_auth(msg: dict[str, Any]) -> bool:
-    """Check auth if enabled. Returns True if OK to proceed."""
+    """Check the extension <-> native-host shared token.
+
+    If ``OBSCURA_AUTH_TOKEN`` is set, every message must supply a matching
+    ``auth_token``. If the env var is not set, the native host accepts
+    messages from anything Chrome hands it (the pairing is already gated
+    by Chrome's native messaging permissions).
+    """
     global _authenticated
     if _authenticated:
         return True
-    if os.environ.get("OBSCURA_AUTH_ENABLED", "").lower() not in ("1", "true", "yes"):
-        _authenticated = True
-        return True
-    token = msg.get("auth_token") or ""
     expected = os.environ.get("OBSCURA_AUTH_TOKEN", "")
     if not expected:
-        _authenticated = True  # no token configured = no auth
+        _authenticated = True  # no token configured = no shared-secret check
         return True
+    token = msg.get("auth_token") or ""
     if token == expected:
         _authenticated = True
         return True

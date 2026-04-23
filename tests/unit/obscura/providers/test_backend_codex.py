@@ -23,22 +23,34 @@ class _FakeThread:
 
     async def run(self, _prompt: str, **_kwargs: Any) -> Any:
         self.last_kwargs = dict(_kwargs)
+        text = self._text
 
-        class _Turn:
-            final_response = self._text
-            thread_id = "thr-1"
+        class _RunResult:
+            final_response = text
+            items: list[Any] = []
+            usage = None
 
-        return _Turn()
+        return _RunResult()
 
 
 class _FakeCodex:
+    """Mimic the subset of ``codex_app_server.AsyncCodex`` we depend on."""
+
     def __init__(self) -> None:
         self._thread = _FakeThread()
+        self.started = False
 
-    def start_thread(self) -> _FakeThread:
+    async def __aenter__(self) -> _FakeCodex:
+        self.started = True
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        self.started = False
+
+    async def thread_start(self, **_kwargs: Any) -> _FakeThread:
         return self._thread
 
-    def resume_thread(self, _thread_id: str) -> _FakeThread:
+    async def thread_resume(self, _thread_id: str, **_kwargs: Any) -> _FakeThread:
         return self._thread
 
 

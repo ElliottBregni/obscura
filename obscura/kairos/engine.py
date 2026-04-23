@@ -11,10 +11,12 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
+from obscura.kairos.state import KairosState
 from obscura.kairos.vault_sync import VaultSync
 
 logger = logging.getLogger(__name__)
@@ -152,6 +154,8 @@ class KairosEngine:
         self._started = False
         self._start_time = 0.0
         self._observation_count = 0
+        self._session_id = uuid.uuid4().hex[:12]
+        self._state = KairosState.load()
 
     @property
     def is_running(self) -> bool:
@@ -163,6 +167,10 @@ class KairosEngine:
             return
         self._started = True
         self._start_time = time.time()
+
+        # Record session in persistent state.
+        self._state.record_session_start(self._session_id)
+        self._state.save()
 
         # Log engine start.
         self.log("KAIROS engine started")
@@ -192,6 +200,10 @@ class KairosEngine:
 
         # Run vault sync before dream consolidation.
         await self._maybe_vault_sync()
+
+        # Record session end in persistent state.
+        self._state.record_session_end()
+        self._state.save()
 
         self.log("KAIROS engine stopped")
         self._started = False
