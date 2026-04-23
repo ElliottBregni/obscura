@@ -55,6 +55,11 @@ def configure_logging(config: ObscuraConfig) -> None:
         _safe_add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
         _add_otel_context,
+        # Redaction runs after all other attributes are merged so we scrub
+        # whatever the call site, context vars, and exception frames added.
+        # Must run before StackInfoRenderer/format_exc_info so we catch
+        # secrets that show up in traceback strings too.
+        _redact_event_dict,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
@@ -110,6 +115,29 @@ def _add_otel_context(
         pass
 
     return event_dict
+
+
+def _redact_event_dict(
+    logger: Any,
+    method_name: str,
+    event_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """Structlog processor that scrubs known secret patterns from every log.
+
+    Runs on every log event regardless of call site so we catch secrets
+    that reached the logger from exception frames, context vars, or the
+    library layer. See obscura.core.redaction for the pattern library.
+    """
+    _ = logger
+    _ = method_name
+    try:
+        from obscura.core.redaction import redact_mapping
+
+        return redact_mapping(event_dict)
+    except Exception:
+        # Never let redaction failure drop a log line. Log loss would be
+        # a worse outcome than an unredacted record.
+        return event_dict
 
 
 def _safe_add_logger_name(
