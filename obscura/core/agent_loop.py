@@ -991,6 +991,11 @@ class AgentLoop:
         _max_retries: int = 3
         _stop_hook_continuations: int = 0
         _max_tokens_retries: int = 0
+        # Dedup cache shared across retries of the same turn. Tools that
+        # already executed (with real side effects) get replayed from this
+        # cache instead of re-executed when the stream is retried after a
+        # timeout / transient error. Cleared on successful turn advance.
+        _seen_calls_for_retry: dict[str, ToolResultEnvelope] = {}
 
         while state.turn < self._max_turns:
             # Arbiter kill: mechanical stop — no prompt injection, loop ends.
@@ -1037,6 +1042,12 @@ class AgentLoop:
             # Streaming tool executor: starts tools as they arrive from
             # the model stream, not after the full response completes.
             executor = StreamingToolExecutor(self)
+            # Share the cross-retry dedup cache. If this turn is a retry
+            # after a timeout / transient stream error, any tool that
+            # completed on a prior attempt will be returned from cache
+            # instead of re-executed — preventing duplicate side effects
+            # like double `git commit`.
+            executor._seen_calls = _seen_calls_for_retry
 
             # Predictive tool calling: speculatively prefetch read-only
             # tools based on the model's text output before it even emits
@@ -1376,8 +1387,10 @@ class AgentLoop:
                         logger.debug("Failed to mark session failed", exc_info=True)
                 return
             else:
-                # Successful turn: reset retry counter
+                # Successful turn: reset retry counter and clear the
+                # cross-retry dedup cache so the next turn starts fresh.
                 _retry_count = 0
+                _seen_calls_for_retry.clear()
 
             # Sync mutable tool_calls back into immutable state
             state = state.replace(

@@ -156,7 +156,7 @@ class GoalBoard:
         if (self._dir / f"{goal_id}.md").exists():
             goal_id = f"{goal_id}-{int(time.time()) % 10000}"
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).isoformat()
         goal = Goal(
             id=goal_id,
             title=title,
@@ -181,7 +181,7 @@ class GoalBoard:
         if goal is None:
             return None
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).isoformat()
         updates: dict[str, Any] = {"updated": now}
 
         for key, val in fields.items():
