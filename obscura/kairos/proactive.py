@@ -87,7 +87,7 @@ class ProactiveMode:
         """Start the proactive tick loop."""
         self._stopped = False
         self._task = asyncio.create_task(self._tick_loop())
-        logger.info("Proactive mode started (interval=%ss)", self._tick_interval)
+        logger.debug("Proactive mode started (interval=%ss)", self._tick_interval)
 
     async def stop(self) -> None:
         """Stop the proactive tick loop."""
@@ -97,7 +97,7 @@ class ProactiveMode:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
-        logger.info("Proactive mode stopped after %d ticks", self._tick_count)
+        logger.debug("Proactive mode stopped after %d ticks", self._tick_count)
 
     async def _tick_loop(self) -> None:
         """Periodically fire tick events for proactive monitoring."""

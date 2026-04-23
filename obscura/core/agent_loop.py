@@ -994,10 +994,15 @@ class AgentLoop:
         # Dedup cache shared across retries of the same turn. Tools that
         # already executed (with real side effects) get replayed from this
         # cache instead of re-executed when the stream is retried after a
-        # timeout / transient error. Cleared on successful turn advance.
+        # timeout / transient error. Cleared at the top of the next fresh
+        # turn (where _retry_count == 0).
         _seen_calls_for_retry: dict[str, ToolResultEnvelope] = {}
 
         while state.turn < self._max_turns:
+            # Clear the cross-retry dedup cache at the top of each fresh
+            # turn (retries keep _retry_count > 0 and preserve the cache).
+            if _retry_count == 0:
+                _seen_calls_for_retry.clear()
             # Arbiter kill: mechanical stop — no prompt injection, loop ends.
             if self._arbiter_killed:
                 kill_event = AgentEvent(
@@ -1387,10 +1392,11 @@ class AgentLoop:
                         logger.debug("Failed to mark session failed", exc_info=True)
                 return
             else:
-                # Successful turn: reset retry counter and clear the
-                # cross-retry dedup cache so the next turn starts fresh.
+                # Successful turn: reset retry counter. The dedup cache is
+                # cleared at the top of the NEXT iteration (once retries
+                # can't fire for this turn), not here — a scheduled tool
+                # task may still need to hit the cache before wait_for_all.
                 _retry_count = 0
-                _seen_calls_for_retry.clear()
 
             # Sync mutable tool_calls back into immutable state
             state = state.replace(

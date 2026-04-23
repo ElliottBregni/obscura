@@ -183,7 +183,7 @@ class KairosEngine:
         if self._proactive is not None:
             await self._proactive.start()
 
-        logger.info(
+        logger.debug(
             "KAIROS engine started (proactive=%s dream=%s vault_sync=%s)",
             self._proactive_enabled,
             self._dream_enabled,
@@ -211,7 +211,7 @@ class KairosEngine:
         # Check if dream consolidation should run.
         await self._maybe_dream()
 
-        logger.info(
+        logger.debug(
             "KAIROS engine stopped after %.0fs, %d observations",
             time.time() - self._start_time,
             self._observation_count,
@@ -308,6 +308,9 @@ class KairosEngine:
                         f'task_update(task_id="{task["task_id"]}", '
                         f'status="completed").'
                     )
+                    logger.info(
+                        "[kairos] \u2192 Working: %s", task["subject"]
+                    )
                     self.log(
                         f"tick #{tick_count}: claimed task {task['task_id']} "
                         f"— {task['subject']}",
@@ -357,7 +360,7 @@ class KairosEngine:
             min_sessions=self._dream_min_sessions,
         )
         if consolidator.should_run():
-            logger.info("Starting dream consolidation...")
+            logger.debug("Dream consolidation triggered")
             self.log("Dream consolidation triggered")
             await consolidator.run()
             self.log("Dream consolidation completed")

@@ -230,6 +230,26 @@ def _is_path_allowed(path: Path) -> bool:
     return True
 
 
+def _is_vault_write_allowed(path: Path) -> bool:
+    """Return False if path is inside vault/user/ or vault/shared/ (read-only zones).
+
+    vault/agent/ is the only zone that agents may write to.  Paths outside the
+    vault entirely are unaffected and always return True.
+    """
+    from obscura.core.paths import resolve_obscura_home
+
+    try:
+        vault_root = resolve_obscura_home() / "vault"
+        rel = path.resolve().relative_to(vault_root.resolve())
+        # First component of the relative path is the zone name.
+        zone = rel.parts[0] if rel.parts else ""
+        if zone in ("user", "shared"):
+            return False
+    except (ValueError, Exception):
+        pass  # Not inside vault — allow
+    return True
+
+
 def _json_error(error: str, **extra: object) -> str:
     payload: dict[str, object] = {"ok": False, "error": error, "exit_code": -1}
     payload.update(extra)
@@ -1200,6 +1220,12 @@ async def write_text_file(
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
+    if not _is_vault_write_allowed(target):
+        return _json_error(
+            "vault_zone_readonly",
+            path=str(target),
+            detail="vault/user and vault/shared are read-only; write to vault/agent instead",
+        )
     if target.exists() and target.is_dir():
         return _json_error("path_is_directory", path=str(target))
     if target.exists() and not overwrite:
@@ -1255,6 +1281,12 @@ async def append_text_file(path: str, text: str, create_dirs: bool = True) -> st
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
+    if not _is_vault_write_allowed(target):
+        return _json_error(
+            "vault_zone_readonly",
+            path=str(target),
+            detail="vault/user and vault/shared are read-only; write to vault/agent instead",
+        )
     if target.exists() and target.is_dir():
         return _json_error("path_is_directory", path=str(target))
 
@@ -1338,6 +1370,12 @@ async def remove_path(
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
+    if not _is_vault_write_allowed(target):
+        return _json_error(
+            "vault_zone_readonly",
+            path=str(target),
+            detail="vault/user and vault/shared are read-only; write to vault/agent instead",
+        )
     if not target.exists():
         if missing_ok:
             return json.dumps({"ok": True, "path": str(target), "removed": False})
@@ -2023,6 +2061,12 @@ async def edit_text_file(
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
+    if not _is_vault_write_allowed(target):
+        return _json_error(
+            "vault_zone_readonly",
+            path=str(target),
+            detail="vault/user and vault/shared are read-only; write to vault/agent instead",
+        )
     if not target.exists():
         return _json_error("path_not_found", path=str(target))
     if not target.is_file():
@@ -4487,6 +4531,70 @@ async def config_tool(
     return _json_error("invalid_action", detail=f"Unknown action: {action}")
 
 
+@tool(
+    "write_agent_shared",
+    (
+        "Write to the shared vault zone. Creates a backup of the previous version "
+        "before overwriting."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": (
+                    "Path relative to vault/shared/ (e.g. 'decisions/plan.md'). "
+                    "Must not escape vault/shared/."
+                ),
+            },
+            "text": {"type": "string", "description": "Content to write."},
+        },
+        "required": ["path", "text"],
+    },
+)
+async def write_agent_shared(path: str, text: str) -> str:
+    import datetime
+
+    from obscura.core.paths import resolve_obscura_home
+
+    shared_root = (resolve_obscura_home() / "vault" / "shared").resolve()
+
+    # Resolve the target path and guard against traversal.
+    candidate = (shared_root / path).resolve()
+    try:
+        candidate.relative_to(shared_root)
+    except ValueError:
+        return _json_error(
+            "path_not_allowed",
+            detail="Resolved path escapes vault/shared/",
+            path=path,
+        )
+
+    backed_up = False
+    if candidate.exists():
+        ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%S")
+        backup_dir = shared_root / ".backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"{candidate.name}.{ts}.bak"
+        try:
+            backup_path.write_bytes(candidate.read_bytes())
+            backed_up = True
+        except OSError as exc:
+            return _json_error(
+                "backup_failed",
+                path=str(candidate),
+                detail=str(exc),
+            )
+
+    try:
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        return _json_error("write_failed", path=str(candidate), detail=str(exc))
+
+    return json.dumps({"ok": True, "path": str(candidate), "backed_up": backed_up})
+
+
 def get_system_tool_specs() -> list[ToolSpec]:
     """Return default system tool specs for agent runtime."""
     static_specs = [
@@ -4506,6 +4614,7 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", read_text_file).spec),
         cast("ToolSpec", cast("Any", write_text_file).spec),
         cast("ToolSpec", cast("Any", append_text_file).spec),
+        cast("ToolSpec", cast("Any", write_agent_shared).spec),
         cast("ToolSpec", cast("Any", make_directory).spec),
         cast("ToolSpec", cast("Any", remove_path).spec),
         # Filesystem — advanced

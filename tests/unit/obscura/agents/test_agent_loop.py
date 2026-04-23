@@ -706,6 +706,126 @@ class TestAgentLoopTurnTracking:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Retry dedup — completed tools must not re-execute on stream retry
+# ---------------------------------------------------------------------------
+
+
+class TestAgentLoopRetryDedup:
+    @pytest.mark.asyncio
+    async def test_tool_result_preserved_across_transient_retry(self) -> None:
+        """Stream fails after a tool already ran → retry must NOT re-execute it.
+
+        Regression: a transient stream error used to force a full turn retry
+        with a fresh executor, losing the cached result. The model would
+        re-emit the same tool_use on retry and the handler would run twice —
+        causing duplicate side effects like double `git commit`.
+        """
+        call_count = 0
+
+        def mutating_handler() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"executed #{call_count}"
+
+        spec = ToolSpec(
+            name="mutate",
+            description="Mutating op",
+            parameters={"type": "object", "properties": {}},
+            handler=mutating_handler,
+        )
+
+        class FlappyBackend(BackendProtocol):
+            def __init__(self) -> None:
+                self._call = 0
+                self._registry = ToolRegistry()
+                self._registry.register(spec)
+
+            @override
+            async def stream(
+                self, prompt: str, **kw: Any,
+            ) -> AsyncIterator[StreamChunk]:
+                self._call += 1
+                if self._call == 1:
+                    yield StreamChunk(
+                        kind=ChunkKind.TOOL_USE_START, tool_name="mutate",
+                    )
+                    yield StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta="{}",
+                    )
+                    yield StreamChunk(kind=ChunkKind.TOOL_USE_END)
+                    # Let the scheduled tool task run to completion before
+                    # we crash the stream.
+                    await asyncio.sleep(0.05)
+                    msg = "connection dropped mid-stream"
+                    raise ConnectionError(msg)
+                if self._call == 2:
+                    yield StreamChunk(
+                        kind=ChunkKind.TOOL_USE_START, tool_name="mutate",
+                    )
+                    yield StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA, tool_input_delta="{}",
+                    )
+                    yield StreamChunk(kind=ChunkKind.TOOL_USE_END)
+                    yield StreamChunk(kind=ChunkKind.DONE)
+                    return
+                yield StreamChunk(kind=ChunkKind.TEXT_DELTA, text="done.")
+                yield StreamChunk(kind=ChunkKind.DONE)
+
+            @override
+            async def start(self) -> None: ...
+            @override
+            async def stop(self) -> None: ...
+            @override
+            async def send(self, prompt: str, **kw: Any) -> Message:
+                return Message(role=Role.ASSISTANT, content=[], raw=None)
+
+            @override
+            async def create_session(self, **kw: Any) -> SessionRef:
+                return SessionRef(session_id="s", backend=Backend.COPILOT)
+
+            @override
+            async def resume_session(self, ref: SessionRef) -> None: ...
+            @override
+            async def list_sessions(self) -> list[SessionRef]:
+                return []
+            @override
+            async def delete_session(self, ref: SessionRef) -> None: ...
+            @override
+            def register_tool(self, spec: ToolSpec) -> None:
+                self._registry.register(spec)
+            @override
+            def register_hook(
+                self, hook: HookPoint, cb: Callable[..., Any],
+            ) -> None: ...
+            @override
+            def get_tool_registry(self) -> ToolRegistry:
+                return self._registry
+
+            @property
+            @override
+            def native(self) -> NativeHandle:
+                return NativeHandle()
+
+            @override
+            def capabilities(self) -> BackendCapabilities:
+                return BackendCapabilities()
+
+        backend = FlappyBackend()
+        loop = AgentLoop(backend, _make_registry(spec))
+
+        events = [e async for e in loop.run("mutate")]
+
+        assert call_count == 1, (
+            f"Tool was re-executed on retry (called {call_count}x). "
+            "The cross-retry dedup cache should have replayed the cached result."
+        )
+        errors = [e for e in events if e.kind == AgentEventKind.ERROR]
+        assert not errors, f"Unexpected errors: {[e.text for e in errors]}"
+        done = [e for e in events if e.kind == AgentEventKind.AGENT_DONE]
+        assert len(done) == 1
+
+
+# ---------------------------------------------------------------------------
 # Tests: ToolCallInfo parsing
 # ---------------------------------------------------------------------------
 

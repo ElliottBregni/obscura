@@ -146,7 +146,7 @@ class VaultSync:
 
         # Load previous sync state.
         self._load_hashes()
-        logger.info("Vault bootstrapped at %s", self.vault_dir)
+        logger.debug("Vault bootstrapped at %s", self.vault_dir)
 
     # ------------------------------------------------------------------
     # Scan & detect
@@ -278,7 +278,7 @@ class VaultSync:
                 fields["body"] = meta.body
             if fields:
                 board.update(goal_id, **fields)
-                logger.info("Vault ingest: updated goal %s", goal_id)
+                logger.debug("Vault ingest: updated goal %s", goal_id)
         else:
             board.create(
                 title,
@@ -287,7 +287,7 @@ class VaultSync:
                 acceptance_criteria=meta.frontmatter.get("acceptance_criteria"),
                 status=str(meta.frontmatter.get("status", "active")),
             )
-            logger.info(
+            logger.debug(
                 "Vault ingest: created goal %s from %s", goal_id, meta.path.name
             )
 
@@ -309,7 +309,7 @@ class VaultSync:
             priority=priority,
             goal_id=goal_id,
         )
-        logger.info("Vault ingest: created task '%s' from %s", subject, meta.path.name)
+        logger.debug("Vault ingest: created task '%s' from %s", subject, meta.path.name)
 
     def _ingest_profile(self, meta: FileMeta) -> None:
         """Update user profile from a vault file."""
@@ -328,7 +328,7 @@ class VaultSync:
                     value = value.strip()
                     if key and value:
                         store.set(key, value)
-            logger.info("Vault ingest: updated profile from %s", meta.path.name)
+            logger.debug("Vault ingest: updated profile from %s", meta.path.name)
         except Exception:
             logger.debug(
                 "Profile ingest failed (auth context may not be available)",
@@ -354,7 +354,7 @@ class VaultSync:
                     "type": memory_type,
                 },
             )
-            logger.info("Vault ingest: stored %s in vector memory", meta.path.name)
+            logger.debug("Vault ingest: stored %s in vector memory", meta.path.name)
         except Exception:
             logger.debug("Vector ingest failed", exc_info=True)
 
