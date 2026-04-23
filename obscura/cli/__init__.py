@@ -2841,6 +2841,10 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 
 main.add_command(_kairos_group)
 
+from obscura.cli.admin_commands import admin_group as _admin_group  # noqa: E402
+
+main.add_command(_admin_group)
+
 
 # Backwards-compat aliases added by test harness
 def _emit_context_warnings(*args, **kwargs):
