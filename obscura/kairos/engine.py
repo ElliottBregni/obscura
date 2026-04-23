@@ -281,6 +281,22 @@ class KairosEngine:
                     goal_ctx = ""
                     if task.get("goal_id"):
                         goal_ctx = f' goal="{task["goal_id"]}"'
+                        # Stamp last_worked on the parent goal.
+                        try:
+                            from datetime import UTC, datetime
+
+                            from obscura.kairos.goals import GoalBoard
+
+                            GoalBoard().update(
+                                task["goal_id"],
+                                last_worked=datetime.now(UTC).isoformat(),
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Could not stamp last_worked on goal %s",
+                                task["goal_id"],
+                                exc_info=True,
+                            )
                     inject(
                         f"<tick>#{tick_count}</tick>\n"
                         f'<task id="{task["task_id"]}" '
