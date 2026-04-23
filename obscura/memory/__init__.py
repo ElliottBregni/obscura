@@ -332,3 +332,19 @@ class GlobalMemoryStore(MemoryStore):
         """Override to add audit logging for global writes."""
         # TODO: Add audit logging
         super().set(*args, **kwargs)
+
+
+def create_memory_store(user: AuthenticatedUser) -> MemoryStore:
+    """Factory: return a PostgreSQL or SQLite memory store based on config.
+
+    When ``OBSCURA_DB_TYPE=postgresql``, returns a
+    :class:`~obscura.memory.postgres_memory.PostgreSQLMemoryStore`.
+    Otherwise returns the default SQLite-backed :class:`MemoryStore`.
+    """
+    from obscura.core.pg_config import is_pg_configured
+
+    if is_pg_configured():
+        from obscura.memory.postgres_memory import PostgreSQLMemoryStore
+
+        return PostgreSQLMemoryStore.for_user(user)  # type: ignore[return-value]
+    return MemoryStore.for_user(user)

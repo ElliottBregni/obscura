@@ -9,7 +9,7 @@ description = "Obscura - Multi-agent context management with TUI"
 requires-python = ">=3.13"
 dependencies = [
     "vault-gen @ file:./packages/vault-gen",
-    "github-copilot-sdk>=0.2.0",
+    "github-copilot-sdk>=0.2.1",
     "claude-agent-sdk>=0.1.0",
     # Official OpenAI Codex Python SDK — not published to PyPI; installed
     # from source in the openai/codex monorepo.

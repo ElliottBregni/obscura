@@ -225,14 +225,13 @@ class CopilotBackend:
 
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
-        from copilot import CopilotClient
-        from copilot.types import SubprocessConfig
+        from copilot import CopilotClient, SubprocessConfig
 
-        client_opts: Any = None
+        client_config: SubprocessConfig | None = None
         if self._auth.github_token:
-            client_opts = SubprocessConfig(github_token=self._auth.github_token)
+            client_config = SubprocessConfig(github_token=self._auth.github_token)
 
-        self._client = CopilotClient(client_opts)
+        self._client = CopilotClient(client_config)
         await self._client.start()
 
         # Create default session
@@ -615,7 +614,7 @@ class CopilotBackend:
     def _convert_tools_to_copilot(self, tools: list[ToolSpec]) -> list[Any]:
         """Convert Obscura ToolSpec objects to Copilot SDK Tool format.
 
-        The Copilot SDK expects ``copilot.types.Tool`` objects whose handler
+        The Copilot SDK expects ``copilot.tools.Tool`` objects whose handler
         matches ``Callable[[ToolInvocation], ToolResult | Awaitable[ToolResult]]``.
         This method wraps each ``ToolSpec.handler`` so it accepts a
         ``ToolInvocation`` dict and returns a ``ToolResult`` TypedDict.
@@ -624,14 +623,14 @@ class CopilotBackend:
         ``^[a-zA-Z0-9_-]{1,128}$`` (dots and other special chars replaced
         with underscores).
         """
-        from copilot.types import Tool
+        from copilot.tools import Tool
 
         converted: list[Any] = []
         for spec in tools:
 
             def _wrapper_factory(bound_spec: ToolSpec) -> Callable[..., Any]:
                 async def wrapped(invocation: Any) -> Any:
-                    from copilot.types import ToolResult as CopilotToolResult
+                    from copilot.tools import ToolResult as CopilotToolResult
 
                     from obscura.core.agent_loop import call_tool_handler
 
@@ -680,7 +679,7 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
-        from copilot.types import PermissionRequestResult
+        from copilot.session import PermissionRequestResult
 
         def _approve_all(
             request: PermissionRequest,

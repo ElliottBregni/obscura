@@ -10,13 +10,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-import sqlite3
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from obscura.core.supervisor.schema import init_supervisor_schema
+from obscura.core.supervisor.db_backend import (
+    DatabaseBackend,
+    SQLiteSupervisorBackend,
+    translate_sql,
+)
 from obscura.core.supervisor.types import (
     MemoryCandidate,
     MemoryCommitResult,
@@ -62,14 +64,22 @@ class MemoryCommitGate:
 
     def __init__(
         self,
-        db_path: str | Path,
-        session_id: str,
-        run_id: str,
+        db_path: str | Path | None = None,
+        session_id: str = "",
+        run_id: str = "",
         *,
         min_importance: float = 0.3,
         max_batch_size: int = 20,
+        backend: DatabaseBackend | None = None,
     ) -> None:
-        self._db_path = Path(db_path)
+        if backend is not None:
+            self._backend = backend
+        elif db_path is not None:
+            self._backend = SQLiteSupervisorBackend(db_path)
+        else:
+            msg = "Either db_path or backend must be provided"
+            raise ValueError(msg)
+
         self._session_id = session_id
         self._run_id = run_id
         self._min_importance = min_importance
@@ -77,21 +87,10 @@ class MemoryCommitGate:
 
         self._queue: list[MemoryCandidate] = []
         self._events: list[SupervisorEvent] = []
-        self._local = threading.local()
 
-        self._init_schema()
-
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-        return self._local.conn
-
-    def _init_schema(self) -> None:
-        init_supervisor_schema(self._conn())
+    def _sql(self, sql: str) -> str:
+        """Translate SQL for the current dialect."""
+        return translate_sql(sql, self._backend.dialect)
 
     # -- queuing -------------------------------------------------------------
 
@@ -151,88 +150,94 @@ class MemoryCommitGate:
         gated = 0
         errors = 0
 
-        conn = self._conn()
+        conn = self._backend.get_conn()
+        try:
+            # Get existing content hashes for this session
+            existing_rows = conn.execute(
+                self._sql(
+                    "SELECT content_hash FROM memory_commits WHERE session_id = ?"
+                ),
+                (self._session_id,),
+            ).fetchall()
+            existing_hashes: set[str] = {row["content_hash"] for row in existing_rows}
 
-        # Get existing content hashes for this session
-        existing_rows = conn.execute(
-            "SELECT content_hash FROM memory_commits WHERE session_id = ?",
-            (self._session_id,),
-        ).fetchall()
-        existing_hashes: set[str] = {row["content_hash"] for row in existing_rows}
+            # Dedupe within batch
+            seen_hashes: set[str] = set()
+            candidates: list[MemoryCandidate] = []
 
-        # Dedupe within batch
-        seen_hashes: set[str] = set()
-        candidates: list[MemoryCandidate] = []
+            for item in self._queue:
+                if item.content_hash in existing_hashes:
+                    deduplicated += 1
+                    self._emit_event(
+                        SupervisorEventKind.MEMORY_DEDUPLICATED,
+                        {"key": item.key, "content_hash": item.content_hash[:12]},
+                    )
+                    continue
 
-        for item in self._queue:
-            if item.content_hash in existing_hashes:
-                deduplicated += 1
-                self._emit_event(
-                    SupervisorEventKind.MEMORY_DEDUPLICATED,
-                    {"key": item.key, "content_hash": item.content_hash[:12]},
-                )
-                continue
+                if item.content_hash in seen_hashes:
+                    deduplicated += 1
+                    continue
 
-            if item.content_hash in seen_hashes:
-                deduplicated += 1
-                continue
+                # Gate by importance (pinned items bypass)
+                if not item.pinned and item.importance < self._min_importance:
+                    gated += 1
+                    self._emit_event(
+                        SupervisorEventKind.MEMORY_GATED,
+                        {
+                            "key": item.key,
+                            "importance": item.importance,
+                            "threshold": self._min_importance,
+                        },
+                    )
+                    continue
 
-            # Gate by importance (pinned items bypass)
-            if not item.pinned and item.importance < self._min_importance:
-                gated += 1
-                self._emit_event(
-                    SupervisorEventKind.MEMORY_GATED,
-                    {
-                        "key": item.key,
-                        "importance": item.importance,
-                        "threshold": self._min_importance,
-                    },
-                )
-                continue
+                seen_hashes.add(item.content_hash)
+                candidates.append(item)
 
-            seen_hashes.add(item.content_hash)
-            candidates.append(item)
+            # Batch size limit (keep highest-scored items)
+            if len(candidates) > self._max_batch_size:
+                candidates.sort(key=lambda c: c.score, reverse=True)
+                gated += len(candidates) - self._max_batch_size
+                candidates = candidates[: self._max_batch_size]
 
-        # Batch size limit (keep highest-scored items)
-        if len(candidates) > self._max_batch_size:
-            candidates.sort(key=lambda c: c.score, reverse=True)
-            gated += len(candidates) - self._max_batch_size
-            candidates = candidates[: self._max_batch_size]
+            # Write to DB
+            now = datetime.now(UTC).isoformat()
+            for item in candidates:
+                try:
+                    conn.execute(
+                        self._sql(
+                            "INSERT OR IGNORE INTO memory_commits "
+                            "(session_id, run_id, key, content_hash, importance, "
+                            " pinned, committed_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                        ),
+                        (
+                            self._session_id,
+                            self._run_id,
+                            item.key,
+                            item.content_hash,
+                            item.importance,
+                            1 if item.pinned else 0,
+                            now,
+                        ),
+                    )
+                    committed += 1
+                    self._emit_event(
+                        SupervisorEventKind.MEMORY_COMMIT,
+                        {
+                            "key": item.key,
+                            "content_hash": item.content_hash[:12],
+                            "importance": item.importance,
+                            "pinned": item.pinned,
+                        },
+                    )
+                except Exception:
+                    errors += 1
+                    logger.exception("Failed to commit memory item: %s", item.key)
 
-        # Write to DB
-        now = datetime.now(UTC).isoformat()
-        for item in candidates:
-            try:
-                conn.execute(
-                    "INSERT OR IGNORE INTO memory_commits "
-                    "(session_id, run_id, key, content_hash, importance, "
-                    " pinned, committed_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        self._session_id,
-                        self._run_id,
-                        item.key,
-                        item.content_hash,
-                        item.importance,
-                        1 if item.pinned else 0,
-                        now,
-                    ),
-                )
-                committed += 1
-                self._emit_event(
-                    SupervisorEventKind.MEMORY_COMMIT,
-                    {
-                        "key": item.key,
-                        "content_hash": item.content_hash[:12],
-                        "importance": item.importance,
-                        "pinned": item.pinned,
-                    },
-                )
-            except Exception:
-                errors += 1
-                logger.exception("Failed to commit memory item: %s", item.key)
-
-        conn.commit()
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
         result = MemoryCommitResult(
             committed=committed,
@@ -265,27 +270,31 @@ class MemoryCommitGate:
 
     def get_committed_hashes(self) -> set[str]:
         """Get all content hashes committed for this session (sync)."""
-        rows = (
-            self._conn()
-            .execute(
-                "SELECT content_hash FROM memory_commits WHERE session_id = ?",
+        conn = self._backend.get_conn()
+        try:
+            rows = conn.execute(
+                self._sql(
+                    "SELECT content_hash FROM memory_commits WHERE session_id = ?"
+                ),
                 (self._session_id,),
-            )
-            .fetchall()
-        )
+            ).fetchall()
+        finally:
+            self._backend.put_conn(conn)
         return {row["content_hash"] for row in rows}
 
     def get_commits_for_run(self) -> list[dict[str, Any]]:
         """Get all commits for the current run (sync)."""
-        rows = (
-            self._conn()
-            .execute(
-                "SELECT key, content_hash, importance, pinned, committed_at "
-                "FROM memory_commits WHERE run_id = ? ORDER BY committed_at",
+        conn = self._backend.get_conn()
+        try:
+            rows = conn.execute(
+                self._sql(
+                    "SELECT key, content_hash, importance, pinned, committed_at "
+                    "FROM memory_commits WHERE run_id = ? ORDER BY committed_at"
+                ),
                 (self._run_id,),
-            )
-            .fetchall()
-        )
+            ).fetchall()
+        finally:
+            self._backend.put_conn(conn)
         return [dict(row) for row in rows]
 
     # -- internal ------------------------------------------------------------
@@ -305,9 +314,7 @@ class MemoryCommitGate:
         )
 
     def close(self) -> None:
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        self._backend.close()
 
 
 # ---------------------------------------------------------------------------

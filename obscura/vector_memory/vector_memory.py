@@ -202,7 +202,11 @@ class VectorMemoryStore:
         import logging
 
         logger = logging.getLogger(__name__)
-        backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "qdrant").lower()
+        backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "").lower()
+        if not backend_type:
+            # Auto-detect from OBSCURA_DB_TYPE
+            db_type = os.environ.get("OBSCURA_DB_TYPE", "sqlite").lower()
+            backend_type = "postgresql" if db_type == "postgresql" else "qdrant"
 
         try:
             half_life = float(os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS"))
@@ -242,7 +246,22 @@ class VectorMemoryStore:
                 # Qdrant not available, fall back to SQLite
                 backend_type = "sqlite"
 
-        # SQLite backend (default fallback if Qdrant unavailable)
+        # PostgreSQL backend
+        if backend_type == "postgresql":
+            try:
+                from obscura.vector_memory.backends.postgres_backend import (
+                    PostgreSQLVectorBackend,
+                )
+
+                return PostgreSQLVectorBackend(config=config)
+            except Exception as e:
+                logger.warning(
+                    "PostgreSQL vector backend failed, falling back to SQLite: %s",
+                    e,
+                )
+                backend_type = "sqlite"
+
+        # SQLite backend (default fallback)
         base_dir = Path(
             os.environ.get(
                 "OBSCURA_VECTOR_MEMORY_DIR",

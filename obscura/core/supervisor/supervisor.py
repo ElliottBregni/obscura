@@ -32,14 +32,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
-import threading
 import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.supervisor.db_backend import (
+    DatabaseBackend,
+    SQLiteSupervisorBackend,
+    create_supervisor_backend,
+    translate_sql,
+)
 from obscura.core.supervisor.errors import (
     LockExpiredError,
     SupervisorError,
@@ -49,7 +53,6 @@ from obscura.core.supervisor.lock import SessionLock
 from obscura.core.supervisor.memory_gate import MemoryCommitGate
 from obscura.core.supervisor.observability import RunObserver
 from obscura.core.supervisor.prompt_assembler import PromptAssembler
-from obscura.core.supervisor.schema import init_supervisor_schema
 from obscura.core.supervisor.session_hooks import SessionHookManager
 from obscura.core.supervisor.state_machine import SessionStateMachine
 from obscura.core.supervisor.tool_snapshot import FrozenToolRegistry, ToolSnapshotStore
@@ -85,29 +88,23 @@ class Supervisor:
 
     def __init__(
         self,
-        db_path: str | Path,
+        db_path: str | Path | None = None,
         *,
         config: SupervisorConfig | None = None,
+        backend: DatabaseBackend | None = None,
     ) -> None:
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        if backend is not None:
+            self._backend = backend
+        elif db_path is not None:
+            self._backend = SQLiteSupervisorBackend(db_path)
+        else:
+            self._backend = create_supervisor_backend()
         self._config = config or SupervisorConfig()
-        self._local = threading.local()
-        self._lock = SessionLock(self._db_path, default_ttl=self._config.lock_ttl)
-        self._tool_store = ToolSnapshotStore(self._db_path)
-        self._init_schema()
+        self._lock = SessionLock(backend=self._backend, default_ttl=self._config.lock_ttl)
+        self._tool_store = ToolSnapshotStore(backend=self._backend)
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-        return self._local.conn
-
-    def _init_schema(self) -> None:
-        init_supervisor_schema(self._conn())
+    def _sql(self, sql: str) -> str:
+        return translate_sql(sql, self._backend.dialect)
 
     # -----------------------------------------------------------------------
     # Main run entry point
@@ -155,17 +152,17 @@ class Supervisor:
 
         # Heartbeat manager
         heartbeat = SessionHeartbeatManager(
-            db_path=self._db_path,
             session_id=session_id,
             run_id=run_id,
             interval=config.heartbeat_interval,
+            backend=self._backend,
         )
 
         # Hook manager
         hooks = SessionHookManager(
-            db_path=self._db_path,
             session_id=session_id,
             run_id=run_id,
+            backend=self._backend,
         )
         hooks.load_from_db()
 
@@ -252,11 +249,11 @@ class Supervisor:
 
         # Memory gate
         memory_gate = MemoryCommitGate(
-            db_path=self._db_path,
             session_id=session_id,
             run_id=run_id,
             min_importance=config.memory_min_importance,
             max_batch_size=config.memory_commit_batch_size,
+            backend=self._backend,
         )
 
         # Run context (populated during BUILD_CONTEXT)
@@ -894,15 +891,20 @@ class Supervisor:
         agent_id: str | None = None,
         policy_id: str | None = None,
     ) -> None:
-        conn = self._conn()
-        now = datetime.now(UTC).isoformat()
-        conn.execute(
-            "INSERT INTO supervisor_runs "
-            "(run_id, session_id, agent_id, policy_id, state, started_at, metadata) "
-            "VALUES (?, ?, ?, ?, 'building_context', ?, '{}')",
-            (run_id, session_id, agent_id, policy_id, now),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            now = datetime.now(UTC).isoformat()
+            conn.execute(
+                self._sql(
+                    "INSERT INTO supervisor_runs "
+                    "(run_id, session_id, agent_id, policy_id, state, started_at, metadata) "
+                    "VALUES (?, ?, ?, ?, 'building_context', ?, '{}')"
+                ),
+                (run_id, session_id, agent_id, policy_id, now),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _update_run_sync(
         self,
@@ -913,75 +915,94 @@ class Supervisor:
         tool_registry_hash: str | None = None,
         state: str | None = None,
     ) -> None:
-        conn = self._conn()
-        sets: list[str] = []
-        params: list[Any] = []
+        conn = self._backend.get_conn()
+        try:
+            sets: list[str] = []
+            params: list[Any] = []
 
-        if prompt_hash is not None:
-            sets.append("prompt_hash = ?")
-            params.append(prompt_hash)
-        if tool_snapshot_id is not None:
-            sets.append("tool_snapshot_id = ?")
-            params.append(tool_snapshot_id)
-        if tool_registry_hash is not None:
-            sets.append("tool_registry_hash = ?")
-            params.append(tool_registry_hash)
-        if state is not None:
-            sets.append("state = ?")
-            params.append(state)
+            if prompt_hash is not None:
+                sets.append("prompt_hash = ?")
+                params.append(prompt_hash)
+            if tool_snapshot_id is not None:
+                sets.append("tool_snapshot_id = ?")
+                params.append(tool_snapshot_id)
+            if tool_registry_hash is not None:
+                sets.append("tool_registry_hash = ?")
+                params.append(tool_registry_hash)
+            if state is not None:
+                sets.append("state = ?")
+                params.append(state)
 
-        if not sets:
-            return
+            if not sets:
+                return
 
-        params.append(run_id)
-        conn.execute(
-            f"UPDATE supervisor_runs SET {', '.join(sets)} WHERE run_id = ?",
-            params,
-        )
-        conn.commit()
+            params.append(run_id)
+            conn.execute(
+                self._sql(
+                    f"UPDATE supervisor_runs SET {', '.join(sets)} WHERE run_id = ?"
+                ),
+                params,
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _complete_run_sync(self, run_id: str, turn_count: int = 0) -> None:
-        conn = self._conn()
-        now = datetime.now(UTC).isoformat()
-        conn.execute(
-            "UPDATE supervisor_runs SET state = 'completed', "
-            "completed_at = ?, turn_count = ? WHERE run_id = ?",
-            (now, turn_count, run_id),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            now = datetime.now(UTC).isoformat()
+            conn.execute(
+                self._sql(
+                    "UPDATE supervisor_runs SET state = 'completed', "
+                    "completed_at = ?, turn_count = ? WHERE run_id = ?"
+                ),
+                (now, turn_count, run_id),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _fail_run_sync(self, run_id: str, error: str) -> None:
-        conn = self._conn()
-        now = datetime.now(UTC).isoformat()
-        conn.execute(
-            "UPDATE supervisor_runs SET state = 'failed', "
-            "completed_at = ?, error = ? WHERE run_id = ?",
-            (now, error, run_id),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            now = datetime.now(UTC).isoformat()
+            conn.execute(
+                self._sql(
+                    "UPDATE supervisor_runs SET state = 'failed', "
+                    "completed_at = ?, error = ? WHERE run_id = ?"
+                ),
+                (now, error, run_id),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _get_run_sync(self, run_id: str) -> dict[str, Any] | None:
-        row = (
-            self._conn()
-            .execute(
-                "SELECT * FROM supervisor_runs WHERE run_id = ?",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql("SELECT * FROM supervisor_runs WHERE run_id = ?"),
                 (run_id,),
             )
-            .fetchone()
-        )
+            row = cur.fetchone()
+        finally:
+            self._backend.put_conn(conn)
         if row is None:
             return None
         return dict(row)
 
     def _get_events_sync(self, run_id: str) -> list[dict[str, Any]]:
-        rows = (
-            self._conn()
-            .execute(
-                "SELECT * FROM supervisor_events WHERE run_id = ? ORDER BY seq",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql(
+                    "SELECT * FROM supervisor_events WHERE run_id = ? ORDER BY seq"
+                ),
                 (run_id,),
             )
-            .fetchall()
-        )
+            rows = cur.fetchall()
+        finally:
+            self._backend.put_conn(conn)
         return [dict(r) for r in rows]
 
     def _persist_events_sync(
@@ -989,68 +1010,81 @@ class Supervisor:
         run_id: str,
         events: list[SupervisorEvent],
     ) -> None:
-        conn = self._conn()
-        for seq, event in enumerate(events, start=1):
-            conn.execute(
-                "INSERT OR IGNORE INTO supervisor_events "
-                "(run_id, seq, kind, payload, timestamp) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (
-                    run_id,
-                    seq,
-                    event.kind.value,
-                    json.dumps(event.payload, default=str),
-                    event.timestamp.isoformat(),
-                ),
-            )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            for seq, event in enumerate(events, start=1):
+                conn.execute(
+                    self._sql(
+                        "INSERT OR IGNORE INTO supervisor_events "
+                        "(run_id, seq, kind, payload, timestamp) "
+                        "VALUES (?, ?, ?, ?, ?)"
+                    ),
+                    (
+                        run_id,
+                        seq,
+                        event.kind.value,
+                        json.dumps(event.payload, default=str),
+                        event.timestamp.isoformat(),
+                    ),
+                )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _store_prompt_snapshot_sync(
         self,
         run_id: str,
         prompt_snapshot: Any,
     ) -> None:
-        conn = self._conn()
-        snapshot_id = str(uuid.uuid4())
-        sections_json = json.dumps(
-            [
-                {"name": s.name, "content": s.content, "tokens": s.token_estimate}
-                for s in prompt_snapshot.sections
-            ],
-            default=str,
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO prompt_snapshots "
-            "(snapshot_id, run_id, prompt_hash, sections_json, token_count, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                snapshot_id,
-                run_id,
-                prompt_snapshot.prompt_hash,
-                sections_json,
-                prompt_snapshot.total_tokens,
-                datetime.now(UTC).isoformat(),
-            ),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            snapshot_id = str(uuid.uuid4())
+            sections_json = json.dumps(
+                [
+                    {"name": s.name, "content": s.content, "tokens": s.token_estimate}
+                    for s in prompt_snapshot.sections
+                ],
+                default=str,
+            )
+            conn.execute(
+                self._sql(
+                    "INSERT OR REPLACE INTO prompt_snapshots "
+                    "(snapshot_id, run_id, prompt_hash, sections_json, token_count, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    snapshot_id,
+                    run_id,
+                    prompt_snapshot.prompt_hash,
+                    sections_json,
+                    prompt_snapshot.total_tokens,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _recover_orphaned_runs_sync(self) -> int:
-        conn = self._conn()
-        now = datetime.now(UTC).isoformat()
-        cursor = conn.execute(
-            "UPDATE supervisor_runs SET state = 'failed', "
-            "completed_at = ?, error = 'crash_recovery' "
-            "WHERE state NOT IN ('completed', 'failed', 'idle') "
-            "AND completed_at IS NULL",
-            (now,),
-        )
-        conn.commit()
-        return cursor.rowcount
+        conn = self._backend.get_conn()
+        try:
+            now = datetime.now(UTC).isoformat()
+            cursor = conn.execute(
+                self._sql(
+                    "UPDATE supervisor_runs SET state = 'failed', "
+                    "completed_at = ?, error = 'crash_recovery' "
+                    "WHERE state NOT IN ('completed', 'failed', 'idle') "
+                    "AND completed_at IS NULL"
+                ),
+                (now,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            self._backend.put_conn(conn)
 
     def close(self) -> None:
         """Close all connections."""
         self._lock.close()
         self._tool_store.close()
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        self._backend.close()

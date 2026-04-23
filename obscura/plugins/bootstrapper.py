@@ -36,20 +36,66 @@ logger = logging.getLogger(__name__)
 
 
 def _obscura_venv_python() -> str:
-    """Return the obscura venv Python, or sys.executable as fallback."""
+    """Return the obscura venv Python, or sys.executable as fallback.
+
+    Resolution order:
+    1. ``$OBSCURA_VENV_PYTHON`` env var — explicit override
+    2. ``$OBSCURA_HOME/venv/bin/python`` — global home venv
+    3. Project-local ``.venv/bin/python`` — walk up from this file's location
+       to find a ``pyproject.toml`` / ``.venv`` pair
+    4. ``sys.executable`` — whatever Python is running right now
+    """
+    # 1. Explicit override
+    explicit = os.environ.get("OBSCURA_VENV_PYTHON", "").strip()
+    if explicit and Path(explicit).is_file():
+        return explicit
+
+    # 2. Global OBSCURA_HOME venv
     venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
     venv_python = venv_dir / "bin" / "python"
     if venv_python.is_file():
         return str(venv_python)
+
+    # 3. Project-local .venv — walk up from this module's location
+    here = Path(__file__).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / ".venv" / "bin" / "python"
+        if candidate.is_file():
+            return str(candidate)
+        # Stop searching once we hit a pyproject.toml boundary with no .venv
+        if (ancestor / "pyproject.toml").is_file() and not candidate.is_file():
+            break
+
     return sys.executable
 
 
 def _obscura_venv_bin() -> Path:
-    """Return the bin directory of the obscura venv, or sys.prefix/bin."""
+    """Return the bin directory of the obscura venv, or sys.prefix/bin.
+
+    Resolution order mirrors ``_obscura_venv_python()``.
+    """
+    # 1. Explicit override
+    explicit = os.environ.get("OBSCURA_VENV_PYTHON", "").strip()
+    if explicit:
+        explicit_bin = Path(explicit).parent
+        if explicit_bin.is_dir():
+            return explicit_bin
+
+    # 2. Global OBSCURA_HOME venv
     venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
     venv_bin = venv_dir / "bin"
     if venv_bin.is_dir():
         return venv_bin
+
+    # 3. Project-local .venv
+    here = Path(__file__).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / ".venv" / "bin"
+        if candidate.is_dir():
+            return candidate
+        if (ancestor / "pyproject.toml").is_file():
+            break
+
     return Path(sys.prefix) / "bin"
 
 
