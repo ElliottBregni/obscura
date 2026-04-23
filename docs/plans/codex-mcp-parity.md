@@ -301,3 +301,42 @@ no config files, no manifest changes.
 - `browser_mcp_server.py` + unit tests: 2 hours
 - Native host wiring + integration tests: 1 hour
 - End-to-end manual verification + polish: 30-60 min
+
+## Known blocker — SDK ↔ CLI version mismatch
+
+Discovered while attempting the manual verification step. The
+`codex_app_server` SDK (git HEAD as of `a9f75e5c`, still reporting
+version `0.2.0`) issues `codex app-server --listen …` at client boot.
+The `@openai/codex` npm CLI rejected `--listen` through version
+`0.60.1`; the flag only exists on a newer CLI line (npm latest is
+`0.124.0` at the time of writing — a 60+ version gap). If the local
+codex binary is too old, the SDK handshake dies immediately with:
+
+```
+TransportClosedError: app-server closed stdout.
+  stderr_tail=error: unexpected argument '--listen' found
+```
+
+No obscura code path hits this — it's SDK ↔ CLI. Before running the
+manual verification steps in § Manual verification, confirm a
+compatible toolchain is installed:
+
+```bash
+# Compare versions
+codex --version                                       # need a CLI that accepts --listen
+uv run --project <repo> python -c "import codex_app_server; print(codex_app_server.__version__)"
+
+# If CLI is old and you're willing to upgrade globally:
+npm install -g @openai/codex@latest
+
+# If you prefer to hold the CLI back, pin a matching SDK commit in
+# pyproject.toml and regenerate uv.lock. There is no PyPI-shipped
+# bundled binary yet (the SDK references `openai-codex-cli-bin` but
+# that package isn't published).
+```
+
+**Suggested defensive hardening for v2:** `CodexBackend.start()`
+catches `TransportClosedError` containing `unexpected argument
+'--listen'` and re-raises a human-readable error pointing at this
+doc. Keeps the surface lesson visible to the next developer who
+reproduces this.
