@@ -2841,6 +2841,10 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 
 main.add_command(_kairos_group)
 
+from obscura.cli.secrets_commands import secrets_group as _secrets_group  # noqa: E402
+
+main.add_command(_secrets_group)
+
 
 # Backwards-compat aliases added by test harness
 def _emit_context_warnings(*args, **kwargs):
