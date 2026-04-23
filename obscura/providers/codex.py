@@ -16,7 +16,7 @@ import re
 import shutil
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
@@ -44,6 +44,99 @@ if TYPE_CHECKING:
 
 
 _SDK_MODULE = "codex_app_server"
+
+
+# ---------------------------------------------------------------------------
+# MCP server → Codex config override translation
+# ---------------------------------------------------------------------------
+#
+# The Codex CLI reads its MCP configuration from ``~/.codex/config.toml``
+# (``[mcp_servers.<name>]`` tables). The ``codex_app_server`` SDK's
+# ``AppServerConfig.config_overrides`` accepts an array of ``key.path=value``
+# strings equivalent to ``codex -c key.path=value`` on the CLI, where each
+# ``value`` is parsed as TOML (falling back to a raw string literal on
+# parse failure).
+#
+# Obscura carries MCP server configs as a list of dicts; this helper
+# translates that list into the override tuple Codex expects, so the
+# backend can forward MCP servers that the CLI would otherwise only see
+# from the on-disk config file. Used by :meth:`CodexBackend._build_sdk_client`.
+
+
+def _mcp_servers_to_config_overrides(
+    servers: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    """Map Obscura's ``mcp_servers`` list to Codex ``-c`` override strings.
+
+    Each server dict must carry a ``name``. Streamable-HTTP servers use
+    ``url`` (and optionally ``bearer_token_env_var``); stdio servers use
+    ``command`` (and optionally ``args``, ``env``). Entries missing a
+    usable name are skipped.
+    """
+    overrides: list[str] = []
+    for server in servers:
+        name = str(server.get("name") or "").strip()
+        if not name:
+            continue
+        key = _codex_config_key(name)
+
+        url = server.get("url")
+        if isinstance(url, str) and url:
+            overrides.append(f"mcp_servers.{key}.url={_toml_str(url)}")
+            bearer = server.get("bearer_token_env_var") or server.get(
+                "bearer_token_env",
+            )
+            if isinstance(bearer, str) and bearer:
+                overrides.append(
+                    f"mcp_servers.{key}.bearer_token_env_var={_toml_str(bearer)}",
+                )
+            continue
+
+        command = server.get("command")
+        if isinstance(command, str) and command:
+            overrides.append(f"mcp_servers.{key}.command={_toml_str(command)}")
+            raw_args: Any = server.get("args")
+            if isinstance(raw_args, list) and raw_args:
+                args: list[Any] = cast("list[Any]", raw_args)
+                overrides.append(
+                    f"mcp_servers.{key}.args={_toml_string_array(args)}",
+                )
+            raw_env: Any = server.get("env")
+            if isinstance(raw_env, dict) and raw_env:
+                env_map: dict[str, Any] = cast("dict[str, Any]", raw_env)
+                overrides.append(
+                    f"mcp_servers.{key}.env={_toml_inline_table(env_map)}",
+                )
+    return tuple(overrides)
+
+
+def _codex_config_key(name: str) -> str:
+    """Sanitize a server name for use as a TOML dotted-path key.
+
+    Dashes are legal in TOML bare keys but we normalize them to
+    underscores so a single stable form reaches Codex regardless of how
+    the caller wrote the name.
+    """
+    return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
+
+def _toml_str(value: str) -> str:
+    """Serialize a Python string as a TOML basic string literal."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _toml_string_array(items: list[Any]) -> str:
+    """Serialize a Python list as a TOML array of strings."""
+    return "[" + ", ".join(_toml_str(str(x)) for x in items) + "]"
+
+
+def _toml_inline_table(mapping: dict[str, Any]) -> str:
+    """Serialize a Python dict as a TOML inline table of string values."""
+    pairs = [
+        f"{_codex_config_key(str(k))} = {_toml_str(str(v))}" for k, v in mapping.items()
+    ]
+    return "{ " + ", ".join(pairs) + " }"
 
 
 class CodexBackend:
@@ -367,9 +460,7 @@ class CodexBackend:
         lines.append("")
         for spec in self._tools:
             desc = (spec.description or "").split("\n")[0][:120]
-            cap_tag = (
-                f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
-            )
+            cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
             lines.append(
                 f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}",
             )
@@ -816,9 +907,8 @@ class CodexBackend:
 
     async def _build_sdk_client(self, sdk_cls: type[Any]) -> Any:
         """Construct and initialize the SDK client."""
-        codex_path = (
-            os.environ.get("OBSCURA_CODEX_PATH", "").strip()
-            or shutil.which("codex")
+        codex_path = os.environ.get("OBSCURA_CODEX_PATH", "").strip() or shutil.which(
+            "codex"
         )
 
         # Pass OpenAI credentials through to the spawned codex process.
@@ -840,6 +930,10 @@ class CodexBackend:
                 cfg_kwargs["cwd"] = cwd
             if env:
                 cfg_kwargs["env"] = env
+            if self._mcp_servers:
+                overrides = _mcp_servers_to_config_overrides(self._mcp_servers)
+                if overrides:
+                    cfg_kwargs["config_overrides"] = overrides
             try:
                 config = config_cls(**cfg_kwargs)
                 client = sdk_cls(config=config)
