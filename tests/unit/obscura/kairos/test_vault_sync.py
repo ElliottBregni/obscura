@@ -213,3 +213,159 @@ def test_notify_functions_dont_crash() -> None:
     # These should not raise even with no vault.
     notify_goal_changed("nonexistent")
     notify_profile_changed()
+
+
+# ---------------------------------------------------------------------------
+# _retry helper tests
+# ---------------------------------------------------------------------------
+
+
+def test_retry_succeeds_on_first_attempt() -> None:
+    """_retry returns immediately when fn() succeeds on the first call."""
+    import obscura.kairos.vault_sync as vs_mod
+    from obscura.kairos.vault_sync import _retry
+
+    slept: list[float] = []
+    original_sleep = vs_mod._time.sleep
+    vs_mod._time.sleep = lambda d: slept.append(d)
+    try:
+        result = _retry(lambda: 99, label="first_attempt")
+        assert result == 99
+        assert slept == [], "No sleep should occur on first-attempt success"
+    finally:
+        vs_mod._time.sleep = original_sleep
+
+
+def test_retry_recovers_after_transient_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fn() failing twice then succeeding on the 3rd attempt returns the result."""
+    import obscura.kairos.vault_sync as vs_mod
+    from obscura.kairos.vault_sync import _retry
+
+    # Suppress actual sleeping.
+    monkeypatch.setattr(vs_mod._time, "sleep", lambda _: None)
+
+    call_log: list[int] = []
+
+    def flaky() -> str:
+        attempt = len(call_log) + 1
+        call_log.append(attempt)
+        if attempt < 3:  # noqa: PLR2004
+            raise OSError("transient filesystem error")
+        return "success"
+
+    result = _retry(flaky, attempts=3, base_delay=0.5, label="queue_snapshot")
+    assert result == "success"
+    assert len(call_log) == 3  # noqa: PLR2004  — exactly 3 calls
+
+
+def test_retry_logs_warning_and_reraises_after_all_attempts_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """After all attempts exhaust, a warning is logged and the exception is re-raised."""
+    import logging
+
+    import obscura.kairos.vault_sync as vs_mod
+    from obscura.kairos.vault_sync import _retry
+
+    monkeypatch.setattr(vs_mod._time, "sleep", lambda _: None)
+
+    def always_fails() -> None:
+        raise PermissionError("locked")
+
+    with caplog.at_level(logging.WARNING, logger="obscura.kairos.vault_sync"):
+        with pytest.raises(PermissionError, match="locked"):
+            _retry(always_fails, attempts=3, label="export_goals")
+
+    assert any(
+        "All 3 attempts failed" in rec.message and "export_goals" in rec.message
+        for rec in caplog.records
+    ), f"Expected retry warning not found in: {[r.message for r in caplog.records]}"
+
+
+def test_retry_debug_log_on_intermediate_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Each failed attempt before the last emits a debug-level retry log."""
+    import logging
+
+    import obscura.kairos.vault_sync as vs_mod
+    from obscura.kairos.vault_sync import _retry
+
+    monkeypatch.setattr(vs_mod._time, "sleep", lambda _: None)
+
+    attempt = 0
+
+    def two_fails_then_ok() -> str:
+        nonlocal attempt
+        attempt += 1
+        if attempt < 3:  # noqa: PLR2004
+            raise IOError("nfs stall")
+        return "done"
+
+    with caplog.at_level(logging.DEBUG, logger="obscura.kairos.vault_sync"):
+        result = _retry(two_fails_then_ok, attempts=3, label="export_queue_snapshot")
+
+    assert result == "done"
+    retry_logs = [r for r in caplog.records if "Retry" in r.message]
+    assert len(retry_logs) == 2, (  # noqa: PLR2004  — attempts 1 and 2 each log
+        f"Expected 2 retry debug messages, got: {[r.message for r in retry_logs]}"
+    )
+
+
+def test_export_queue_snapshot_retries_on_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A transient write failure is retried; the 3rd attempt writes successfully."""
+    import logging
+
+    import obscura.kairos.vault_sync as vs_mod
+    from obscura.kairos.vault_sync import VaultSync
+
+    # Suppress sleeping in _retry.
+    monkeypatch.setattr(vs_mod._time, "sleep", lambda _: None)
+
+    vault = tmp_path / "vault"
+    vs = VaultSync(vault_dir=vault)
+    vs.bootstrap()
+
+    snapshot_path = vault / "agent" / "tasks" / "queue-snapshot.md"
+
+    # Stub out TaskQueue so it doesn't need a real DB.
+    class FakeQueue:
+        def queue_depth(self) -> dict:
+            return {"50": 2}
+
+    monkeypatch.setattr("obscura.core.task_queue.TaskQueue", FakeQueue)
+
+    # Intercept Path.write_text on the snapshot path specifically:
+    # fail twice, succeed on the 3rd call.
+    write_calls: list[int] = []
+    original_write_text = Path.write_text
+
+    def patched_write_text(self: Path, content: str, **kwargs: object) -> None:
+        if self == snapshot_path:
+            write_calls.append(len(write_calls) + 1)
+            if len(write_calls) < 3:  # noqa: PLR2004
+                raise OSError("NFS write error (simulated)")
+        return original_write_text(self, content, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", patched_write_text)
+
+    with caplog.at_level(logging.DEBUG, logger="obscura.kairos.vault_sync"):
+        count = vs._export_all()
+
+    # The queue snapshot eventually wrote (1 file exported).
+    assert count >= 1
+    assert snapshot_path.exists(), "Snapshot file should exist after retry success"
+    assert len(write_calls) == 3  # noqa: PLR2004  — two failures + one success
+
+    retry_msgs = [r.message for r in caplog.records if "Retry" in r.message]
+    assert len(retry_msgs) >= 2, (  # noqa: PLR2004  — 2 retries before success
+        f"Expected retry log messages, got: {retry_msgs}"
+    )

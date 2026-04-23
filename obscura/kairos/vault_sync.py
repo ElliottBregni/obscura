@@ -33,7 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
+import time as _time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +42,25 @@ from typing import Any
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+def _retry(fn: Any, *, attempts: int = 3, base_delay: float = 0.5, label: str = "") -> Any:
+    """Call fn() up to `attempts` times with exponential backoff on exception."""
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            if i < attempts - 1:
+                delay = base_delay * (2 ** i)
+                logger.debug(
+                    "Retry %d/%d for %s after %.1fs: %s", i + 1, attempts, label, delay, exc
+                )
+                _time.sleep(delay)
+    logger.warning("All %d attempts failed for %s: %s", attempts, label, last_exc)
+    raise last_exc  # Re-raise so callers can decide to continue or abort
+
 
 _DEFAULT_VAULT_DIR = Path.home() / ".obscura" / "vault"
 
@@ -209,7 +228,10 @@ class VaultSync:
         for meta in changed_files:
             try:
                 if not effective_dry_run:
-                    self._ingest_file(meta)
+                    _retry(
+                        lambda m=meta: self._ingest_file(m),
+                        label=f"ingest:{meta.path.name}",
+                    )
                 report.ingested += 1
             except Exception as exc:
                 report.errors.append(f"ingest {meta.path}: {exc}")
@@ -365,10 +387,16 @@ class VaultSync:
     def _export_all(self) -> int:
         """Export Obscura state to the agent/ zone. Returns file count."""
         count = 0
-        count += self._export_goals()
-        count += self._export_queue_snapshot()
-        count += self._export_arbiter_verdicts()
-        count += self._export_profile_summary()
+        for fn, label in (
+            (self._export_goals, "export_goals"),
+            (self._export_queue_snapshot, "export_queue_snapshot"),
+            (self._export_arbiter_verdicts, "export_arbiter_verdicts"),
+            (self._export_profile_summary, "export_profile_summary"),
+        ):
+            try:
+                count += _retry(fn, label=label)
+            except Exception as exc:
+                logger.warning("Export step %s failed after retries: %s", label, exc)
         return count
 
     def _export_goals(self) -> int:
@@ -503,11 +531,14 @@ class VaultSync:
                 }.get(prio_str, f"p{prio_str}")
                 lines.append(f"- **{prio_label}**: {cnt} task(s)")
 
-            snapshot_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            return 1
+            content = "\n".join(lines) + "\n"
         except Exception:
             logger.debug("Queue snapshot export failed", exc_info=True)
             return 0
+
+        # Write outside the data-fetch try/except so transient I/O errors can be retried.
+        snapshot_path.write_text(content, encoding="utf-8")
+        return 1
 
     def _export_arbiter_verdicts(self) -> int:
         """Export recent Arbiter verdicts to vault/agent/arbiter/."""
@@ -523,6 +554,24 @@ class VaultSync:
             verdicts_path.parent.mkdir(parents=True, exist_ok=True)
 
             stats = store.stats()
+
+            # Compute score trend: avg of last 5 vs previous 5.
+            scores = [row.get("composite", 0.0) for row in recent]
+            last5 = scores[:5]
+            prev5 = scores[5:10]
+            avg_last5 = sum(last5) / len(last5) if last5 else 0.0
+            avg_prev5 = sum(prev5) / len(prev5) if prev5 else 0.0
+            if avg_prev5 and prev5:
+                trend_delta = avg_last5 - avg_prev5
+                if trend_delta > 0.02:
+                    trend_label = f"improving (+{trend_delta:.3f})"
+                elif trend_delta < -0.02:
+                    trend_label = f"declining ({trend_delta:.3f})"
+                else:
+                    trend_label = f"stable ({trend_delta:+.3f})"
+            else:
+                trend_label = "insufficient data"
+
             lines = [
                 "---",
                 "type: arbiter_verdicts",
@@ -533,6 +582,8 @@ class VaultSync:
                 "",
                 f"**{stats.get('total', 0)} total** evaluations "
                 f"(avg score: {stats.get('avg_composite_score', 0):.2f})",
+                f"Score trend (last 5 vs prev 5): **{trend_label}**"
+                f" — last5={avg_last5:.3f}, prev5={avg_prev5:.3f}",
                 "",
             ]
 
@@ -545,17 +596,23 @@ class VaultSync:
                 verdict = row.get("verdict", "?")
                 kind = row.get("kind", "?")
                 target = row.get("target_id", "?")
+                session = row.get("session_id", "")
                 score = row.get("composite", 0)
                 feedback = (row.get("feedback") or "")[:80]
+                session_suffix = f" session={session}" if session else ""
                 lines.append(
-                    f"- [{verdict}] {kind} `{target}` (score={score:.2f}) {feedback}"
+                    f"- [{verdict}] {kind} `{target}`{session_suffix}"
+                    f" (score={score:.2f}) {feedback}"
                 )
 
-            verdicts_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            return 1
+            content = "\n".join(lines) + "\n"
         except Exception:
             logger.debug("Arbiter verdict export failed", exc_info=True)
             return 0
+
+        # Write outside the data-fetch try/except so transient I/O errors can be retried.
+        verdicts_path.write_text(content, encoding="utf-8")
+        return 1
 
     def _export_profile_summary(self) -> int:
         """Export a profile summary to vault/agent/profile-summary.md."""
@@ -574,15 +631,17 @@ class VaultSync:
 
             out = self.vault_dir / "agent" / "profile-summary.md"
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(
+            content = (
                 f"---\ntype: profile_summary\n"
-                f"generated: {datetime.now(UTC).isoformat()}\n---\n\n{summary}\n",
-                encoding="utf-8",
+                f"generated: {datetime.now(UTC).isoformat()}\n---\n\n{summary}\n"
             )
-            return 1
         except Exception:
             logger.debug("Profile summary export failed", exc_info=True)
             return 0
+
+        # Write outside the data-fetch try/except so transient I/O errors can be retried.
+        out.write_text(content, encoding="utf-8")
+        return 1
 
     # ------------------------------------------------------------------
     # Notifications (called by tools on mutations)
