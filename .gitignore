@@ -84,8 +84,10 @@ docker-compose.staging.yml
 partity_matrix
 
 firebase-debug.log
-.sh 
+.sh
 docs/*
+# Exception: customer-facing compliance docs must ship in the repo.
+!docs/subprocessors.md
 .gitnexus
 
 # Pyright and pytest output
