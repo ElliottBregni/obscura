@@ -507,9 +507,7 @@ class TestWriteAgentShared:
                 "obscura.tools.system.resolve_obscura_home",
                 return_value=home,
             ):
-                result = json.loads(
-                    await write_agent_shared("notes.md", "hello\n")
-                )
+                result = json.loads(await write_agent_shared("notes.md", "hello\n"))
         assert result["ok"] is True
         assert result["merged"] is False
         assert result["conflict"] is False
@@ -535,7 +533,6 @@ class TestWriteAgentShared:
         assert result["merged"] is True
         assert result["conflict"] is False
         assert result["backed_up"] is True
-        # Merged file should contain all three lines.
         written = target.read_text(encoding="utf-8")
         assert "line3" in written
 
@@ -553,162 +550,7 @@ class TestWriteAgentShared:
                 return_value=home,
             ):
                 result = json.loads(
-                    await write_agent_shared(
-                        "plan.md", "header\nnew value\nfooter\n"
-                    )
-                )
-        assert result["ok"] is True
-        assert result["merged"] is True
-        assert result["conflict"] is True
-        written = target.read_text(encoding="utf-8")
-        assert "<<<<<<< agent" in written
-        assert ">>>>>>> previous" in written
-
-    @pytest.mark.asyncio
-    async def test_path_traversal_blocked(self) -> None:
-        """Paths that escape vault/shared/ must be rejected."""
-        with TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            (home / "vault" / "shared").mkdir(parents=True)
-            with patch(
-                "obscura.tools.system.resolve_obscura_home",
-                return_value=home,
-            ):
-                result = json.loads(
-                    await write_agent_shared("../../etc/passwd", "evil")
-                )
-        assert result["ok"] is False
-        assert result["error"] == "path_not_allowed"
-
-
-# ---------------------------------------------------------------------------
-# _merge_lines unit tests
-# ---------------------------------------------------------------------------
-
-
-class TestMergeLines:
-    """Unit tests for the _merge_lines helper used by write_agent_shared."""
-
-    def test_clean_merge_append(self) -> None:
-        """New content adds lines at the end — no conflict expected."""
-        old = ["line1\n", "line2\n"]
-        new = ["line1\n", "line2\n", "line3\n"]
-        merged, had_conflict = _merge_lines(old, new)
-        assert had_conflict is False
-        assert merged == ["line1\n", "line2\n", "line3\n"]
-
-    def test_clean_merge_prepend(self) -> None:
-        """New content adds a line at the start — no conflict expected."""
-        old = ["line2\n", "line3\n"]
-        new = ["line1\n", "line2\n", "line3\n"]
-        merged, had_conflict = _merge_lines(old, new)
-        assert had_conflict is False
-        assert merged == ["line1\n", "line2\n", "line3\n"]
-
-    def test_conflict_same_line_changed(self) -> None:
-        """Both versions changed the same line — conflict markers must appear."""
-        old = ["header\n", "old value\n", "footer\n"]
-        new = ["header\n", "new value\n", "footer\n"]
-        merged, had_conflict = _merge_lines(old, new)
-        assert had_conflict is True
-        text = "".join(merged)
-        assert "<<<<<<< agent" in text
-        assert "=======" in text
-        assert ">>>>>>> previous" in text
-        assert "new value" in text
-        assert "old value" in text
-
-    def test_delete_lines(self) -> None:
-        """New version removes lines that existed in old — no conflict."""
-        old = ["keep\n", "remove\n", "keep\n"]
-        new = ["keep\n", "keep\n"]
-        merged, had_conflict = _merge_lines(old, new)
-        assert had_conflict is False
-        assert merged == ["keep\n", "keep\n"]
-
-    def test_identical_content(self) -> None:
-        """Identical old and new — no conflict, output equals input."""
-        lines = ["a\n", "b\n", "c\n"]
-        merged, had_conflict = _merge_lines(lines, lines)
-        assert had_conflict is False
-        assert merged == lines
-
-    def test_empty_old(self) -> None:
-        """Old file was empty — all new lines are insertions, no conflict."""
-        old: list[str] = []
-        new = ["new\n"]
-        merged, had_conflict = _merge_lines(old, new)
-        assert had_conflict is False
-        assert merged == new
-
-
-# ---------------------------------------------------------------------------
-# write_agent_shared integration tests (uses a temp directory)
-# ---------------------------------------------------------------------------
-
-
-class TestWriteAgentShared:
-    """Integration tests for write_agent_shared with a patched obscura home."""
-
-    @pytest.mark.asyncio
-    async def test_new_file_no_merge(self) -> None:
-        """Writing to a path that doesn't exist yet — no merge, no conflict."""
-        with TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            (home / "vault" / "shared").mkdir(parents=True)
-            with patch(
-                "obscura.tools.system.resolve_obscura_home",
-                return_value=home,
-            ):
-                result = json.loads(
-                    await write_agent_shared("notes.md", "hello\n")
-                )
-        assert result["ok"] is True
-        assert result["merged"] is False
-        assert result["conflict"] is False
-        assert result["backed_up"] is False
-
-    @pytest.mark.asyncio
-    async def test_existing_file_clean_merge(self) -> None:
-        """Writing to an existing file where new content only appends lines."""
-        with TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            shared = home / "vault" / "shared"
-            shared.mkdir(parents=True)
-            target = shared / "notes.md"
-            target.write_text("line1\nline2\n", encoding="utf-8")
-            with patch(
-                "obscura.tools.system.resolve_obscura_home",
-                return_value=home,
-            ):
-                result = json.loads(
-                    await write_agent_shared("notes.md", "line1\nline2\nline3\n")
-                )
-        assert result["ok"] is True
-        assert result["merged"] is True
-        assert result["conflict"] is False
-        assert result["backed_up"] is True
-        # Merged file should contain all three lines.
-        written = target.read_text(encoding="utf-8")
-        assert "line3" in written
-
-    @pytest.mark.asyncio
-    async def test_existing_file_conflict(self) -> None:
-        """Writing where old and new both changed the same region emits markers."""
-        with TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            shared = home / "vault" / "shared"
-            shared.mkdir(parents=True)
-            target = shared / "plan.md"
-            target.write_text("header\nold value\nfooter\n", encoding="utf-8")
-            with patch(
-                "obscura.tools.system.resolve_obscura_home",
-                return_value=home,
-            ):
-                result = json.loads(
-                    await write_agent_shared(
-                        "plan.md", "header\nnew value\nfooter\n"
-                    )
+                    await write_agent_shared("plan.md", "header\nnew value\nfooter\n")
                 )
         assert result["ok"] is True
         assert result["merged"] is True
