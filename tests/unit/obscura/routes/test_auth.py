@@ -115,6 +115,59 @@ class TestResolveGithubToken:
             with patch("subprocess.run", return_value=mock_result):
                 assert resolve_github_token(None) == "gh-cmd-token"
 
+    def test_oauth_fallback_when_nothing_else_set(self) -> None:
+        """The Supabase-forwarded OAuth token is used as a last resort."""
+        with patch.dict(os.environ, {}, clear=True):
+            cli_result = MagicMock()
+            cli_result.returncode = 1
+            cli_result.stdout = ""
+            with patch("subprocess.run", return_value=cli_result):
+                assert (
+                    resolve_github_token(None, oauth_token="supabase-gh-tok")
+                    == "supabase-gh-tok"
+                )
+
+    def test_env_overrides_oauth_fallback(self) -> None:
+        """Env var wins over Supabase OAuth token — operators can force override."""
+        with patch.dict(os.environ, {"GH_TOKEN": "env-tok"}, clear=True):
+            cli_result = MagicMock()
+            cli_result.returncode = 1
+            cli_result.stdout = ""
+            with patch("subprocess.run", return_value=cli_result):
+                assert (
+                    resolve_github_token(None, oauth_token="supabase-gh-tok")
+                    == "env-tok"
+                )
+
+    def test_explicit_overrides_oauth_fallback(self) -> None:
+        """Explicit argument always wins, even over OAuth fallback."""
+        with patch.dict(os.environ, {}, clear=True):
+            assert (
+                resolve_github_token("explicit", oauth_token="supabase-gh-tok")
+                == "explicit"
+            )
+
+    def test_gh_cli_overrides_oauth_fallback(self) -> None:
+        """`gh auth token` wins over OAuth fallback in oauth_first mode."""
+        with patch.dict(os.environ, {}, clear=True):
+            cli_result = MagicMock()
+            cli_result.returncode = 0
+            cli_result.stdout = "gh-cli-tok\n"
+            with patch("subprocess.run", return_value=cli_result):
+                assert (
+                    resolve_github_token(None, oauth_token="supabase-gh-tok")
+                    == "gh-cli-tok"
+                )
+
+    def test_no_sources_raises_with_supabase_hint(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            cli_result = MagicMock()
+            cli_result.returncode = 1
+            cli_result.stdout = ""
+            with patch("subprocess.run", return_value=cli_result):
+                with pytest.raises(ValueError, match="Supabase GitHub sign-in"):
+                    resolve_github_token(None)
+
     def test_env_first_prefers_env_over_cmd(self) -> None:
         with patch.dict(
             os.environ,

@@ -32,6 +32,12 @@ class AuthConfig(BaseModel):
 
     # Copilot
     github_token: str | None = None
+    # Supabase-forwarded GitHub OAuth token (the "easy path" — used as a
+    # last-resort fallback after explicit github_token / env vars / gh CLI.
+    # Set from an ``X-GitHub-Token`` header supplied by the web UI or CLI
+    # after a Supabase GitHub sign-in. Env vars override this so operators
+    # can force a different token when needed.
+    oauth_github_token: str | None = None
     # Claude
     anthropic_api_key: str | None = None
     # Copilot BYOK (Bring Your Own Key)
@@ -95,8 +101,19 @@ def _is_env_first_mode() -> bool:
     return _auth_mode() == "env_first"
 
 
-def _resolve_github_token(explicit: str | None) -> str:
-    """Resolve a GitHub token from explicit value, gh CLI, or env vars."""
+def _resolve_github_token(
+    explicit: str | None,
+    oauth_token: str | None = None,
+) -> str:
+    """Resolve a GitHub token from explicit value, gh CLI, env vars, or OAuth.
+
+    Priority: ``explicit`` → env / ``gh`` CLI (per mode) → ``oauth_token``.
+
+    The OAuth fallback is the "easy path": it kicks in when nothing else is
+    configured. Environment variables intentionally override it so operators
+    can point Copilot at a different GitHub identity without logging out of
+    the web UI.
+    """
     if explicit:
         return explicit
 
@@ -167,10 +184,18 @@ def _resolve_github_token(explicit: str | None) -> str:
             if token:
                 return token
 
+    # Last resort: the Supabase-forwarded OAuth token. This is the "easy
+    # path" for users who signed in via the web UI or CLI — note that GitHub
+    # may still reject it against Copilot's internal API if the Supabase
+    # OAuth app isn't allowlisted. Callers handle that 403 separately.
+    if oauth_token:
+        return oauth_token
+
     msg = (
         "Copilot auth requires one of: "
         f"{', '.join(_COPILOT_ENV_VARS)} env var, "
-        "OBSCURA_GITHUB_TOKEN_CMD, or `gh auth login`."
+        "OBSCURA_GITHUB_TOKEN_CMD, `gh auth login`, "
+        "or a Supabase GitHub sign-in (web UI or `obscura-auth login`)."
     )
     raise ValueError(
         msg,
@@ -412,8 +437,11 @@ def _resolve_moonshot_base_url(explicit: str | None) -> str:
 
 
 # Public helpers for testing/observability
-def resolve_github_token(explicit: str | None) -> str:
-    return _resolve_github_token(explicit)
+def resolve_github_token(
+    explicit: str | None,
+    oauth_token: str | None = None,
+) -> str:
+    return _resolve_github_token(explicit, oauth_token=oauth_token)
 
 
 def resolve_anthropic_key(explicit: str | None) -> str:
@@ -530,7 +558,10 @@ def resolve_auth(
         # BYOK mode skips GitHub auth entirely
         if config.byok_provider is not None:
             return config
-        token = _resolve_github_token(config.github_token)
+        token = _resolve_github_token(
+            config.github_token,
+            oauth_token=config.oauth_github_token,
+        )
         return AuthConfig(
             github_token=token,
             byok_provider=config.byok_provider,

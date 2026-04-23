@@ -1,23 +1,37 @@
 # =============================================================================
-# Obscura SDK — Multi-stage Docker build
+# Obscura SDK — Multi-stage Docker build (uv workspace aware)
 # =============================================================================
 
 # Stage 1: Builder — install deps with uv, compile the venv
 FROM python:3.13.5-slim AS builder
 
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never
+
 WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
+# --- Workspace manifests ---------------------------------------------------
+# pyproject.toml declares `packages/vault-gen` as a uv workspace member, so
+# every member's pyproject.toml must be present before `uv sync` can resolve
+# the lockfile. Copy manifests only (not source) so dep-install stays cached
+# when only source changes.
 COPY pyproject.toml uv.lock ./
+COPY packages/vault-gen/pyproject.toml packages/vault-gen/pyproject.toml
+COPY packages/vault-gen/README.md packages/vault-gen/README.md
 
-# Install only third-party dependencies (not the project itself).
-# This layer is cached as long as pyproject.toml and uv.lock are unchanged.
-RUN uv sync --frozen --no-dev --no-install-project --extra server --extra telemetry
+# Install third-party deps only (no workspace source yet, no project install).
+RUN uv sync --frozen --no-dev --no-install-workspace \
+        --extra server --extra telemetry
 
-# Now copy source and install the project (fast — deps already cached).
+# --- Workspace source ------------------------------------------------------
 COPY obscura/ obscura/
 COPY scripts/ scripts/
+COPY packages/vault-gen/src packages/vault-gen/src
+
+# Install the project + workspace members (fast — deps already cached).
 RUN uv sync --frozen --no-dev --extra server --extra telemetry
 
 # Stage 2: Runtime — minimal image with only the venv + app code
@@ -41,6 +55,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/obscura obscura/
 COPY --from=builder /app/scripts scripts/
+COPY --from=builder /app/packages packages/
 
 # Some packaged provider binaries lose executable mode in copied venv layers.
 # Ensure Copilot CLI shim is runnable at runtime.
@@ -51,15 +66,12 @@ ENV PYTHONUNBUFFERED=1
 # Pin OBSCURA_HOME so paths.py resolves the .obscura directory correctly
 # inside containers. The docker-compose volume bind maps
 # ${HOME}/.obscura -> /home/obscura/.obscura, matching this path exactly.
-# Without this, paths.py falls back to the obscura user's $HOME which
-# resolves correctly at runtime but is fragile if the image is used with
-# a different UID or non-standard home directory.
 ENV OBSCURA_HOME=/home/obscura/.obscura
 
 USER obscura
-EXPOSE 8080
+EXPOSE 8080 50051
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"
 
 ENTRYPOINT ["python", "-m", "uvicorn", "obscura.server:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]

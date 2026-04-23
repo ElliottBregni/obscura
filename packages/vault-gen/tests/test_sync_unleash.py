@@ -5,7 +5,6 @@ HTTP calls are intercepted by respx so no real Unleash instance is needed.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -22,7 +21,6 @@ from vault_gen.sync.adapters.unleash import (
     _read_flags,
     _require_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

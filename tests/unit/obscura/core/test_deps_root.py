@@ -64,6 +64,7 @@ class TestClientFactory:
                 model_alias="smart",
                 system_prompt="You are helpful.",
                 user=_make_user(),
+                auth=None,  # ClientFactory now always threads auth= through
             )
 
 

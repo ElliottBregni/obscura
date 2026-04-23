@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import tomllib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -64,7 +64,7 @@ class SyncState(BaseModel, extra="ignore"):
     def record_push(self, adapter_name: str, n_changes: int) -> None:
         state = self.adapters.setdefault(adapter_name, AdapterState())
         state = AdapterState(
-            last_push=datetime.now(timezone.utc).isoformat(),
+            last_push=datetime.now(UTC).isoformat(),
             last_push_changes=n_changes,
             last_pull=state.last_pull,
             last_pull_changes=state.last_pull_changes,
@@ -74,7 +74,7 @@ class SyncState(BaseModel, extra="ignore"):
     def record_pull(self, adapter_name: str, n_changes: int) -> None:
         state = self.adapters.setdefault(adapter_name, AdapterState())
         state = AdapterState(
-            last_pull=datetime.now(timezone.utc).isoformat(),
+            last_pull=datetime.now(UTC).isoformat(),
             last_pull_changes=n_changes,
             last_push=state.last_push,
             last_push_changes=state.last_push_changes,

@@ -25,7 +25,9 @@ dependencies = [
     "prompt-toolkit>=3.0.50",
     "toons>=0.5.0",
     "fastmcp>=3.1.0",
-    "tomli-w==1.2.0"
+    "tomli-w==1.2.0",
+    "pyjwt[crypto]>=2.8.0",
+    "keyring>=25.0"
 ]
 
 [project.optional-dependencies]
@@ -87,6 +89,7 @@ providers = [
 [project.scripts]
 obscura = "obscura.cli:main"
 obscura-mcp = "obscura.mcp_server.__main__:main"
+obscura-auth = "obscura.cli.auth_commands:auth_group"
 
 [dependency-groups]
 dev = [

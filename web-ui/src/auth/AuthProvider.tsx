@@ -2,6 +2,7 @@ import { type ReactNode, useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useSystemStore } from '@/stores/systemStore';
 import { API_URL } from '@/lib/constants';
+import { supabase } from '@/lib/supabase';
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -10,13 +11,64 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const token = useAuthStore((s) => s.token);
   const apiKey = useAuthStore((s) => s.apiKey);
+  const setToken = useAuthStore((s) => s.setToken);
   const setApiKey = useAuthStore((s) => s.setApiKey);
+  const setGithubToken = useAuthStore((s) => s.setGithubToken);
+  const logout = useAuthStore((s) => s.logout);
   const setAuthEnabled = useSystemStore((s) => s.setAuthEnabled);
   const setServerReachable = useSystemStore((s) => s.setServerReachable);
   const devApiKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
-  const forceDevApiKey = import.meta.env.VITE_FORCE_DEV_API_KEY === 'true';
+  // Security: refuse the dev-key bypass in production builds even if
+  // VITE_FORCE_DEV_API_KEY=true accidentally leaks into the build env.
+  const isProdBuild = import.meta.env.PROD === true;
+  const forceDevApiKey =
+    !isProdBuild && import.meta.env.VITE_FORCE_DEV_API_KEY === 'true';
+  if (isProdBuild && import.meta.env.VITE_FORCE_DEV_API_KEY === 'true') {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[Obscura] VITE_FORCE_DEV_API_KEY is set in a production build — ignored. ' +
+        'Remove it from your build env.',
+    );
+  }
 
-  // Check server health on mount to determine if auth is enabled
+  // ── Supabase session → authStore ──────────────────────────────────────
+  useEffect(() => {
+    if (!supabase) return;
+
+    let cancelled = false;
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session?.access_token) {
+        setToken(data.session.access_token);
+      }
+      // `provider_token` only populated on GitHub (and other third-party
+      // OAuth) sign-ins. Used as the "easy path" Copilot fallback.
+      if (data.session?.provider_token) {
+        setGithubToken(data.session.provider_token);
+      }
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        if (!useAuthStore.getState().apiKey) {
+          logout();
+        }
+        return;
+      }
+      setToken(session.access_token);
+      if (session.provider_token) {
+        setGithubToken(session.provider_token);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [setToken, setGithubToken, logout]);
+
+  // ── Server health probe ───────────────────────────────────────────────
   useEffect(() => {
     async function checkHealth() {
       if (forceDevApiKey && devApiKey && apiKey !== devApiKey) {
@@ -33,13 +85,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       try {
         const resp = await fetch(healthEndpoint, { headers });
-        if (resp.ok) {
-          setAuthEnabled(true);
-          setServerReachable(true);
-          if (!token && !apiKey && devApiKey) {
-            setApiKey(devApiKey);
-          }
-        } else if (resp.status === 401) {
+        if (resp.ok || resp.status === 401) {
           setAuthEnabled(true);
           setServerReachable(true);
           if (!token && !apiKey && devApiKey) {

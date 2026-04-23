@@ -869,18 +869,17 @@ async def _handle_diag(msg: dict[str, Any]) -> None:
 
     # Vector memory status
     try:
-        from obscura.vector_memory.store import get_store  # type: ignore[import-not-found]
+        from obscura.vector_memory import VectorMemoryStore
 
-        vs = get_store()  # type: ignore[reportUnknownVariableType]
-        diag["vector_memory"] = {"backend": str(type(vs).__name__), "status": "ok"}  # type: ignore[reportUnknownArgumentType]
+        diag["vector_memory"] = {"backend": VectorMemoryStore.__name__, "status": "ok"}
     except Exception as exc:
         diag["vector_memory"] = {"status": "error", "error": str(exc)}
 
     # Key-value memory status
     try:
-        from obscura.memory.store import get_store as get_kv_store  # type: ignore[import-not-found]
+        from obscura.memory import GlobalMemoryStore
 
-        get_kv_store()
+        GlobalMemoryStore.get_instance()
         diag["kv_memory"] = {"status": "ok"}
     except Exception as exc:
         diag["kv_memory"] = {"status": "error", "error": str(exc)}

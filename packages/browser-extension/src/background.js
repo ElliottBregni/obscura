@@ -13,6 +13,9 @@ const panelPorts = new Set();
 // Per-Chrome-tab state tracking
 const tabPanelState = new Map(); // chromeTabId -> { sessionId, lastLabel }
 
+// Handshake keys: handshakeId -> CryptoKey (HMAC key)
+const handshakeKeys = new Map();
+
 // Notify panels when the user switches Chrome tabs so each panel can swap
 // its conversation to match the newly-active tab.
 chrome.tabs.onActivated.addListener(({ tabId }) => {
@@ -141,7 +144,7 @@ chrome.sidePanel
 
 // First-run onboarding: open the setup page when the extension is installed
 // or updated across a breaking host-protocol change. Also verify the native
-// host is reachable  if not, open onboarding automatically.
+// host is reachable — if not, open onboarding automatically.
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === "install") {
     const healthy = await healthCheck(5000);
@@ -153,17 +156,17 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-// Service worker startup health check  verify native host connectivity.
+// Service worker startup health check — verify native host connectivity.
 (async () => {
   try {
     const healthy = await healthCheck(5000);
     if (!healthy) {
-      // Native host not responding  panels will show the disconnect banner.
+      // Native host not responding — panels will show the disconnect banner.
       // No action needed here beyond logging for debugging.
       console.warn("[obscura] native host health check failed on startup");
     }
   } catch {
-    // Swallow  best-effort check.
+    // Swallow — best-effort check.
   }
 })();
 
@@ -171,7 +174,58 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // Handle messages forwarded from the content script (page bridge). Keep a
 // small whitelist of allowed commands and implement batching for convenience.
 
-const PAGE_BRIDGE_WHITELIST = new Set(['ping', 'getToken', 'batch']);
+const PAGE_BRIDGE_WHITELIST = new Set(['ping', 'getToken', 'batch', 'stream', 'handshake-init']);
+
+// helpers for base64 conversion
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function base64ToArrayBuffer(b64) {
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function generateECDHKeyPair() {
+  return crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+}
+
+async function exportRawPublicKey(key) {
+  const raw = await crypto.subtle.exportKey('raw', key);
+  return arrayBufferToBase64(raw);
+}
+
+async function importRawPublicKey(b64) {
+  const buf = base64ToArrayBuffer(b64);
+  return crypto.subtle.importKey('raw', buf, { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+}
+
+async function deriveHmacKey(ownPrivateKey, otherPublicKey) {
+  // derive 256 bits and use as HMAC-SHA256 key
+  const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: otherPublicKey }, ownPrivateKey, 256);
+  return crypto.subtle.importKey('raw', bits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+async function verifyHmacForMessage(handshakeId, message, signatureB64) {
+  const key = handshakeKeys.get(handshakeId);
+  if (!key) return false;
+  const sigBuf = base64ToArrayBuffer(signatureB64);
+  try {
+    const ok = await crypto.subtle.verify('HMAC', key, sigBuf, new TextEncoder().encode(message));
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function canonicalizeMsgForHmac(msg) {
+  return `${msg.id}|${msg.cmd}|${JSON.stringify(msg.payload || {})}`;
+}
 
 async function handleBridgeCommand(cmd, payload, sender) {
   if (cmd === 'ping') return { result: 'pong' };
@@ -198,7 +252,39 @@ async function handleBridgeCommand(cmd, payload, sender) {
     }
     return { result: results };
   }
+
+  if (cmd === 'stream') {
+    // Start a demo stream of incremental messages to the originating tab.
+    // payload can include {intervalMs, chunks}
+    const tabId = sender?.tab?.id;
+    if (!tabId) return { error: 'no-originating-tab' };
+    const intervalMs = (payload && payload.intervalMs) || 500;
+    const chunks = (payload && payload.chunks) || ["one","two","three","done"];
+    startDemoStream(tabId, payload && payload.id ? payload.id : crypto.randomUUID(), chunks, intervalMs);
+    return { result: 'stream-started' };
+  }
+
   return { error: 'unsupported' };
+}
+
+// Start a demo stream that sends incremental messages into the content script
+// which will forward them into the page. This is a simple example; real
+// streams should support cancellation and backpressure.
+function startDemoStream(tabId, id, chunks, intervalMs) {
+  let i = 0;
+  const timer = setInterval(() => {
+    const chunk = chunks[i] ?? null;
+    const done = i >= chunks.length;
+    try {
+      chrome.tabs.sendMessage(tabId, { from: 'background-stream', id, chunk, done });
+    } catch (e) {
+      // ignore send errors
+    }
+    if (done) {
+      clearInterval(timer);
+    }
+    i++;
+  }, intervalMs);
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -211,7 +297,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 
-  // Process command
+  // Special-case: handshake-init -> perform ECDH key exchange and return
+  // the background public key. Expect payload: { pubkey: <base64> }
+  if (msg.cmd === 'handshake-init') {
+    (async () => {
+      try {
+        if (!msg.payload || typeof msg.payload.pubkey !== 'string') {
+          sendResponse({ error: 'missing-pubkey' });
+          return;
+        }
+        const clientPubB64 = msg.payload.pubkey;
+        // generate our ECDH keypair
+        const pair = await generateECDHKeyPair();
+        // import client's public key
+        const clientPub = await importRawPublicKey(clientPubB64);
+        // derive HMAC key and store it by handshake id (msg.handshake expected)
+        const hmacKey = await deriveHmacKey(pair.privateKey, clientPub);
+        if (msg.handshake) {
+          handshakeKeys.set(msg.handshake, hmacKey);
+        }
+        const ourPubB64 = await exportRawPublicKey(pair.publicKey);
+        sendResponse({ result: { backgroundPubKey: ourPubB64 } });
+      } catch (err) {
+        sendResponse({ error: String(err) });
+      }
+    })();
+    return true; // async
+  }
+
+  // For non-handshake messages (except ping), require a valid signature
+  if (msg.cmd !== 'ping') {
+    if (!msg.handshake || !msg.signature) {
+      sendResponse({ error: 'missing-signature-or-handshake' });
+      return;
+    }
+    const canon = canonicalizeMsgForHmac(msg);
+    (async () => {
+      const ok = await verifyHmacForMessage(msg.handshake, canon, msg.signature).catch(() => false);
+      if (!ok) { sendResponse({ error: 'invalid-signature' }); return; }
+      try {
+        const out = await handleBridgeCommand(msg.cmd, msg.payload, sender);
+        sendResponse(out);
+      } catch (err) { sendResponse({ error: String(err) }); }
+    })();
+    return true; // async
+  }
+
+  // Process command (ping)
   (async () => {
     try {
       const out = await handleBridgeCommand(msg.cmd, msg.payload, sender);

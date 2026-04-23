@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from obscura.auth.rbac import require_role
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.types import Backend, SessionRef
-from obscura.deps import ClientFactory, audit
+from obscura.deps import ClientFactory, audit, get_oauth_github_token
 from obscura.routes.session_ingest import (
     preflight_system_session_ingest,
     sync_and_ingest_system_sessions,
@@ -44,10 +44,15 @@ async def create_session(
     body: SessionCreateRequest,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))],
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
 ) -> SessionResponse:
     """Create a new session."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(body.backend, user=user)
+    client = await factory.create(
+        body.backend,
+        user=user,
+        oauth_github_token=oauth_gh_token,
+    )
     try:
         ref = await client.create_session()
         audit(
@@ -206,10 +211,15 @@ async def delete_session(
     request: Request,
     backend: str = "copilot",
     user: AuthenticatedUser = Depends(require_role("sessions:manage")),
+    oauth_gh_token: str | None = Depends(get_oauth_github_token),
 ) -> JSONResponse:
     """Delete a session by ID."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(backend, user=user)
+    client = await factory.create(
+        backend,
+        user=user,
+        oauth_github_token=oauth_gh_token,
+    )
     try:
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
         await client.delete_session(ref)

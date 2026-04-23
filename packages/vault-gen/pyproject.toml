@@ -31,7 +31,7 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -44,6 +44,16 @@ ignore = [
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 include = ["src", "tests"]
+# Resolve third-party deps (pydantic, httpx, structlog, click) from the
+# workspace root venv so editor-side pyright matches the CLI run.
+venvPath = "../.."
+venv = ".venv"
+extraPaths = ["src"]
+# Tests intentionally probe private helpers and use underspecified dicts.
+# Relax the noisiest rules there rather than littering test code with ignores.
+executionEnvironments = [
+    { root = "tests", reportPrivateUsage = "none", reportMissingTypeArgument = "none", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownVariableType = "none", reportUnknownArgumentType = "none", reportUnknownMemberType = "none" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

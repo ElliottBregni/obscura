@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from vault_gen.access.repo import RepoAccess
 
@@ -25,7 +26,7 @@ class SyncResult:
     changes: tuple[Change, ...] = ()
     error: str | None = None
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
 
@@ -48,7 +49,7 @@ class SyncAdapter(ABC):
         """Unique adapter identifier. Must match the ``name`` field in sync.toml."""
 
     @abstractmethod
-    async def push(self, repo: RepoAccess, config: dict[str, object]) -> SyncResult:
+    async def push(self, repo: RepoAccess, config: Mapping[str, object]) -> SyncResult:
         """Push repo state to the external backend.
 
         Should be idempotent: running push twice in a row with no intervening
@@ -56,7 +57,7 @@ class SyncAdapter(ABC):
         """
 
     @abstractmethod
-    async def pull(self, repo: RepoAccess, config: dict[str, object]) -> SyncResult:
+    async def pull(self, repo: RepoAccess, config: Mapping[str, object]) -> SyncResult:
         """Pull current state from the external backend into the repo.
 
         Writes files and auto-commits via ``repo.write(..., commit_msg=...)``.
@@ -64,7 +65,7 @@ class SyncAdapter(ABC):
 
     @abstractmethod
     async def diff(
-        self, repo: RepoAccess, config: dict[str, object]
+        self, repo: RepoAccess, config: Mapping[str, object]
     ) -> list[Change]:
         """Return what would change on push without applying anything.
 

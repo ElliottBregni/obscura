@@ -15,7 +15,7 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _ACCESS_DIR = Path(__file__).parent / "access"
 
 
-class RepoType(str, enum.Enum):
+class RepoType(enum.StrEnum):
     CONFIG = "config"
     VAULT = "vault"
 

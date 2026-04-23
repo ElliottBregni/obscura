@@ -272,14 +272,14 @@ class RepoAccess:
     def _load_meta(self) -> dict[str, object]:
         meta_file = self.root / ".vault-gen" / "meta.toml"
         if meta_file.exists():
-            return tomllib.loads(meta_file.read_text())  # type: ignore[return-value]
+            return tomllib.loads(meta_file.read_text())
         return {}
 
     def _repo_type(self) -> str | None:
-        vault_section = self._meta.get("vault", {})
+        vault_section: object = self._meta.get("vault", {})
         if isinstance(vault_section, dict):
-            val = vault_section.get("type")
-            return str(val) if val is not None else None
+            val = vault_section.get("type")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            return str(val) if val is not None else None  # pyright: ignore[reportUnknownArgumentType]
         return None
 
     def _check_write_permission(self) -> None:
@@ -287,7 +287,8 @@ class RepoAccess:
             raise PermissionError(
                 f"Writes to config repos require elevated privileges.\n"
                 f"Use RepoAccess({str(self.root)!r}, privilege='admin') to enable writes.\n"
-                f"Config repos are fleet configuration — accidental writes can break running agents."
+                f"Config repos are fleet configuration — "
+                f"accidental writes can break running agents."
             )
 
     def _parse_log(self, output: str) -> list[dict[str, str]]:

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from vault_gen.sync.base import Change, SyncAdapter, SyncResult
-
 
 # ---------------------------------------------------------------------------
 # Change
@@ -23,7 +24,7 @@ class TestChange:
 
     def test_frozen(self) -> None:
         c = Change(path="p", action="add")
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             c.path = "other"  # type: ignore[misc]
 
     def test_equality(self) -> None:
@@ -68,7 +69,7 @@ class TestSyncResult:
 
     def test_frozen(self) -> None:
         r = SyncResult(success=True, adapter="x")
-        with pytest.raises(Exception):
+        with pytest.raises(FrozenInstanceError):
             r.success = False  # type: ignore[misc]
 
     def test_two_results_have_different_timestamps(self) -> None:

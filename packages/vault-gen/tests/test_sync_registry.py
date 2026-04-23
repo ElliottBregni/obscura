@@ -7,7 +7,6 @@ import pytest
 from vault_gen.sync.base import Change, SyncAdapter, SyncResult
 from vault_gen.sync.registry import AdapterRegistry, get_adapter, list_adapters
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

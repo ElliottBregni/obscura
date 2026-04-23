@@ -17,7 +17,7 @@ from obscura.core.types import (
     SessionRef,
     UnifiedRequest,
 )
-from obscura.deps import ClientFactory, audit
+from obscura.deps import ClientFactory, audit, get_oauth_github_token
 from obscura.routes.session_sync import sync_session_turn
 from obscura.schemas import SendRequest, SendResponse, StreamRequest
 
@@ -34,6 +34,7 @@ async def send(
     body: SendRequest,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
 ) -> SendResponse:
     """Send a prompt and receive the full response."""
     factory: ClientFactory = request.app.state.client_factory
@@ -43,6 +44,7 @@ async def send(
         model=body.model,
         model_alias=body.model_alias,
         system_prompt=body.system_prompt,
+        oauth_github_token=oauth_gh_token,
     )
     try:
         if body.session_id:
@@ -128,6 +130,7 @@ async def stream(
     body: StreamRequest,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
 ) -> EventSourceResponse:
     """Send a prompt and receive an SSE event stream."""
 
@@ -139,6 +142,7 @@ async def stream(
             model=body.model,
             model_alias=body.model_alias,
             system_prompt=body.system_prompt,
+            oauth_github_token=oauth_gh_token,
         )
         response_text_parts: list[str] = []
         try:

@@ -75,8 +75,13 @@ class TestGenerateConfig:
     def test_access_layer_is_importable(self, tmp_path: Path) -> None:
         config = RepoConfig(name="test-config", repo_type=RepoType.CONFIG, destination=tmp_path)
         repo_path = generate_repo(config)
+        probe = (
+            "import sys; sys.path.insert(0, '.'); "
+            "from _access import RepoAccess; "
+            "r = RepoAccess('.'); print('ok')"
+        )
         result = subprocess.run(
-            ["python3", "-c", "import sys; sys.path.insert(0, '.'); from _access import RepoAccess; r = RepoAccess('.'); print('ok')"],
+            ["python3", "-c", probe],
             cwd=repo_path,
             capture_output=True,
             text=True,
@@ -210,8 +215,6 @@ class TestGenerateErrors:
     def test_cleans_up_on_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Partial directory should be removed if generation fails mid-way."""
         import vault_gen.generator as gen_mod
-
-        original = gen_mod._git_init
 
         def failing_git_init(*args: object, **kwargs: object) -> None:
             raise RuntimeError("simulated git failure")

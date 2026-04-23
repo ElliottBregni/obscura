@@ -232,6 +232,12 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     app.state.rate_limiter = rate_limiter
     app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 
+    # Security headers — always on (opt-out via env). Added before auth so
+    # even 401/429 responses carry CSP/HSTS/COOP/etc.
+    from obscura.auth.security_headers import SecurityHeadersMiddleware
+
+    app.add_middleware(SecurityHeadersMiddleware)
+
     if config.auth_enabled:
         app.add_middleware(APIKeyAuthMiddleware)
     else:

@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
+from typing import override
 
 import httpx
 import structlog
@@ -73,10 +74,12 @@ class UnleashAdapter(SyncAdapter):
     ADAPTER_NAME = "unleash"
 
     @property
+    @override
     def name(self) -> str:
         return self.ADAPTER_NAME
 
-    async def push(self, repo: RepoAccess, config: dict[str, object]) -> SyncResult:
+    @override
+    async def push(self, repo: RepoAccess, config: Mapping[str, object]) -> SyncResult:
         """Push repo flag state to Unleash. Creates/updates/archives as needed."""
         cfg = UnleashAdapterConfig.model_validate(config)
         token = _require_token()
@@ -109,7 +112,10 @@ class UnleashAdapter(SyncAdapter):
                             success=False,
                             adapter=self.name,
                             changes=tuple(applied),
-                            error=f"Failed to create '{flag_name}': HTTP {exc.response.status_code}: {exc.response.text}",
+                            error=(
+                                f"Failed to create '{flag_name}': "
+                                f"HTTP {exc.response.status_code}: {exc.response.text}"
+                            ),
                         )
                 elif _flag_differs(spec, remote_flags[flag_name]):
                     try:
@@ -122,7 +128,10 @@ class UnleashAdapter(SyncAdapter):
                             success=False,
                             adapter=self.name,
                             changes=tuple(applied),
-                            error=f"Failed to update '{flag_name}': HTTP {exc.response.status_code}: {exc.response.text}",
+                            error=(
+                                f"Failed to update '{flag_name}': "
+                                f"HTTP {exc.response.status_code}: {exc.response.text}"
+                            ),
                         )
 
             # Archive flags present in Unleash but not in repo.
@@ -143,12 +152,16 @@ class UnleashAdapter(SyncAdapter):
                             success=False,
                             adapter=self.name,
                             changes=tuple(applied),
-                            error=f"Failed to archive '{flag_name}': HTTP {exc.response.status_code}: {exc.response.text}",
+                            error=(
+                                f"Failed to archive '{flag_name}': "
+                                f"HTTP {exc.response.status_code}: {exc.response.text}"
+                            ),
                         )
 
         return SyncResult(success=True, adapter=self.name, changes=tuple(applied))
 
-    async def pull(self, repo: RepoAccess, config: dict[str, object]) -> SyncResult:
+    @override
+    async def pull(self, repo: RepoAccess, config: Mapping[str, object]) -> SyncResult:
         """Pull Unleash flags into the repo as TOML files."""
         cfg = UnleashAdapterConfig.model_validate(config)
         token = _require_token()
@@ -182,11 +195,12 @@ class UnleashAdapter(SyncAdapter):
                 new_content,
                 commit_msg=f"sync(unleash): {action} flag '{flag.name}'",
             )
-            applied.append(Change(path=file_path, action=action, detail=f"from Unleash"))
+            applied.append(Change(path=file_path, action=action, detail="from Unleash"))
 
         return SyncResult(success=True, adapter=self.name, changes=tuple(applied))
 
-    async def diff(self, repo: RepoAccess, config: dict[str, object]) -> list[Change]:
+    @override
+    async def diff(self, repo: RepoAccess, config: Mapping[str, object]) -> list[Change]:
         """Return what would change on push without applying anything."""
         cfg = UnleashAdapterConfig.model_validate(config)
         token = _require_token()
@@ -243,7 +257,7 @@ def _require_token() -> str:
 
 
 @asynccontextmanager
-async def _client(base_url: str, token: str) -> AsyncGenerator[httpx.AsyncClient, None]:
+async def _client(base_url: str, token: str) -> AsyncGenerator[httpx.AsyncClient]:
     """Yield a configured httpx.AsyncClient for the Unleash admin API."""
     async with httpx.AsyncClient(
         base_url=base_url.rstrip("/"),
