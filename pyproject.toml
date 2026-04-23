@@ -83,6 +83,15 @@ providers = [
     "datadog-api-client>=2.0.0",
     "anthropic>=0.40.0",
 ]
+# Encrypts persistent SQLite stores (supervisor event log, memory KV,
+# vector memory) with SQLCipher. Optional because the binary wheel is
+# platform-specific and not every customer wants the install cost; the
+# runtime degrades gracefully to unencrypted sqlite3 with a loud warning
+# when this extra is absent. See obscura/core/sqlite_encryption.py.
+encrypted = [
+    "sqlcipher3-binary>=0.5.4",
+    "keyring>=24.0",
+]
 
 [project.scripts]
 obscura = "obscura.cli:main"
