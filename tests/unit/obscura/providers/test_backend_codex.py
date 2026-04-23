@@ -1,4 +1,5 @@
 """Tests for obscura.providers.codex.CodexBackend."""
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false
 
 from __future__ import annotations
 
@@ -65,8 +66,6 @@ class TestCodexBackend:
             await backend.start()
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    @pytest.mark.asyncio
     async def test_sessions(self) -> None:
         backend = CodexBackend(_auth())
         backend._import_sdk_class = lambda: (_FakeCodex, "json")  # type: ignore[method-assign]
@@ -77,3 +76,146 @@ class TestCodexBackend:
         assert any(r.session_id == ref.session_id for r in refs)
         await backend.resume_session(ref)
         await backend.delete_session(ref)
+
+
+class TestMcpServerConfigOverrides:
+    """Unit tests for the helper that maps Obscura's mcp_servers format
+    onto Codex's ``-c mcp_servers.<name>.<field>=<toml>`` overrides."""
+
+    def test_empty_list_returns_empty(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        assert _mcp_servers_to_config_overrides([]) == ()
+
+    def test_http_server_emits_url_override(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        overrides = _mcp_servers_to_config_overrides(
+            [{"name": "obscura-browser", "url": "http://127.0.0.1:50123/mcp"}],
+        )
+        assert overrides == (
+            'mcp_servers.obscura_browser.url="http://127.0.0.1:50123/mcp"',
+        )
+
+    def test_http_server_with_bearer_token_env(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        overrides = _mcp_servers_to_config_overrides(
+            [
+                {
+                    "name": "secure",
+                    "url": "https://api.example.com/mcp",
+                    "bearer_token_env_var": "API_TOKEN",
+                },
+            ],
+        )
+        assert 'mcp_servers.secure.url="https://api.example.com/mcp"' in overrides
+        assert 'mcp_servers.secure.bearer_token_env_var="API_TOKEN"' in overrides
+
+    def test_stdio_server_emits_command_args_env(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        overrides = _mcp_servers_to_config_overrides(
+            [
+                {
+                    "name": "local",
+                    "command": "mcp-filesystem",
+                    "args": ["--root", "/tmp"],
+                    "env": {"LOG_LEVEL": "info"},
+                },
+            ],
+        )
+        assert 'mcp_servers.local.command="mcp-filesystem"' in overrides
+        assert 'mcp_servers.local.args=["--root", "/tmp"]' in overrides
+        assert 'mcp_servers.local.env={ LOG_LEVEL = "info" }' in overrides
+
+    def test_ignores_unnamed_entries(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        assert _mcp_servers_to_config_overrides([{"url": "http://x/"}]) == ()
+
+    def test_string_values_are_toml_escaped(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        overrides = _mcp_servers_to_config_overrides(
+            [{"name": "weird", "command": 'quote "me" and \\slash'}],
+        )
+        # Double quotes are backslash-escaped, backslashes are doubled.
+        assert 'mcp_servers.weird.command="quote \\"me\\" and \\\\slash"' in overrides
+
+    def test_name_sanitization_normalizes_to_alphanum_underscore(self) -> None:
+        from obscura.providers.codex import _mcp_servers_to_config_overrides
+
+        overrides = _mcp_servers_to_config_overrides(
+            [{"name": "my name/with-weird chars", "url": "http://x/"}],
+        )
+        # Spaces, slashes, and dashes collapse to underscore for a
+        # stable TOML dotted-path key.
+        assert any(
+            o.startswith("mcp_servers.my_name_with_weird_chars.url=") for o in overrides
+        )
+
+
+class TestBuildSdkClientForwardsMcpServers:
+    """End-to-end: AppServerConfig receives our config_overrides."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_servers_reach_app_server_config(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class _FakeConfig:
+            def __init__(self, **kwargs: Any) -> None:
+                captured.update(kwargs)
+
+        class _FakeCodexWithConfig:
+            def __init__(self, config: Any) -> None:
+                self.config = config
+
+            async def __aenter__(self) -> _FakeCodexWithConfig:
+                return self
+
+            async def __aexit__(self, *_exc: Any) -> None:
+                return None
+
+        backend = CodexBackend(
+            _auth(),
+            mcp_servers=[
+                {"name": "obscura-browser", "url": "http://127.0.0.1:8765/mcp"},
+            ],
+        )
+        backend._import_sdk_class = lambda: (_FakeCodexWithConfig, "json")  # type: ignore[method-assign]
+        # Install the SDK-symbol cache so _build_sdk_client picks up our stub.
+        backend._sdk_syms = {"AppServerConfig": _FakeConfig}
+
+        await backend.start()
+
+        assert "config_overrides" in captured
+        overrides = captured["config_overrides"]
+        assert isinstance(overrides, tuple)
+        assert any("mcp_servers.obscura_browser.url=" in o for o in overrides)
+
+    @pytest.mark.asyncio
+    async def test_no_overrides_when_mcp_servers_empty(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class _FakeConfig:
+            def __init__(self, **kwargs: Any) -> None:
+                captured.update(kwargs)
+
+        class _FakeCodexWithConfig:
+            def __init__(self, config: Any) -> None:
+                self.config = config
+
+            async def __aenter__(self) -> _FakeCodexWithConfig:
+                return self
+
+            async def __aexit__(self, *_exc: Any) -> None:
+                return None
+
+        backend = CodexBackend(_auth())  # no mcp_servers
+        backend._import_sdk_class = lambda: (_FakeCodexWithConfig, "json")  # type: ignore[method-assign]
+        backend._sdk_syms = {"AppServerConfig": _FakeConfig}
+
+        await backend.start()
+
+        assert "config_overrides" not in captured

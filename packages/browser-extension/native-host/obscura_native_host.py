@@ -399,7 +399,11 @@ class BrowserRenderer:
             result: Any = getattr(event, "tool_result", "") or ""
             if isinstance(result, (dict, list)):
                 try:
-                    result = json.dumps(cast("dict[str, Any] | list[Any]", result), ensure_ascii=False, indent=2)
+                    result = json.dumps(
+                        cast("dict[str, Any] | list[Any]", result),
+                        ensure_ascii=False,
+                        indent=2,
+                    )
                 except Exception:
                     result = str(cast("Any", result))
             is_error = bool(getattr(event, "is_error", False))
@@ -589,8 +593,24 @@ async def _ensure_session(
                     len(compiled_ws.agents),
                 )
             except Exception:
-                log.warning("workspace '%s' failed to load; ignoring", workspace,
-                            exc_info=True)
+                log.warning(
+                    "workspace '%s' failed to load; ignoring", workspace, exc_info=True
+                )
+
+        # Codex runs its own closed tool loop — it only calls tools it
+        # discovered through its native ``mcp_servers`` config, not
+        # Obscura's ``register_tool()`` path.  Stand up an in-process
+        # streamable-HTTP MCP server exposing the browser tools and
+        # inject its URL into the Codex session's extra_mcp_servers so
+        # Codex can actually call them.  Claude / Copilot / others keep
+        # using register_tool() below, unchanged.
+        extra_mcp_servers: list[dict[str, Any]] = []
+        if backend == "codex":
+            url = await _ensure_browser_mcp_server()
+            if url:
+                extra_mcp_servers.append(
+                    {"name": "obscura_browser", "url": url},
+                )
 
         config = SessionConfig(
             backend=backend,
@@ -602,6 +622,7 @@ async def _ensure_session(
             no_default_prompt=False,
             supervise=False,  # no agent fleet — panel is single-user
             compiled_ws=compiled_ws,
+            extra_mcp_servers=extra_mcp_servers or None,
         )
 
         _session = await ObscuraSession.create(config)
@@ -609,21 +630,59 @@ async def _ensure_session(
         _session_workspace = workspace
         _session_id_override = session_id
 
-        # Register browser tools on the live client so the agent can call the
-        # DOM. This happens AFTER session.create() so they join the existing
-        # tool registry rather than getting filtered out by workspace policy.
-        for tool in _ensure_browser_tools():
-            try:
-                _session.client.register_tool(tool)
-            except Exception:
-                log.warning("failed to register %s", tool.name, exc_info=True)
+        # Register browser tools on the live client so the agent can call
+        # the DOM.  Skipped on Codex — the browser MCP server above
+        # already exposes them on Codex's native tool surface; double-
+        # registering would show the tools twice in the prompt.
+        if backend != "codex":
+            for tool in _ensure_browser_tools():
+                try:
+                    _session.client.register_tool(tool)
+                except Exception:
+                    log.warning("failed to register %s", tool.name, exc_info=True)
+        else:
+            # Prime the browser_tools frame-writer so the MCP server's
+            # tool handlers can reach the side panel.
+            _ensure_browser_tools()
+
         log.info(
-            "session ready: backend=%s sid=%s tools=%d",
+            "session ready: backend=%s sid=%s tools=%d browser_via_mcp=%s",
             backend,
             _session.ctx.session_id,
             len(list(_session.client._tool_registry.all())),
+            backend == "codex",
         )
         return _session
+
+
+_browser_mcp_url: str | None = None
+
+
+async def _ensure_browser_mcp_server() -> str | None:
+    """Start (or reuse) the in-process browser MCP server for Codex.
+
+    Returns the server URL, or ``None`` if startup failed — callers
+    should treat a None result as "browser tools unavailable on Codex
+    this session" and log rather than crash, so the chat turn still
+    proceeds without browser side effects.
+    """
+    global _browser_mcp_url
+    if _browser_mcp_url is not None:
+        return _browser_mcp_url
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import browser_mcp_server as _bms  # type: ignore[import-not-found]
+    except Exception:
+        log.exception("browser_mcp_server import failed — Codex browser tools disabled")
+        return None
+    try:
+        _browser_mcp_url = await _bms.start_browser_mcp()
+    except Exception:
+        log.exception(
+            "browser_mcp_server failed to start — Codex browser tools disabled"
+        )
+        return None
+    return _browser_mcp_url
 
 
 # ---------------------------------------------------------------------------
@@ -722,9 +781,7 @@ async def _handle_send(msg: dict[str, Any]) -> None:
         assistant_text = await session.send(full_prompt)
     except asyncio.CancelledError:
         log.info("send cancelled msg_id=%s", msg_id)
-        await _write_frame(
-            {"type": "error", "id": msg_id, "message": "cancelled"}
-        )
+        await _write_frame({"type": "error", "id": msg_id, "message": "cancelled"})
         return
     except Exception as exc:
         log.exception("send failed")
@@ -803,9 +860,7 @@ async def _handle_command(msg: dict[str, Any]) -> None:
     finally:
         _current_msg_id = ""
 
-    await _write_frame(
-        {"type": "done", "id": msg_id, "command_result": result}
-    )
+    await _write_frame({"type": "done", "id": msg_id, "command_result": result})
 
 
 async def _handle_cancel(msg: dict[str, Any]) -> None:
@@ -938,8 +993,14 @@ async def _handle_sessions(msg: dict[str, Any]) -> None:
                     "summary": str(getattr(r, "summary", "") or ""),
                     "backend": str(getattr(r, "backend", "") or ""),
                     "message_count": int(getattr(r, "message_count", 0) or 0),
-                    "created": str(getattr(r, "created_at", "")) if getattr(r, "created_at", None) else "",
-                    "status": str(getattr(getattr(r, "status", ""), "value", getattr(r, "status", ""))),
+                    "created": str(getattr(r, "created_at", ""))
+                    if getattr(r, "created_at", None)
+                    else "",
+                    "status": str(
+                        getattr(
+                            getattr(r, "status", ""), "value", getattr(r, "status", "")
+                        )
+                    ),
                 }
             )
         # Most recent first, cap at 20
@@ -1112,8 +1173,7 @@ async def _acquire_pid_lock() -> None:
         peers = _peer_hosts()
         if peers:
             log.info(
-                "peer browser hosts running: %s (one per Chrome profile is "
-                "expected)",
+                "peer browser hosts running: %s (one per Chrome profile is expected)",
                 peers,
             )
             _multi_instance_detected = True
@@ -1139,15 +1199,15 @@ def _release_pid_lock() -> None:
 # (handler_fn, requires_auth, track_in_active_sends)
 # (handler_fn, requires_auth, track_in_active_sends)
 _MSG_HANDLERS: dict[str, tuple[Any, bool, bool]] = {
-    "send":                  (_handle_send,                  True,  True),
-    "command":               (_handle_command,               True,  True),
-    "cancel":                (_handle_cancel,                False, False),
-    "kairos":                (_handle_kairos,                False, False),
-    "diag":                  (_handle_diag,                  False, False),
-    "list_sessions":         (_handle_sessions,              False, False),
-    "ping":                  (_handle_ping,                  False, False),
+    "send": (_handle_send, True, True),
+    "command": (_handle_command, True, True),
+    "cancel": (_handle_cancel, False, False),
+    "kairos": (_handle_kairos, False, False),
+    "diag": (_handle_diag, False, False),
+    "list_sessions": (_handle_sessions, False, False),
+    "ping": (_handle_ping, False, False),
     "browser-tool-response": (_handle_browser_tool_response, False, False),
-    "widget-response":       (_handle_widget_response,       False, False),
+    "widget-response": (_handle_widget_response, False, False),
 }
 
 
@@ -1212,9 +1272,7 @@ async def _main() -> None:
                 global _profile_id
                 if _profile_id != pid_in_msg:
                     _profile_id = pid_in_msg
-                    log.info(
-                        "profile_id=%s (host pid=%d)", _profile_id, os.getpid()
-                    )
+                    log.info("profile_id=%s (host pid=%d)", _profile_id, os.getpid())
 
             # Shutdown is handled inline because it breaks the loop.
             if msg_type == "shutdown":
@@ -1259,6 +1317,15 @@ async def _main() -> None:
         except Exception:
             log.debug("session close failed", exc_info=True)
         _session = None
+
+    # Shut the in-process browser MCP server if it was started for a
+    # Codex session. Safe to call when it never ran.
+    try:
+        import browser_mcp_server as _bms  # type: ignore[import-not-found]
+
+        await _bms.stop_browser_mcp()
+    except Exception:
+        log.debug("browser_mcp_server stop failed", exc_info=True)
 
 
 if __name__ == "__main__":

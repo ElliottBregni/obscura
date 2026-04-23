@@ -87,8 +87,9 @@ docker-compose.staging.yml
 partity_matrix
 
 firebase-debug.log
-.sh 
+.sh
 docs/*
+!docs/plans/
 .gitnexus
 
 # Pyright and pytest output
