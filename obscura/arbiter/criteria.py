@@ -232,7 +232,7 @@ def _verify_file_exists(
     if not match:
         return None
 
-    target = match.group(1).strip("/\\")
+    target = match.group(1).rstrip("/\\")
     # Check files_changed first (agent may have created it this turn).
     for f in files_changed:
         if target in f or Path(f).name == target:
