@@ -20,6 +20,9 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, override
 
+from obscura.memory import MemoryStore
+from obscura.vector_memory.vector_memory import VectorMemoryStore
+
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 
@@ -38,6 +41,24 @@ if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
+
+# Process-local cache of users we've already provisioned to avoid repeating
+# first-login initialization work on every request.
+_PROVISIONED_USERS: set[str] = set()
+_PROVISIONED_USERS_LOCK = threading.Lock()
+
+
+def _ensure_user_account(user: AuthenticatedUser) -> None:
+    """Provision local per-user state on first successful Supabase auth."""
+    with _PROVISIONED_USERS_LOCK:
+        if user.user_id in _PROVISIONED_USERS:
+            return
+
+    MemoryStore.for_user(user)
+    VectorMemoryStore.for_user(user)
+
+    with _PROVISIONED_USERS_LOCK:
+        _PROVISIONED_USERS.add(user.user_id)
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -205,7 +226,9 @@ def _user_from_bearer(request: Request) -> AuthenticatedUser | None:
 
     verifier = get_verifier(jwt_secret, jwks_url, audience, issuer)
     try:
-        return verifier.verify(token)
+        user = verifier.verify(token)
+        _ensure_user_account(user)
+        return user
     except SupabaseAuthError as exc:
         logger.debug("Supabase token rejected: %s", exc)
         _emit_auth_audit(

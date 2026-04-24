@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 
+from obscura.auth import middleware as auth_middleware
 from obscura.auth.middleware import APIKeyAuthMiddleware
 from obscura.auth.rbac import _load_api_keys
 from obscura.auth.supabase import reset_verifier_for_tests
@@ -94,6 +95,10 @@ def _create_test_app(*, supabase: bool = False) -> FastAPI:
 
 
 class TestAPIKeyAuthMiddleware:
+    @pytest.fixture(autouse=True)
+    def _reset_provisioned_users(self) -> None:
+        auth_middleware._PROVISIONED_USERS.clear()
+
     @pytest.mark.asyncio
     async def test_valid_api_key(self) -> None:
         app = _create_test_app()

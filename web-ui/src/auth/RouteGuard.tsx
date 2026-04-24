@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
 import { supabase, supabaseEnabled } from '@/lib/supabase';
 
 type LoginMode = 'oauth' | 'magiclink' | 'apikey';
+
+const AUTO_GITHUB_OAUTH_ATTEMPT_KEY = 'obscura.auto_github_oauth_attempted';
 
 export function RouteGuard() {
   const { isAuthenticated, setApiKey } = useAuth();
@@ -61,6 +63,23 @@ export function RouteGuard() {
     if (!apiKeyInput.trim()) return;
     setApiKey(apiKeyInput.trim());
   };
+
+  useEffect(() => {
+    if (!supabaseEnabled || !supabase || isAuthenticated || submitting) {
+      return;
+    }
+    if (mode !== 'oauth') {
+      return;
+    }
+
+    const attempted = window.sessionStorage.getItem(AUTO_GITHUB_OAUTH_ATTEMPT_KEY);
+    if (attempted === '1') {
+      return;
+    }
+
+    window.sessionStorage.setItem(AUTO_GITHUB_OAUTH_ATTEMPT_KEY, '1');
+    void handleOAuth('github');
+  }, [isAuthenticated, mode, submitting]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
