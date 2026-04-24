@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Download, MessageSquare, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import {
@@ -30,40 +30,27 @@ import { KairosStatusDot } from './components/KairosStatusDot';
 import { FleetPanel } from './components/FleetPanel';
 import { ObservePanel } from './components/ObservePanel';
 import { GoalsWidget } from './components/GoalsWidget';
+import { SessionCommandPalette } from './components/SessionCommandPalette';
 import type { Session } from '@/api/types';
 
 // ─── Session list item ────────────────────────────────────────────────────────
 
 function SessionListItem({
-  session,
-  selected,
-  onSelect,
-  onDelete,
+  session, selected, onSelect, onDelete,
 }: {
-  session: Session;
-  selected: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
+  session: Session; selected: boolean; onSelect: () => void; onDelete: () => void;
 }) {
   const rawId = session.session_id;
   const isUuid = /^[0-9a-f-]{36}$/i.test(rawId);
-  const label = isUuid
-    ? rawId.slice(0, 8) + '…'
-    : rawId.length > 28
-    ? rawId.slice(0, 24) + '…'
-    : rawId;
-
-  const backendLabel =
-    BACKENDS.find((b) => b.value === session.backend)?.label ?? session.backend;
+  const label = isUuid ? rawId.slice(0, 8) + '…'
+    : rawId.length > 28 ? rawId.slice(0, 24) + '…' : rawId;
+  const backendLabel = BACKENDS.find((b) => b.value === session.backend)?.label ?? session.backend;
 
   return (
     <div
       onClick={onSelect}
       className={`group flex cursor-pointer items-start gap-2 rounded-md px-2.5 py-2 text-sm transition-colors
-        ${selected
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-        }`}
+        ${selected ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
     >
       <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
       <div className="min-w-0 flex-1">
@@ -96,9 +83,7 @@ function CreateSessionDialog({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>New Session</DialogTitle>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>New Session</DialogTitle></DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label htmlFor="session-id">Session ID</Label>
@@ -125,9 +110,7 @@ function CreateSessionDialog({ open, onClose }: { open: boolean; onClose: () => 
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleCreate} disabled={!sessionId.trim() || createSession.isPending}>
-            Create
-          </Button>
+          <Button onClick={handleCreate} disabled={!sessionId.trim() || createSession.isPending}>Create</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -143,12 +126,11 @@ function EmptyState({ onNew }: { onNew: () => void }) {
       <div>
         <p className="text-sm font-medium text-muted-foreground">No session selected</p>
         <p className="mt-1 text-xs text-muted-foreground/60">
-          Select a session from the sidebar or create a new one.
+          Select a session or press <kbd className="rounded bg-muted px-1 py-0.5 text-[10px]">⌘K</kbd> to search.
         </p>
       </div>
       <Button size="sm" onClick={onNew}>
-        <Plus className="mr-1.5 h-3.5 w-3.5" />
-        New Session
+        <Plus className="mr-1.5 h-3.5 w-3.5" /> New Session
       </Button>
     </div>
   );
@@ -166,6 +148,7 @@ export default function SessionsPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('sessions');
 
   const selectedSession = sessions.find((s) => s.session_id === selectedId) ?? null;
@@ -174,11 +157,21 @@ export default function SessionsPage() {
     setSelectedId(sessions[0].session_id);
   }
 
+  // Cmd+K global shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const handleDelete = (session: Session) => {
     deleteSession.mutate(session.session_id, {
-      onSuccess: () => {
-        if (selectedId === session.session_id) setSelectedId(null);
-      },
+      onSuccess: () => { if (selectedId === session.session_id) setSelectedId(null); },
     });
   };
 
@@ -193,9 +186,7 @@ export default function SessionsPage() {
               key={tab}
               onClick={() => setSidebarTab(tab)}
               className={`relative flex-1 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors
-                ${sidebarTab === tab
-                  ? 'border-b-2 border-primary text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'}`}
+                ${sidebarTab === tab ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             >
               {tab === 'runtime' ? 'Live' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               {tab === 'runtime' && staleCount > 0 && (
@@ -206,13 +197,7 @@ export default function SessionsPage() {
             </button>
           ))}
           {sidebarTab === 'sessions' && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="mr-1.5 h-6 w-6 shrink-0"
-              onClick={() => setCreateOpen(true)}
-              title="New session"
-            >
+            <Button size="icon" variant="ghost" className="mr-1.5 h-6 w-6 shrink-0" onClick={() => setCreateOpen(true)} title="New session">
               <Plus className="h-3.5 w-3.5" />
             </Button>
           )}
@@ -224,12 +209,8 @@ export default function SessionsPage() {
           {sidebarTab === 'runtime' && <ObservePanel />}
           {sidebarTab === 'sessions' && (
             <>
-              {isLoading && (
-                <p className="px-2 py-4 text-center text-xs text-muted-foreground">Loading…</p>
-              )}
-              {!isLoading && sessions.length === 0 && (
-                <p className="px-2 py-4 text-center text-xs text-muted-foreground">No sessions yet.</p>
-              )}
+              {isLoading && <p className="px-2 py-4 text-center text-xs text-muted-foreground">Loading…</p>}
+              {!isLoading && sessions.length === 0 && <p className="px-2 py-4 text-center text-xs text-muted-foreground">No sessions yet.</p>}
               {sessions.map((session) => (
                 <SessionListItem
                   key={session.session_id}
@@ -249,8 +230,7 @@ export default function SessionsPage() {
           <div className="p-2 space-y-1">
             <KairosStatusDot />
             <Button
-              variant="ghost"
-              size="sm"
+              variant="ghost" size="sm"
               className="w-full justify-start text-xs text-muted-foreground"
               onClick={() => ingestSessions.mutate(undefined)}
               disabled={ingestSessions.isPending}
@@ -271,7 +251,14 @@ export default function SessionsPage() {
         )}
       </main>
 
+      {/* ── Modals ── */}
       <CreateSessionDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <SessionCommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onSelect={(s) => setSelectedId(s.session_id)}
+        currentId={selectedId}
+      />
     </div>
   );
 }

@@ -1,32 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, User, Brain, AlertCircle, Loader2, RotateCcw } from 'lucide-react';
+import { AlertCircle, RotateCcw, Settings } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { useChatStore } from '@/stores/chatStore';
 import { useAgentStream } from '@/hooks/useAgentStream';
 import { fetchApi } from '@/api/client';
 import { BACKENDS } from '@/lib/constants';
-import { ToolCallBlock } from './ToolCallBlock';
+import { ChatMessageBubble } from './ChatMessage';
 import { ChatComposer } from './ChatComposer';
 import { ToolApprovalBanner } from './ToolApprovalBanner';
+import { SettingsDrawer } from './SettingsDrawer';
 import type { Session } from '@/api/types';
 
 interface Props {
   session: Session;
-}
-
-function ThinkingBlock({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)} className="my-1.5 rounded-md border border-dashed border-border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
-      <summary className="flex cursor-pointer items-center gap-1.5 font-medium select-none">
-        <Brain className="h-3 w-3" />
-        Thinking
-      </summary>
-      <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] leading-relaxed opacity-80">
-        {text}
-      </pre>
-    </details>
-  );
 }
 
 function useResumeSession(sessionId: string) {
@@ -53,7 +39,7 @@ export function SessionChatView({ session }: Props) {
   });
 
   const resumeSession = useResumeSession(session.session_id);
-
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Sync session into store + clear on session change
@@ -67,6 +53,20 @@ export function SessionChatView({ session }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Esc cancels stream (only when not in a modal)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isStreaming && !settingsOpen) {
+        e.preventDefault();
+        cancelStream();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isStreaming, cancelStream, settingsOpen]);
+
+  const lastMsgId = messages[messages.length - 1]?.id;
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -79,15 +79,24 @@ export function SessionChatView({ session }: Props) {
         <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
           {BACKENDS.find((b) => b.value === session.backend)?.label ?? session.backend}
         </span>
-        <button
-          onClick={() => resumeSession.mutate()}
-          disabled={resumeSession.isPending}
-          title="Resume session"
-          className="ml-auto shrink-0 flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          <RotateCcw className={`h-3 w-3 ${resumeSession.isPending ? 'animate-spin' : ''}`} />
-          Resume
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => resumeSession.mutate()}
+            disabled={resumeSession.isPending}
+            title="Resume session"
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            <RotateCcw className={`h-3 w-3 ${resumeSession.isPending ? 'animate-spin' : ''}`} />
+            Resume
+          </button>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Message list */}
@@ -99,49 +108,11 @@ export function SessionChatView({ session }: Props) {
         )}
 
         {messages.map((msg) => (
-          <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            {/* Avatar */}
-            <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold
-              ${msg.role === 'user'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground border border-border'}`}>
-              {msg.role === 'user' ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
-            </div>
-
-            {/* Bubble */}
-            <div className={`max-w-[80%] space-y-1 ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
-              {/* Thinking */}
-              {msg.thinking && <ThinkingBlock text={msg.thinking} />}
-
-              {/* Tool calls */}
-              {msg.toolCalls.map((tc) => (
-                <ToolCallBlock key={tc.id} toolCall={tc} />
-              ))}
-
-              {/* Text */}
-              {msg.text && (
-                <div className={`rounded-lg px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap
-                  ${msg.role === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted/50 text-foreground border border-border/50'}`}>
-                  {msg.text}
-                  {/* streaming cursor */}
-                  {isStreaming && msg.role === 'assistant' &&
-                    msg.id === messages[messages.length - 1]?.id && (
-                    <span className="ml-0.5 inline-block h-4 w-0.5 bg-current animate-pulse align-middle" />
-                  )}
-                </div>
-              )}
-
-              {/* Empty assistant message still streaming */}
-              {msg.role === 'assistant' && !msg.text && !msg.thinking && msg.toolCalls.length === 0 && isStreaming && (
-                <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/50 px-3.5 py-2.5">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Thinking…</span>
-                </div>
-              )}
-            </div>
-          </div>
+          <ChatMessageBubble
+            key={msg.id}
+            msg={msg}
+            isStreamingThis={isStreaming && msg.id === lastMsgId && msg.role === 'assistant'}
+          />
         ))}
 
         {/* Error */}
@@ -164,6 +135,9 @@ export function SessionChatView({ session }: Props) {
         onStop={cancelStream}
         isStreaming={isStreaming}
       />
+
+      {/* Settings drawer */}
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
