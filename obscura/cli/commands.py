@@ -633,6 +633,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /review [ref]          AI code review",
         "  /security-review [ref] Security-focused review",
         "  /branch [name|create|delete|list]   Git branch management",
+        "  /worktree [list|status|sweep|cleanup]  Isolated worktrees",
         "  /pr [base]             Create pull request",
         "",
         " [bold]Context & Memory[/]",
@@ -7950,6 +7951,123 @@ async def cmd_branch(args: str, _ctx: REPLContext) -> str | None:
     return None
 
 
+# ── /worktree ─────────────────────────────────────────────────────────────
+
+
+async def cmd_worktree(args: str, _ctx: REPLContext) -> str | None:
+    """Inspect and manage git worktrees tracked in ~/.obscura/worktrees/.
+
+    Usage:
+        /worktree                 — list active worktrees for this repo
+        /worktree list            — list all worktrees across all repos
+        /worktree status <slug>   — show details + observer summary for a slug
+        /worktree sweep           — mark dead-PID entries as orphan
+        /worktree cleanup         — sweep + prune missing paths + drop orphan dirs
+    """
+    from obscura.tools import worktree_observer, worktree_registry
+
+    parts = args.strip().split(None, 1)
+    sub = parts[0].lower() if parts else ""
+    sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+    def _render_entries(entries: list[worktree_registry.WorktreeEntry]) -> None:
+        if not entries:
+            print_info("No worktrees tracked.")
+            return
+        active_slugs = set(worktree_observer.active_slugs())
+        table = Table(title="Worktrees", expand=False)
+        table.add_column("slug", no_wrap=True)
+        table.add_column("status")
+        table.add_column("obs", justify="center", width=3)
+        table.add_column("branch", no_wrap=True)
+        table.add_column("owner")
+        table.add_column("pid", justify="right")
+        table.add_column("path", max_width=55)
+        for e in entries:
+            obs = "[green]●[/]" if e.slug in active_slugs else "[dim]·[/]"
+            status_color = {
+                "active": "green",
+                "kept": "yellow",
+                "orphan": "red",
+            }.get(e.status, "white")
+            who = e.agent_name or e.owner
+            table.add_row(
+                e.slug,
+                f"[{status_color}]{e.status}[/]",
+                obs,
+                e.branch,
+                who,
+                str(e.pid),
+                e.worktree_path,
+            )
+        console.print(table)
+
+    if not sub:
+        # List entries for the current repo.
+        proc = await asyncio.create_subprocess_shell(
+            "git rev-parse --path-format=absolute --git-common-dir",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            print_error("Not inside a git repository.")
+            return None
+        common = Path(stdout.decode().strip())
+        repo_root = str(common.parent) if common.name == ".git" else str(common)
+        _render_entries(worktree_registry.list_for_repo(repo_root))
+        return None
+
+    if sub == "list":
+        _render_entries(worktree_registry.load())
+        return None
+
+    if sub == "status":
+        if not sub_arg:
+            print_error("Usage: /worktree status <slug>")
+            return None
+        entry = worktree_registry.get(sub_arg)
+        if entry is None:
+            print_error(f"Unknown worktree: {sub_arg}")
+            return None
+        console.print(f"[bold]slug[/]:   {entry.slug}")
+        console.print(f"[bold]branch[/]: {entry.branch}")
+        console.print(f"[bold]repo[/]:   {entry.repo_root}")
+        console.print(f"[bold]path[/]:   {entry.worktree_path}")
+        console.print(f"[bold]status[/]: {entry.status}")
+        console.print(f"[bold]owner[/]:  {entry.agent_name or entry.owner}")
+        console.print(f"[bold]pid[/]:    {entry.pid}")
+        summary = worktree_observer.summary(entry.slug)
+        if summary is None:
+            console.print("[dim]observer: not active[/]")
+        else:
+            console.print(
+                f"[bold]observer[/]: +{summary['created']} ~{summary['modified']} "
+                f"-{summary['deleted']} (baseline {summary['baseline_files']})",
+            )
+        return None
+
+    if sub in {"sweep", "cleanup"}:
+        orphans = worktree_registry.sweep_dead_pids()
+        if orphans:
+            print_warning(f"Marked {len(orphans)} entry(s) as orphan: " + ", ".join(e.slug for e in orphans))
+        else:
+            print_info("No orphan owners found.")
+        if sub == "cleanup":
+            dropped = worktree_registry.prune_missing_paths()
+            if dropped:
+                print_ok(f"Pruned {len(dropped)} missing-path entry(s): {', '.join(dropped)}")
+            removed = worktree_registry.cleanup_orphan_dirs()
+            if removed:
+                print_ok(f"Removed {removed} unreferenced checkout dir(s).")
+            if not dropped and not removed and not orphans:
+                print_info("Registry clean.")
+        return None
+
+    print_error("Usage: /worktree [list|status <slug>|sweep|cleanup]")
+    return None
+
+
 # ── /config ───────────────────────────────────────────────────────────────
 
 
@@ -9828,6 +9946,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "review": cmd_review,
     "pr": cmd_pr,
     "branch": cmd_branch,
+    "worktree": cmd_worktree,
     "security-review": cmd_security_review,
     "ultrareview": cmd_ultrareview,
     # Utility
@@ -9940,6 +10059,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "review": [],
     "pr": ["main", "master", "develop"],
     "branch": ["list", "create", "delete"],
+    "worktree": ["list", "status", "sweep", "cleanup"],
     "security-review": [],
     "ultrareview": [],
     "cat": [],
