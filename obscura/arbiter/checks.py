@@ -266,7 +266,7 @@ def check_model_turn(
         issues.append(f"{total} lint error(s) in {len(lint_errors)} file(s)")
         score -= 0.3
 
-    return max(score, 0.0), issues
+    return round(max(score, 0.0), 10), issues
 
 
 # ---------------------------------------------------------------------------

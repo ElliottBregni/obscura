@@ -21,6 +21,8 @@ def engine() -> ArbiterEngine:
         accept_threshold=0.8,
         revise_threshold=0.3,
         max_retries=2,
+        phantom_level=0,  # pin to 0 so OBSCURA_PHANTOM_LEVEL env doesn't affect tests
+        is_daemon=False,
     )
     eng = ArbiterEngine(config=config, session_id="test", run_id="run-1")
     eng.start()

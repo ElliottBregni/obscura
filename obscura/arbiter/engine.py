@@ -439,8 +439,13 @@ class ArbiterEngine:
         return raw
 
     def _resolve_phantom_level(self) -> int:
-        """Get the current phantom level (config override > env var > 0)."""
-        if self._config.phantom_level > 0:
+        """Get the current phantom level (config override > env var > 0).
+
+        phantom_level=-1 means "read from OBSCURA_PHANTOM_LEVEL env var".
+        phantom_level=0  means "off" (env var is ignored).
+        phantom_level>0  means that exact level (env var is ignored).
+        """
+        if self._config.phantom_level >= 0:
             return self._config.phantom_level
         import os
 
