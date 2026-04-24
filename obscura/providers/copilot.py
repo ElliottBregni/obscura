@@ -628,20 +628,17 @@ class CopilotBackend:
 
         converted: list[Any] = []
         for spec in tools:
-            _handler = spec.handler
 
-            def _wrapper_factory(handler: Callable[..., Any]) -> Callable[..., Any]:
+            def _wrapper_factory(bound_spec: ToolSpec) -> Callable[..., Any]:
                 async def wrapped(invocation: Any) -> Any:
-                    import inspect as _inspect
-
                     from copilot.types import ToolResult as CopilotToolResult
+
+                    from obscura.core.agent_loop import call_tool_handler
 
                     try:
                         raw_args = invocation.arguments
                         args = cast("dict[str, Any]", raw_args) if raw_args else {}
-                        result: Any = handler(**args)
-                        if _inspect.isawaitable(result):
-                            result = await result
+                        result: Any = await call_tool_handler(bound_spec, args)
                         # Normalize to SDK ToolResult (snake_case fields in 0.2.0)
                         if isinstance(result, CopilotToolResult):
                             return result
@@ -669,7 +666,7 @@ class CopilotBackend:
                 Tool(
                     name=self._sanitize_tool_name(spec.name),
                     description=spec.description,
-                    handler=_wrapper_factory(_handler),
+                    handler=_wrapper_factory(spec),
                     parameters=params,
                     overrides_built_in_tool=True,
                 ),

@@ -2945,3 +2945,15 @@ def _audit_tool_denied(tool_name: str, reason: str) -> None:
         )
     except Exception:
         logger.debug("Failed to emit audit event for denied tool", exc_info=True)
+
+
+async def call_tool_handler(spec: ToolSpec, inputs: dict[str, Any]) -> Any:
+    """Dispatch a tool call through the shared bridging pipeline.
+
+    Thin module-level entry point so every dispatch site — the agent loop,
+    the claude provider wrapper, the copilot provider wrapper — shares one
+    definition of bridging, aliasing, validation, coercion, and
+    undeclared-kwarg tolerance. Implementation lives on
+    :meth:`AgentLoop._call_handler`.
+    """
+    return await AgentLoop._call_handler(spec, inputs)  # pyright: ignore[reportPrivateUsage]

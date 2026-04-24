@@ -659,41 +659,28 @@ class ClaudeBackend:
         returns from Obscura tools are converted to plain text content
         that the MCP protocol expects.
         """
-        import functools
-        import inspect
-
         from claude_agent_sdk import create_sdk_mcp_server
         from claude_agent_sdk import tool as claude_tool
 
-        def _wrap_handler(handler: Any) -> Any:
-            """Ensure the handler always returns a plain string for MCP.
+        def _wrap_handler(bound_spec: Any) -> Any:
+            """Bridge the claude_agent_sdk calling convention.
 
-            The claude_agent_sdk calls ``handler(arguments)`` with the
-            arguments dict as a single positional arg, but Obscura tool
-            handlers expect keyword arguments.  This wrapper bridges the
-            two calling conventions.
+            The SDK calls ``handler(arguments)`` with the arguments dict as
+            a single positional arg. We route through
+            :func:`call_tool_handler` so bridging, aliasing, coercion, and
+            undeclared-kwarg tolerance match the copilot and agent-loop
+            paths.
             """
-            if inspect.iscoroutinefunction(handler):
+            from obscura.core.agent_loop import call_tool_handler
 
-                @functools.wraps(handler)
-                async def _async_wrapper(
-                    arguments: dict[str, Any] | None = None, **kwargs: Any
-                ) -> str:
-                    merged = {**(arguments or {}), **kwargs}
-                    result = await handler(**merged)
-                    return str(result) if result is not None else ""
-
-                return _async_wrapper
-
-            @functools.wraps(handler)
-            def _sync_wrapper(
+            async def _async_wrapper(
                 arguments: dict[str, Any] | None = None, **kwargs: Any
             ) -> str:
                 merged = {**(arguments or {}), **kwargs}
-                result = handler(**merged)
+                result = await call_tool_handler(bound_spec, merged)
                 return str(result) if result is not None else ""
 
-            return _sync_wrapper
+            return _async_wrapper
 
         claude_tools: list[Any] = []
         seen_names: set[str] = set()
@@ -701,7 +688,7 @@ class ClaudeBackend:
             if spec.name in seen_names:
                 continue
             seen_names.add(spec.name)
-            wrapped = _wrap_handler(spec.handler)
+            wrapped = _wrap_handler(spec)
             decorated = claude_tool(
                 spec.name,
                 spec.description,
