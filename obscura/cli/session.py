@@ -555,6 +555,7 @@ class ObscuraSession:
                         elif event.kind == AgentEventKind.TOOL_RESULT:
                             dlog.tool_call(
                                 getattr(event, "tool_name", ""),
+                                getattr(event, "tool_input", {}),
                                 ok=not getattr(event, "is_error", False),
                                 result_preview=str(getattr(event, "tool_result", ""))[
                                     :200
