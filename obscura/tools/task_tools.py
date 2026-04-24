@@ -114,6 +114,8 @@ async def task_create(
     max_retries: int = 3,
     metadata: dict[str, Any] | None = None,
 ) -> str:
+    import os
+
     from obscura.core.task_queue import TaskQueue
 
     q = TaskQueue()
@@ -126,6 +128,7 @@ async def task_create(
         run_after=run_after,
         max_retries=max_retries,
         metadata=metadata,
+        project_root=os.getcwd(),
     )
 
     # Back-fill active_form if provided (not in TaskQueue.enqueue signature).

@@ -308,6 +308,14 @@ def _is_vault_write_allowed(path: Path) -> bool:
 def _json_error(error: str, **extra: object) -> str:
     payload: dict[str, object] = {"ok": False, "error": error, "exit_code": -1}
     payload.update(extra)
+    if error == "path_not_allowed" and "hint" not in payload:
+        base = _resolve_base_dir()
+        payload["hint"] = (
+            f"Path is outside Obscura's sandbox (OBSCURA_SYSTEM_TOOLS_BASE_DIR={base}). "
+            "Unset the env var or widen the base dir to grant access."
+            if base is not None
+            else "Path rejected by Obscura's sandbox policy."
+        )
     return json.dumps(payload)
 
 

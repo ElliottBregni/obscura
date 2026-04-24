@@ -675,10 +675,15 @@ class ClaudeBackend:
 
             async def _async_wrapper(
                 arguments: dict[str, Any] | None = None, **kwargs: Any
-            ) -> str:
+            ) -> dict[str, Any]:
                 merged = {**(arguments or {}), **kwargs}
                 result = await call_tool_handler(bound_spec, merged)
-                return str(result) if result is not None else ""
+                # claude_agent_sdk expects {"content": [{"type": "text", ...}]}.
+                # Returning a bare string makes the SDK do `"content" in result`
+                # on the string (substring match) and either silently drop the
+                # result or raise TypeError on `result["content"]`.
+                text = str(result) if result is not None else ""
+                return {"content": [{"type": "text", "text": text}]}
 
             return _async_wrapper
 

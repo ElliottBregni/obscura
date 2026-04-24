@@ -276,7 +276,7 @@ class KairosEngine:
                 q = TaskQueue()
                 # Reclaim any stale claims from crashed workers.
                 q.reclaim_stale()
-                task = q.next_ready(worker_id="kairos")
+                task = q.next_ready(worker_id="kairos", project_root=os.getcwd())
                 if task is not None and q.claim(task["task_id"], "kairos"):
                     goal_ctx = ""
                     if task.get("goal_id"):
