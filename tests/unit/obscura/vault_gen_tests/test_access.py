@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from vault_gen.access.repo import RepoAccess
+from obscura.vault_gen.access.repo import RepoAccess
 
 # ---------------------------------------------------------------------------
 # Fixtures

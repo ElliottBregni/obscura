@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from vault_gen.generator import RepoConfig, RepoType, generate_repo
+from obscura.vault_gen.generator import RepoConfig, RepoType, generate_repo
 
 
 def _git_log(path: Path) -> list[str]:
@@ -148,7 +148,7 @@ class TestMeta:
 
     def test_meta_enables_permission_model(self, tmp_path: Path) -> None:
         """RepoAccess should pick up the meta and gate writes on config repos."""
-        from vault_gen.access.repo import RepoAccess
+        from obscura.vault_gen.access.repo import RepoAccess
 
         config = RepoConfig(name="perm-config", repo_type=RepoType.CONFIG, destination=tmp_path)
         repo_path = generate_repo(config)
@@ -214,7 +214,7 @@ class TestGenerateErrors:
 
     def test_cleans_up_on_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Partial directory should be removed if generation fails mid-way."""
-        import vault_gen.generator as gen_mod
+        import obscura.vault_gen.generator as gen_mod
 
         def failing_git_init(*args: object, **kwargs: object) -> None:
             raise RuntimeError("simulated git failure")

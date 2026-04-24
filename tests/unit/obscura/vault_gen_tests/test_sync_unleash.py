@@ -12,8 +12,8 @@ import httpx
 import pytest
 import respx
 
-from vault_gen.access.repo import RepoAccess
-from vault_gen.sync.adapters.unleash import (
+from obscura.vault_gen.access.repo import RepoAccess
+from obscura.vault_gen.sync.adapters.unleash import (
     FlagSpec,
     UnleashAdapter,
     _flag_differs,
@@ -387,7 +387,7 @@ class TestUnleashAdapterPull:
     @respx.mock
     async def test_skips_unchanged_flags(self, repo: RepoAccess) -> None:
         # Write the exact same content that pull would write.
-        from vault_gen.sync.adapters.unleash import FlagSpec, _flag_to_toml
+        from obscura.vault_gen.sync.adapters.unleash import FlagSpec, _flag_to_toml
 
         flag = FlagSpec(name="stable", description="", type="release", enabled=True)
         (repo.root / "flags").mkdir()

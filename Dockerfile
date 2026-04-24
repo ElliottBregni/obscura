@@ -1,5 +1,9 @@
 # =============================================================================
-# Obscura SDK — Multi-stage Docker build (uv workspace aware)
+# Obscura SDK — slim image (core + server + telemetry only).
+#
+# For a "batteries included" image that bakes in every plugin pip dep plus the
+# binary tools non-pip plugins shell out to (jq, rg, kubectl, playwright, …),
+# build `Dockerfile.full` instead: `docker build -f Dockerfile.full -t obscura:full .`
 # =============================================================================
 
 # Stage 1: Builder — install deps with uv, compile the venv
@@ -13,39 +17,25 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
-# --- Workspace manifests ---------------------------------------------------
-# pyproject.toml declares `packages/vault-gen` as a uv workspace member, so
-# every member's pyproject.toml must be present before `uv sync` can resolve
-# the lockfile. Copy manifests only (not source) so dep-install stays cached
-# when only source changes.
+# Manifests only — keeps dep-install cached when only source changes.
 COPY pyproject.toml uv.lock ./
-COPY packages/vault-gen/pyproject.toml packages/vault-gen/pyproject.toml
-COPY packages/vault-gen/README.md packages/vault-gen/README.md
 
-# Install third-party deps only (no workspace source yet, no project install).
-RUN uv sync --frozen --no-dev --no-install-workspace \
+# Install third-party deps only (no project source yet).
+RUN uv sync --frozen --no-dev --no-install-project \
         --extra server --extra telemetry
 
-# --- Workspace source ------------------------------------------------------
 COPY obscura/ obscura/
 COPY scripts/ scripts/
-COPY packages/vault-gen/src packages/vault-gen/src
 
-# Install the project + workspace members (fast — deps already cached).
+# Install the project itself (fast — deps already cached).
 RUN uv sync --frozen --no-dev --extra server --extra telemetry
 
 # Stage 2: Runtime — minimal image with only the venv + app code
 FROM python:3.13.5-slim AS runtime
 
-ARG INSTALL_GWS=0
-ARG INSTALL_M365=0
-ARG INSTALL_HF=0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gh ca-certificates nodejs npm libpq-dev \
     && npm install -g @anthropic-ai/claude-code \
-    && if [ "$INSTALL_GWS" = "1" ]; then npm install -g @googleworkspace/cli || true; fi \
-    && if [ "$INSTALL_M365" = "1" ]; then npm install -g @pnp/cli-microsoft365 || true; fi \
-    && if [ "$INSTALL_HF" = "1" ]; then pip install --no-cache-dir huggingface-hub || true; fi \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r obscura && useradd -r -g obscura -d /home/obscura -m obscura
@@ -55,7 +45,6 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/obscura obscura/
 COPY --from=builder /app/scripts scripts/
-COPY --from=builder /app/packages packages/
 
 # Some packaged provider binaries lose executable mode in copied venv layers.
 # Ensure Copilot CLI shim is runnable at runtime.

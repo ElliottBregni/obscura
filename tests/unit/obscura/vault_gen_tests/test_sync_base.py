@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from vault_gen.sync.base import Change, SyncAdapter, SyncResult
+from obscura.vault_gen.sync.base import Change, SyncAdapter, SyncResult
 
 # ---------------------------------------------------------------------------
 # Change
@@ -111,7 +111,7 @@ class TestSyncAdapterABC:
             Incomplete()  # type: ignore[abstract]
 
     def test_minimal_concrete_subclass(self) -> None:
-        from vault_gen.access.repo import RepoAccess
+        from obscura.vault_gen.access.repo import RepoAccess
 
         class Minimal(SyncAdapter):
             @property
@@ -131,7 +131,7 @@ class TestSyncAdapterABC:
         assert m.name == "minimal"
 
     async def test_adapter_push_is_awaitable(self) -> None:
-        from vault_gen.access.repo import RepoAccess
+        from obscura.vault_gen.access.repo import RepoAccess
 
         class Echo(SyncAdapter):
             @property

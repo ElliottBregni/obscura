@@ -9,7 +9,7 @@
     ".claude",
     ".obscura",
     "output",
-    "packages/vault-gen/tests"
+    "tests/unit/obscura/vault_gen_tests"
   ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.13",

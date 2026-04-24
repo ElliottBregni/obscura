@@ -29,8 +29,8 @@ import httpx
 import structlog
 from pydantic import BaseModel
 
-from vault_gen.access.repo import RepoAccess
-from vault_gen.sync.base import Change, SyncAdapter, SyncResult
+from obscura.vault_gen.access.repo import RepoAccess
+from obscura.vault_gen.sync.base import Change, SyncAdapter, SyncResult
 
 log = structlog.get_logger()
 

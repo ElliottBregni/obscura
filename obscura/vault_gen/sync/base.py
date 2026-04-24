@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from vault_gen.access.repo import RepoAccess
+from obscura.vault_gen.access.repo import RepoAccess
 
 
 @dataclass(frozen=True)

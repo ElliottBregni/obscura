@@ -4,7 +4,7 @@ from importlib.metadata import entry_points
 
 import structlog
 
-from vault_gen.sync.base import SyncAdapter
+from obscura.vault_gen.sync.base import SyncAdapter
 
 log = structlog.get_logger()
 
@@ -29,7 +29,7 @@ class AdapterRegistry:
         self._load_entry_points()
 
     def _load_builtins(self) -> None:
-        from vault_gen.sync.adapters.unleash import UnleashAdapter
+        from obscura.vault_gen.sync.adapters.unleash import UnleashAdapter
 
         self._adapters[UnleashAdapter.ADAPTER_NAME] = UnleashAdapter
         log.debug("registered built-in adapter", name=UnleashAdapter.ADAPTER_NAME)

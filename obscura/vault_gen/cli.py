@@ -9,8 +9,8 @@ from pathlib import Path
 import click
 import structlog
 
-from vault_gen.generator import RepoConfig, RepoType, generate_repo
-from vault_gen.registry import Registry
+from obscura.vault_gen.generator import RepoConfig, RepoType, generate_repo
+from obscura.vault_gen.registry import Registry
 
 log = structlog.get_logger()
 
@@ -112,7 +112,7 @@ def list_repos() -> None:
 )
 def link(repo_path: str, obscura_path: str) -> None:
     """Register a repo as pluggable into an Obscura instance."""
-    from vault_gen.access.repo import RepoAccess
+    from obscura.vault_gen.access.repo import RepoAccess
 
     rp = Path(repo_path).resolve()
     op = Path(obscura_path).resolve()
@@ -241,9 +241,9 @@ def sync() -> None:
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would change without applying.")
 def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
     """Push repo state to external backend(s)."""
-    from vault_gen.access.repo import RepoAccess
-    from vault_gen.sync.config import SyncConfig, SyncState
-    from vault_gen.sync.registry import AdapterRegistry
+    from obscura.vault_gen.access.repo import RepoAccess
+    from obscura.vault_gen.sync.config import SyncConfig, SyncState
+    from obscura.vault_gen.sync.registry import AdapterRegistry
 
     repo_path = _resolve_repo_path(repo_name)
     access = RepoAccess(repo_path, privilege="admin")
@@ -302,9 +302,9 @@ def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
 @click.option("--adapter", "adapter_name", default=None, help="Adapter to use (default: all enabled).")
 def sync_pull(repo_name: str, adapter_name: str | None) -> None:
     """Pull backend state into the repo."""
-    from vault_gen.access.repo import RepoAccess
-    from vault_gen.sync.config import SyncConfig, SyncState
-    from vault_gen.sync.registry import AdapterRegistry
+    from obscura.vault_gen.access.repo import RepoAccess
+    from obscura.vault_gen.sync.config import SyncConfig, SyncState
+    from obscura.vault_gen.sync.registry import AdapterRegistry
 
     repo_path = _resolve_repo_path(repo_name)
     access = RepoAccess(repo_path, privilege="admin")
@@ -348,9 +348,9 @@ def sync_pull(repo_name: str, adapter_name: str | None) -> None:
 @click.option("--adapter", "adapter_name", default=None, help="Adapter to diff against.")
 def sync_diff(repo_name: str, adapter_name: str | None) -> None:
     """Show what would change on push without applying anything."""
-    from vault_gen.access.repo import RepoAccess
-    from vault_gen.sync.config import SyncConfig
-    from vault_gen.sync.registry import AdapterRegistry
+    from obscura.vault_gen.access.repo import RepoAccess
+    from obscura.vault_gen.sync.config import SyncConfig
+    from obscura.vault_gen.sync.registry import AdapterRegistry
 
     repo_path = _resolve_repo_path(repo_name)
     access = RepoAccess(repo_path)
@@ -386,8 +386,8 @@ def sync_diff(repo_name: str, adapter_name: str | None) -> None:
 @click.argument("repo_name")
 def sync_status(repo_name: str) -> None:
     """Show all registered adapters and their last sync times."""
-    from vault_gen.sync.config import SyncConfig, SyncState
-    from vault_gen.sync.registry import AdapterRegistry
+    from obscura.vault_gen.sync.config import SyncConfig, SyncState
+    from obscura.vault_gen.sync.registry import AdapterRegistry
 
     repo_path = _resolve_repo_path(repo_name)
     sync_cfg = SyncConfig.load(repo_path)

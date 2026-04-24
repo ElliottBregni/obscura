@@ -8,9 +8,9 @@
 #   docker compose logs -f        # tail all logs
 #   docker compose down -v        # tear down (remove volumes)
 #
-# The obscura-sdk image builds from the repo root so the uv workspace
-# (pyproject.toml + packages/vault-gen) resolves correctly. See Dockerfile
-# for workspace-aware layer caching.
+# The obscura-sdk image builds from the repo root. See Dockerfile (slim,
+# core + server + telemetry) or Dockerfile.full (slim + every plugin +
+# provider dep, plus the binaries non-pip plugins shell out to).
 # =============================================================================
 
 x-obscura-logging: &default-logging
