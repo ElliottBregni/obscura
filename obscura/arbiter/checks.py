@@ -278,22 +278,30 @@ def check_task_complete(
     task: Mapping[str, Any],
     *,
     output_text: str = "",
+    files_changed: list[str] | None = None,
+    tool_call_count: int = 0,
 ) -> tuple[float, list[str]]:
     """Score a task that has been marked completed.
 
     *output_text* is the agent's output for relevance checking against
-    the task subject/description.
+    the task subject/description.  *files_changed* and *tool_call_count*
+    are used as proxies for "work was done" when no text output exists
+    (common for pure tool-call / KAIROS daemon turns).
 
     Returns (score, issues).
     """
     issues: list[str] = []
     score = 1.0
 
-    # Output should be non-empty for completed tasks
+    # Output should be non-empty — but tool-call-only turns produce no
+    # narration text.  Skip the penalty when files were changed or tools
+    # were called, as those are clear evidence of productive work.
     output = str(task.get("output", "") or output_text or "")
     if not output.strip():
-        issues.append("task completed with no output")
-        score -= 0.3
+        work_done = bool(files_changed) or tool_call_count > 0
+        if not work_done:
+            issues.append("task completed with no output")
+            score -= 0.3
 
     # Error field should be empty
     error = str(task.get("error", "") or "")

@@ -255,6 +255,8 @@ class ArbiterEngine:
             return check_task_complete(
                 task,
                 output_text=str(context.get("output_text", "")),
+                files_changed=context.get("files_changed"),
+                tool_call_count=int(context.get("tool_call_count", 0)),
             )
 
         if kind == ArbiterCheckKind.GOAL_TRANSITION:
