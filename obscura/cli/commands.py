@@ -7048,18 +7048,31 @@ async def cmd_send(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
-    """Add a directory to the working context. Usage: /add-dir <path>."""
-    target = args.strip()
-    if not target:
-        print_error("Usage: /add-dir <path>")
+    """Allow a directory for tool access at runtime. Usage: /add-dir <path>
+
+    Registers the path with the system tools allowlist so agents can read/write
+    it regardless of OBSCURA_SYSTEM_TOOLS_BASE_DIR. Does NOT change cwd.
+    Pass --chdir to also change the working directory.
+    """
+    parts = args.strip().split()
+    if not parts:
+        print_error("Usage: /add-dir <path> [--chdir]")
         return None
+    do_chdir = "--chdir" in parts
+    path_parts = [p for p in parts if p != "--chdir"]
+    target = " ".join(path_parts)
     p = Path(target).expanduser().resolve()
     if not p.is_dir():
         print_error(f"Not a directory: {p}")
         return None
-    # Change working directory.
-    os.chdir(p)
-    print_ok(f"Working directory changed to {p}")
+    # Register with system tools allowlist.
+    from obscura.tools.system import add_allowed_dir
+    add_allowed_dir(p)
+    if do_chdir:
+        os.chdir(p)
+        print_ok(f"Allowed and changed working directory to: {p}")
+    else:
+        print_ok(f"Allowed for tool access: {p}")
     return None
 
 

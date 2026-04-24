@@ -86,6 +86,30 @@ def _unsafe_full_access_enabled() -> bool:
     return _env_flag("OBSCURA_SYSTEM_TOOLS_UNSAFE_FULL_ACCESS", default=False)
 
 
+# ---------------------------------------------------------------------------
+# Runtime-extensible allowed directories
+# ---------------------------------------------------------------------------
+
+# Extra dirs registered at runtime via add_allowed_dir() — bypasses base-dir check.
+_runtime_allowed_dirs: list[Path] = []
+
+
+def add_allowed_dir(path: str | Path) -> None:
+    """Register an additional directory as allowed at runtime.
+
+    Useful for dynamically granting access to paths outside the configured
+    ``OBSCURA_SYSTEM_TOOLS_BASE_DIR`` without restarting the process.
+
+    Example::
+
+        from obscura.tools.system import add_allowed_dir
+        add_allowed_dir("/tmp/my-workspace")
+    """
+    resolved = Path(path).expanduser().resolve()
+    if resolved not in _runtime_allowed_dirs:
+        _runtime_allowed_dirs.append(resolved)
+
+
 def _validate_url(url: str) -> str:
     """Validate a URL against SSRF attacks.
 
@@ -223,6 +247,37 @@ def _is_path_allowed(path: Path) -> bool:
     base = _resolve_base_dir()
     if base is None:
         return True
+
+    # 1. Runtime-registered dirs (add_allowed_dir() or OBSCURA_SYSTEM_TOOLS_EXTRA_ALLOWED_DIRS).
+    for allowed in _runtime_allowed_dirs:
+        try:
+            path.relative_to(allowed)
+            return True
+        except ValueError:
+            pass
+
+    # 2. Always allow any .obscura directory — it's agent-owned data (vault, output,
+    #    config) and must never be locked out by a project-scoped base-dir restriction.
+    #    This covers both the resolved obscura home and any symlinked/alternate .obscura
+    #    locations anywhere on the filesystem.
+    resolved = path.resolve()
+    for part in resolved.parts:
+        if part == ".obscura":
+            return True
+    # Also check via the canonical obscura home path.
+    try:
+        from obscura.core.paths import resolve_obscura_home
+
+        obscura_home = resolve_obscura_home().resolve()
+        try:
+            resolved.relative_to(obscura_home)
+            return True
+        except ValueError:
+            pass
+    except Exception:
+        pass
+
+    # 3. Standard base-dir check.
     try:
         path.relative_to(base)
     except ValueError:
