@@ -342,11 +342,20 @@ def check_goal_transition(
     goal: Mapping[str, Any],
     *,
     linked_task_statuses: Sequence[str] | None = None,
+    output_text: str = "",
+    files_changed: Sequence[str] = (),
+    test_outcome: object | None = None,
+    error_count: int = 0,
 ) -> tuple[float, list[str]]:
     """Score a goal status transition.
 
     *linked_task_statuses* should be the status of each task linked
     to the goal (e.g. ``["completed", "completed", "pending"]``).
+
+    When *output_text* and *files_changed* are provided, acceptance
+    criteria are verified using structured pattern matching (tests,
+    lint, file existence, error absence) via
+    :func:`check_acceptance_criteria`.
 
     Returns (score, issues).
     """
@@ -371,11 +380,23 @@ def check_goal_transition(
             issues.append(f"goal completing at {progress}% (expected 100%)")
             score -= 0.2
 
-        # Should have acceptance criteria satisfied (basic presence check)
-        criteria = goal.get("acceptance_criteria") or []
-        if criteria and not linked_task_statuses:
-            issues.append("goal has acceptance criteria but no linked tasks")
-            score -= 0.2
+        # Verify acceptance criteria using structured pattern matching.
+        criteria = list(goal.get("acceptance_criteria") or [])
+        if criteria:
+            crit_score, crit_issues = check_acceptance_criteria(
+                criteria,
+                output_text,
+                files_changed=files_changed,
+                test_outcome=test_outcome,
+                error_count=error_count,
+            )
+            if crit_score < 1.0:
+                # Weight criteria satisfaction at up to 0.3 of total score.
+                score -= (1.0 - crit_score) * 0.3
+                issues.extend(crit_issues)
+        elif not linked_task_statuses:
+            issues.append("goal has no acceptance criteria or linked tasks")
+            score -= 0.1
 
     return max(score, 0.0), issues
 
@@ -396,42 +417,27 @@ def check_acceptance_criteria(
     output_text: str,
     *,
     files_changed: Sequence[str] = (),
+    test_outcome: object | None = None,
+    error_count: int = 0,
 ) -> tuple[float, list[str]]:
     """Score whether acceptance criteria are satisfied.
 
-    Each criterion is a plain-text description. We check for keyword
-    overlap between the criterion and the combined output + file list.
-    This is a heuristic — the LLM judge handles nuanced evaluation.
+    Delegates to :mod:`obscura.arbiter.criteria` for structured pattern
+    matching (tests pass, lint clean, file exists, no errors) before
+    falling back to keyword overlap.  The LLM judge handles nuanced
+    evaluation of criteria that don't match any pattern.
 
     Returns (score, issues).
     """
-    if not criteria:
-        return 1.0, []
+    from obscura.arbiter.criteria import verify_criteria
 
-    issues: list[str] = []
-    evidence = f"{output_text} {' '.join(files_changed)}"
-    evidence_keywords = _extract_keywords(evidence)
-
-    met = 0
-    for criterion in criteria:
-        criterion_keywords = _extract_keywords(criterion)
-        if not criterion_keywords:
-            met += 1
-            continue
-        overlap = criterion_keywords & evidence_keywords
-        ratio = len(overlap) / len(criterion_keywords)
-        if ratio >= 0.3:
-            met += 1
-        else:
-            issues.append(
-                f"Criterion may be unmet ({ratio:.0%} match): "
-                f"'{criterion[:80]}'"
-            )
-
-    score = met / len(criteria) if criteria else 1.0
-    if score < 0.5:
-        issues.insert(0, f"Only {met}/{len(criteria)} acceptance criteria appear met")
-
+    score, issues, _ = verify_criteria(
+        criteria,
+        output_text=output_text,
+        files_changed=files_changed,
+        test_outcome=test_outcome,  # type: ignore[arg-type]
+        error_count=error_count,
+    )
     return max(score, 0.0), issues
 
 
