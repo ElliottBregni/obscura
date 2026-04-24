@@ -29,6 +29,9 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     from obscura.arbiter.test_runner import TestOutcome
 
+# Import shared stop-words and stemmer from checks — same pipeline, no duplication.
+from obscura.arbiter.checks import _STOP_WORDS, _stem  # noqa: PLC2701
+
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -74,11 +77,7 @@ _FILE_EXISTS_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-_STOP_WORDS = frozenset(
-    "a an the and or but in on at to for of with is are was were be been "
-    "have has had do does did will would could should may might must "
-    "it its this that these those".split()
-)
+
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +325,7 @@ def _verify_keyword_overlap(
 
     def _keywords(text: str) -> set[str]:
         words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())
-        return {w for w in words if w not in _STOP_WORDS}
+        return {_stem(w) for w in words if w not in _STOP_WORDS}
 
     criterion_kw = _keywords(criterion)
     evidence_kw = _keywords(evidence)
