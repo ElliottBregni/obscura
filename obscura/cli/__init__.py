@@ -134,6 +134,27 @@ def _sync_provider_settings() -> None:
 _session_state: dict[str, bool] = {"titled": False}
 
 
+def _is_interactive_repl(prompt: str | None) -> bool:
+    """Return True when running the interactive REPL (not single-shot)."""
+    return prompt is None
+
+
+def _ensure_cli_auth_for_startup(
+    backend: str,
+    prompt: str | None,
+) -> None:
+    """Auto-run CLI GitHub OAuth for interactive Copilot sessions when needed."""
+    if backend != "copilot" or not _is_interactive_repl(prompt):
+        return
+
+    try:
+        from obscura.cli.auth_commands import ensure_github_oauth_session
+
+        ensure_github_oauth_session(open_browser=True)
+    except Exception as exc:
+        _log.debug("CLI auto-auth skipped: %s", exc)
+
+
 def _swallow(label: str, exc: Exception) -> None:
     """Log a swallowed exception at DEBUG level instead of silently ignoring."""
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
@@ -2567,6 +2588,8 @@ def main(
             )
         except Exception as exc:
             click.echo(f"Failed to load workspace '{workspace_name}': {exc}", err=True)
+
+    _ensure_cli_auth_for_startup(backend, prompt)
 
     # Resolve session ID: --resume > --session > --continue (last session)
     resolved_session = resume or session

@@ -17,6 +17,7 @@ from obscura.cli.auth_commands import (
     SupabaseCliConfig,
     auth_group,
     clear_session,
+    ensure_github_oauth_session,
     get_access_token,
     get_github_token,
     load_session,
@@ -198,6 +199,47 @@ class TestCliCommands:
         result = CliRunner().invoke(auth_group, ["login", "--provider", "github"])
         assert result.exit_code != 0
         assert "Supabase is not configured" in result.output
+
+
+class TestEnsureGithubOauthSession:
+    def test_returns_none_when_supabase_unconfigured(
+        self, isolated_credentials: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ = isolated_credentials
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+
+        with patch.object(auth_commands, "_run_oauth_flow") as oauth_flow:
+            assert ensure_github_oauth_session(open_browser=False) is None
+            oauth_flow.assert_not_called()
+
+    def test_reuses_existing_valid_session(
+        self, isolated_credentials: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ = isolated_credentials
+        save_session(_sample_session(expires_at=int(time.time()) + 3600))
+        monkeypatch.setenv("SUPABASE_URL", "https://proj.supabase.co")
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+
+        with patch.object(auth_commands, "_run_oauth_flow") as oauth_flow:
+            session = ensure_github_oauth_session(open_browser=False)
+            assert session is not None
+            assert session.email == "user@example.com"
+            oauth_flow.assert_not_called()
+
+    def test_runs_oauth_when_session_missing(
+        self, isolated_credentials: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ = isolated_credentials
+        monkeypatch.setenv("SUPABASE_URL", "https://proj.supabase.co")
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+
+        fresh = _sample_session(email="new@example.com", user_id="new-user")
+        with patch.object(auth_commands, "_run_oauth_flow", return_value=fresh) as oauth_flow:
+            session = ensure_github_oauth_session(open_browser=False)
+            assert session is not None
+            assert session.email == "new@example.com"
+            oauth_flow.assert_called_once()
 
 
 class TestStoredSessionSerialization:

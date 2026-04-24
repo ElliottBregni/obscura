@@ -301,6 +301,28 @@ def get_github_token() -> str | None:
     return session.provider_token if session else None
 
 
+def ensure_github_oauth_session(*, open_browser: bool = True) -> StoredSession | None:
+    """Ensure a valid GitHub OAuth session exists for CLI startup.
+
+    Returns the current or newly-created session when Supabase is configured.
+    Returns ``None`` when Supabase is not configured.
+    """
+    cfg = SupabaseCliConfig.from_env()
+    if cfg is None:
+        return None
+
+    token = get_access_token()
+    if token:
+        existing = load_session()
+        if existing is not None:
+            return existing
+
+    session = _run_oauth_flow(cfg, "github", open_browser=open_browser)
+    click.secho(f"Signed in as {session.email or session.user_id}.", fg="green")
+    click.echo(f"Credentials stored at {CREDENTIALS_PATH}")
+    return session
+
+
 # ---------------------------------------------------------------------------
 # Local callback server
 # ---------------------------------------------------------------------------
@@ -577,6 +599,7 @@ __all__ = [
     "clear_session",
     "get_access_token",
     "get_github_token",
+    "ensure_github_oauth_session",
     "load_session",
     "save_session",
 ]
