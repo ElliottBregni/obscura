@@ -8144,7 +8144,7 @@ async def cmd_listen(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_login(args: str, _ctx: REPLContext) -> str | None:
     """Show auth status or login hints. Usage: /login [provider]."""
-    provider = args.strip().lower()
+    provider = args.strip().lower() or "copilot"
 
     if not provider:
         statuses: list[tuple[str, bool, str]] = []
@@ -8177,11 +8177,8 @@ async def cmd_login(args: str, _ctx: REPLContext) -> str | None:
 
 
 async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
-    """Clear auth for a provider. Usage: /logout <provider>."""
-    provider = args.strip().lower()
-    if not provider:
-        print_error("Usage: /logout <provider>  (claude, openai, copilot)")
-        return None
+    """Clear auth for a provider. Usage: /logout [provider]."""
+    provider = args.strip().lower() or "copilot"
     env_map = {
         "claude": "ANTHROPIC_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
