@@ -27,6 +27,7 @@ import { BACKENDS } from '@/lib/constants';
 import { SessionChatView } from './components/SessionChatView';
 import { KairosStatusDot } from './components/KairosStatusDot';
 import { FleetPanel } from './components/FleetPanel';
+import { GoalsWidget } from './components/GoalsWidget';
 import type { Session } from '@/api/types';
 
 // ─── Session list item ────────────────────────────────────────────────────────
@@ -42,7 +43,6 @@ function SessionListItem({
   onSelect: () => void;
   onDelete: () => void;
 }) {
-  // Prefer a human-readable slug; UUIDs get shortened
   const rawId = session.session_id;
   const isUuid = /^[0-9a-f-]{36}$/i.test(rawId);
   const label = isUuid
@@ -266,18 +266,21 @@ export default function SessionsPage() {
         </div>
 
         {/* Sidebar footer */}
-        <div className="border-t border-border p-2 space-y-1">
-          <KairosStatusDot />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start text-xs text-muted-foreground"
-            onClick={() => ingestSessions.mutate(undefined)}
-            disabled={ingestSessions.isPending}
-          >
-            <Download className="mr-1.5 h-3 w-3" />
-            {ingestSessions.isPending ? 'Ingesting…' : 'Ingest Sessions'}
-          </Button>
+        <div className="border-t border-border">
+          <GoalsWidget />
+          <div className="p-2 space-y-1">
+            <KairosStatusDot />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-xs text-muted-foreground"
+              onClick={() => ingestSessions.mutate(undefined)}
+              disabled={ingestSessions.isPending}
+            >
+              <Download className="mr-1.5 h-3 w-3" />
+              {ingestSessions.isPending ? 'Ingesting…' : 'Ingest Sessions'}
+            </Button>
+          </div>
         </div>
       </aside>
 

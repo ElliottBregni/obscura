@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, User, Brain, AlertCircle, Loader2 } from 'lucide-react';
+import { Bot, User, Brain, AlertCircle, Loader2, RotateCcw } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query';
 import { useChatStore } from '@/stores/chatStore';
 import { useAgentStream } from '@/hooks/useAgentStream';
+import { fetchApi } from '@/api/client';
 import { BACKENDS } from '@/lib/constants';
 import { ToolCallBlock } from './ToolCallBlock';
 import { ChatComposer } from './ChatComposer';
@@ -27,6 +29,13 @@ function ThinkingBlock({ text }: { text: string }) {
   );
 }
 
+function useResumeSession(sessionId: string) {
+  return useMutation({
+    mutationFn: () =>
+      fetchApi(`/api/v1/sessions/${sessionId}/resume`, { method: 'POST' }),
+  });
+}
+
 export function SessionChatView({ session }: Props) {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
@@ -42,6 +51,8 @@ export function SessionChatView({ session }: Props) {
     backend: backendValue,
     sessionId: session.session_id,
   });
+
+  const resumeSession = useResumeSession(session.session_id);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -65,9 +76,18 @@ export function SessionChatView({ session }: Props) {
             ? session.session_id.slice(0, 8) + '…' + session.session_id.slice(-8)
             : session.session_id}
         </span>
-        <span className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
           {BACKENDS.find((b) => b.value === session.backend)?.label ?? session.backend}
         </span>
+        <button
+          onClick={() => resumeSession.mutate()}
+          disabled={resumeSession.isPending}
+          title="Resume session"
+          className="ml-auto shrink-0 flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <RotateCcw className={`h-3 w-3 ${resumeSession.isPending ? 'animate-spin' : ''}`} />
+          Resume
+        </button>
       </div>
 
       {/* Message list */}
@@ -134,9 +154,6 @@ export function SessionChatView({ session }: Props) {
 
         <div ref={bottomRef} />
       </div>
-
-      {/* Tool approval banner */}
-      <ToolApprovalBanner />
 
       {/* Tool approval banner */}
       <ToolApprovalBanner />
