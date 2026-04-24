@@ -134,10 +134,16 @@ class VaultSync:
         self,
         vault_dir: Path | str | None = None,
         *,
+        project_vault_dir: Path | str | None = None,
         autosync: bool = True,
         dry_run: bool = False,
     ) -> None:
         self.vault_dir = Path(vault_dir or _DEFAULT_VAULT_DIR).expanduser()
+        # Optional per-project vault overlay (e.g. <project>/.obscura/vault/).
+        # When set, scan() merges both; project files shadow global ones.
+        self.project_vault_dir: Path | None = (
+            Path(project_vault_dir).expanduser() if project_vault_dir else None
+        )
         self.autosync = bool(autosync)
         self.dry_run = bool(dry_run)
         self._prev_hashes: dict[str, str] = {}
@@ -163,6 +169,12 @@ class VaultSync:
                 encoding="utf-8",
             )
 
+        # Bootstrap project vault zones if a project overlay is configured.
+        if self.project_vault_dir is not None:
+            for zone_dir in _ZONE_DIRS:
+                (self.project_vault_dir / zone_dir).mkdir(parents=True, exist_ok=True)
+            logger.debug("Project vault bootstrapped at %s", self.project_vault_dir)
+
         # Load previous sync state.
         self._load_hashes()
         logger.debug("Vault bootstrapped at %s", self.vault_dir)
@@ -187,6 +199,27 @@ class VaultSync:
             metas.append(
                 FileMeta(path=p, owner=owner, hash=file_hash, frontmatter=fm, body=body)
             )
+        # Merge project vault overlay — project files shadow global ones by rel-path.
+        if self.project_vault_dir is not None:
+            proj_root = self.project_vault_dir
+            proj_scan_root = proj_root / zone if zone else proj_root
+            if proj_scan_root.exists():
+                global_rels = {m.path.relative_to(self.vault_dir): m for m in metas}
+                for p in sorted(proj_scan_root.rglob("*.md")):
+                    rel = p.relative_to(proj_root)
+                    owner = rel.parts[0] if len(rel.parts) > 1 else "shared"
+                    if owner not in ("user", "agent", "shared"):
+                        continue
+                    file_hash = self._compute_hash(p)
+                    fm, body = self._parse_frontmatter(p)
+                    proj_meta = FileMeta(
+                        path=p, owner=owner, hash=file_hash, frontmatter=fm, body=body
+                    )
+                    # Project file shadows global file with the same relative path.
+                    if rel in global_rels:
+                        metas = [m for m in metas if m.path.relative_to(self.vault_dir) != rel]
+                    metas.append(proj_meta)
+
         return metas
 
     def detect_changes(self, zone: str = "") -> ChangeSet:
@@ -803,10 +836,23 @@ class VaultSync:
 _instance: VaultSync | None = None
 
 
+def _auto_project_vault_dir(cwd: str | None = None) -> Path | None:
+    """Return <cwd>/.obscura/vault if it exists, else None.
+
+    Allows per-project vaults to be discovered automatically when a project
+    drops a ``.obscura/vault/`` directory alongside its code.
+    """
+    import os
+
+    root = Path(cwd or os.getcwd())
+    candidate = root / ".obscura" / "vault"
+    return candidate if candidate.is_dir() else None
+
+
 def _get_instance() -> VaultSync:
     global _instance  # noqa: PLW0603
     if _instance is None:
-        _instance = VaultSync()
+        _instance = VaultSync(project_vault_dir=_auto_project_vault_dir())
     return _instance
 
 
