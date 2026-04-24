@@ -34,6 +34,13 @@ if [[ -z "$GH_TOKEN" && -z "$GITHUB_TOKEN" && -z "$COPILOT_GITHUB_TOKEN" ]]; the
   done
 fi
 
+SCRIPT_PATH="$(dirname "$HOST")/ensure_playwright.sh"
+if [[ -f "$SCRIPT_PATH" ]]; then
+  echo "Running ensure_playwright.sh" >> "$LOG"
+  # Run non-fatal check and append output to launcher log
+  bash "$SCRIPT_PATH" >> "$LOG" 2>&1 || echo "ensure_playwright failed" >> "$LOG"
+fi
+
 echo "---- launcher boot $(date) ----" >> "$LOG"
 
 if [[ -n "$PY" && -x "$PY" ]]; then
