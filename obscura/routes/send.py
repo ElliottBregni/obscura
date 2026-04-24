@@ -125,6 +125,28 @@ async def send(
         await client.stop()
 
 
+@router.post("/messages", response_model=SendResponse)
+async def messages_send(
+    body: SendRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
+) -> SendResponse:
+    """Phase-1 alias for send; keeps CLI/API surface aligned."""
+    return await send(body, request, user, oauth_gh_token)
+
+
+@router.post("/messages/stream")
+async def messages_stream(
+    body: StreamRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
+) -> EventSourceResponse:
+    """Phase-1 alias for stream; keeps CLI/API surface aligned."""
+    return await stream(body, request, user, oauth_gh_token)
+
+
 @router.post("/stream")
 async def stream(
     body: StreamRequest,

@@ -227,6 +227,25 @@ class TestSendRoutes:
         assert kwargs["request"].prompt == "hello"
         assert kwargs["request"].mode.value == "unified"
 
+    def test_messages_alias_endpoint(self, app: Any, client: TestClient) -> None:
+        mock_client: Any = AsyncMock()
+        mock_client.send.return_value = MagicMock(text="hello")
+        mock_client.stop = AsyncMock()
+        mock_client.capability_tier = "B"
+        mock_factory: Any = AsyncMock()
+        mock_factory.create.return_value = mock_client
+        app.state.client_factory = mock_factory
+
+        resp = client.post(
+            "/api/v1/messages",
+            json={
+                "backend": "copilot",
+                "prompt": "hello",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "hello"
+
     @patch("obscura.routes.send.sync_session_turn")
     def test_send_syncs_session_turn_to_vector_memory(
         self,
