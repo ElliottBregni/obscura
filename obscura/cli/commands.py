@@ -8143,34 +8143,25 @@ async def cmd_listen(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_login(args: str, _ctx: REPLContext) -> str | None:
-    """Show auth status or login hints. Usage: /login [provider]."""
+    """Login for a provider. Usage: /login [provider]."""
     provider = args.strip().lower() or "copilot"
 
-    if not provider:
-        statuses: list[tuple[str, bool, str]] = []
-        ck = os.environ.get("ANTHROPIC_API_KEY", "")
-        statuses.append(("claude", bool(ck), f"...{ck[-4:]}" if ck else ""))
-        ok = os.environ.get("OPENAI_API_KEY", "")
-        statuses.append(("openai", bool(ok), f"...{ok[-4:]}" if ok else ""))
-        cp = (Path.home() / ".config" / "github-copilot" / "hosts.json").exists()
-        statuses.append(("copilot", cp, "token file" if cp else ""))
+    if provider in ("copilot", "github"):
+        from obscura.cli.auth_commands import ensure_github_oauth_session
 
-        table = Table(title="Auth Status", expand=False)
-        table.add_column("Provider", width=12)
-        table.add_column("Status", width=14)
-        table.add_column("Key", width=15, style="dim")
-        for name, authed, hint in statuses:
-            st = "[green]authenticated[/]" if authed else "[red]not configured[/]"
-            table.add_row(name, st, hint)
-        console.print(table)
+        session = ensure_github_oauth_session(open_browser=True)
+        if session is None:
+            print_error(
+                "GitHub OAuth login unavailable. Configure SUPABASE_URL and SUPABASE_ANON_KEY.",
+            )
+            return None
+        print_ok(f"Signed in via GitHub OAuth as {session.email}.")
         return None
 
     if provider in ("claude", "anthropic"):
         console.print("  [bold]export ANTHROPIC_API_KEY=sk-ant-...[/]")
     elif provider in ("openai", "gpt"):
         console.print("  [bold]export OPENAI_API_KEY=sk-...[/]")
-    elif provider in ("copilot", "github"):
-        console.print("  [bold]! obscura auth copilot[/]")
     else:
         print_error(f"Unknown provider: {provider}. Known: claude, openai, copilot")
     return None

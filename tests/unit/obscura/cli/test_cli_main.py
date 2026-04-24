@@ -23,7 +23,12 @@ from obscura.cli import (
     send_message,
 )
 from obscura.cli.bootstrap import _parse_inline_agent_mention
-from obscura.cli.commands import REPLContext, _fleet_delegate, cmd_delegate
+from obscura.cli.commands import (
+    REPLContext,
+    _fleet_delegate,
+    cmd_delegate,
+    cmd_login,
+)
 from obscura.core.types import AgentEvent, AgentEventKind
 
 if TYPE_CHECKING:
@@ -92,6 +97,43 @@ def _done_event() -> AgentEvent:
 
 class TestClickEntryPoint:
     """Tests for the Click CLI command."""
+
+
+class TestLoginSlashCommand:
+    @pytest.mark.asyncio
+    async def test_default_login_runs_github_oauth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_session = MagicMock(email="user@example.com")
+        ensure_mock = MagicMock(return_value=fake_session)
+        ok_mock = MagicMock()
+        monkeypatch.setattr(
+            "obscura.cli.auth_commands.ensure_github_oauth_session",
+            ensure_mock,
+        )
+        monkeypatch.setattr("obscura.cli.commands.print_ok", ok_mock)
+
+        await cmd_login("", _make_ctx())
+
+        ensure_mock.assert_called_once_with(open_browser=True)
+        ok_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_default_login_reports_when_oauth_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ensure_mock = MagicMock(return_value=None)
+        err_mock = MagicMock()
+        monkeypatch.setattr(
+            "obscura.cli.auth_commands.ensure_github_oauth_session",
+            ensure_mock,
+        )
+        monkeypatch.setattr("obscura.cli.commands.print_error", err_mock)
+
+        await cmd_login("", _make_ctx())
+
+        ensure_mock.assert_called_once_with(open_browser=True)
+        err_mock.assert_called_once()
+
 
     def test_help_flag(self) -> None:
         runner = CliRunner()
