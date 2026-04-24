@@ -231,7 +231,7 @@ class SQLiteBackend:
             updated_at = (
                 datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None
             )
-            accessed_at_raw = row.get("accessed_at", None)
+            accessed_at_raw = row["accessed_at"]
             accessed_at = (
                 datetime.fromisoformat(accessed_at_raw) if accessed_at_raw else None
             )
@@ -353,7 +353,7 @@ class SQLiteBackend:
         rows = conn.execute(query, params).fetchall()
         entries: list[VectorEntry] = []
         for row in rows:
-            accessed_at_raw = row.get("accessed_at", None)
+            accessed_at_raw = row["accessed_at"]
             entries.append(
                 VectorEntry(
                     key=MemoryKey(namespace=row["namespace"], key=row["key"]),
