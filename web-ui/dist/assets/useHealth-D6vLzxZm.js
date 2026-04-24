@@ -1,1 +1,0 @@
-import{u as r,f as t}from"./client-DcQdd-qf.js";function u(){return r({queryKey:["health"],queryFn:()=>t("/api/v1/health"),refetchInterval:1e4})}function h(e){return r({queryKey:["heartbeat",e],queryFn:()=>t(`/api/v1/heartbeat/${e}`),enabled:!!e,refetchInterval:5e3})}export{h as a,u};
