@@ -1860,7 +1860,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     # Fallback: spawn with SDK defaults (with warning)
     if not manifest_loaded:
         print_warning(
-            f"No manifest found for '{name}\. "
+            f"No manifest found for '{name}'. "
             "Using SDK defaults (no skill filters, tool restrictions, or limits).",
         )
         agent = runtime.spawn(
