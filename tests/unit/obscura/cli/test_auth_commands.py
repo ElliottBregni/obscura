@@ -262,6 +262,46 @@ class TestStoredSessionSerialization:
         }
         loaded = StoredSession.from_dict(raw)
         assert loaded.provider_token is None
+        assert loaded.provider_refresh_token is None
+
+
+class TestProviderSecretMetadata:
+    def test_build_provider_secrets_metadata_merges_existing(self) -> None:
+        existing = {
+            "name": "User",
+            "obscura_provider_secrets": {
+                "google": {"provider_token": "goog-token"},
+                "github": {"provider_token": "old-gh"},
+            },
+        }
+        session = _sample_session(
+            provider_token="new-gh-token",
+            provider_refresh_token="new-gh-refresh",
+        )
+
+        merged = auth_commands._build_provider_secrets_metadata(
+            existing_user_metadata=existing,
+            provider="github",
+            session=session,
+        )
+
+        assert merged["name"] == "User"
+        secrets = merged["obscura_provider_secrets"]
+        assert secrets["google"]["provider_token"] == "goog-token"
+        assert secrets["github"]["provider_token"] == "new-gh-token"
+        assert secrets["github"]["provider_refresh_token"] == "new-gh-refresh"
+
+    def test_build_provider_secrets_metadata_no_secrets_noop(self) -> None:
+        existing = {"name": "User"}
+        session = _sample_session(provider_token=None, provider_refresh_token=None)
+
+        merged = auth_commands._build_provider_secrets_metadata(
+            existing_user_metadata=existing,
+            provider="github",
+            session=session,
+        )
+
+        assert merged == existing
 
 
 class TestGithubTokenAccessor:
@@ -310,10 +350,16 @@ class TestGithubTokenAccessor:
             expires_at=int(time.time()) + 3600,
             provider="refresh",
             provider_token=None,  # Supabase didn't re-issue
+            provider_refresh_token=None,
         )
-        with patch.object(auth_commands, "_refresh_session", return_value=refreshed):
+        with (
+            patch.object(auth_commands, "_refresh_session", return_value=refreshed),
+            patch.object(auth_commands, "_sync_provider_secrets_to_supabase") as sync_mock,
+        ):
             get_access_token()
 
         stored = load_session()
         assert stored is not None
         assert stored.provider_token == "ghp_original"
+        assert stored.provider_refresh_token is None
+        sync_mock.assert_called_once()

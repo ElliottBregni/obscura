@@ -44,6 +44,7 @@ CREDENTIALS_PATH = Path(
 )
 
 REFRESH_LEEWAY_SECONDS = 60
+_PROVIDER_SECRET_METADATA_KEY = "obscura_provider_secrets"
 
 
 def _load_dotenv_best_effort() -> None:
@@ -95,6 +96,8 @@ class StoredSession:
     # GitHub provider token — populated on GitHub OAuth only; used as the
     # "easy path" Copilot auth fallback (see obscura.core.auth.AuthConfig).
     provider_token: str | None = None
+    # Provider refresh token (when Supabase returns it).
+    provider_refresh_token: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +108,7 @@ class StoredSession:
             "email": self.email,
             "provider": self.provider,
             "provider_token": self.provider_token,
+            "provider_refresh_token": self.provider_refresh_token,
         }
 
     @classmethod
@@ -119,6 +123,11 @@ class StoredSession:
             provider_token=(
                 str(d["provider_token"])
                 if d.get("provider_token") is not None
+                else None
+            ),
+            provider_refresh_token=(
+                str(d["provider_refresh_token"])
+                if d.get("provider_refresh_token") is not None
                 else None
             ),
         )
@@ -234,6 +243,90 @@ def clear_session() -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _provider_secret_payload(session: StoredSession) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    if session.provider_token:
+        payload["provider_token"] = session.provider_token
+    if session.provider_refresh_token:
+        payload["provider_refresh_token"] = session.provider_refresh_token
+    return payload
+
+
+def _build_provider_secrets_metadata(
+    *,
+    existing_user_metadata: dict[str, Any] | None,
+    provider: str,
+    session: StoredSession,
+) -> dict[str, Any]:
+    metadata = dict(existing_user_metadata or {})
+    existing_secrets = metadata.get(_PROVIDER_SECRET_METADATA_KEY)
+    provider_secrets: dict[str, Any]
+    if isinstance(existing_secrets, dict):
+        provider_secrets = dict(existing_secrets)
+    else:
+        provider_secrets = {}
+
+    merged = _provider_secret_payload(session)
+    if merged:
+        provider_secrets[provider] = {**provider_secrets.get(provider, {}), **merged}
+        metadata[_PROVIDER_SECRET_METADATA_KEY] = provider_secrets
+
+    return metadata
+
+
+def _sync_provider_secrets_to_supabase(
+    cfg: SupabaseCliConfig,
+    *,
+    provider: str,
+    session: StoredSession,
+) -> None:
+    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not service_role_key:
+        return
+    if not session.user_id:
+        return
+
+    admin_headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Content-Type": "application/json",
+    }
+
+    user_resp = httpx.get(
+        f"{cfg.url}/auth/v1/admin/users/{session.user_id}",
+        headers=admin_headers,
+        timeout=20.0,
+    )
+    if user_resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to fetch Supabase user metadata ({user_resp.status_code}): {user_resp.text}",
+        )
+
+    user_body = user_resp.json()
+    existing_user_metadata = user_body.get("user_metadata")
+    metadata = _build_provider_secrets_metadata(
+        existing_user_metadata=(
+            existing_user_metadata if isinstance(existing_user_metadata, dict) else None
+        ),
+        provider=provider,
+        session=session,
+    )
+
+    if metadata == existing_user_metadata:
+        return
+
+    update_resp = httpx.put(
+        f"{cfg.url}/auth/v1/admin/users/{session.user_id}",
+        headers=admin_headers,
+        json={"user_metadata": metadata},
+        timeout=20.0,
+    )
+    if update_resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to update Supabase user metadata ({update_resp.status_code}): {update_resp.text}",
+        )
+
+
 def _refresh_session(cfg: SupabaseCliConfig, refresh_token: str) -> StoredSession:
     resp = httpx.post(
         f"{cfg.url}/auth/v1/token",
@@ -247,6 +340,7 @@ def _refresh_session(cfg: SupabaseCliConfig, refresh_token: str) -> StoredSessio
     body = resp.json()
     user = body.get("user") or {}
     provider_token = body.get("provider_token")
+    provider_refresh_token = body.get("provider_refresh_token")
     return StoredSession(
         access_token=body["access_token"],
         refresh_token=body["refresh_token"],
@@ -255,6 +349,9 @@ def _refresh_session(cfg: SupabaseCliConfig, refresh_token: str) -> StoredSessio
         email=str(user.get("email", "")),
         provider="refresh",
         provider_token=str(provider_token) if provider_token else None,
+        provider_refresh_token=(
+            str(provider_refresh_token) if provider_refresh_token else None
+        ),
     )
 
 
@@ -282,11 +379,15 @@ def get_access_token() -> str | None:
         logger.debug("CLI token refresh failed: %s", exc)
         return None
     refreshed.provider = session.provider
-    # Preserve the previously-captured provider_token — Supabase's refresh
-    # endpoint doesn't always re-issue it.
+    # Preserve previously-captured provider secrets — Supabase refresh
+    # responses may omit them.
     if refreshed.provider_token is None:
         refreshed.provider_token = session.provider_token
+    if refreshed.provider_refresh_token is None:
+        refreshed.provider_refresh_token = session.provider_refresh_token
     save_session(refreshed)
+    if refreshed.provider == "github":
+        _sync_provider_secrets_to_supabase(cfg, provider="github", session=refreshed)
     return refreshed.access_token
 
 
@@ -463,6 +564,7 @@ def _run_oauth_flow(
     body = resp.json()
     user = body.get("user") or {}
     provider_token = body.get("provider_token")
+    provider_refresh_token = body.get("provider_refresh_token")
     session = StoredSession(
         access_token=body["access_token"],
         refresh_token=body["refresh_token"],
@@ -471,8 +573,12 @@ def _run_oauth_flow(
         email=str(user.get("email", "")),
         provider=provider,
         provider_token=str(provider_token) if provider_token else None,
+        provider_refresh_token=(
+            str(provider_refresh_token) if provider_refresh_token else None
+        ),
     )
     save_session(session)
+    _sync_provider_secrets_to_supabase(cfg, provider=provider, session=session)
     return session
 
 
