@@ -29,7 +29,6 @@ import time
 from typing import Any
 
 from obscura.arbiter.checks import (
-    check_acceptance_criteria,
     check_drift,
     check_file_quality,
     check_file_relevance,
@@ -74,6 +73,8 @@ class ArbiterEngine:
         self._session_errors: dict[str, list[str]] = {}  # cross-turn error memory
         self._events: list[ArbiterEvent] = []
         self._started = False
+        self._historical_patterns: str = ""  # loaded from previous sessions on start()
+        self._historical_patterns: str = ""  # loaded from previous sessions on start()
 
     @property
     def config(self) -> ArbiterConfig:
@@ -89,6 +90,7 @@ class ArbiterEngine:
 
     def start(self) -> None:
         self._started = True
+        self._load_historical_patterns()
         logger.info(
             "Arbiter started (judge_mode=%s, accept=%.1f, revise=%.1f)",
             self._config.judge_mode,
@@ -536,6 +538,40 @@ class ArbiterEngine:
     # Agent self-awareness
     # ------------------------------------------------------------------
 
+
+    def _load_historical_patterns(self) -> None:
+        """Load cross-session patterns from previous runs for this project."""
+        try:
+            import os
+            from obscura.arbiter.store import ArbiterStore
+            project_root = os.getcwd()
+            self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
+            if self._historical_patterns:
+                logger.info(
+                    "Arbiter: loaded historical patterns for %s — %s",
+                    project_root,
+                    self._historical_patterns[:120],
+                )
+        except Exception:
+            logger.debug("Could not load historical patterns", exc_info=True)
+
+
+    def _load_historical_patterns(self) -> None:
+        """Load cross-session patterns from previous runs for this project."""
+        try:
+            import os
+            from obscura.arbiter.store import ArbiterStore
+            project_root = os.getcwd()
+            self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
+            if self._historical_patterns:
+                logger.info(
+                    "Arbiter: loaded historical patterns for %s — %s",
+                    project_root,
+                    self._historical_patterns[:120],
+                )
+        except Exception:
+            logger.debug("Could not load historical patterns", exc_info=True)
+
     def get_recent_verdict_summary(self, limit: int = 5) -> str:
         """Return a short summary of recent verdicts for agent self-awareness.
 
@@ -544,7 +580,8 @@ class ArbiterEngine:
         """
         recent = self._events[-limit:] if self._events else []
         if not recent:
-            return ""
+            # Still surface historical patterns even if no in-session events yet.
+            return self._historical_patterns if self._historical_patterns else ""
 
         lines = ["## Recent Arbiter Verdicts", ""]
         verdict_counts: dict[str, int] = {}
@@ -577,6 +614,12 @@ class ArbiterEngine:
                 "_Pattern: Strong acceptance rate. Current approach is working well._"
             )
 
+        if self._historical_patterns:
+            lines.append("")
+            lines.append(f"_Historical: {self._historical_patterns}_")
+        if self._historical_patterns:
+            lines.append("")
+            lines.append(f"_Historical: {self._historical_patterns}_")
         return "\n".join(lines)
 
     @property
