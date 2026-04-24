@@ -25,6 +25,7 @@ import {
 } from '@/api/hooks/useSessions';
 import { BACKENDS } from '@/lib/constants';
 import { SessionChatView } from './components/SessionChatView';
+import { KairosStatusDot } from './components/KairosStatusDot';
 import type { Session } from '@/api/types';
 
 // ─── Session list item ────────────────────────────────────────────────────────
@@ -40,10 +41,14 @@ function SessionListItem({
   onSelect: () => void;
   onDelete: () => void;
 }) {
-  const label =
-    session.session_id.length > 28
-      ? session.session_id.slice(0, 8) + '…' + session.session_id.slice(-8)
-      : session.session_id;
+  // Prefer a human-readable slug; UUIDs get shortened
+  const rawId = session.session_id;
+  const isUuid = /^[0-9a-f-]{36}$/i.test(rawId);
+  const label = isUuid
+    ? rawId.slice(0, 8) + '…'
+    : rawId.length > 28
+    ? rawId.slice(0, 24) + '…'
+    : rawId;
 
   const backendLabel =
     BACKENDS.find((b) => b.value === session.backend)?.label ?? session.backend;
@@ -236,7 +241,8 @@ export default function SessionsPage() {
         </div>
 
         {/* Sidebar footer */}
-        <div className="border-t border-border p-2">
+        <div className="border-t border-border p-2 space-y-1">
+          <KairosStatusDot />
           <Button
             variant="ghost"
             size="sm"

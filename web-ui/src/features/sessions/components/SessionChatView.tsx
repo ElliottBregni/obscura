@@ -5,6 +5,7 @@ import { useAgentStream } from '@/hooks/useAgentStream';
 import { BACKENDS } from '@/lib/constants';
 import { ToolCallBlock } from './ToolCallBlock';
 import { ChatComposer } from './ChatComposer';
+import { ToolApprovalBanner } from './ToolApprovalBanner';
 import type { Session } from '@/api/types';
 
 interface Props {
@@ -133,6 +134,12 @@ export function SessionChatView({ session }: Props) {
 
         <div ref={bottomRef} />
       </div>
+
+      {/* Tool approval banner */}
+      <ToolApprovalBanner />
+
+      {/* Tool approval banner */}
+      <ToolApprovalBanner />
 
       {/* Composer */}
       <ChatComposer
