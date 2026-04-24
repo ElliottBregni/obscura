@@ -75,7 +75,9 @@ async def _ingest_and_inject(context: dict[str, Any]) -> None:
             logger.info("Vault ingest: %d file(s) synced", len(changed_files))
 
         # Inject vault context into the prompt.
-        vault_context = _build_vault_context(vs)
+        # Use active goal text as query for relevance ranking.
+        goal_ctx: str = context.get("_goal_context", "")
+        vault_context = _build_vault_context(vs, query=goal_ctx or None)
         if vault_context:
             context["_vault_context"] = vault_context
 
@@ -104,13 +106,43 @@ async def _export_on_finalize(context: dict[str, Any]) -> None:
         logger.debug("Vault PRE_FINALIZE export failed", exc_info=True)
 
 
-def _build_vault_context(vs: Any) -> str:
+def _vault_relevance_score(meta: Any, query_words: set[str]) -> int:
+    """Score a vault file by keyword overlap with query_words.
+
+    Checks title, tags, type, and first 500 chars of body.
+    Returns number of matching keywords (higher = more relevant).
+    """
+    if not query_words:
+        return 0
+    candidates: list[str] = []
+    fm = meta.frontmatter
+    if fm.get("title"):
+        candidates.append(str(fm["title"]).lower())
+    if fm.get("tags"):
+        tags = fm["tags"]
+        if isinstance(tags, list):
+            candidates.extend(str(t).lower() for t in tags)
+        else:
+            candidates.append(str(tags).lower())
+    if fm.get("type"):
+        candidates.append(str(fm["type"]).lower())
+    if meta.body:
+        candidates.append(meta.body[:500].lower())
+    combined = " ".join(candidates)
+    return sum(1 for w in query_words if w in combined)
+
+
+def _build_vault_context(vs: Any, *, query: str | None = None) -> str:
     """Build the vault context section for prompt injection.
 
     Three parts:
     1. Full content of ``always_inject: true`` files (profile, conventions)
-    2. Compact index of all vault files so the agent knows what's available
+    2. Semantically ranked vault index -- top-5 relevant files shown with a
+       one-line snippet, remaining files listed by name only
     3. Instruction telling the agent to ``read_text_file`` for details
+
+    When *query* is provided (e.g. the active goal summary), files are ranked
+    by keyword overlap so the most relevant notes surface first.
     """
     parts: list[str] = ["## Vault"]
 
@@ -124,7 +156,7 @@ def _build_vault_context(vs: Any) -> str:
             parts.append(f"\n### {meta.frontmatter.get('title', meta.path.stem)}")
             parts.append(meta.body)
 
-    # 2. Vault index (compact — just filenames and types).
+    # 2. Vault index -- ranked by relevance when a query is available.
     all_files = vs.scan()
     if all_files:
         # Skip always_inject files from index (already shown in full).
@@ -132,17 +164,43 @@ def _build_vault_context(vs: Any) -> str:
         index_files = [m for m in all_files if str(m.path) not in always_paths]
 
         if index_files:
+            # Build query word set for relevance scoring.
+            stop = {"the", "a", "an", "and", "or", "of", "to", "in", "is",
+                    "for", "with", "this", "that", "are", "on", "at", "be"}
+            query_words: set[str] = set()
+            if query:
+                query_words = {
+                    w for w in query.lower().split() if len(w) > 2 and w not in stop
+                }
+
+            # Sort by relevance score descending (stable -- preserves order on ties).
+            scored = sorted(
+                index_files,
+                key=lambda m: _vault_relevance_score(m, query_words),
+                reverse=True,
+            )
+
+            _TOP_N = 5  # Show snippet for top-N relevant files.
             parts.append("\n### Vault Index")
-            parts.append("Files available via `read_text_file`:")
-            for meta in index_files:
+            if query_words:
+                parts.append("Relevant files (ranked by topic match):")
+            else:
+                parts.append("Files available via `read_text_file`:")
+
+            for i, meta in enumerate(scored):
                 rel = meta.path.relative_to(vs.vault_dir)
                 file_type = meta.frontmatter.get("type", "")
+                title = meta.frontmatter.get("title", "")
                 label = f"  - `{rel}`"
                 if file_type:
                     label += f" ({file_type})"
-                title = meta.frontmatter.get("title", "")
                 if title:
                     label += f" — {title}"
+                # Add a one-line body snippet for the top-N results.
+                if i < _TOP_N and meta.body and query_words:
+                    snippet = meta.body.strip().splitlines()[0][:120]
+                    if snippet:
+                        label += f"\n      _{snippet}_"
                 parts.append(label)
 
     if len(parts) <= 1:
