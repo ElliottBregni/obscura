@@ -26,6 +26,7 @@ import {
 import { BACKENDS } from '@/lib/constants';
 import { SessionChatView } from './components/SessionChatView';
 import { KairosStatusDot } from './components/KairosStatusDot';
+import { FleetPanel } from './components/FleetPanel';
 import type { Session } from '@/api/types';
 
 // ─── Session list item ────────────────────────────────────────────────────────
@@ -181,6 +182,7 @@ export default function SessionsPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<'sessions' | 'fleet'>('sessions');
 
   const selectedSession = sessions.find((s) => s.session_id === selectedId) ?? null;
 
@@ -201,43 +203,66 @@ export default function SessionsPage() {
     <div className="flex h-full overflow-hidden">
       {/* ── Sidebar ── */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-background">
-        {/* Sidebar header */}
-        <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Sessions
-          </span>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6"
-            onClick={() => setCreateOpen(true)}
-            title="New session"
+        {/* Sidebar header — tabs */}
+        <div className="flex items-center border-b border-border">
+          <button
+            onClick={() => setSidebarTab('sessions')}
+            className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors
+              ${sidebarTab === 'sessions'
+                ? 'border-b-2 border-primary text-foreground'
+                : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+            Sessions
+          </button>
+          <button
+            onClick={() => setSidebarTab('fleet')}
+            className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors
+              ${sidebarTab === 'fleet'
+                ? 'border-b-2 border-primary text-foreground'
+                : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            Fleet
+          </button>
+          {sidebarTab === 'sessions' && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="mr-1.5 h-6 w-6 shrink-0"
+              onClick={() => setCreateOpen(true)}
+              title="New session"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
 
-        {/* Session list */}
+        {/* Session list / Fleet panel */}
         <div className="flex-1 overflow-y-auto py-1.5 px-1.5 space-y-0.5">
-          {isLoading && (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              Loading…
-            </p>
+          {sidebarTab === 'fleet' ? (
+            <FleetPanel />
+          ) : (
+            <>
+              {isLoading && (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  Loading…
+                </p>
+              )}
+              {!isLoading && sessions.length === 0 && (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  No sessions yet.
+                </p>
+              )}
+              {sessions.map((session) => (
+                <SessionListItem
+                  key={session.session_id}
+                  session={session}
+                  selected={session.session_id === selectedId}
+                  onSelect={() => setSelectedId(session.session_id)}
+                  onDelete={() => handleDelete(session)}
+                />
+              ))}
+            </>
           )}
-          {!isLoading && sessions.length === 0 && (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              No sessions yet.
-            </p>
-          )}
-          {sessions.map((session) => (
-            <SessionListItem
-              key={session.session_id}
-              session={session}
-              selected={session.session_id === selectedId}
-              onSelect={() => setSelectedId(session.session_id)}
-              onDelete={() => handleDelete(session)}
-            />
-          ))}
         </div>
 
         {/* Sidebar footer */}
