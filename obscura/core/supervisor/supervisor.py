@@ -440,6 +440,7 @@ class Supervisor:
                 ("_profile_context", "profile_context"),
                 ("_vector_memory_context", "vector_memory_context"),
                 ("_vault_context", "vault_context"),
+                ("_arbiter_context", "arbiter_context"),
             ):
                 ctx_value = hook_context.get(ctx_key)
                 if ctx_value:

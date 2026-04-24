@@ -36,6 +36,7 @@ SECTION_ORDER: tuple[str, ...] = (
     "profile_context",
     "vault_context",
     "vector_memory_context",
+    "arbiter_context",
     # End hook-injected context.
     "tool_definitions",
     "memory_snippets",
