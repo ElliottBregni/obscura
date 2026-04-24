@@ -283,6 +283,7 @@ class ArbiterEngine:
         base_score, base_issues = check_model_turn(
             output_text=str(context.get("output_text", "")),
             tool_error_count=int(context.get("tool_error_count", 0)),
+            tool_call_count=int(context.get("tool_call_count", 0)),
             repeated_errors=int(context.get("repeated_errors", 0)),
             lint_errors=context.get("lint_errors"),
         )

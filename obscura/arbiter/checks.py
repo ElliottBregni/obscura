@@ -232,6 +232,7 @@ def check_model_turn(
     output_text: str,
     *,
     tool_error_count: int = 0,
+    tool_call_count: int = 0,
     repeated_errors: int = 0,
     lint_errors: Mapping[str, str] | None = None,
 ) -> tuple[float, list[str]]:
@@ -242,10 +243,12 @@ def check_model_turn(
     issues: list[str] = []
     score = 1.0
 
-    # Empty output
+    # Empty output — only flag when the model made no tool calls either.
+    # Pure tool-call turns (no narration) are valid agentic behaviour.
     if not output_text or not output_text.strip():
-        issues.append("model produced empty output")
-        score -= 0.3
+        if tool_call_count == 0:
+            issues.append("model produced empty output")
+            score -= 0.3
 
     # Tool errors this turn
     if tool_error_count > 0:
