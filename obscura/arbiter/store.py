@@ -222,3 +222,77 @@ class ArbiterStore:
             }
         finally:
             conn.close()
+
+    def score_regression(
+        self,
+        *,
+        session_id: str = "",
+        project_root: str = "",
+        window_days: int = 7,
+        threshold: float = 0.10,
+    ) -> dict[str, Any]:
+        """Compare current session avg score against a rolling baseline.
+
+        Returns a dict with:
+            ``baseline_avg``   – avg composite over the last *window_days* days
+                                 (excluding the current session).
+            ``session_avg``    – avg composite for the current session.
+            ``drop``           – (baseline - session) / baseline, or 0 if no baseline.
+            ``regression``     – True when drop > threshold.
+            ``sufficient_data``– False when baseline has fewer than 5 verdicts.
+        """
+        import time
+
+        conn = _open()
+        try:
+            cutoff = time.time() - window_days * 86400
+
+            # Baseline: verdicts in the window, excluding current session.
+            base_filter = "WHERE created_at > ?"
+            base_params: list[Any] = [cutoff]
+            if session_id:
+                base_filter += " AND session_id != ?"
+                base_params.append(session_id)
+            if project_root:
+                base_filter += " AND project_root = ?"
+                base_params.append(project_root)
+
+            base_row = conn.execute(
+                f"SELECT AVG(composite) as avg, COUNT(*) as cnt FROM verdicts {base_filter}",
+                base_params,
+            ).fetchone()
+            baseline_avg: float = float(base_row["avg"] or 0.0)
+            baseline_cnt: int = base_row["cnt"] or 0
+
+            # Session avg.
+            sess_filter = "WHERE 1=1"
+            sess_params: list[Any] = []
+            if session_id:
+                sess_filter += " AND session_id = ?"
+                sess_params.append(session_id)
+            if project_root:
+                sess_filter += " AND project_root = ?"
+                sess_params.append(project_root)
+
+            sess_row = conn.execute(
+                f"SELECT AVG(composite) as avg, COUNT(*) as cnt FROM verdicts {sess_filter}",
+                sess_params,
+            ).fetchone()
+            session_avg: float = float(sess_row["avg"] or 0.0)
+            session_cnt: int = sess_row["cnt"] or 0
+
+            drop = 0.0
+            if baseline_avg > 0:
+                drop = (baseline_avg - session_avg) / baseline_avg
+
+            return {
+                "baseline_avg": round(baseline_avg, 3),
+                "session_avg": round(session_avg, 3),
+                "baseline_count": baseline_cnt,
+                "session_count": session_cnt,
+                "drop": round(drop, 3),
+                "regression": drop > threshold and baseline_cnt >= 5,
+                "sufficient_data": baseline_cnt >= 5,
+            }
+        finally:
+            conn.close()

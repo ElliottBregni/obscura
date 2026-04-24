@@ -74,7 +74,7 @@ class ArbiterEngine:
         self._events: list[ArbiterEvent] = []
         self._started = False
         self._historical_patterns: str = ""  # loaded from previous sessions on start()
-        self._historical_patterns: str = ""  # loaded from previous sessions on start()
+        self._project_root: str = ""  # set in start() from os.getcwd()
 
     @property
     def config(self) -> ArbiterConfig:
@@ -545,23 +545,7 @@ class ArbiterEngine:
             import os
             from obscura.arbiter.store import ArbiterStore
             project_root = os.getcwd()
-            self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
-            if self._historical_patterns:
-                logger.info(
-                    "Arbiter: loaded historical patterns for %s — %s",
-                    project_root,
-                    self._historical_patterns[:120],
-                )
-        except Exception:
-            logger.debug("Could not load historical patterns", exc_info=True)
-
-
-    def _load_historical_patterns(self) -> None:
-        """Load cross-session patterns from previous runs for this project."""
-        try:
-            import os
-            from obscura.arbiter.store import ArbiterStore
-            project_root = os.getcwd()
+            self._project_root = project_root
             self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
             if self._historical_patterns:
                 logger.info(
@@ -617,9 +601,25 @@ class ArbiterEngine:
         if self._historical_patterns:
             lines.append("")
             lines.append(f"_Historical: {self._historical_patterns}_")
-        if self._historical_patterns:
-            lines.append("")
-            lines.append(f"_Historical: {self._historical_patterns}_")
+
+        # Regression warning: flag if current session is tracking >10% below baseline.
+        try:
+            from obscura.arbiter.store import ArbiterStore
+            reg = ArbiterStore().score_regression(
+                session_id=self._session_id,
+                project_root=self._project_root,
+            )
+            if reg["regression"]:
+                pct = int(reg["drop"] * 100)
+                lines.append("")
+                lines.append(
+                    f"_⚠ Score regression: session avg {reg['session_avg']:.2f} is "
+                    f"{pct}% below 7-day baseline {reg['baseline_avg']:.2f}. "
+                    f"Review recent verdicts and adjust approach._"
+                )
+        except Exception:
+            pass
+
         return "\n".join(lines)
 
     @property
