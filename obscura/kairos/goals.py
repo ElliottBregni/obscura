@@ -112,6 +112,27 @@ class GoalBoard:
                 return self._parse_file(p)
         return None
 
+    def get_if_newer(self, goal_id: str, since: str) -> Goal | None:
+        """Return the in-memory (disk) goal if its 'updated' timestamp is newer than *since*.
+
+        Used by vault_sync conflict detection: if the agent wrote a newer version
+        to disk than what the user's file claims, the agent copy might have unsaved
+        progress that we should archive before overwriting.
+
+        Args:
+            goal_id: The goal slug to look up.
+            since: ISO 8601 timestamp to compare against.  If the stored goal's
+                ``updated`` field is lexicographically greater (i.e., newer), the
+                goal is returned; otherwise ``None`` is returned.
+        """
+        goal = self.load(goal_id)
+        if goal is None:
+            return None
+        # ISO 8601 strings are lexicographically comparable.
+        if goal.updated > since:
+            return goal
+        return None
+
     def active_goals(self) -> list[Goal]:
         """Return active/in_progress goals sorted by priority then staleness."""
         active = [g for g in self.load_all() if g.is_active]

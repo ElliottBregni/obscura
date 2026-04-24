@@ -215,6 +215,98 @@ def test_notify_functions_dont_crash() -> None:
     notify_profile_changed()
 
 
+def test_ingest_goal_user_zone_wins_on_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """User zone always wins when a goal file is edited while GoalBoard has a newer version.
+
+    Scenario:
+      1. GoalBoard already has a goal (e.g. agent updated progress to 80%).
+      2. User edits the vault/user/ markdown file with an older 'updated' timestamp.
+      3. _ingest_goal() runs — user file wins, GoalBoard is overwritten.
+      4. The old in-memory version is archived to vault/agent/goals/.conflicts/.
+    """
+    import logging
+
+    vault = tmp_path / "vault"
+    goals_dir = tmp_path / "goals"
+    db_file = tmp_path / "tasks.db"
+
+    monkeypatch.setattr("obscura.core.task_queue._db_path", lambda: db_file)
+    monkeypatch.setattr("obscura.kairos.goals._GOALS_DIR", goals_dir)
+
+    vs = VaultSync(vault_dir=vault)
+    vs.bootstrap()
+
+    # --- Step 1: seed GoalBoard with an in-memory version that has newer progress ---
+    from obscura.kairos.goals import GoalBoard
+
+    board = GoalBoard(goals_dir=goals_dir)
+    agent_goal = board.create(
+        "Ship Auth",
+        priority="high",
+        context="Agent context with 80% progress.",
+        status="in_progress",
+    )
+    # Simulate agent writing newer progress (updated timestamp will be after creation).
+    board.update(agent_goal.id, progress=80)
+    agent_after_update = board.load(agent_goal.id)
+    assert agent_after_update is not None
+    agent_updated_ts = agent_after_update.updated
+
+    # --- Step 2: write a user vault file with an OLDER updated timestamp ---
+    # Use a timestamp that predates the agent's update.
+    older_ts = "2020-01-01T00:00:00+00:00"
+    goal_file = vault / "user" / "goals" / f"{agent_goal.id}.md"
+    goal_file.write_text(
+        f"---\ntype: goal\npriority: medium\ntitle: Ship Auth\n"
+        f"updated: '{older_ts}'\nstatus: active\n---\n\n"
+        "User edited description: simplified auth approach."
+    )
+
+    # --- Step 3: run _ingest_goal() ---
+    meta = vs.scan("user/goals")[0]
+
+    with caplog.at_level(logging.INFO, logger="obscura.kairos.vault_sync"):
+        vs._ingest_goal(meta)
+
+    # --- Step 4: in-memory version replaced with user's version ---
+    board2 = GoalBoard(goals_dir=goals_dir)
+    reloaded = board2.load(agent_goal.id)
+    assert reloaded is not None, "Goal should still exist after ingest"
+    # User file had priority=medium; agent had priority=high.
+    assert reloaded.priority == "medium", (
+        "User file priority (medium) should have replaced agent priority (high)"
+    )
+    # User file body should be present.
+    assert "simplified auth approach" in (reloaded.body or ""), (
+        "User file body should be the active version"
+    )
+
+    # INFO log should be present.
+    conflict_logs = [
+        r for r in caplog.records if "in-memory version replaced" in r.message
+    ]
+    assert conflict_logs, "Expected INFO log about in-memory version being replaced"
+
+    # --- Step 5: old agent version was archived to .conflicts/ ---
+    conflicts_dir = vault / "agent" / "goals" / ".conflicts"
+    assert conflicts_dir.is_dir(), ".conflicts directory should have been created"
+    conflict_files = list(conflicts_dir.glob(f"{agent_goal.id}.*.md"))
+    assert len(conflict_files) == 1, (
+        f"Expected exactly one conflict archive, got: {conflict_files}"
+    )
+    conflict_content = conflict_files[0].read_text(encoding="utf-8")
+    # The archived version should capture the agent's progress (80%).
+    assert "80" in conflict_content, (
+        "Conflict archive should contain the agent's 80% progress"
+    )
+    # Sanity-check: archived updated timestamp matches agent's version.
+    assert agent_updated_ts.replace(":", "") in conflict_content or any(
+        part in conflict_content for part in agent_updated_ts.split("T")
+    ), "Conflict archive should contain the agent's updated timestamp"
+
+
 # ---------------------------------------------------------------------------
 # _retry helper tests
 # ---------------------------------------------------------------------------

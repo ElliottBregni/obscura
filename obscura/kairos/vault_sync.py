@@ -277,7 +277,15 @@ class VaultSync:
             logger.debug("Skipping unrecognized type '%s': %s", file_type, meta.path)
 
     def _ingest_goal(self, meta: FileMeta) -> None:
-        """Create or update a goal from a user-zone markdown file."""
+        """Create or update a goal from a user-zone markdown file.
+
+        Policy: user zone always wins.
+        If the in-memory (GoalBoard) version of this goal is newer than what the
+        user's file records (e.g. the agent wrote progress updates that hadn't been
+        synced), we treat that as a conflict.  The user's file still wins — we
+        overwrite GoalBoard — but we first archive the agent's version to
+        ``vault/agent/goals/.conflicts/<goal_id>.<ISO8601>.md`` so no data is lost.
+        """
         from obscura.kairos.goals import GoalBoard
 
         board = GoalBoard()
@@ -286,9 +294,25 @@ class VaultSync:
         )
         goal_id = meta.path.stem
 
+        # Timestamp declared in the user's file (may be absent for hand-written files).
+        user_updated = str(meta.frontmatter.get("updated", ""))
+
         existing = board.load(goal_id)
         if existing:
-            # Update existing goal.
+            # --- Conflict detection ---
+            # "user zone always wins" — but preserve the agent's version first if it
+            # contains work that post-dates what the user's file acknowledges.
+            if user_updated:
+                conflicting = board.get_if_newer(goal_id, since=user_updated)
+            else:
+                # No timestamp in user file: treat any in-memory version as a
+                # potential conflict worth preserving.
+                conflicting = existing if existing.updated else None
+
+            if conflicting is not None:
+                self._archive_conflict(conflicting)
+
+            # User file wins — overwrite in-memory version unconditionally.
             fields: dict[str, Any] = {}
             if meta.frontmatter.get("priority"):
                 fields["priority"] = meta.frontmatter["priority"]
@@ -300,7 +324,11 @@ class VaultSync:
                 fields["body"] = meta.body
             if fields:
                 board.update(goal_id, **fields)
-                logger.debug("Vault ingest: updated goal %s", goal_id)
+
+            logger.info(
+                "[vault] Goal %s updated from user zone — in-memory version replaced",
+                goal_id,
+            )
         else:
             board.create(
                 title,
@@ -311,6 +339,50 @@ class VaultSync:
             )
             logger.debug(
                 "Vault ingest: created goal %s from %s", goal_id, meta.path.name
+            )
+
+    def _archive_conflict(self, goal: Any) -> None:
+        """Write a conflicting in-memory goal version to the .conflicts/ directory.
+
+        Path: ``vault/agent/goals/.conflicts/<goal_id>.<ISO8601>.md``
+
+        This preserves agent-side progress (e.g. task linkages, % progress) that
+        existed before the user's file was ingested.  The user's version still wins;
+        this archive is for auditability and recovery only.
+        """
+        import yaml as _yaml
+
+        conflicts_dir = self.vault_dir / "agent" / "goals" / ".conflicts"
+        conflicts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build a safe ISO 8601 filename (colons not valid on some FSes).
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        out_path = conflicts_dir / f"{goal.id}.{ts}.md"
+
+        data: dict[str, Any] = {
+            "id": goal.id,
+            "title": goal.title,
+            "status": goal.status,
+            "priority": goal.priority,
+            "created": goal.created,
+            "updated": goal.updated,
+            "acceptance_criteria": list(goal.acceptance_criteria),
+            "depends_on": list(goal.depends_on),
+            "tasks": list(goal.tasks),
+            "progress": goal.progress,
+            "last_worked": goal.last_worked,
+            "conflict_archived_at": datetime.now(UTC).isoformat(),
+            "conflict_reason": "user zone ingest overwrote newer in-memory version",
+        }
+        fm = _yaml.dump(data, default_flow_style=False, sort_keys=False)
+        content = f"---\n{fm}---\n\n{goal.body or ''}\n"
+
+        try:
+            out_path.write_text(content, encoding="utf-8")
+            logger.debug("[vault] Conflict archive written: %s", out_path.name)
+        except Exception:
+            logger.warning(
+                "[vault] Could not write conflict archive for %s", goal.id, exc_info=True
             )
 
     def _ingest_task(self, meta: FileMeta) -> None:
