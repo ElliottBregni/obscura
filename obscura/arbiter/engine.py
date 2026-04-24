@@ -65,7 +65,7 @@ class ArbiterEngine:
         session_id: str = "",
         run_id: str = "",
     ) -> None:
-        self._config = config or ArbiterConfig()
+        self._config = config or ArbiterConfig.from_settings()
         self._session_id = session_id
         self._run_id = run_id
         self._judge_calls = 0
