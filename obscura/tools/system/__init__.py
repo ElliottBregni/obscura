@@ -1954,6 +1954,31 @@ async def find_files(
     max_results: int = 200,
     file_type: str = "any",
 ) -> str:
+    # Claude's native Glob tool accepts absolute patterns (e.g. "/abs/path/*.py"),
+    # but pathlib.Path.glob rejects them. Split an absolute pattern into its
+    # longest non-glob prefix (used as path) and the remaining relative pattern.
+    if pattern and (pattern.startswith("/") or pattern.startswith("~")):
+        from pathlib import PurePosixPath
+
+        parts = PurePosixPath(pattern).parts
+        base_parts: list[str] = []
+        rel_parts: list[str] = []
+        glob_chars = ("*", "?", "[")
+        hit_glob = False
+        for part in parts:
+            if hit_glob or any(ch in part for ch in glob_chars):
+                hit_glob = True
+                rel_parts.append(part)
+            else:
+                base_parts.append(part)
+        if rel_parts:
+            path = str(PurePosixPath(*base_parts)) if base_parts else "/"
+            pattern = str(PurePosixPath(*rel_parts))
+        else:
+            # No glob chars — treat pattern as a literal absolute path lookup.
+            path = str(PurePosixPath(*base_parts[:-1])) if len(base_parts) > 1 else "/"
+            pattern = base_parts[-1] if base_parts else "**/*"
+
     target = _resolve_path(path)
     if not _unsafe_full_access_enabled() and not _is_path_allowed(target):
         return _json_error("path_not_allowed", path=str(target))
