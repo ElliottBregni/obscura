@@ -213,30 +213,15 @@ class ClaudeBackend:
         # appear in the system prompt's tool listing and are discoverable
         # via tool_search. Claude SDK still dispatches the actual calls
         # via mcp_servers passthrough — these specs are discovery-only.
-        await self._discover_external_mcp_tools()
+        from obscura.integrations.mcp.discovery import (
+            register_external_mcp_tools,
+        )
+
+        await register_external_mcp_tools(self, self._mcp_servers)
 
         options = self._build_options()
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
-
-    async def _discover_external_mcp_tools(self) -> None:
-        """Probe ``self._mcp_servers`` and register shadow specs.
-
-        Best-effort: failures are logged but never raised. Skips servers
-        already represented by registered tools (idempotent across
-        re-starts).
-        """
-        if not self._mcp_servers:
-            return
-        try:
-            from obscura.integrations.mcp.discovery import discover_mcp_tools
-
-            specs = await discover_mcp_tools(self._mcp_servers)
-        except Exception:
-            # Discovery is best-effort — never break session startup.
-            return
-        for spec in specs:
-            self.register_tool(spec)
 
     async def stop(self) -> None:
         """Disconnect from Claude."""

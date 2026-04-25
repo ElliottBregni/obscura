@@ -1903,6 +1903,32 @@ class AgentLoop:
 
         return list(await asyncio.gather(*[limited(c) for c in coros]))
 
+    @staticmethod
+    def _read_host_callbacks() -> dict[str, Any]:
+        """Snapshot the legacy module-level host callbacks.
+
+        Returns a dict suitable for splatting into ToolContext(...). Reads
+        each global lazily via the system tools module so failures during
+        early import don't block the agent loop.
+        """
+        try:
+            from obscura.tools import system as _sys
+
+            return {
+                "ask_user_callback": getattr(_sys, "_ask_user_callback", None),
+                "user_interact_callback": getattr(
+                    _sys, "_user_interact_callback", None
+                ),
+                "permission_mode_callback": getattr(
+                    _sys, "_set_permission_mode_callback", None
+                ),
+                "plan_approval_callback": getattr(
+                    _sys, "_plan_approval_callback", None
+                ),
+            }
+        except Exception:
+            return {}
+
     async def _execute_single_tool(
         self,
         tc: ToolCallInfo,
@@ -2078,11 +2104,15 @@ class AgentLoop:
                 bind_tool_context,
             )
 
+            # Pull current host callbacks from the legacy module-level globals
+            # so tools migrated to ToolContext keep working without any change
+            # to the REPL's wiring code.
             ctx = ToolContext(
                 registry=self._tools,
                 history=self._current_messages,
                 user=self._current_user,
                 session_id=self._current_session_id,
+                **self._read_host_callbacks(),
             )
             with bind_tool_context(ctx):
                 result = await self._call_handler(spec, tc.input)

@@ -227,6 +227,12 @@ class CopilotBackend:
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient, SubprocessConfig
 
+        from obscura.integrations.mcp.discovery import (
+            register_external_mcp_tools,
+        )
+
+        await register_external_mcp_tools(self, self._mcp_servers)
+
         client_config: SubprocessConfig | None = None
         if self._auth.github_token:
             client_config = SubprocessConfig(github_token=self._auth.github_token)

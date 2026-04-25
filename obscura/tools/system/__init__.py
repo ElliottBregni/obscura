@@ -3689,9 +3689,15 @@ def set_plan_approval_callback(cb: Any) -> None:
     },
 )
 async def enter_plan_mode() -> str:
-    if _set_permission_mode_callback is not None:
+    from obscura.core.tool_context import current_tool_context
+
+    ctx = current_tool_context()
+    cb = ctx.permission_mode_callback if ctx is not None else None
+    if cb is None:
+        cb = _set_permission_mode_callback
+    if cb is not None:
         try:
-            _set_permission_mode_callback("plan")
+            cb("plan")
         except Exception as exc:
             return json.dumps({"ok": False, "error": str(exc)})
     return json.dumps({"ok": True, "mode": "plan"})
@@ -3713,10 +3719,20 @@ async def enter_plan_mode() -> str:
     },
 )
 async def exit_plan_mode(plan_summary: str = "") -> str:
+    from obscura.core.tool_context import current_tool_context
+
+    ctx = current_tool_context()
+    approval_cb = ctx.plan_approval_callback if ctx is not None else None
+    if approval_cb is None:
+        approval_cb = _plan_approval_callback
+    mode_cb = ctx.permission_mode_callback if ctx is not None else None
+    if mode_cb is None:
+        mode_cb = _set_permission_mode_callback
+
     # If a renderer approval callback is registered, gate on it.
-    if _plan_approval_callback is not None:
+    if approval_cb is not None:
         try:
-            approved = _plan_approval_callback(plan_summary)
+            approved = approval_cb(plan_summary)
             if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
                 approved = await approved
             if not approved:
@@ -3730,9 +3746,9 @@ async def exit_plan_mode(plan_summary: str = "") -> str:
         except Exception as exc:
             return json.dumps({"ok": False, "error": str(exc)})
 
-    if _set_permission_mode_callback is not None:
+    if mode_cb is not None:
         try:
-            _set_permission_mode_callback("default")
+            mode_cb("default")
         except Exception as exc:
             return json.dumps({"ok": False, "error": str(exc)})
     return json.dumps({"ok": True, "mode": "default"})
@@ -3821,10 +3837,16 @@ async def ask_user(
     allow_custom: bool = False,
 ) -> str:
     """Present choices to the user via the TUI widget and return the selection."""
+    from obscura.core.tool_context import current_tool_context
+
     global _ask_user_called
     _ask_user_called = True
 
-    if _ask_user_callback is None:
+    ctx = current_tool_context()
+    cb = ctx.ask_user_callback if ctx is not None else None
+    if cb is None:
+        cb = _ask_user_callback
+    if cb is None:
         return _json_error(
             "no_ui",
             detail="Interactive UI not available. "
@@ -3832,7 +3854,7 @@ async def ask_user(
         )
 
     try:
-        result = await _ask_user_callback(
+        result = await cb(
             question=question,
             choices=choices or [],
             allow_custom=allow_custom,
@@ -3913,10 +3935,16 @@ async def user_ask(
     Accepts either the structured ``questions`` array (Claude Code style) or a
     flat ``question`` string + optional ``choices`` list (Copilot / simple style).
     """
+    from obscura.core.tool_context import current_tool_context
+
     global _ask_user_called
     _ask_user_called = True
 
-    if _ask_user_callback is None:
+    ctx = current_tool_context()
+    cb = ctx.ask_user_callback if ctx is not None else None
+    if cb is None:
+        cb = _ask_user_callback
+    if cb is None:
         return _json_error(
             "no_ui",
             detail="Interactive UI not available. "
@@ -3957,7 +3985,7 @@ async def user_ask(
         prompt = f"[{header}] {q_text}" if header else q_text
 
         try:
-            result = await _ask_user_callback(
+            result = await cb(
                 question=prompt,
                 choices=choice_labels,
                 allow_custom=True,
@@ -3967,7 +3995,7 @@ async def user_ask(
         except TypeError:
             # Callback doesn't support multi_select — fall back
             try:
-                result = await _ask_user_callback(
+                result = await cb(
                     question=prompt,
                     choices=choice_labels,
                     allow_custom=True,
@@ -3995,16 +4023,26 @@ def set_user_interact_callback(cb: Any) -> None:
     _user_interact_callback = cb
 
 
+def _resolve_user_interact_callback() -> Any:
+    """Return the active user_interact callback (ToolContext first, global fallback)."""
+    from obscura.core.tool_context import current_tool_context
+
+    ctx = current_tool_context()
+    cb = ctx.user_interact_callback if ctx is not None else None
+    return cb if cb is not None else _user_interact_callback
+
+
 async def _handle_ui_permission(action: str, reason: str, risk: str) -> str:
     """Handle permission mode of user_interact."""
-    if _user_interact_callback is None:
+    cb = _resolve_user_interact_callback()
+    if cb is None:
         return _json_error(
             "no_ui",
             detail="Interactive UI not available. "
             "Ask the user directly in your text response instead.",
         )
     try:
-        result = await _user_interact_callback(
+        result = await cb(
             mode="permission",
             action=action,
             reason=reason,
@@ -4033,9 +4071,10 @@ async def _handle_ui_notify(
     delivered: list[str] = []
 
     # TUI channel — uses callback if available
-    if "tui" in resolved_channels and _user_interact_callback is not None:
+    cb = _resolve_user_interact_callback()
+    if "tui" in resolved_channels and cb is not None:
         try:
-            await _user_interact_callback(
+            await cb(
                 mode="notify",
                 title=title,
                 message=message,
@@ -4100,14 +4139,15 @@ async def _handle_ui_question(
     allow_custom: bool,
 ) -> str:
     """Handle question mode of user_interact."""
-    if _user_interact_callback is None:
+    cb = _resolve_user_interact_callback()
+    if cb is None:
         return _json_error(
             "no_ui",
             detail="Interactive UI not available. "
             "Ask the user directly in your text response instead.",
         )
     try:
-        result = await _user_interact_callback(
+        result = await cb(
             mode="question",
             question=question,
             choices=choices or [],
@@ -4219,7 +4259,8 @@ async def _handle_ui_multi_select(
     choices: list[str] | None,
 ) -> str:
     """Handle multi_select mode of user_interact."""
-    if _user_interact_callback is None:
+    cb = _resolve_user_interact_callback()
+    if cb is None:
         return _json_error(
             "no_ui",
             detail="Interactive UI not available.",
@@ -4227,7 +4268,7 @@ async def _handle_ui_multi_select(
     if not choices:
         return _json_error("no_choices", detail="Multi-select requires choices.")
     try:
-        result = await _user_interact_callback(
+        result = await cb(
             mode="multi_select",
             question=question,
             choices=choices,

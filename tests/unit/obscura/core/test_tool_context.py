@@ -152,3 +152,94 @@ class TestHistorySnipUsesContext:
         # Ensure no module-global history either
         result = await history_snip(start_turn=0, end_turn=0)
         assert "no_history" in result
+
+
+class TestPlanModeCallbacksUseContext:
+    """enter_plan_mode / exit_plan_mode resolve callbacks via ToolContext."""
+
+    @pytest.mark.asyncio
+    async def test_enter_plan_mode_uses_context_callback(self) -> None:
+        from obscura.tools.system import enter_plan_mode
+
+        calls: list[str] = []
+
+        def _cb(mode: str) -> None:
+            calls.append(mode)
+
+        ctx = ToolContext(permission_mode_callback=_cb)
+        with bind_tool_context(ctx):
+            result = await enter_plan_mode()
+
+        assert calls == ["plan"]
+        assert '"mode": "plan"' in result
+
+    @pytest.mark.asyncio
+    async def test_exit_plan_mode_uses_context_callbacks(self) -> None:
+        from obscura.tools.system import exit_plan_mode
+
+        modes: list[str] = []
+        approvals: list[str] = []
+
+        def _mode_cb(mode: str) -> None:
+            modes.append(mode)
+
+        def _approval_cb(summary: str) -> bool:
+            approvals.append(summary)
+            return True
+
+        ctx = ToolContext(
+            permission_mode_callback=_mode_cb,
+            plan_approval_callback=_approval_cb,
+        )
+        with bind_tool_context(ctx):
+            result = await exit_plan_mode(plan_summary="ship it")
+
+        assert approvals == ["ship it"]
+        assert modes == ["default"]
+        assert '"mode": "default"' in result
+
+    @pytest.mark.asyncio
+    async def test_exit_plan_mode_blocks_when_approval_denied(self) -> None:
+        from obscura.tools.system import exit_plan_mode
+
+        ctx = ToolContext(
+            plan_approval_callback=lambda _summary: False,
+            permission_mode_callback=lambda _mode: None,
+        )
+        with bind_tool_context(ctx):
+            result = await exit_plan_mode(plan_summary="x")
+
+        assert "not approved" in result
+        assert '"mode": "plan"' in result
+
+
+class TestAskUserUsesContext:
+    """ask_user resolves its callback via ToolContext."""
+
+    @pytest.mark.asyncio
+    async def test_ask_user_uses_context_callback(self) -> None:
+        from obscura.tools.system import ask_user
+
+        async def _cb(question: str, choices: list[str], allow_custom: bool) -> str:
+            return f"answer to: {question}"
+
+        ctx = ToolContext(ask_user_callback=_cb)
+        with bind_tool_context(ctx):
+            result = await ask_user(question="continue?")
+
+        assert "answer to: continue?" in result
+
+    @pytest.mark.asyncio
+    async def test_ask_user_no_ui_when_no_callback(self) -> None:
+        from obscura.tools import system as system_mod
+        from obscura.tools.system import ask_user
+
+        # Save and clear the module global so neither path has a callback.
+        prev = system_mod._ask_user_callback
+        system_mod._ask_user_callback = None
+        try:
+            result = await ask_user(question="x")
+        finally:
+            system_mod._ask_user_callback = prev
+
+        assert "no_ui" in result
