@@ -1,9 +1,0 @@
-{
-  "name": "com.obscura.host",
-  "description": "Obscura browser-extension native messaging host",
-  "path": "/Users/elliottbregni/dev/obscura-main/packages/browser-extension/native-host/obscura-native-host",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://hpldngegaacngfebjejjonepbpbfmfpc/"
-  ]
-}

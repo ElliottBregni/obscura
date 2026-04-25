@@ -102,3 +102,5 @@ docs/*
 pyright_out.json
 pytest-report.xml
 OBSCURA.md
+# Rendered at install time by install.sh — must not be tracked.
+packages/browser-extension/native-host/com.obscura.host.json
