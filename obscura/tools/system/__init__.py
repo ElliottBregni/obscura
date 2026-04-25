@@ -4282,7 +4282,13 @@ async def history_snip(
     end_turn: int,
     reason: str = "",
 ) -> str:
-    if _snip_message_history is None:
+    from obscura.core.tool_context import current_tool_context
+
+    ctx = current_tool_context()
+    history = ctx.history if ctx is not None else None
+    if history is None:
+        history = _snip_message_history
+    if history is None:
         return json.dumps(
             {
                 "ok": False,
@@ -4300,7 +4306,7 @@ async def history_snip(
     except (TypeError, ValueError):
         end_turn = 0
 
-    total = len(_snip_message_history)
+    total = len(history)
     if start_turn < 0 or end_turn >= total or start_turn > end_turn:
         return json.dumps(
             {
@@ -4312,13 +4318,13 @@ async def history_snip(
 
     # Remove the specified range.
     removed_count = end_turn - start_turn + 1
-    del _snip_message_history[start_turn : end_turn + 1]
+    del history[start_turn : end_turn + 1]
 
     return json.dumps(
         {
             "ok": True,
             "removed_turns": removed_count,
-            "remaining_turns": len(_snip_message_history),
+            "remaining_turns": len(history),
             "reason": reason,
         },
     )
@@ -4510,10 +4516,16 @@ def set_tool_registry(registry: Any) -> None:
     },
 )
 async def tool_search(query: str, max_results: int = 5) -> str:
-    if _tool_registry_ref is None:
+    from obscura.core.tool_context import current_tool_context
+
+    ctx = current_tool_context()
+    registry = ctx.registry if ctx is not None else None
+    if registry is None:
+        registry = _tool_registry_ref
+    if registry is None:
         return _json_error("no_registry", detail="Tool registry not available")
 
-    all_specs = _tool_registry_ref.all()
+    all_specs = registry.all()
     try:
         max_results = int(max_results)
     except (TypeError, ValueError):
@@ -4525,7 +4537,7 @@ async def tool_search(query: str, max_results: int = 5) -> str:
         names = [n.strip() for n in query[7:].split(",") if n.strip()]
         found = []
         for name in names:
-            spec = _tool_registry_ref.get(name)
+            spec = registry.get(name)
             if spec is not None:
                 found.append({"name": spec.name, "description": spec.description})
         return json.dumps(
