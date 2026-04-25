@@ -205,3 +205,34 @@ class TestToolRegistry:
         assert reg.get("web_search") is not None
         assert reg.get("Task") is reg.get("task")
         assert reg.get("BrowserNavigate") is reg.get("browser_navigate")
+
+    def test_register_tool_search_wires_module_global(self) -> None:
+        """Registering tool_search must set the module-level registry ref."""
+        from obscura.tools import system as system_mod
+
+        ts: Any = system_mod.tool_search
+        reg = ToolRegistry()
+        reg.register(ts.spec)
+
+        assert system_mod._tool_registry_ref is reg
+
+    def test_alias_lookup_resolves_camelcase_sdk_names(self) -> None:
+        reg = ToolRegistry()
+
+        @tool("tool_search", "Search tools")
+        def tool_search_tool(query: str) -> str:
+            return query
+
+        @tool("web_search", "Web search")
+        def web_search_tool(query: str) -> str:
+            return query
+
+        reg.register(tool_search_tool.spec)
+        reg.register(web_search_tool.spec)
+
+        # Claude SDK CamelCase variants must resolve to canonical snake_case.
+        assert reg.get("ToolSearch") is reg.get("tool_search")
+        assert reg.get("WebSearch") is reg.get("web_search")
+        # Common variants
+        assert reg.get("search_tools") is reg.get("tool_search")
+        assert reg.get("list_tools") is reg.get("tool_search")
