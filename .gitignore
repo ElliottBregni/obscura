@@ -1,5 +1,11 @@
 resume_elliott_bregni_datadog.md
-resume_elliott_bregni.md 
+resume_elliott_bregni.md
+# Personal scratch dropped into the repo root by past sessions.
+2025_spending_report.md
+se_michigan_homes_325k_analysis.md
+# Stale -- Obscura uses pyproject.toml for dependencies.
+/requirements.txt
+
 # Python bytecode
 __pycache__/
 *.pyc
