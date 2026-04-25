@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from obscura.core.auth import AuthConfig
 
 
-class LocalLLMBackend:
+class LocalLLMBackend(BackendToolHostMixin):
     """BackendProtocol implementation for local LLM servers.
 
     Uses the ``openai`` Python SDK pointed at a local endpoint. Works with
@@ -77,9 +78,8 @@ class LocalLLMBackend:
         # SDK client (set on start())
         self._client: Any = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -437,18 +437,7 @@ class LocalLLMBackend:
         self._active_session = session_id
         return fork_ref
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
-
-    def get_tool_registry(self) -> ToolRegistry:
-        """Return the tool registry."""
-        return self._tool_registry
+    # -- Tools (register_tool / get_tool_registry from BackendToolHostMixin) -----
 
     # -- Hooks ---------------------------------------------------------------
 

@@ -19,7 +19,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
-from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     Backend,
     BackendCapabilities,
@@ -33,7 +33,6 @@ from obscura.core.types import (
     SessionRef,
     StreamChunk,
     StreamMetadata,
-    ToolSpec,
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
@@ -206,7 +205,7 @@ def _toml_inline_table(mapping: dict[str, Any]) -> str:
     return "{ " + ", ".join(pairs) + " }"
 
 
-class CodexBackend:
+class CodexBackend(BackendToolHostMixin):
     """BackendProtocol implementation backed by ``codex_app_server.AsyncCodex``."""
 
     def __init__(
@@ -224,8 +223,7 @@ class CodexBackend:
         self._mcp_servers = mcp_servers or []
         self._reasoning_effort = reasoning_effort or "medium"
 
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -474,17 +472,12 @@ class CodexBackend:
 
     # -- Tools ---------------------------------------------------------------
 
-    def register_tool(self, spec: ToolSpec) -> None:
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
+    # register_tool comes from BackendToolHostMixin
 
     def register_hook(self, hook: HookPoint, callback: Callable[..., Any]) -> None:
         self._hooks[hook].append(callback)
 
-    def get_tool_registry(self) -> ToolRegistry:
-        return self._tool_registry
+    # get_tool_registry comes from BackendToolHostMixin
 
     # -- Internals -----------------------------------------------------------
 
