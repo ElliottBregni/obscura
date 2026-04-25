@@ -154,6 +154,7 @@ class ToolRegistry:
             # web search
             "searchweb": "web_search",
             "search_web": "web_search",
+            "websearch": "web_search",
             "google": "web_search",
             # web fetch
             "webfetch": "web_fetch",
@@ -255,7 +256,7 @@ class ToolRegistry:
             "todo": "todo_write",
             "update_todos": "todo_write",
             "write_todos": "todo_write",
-            "notebookedit": "edit_text_file",
+            "notebookedit": "notebook_edit",
             "askuserquestion": "user_ask",
             "ask_question": "user_ask",
             "ask_user_question": "user_ask",
@@ -264,6 +265,23 @@ class ToolRegistry:
             "skill": "task",
             "enterplanmode": "enter_plan_mode",
             "exitplanmode": "exit_plan_mode",
+            "enterworktree": "enter_worktree",
+            "exitworktree": "exit_worktree",
+            # task lifecycle (Claude SDK CamelCase → canonical)
+            "taskoutput": "task_output",
+            "taskstop": "task_stop",
+            "taskcreate": "task_create",
+            "taskget": "task_get",
+            "tasklist": "task_list",
+            "taskupdate": "task_update",
+            # tool discovery (Claude SDK CamelCase → canonical)
+            "toolsearch": "tool_search",
+            "search_tools": "tool_search",
+            "searchtools": "tool_search",
+            "find_tools": "tool_search",
+            "findtools": "tool_search",
+            "list_tools": "tool_search",
+            "listtools": "tool_search",
         }
 
     @staticmethod
@@ -282,6 +300,15 @@ class ToolRegistry:
         sanitized = self._sanitize_tool_name(spec.name)
         if sanitized != spec.name and sanitized not in self._tools:
             self._tools[sanitized] = spec
+        # tool_search reads from a module-level registry ref; bind it here so
+        # the most recently populated registry is what tool_search queries.
+        if spec.name == "tool_search":
+            try:
+                from obscura.tools.system import set_tool_registry
+
+                set_tool_registry(self)
+            except ImportError:
+                pass
 
     def register_alias(self, alias: str, canonical: str) -> None:
         """Map *alias* to an already-registered *canonical* tool name.
