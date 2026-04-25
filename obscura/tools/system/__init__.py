@@ -144,7 +144,9 @@ def _validate_url(url: str) -> str:
     # --- DNS resolution (pre-flight to defeat rebinding) ---
     try:
         addrinfos = socket.getaddrinfo(
-            hostname, parsed.port or 443, proto=socket.IPPROTO_TCP,
+            hostname,
+            parsed.port or 443,
+            proto=socket.IPPROTO_TCP,
         )
     except socket.gaierror as exc:
         msg = f"DNS resolution failed for {hostname!r}: {exc}"
@@ -367,6 +369,8 @@ async def run_python3(
     timeout_seconds: float = 30.0,
 ) -> str:
     command = _resolve_command("python3")
+    from obscura.auth.secrets import safe_subprocess_env
+
     proc = await asyncio.create_subprocess_exec(
         command,
         "-c",
@@ -374,6 +378,7 @@ async def run_python3(
         cwd=(cwd or None),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=safe_subprocess_env(),
     )
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -456,12 +461,15 @@ async def run_command(
         return _json_error("command_not_found", command=normalized_command)
 
     process_args = args or []
+    from obscura.auth.secrets import safe_subprocess_env
+
     proc = await asyncio.create_subprocess_exec(
         resolved_command,
         *process_args,
         cwd=(cwd or None),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=safe_subprocess_env(),
     )
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -3191,17 +3199,41 @@ async def create_tool(
     # Build the async handler function
     # Available imports inside the sandbox
     _SAFE_BUILTINS: dict[str, Any] = {
-        "len": len, "range": range, "enumerate": enumerate, "zip": zip,
-        "map": map, "filter": filter, "sorted": sorted, "reversed": reversed,
-        "list": list, "dict": dict, "set": set, "tuple": tuple,
-        "str": str, "int": int, "float": float, "bool": bool,
-        "isinstance": isinstance, "hasattr": hasattr, "getattr": getattr,
-        "print": print, "type": type,
-        "None": None, "True": True, "False": False,
-        "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
-        "any": any, "all": all,
-        "ValueError": ValueError, "TypeError": TypeError,
-        "KeyError": KeyError, "RuntimeError": RuntimeError,
+        "len": len,
+        "range": range,
+        "enumerate": enumerate,
+        "zip": zip,
+        "map": map,
+        "filter": filter,
+        "sorted": sorted,
+        "reversed": reversed,
+        "list": list,
+        "dict": dict,
+        "set": set,
+        "tuple": tuple,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "isinstance": isinstance,
+        "hasattr": hasattr,
+        "getattr": getattr,
+        "print": print,
+        "type": type,
+        "None": None,
+        "True": True,
+        "False": False,
+        "min": min,
+        "max": max,
+        "sum": sum,
+        "abs": abs,
+        "round": round,
+        "any": any,
+        "all": all,
+        "ValueError": ValueError,
+        "TypeError": TypeError,
+        "KeyError": KeyError,
+        "RuntimeError": RuntimeError,
         "Exception": Exception,
     }
     sandbox_globals: dict[str, Any] = {
@@ -3379,10 +3411,13 @@ async def code_sandbox(
         ):
             args = [str(save_path)]
 
-    # Build environment
-    run_env = dict(os.environ)
-    if env:
-        run_env.update(env)
+    # Build environment -- caller-supplied ``env`` wins and is never stripped
+    # by strict mode, so the sandbox can be explicitly handed the secrets
+    # it needs while the rest of the parent env is filtered when
+    # OBSCURA_TOOL_ENV_STRICT=1.
+    from obscura.auth.secrets import safe_subprocess_env
+
+    run_env = safe_subprocess_env(env)
 
     proc = await asyncio.create_subprocess_exec(
         resolved_cmd,
@@ -3890,7 +3925,12 @@ async def user_ask(
 
     # Flat question fallback (Copilot or simple invocation)
     if not questions and question:
-        questions = [{"question": question, "options": [{"label": c, "description": ""} for c in (choices or [])]}]
+        questions = [
+            {
+                "question": question,
+                "options": [{"label": c, "description": ""} for c in (choices or [])],
+            }
+        ]
 
     if not questions:
         return _json_error("invalid_args", detail="No questions provided.")
@@ -4709,7 +4749,9 @@ async def write_agent_shared(path: str, text: str) -> str:
             )
 
         # Fork-merge: split both versions into lines and reconcile.
-        old_lines = old_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+        old_lines = old_bytes.decode("utf-8", errors="replace").splitlines(
+            keepends=True
+        )
         new_lines = text.splitlines(keepends=True)
         merged_lines, had_conflict = _merge_lines(old_lines, new_lines)
         final_text = "".join(merged_lines)

@@ -5536,7 +5536,9 @@ async def cmd_review(args: str, ctx: REPLContext) -> str | None:
 
     ref = args.strip() or "HEAD"
     proc = await _aio.create_subprocess_exec(
-        "git", "diff", ref,
+        "git",
+        "diff",
+        ref,
         stdout=_aio.subprocess.PIPE,
         stderr=_aio.subprocess.PIPE,
     )
@@ -5671,7 +5673,9 @@ async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
 
     ref = args.strip() or "HEAD"
     proc = await _aio.create_subprocess_exec(
-        "git", "diff", ref,
+        "git",
+        "diff",
+        ref,
         stdout=_aio.subprocess.PIPE,
         stderr=_aio.subprocess.PIPE,
     )
@@ -5732,21 +5736,28 @@ async def cmd_ultrareview(args: str, ctx: REPLContext) -> str | None:
     # If a PR number is given, fetch the diff from GitHub
     if ref and ref.isdigit():
         proc = await _aio.create_subprocess_exec(
-            "gh", "pr", "diff", ref,
+            "gh",
+            "pr",
+            "diff",
+            ref,
             stdout=_aio.subprocess.PIPE,
             stderr=_aio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         diff = stdout.decode("utf-8", errors="replace").strip()
         if not diff:
-            print_warning(f"Could not fetch PR #{ref} diff via gh: {stderr.decode()[:200]}")
+            print_warning(
+                f"Could not fetch PR #{ref} diff via gh: {stderr.decode()[:200]}"
+            )
             return None
         review_target = f"PR #{ref}"
     else:
         # Local diff — use subprocess_exec to prevent shell injection
         git_ref = ref or "HEAD"
         proc = await _aio.create_subprocess_exec(
-            "git", "diff", git_ref,
+            "git",
+            "diff",
+            git_ref,
             stdout=_aio.subprocess.PIPE,
             stderr=_aio.subprocess.PIPE,
         )
@@ -5864,7 +5875,10 @@ async def cmd_ultrareview(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     async def _run_specialist(
-        idx: int, name: str, persona: str, focus: str,
+        idx: int,
+        name: str,
+        persona: str,
+        focus: str,
     ) -> tuple[str, str]:
         chunk = specialist_chunks[idx]
         files = specialist_files[idx]
@@ -5917,10 +5931,12 @@ Rules:
     for idx, (name, output) in enumerate(results):
         color = colors[idx % len(colors)]
         fcount = len(specialist_files[idx])
-        console.print(Rule(
-            f"[bold {color}]{name.upper()}[/] ({fcount} files)",
-            style=color,
-        ))
+        console.print(
+            Rule(
+                f"[bold {color}]{name.upper()}[/] ({fcount} files)",
+                style=color,
+            )
+        )
         if output.strip() and output.strip() != "No files assigned to this specialist.":
             console.print(Markdown(output))
         else:
@@ -6341,7 +6357,9 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
             for row in recent:
                 import datetime as _dt
 
-                ts = _dt.datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M")
+                ts = _dt.datetime.fromtimestamp(row["created_at"]).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
                 v = row["verdict"].upper()
                 color = {
                     "accept": "green",
@@ -6396,7 +6414,9 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
             print_error(f"Watchdog sweep failed: {exc}")
         return None
 
-    print_error(f"Unknown subcommand: {sub_cmd}. Try /arbiter, /arbiter verdicts, /arbiter stats, /arbiter watchdog")
+    print_error(
+        f"Unknown subcommand: {sub_cmd}. Try /arbiter, /arbiter verdicts, /arbiter stats, /arbiter watchdog"
+    )
     return None
 
 
@@ -7068,6 +7088,7 @@ async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
         return None
     # Register with system tools allowlist.
     from obscura.tools.system import add_allowed_dir
+
     add_allowed_dir(p)
     if do_chdir:
         os.chdir(p)
@@ -8050,13 +8071,18 @@ async def cmd_worktree(args: str, _ctx: REPLContext) -> str | None:
     if sub in {"sweep", "cleanup"}:
         orphans = worktree_registry.sweep_dead_pids()
         if orphans:
-            print_warning(f"Marked {len(orphans)} entry(s) as orphan: " + ", ".join(e.slug for e in orphans))
+            print_warning(
+                f"Marked {len(orphans)} entry(s) as orphan: "
+                + ", ".join(e.slug for e in orphans)
+            )
         else:
             print_info("No orphan owners found.")
         if sub == "cleanup":
             dropped = worktree_registry.prune_missing_paths()
             if dropped:
-                print_ok(f"Pruned {len(dropped)} missing-path entry(s): {', '.join(dropped)}")
+                print_ok(
+                    f"Pruned {len(dropped)} missing-path entry(s): {', '.join(dropped)}"
+                )
             removed = worktree_registry.cleanup_orphan_dirs()
             if removed:
                 print_ok(f"Removed {removed} unreferenced checkout dir(s).")
@@ -8270,7 +8296,8 @@ async def cmd_login(args: str, _ctx: REPLContext) -> str | None:
         session = ensure_github_oauth_session(open_browser=True)
         if session is None:
             print_error(
-                "GitHub OAuth login unavailable. Configure SUPABASE_URL and SUPABASE_ANON_KEY.",
+                "GitHub OAuth login unavailable. Configure Supabase via "
+                "`/secrets set SUPABASE_URL`, env vars, or ~/.obscura/.env.",
             )
             return None
         print_ok(f"Signed in via GitHub OAuth as {session.email}.")
@@ -8305,6 +8332,129 @@ async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
         print_info("Remove ~/.config/github-copilot/hosts.json to deauthorize.")
     else:
         print_error(f"Unknown provider: {provider}")
+    return None
+
+
+# ── /whoami + /secrets ────────────────────────────────────────────────────
+
+
+async def cmd_whoami(_args: str, _ctx: REPLContext) -> str | None:
+    """Show the currently authenticated Supabase user. Usage: /whoami."""
+    import time as _time
+
+    from obscura.cli.auth_commands import CREDENTIALS_PATH, load_session
+
+    session = load_session()
+    if session is None:
+        print_info("Not signed in. Run /login to authenticate via Supabase.")
+        return None
+
+    remaining = session.expires_at - int(_time.time())
+    state = "valid" if remaining > 0 else "EXPIRED"
+    gh_state = "yes" if session.provider_token else "no"
+    console.print(f"  user:         {session.email or session.user_id}")
+    console.print(f"  user_id:      {session.user_id}")
+    console.print(f"  provider:     {session.provider}")
+    console.print(f"  token:        {state} (expires in {max(0, remaining)}s)")
+    console.print(f"  github oauth: {gh_state}")
+    console.print(f"  file:         {CREDENTIALS_PATH}")
+    return None
+
+
+async def cmd_secrets(args: str, _ctx: REPLContext) -> str | None:
+    """Manage service secrets in the OS keyring.
+
+    Usage:
+      /secrets list [--only-set]             -- show where every value resolves
+      /secrets get <NAME> [--reveal]         -- show one value (masked by default)
+      /secrets set <NAME> <value> [--force]  -- persist to OS keyring
+      /secrets delete <NAME> [--force]       -- remove from OS keyring
+
+    Known names include Supabase identity config, LLM backend keys
+    (ANTHROPIC_API_KEY, OPENAI_API_KEY, GITHUB_TOKEN, …), and common
+    plugin credentials (NOTION_TOKEN, QDRANT_API_KEY, …). Pass ``--force``
+    to store any other name.
+
+    Env vars always win over keyring, so Docker/CI keep working unchanged.
+    For hidden-input ``set``, prefer ``obscura-auth secrets set <NAME>``.
+    """
+    from obscura.auth import secrets as _secrets
+
+    raw_tokens = args.strip().split()
+    force = "--force" in raw_tokens
+    only_set = "--only-set" in raw_tokens
+    reveal = "--reveal" in raw_tokens
+    positional = [t for t in raw_tokens if not t.startswith("--")]
+    sub = positional[0].lower() if positional else "list"
+
+    if sub == "list":
+        mapping = _secrets.sources()
+        kr_ready = _secrets.keyring_available()
+        console.print(
+            f"  Keyring backend: {'available' if kr_ready else 'unavailable'}",
+        )
+        width = max(len(name) for name in mapping)
+        for name, source in mapping.items():
+            if only_set and source == "missing":
+                continue
+            console.print(f"  {name.ljust(width)}  {source}")
+        return None
+
+    if sub in {"get", "set", "delete"} and len(positional) < 2:
+        print_error(f"Usage: /secrets {sub} <NAME> [...]")
+        return None
+
+    name = positional[1].strip().upper() if len(positional) >= 2 else ""
+    if name and not force and name not in _secrets.KNOWN_SECRET_NAMES:
+        known = ", ".join(_secrets.KNOWN_SECRET_NAMES)
+        print_error(
+            f"Unknown secret '{positional[1]}'. Pass --force to store an "
+            f"arbitrary name, or pick from: {known}",
+        )
+        return None
+
+    if sub == "get":
+        value = _secrets.resolve(name)
+        if value is None:
+            console.print(f"  {name}: (unset)")
+            return None
+        source = _secrets.sources([name]).get(name, "missing")
+        shown = value if reveal else _secrets.mask(value)
+        console.print(f"  {name}: {shown} [source: {source}]")
+        return None
+
+    if sub == "set":
+        if len(positional) < 3 or not positional[2].strip():
+            print_error(
+                "Value required inline. For hidden input use "
+                "`obscura-auth secrets set " + name + "` outside the REPL.",
+            )
+            return None
+        if not _secrets.keyring_available():
+            print_error(
+                "No OS keyring backend available. "
+                f"Set {name} as an env var or in ~/.obscura/.env instead.",
+            )
+            return None
+        try:
+            stored = _secrets.store(name, positional[2].strip())
+        except _secrets.SecretsValidationError as exc:
+            print_error(str(exc))
+            return None
+        if not stored:
+            print_error(f"Failed to store {name} in keyring.")
+            return None
+        print_ok(f"Stored {name} in keyring.")
+        return None
+
+    if sub == "delete":
+        if _secrets.delete(name):
+            print_ok(f"Removed {name} from keyring.")
+        else:
+            print_info(f"No keyring entry found for {name}.")
+        return None
+
+    print_error(f"Unknown subcommand: {sub}. Try /secrets list|get|set|delete.")
     return None
 
 
@@ -10008,6 +10158,11 @@ COMMANDS: dict[str, CommandHandler] = {
     "hooks": cmd_hooks,
     "bug": cmd_bug,
     "voice": cmd_voice,
+    # Auth / Supabase identity
+    "login": cmd_login,
+    "logout": cmd_logout,
+    "whoami": cmd_whoami,
+    "secrets": cmd_secrets,
 }
 
 # Subcommand completions for readline tab-complete
@@ -10137,6 +10292,11 @@ COMPLETIONS: dict[str, list[str]] = {
     "bug": ["report"],
     "voice": ["on", "off"],
     "caffeinate": ["on", "off", "status"],
+    # Auth
+    "login": ["github", "copilot", "claude", "openai"],
+    "logout": ["github", "copilot", "claude", "openai"],
+    "whoami": [],
+    "secrets": ["list", "get", "set", "delete"],
 }
 
 # Add secret menu stub (tests toggle visibility)

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from obscura.auth import secrets as _secrets
 from obscura.core.auth import (
     AuthConfig,
     TokenRefresher,
@@ -16,6 +17,21 @@ from obscura.core.auth import (
     resolve_openai_key,
 )
 from obscura.core.types import Backend
+
+
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin keyring to "unavailable", wipe the shell-env snapshot, and
+    stub the cloud vault so resolver tests don't read whatever the
+    developer has stored locally or loop through a live Supabase call.
+    """
+    from obscura.auth import supabase_secrets as _vault
+
+    monkeypatch.setattr(_secrets, "keyring_available", lambda: False)
+    monkeypatch.setattr(_secrets, "_dotenv_loaded", True)
+    monkeypatch.setattr(_secrets, "_shell_env_snapshot", {})
+    monkeypatch.setattr(_vault, "get_client", lambda: None)
+    _vault.reset()
 
 
 class TestAuthConfig:
@@ -503,3 +519,83 @@ class TestTokenRefresher:
         auth2 = await refresher.get_valid_auth()
         # With interval=0, should re-resolve each time
         assert auth2 is not None
+
+
+class TestKeyringFallback:
+    """Each backend resolver must consult the OS keyring when the env is
+    empty, so users who store keys via ``/secrets set`` don't also have to
+    export them.
+    """
+
+    @pytest.fixture
+    def fake_kr(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+        store: dict[str, str] = {}
+        monkeypatch.setattr(_secrets, "keyring_available", lambda: True)
+
+        def _resolve_with_fake_kr(
+            name: str, *, default: str | None = None
+        ) -> str | None:
+            env_val = os.environ.get(name, "").strip()
+            if env_val:
+                return env_val
+            stored = store.get(name)
+            if stored:
+                return stored
+            return default
+
+        monkeypatch.setattr(_secrets, "resolve", _resolve_with_fake_kr)
+        # Also disarm dotenv auto-loading -- real resolve() calls it in
+        # the other tests but our fake bypasses it entirely.
+        monkeypatch.setattr(_secrets, "_dotenv_loaded", True)
+        return store
+
+    def test_anthropic_key_from_keyring(
+        self,
+        fake_kr: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        for var in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "CLAUDE_CODE_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        fake_kr["ANTHROPIC_API_KEY"] = "kr-anthropic"
+
+        assert resolve_anthropic_key(None) == "kr-anthropic"
+
+    def test_github_token_from_keyring(
+        self,
+        fake_kr: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        for var in ("GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+        fake_kr["GITHUB_TOKEN"] = "kr-gh"
+
+        # Force env-first mode so we skip the gh CLI lookup.
+        monkeypatch.setenv("OBSCURA_AUTH_MODE", "env_first")
+
+        cli_result = MagicMock(returncode=1, stdout="")
+        with patch("subprocess.run", return_value=cli_result):
+            assert resolve_github_token(None) == "kr-gh"
+
+    def test_openai_key_from_keyring(
+        self,
+        fake_kr: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        for var in ("OPENAI_API_KEY", "CODEX_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        fake_kr["OPENAI_API_KEY"] = "kr-openai"
+        monkeypatch.setenv("OBSCURA_AUTH_MODE", "env_first")
+
+        cli_result = MagicMock(returncode=1, stdout="")
+        with patch("subprocess.run", return_value=cli_result):
+            assert resolve_openai_key(None) == "kr-openai"
+
+    def test_env_still_wins_over_keyring(
+        self,
+        fake_kr: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_kr["ANTHROPIC_API_KEY"] = "kr-value"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-value")
+
+        assert resolve_anthropic_key(None) == "env-value"

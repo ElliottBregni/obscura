@@ -11,6 +11,8 @@ import os
 
 from pydantic import BaseModel
 
+from obscura.auth import secrets as _secrets
+
 
 class ObscuraConfig(BaseModel):
     """Unified configuration for the Obscura platform.
@@ -84,12 +86,17 @@ class ObscuraConfig(BaseModel):
         return cls(
             host=os.environ.get("OBSCURA_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_PORT", "8080")),
-            # Supabase OAuth
-            supabase_url=os.environ.get("SUPABASE_URL", ""),
-            supabase_jwt_secret=os.environ.get("SUPABASE_JWT_SECRET", ""),
-            supabase_jwks_url=os.environ.get("SUPABASE_JWKS_URL", ""),
-            supabase_audience=os.environ.get("SUPABASE_AUDIENCE", "authenticated"),
-            supabase_issuer=os.environ.get("SUPABASE_ISSUER", ""),
+            # Supabase OAuth -- env wins, then OS keyring, then default.
+            supabase_url=_secrets.resolve("SUPABASE_URL", default="") or "",
+            supabase_jwt_secret=_secrets.resolve("SUPABASE_JWT_SECRET", default="")
+            or "",
+            supabase_jwks_url=_secrets.resolve("SUPABASE_JWKS_URL", default="") or "",
+            supabase_audience=_secrets.resolve(
+                "SUPABASE_AUDIENCE",
+                default="authenticated",
+            )
+            or "authenticated",
+            supabase_issuer=_secrets.resolve("SUPABASE_ISSUER", default="") or "",
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
             otel_endpoint=os.environ.get(

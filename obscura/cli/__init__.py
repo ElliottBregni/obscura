@@ -942,6 +942,16 @@ async def _repl(
     except Exception:
         pass
 
+    # 4. Materialise OS keyring entries into os.environ so plugins that read
+    # env vars directly can see keys stored via `/secrets set`. Never
+    # overwrites existing values, so shell env and .env files still win.
+    try:
+        from obscura.auth.secrets import materialize_to_environ
+
+        materialize_to_environ()
+    except Exception:
+        pass
+
     # Tool / MCP setup
     tools_enabled = tools == "on"
     mcp_configs: list[dict[str, Any]] = []

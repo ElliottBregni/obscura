@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from obscura.auth import secrets as _secrets
 from obscura.core.types import Backend
 
 # ---------------------------------------------------------------------------
@@ -122,7 +123,7 @@ def _resolve_github_token(
 
     if _is_env_first_mode():
         for var in _COPILOT_ENV_VARS:
-            token = os.environ.get(var)
+            token = _secrets.resolve(var)
             if token:
                 return token
         if token_cmd:
@@ -180,7 +181,7 @@ def _resolve_github_token(
                 pass
 
         for var in _COPILOT_ENV_VARS:
-            token = os.environ.get(var)
+            token = _secrets.resolve(var)
             if token:
                 return token
 
@@ -208,7 +209,7 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
         return explicit
 
     for var in _CLAUDE_ENV_VARS:
-        key = os.environ.get(var)
+        key = _secrets.resolve(var)
         if key:
             return key
 
@@ -269,7 +270,7 @@ def _resolve_openai_key(explicit: str | None) -> str:
 
     if _is_env_first_mode():
         for var in _OPENAI_KEY_ENV_VARS:
-            key = os.environ.get(var)
+            key = _secrets.resolve(var)
             if key:
                 return key
 
@@ -298,7 +299,7 @@ def _resolve_openai_key(explicit: str | None) -> str:
             return oauth_token
 
         for var in _OPENAI_KEY_ENV_VARS:
-            key = os.environ.get(var)
+            key = _secrets.resolve(var)
             if key:
                 return key
 
@@ -416,7 +417,7 @@ def _resolve_moonshot_key(explicit: str | None) -> str:
     if explicit:
         return explicit
     for var in _MOONSHOT_KEY_ENV_VARS:
-        key = os.environ.get(var)
+        key = _secrets.resolve(var)
         if key:
             return key
     msg = f"Moonshot auth requires one of: {', '.join(_MOONSHOT_KEY_ENV_VARS)} env var."

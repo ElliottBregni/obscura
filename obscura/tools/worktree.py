@@ -44,12 +44,15 @@ async def _git(
     cwd: str | None = None,
 ) -> tuple[int, str, str]:
     """Run a git command and return (exit_code, stdout, stderr)."""
+    from obscura.auth.secrets import safe_subprocess_env
+
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=safe_subprocess_env(),
     )
     stdout, stderr = await proc.communicate()
     return (
