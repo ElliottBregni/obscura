@@ -141,6 +141,42 @@ async def _probe_one_server(
     return specs
 
 
+async def register_external_mcp_tools(
+    backend: Any,
+    mcp_servers: list[dict[str, Any]],
+    *,
+    timeout: float = _DEFAULT_PROBE_TIMEOUT,
+) -> int:
+    """Discover *mcp_servers* and register the shadow specs into *backend*.
+
+    *backend* must expose a ``register_tool(spec)`` method (every obscura
+    provider does). Wraps the discovery + registration loop so each
+    backend's ``start()`` becomes one line:
+
+        await register_external_mcp_tools(self, self._mcp_servers)
+
+    Returns the number of shadow specs registered. Failures are swallowed
+    — discovery is best-effort.
+    """
+    if not mcp_servers:
+        return 0
+    try:
+        specs = await discover_mcp_tools(mcp_servers, timeout=timeout)
+    except Exception as exc:
+        logger.info("MCP discovery aborted: %s", exc)
+        return 0
+
+    register = getattr(backend, "register_tool", None)
+    if register is None:
+        return 0
+    for spec in specs:
+        try:
+            register(spec)
+        except Exception as exc:
+            logger.info("Failed to register shadow spec %s: %s", spec.name, exc)
+    return len(specs)
+
+
 async def discover_mcp_tools(
     mcp_servers: list[dict[str, Any]],
     *,

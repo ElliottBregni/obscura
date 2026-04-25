@@ -47,6 +47,73 @@ _SDK_MODULE = "codex_app_server"
 
 
 # ---------------------------------------------------------------------------
+# SDK ↔ CLI version-skew tolerance
+# ---------------------------------------------------------------------------
+#
+# The pinned ``codex_app_server`` SDK declares some response fields as
+# required that newer ``codex`` CLI binaries no longer emit (and vice
+# versa). Notable cases:
+#
+#   * ``ThreadStartResponse.approvalsReviewer`` — added in the SDK after
+#     it landed in CLI responses.
+#   * ``Thread.ephemeral`` — present in the SDK's model but absent from
+#     responses produced by ``codex-cli`` 0.106.x and earlier.
+#
+# We don't read these fields ourselves (we only need ``thread.id``), so
+# we relax them to optional at SDK-import time. This is forward- and
+# backward-compatible: when the CLI catches up, the field is populated
+# normally; otherwise it defaults to ``None``.
+
+_OPTIONAL_RELAXATIONS: dict[str, tuple[str, ...]] = {
+    "ThreadStartResponse": ("approvals_reviewer",),
+    "ThreadResumeResponse": ("approvals_reviewer",),
+    "Thread": ("ephemeral",),
+}
+
+
+def _relax_strict_response_models(mod: Any) -> None:
+    """Make selected SDK response fields optional to tolerate version skew.
+
+    Scans the SDK's submodules for the model classes named in
+    :data:`_OPTIONAL_RELAXATIONS` and downgrades the listed fields to
+    ``default=None``. Silently no-ops on missing classes or fields so a
+    future SDK rename doesn't blow up at startup.
+    """
+    candidates: list[Any] = [mod]
+    generated = getattr(mod, "generated", None)
+    if generated is not None:
+        candidates.append(generated)
+        v2 = getattr(generated, "v2_all", None)
+        if v2 is not None:
+            candidates.append(v2)
+
+    for model_name, field_names in _OPTIONAL_RELAXATIONS.items():
+        cls = next(
+            (
+                getattr(c, model_name)
+                for c in candidates
+                if hasattr(c, model_name)
+                and hasattr(getattr(c, model_name), "model_fields")
+            ),
+            None,
+        )
+        if cls is None:
+            continue
+        changed = False
+        for fname in field_names:
+            field = cls.model_fields.get(fname)
+            if field is None or not field.is_required():
+                continue
+            field.default = None
+            changed = True
+        if changed:
+            try:
+                cls.model_rebuild(force=True)
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # MCP server → Codex config override translation
 # ---------------------------------------------------------------------------
 #
@@ -233,6 +300,12 @@ class CodexBackend:
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
+        from obscura.integrations.mcp.discovery import (
+            register_external_mcp_tools,
+        )
+
+        await register_external_mcp_tools(self, self._mcp_servers)
+
         sdk_cls, module_name = self._import_sdk_class()
         self._sdk_module_name = module_name
         self._sdk_client = await self._build_sdk_client(sdk_cls)
@@ -902,6 +975,8 @@ class CodexBackend:
             val = getattr(mod, sym, None)
             if val is not None:
                 self._sdk_syms[sym] = val
+
+        _relax_strict_response_models(mod)
 
         return sdk_cls, _SDK_MODULE
 

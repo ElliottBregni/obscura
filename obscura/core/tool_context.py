@@ -62,6 +62,21 @@ class ToolContext:
     session_id: str | None = None
     """Durable session identifier, if one is active."""
 
+    # Host-supplied callbacks. Tools that need user interaction or permission-mode
+    # changes read these from ToolContext when present and fall back to legacy
+    # module-level globals (set by ``set_*_callback`` helpers) when they're None.
+    ask_user_callback: Any = None
+    """Callback for ``ask_user`` / ``user_ask`` tools. Signature varies by host."""
+
+    user_interact_callback: Any = None
+    """Callback for the ``user_interact`` tool — generic UI prompts."""
+
+    permission_mode_callback: Any = None
+    """Callback for ``enter_plan_mode`` / ``exit_plan_mode``. Signature: (mode: str) -> None."""
+
+    plan_approval_callback: Any = None
+    """Callback gating exit from plan mode. Signature: (summary: str) -> bool|coroutine."""
+
     extras: dict[str, Any] = field(default_factory=lambda: {})
     """Backend-specific or future extension fields."""
 
