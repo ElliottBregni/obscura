@@ -15,6 +15,7 @@ from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     AgentHookConfig,
@@ -99,7 +100,7 @@ def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
 # ---------------------------------------------------------------------------
 
 
-class CopilotBackend:
+class CopilotBackend(BackendToolHostMixin):
     """BackendProtocol implementation wrapping github-copilot-sdk."""
 
     def __init__(
@@ -123,9 +124,8 @@ class CopilotBackend:
         self._client: Any = None
         self._session: Any = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -493,14 +493,7 @@ class CopilotBackend:
         self._session = session
         return fork_ref
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for use in sessions (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
+    # -- Tools (register_tool comes from BackendToolHostMixin) -------------------
 
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry for agent loop use."""

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -50,7 +51,7 @@ if TYPE_CHECKING:
     from obscura.core.tool_router import RoutingResult
 
 
-class OpenAIBackend:
+class OpenAIBackend(BackendToolHostMixin):
     """BackendProtocol implementation wrapping the official ``openai`` SDK.
 
     Full proxy mode means the openai SDK owns the entire HTTP lifecycle —
@@ -86,9 +87,8 @@ class OpenAIBackend:
         # SDK client (set on start())
         self._client: Any = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -494,14 +494,7 @@ class OpenAIBackend:
         self._active_session = session_id
         return fork_ref
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for function calling (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
+    # -- Tools (register_tool comes from BackendToolHostMixin) -------------------
 
     def _build_tool_listing(self) -> str:
         """Build a human-readable tool listing for the system prompt."""

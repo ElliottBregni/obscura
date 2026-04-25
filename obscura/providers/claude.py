@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
 from obscura.core.tool_policy import ToolPolicy
-from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class ClaudeBackend:
+class ClaudeBackend(BackendToolHostMixin):
     """BackendProtocol implementation wrapping claude-agent-sdk."""
 
     def __init__(
@@ -70,9 +70,8 @@ class ClaudeBackend:
         self._client: Any = None
         self._last_session_id: str | None = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -318,18 +317,7 @@ class ClaudeBackend:
         """Remove a session from tracking."""
         self._session_store.remove(ref.session_id)
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for use in sessions (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
-
-    def get_tool_registry(self) -> ToolRegistry:
-        """Return the tool registry for agent loop use."""
-        return self._tool_registry
+    # -- Tools (register_tool / get_tool_registry come from BackendToolHostMixin) -----
 
     # -- Hooks ---------------------------------------------------------------
 
