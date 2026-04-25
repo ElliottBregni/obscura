@@ -655,6 +655,14 @@ class AgentLoop:
         self._predictive_cache = PredictiveToolCache()
         self._predictor: ToolPredictor | None = None
 
+        # Conversation history reference for tools that need to inspect
+        # or mutate it (e.g. history_snip). Updated each turn from the
+        # kwargs["messages"] list — None when the backend manages history
+        # opaquely (e.g. Claude SDK session state).
+        self._current_messages: list[Any] | None = None
+        self._current_session_id: str | None = None
+        self._current_user: Any = None
+
     # ------------------------------------------------------------------
     # Compiled agent application
     # ------------------------------------------------------------------
@@ -986,6 +994,15 @@ class AgentLoop:
         )
         current_prompt: str = prompt
         kwargs: dict[str, Any] = stream_kwargs
+        # Expose mutable conversation history to ToolContext so tools like
+        # history_snip can inspect / mutate it. Backends that don't pass
+        # messages through kwargs (e.g. Claude SDK with native sessions)
+        # will leave this as None and history-mutating tools will return
+        # a clean "no_history" error.
+        msgs = kwargs.get("messages")
+        if isinstance(msgs, list):
+            self._current_messages = msgs
+        self._current_session_id = session_id
         _prev_event: AgentEvent | None = None
         _retry_count: int = 0
         _max_retries: int = 3
@@ -2056,7 +2073,19 @@ class AgentLoop:
                 logger.debug("Capability module unavailable", exc_info=True)
 
         try:
-            result = await self._call_handler(spec, tc.input)
+            from obscura.core.tool_context import (
+                ToolContext,
+                bind_tool_context,
+            )
+
+            ctx = ToolContext(
+                registry=self._tools,
+                history=self._current_messages,
+                user=self._current_user,
+                session_id=self._current_session_id,
+            )
+            with bind_tool_context(ctx):
+                result = await self._call_handler(spec, tc.input)
 
             # Apply output bridge transform if registered
             bridge = TOOL_BRIDGES.get(spec.name)
