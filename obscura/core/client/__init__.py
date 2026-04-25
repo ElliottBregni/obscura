@@ -616,12 +616,20 @@ class ObscuraClient:
     def backend_impl(self) -> BackendProtocol:
         """Direct access to the underlying backend for SDK-specific features.
 
+        Returns the concrete provider, unwrapping the throttle layer so
+        callers can reach backend-specific methods.
+
         Example::
 
             claude = client.backend_impl  # ClaudeBackend
             await claude.fork_session(ref)
         """
-        return self._backend
+        from obscura.core.throttle import ThrottledBackend
+
+        backend = self._backend
+        if isinstance(backend, ThrottledBackend):
+            return backend.wrapped
+        return backend
 
     @property
     def current_loop(self) -> Any | None:
@@ -807,11 +815,14 @@ class ObscuraClient:
         streaming: bool,
         tool_policy: ToolPolicy | None = None,
     ) -> BackendProtocol:
-        """Instantiate the appropriate backend."""
+        """Instantiate the appropriate backend, wrapped in the throttle gate."""
+        instance: BackendProtocol
+        backend_name: str
+
         if backend == Backend.COPILOT:
             from obscura.providers.copilot import CopilotBackend
 
-            return CopilotBackend(
+            instance = CopilotBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
@@ -819,11 +830,11 @@ class ObscuraClient:
                 streaming=streaming,
                 tool_policy=tool_policy,
             )
-
-        if backend == Backend.CLAUDE:
+            backend_name = "copilot"
+        elif backend == Backend.CLAUDE:
             from obscura.providers.claude import ClaudeBackend
 
-            return ClaudeBackend(
+            instance = ClaudeBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
@@ -832,49 +843,54 @@ class ObscuraClient:
                 cwd=cwd,
                 tool_policy=tool_policy,
             )
-
-        if backend == Backend.LOCALLLM:
+            backend_name = "claude"
+        elif backend == Backend.LOCALLLM:
             from obscura.providers.localllm import LocalLLMBackend
 
-            return LocalLLMBackend(
+            instance = LocalLLMBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
                 mcp_servers=mcp_servers,
             )
-
-        if backend == Backend.OPENAI:
+            backend_name = "localllm"
+        elif backend == Backend.OPENAI:
             from obscura.providers.openai import OpenAIBackend
 
-            return OpenAIBackend(
+            instance = OpenAIBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
                 mcp_servers=mcp_servers,
             )
-
-        if backend == Backend.CODEX:
+            backend_name = "openai"
+        elif backend == Backend.CODEX:
             from obscura.providers.codex import CodexBackend
 
-            return CodexBackend(
+            instance = CodexBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
                 mcp_servers=mcp_servers,
             )
-
-        if backend == Backend.MOONSHOT:
+            backend_name = "codex"
+        elif backend == Backend.MOONSHOT:
             from obscura.providers.moonshot import MoonshotBackend
 
-            return MoonshotBackend(
+            instance = MoonshotBackend(
                 auth=auth,
                 model=model,
                 system_prompt=system_prompt,
                 mcp_servers=mcp_servers,
             )
+            backend_name = "moonshot"
+        else:
+            msg = f"Unknown backend: {backend}"
+            raise ValueError(msg)
 
-        msg = f"Unknown backend: {backend}"
-        raise ValueError(msg)
+        from obscura.core.throttle import wrap_if_enabled
+
+        return wrap_if_enabled(instance, backend_name=backend_name, auth=auth)
 
 
 # ---------------------------------------------------------------------------

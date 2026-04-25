@@ -170,20 +170,6 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch(() => {});
 
-// First-run onboarding: open the setup page when the extension is installed
-// or updated across a breaking host-protocol change. Also verify the native
-// host is reachable — if not, open onboarding automatically.
-chrome.runtime.onInstalled.addListener(async (details) => {
-  if (details.reason === "install") {
-    const healthy = await healthCheck(5000);
-    if (!healthy) {
-      chrome.tabs.create({
-        url: chrome.runtime.getURL("src/onboarding/index.html"),
-      });
-    }
-  }
-});
-
 // Service worker startup health check — verify native host connectivity.
 (async () => {
   try {

@@ -1373,9 +1373,7 @@ function showDisconnectBanner() {
   diagnoseBtn.addEventListener("click", () => {
     try {
       port?.postMessage({ type: MsgType.DIAG, id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
-    } catch {
-      chrome.tabs.create({ url: chrome.runtime.getURL("src/onboarding/index.html") });
-    }
+    } catch {}
   });
 
   disconnectBanner.append(text, reconnectBtn, diagnoseBtn);

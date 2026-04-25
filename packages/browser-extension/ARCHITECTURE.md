@@ -272,12 +272,10 @@ packages/browser-extension/
 ├── manifest.json                     MV3 — pinned `key` = stable extension id
 ├── background.js                     Service-worker bridge
 ├── src/
-│   ├── sidepanel/
-│   │   ├── index.html                Panel layout (statusbar, composer, tab strip)
-│   │   ├── sidepanel.css             Dark-terminal theme
-│   │   └── sidepanel.js              Panel logic (1700+ LOC, no framework)
-│   └── onboarding/
-│       └── index.html                First-run setup page
+│   └── sidepanel/
+│       ├── index.html                Panel layout (statusbar, composer, tab strip)
+│       ├── sidepanel.css             Dark-terminal theme
+│       └── sidepanel.js              Panel logic (1700+ LOC, no framework)
 ├── native-host/
 │   ├── obscura_native_host.py        Adapter (v0.3.0) — monkey-patches + main loop
 │   ├── browser_tools.py              Browser ToolSpecs (read_page, click, fill, eval, …)
