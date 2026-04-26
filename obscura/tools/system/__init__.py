@@ -4622,8 +4622,41 @@ async def tool_search(query: str, max_results: int = 5) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sleep tool — wait/poll for proactive-mode agents
+# MCP discovery status — surface external MCP server health
 # ---------------------------------------------------------------------------
+
+
+@tool(
+    "mcp_discovery_status",
+    (
+        "Report the outcome of the most recent external MCP server discovery "
+        "for the active backend. Use this when external MCP tools "
+        "(`mcp__<server>__<tool>`) seem missing or are timing out — the "
+        "report says which servers came up, which failed, and why."
+    ),
+    {
+        "type": "object",
+        "properties": {},
+    },
+)
+async def mcp_discovery_status() -> str:
+    from obscura.core.tool_context import current_tool_context
+
+    ctx = current_tool_context()
+    report = ctx.mcp_discovery_report if ctx is not None else None
+    if report is None:
+        return json.dumps(
+            {
+                "ok": True,
+                "configured": False,
+                "detail": (
+                    "No MCP discovery has run for this session — either no "
+                    "external MCP servers are configured or the backend "
+                    "hasn't been started yet."
+                ),
+            },
+        )
+    return json.dumps(report.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -4937,6 +4970,8 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", notebook_edit).spec),
         # Tool search
         cast("ToolSpec", cast("Any", tool_search).spec),
+        # MCP discovery status (external MCP server health)
+        cast("ToolSpec", cast("Any", mcp_discovery_status).spec),
         # Sleep & Config
         cast("ToolSpec", cast("Any", sleep).spec),
         cast("ToolSpec", cast("Any", config_tool).spec),

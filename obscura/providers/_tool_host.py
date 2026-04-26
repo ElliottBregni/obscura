@@ -28,6 +28,7 @@ from obscura.core.tools import ToolRegistry
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
+    from obscura.integrations.mcp.discovery import DiscoveryReport
 
 
 class BackendToolHostMixin:
@@ -38,10 +39,16 @@ class BackendToolHostMixin:
     (``_tools`` / ``_tool_registry``) are intentionally exposed directly
     so call sites that read them (system-prompt builders, etc.) keep
     working unchanged after migration.
+
+    ``last_mcp_discovery_report`` is set by
+    :func:`obscura.integrations.mcp.discovery.register_external_mcp_tools`
+    after each probe, so callers (and the ``mcp_discovery_status`` system
+    tool) can inspect per-server outcomes without scraping log lines.
     """
 
     _tools: list[ToolSpec]
     _tool_registry: ToolRegistry
+    last_mcp_discovery_report: DiscoveryReport | None
 
     def _init_tool_host(self) -> None:
         """Initialize the empty tool list and registry. Idempotent."""
@@ -49,6 +56,8 @@ class BackendToolHostMixin:
             self._tools = []
         if not hasattr(self, "_tool_registry"):
             self._tool_registry = ToolRegistry()
+        if not hasattr(self, "last_mcp_discovery_report"):
+            self.last_mcp_discovery_report = None
 
     def register_tool(self, spec: ToolSpec) -> None:
         """Register *spec* for use in sessions, skipping duplicates by name.

@@ -77,6 +77,13 @@ class ToolContext:
     plan_approval_callback: Any = None
     """Callback gating exit from plan mode. Signature: (summary: str) -> bool|coroutine."""
 
+    mcp_discovery_report: Any = None
+    """Snapshot of the active backend's MCP discovery report (or None).
+
+    Read by the ``mcp_discovery_status`` system tool so an agent can
+    surface which external MCP servers came up, which failed, and why.
+    """
+
     extras: dict[str, Any] = field(default_factory=lambda: {})
     """Backend-specific or future extension fields."""
 
