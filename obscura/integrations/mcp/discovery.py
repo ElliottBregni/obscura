@@ -273,11 +273,19 @@ async def register_external_mcp_tools(
     :class:`BackendToolHostMixin`), so callers and the
     ``mcp_discovery_status`` system tool can inspect failures
     after the fact rather than scraping log lines.
+
+    Also scans for leaked subprocesses (Claude SDK doesn't always reap
+    its stdio MCP servers when sessions end abruptly) and logs a warning
+    naming each server with more than one matching process. We never
+    auto-kill — concurrent sessions in another shell may legitimately own
+    those processes; cleanup is opt-in via the ``mcp_cleanup_orphans`` tool.
     """
     if not mcp_servers:
         report = DiscoveryReport()
         _set_last_report(backend, report)
         return report
+
+    _warn_about_leaked_processes(mcp_servers)
 
     try:
         report = await discover_mcp_tools_with_report(mcp_servers, timeout=timeout)
@@ -320,6 +328,38 @@ def _set_last_report(backend: Any, report: DiscoveryReport) -> None:
         # Backend doesn't support the attribute — that's fine, the report is
         # still returned to the caller.
         pass
+
+
+def _warn_about_leaked_processes(mcp_servers: list[dict[str, Any]]) -> None:
+    """Log a warning for each server with multiple existing subprocesses.
+
+    Single matches are normal — Claude SDK reuses its subprocess across a
+    session. Two or more usually means an earlier session leaked.
+    """
+    try:
+        from obscura.integrations.mcp.process_cleanup import detect_orphans
+    except ImportError:
+        return
+
+    try:
+        orphans = detect_orphans(mcp_servers)
+    except Exception as exc:
+        logger.debug("MCP orphan scan failed: %s", exc)
+        return
+
+    for name, procs in orphans.items():
+        if len(procs) <= 1:
+            continue
+        stopped = [p for p in procs if p.is_stopped]
+        logger.warning(
+            "MCP server '%s' has %d running subprocess(es) — likely leak from "
+            "previous session(s). PIDs: %s%s. Use the 'mcp_cleanup_orphans' "
+            "tool to reap them.",
+            name,
+            len(procs),
+            ",".join(str(p.pid) for p in procs),
+            f" ({len(stopped)} suspended)" if stopped else "",
+        )
 
 
 async def discover_mcp_tools(
