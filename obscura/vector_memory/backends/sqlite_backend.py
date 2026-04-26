@@ -24,6 +24,22 @@ from obscura.vector_memory.vector_memory_filters import (
 _logger = logging.getLogger(__name__)
 
 
+def _sqlite_supports_json_patch() -> bool:
+    """Probe at module load: does the bundled sqlite3 expose json_patch()?"""
+    try:
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute("SELECT json_patch('{\"a\":1}', '{\"b\":2}')").fetchone()
+            return True
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:
+        return False
+
+
+_JSON_PATCH_AVAILABLE = _sqlite_supports_json_patch()
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     a_arr = np.array(a)
@@ -333,6 +349,70 @@ class SQLiteBackend:
             (datetime.now(UTC).isoformat(), key.namespace, key.key),
         )
         conn.commit()
+
+    def update_metadata(self, key: MemoryKey, partial: dict[str, Any]) -> None:
+        """Atomic merge of ``partial`` into the metadata JSON column.
+
+        ``accessed_at`` is split out because it lives in its own column.
+        Everything else is folded into the metadata JSON dict.  No-op if
+        the key doesn't exist.
+        """
+        if not partial:
+            return
+        accessed_at = partial.get("accessed_at")
+        md_updates = {k: v for k, v in partial.items() if k != "accessed_at"}
+        conn = self._get_conn()
+        if md_updates and _JSON_PATCH_AVAILABLE:
+            patch = json.dumps(md_updates)
+            if accessed_at is not None:
+                conn.execute(
+                    "UPDATE vector_memory SET "
+                    "metadata = json_patch(COALESCE(metadata, '{}'), ?), "
+                    "accessed_at = ? "
+                    "WHERE namespace = ? AND key = ?",
+                    (patch, accessed_at, key.namespace, key.key),
+                )
+            else:
+                conn.execute(
+                    "UPDATE vector_memory SET "
+                    "metadata = json_patch(COALESCE(metadata, '{}'), ?) "
+                    "WHERE namespace = ? AND key = ?",
+                    (patch, key.namespace, key.key),
+                )
+            conn.commit()
+            return
+
+        if md_updates:
+            row = conn.execute(
+                "SELECT metadata FROM vector_memory WHERE namespace = ? AND key = ?",
+                (key.namespace, key.key),
+            ).fetchone()
+            if row is None:
+                return
+            current_md = json.loads(row["metadata"]) if row["metadata"] else {}
+            new_md = {**current_md, **md_updates}
+            if accessed_at is not None:
+                conn.execute(
+                    "UPDATE vector_memory SET metadata = ?, accessed_at = ? "
+                    "WHERE namespace = ? AND key = ?",
+                    (json.dumps(new_md), accessed_at, key.namespace, key.key),
+                )
+            else:
+                conn.execute(
+                    "UPDATE vector_memory SET metadata = ? "
+                    "WHERE namespace = ? AND key = ?",
+                    (json.dumps(new_md), key.namespace, key.key),
+                )
+            conn.commit()
+            return
+
+        if accessed_at is not None:
+            conn.execute(
+                "UPDATE vector_memory SET accessed_at = ? "
+                "WHERE namespace = ? AND key = ?",
+                (accessed_at, key.namespace, key.key),
+            )
+            conn.commit()
 
     def list_by_type(
         self,
