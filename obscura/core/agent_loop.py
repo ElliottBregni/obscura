@@ -1422,6 +1422,24 @@ class AgentLoop:
                 accumulated_text=state.accumulated_text + state.turn_text,
             )
 
+            # Scan accumulated turn text for known hallucination patterns
+            # (model inventing UX flows like "click Allow" or
+            # "/allowed-tools" that don't exist in obscura). Logs at
+            # WARNING so violations surface in default-level logs without
+            # changing the output the user sees.
+            try:
+                from obscura.core.output_quality import (
+                    log_violations,
+                    scan_text,
+                )
+
+                violations = scan_text(state.turn_text)
+                if violations:
+                    log_violations(violations, turn=state.turn)
+            except Exception:
+                # Quality scan must never break the turn — best-effort.
+                pass
+
             # Emit TURN_COMPLETE
             if _prev_event is not None:
                 await self._post_emit(_prev_event)
