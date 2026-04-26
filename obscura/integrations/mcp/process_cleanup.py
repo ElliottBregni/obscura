@@ -48,12 +48,21 @@ class MCPProcess:
         return self.state.startswith("T")
 
 
-def find_processes_for_command(command: str) -> list[MCPProcess]:
+def find_processes_for_command(
+    command: str,
+    *,
+    descendants_of: int | None = None,
+) -> list[MCPProcess]:
     """Return every running process whose command path matches *command*.
 
     Uses ``ps`` (universally available on macOS / Linux) so we don't pull
     in psutil as a hard dep. Returns an empty list when ``ps`` is missing
     or fails — detection is best-effort.
+
+    *descendants_of*, when set, restricts matches to the process subtree
+    rooted at the given PID. This lets the lifecycle hook in
+    ``ClaudeBackend`` reap only subprocesses spawned by *its* SDK call,
+    leaving alone any owned by concurrent obscura sessions in other shells.
     """
     if not command:
         return []
@@ -71,6 +80,10 @@ def find_processes_for_command(command: str) -> list[MCPProcess]:
     except (subprocess.SubprocessError, OSError) as exc:
         logger.debug("ps invocation failed: %s", exc)
         return []
+
+    allowed: set[int] | None = None
+    if descendants_of is not None:
+        allowed = build_descendant_set(descendants_of)
 
     own_pid = os.getpid()
     matches: list[MCPProcess] = []
@@ -91,8 +104,65 @@ def find_processes_for_command(command: str) -> list[MCPProcess]:
             continue
         if command not in cmd:
             continue
+        if allowed is not None and pid not in allowed:
+            continue
         matches.append(MCPProcess(pid=pid, state=state, command=cmd))
     return matches
+
+
+def _read_pid_ppid_map() -> dict[int, int]:
+    """Map every running ``pid -> ppid``. Empty dict on any ps failure."""
+    if shutil.which("ps") is None:
+        return {}
+    try:
+        proc = subprocess.run(
+            ["ps", "-axo", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.debug("ps -axo pid,ppid failed: %s", exc)
+        return {}
+
+    out: dict[int, int] = {}
+    for raw in proc.stdout.splitlines():
+        parts = raw.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        out[pid] = ppid
+    return out
+
+
+def build_descendant_set(root_pid: int) -> set[int]:
+    """Return the set of PIDs in the subtree rooted at *root_pid* (inclusive).
+
+    BFS over the parent map. Robust to cycles (which shouldn't happen in
+    real ps output but cost nothing to defend against).
+    """
+    parents = _read_pid_ppid_map()
+    if not parents:
+        return {root_pid}
+
+    children: dict[int, list[int]] = {}
+    for pid, ppid in parents.items():
+        children.setdefault(ppid, []).append(pid)
+
+    out = {root_pid}
+    stack = [root_pid]
+    while stack:
+        node = stack.pop()
+        for c in children.get(node, []):
+            if c not in out:
+                out.add(c)
+                stack.append(c)
+    return out
 
 
 def detect_orphans(

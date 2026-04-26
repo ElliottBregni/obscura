@@ -235,15 +235,97 @@ class ClaudeBackend(BackendToolHostMixin):
 
         await register_external_mcp_tools(self, self._mcp_servers)
 
+        # Snapshot baseline MCP subprocess PIDs so we can identify (and
+        # later reap) the ones Claude SDK spawns for *this* session. The
+        # snapshot uses ``ps`` and is best-effort — see
+        # ``obscura.integrations.mcp.process_cleanup``.
+        self._mcp_pids_at_start = self._snapshot_mcp_pids()
+
         options = self._build_options()
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
 
     async def stop(self) -> None:
-        """Disconnect from Claude."""
+        """Disconnect from Claude and reap any MCP subprocess we spawned."""
         if self._client is not None:
-            await self._client.disconnect()
-            self._client = None
+            try:
+                await self._client.disconnect()
+            finally:
+                self._client = None
+
+        await self._reap_session_mcp_subprocesses()
+
+    def _snapshot_mcp_pids(self) -> set[int]:
+        """Return the set of currently-running PIDs matching configured MCP servers.
+
+        Used as a baseline at session start so we can compute "what
+        appeared during my session" at stop time without clobbering
+        subprocesses owned by a concurrent obscura session in another
+        shell.
+        """
+        if not self._mcp_servers:
+            return set()
+        try:
+            from obscura.integrations.mcp.process_cleanup import (
+                find_processes_for_command,
+            )
+        except ImportError:
+            return set()
+
+        pids: set[int] = set()
+        for server in self._mcp_servers:
+            command = str(server.get("command") or "")
+            if not command:
+                continue
+            for proc in find_processes_for_command(command):
+                pids.add(proc.pid)
+        return pids
+
+    async def _reap_session_mcp_subprocesses(self) -> None:
+        """Kill MCP subprocesses that appeared during this session.
+
+        Computes the diff between *now* and ``_mcp_pids_at_start``, then
+        further filters to descendants of our own Python process so a
+        subprocess spawned by a concurrent obscura session never gets
+        reaped. Best-effort and silent on any error.
+        """
+        baseline: set[int] = getattr(self, "_mcp_pids_at_start", set())
+        if not self._mcp_servers:
+            return
+        try:
+            import os
+
+            from obscura.integrations.mcp.process_cleanup import (
+                build_descendant_set,
+                cleanup_orphans,
+                find_processes_for_command,
+            )
+        except ImportError:
+            return
+
+        own_subtree = build_descendant_set(os.getpid())
+
+        new_pids: list[int] = []
+        for server in self._mcp_servers:
+            command = str(server.get("command") or "")
+            if not command:
+                continue
+            for proc in find_processes_for_command(command):
+                if proc.pid in baseline:
+                    continue
+                if proc.pid not in own_subtree:
+                    # Owned by a concurrent obscura session — leave it alone.
+                    continue
+                new_pids.append(proc.pid)
+
+        if not new_pids:
+            return
+
+        try:
+            cleanup_orphans(new_pids)
+        except Exception:
+            # Cleanup is best-effort — never raise out of stop().
+            pass
 
     # -- Send / Stream -------------------------------------------------------
 

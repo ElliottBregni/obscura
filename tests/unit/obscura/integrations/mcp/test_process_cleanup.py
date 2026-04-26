@@ -146,3 +146,128 @@ class TestPidAlive:
     def test_dead(self) -> None:
         # PID 99999999 is essentially guaranteed not to exist.
         assert process_cleanup._pid_alive(99999999) is False
+
+
+class TestBuildDescendantSet:
+    def test_root_in_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The subtree always contains the root pid."""
+        monkeypatch.setattr(
+            process_cleanup,
+            "_read_pid_ppid_map",
+            lambda: {1: 0, 100: 1, 200: 100},
+        )
+        result = process_cleanup.build_descendant_set(100)
+        assert 100 in result
+
+    def test_walks_full_subtree(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Tree:
+        #   1 -> 100 -> 200 -> 300
+        #         \-> 250
+        #   1 -> 999  (sibling, not in subtree)
+        monkeypatch.setattr(
+            process_cleanup,
+            "_read_pid_ppid_map",
+            lambda: {1: 0, 100: 1, 200: 100, 300: 200, 250: 100, 999: 1},
+        )
+        result = process_cleanup.build_descendant_set(100)
+        assert result == {100, 200, 250, 300}
+
+    def test_empty_ps_falls_back_to_singleton(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When ps fails, the descendant set is just the root."""
+        monkeypatch.setattr(process_cleanup, "_read_pid_ppid_map", lambda: {})
+        assert process_cleanup.build_descendant_set(42) == {42}
+
+
+class TestFindProcessesForCommandDescendantsFilter:
+    def test_filters_to_subtree(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only processes inside the descendants_of subtree are returned."""
+        # Two processes match the command, but only pid 200 is a descendant
+        # of root pid 100. Pid 500 is a sibling owned by another session.
+        own_pid = os.getpid()
+
+        class _Result:
+            stdout = (
+                "200 S+ /bin/svc\n"
+                "500 S+ /bin/svc\n"
+                f"{own_pid} R+ /bin/svc\n"  # filtered out: own pid
+            )
+
+        monkeypatch.setattr(process_cleanup.shutil, "which", lambda _name: "/bin/ps")
+        monkeypatch.setattr(
+            process_cleanup.subprocess,
+            "run",
+            lambda *args, **kwargs: _Result(),
+        )
+        # Subtree of 100 = {100, 200}.
+        monkeypatch.setattr(
+            process_cleanup, "build_descendant_set", lambda root: {100, 200}
+        )
+
+        result = process_cleanup.find_processes_for_command(
+            "svc", descendants_of=100
+        )
+        pids = [m.pid for m in result]
+        assert pids == [200]
+        assert 500 not in pids
+
+
+class TestClaudeBackendReap:
+    """ClaudeBackend.start() snapshots; .stop() reaps PIDs that appeared during the session."""
+
+    @pytest.mark.asyncio
+    async def test_reap_kills_only_new_descendants(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from obscura.integrations.mcp import process_cleanup as pc
+        from obscura.providers.claude import ClaudeBackend
+
+        # Track every PID we'd kill.
+        killed: list[int] = []
+
+        def _fake_cleanup(
+            pids: list[int], *, grace_seconds: float = 1.0
+        ) -> pc.CleanupResult:
+            killed.extend(pids)
+            return pc.CleanupResult(killed=tuple(pids), failed=())
+
+        monkeypatch.setattr(pc, "cleanup_orphans", _fake_cleanup)
+
+        # Subtree contains everything except pid 999 (concurrent session).
+        monkeypatch.setattr(
+            pc,
+            "build_descendant_set",
+            lambda _root: {os.getpid(), 100, 200, 300},
+        )
+
+        # ps view at "stop time": 200 (baseline), 300 (new + ours), 999 (new + concurrent).
+        find_calls: list[tuple[str, dict]] = []
+
+        def _fake_find(
+            command: str,
+            *,
+            descendants_of: int | None = None,
+        ) -> list[pc.MCPProcess]:
+            find_calls.append((command, {"descendants_of": descendants_of}))
+            return [
+                pc.MCPProcess(pid=200, state="S+", command=command),
+                pc.MCPProcess(pid=300, state="S+", command=command),
+                pc.MCPProcess(pid=999, state="S+", command=command),
+            ]
+
+        monkeypatch.setattr(pc, "find_processes_for_command", _fake_find)
+
+        # Build a backend without going through real auth/SDK setup.
+        backend = ClaudeBackend.__new__(ClaudeBackend)
+        backend._mcp_servers = [
+            {"name": "prog", "command": "/bin/prog-mcp"},
+        ]
+        backend._mcp_pids_at_start = {200}  # 200 was already there
+
+        await backend._reap_session_mcp_subprocesses()
+
+        # Killed: 300 (new + in our subtree). Not 200 (baseline). Not 999 (not in subtree).
+        assert killed == [300]
