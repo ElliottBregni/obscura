@@ -871,16 +871,16 @@ class TestPriorityTruncate:
         """
         from obscura.providers.copilot import _priority_truncate
 
-        mcp_core = [_make_spec("mcp__obscura_tools__run_shell")]
-        mcp_core.append(_make_spec("mcp__obscura_tools__read_text_file"))
+        mcp_core = [_make_spec("mcp__obs__run_shell")]
+        mcp_core.append(_make_spec("mcp__obs__read_text_file"))
         mcp_filler = _make_tools([f"mcp__plugin__filler_{i}" for i in range(150)])
         all_tools = mcp_filler + mcp_core  # MCP core at end
 
         result = _priority_truncate(all_tools, 128)
         result_names = {t.name for t in result}
 
-        assert "mcp__obscura_tools__run_shell" in result_names
-        assert "mcp__obscura_tools__read_text_file" in result_names
+        assert "mcp__obs__run_shell" in result_names
+        assert "mcp__obs__read_text_file" in result_names
 
     def test_native_plugins_preferred_over_mcp(self) -> None:
         """Non-MCP native tools are kept before MCP plugin tools."""
@@ -905,11 +905,11 @@ class TestPriorityTruncate:
         from obscura.providers.copilot import _CORE_TOOL_NAMES, _priority_truncate
 
         # Simulate real tool ordering: MCP tools registered first, core later
-        mcp_tools = _make_tools([f"mcp__obscura_tools__tool_{i}" for i in range(80)])
+        mcp_tools = _make_tools([f"mcp__obs__tool_{i}" for i in range(80)])
         mcp_core = [
-            _make_spec("mcp__obscura_tools__run_shell"),
-            _make_spec("mcp__obscura_tools__read_text_file"),
-            _make_spec("mcp__obscura_tools__write_text_file"),
+            _make_spec("mcp__obs__run_shell"),
+            _make_spec("mcp__obs__read_text_file"),
+            _make_spec("mcp__obs__write_text_file"),
         ]
         native_plugins = _make_tools(
             [
@@ -944,7 +944,7 @@ class TestPriorityTruncate:
             )
 
         # MCP core variants must survive
-        assert "mcp__obscura_tools__run_shell" in result_names
+        assert "mcp__obs__run_shell" in result_names
         assert len(result) <= 128
 
     def test_under_limit_returns_all(self) -> None:

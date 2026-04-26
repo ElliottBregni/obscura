@@ -250,7 +250,7 @@ class TestToolPolicyClaude:
     """Test apply_to_claude() method."""
 
     def test_apply_uses_mcp_naming(self, sample_tools: list[ToolSpec]) -> None:
-        """Claude policy uses mcp__obscura_tools__ prefix."""
+        """Claude policy uses mcp__obs__ prefix."""
         policy = ToolPolicy.custom_only()
         opts: dict[str, Any] = {}
 
@@ -258,9 +258,9 @@ class TestToolPolicyClaude:
 
         assert "allowed_tools" in opts
         expected = [
-            "mcp__obscura_tools__search",
-            "mcp__obscura_tools__fetch",
-            "mcp__obscura_tools__execute",
+            "mcp__obs__search",
+            "mcp__obs__fetch",
+            "mcp__obs__execute",
         ]
         assert opts["allowed_tools"] == expected
 
@@ -274,7 +274,7 @@ class TestToolPolicyClaude:
 
         policy.apply_to_claude(opts, sample_tools)
 
-        assert opts["allowed_tools"] == ["mcp__obscura_tools__search"]
+        assert opts["allowed_tools"] == ["mcp__obs__search"]
 
     def test_apply_denied_with_mcp_naming(
         self,
@@ -286,8 +286,8 @@ class TestToolPolicyClaude:
 
         policy.apply_to_claude(opts, sample_tools)
 
-        assert "mcp__obscura_tools__execute" not in opts["allowed_tools"]
-        assert "mcp__obscura_tools__search" in opts["allowed_tools"]
+        assert "mcp__obs__execute" not in opts["allowed_tools"]
+        assert "mcp__obs__search" in opts["allowed_tools"]
 
     def test_apply_allow_all_no_restriction(
         self,
