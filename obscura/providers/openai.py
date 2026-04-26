@@ -82,10 +82,17 @@ class OpenAIBackend(BackendToolHostMixin):
         self._mcp_servers: list[MCPServerConfig] = [
             MCPServerConfig.from_dict(s) for s in (mcp_servers or [])
         ]
+        # Keep the raw dicts for discovery + bridge — MCPServerConfig is lossy
+        # (drops name/args/url/headers/timeout) and cannot be round-tripped
+        # back to the full schema register_external_mcp_tools expects.
+        self._mcp_servers_raw: list[dict[str, Any]] = list(mcp_servers or [])
         self._backend_type = backend_type
 
         # SDK client (set on start())
         self._client: Any = None
+        # Bridge that lets this non-SDK-native backend invoke external MCP
+        # tools at runtime; set on start() when mcp_servers are configured.
+        self._mcp_bridge: Any = None
 
         # Tool list + registry (provided by BackendToolHostMixin)
         self._init_tool_host()
@@ -179,7 +186,7 @@ class OpenAIBackend(BackendToolHostMixin):
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
-        """Initialize the OpenAI SDK client."""
+        """Initialize the OpenAI SDK client and external MCP tooling."""
         from openai import AsyncOpenAI
 
         kwargs: dict[str, Any] = {"api_key": self._api_key}
@@ -188,8 +195,32 @@ class OpenAIBackend(BackendToolHostMixin):
 
         self._client = AsyncOpenAI(**kwargs)
 
+        # Discover any configured external MCP servers and install real
+        # handlers. Unlike Claude/Copilot, the OpenAI SDK has no native
+        # MCP routing — without the bridge, a model call to
+        # ``mcp__forge__generate_image`` would hit the discovery shadow
+        # and fail. Both calls are best-effort: failures are logged and
+        # leave the backend usable for non-MCP work.
+        if self._mcp_servers_raw:
+            from obscura.integrations.mcp.discovery import (
+                register_external_mcp_tools,
+            )
+            from obscura.providers._mcp_execution_bridge import (
+                MCPExecutionBridge,
+            )
+
+            await register_external_mcp_tools(self, self._mcp_servers_raw)
+            self._mcp_bridge = MCPExecutionBridge(self._mcp_servers_raw)
+            await self._mcp_bridge.start()
+            self._mcp_bridge.install_handlers(self)
+
     async def stop(self) -> None:
-        """Close the client."""
+        """Close the client and tear down the MCP bridge."""
+        if self._mcp_bridge is not None:
+            try:
+                await self._mcp_bridge.stop()
+            finally:
+                self._mcp_bridge = None
         if self._client is not None:
             await self._client.close()
             self._client = None
