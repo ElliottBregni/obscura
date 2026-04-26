@@ -213,6 +213,62 @@ class TestPlanModeCallbacksUseContext:
         assert '"mode": "plan"' in result
 
 
+class TestMCPDiscoveryStatusTool:
+    """The mcp_discovery_status tool reads the report from ToolContext."""
+
+    @pytest.mark.asyncio
+    async def test_no_report_returns_unconfigured(self) -> None:
+        from obscura.tools.system import mcp_discovery_status
+
+        result = await mcp_discovery_status()
+        assert '"configured": false' in result
+
+    @pytest.mark.asyncio
+    async def test_report_in_context_is_serialised(self) -> None:
+        import json as _json
+
+        from obscura.integrations.mcp.discovery import (
+            DiscoveryReport,
+            DiscoveryStatus,
+        )
+        from obscura.tools.system import mcp_discovery_status
+
+        report = DiscoveryReport(
+            statuses=(
+                DiscoveryStatus(
+                    server_name="prognostic",
+                    transport="stdio",
+                    ok=True,
+                    tool_count=6,
+                    duration_ms=120,
+                ),
+                DiscoveryStatus(
+                    server_name="lightpanda",
+                    transport="stdio",
+                    ok=False,
+                    tool_count=0,
+                    error="TimeoutError: ",
+                    duration_ms=4000,
+                ),
+            ),
+        )
+
+        ctx = ToolContext(mcp_discovery_report=report)
+        with bind_tool_context(ctx):
+            result_str = await mcp_discovery_status()
+
+        result = _json.loads(result_str)
+        assert result["ok"] is False
+        assert result["total_tools"] == 6
+        assert {s["name"] for s in result["servers"]} == {
+            "prognostic",
+            "lightpanda",
+        }
+        fail = next(s for s in result["servers"] if s["name"] == "lightpanda")
+        assert fail["error"] is not None
+        assert "TimeoutError" in fail["error"]
+
+
 class TestAskUserUsesContext:
     """ask_user resolves its callback via ToolContext."""
 

@@ -17,6 +17,11 @@ entries in the registry. The shadows exist only for discovery — Claude
 SDK still routes the actual calls through the original ``mcp_servers``
 passthrough. The shadow handler returns a clear error if invoked
 directly, which would indicate a routing bug.
+
+Discovery results are surfaced as :class:`DiscoveryReport` so failures
+don't vanish into log lines — backends store the report on
+``last_mcp_discovery_report`` and the ``mcp_discovery_status`` system
+tool exposes it from inside an agent session.
 """
 
 from __future__ import annotations
@@ -24,6 +29,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from obscura.integrations.mcp.client import MCPClient
@@ -37,6 +44,61 @@ logger = logging.getLogger(__name__)
 # Per-server probe timeout. Keep short so a slow / dead MCP server doesn't
 # stall session startup.
 _DEFAULT_PROBE_TIMEOUT = 3.0
+
+
+@dataclass(frozen=True)
+class DiscoveryStatus:
+    """Outcome of probing one external MCP server.
+
+    Captured per-server so callers can show *which* servers failed and
+    *why* — log lines alone made it hard to tell whether the prognostic
+    binary was missing or whether the server timed out.
+    """
+
+    server_name: str
+    transport: str
+    ok: bool
+    tool_count: int
+    error: str | None = None
+    duration_ms: int = 0
+
+
+@dataclass(frozen=True)
+class DiscoveryReport:
+    """Aggregate outcome of probing every configured MCP server."""
+
+    statuses: tuple[DiscoveryStatus, ...] = field(default_factory=tuple)
+    specs: tuple[ToolSpec, ...] = field(default_factory=tuple)
+
+    @property
+    def total_tools(self) -> int:
+        return sum(s.tool_count for s in self.statuses)
+
+    @property
+    def ok_servers(self) -> tuple[DiscoveryStatus, ...]:
+        return tuple(s for s in self.statuses if s.ok)
+
+    @property
+    def failed_servers(self) -> tuple[DiscoveryStatus, ...]:
+        return tuple(s for s in self.statuses if not s.ok)
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-serialisable view, suitable for the ``mcp_discovery_status`` tool."""
+        return {
+            "ok": all(s.ok for s in self.statuses) if self.statuses else True,
+            "total_tools": self.total_tools,
+            "servers": [
+                {
+                    "name": s.server_name,
+                    "transport": s.transport,
+                    "ok": s.ok,
+                    "tool_count": s.tool_count,
+                    "error": s.error,
+                    "duration_ms": s.duration_ms,
+                }
+                for s in self.statuses
+            ],
+        }
 
 
 def _shadow_handler_factory(qualified_name: str) -> Any:
@@ -105,27 +167,45 @@ async def _probe_one_server(
     server: dict[str, Any],
     *,
     timeout: float,
-) -> list[ToolSpec]:
-    """Connect to one MCP server, list tools, return shadow ToolSpecs.
+) -> tuple[list[ToolSpec], DiscoveryStatus]:
+    """Connect to one MCP server, list tools, return shadow ToolSpecs + status.
 
-    Returns an empty list on any failure (logged at INFO level — discovery
-    is best-effort and must not break session startup).
+    Failures yield an empty spec list and a :class:`DiscoveryStatus` with
+    ``ok=False`` and the error message. Discovery never raises — the
+    status is the channel for surfacing what went wrong.
     """
     from obscura.core.types import ToolSpec  # local to avoid import cycle
 
     name = str(server.get("name") or "unknown")
+    transport = str(server.get("transport") or "stdio")
+    started = time.monotonic()
+
     config = _build_config(server)
     if config is None:
-        logger.info("Skipping malformed MCP server config: %s", name)
-        return []
+        logger.warning("MCP discovery: malformed config for %s", name)
+        return [], DiscoveryStatus(
+            server_name=name,
+            transport=transport,
+            ok=False,
+            tool_count=0,
+            error="malformed config (missing command or url)",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
     try:
         async with asyncio.timeout(timeout + 1.0):
             async with MCPClient(config) as client:
                 tools = await client.list_tools()
     except (TimeoutError, Exception) as exc:
-        logger.info("MCP discovery failed for %s: %s", name, exc)
-        return []
+        logger.warning("MCP discovery failed for %s: %s", name, exc)
+        return [], DiscoveryStatus(
+            server_name=name,
+            transport=transport,
+            ok=False,
+            tool_count=0,
+            error=f"{type(exc).__name__}: {exc}",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
     specs: list[ToolSpec] = []
     for tool in tools:
@@ -138,7 +218,13 @@ async def _probe_one_server(
         )
         specs.append(spec)
     logger.info("MCP discovery: %s contributed %d tools", name, len(specs))
-    return specs
+    return specs, DiscoveryStatus(
+        server_name=name,
+        transport=transport,
+        ok=True,
+        tool_count=len(specs),
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
 
 
 async def register_external_mcp_tools(
@@ -146,35 +232,62 @@ async def register_external_mcp_tools(
     mcp_servers: list[dict[str, Any]],
     *,
     timeout: float = _DEFAULT_PROBE_TIMEOUT,
-) -> int:
+) -> DiscoveryReport:
     """Discover *mcp_servers* and register the shadow specs into *backend*.
 
-    *backend* must expose a ``register_tool(spec)`` method (every obscura
-    provider does). Wraps the discovery + registration loop so each
-    backend's ``start()`` becomes one line:
-
-        await register_external_mcp_tools(self, self._mcp_servers)
-
-    Returns the number of shadow specs registered. Failures are swallowed
-    — discovery is best-effort.
+    *backend* must expose ``register_tool(spec)``. The full
+    :class:`DiscoveryReport` is returned and stored on
+    ``backend.last_mcp_discovery_report`` (when the backend uses
+    :class:`BackendToolHostMixin`), so callers and the
+    ``mcp_discovery_status`` system tool can inspect failures
+    after the fact rather than scraping log lines.
     """
     if not mcp_servers:
-        return 0
+        report = DiscoveryReport()
+        _set_last_report(backend, report)
+        return report
+
     try:
-        specs = await discover_mcp_tools(mcp_servers, timeout=timeout)
+        report = await discover_mcp_tools_with_report(mcp_servers, timeout=timeout)
     except Exception as exc:
-        logger.info("MCP discovery aborted: %s", exc)
-        return 0
+        logger.warning("MCP discovery aborted: %s", exc)
+        report = DiscoveryReport(
+            statuses=(
+                DiscoveryStatus(
+                    server_name=str(s.get("name") or "unknown"),
+                    transport=str(s.get("transport") or "stdio"),
+                    ok=False,
+                    tool_count=0,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                for s in mcp_servers
+            ),
+        )
+        _set_last_report(backend, report)
+        return report
 
     register = getattr(backend, "register_tool", None)
-    if register is None:
-        return 0
-    for spec in specs:
-        try:
-            register(spec)
-        except Exception as exc:
-            logger.info("Failed to register shadow spec %s: %s", spec.name, exc)
-    return len(specs)
+    if register is not None:
+        for spec in report.specs:
+            try:
+                register(spec)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to register shadow spec %s: %s", spec.name, exc
+                )
+
+    _set_last_report(backend, report)
+    return report
+
+
+def _set_last_report(backend: Any, report: DiscoveryReport) -> None:
+    """Stash *report* on the backend if it accepts the attribute."""
+    try:
+        backend.last_mcp_discovery_report = report
+    except Exception:
+        # Backend doesn't support the attribute — that's fine, the report is
+        # still returned to the caller.
+        pass
 
 
 async def discover_mcp_tools(
@@ -182,27 +295,59 @@ async def discover_mcp_tools(
     *,
     timeout: float = _DEFAULT_PROBE_TIMEOUT,
 ) -> list[ToolSpec]:
-    """Probe every server in *mcp_servers* and return shadow ToolSpecs.
+    """Probe every server and return the flat list of shadow ToolSpecs.
 
-    Discovery runs all servers concurrently. Each server has its own
-    timeout, so one slow server doesn't block the others. Failures are
-    logged but never raised — discovery is purely best-effort.
+    Thin wrapper around :func:`discover_mcp_tools_with_report` that
+    discards the per-server status info — kept for callers that only
+    want the specs (and existing tests).
+    """
+    report = await discover_mcp_tools_with_report(mcp_servers, timeout=timeout)
+    return list(report.specs)
+
+
+async def discover_mcp_tools_with_report(
+    mcp_servers: list[dict[str, Any]],
+    *,
+    timeout: float = _DEFAULT_PROBE_TIMEOUT,
+) -> DiscoveryReport:
+    """Probe every server concurrently and return a :class:`DiscoveryReport`.
+
+    Each server has its own timeout, so one slow / dead server doesn't
+    block the others. Per-server failures are captured in the report's
+    ``statuses`` tuple — never raised. A gather-level exception (rare,
+    typically programmer error) is treated the same way.
     """
     if not mcp_servers:
-        return []
+        return DiscoveryReport()
 
-    results = await asyncio.gather(
+    raw = await asyncio.gather(
         *(_probe_one_server(s, timeout=timeout) for s in mcp_servers),
         return_exceptions=True,
     )
 
     specs: list[ToolSpec] = []
-    for result in results:
-        if isinstance(result, list):
-            specs.extend(result)
+    statuses: list[DiscoveryStatus] = []
+    for cfg, result in zip(mcp_servers, raw, strict=True):
+        if isinstance(result, tuple):
+            tool_specs, status = result
+            specs.extend(tool_specs)
+            statuses.append(status)
         else:
-            logger.info("MCP discovery task raised: %s", result)
-    return specs
+            # Unexpected — _probe_one_server should never raise.
+            name = str(cfg.get("name") or "unknown")
+            transport = str(cfg.get("transport") or "stdio")
+            logger.warning("MCP discovery task raised for %s: %s", name, result)
+            statuses.append(
+                DiscoveryStatus(
+                    server_name=name,
+                    transport=transport,
+                    ok=False,
+                    tool_count=0,
+                    error=f"{type(result).__name__}: {result}",
+                ),
+            )
+
+    return DiscoveryReport(statuses=tuple(statuses), specs=tuple(specs))
 
 
 def discover_mcp_tools_sync(

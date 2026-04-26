@@ -84,6 +84,40 @@ async def test_handler_sees_host_callbacks_from_globals() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handler_sees_mcp_discovery_report_from_backend() -> None:
+    """The MCP discovery report stashed on the backend reaches the bound ToolContext."""
+    from obscura.integrations.mcp.discovery import DiscoveryReport, DiscoveryStatus
+
+    seen: dict[str, object] = {}
+
+    @tool("captures_report", "capture report")
+    def captures_report() -> str:
+        ctx = current_tool_context()
+        seen["report"] = ctx.mcp_discovery_report if ctx else None
+        return ""
+
+    class _StubBackend:
+        last_mcp_discovery_report = DiscoveryReport(
+            statuses=(
+                DiscoveryStatus(
+                    server_name="x", transport="stdio", ok=True, tool_count=2
+                ),
+            ),
+        )
+
+    registry = ToolRegistry()
+    registry.register(captures_report.spec)
+    loop = AgentLoop(backend=_StubBackend(), tool_registry=registry)
+
+    tc = ToolCallInfo(tool_use_id="c", name="captures_report", input={})
+    await loop._execute_single_tool(tc, seen_calls={})
+
+    report = seen["report"]
+    assert report is not None
+    assert getattr(report, "total_tools", None) == 2
+
+
+@pytest.mark.asyncio
 async def test_context_unbinds_after_tool_returns() -> None:
     """Bound context is reset after a tool call completes."""
 

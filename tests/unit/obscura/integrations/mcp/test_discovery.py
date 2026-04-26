@@ -81,7 +81,7 @@ class TestProbeOneServer:
 
         monkeypatch.setattr(discovery, "MCPClient", _ctor)
 
-        specs = await discovery._probe_one_server(
+        specs, status = await discovery._probe_one_server(
             {
                 "name": "prognostic",
                 "transport": "stdio",
@@ -95,12 +95,16 @@ class TestProbeOneServer:
             "mcp__prognostic__discover_markets",
             "mcp__prognostic__inspect_market",
         ]
+        assert status.ok is True
+        assert status.server_name == "prognostic"
+        assert status.tool_count == 2
+        assert status.error is None
 
     @pytest.mark.asyncio
-    async def test_failed_probe_returns_empty_list(
+    async def test_failed_probe_yields_failure_status(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An exception during probing yields an empty list, not a raise."""
+        """An exception during probing yields empty specs + ok=False status."""
 
         fake_client = MagicMock()
         fake_client.__aenter__ = AsyncMock(side_effect=RuntimeError("connect failed"))
@@ -108,7 +112,7 @@ class TestProbeOneServer:
 
         monkeypatch.setattr(discovery, "MCPClient", lambda _c: fake_client)
 
-        specs = await discovery._probe_one_server(
+        specs, status = await discovery._probe_one_server(
             {
                 "name": "broken",
                 "transport": "stdio",
@@ -117,14 +121,22 @@ class TestProbeOneServer:
             timeout=1.0,
         )
         assert specs == []
+        assert status.ok is False
+        assert status.server_name == "broken"
+        assert status.tool_count == 0
+        assert status.error is not None
+        assert "RuntimeError" in status.error
 
     @pytest.mark.asyncio
-    async def test_malformed_config_returns_empty(self) -> None:
+    async def test_malformed_config_yields_failure_status(self) -> None:
         # Missing command for stdio
-        specs = await discovery._probe_one_server(
+        specs, status = await discovery._probe_one_server(
             {"name": "x", "transport": "stdio"}, timeout=1.0
         )
         assert specs == []
+        assert status.ok is False
+        assert status.error is not None
+        assert "malformed config" in status.error
 
 
 class TestShadowHandler:
@@ -145,11 +157,13 @@ class TestDiscoverMcpTools:
     async def test_aggregates_specs_across_servers(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def _fake_probe(server: dict[str, Any], *, timeout: float) -> list[Any]:
+        async def _fake_probe(
+            server: dict[str, Any], *, timeout: float
+        ) -> tuple[list[Any], discovery.DiscoveryStatus]:
             from obscura.core.types import ToolSpec
 
             n = server["name"]
-            return [
+            specs = [
                 ToolSpec(
                     name=f"mcp__{n}__t",
                     description="x",
@@ -157,6 +171,9 @@ class TestDiscoverMcpTools:
                     handler=lambda: None,
                 )
             ]
+            return specs, discovery.DiscoveryStatus(
+                server_name=n, transport="stdio", ok=True, tool_count=1
+            )
 
         monkeypatch.setattr(discovery, "_probe_one_server", _fake_probe)
 
@@ -173,19 +190,31 @@ class TestDiscoverMcpTools:
     async def test_one_server_failure_does_not_block_others(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def _fake_probe(server: dict[str, Any], *, timeout: float) -> list[Any]:
+        async def _fake_probe(
+            server: dict[str, Any], *, timeout: float
+        ) -> tuple[list[Any], discovery.DiscoveryStatus]:
             from obscura.core.types import ToolSpec
 
-            if server["name"] == "broken":
-                raise RuntimeError("kaboom")
-            return [
+            n = server["name"]
+            if n == "broken":
+                return [], discovery.DiscoveryStatus(
+                    server_name=n,
+                    transport="stdio",
+                    ok=False,
+                    tool_count=0,
+                    error="RuntimeError: kaboom",
+                )
+            specs = [
                 ToolSpec(
-                    name=f"mcp__{server['name']}__ok",
+                    name=f"mcp__{n}__ok",
                     description="x",
                     parameters={"type": "object", "properties": {}},
                     handler=lambda: None,
                 )
             ]
+            return specs, discovery.DiscoveryStatus(
+                server_name=n, transport="stdio", ok=True, tool_count=1
+            )
 
         monkeypatch.setattr(discovery, "_probe_one_server", _fake_probe)
 
@@ -197,3 +226,100 @@ class TestDiscoverMcpTools:
             "mcp__good1__ok",
             "mcp__good2__ok",
         ]
+
+
+class TestDiscoveryReport:
+    @pytest.mark.asyncio
+    async def test_report_captures_per_server_outcomes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _fake_probe(
+            server: dict[str, Any], *, timeout: float
+        ) -> tuple[list[Any], discovery.DiscoveryStatus]:
+            from obscura.core.types import ToolSpec
+
+            n = server["name"]
+            if n == "fail":
+                return [], discovery.DiscoveryStatus(
+                    server_name=n,
+                    transport="stdio",
+                    ok=False,
+                    tool_count=0,
+                    error="TimeoutError: ",
+                    duration_ms=4000,
+                )
+            return [
+                ToolSpec(
+                    name=f"mcp__{n}__t",
+                    description="x",
+                    parameters={"type": "object", "properties": {}},
+                    handler=lambda: None,
+                )
+            ], discovery.DiscoveryStatus(
+                server_name=n,
+                transport="stdio",
+                ok=True,
+                tool_count=1,
+                duration_ms=120,
+            )
+
+        monkeypatch.setattr(discovery, "_probe_one_server", _fake_probe)
+
+        report = await discovery.discover_mcp_tools_with_report(
+            [{"name": "ok1"}, {"name": "fail"}, {"name": "ok2"}]
+        )
+
+        assert {s.name for s in report.specs} == {"mcp__ok1__t", "mcp__ok2__t"}
+        assert report.total_tools == 2
+        assert {s.server_name for s in report.ok_servers} == {"ok1", "ok2"}
+        assert {s.server_name for s in report.failed_servers} == {"fail"}
+
+        report_dict = report.to_dict()
+        assert report_dict["ok"] is False
+        assert report_dict["total_tools"] == 2
+        assert len(report_dict["servers"]) == 3
+        # Failure entry includes the error message.
+        fail_entry = next(
+            s for s in report_dict["servers"] if s["name"] == "fail"
+        )
+        assert fail_entry["ok"] is False
+        assert "TimeoutError" in fail_entry["error"]
+
+    @pytest.mark.asyncio
+    async def test_register_stashes_report_on_backend(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """register_external_mcp_tools writes the report onto the backend."""
+        from obscura.providers._tool_host import BackendToolHostMixin
+
+        async def _fake_probe(
+            server: dict[str, Any], *, timeout: float
+        ) -> tuple[list[Any], discovery.DiscoveryStatus]:
+            from obscura.core.types import ToolSpec
+
+            return [
+                ToolSpec(
+                    name=f"mcp__{server['name']}__t",
+                    description="x",
+                    parameters={"type": "object", "properties": {}},
+                    handler=lambda: None,
+                )
+            ], discovery.DiscoveryStatus(
+                server_name=server["name"],
+                transport="stdio",
+                ok=True,
+                tool_count=1,
+            )
+
+        monkeypatch.setattr(discovery, "_probe_one_server", _fake_probe)
+
+        class _Stub(BackendToolHostMixin):
+            def __init__(self) -> None:
+                self._init_tool_host()
+
+        backend = _Stub()
+        report = await discovery.register_external_mcp_tools(
+            backend, [{"name": "x"}]
+        )
+        assert report.total_tools == 1
+        assert backend.last_mcp_discovery_report is report

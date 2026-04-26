@@ -2112,6 +2112,9 @@ class AgentLoop:
                 history=self._current_messages,
                 user=self._current_user,
                 session_id=self._current_session_id,
+                mcp_discovery_report=getattr(
+                    self._backend, "last_mcp_discovery_report", None
+                ),
                 **self._read_host_callbacks(),
             )
             with bind_tool_context(ctx):

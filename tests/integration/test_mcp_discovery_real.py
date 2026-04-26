@@ -93,11 +93,14 @@ async def test_register_external_lands_specs_in_backend_registry() -> None:
         pytest.skip("prognostic-mcp not installed in venv or PATH")
 
     backend = _StubBackend()
-    count = await register_external_mcp_tools(
+    report = await register_external_mcp_tools(
         backend, [_prognostic_config(binary)], timeout=8.0
     )
 
-    assert count > 0, "register_external_mcp_tools registered nothing"
+    assert report.total_tools > 0, "register_external_mcp_tools registered nothing"
+    # Report should be stashed on the backend for later inspection.
+    assert backend.last_mcp_discovery_report is report
+    assert any(s.ok for s in report.statuses)
 
     # The mixin's get_tool_registry() backed registry must resolve the namespace
     # name as well as accept a query through tool_search.
