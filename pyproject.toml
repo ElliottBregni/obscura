@@ -213,6 +213,7 @@ markers = [
     "e2e: end-to-end tests (slow, require server)",
     "unit: fast unit tests",
     "integration: integration tests",
+    "lightrag_integration: real lightrag-hku, opt-in via RUN_LR_INTEGRATION=1",
 ]
 
 [tool.coverage.run]

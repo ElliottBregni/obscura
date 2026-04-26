@@ -113,14 +113,18 @@ def temp_memory_dirs(
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     config: pytest.Config | None = items[0].config if items else None
     run_e2e: bool = bool(config.getoption("--run-e2e") if config else False)
+    run_lr: bool = os.environ.get("RUN_LR_INTEGRATION") == "1"
+
+    e2e_skip = pytest.mark.skip(reason="Use --run-e2e to include e2e tests")
+    lr_skip = pytest.mark.skip(reason="set RUN_LR_INTEGRATION=1 to run")
 
     for item in items:
         if not run_e2e and (
             "tests/e2e/" in item.nodeid or item.get_closest_marker("e2e")
         ):
-            item.add_marker(
-                pytest.mark.skip(reason="Use --run-e2e to include e2e tests"),
-            )
+            item.add_marker(e2e_skip)
+        if not run_lr and item.get_closest_marker("lightrag_integration"):
+            item.add_marker(lr_skip)
 
 
 # ---------------------------------------------------------------------------
