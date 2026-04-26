@@ -38,6 +38,23 @@ if TYPE_CHECKING:
     from obscura.core.tool_router import RoutingResult
 
 # ---------------------------------------------------------------------------
+# MCP server name + tool prefix
+# ---------------------------------------------------------------------------
+#
+# Claude Agent SDK requires every custom tool to live inside an MCP server
+# and be exposed as ``mcp__<server>__<tool>``. There's no escape hatch in
+# the SDK — the ``tools`` field on ``ClaudeAgentOptions`` is an enable list
+# for Claude's own native tools (Bash, Read, Edit, …), not a way to
+# register new ones. So our in-process MCP server's name is always part of
+# the prefix the model sees.
+#
+# Keep the name short — the prefix shows up everywhere in tool listings
+# and tool-call traces.
+MCP_SERVER_NAME = "obs"
+MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
+
+# ---------------------------------------------------------------------------
 # Backend implementation
 # ---------------------------------------------------------------------------
 
@@ -491,7 +508,7 @@ class ClaudeBackend(BackendToolHostMixin):
         if choice is None:
             return {}
 
-        tool_names = [f"mcp__obscura_tools__{t.name}" for t in self._tools]
+        tool_names = [f"{MCP_TOOL_PREFIX}{t.name}" for t in self._tools]
         if isinstance(choice, ToolChoice):
             if choice.mode == "auto":
                 return {}
@@ -501,7 +518,7 @@ class ClaudeBackend(BackendToolHostMixin):
                 return {"allowed_tools": tool_names} if tool_names else {}
             if choice.mode == "function" and choice.function_name:
                 return {
-                    "allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"],
+                    "allowed_tools": [f"{MCP_TOOL_PREFIX}{choice.function_name}"],
                 }
             return {}
 
@@ -613,7 +630,7 @@ class ClaudeBackend(BackendToolHostMixin):
                 # When native tools are blocked (default) OR the filter reduced
                 # the set, set an explicit allowlist so the LLM can only call
                 # registered Obscura tool names — prevents hallucinated names.
-                allowed = [f"mcp__obscura_tools__{t.name}" for t in filtered]
+                allowed = [f"{MCP_TOOL_PREFIX}{t.name}" for t in filtered]
                 opts["allowed_tools"] = allowed
 
         # Extended thinking (set at session level, not per-query)
@@ -700,11 +717,11 @@ class ClaudeBackend(BackendToolHostMixin):
             claude_tools.append(decorated)
 
         server = create_sdk_mcp_server(
-            name="obscura_tools",
+            name=MCP_SERVER_NAME,
             version="1.0.0",
             tools=claude_tools,
         )
-        return {"obscura_tools": server}
+        return {MCP_SERVER_NAME: server}
 
     def _build_hooks_config(self) -> dict[str, Any] | None:
         """Translate registered hooks to Claude SDK hook config."""

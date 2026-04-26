@@ -67,7 +67,7 @@ def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
 
     Tiers (kept in order):
       1. Core system tools (always kept)
-      2. MCP tools that match core names (e.g. ``mcp__obscura_tools__run_shell``)
+      2. MCP tools that match core names (e.g. ``mcp__obs__run_shell``)
       3. Non-MCP tools (native plugins)
       4. Remaining MCP tools (plugin MCP tools — dropped first)
     """

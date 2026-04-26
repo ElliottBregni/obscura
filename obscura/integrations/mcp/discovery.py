@@ -8,7 +8,7 @@ meant:
   * The system prompt's tool listing didn't include them.
   * ``tool_search`` couldn't find them.
   * The model had to guess names and frequently hallucinated the wrong
-    namespace prefix (``mcp__obscura_tools__*`` instead of
+    namespace prefix (``mcp__obs__*`` — obscura's own server — instead of
     ``mcp__<server>__*``).
 
 This module fixes that by connecting to each external server at session

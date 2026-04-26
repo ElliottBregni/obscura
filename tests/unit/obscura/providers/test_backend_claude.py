@@ -177,7 +177,7 @@ class TestClaudeSend:
 
         mock_client.query.assert_awaited_once_with(
             "Hello",
-            allowed_tools=["mcp__obscura_tools__read_file"],
+            allowed_tools=["mcp__obs__read_file"],
         )
 
     @pytest.mark.asyncio
@@ -224,7 +224,7 @@ class TestClaudeSend:
 
         assert mock_client.query.await_count == 2
         assert mock_client.query.await_args_list[0].kwargs == {
-            "disallowed_tools": ["mcp__obscura_tools__read_file"],
+            "disallowed_tools": ["mcp__obs__read_file"],
         }
         assert mock_client.query.await_args_list[1].args == ("Hello",)
 
@@ -569,5 +569,5 @@ class TestClaudeStream:
         assert len(chunks) == 2
         mock_client.query.assert_awaited_once_with(
             "ping",
-            disallowed_tools=["mcp__obscura_tools__search"],
+            disallowed_tools=["mcp__obs__search"],
         )
