@@ -58,6 +58,56 @@ class TestBuildConfig:
             is None
         )
 
+    def test_per_server_timeout_override_honoured(self) -> None:
+        """`timeout` field on the server config flows into MCPConnectionConfig."""
+        cfg = discovery._build_config(
+            {
+                "name": "slow",
+                "transport": "stdio",
+                "command": "/bin/slow",
+                "timeout": 15.0,
+            }
+        )
+        assert cfg is not None
+        assert cfg.timeout == 15.0
+
+    def test_timeout_seconds_alias_accepted(self) -> None:
+        cfg = discovery._build_config(
+            {
+                "name": "slow",
+                "transport": "stdio",
+                "command": "/bin/slow",
+                "timeout_seconds": 12.5,
+            }
+        )
+        assert cfg is not None
+        assert cfg.timeout == 12.5
+
+    def test_invalid_timeout_falls_back_to_default(self) -> None:
+        cfg = discovery._build_config(
+            {
+                "name": "x",
+                "transport": "stdio",
+                "command": "/bin/x",
+                "timeout": "not-a-number",
+            }
+        )
+        assert cfg is not None
+        assert cfg.timeout == discovery._DEFAULT_PROBE_TIMEOUT
+
+    def test_excessive_timeout_clamped(self) -> None:
+        """A 600s probe timeout would stall startup — clamp to 60s."""
+        cfg = discovery._build_config(
+            {
+                "name": "x",
+                "transport": "stdio",
+                "command": "/bin/x",
+                "timeout": 600.0,
+            }
+        )
+        assert cfg is not None
+        assert cfg.timeout == 60.0
+
 
 class TestProbeOneServer:
     @pytest.mark.asyncio

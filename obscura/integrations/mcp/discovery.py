@@ -132,6 +132,7 @@ def _build_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
     """
     transport_str = str(server.get("transport", "stdio")).lower()
     name = str(server.get("name") or "")
+    server_timeout = _resolve_server_timeout(server)
 
     if transport_str == "stdio":
         command = server.get("command")
@@ -142,7 +143,7 @@ def _build_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
             command=str(command),
             args=list(server.get("args") or []),
             env=dict(server.get("env") or {}),
-            timeout=_DEFAULT_PROBE_TIMEOUT,
+            timeout=server_timeout,
             name=name,
         )
 
@@ -156,11 +157,33 @@ def _build_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
             url=str(url),
             env=dict(server.get("env") or {}),
             headers=dict(server.get("headers") or {}),
-            timeout=_DEFAULT_PROBE_TIMEOUT,
+            timeout=server_timeout,
             name=name,
         )
 
     return None
+
+
+def _resolve_server_timeout(server: dict[str, Any]) -> float:
+    """Pick the discovery timeout for one server.
+
+    Reads ``timeout`` or ``timeout_seconds`` from the server config, falls
+    back to ``_DEFAULT_PROBE_TIMEOUT``. Slow MCP servers (prediction-market
+    APIs, long-running scrapers) can override per-server without bumping
+    the default for fast ones.
+    """
+    raw = server.get("timeout")
+    if raw is None:
+        raw = server.get("timeout_seconds")
+    if raw is None:
+        return _DEFAULT_PROBE_TIMEOUT
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_PROBE_TIMEOUT
+    # Clamp to a sane window — negative timeouts make no sense; very long
+    # ones would stall session startup.
+    return max(0.5, min(value, 60.0))
 
 
 async def _probe_one_server(
@@ -173,6 +196,10 @@ async def _probe_one_server(
     Failures yield an empty spec list and a :class:`DiscoveryStatus` with
     ``ok=False`` and the error message. Discovery never raises — the
     status is the channel for surfacing what went wrong.
+
+    The effective timeout is ``max(timeout, server.get("timeout"))`` —
+    per-server overrides extend the window for known-slow servers but
+    can't shrink it below the caller's floor.
     """
     from obscura.core.types import ToolSpec  # local to avoid import cycle
 
@@ -192,8 +219,13 @@ async def _probe_one_server(
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 
+    # Honour per-server timeout overrides — slow servers (e.g. external
+    # prediction-market APIs that hit a remote orderbook) can declare a
+    # longer probe timeout without inflating the global default.
+    effective_timeout = max(timeout, config.timeout)
+
     try:
-        async with asyncio.timeout(timeout + 1.0):
+        async with asyncio.timeout(effective_timeout + 1.0):
             async with MCPClient(config) as client:
                 tools = await client.list_tools()
     except (TimeoutError, Exception) as exc:
