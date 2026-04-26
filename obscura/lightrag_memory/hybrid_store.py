@@ -12,17 +12,19 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from obscura.vector_memory import VectorMemoryStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import timedelta
 
     from obscura.auth.models import AuthenticatedUser
     from obscura.lightrag_memory.adapter import LightRAGAdapter
+    from obscura.memory import MemoryKey
     from obscura.memory.events import EventSink
-    from obscura.vector_memory.backends import VectorBackend
+    from obscura.vector_memory.backends import VectorBackend, VectorEntry
     from obscura.vector_memory.decay import DecayConfig
 
 logger = logging.getLogger(__name__)
@@ -66,3 +68,43 @@ class HybridVectorMemoryStore(VectorMemoryStore):
             "(Phase 1 stub: no fan-out wiring active yet)",
             user.user_id[:8],
         )
+
+    # ------------------------------------------------------------------
+    # Phase 2/3 placeholders.
+    #
+    # These overrides keep the public surface stable while the parallel
+    # branches that implement them land. Once Phase 2 + Phase 3 merge,
+    # these stubs are replaced with the real fan-out and search logic.
+    # ------------------------------------------------------------------
+
+    def set(  # type: ignore[override]
+        self,
+        key: str | MemoryKey,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+        namespace: str = "default",
+        ttl: timedelta | None = None,
+        memory_type: str = "general",
+    ) -> None:
+        raise NotImplementedError("provided by Phase 2/3")
+
+    def delete(self, key: str | MemoryKey, namespace: str = "default") -> bool:  # type: ignore[override]
+        raise NotImplementedError("provided by Phase 2/3")
+
+    def search_hybrid(
+        self,
+        query: str,
+        *,
+        namespace: str | None = None,
+        top_k: int = 5,
+        mode: str = "hybrid",
+        first_stage_k: int = 50,
+        weights: Any | None = None,
+    ) -> list[VectorEntry]:
+        raise NotImplementedError("provided by Phase 2/3")
+
+    async def _touch_and_count_async(
+        self,
+        entries: list[VectorEntry],
+    ) -> None:
+        raise NotImplementedError("provided by Phase 2/3")
