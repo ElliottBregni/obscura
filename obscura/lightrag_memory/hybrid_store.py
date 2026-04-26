@@ -52,6 +52,34 @@ _DEFAULT_MIN_TEXT_CHARS = 50
 _DEFAULT_MAX_TEXT_CHARS = 100_000
 
 
+class _TokenBucket:
+    """Simple non-blocking token bucket for rate-limiting lazy ingests.
+
+    ``capacity`` tokens; refills at ``rate_per_sec`` per second.
+    ``try_acquire()`` returns True if a token was available, False otherwise.
+    """
+
+    def __init__(self, rate_per_sec: float, capacity: int) -> None:
+        self._rate = rate_per_sec
+        self._capacity = capacity
+        self._tokens = float(capacity)
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+
+    def try_acquire(self, n: int = 1) -> bool:
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last
+            self._last = now
+            self._tokens = min(
+                float(self._capacity), self._tokens + elapsed * self._rate
+            )
+            if self._tokens >= n:
+                self._tokens -= n
+                return True
+            return False
+
+
 def _metric_inc(name: str, **labels: str) -> None:
     """Increment a counter via the telemetry meter, no-op if OTel absent."""
     try:
@@ -113,6 +141,25 @@ class HybridVectorMemoryStore(VectorMemoryStore):
             thread_name_prefix=f"lr-ingest-{user.user_id[:8]}",
         )
         self._closed = False
+
+        import os as _os
+
+        if _os.environ.get("OBSCURA_LR_LAZY", "on").strip().lower() in (
+            "off",
+            "0",
+            "false",
+            "no",
+        ):
+            self._lazy_enabled = False
+        else:
+            self._lazy_enabled = True
+        try:
+            lazy_rps = float(_os.environ.get("OBSCURA_LR_LAZY_RPS", "5.0"))
+        except ValueError:
+            lazy_rps = 5.0
+        self._lazy_bucket = _TokenBucket(rate_per_sec=lazy_rps, capacity=10)
+        self._lazy_inflight: set[str] = set()
+        self._lazy_inflight_lock = threading.Lock()
 
     @staticmethod
     def _make_doc_id(mkey: MemoryKey) -> str:
@@ -291,6 +338,92 @@ class HybridVectorMemoryStore(VectorMemoryStore):
                     doc_id,
                     exc_info=True,
                 )
+
+    def touch(self, key: str | MemoryKey, namespace: str = "default") -> None:
+        """Bump ``accessed_at`` and opportunistically schedule graph indexing.
+
+        Lazy-on-touch: if the chunk is eligible for graph indexing but has
+        never been ingested into LightRAG (no ``lr_indexed_at``), submit a
+        background ingest job. Rate-limited via a token bucket; bursts
+        beyond the bucket are silently dropped (next touch retries). Stops
+        retrying after ``lr_index_attempts >= 3`` until an explicit
+        ``backfill-graph --retry-failed`` run.
+        """
+        super().touch(key, namespace=namespace)
+
+        if self._closed or not self._lazy_enabled:
+            return
+        if not self._lr.indexable_types:
+            return
+
+        if isinstance(key, str):
+            mkey = MemoryKey(namespace=namespace, key=key)
+        else:
+            mkey = key
+
+        try:
+            entry = self.backend.get_vector(mkey)
+        except Exception:
+            return
+        if entry is None:
+            return
+        if entry.memory_type not in self._lr.indexable_types:
+            return
+        md = entry.metadata or {}
+        if md.get("lr_indexed_at"):
+            return
+        if md.get("lr_index_attempts", 0) >= 3:
+            return
+
+        composite = self._make_doc_id(mkey)
+        with self._lazy_inflight_lock:
+            if composite in self._lazy_inflight:
+                return
+            if not self._lazy_bucket.try_acquire():
+                return
+            self._lazy_inflight.add(composite)
+
+        def _do_lazy_index() -> None:
+            try:
+                self._lr.insert_safe(
+                    doc_id=composite,
+                    text=entry.text,
+                    metadata={
+                        **md,
+                        "memory_type": entry.memory_type,
+                        "obscura_key": mkey.key,
+                        "obscura_namespace": mkey.namespace,
+                    },
+                )
+                with contextlib.suppress(Exception):
+                    self.backend.update_metadata(
+                        mkey,
+                        {
+                            "lr_indexed_at": datetime.now(UTC).isoformat(),
+                            "lr_index_attempts": 0,
+                        },
+                    )
+            except Exception as exc:
+                logger.debug("lazy index failed for %s: %s", composite, exc)
+                prior = md.get("lr_index_attempts", 0)
+                with contextlib.suppress(Exception):
+                    self.backend.update_metadata(
+                        mkey,
+                        {
+                            "lr_index_attempts": prior + 1,
+                            "lr_index_skip_reason": str(exc)[:200],
+                            "lr_index_last_error_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+            finally:
+                with self._lazy_inflight_lock:
+                    self._lazy_inflight.discard(composite)
+
+        try:
+            self._ingest_executor.submit(_do_lazy_index)
+        except RuntimeError:
+            with self._lazy_inflight_lock:
+                self._lazy_inflight.discard(composite)
 
     def _resolve_weights(self, weights: HybridWeights | None) -> HybridWeights:
         if weights is not None:

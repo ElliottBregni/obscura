@@ -2889,6 +2889,15 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 main.add_command(_kairos_group)
 
 
+# ---------------------------------------------------------------------------
+# Memory backfill / maintenance — `obscura memory <subcommand>`
+# ---------------------------------------------------------------------------
+
+from obscura.cli.memory_commands import memory_group as _memory_group  # noqa: E402
+
+main.add_command(_memory_group)
+
+
 # Backwards-compat aliases added by test harness
 def _emit_context_warnings(*args, **kwargs):
     from .warnings import emit_context_warnings as _impl

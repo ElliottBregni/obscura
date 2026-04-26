@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -141,10 +141,38 @@ class MemoryConsolidator:
                 try:
                     self.store.backend.delete_vector(e.key)
                     deleted += 1
+
+                    # Phase 5: keep the LightRAG graph in sync with the
+                    # canonical store. If the store is a HybridVectorMemoryStore
+                    # the corresponding doc_id is also dropped from the graph;
+                    # failures here never abort consolidation.
+                    self._maybe_delete_from_graph(e.key)
                 except Exception:
                     _log.debug("Failed to delete episode %s", e.key, exc_info=True)
 
         return deleted, created
+
+    def _maybe_delete_from_graph(self, key: Any) -> None:
+        """Mirror an episode delete to LightRAG when the store is hybrid.
+
+        Best-effort: any exception is logged and swallowed so consolidation
+        continues. The next backfill or sweep will reconcile drift.
+        """
+        try:
+            from obscura.lightrag_memory.hybrid_store import HybridVectorMemoryStore
+        except ImportError:
+            return
+        if not isinstance(self.store, HybridVectorMemoryStore):
+            return
+        try:
+            doc_id = f"{key.namespace}::{key.key}"
+            self.store._lr.delete_safe(doc_id)
+        except Exception:
+            _log.debug(
+                "Failed to delete graph entry for consolidated episode %s",
+                key,
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Grouping
