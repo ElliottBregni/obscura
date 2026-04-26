@@ -81,6 +81,13 @@ toml = [
     "tomli-w>=1.0",
 ]
 
+# LightRAG graph-aware retrieval. Optional layer on top of vector_memory.
+# Enabled via OBSCURA_LIGHTRAG=on at runtime; safe to leave uninstalled.
+lightrag = [
+    "lightrag-hku>=1.4",
+    "networkx>=3.0",
+]
+
 # ---------------------------------------------------------------------------
 # Provider extras — one per non-default LLM/backend
 # ---------------------------------------------------------------------------
@@ -120,7 +127,7 @@ plugins-all = [
 # The "batteries included" target for pip users — server + telemetry + every
 # plugin + every provider. Binary plugin deps (jq, rg, playwright, …) still
 # need the runtime bootstrapper or the Dockerfile.full image.
-full = ["obscura[server,telemetry,a2a,metrics,voice,anthropic,plugins-all]"]
+full = ["obscura[server,telemetry,a2a,metrics,voice,anthropic,lightrag,plugins-all]"]
 
 # Back-compat alias — older docs and CI jobs reference `--extra providers`.
 # Kept lean; prefer the per-provider / per-plugin extras above.
@@ -170,6 +177,7 @@ packages = [
     "obscura.agent",
     "obscura.memory",
     "obscura.vector_memory",
+    "obscura.lightrag_memory",
     "obscura.telemetry",
     "obscura.server",
     "obscura.routes",
