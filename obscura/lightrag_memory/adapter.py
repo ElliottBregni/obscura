@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 try:
-    from lightrag import LightRAG, QueryParam  # noqa: F401
+    import lightrag as _lightrag_pkg  # noqa: F401  # pyright: ignore[reportMissingImports, reportUnusedImport]
 except ImportError as exc:  # pragma: no cover
     msg = (
         "obscura.lightrag_memory.adapter requires the 'lightrag' optional "
@@ -61,6 +61,24 @@ class GraphHit:
     graph_relevance: float
     text: str
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class GraphExplanation:
+    """Result of a graph neighborhood lookup for a single chunk.
+
+    Returned by :meth:`LightRAGAdapter.get_neighbors`. Read by the
+    ``memory_graph_explain`` tool.
+    """
+
+    entities: list[dict[str, Any]]
+    """{"name", "type", "description"} dicts extracted from the chunk."""
+
+    relations: list[dict[str, Any]]
+    """{"source", "target", "description"} dicts the chunk participates in."""
+
+    neighbors: list[str]
+    """doc_ids that share entities/relations with this chunk."""
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +164,7 @@ class LightRAGAdapter:
         self.user = user
         self.user_id = user.user_id
         self._embedding_fn = embedding_fn
+        self._closed = False
 
         self._embedding_dim = len(embedding_fn("test"))
 
@@ -181,7 +200,28 @@ class LightRAGAdapter:
         """Clear singleton cache. For testing only."""
         with cls._lock:
             for adapter in cls._instances.values():
-                adapter.shutdown()
+                try:
+                    adapter.close()
+                except Exception:
+                    _log.exception("LightRAGAdapter close failed during reset")
+            cls._instances.clear()
+
+    @classmethod
+    def close_all(cls) -> None:
+        """Close every cached adapter. Safe to call multiple times.
+
+        Wired as the ``atexit`` handler in
+        :mod:`obscura.lightrag_memory` so process shutdown drains every
+        per-user adapter before the interpreter tears down.
+        """
+        with cls._lock:
+            for adapter in list(cls._instances.values()):
+                try:
+                    adapter.close()
+                except Exception:
+                    _log.exception(
+                        "LightRAGAdapter close failed during close_all",
+                    )
             cls._instances.clear()
 
     def insert_safe(
@@ -230,18 +270,49 @@ class LightRAGAdapter:
         )
         return []
 
+    def get_neighbors(self, doc_id: str, depth: int = 1) -> GraphExplanation:
+        """Read entities and neighbors for a chunk from the local NetworkX graph.
+
+        Does not run any LLM call. Does not query Qdrant. Reads the
+        pickled NetworkX graph LightRAG maintains in working_dir and
+        traverses up to ``depth`` hops out from the chunk's entities.
+
+        Phase 4 introduces this hook on the adapter; the full traversal
+        body lands alongside Phase 2/3 graph wiring (the methods this
+        relies on don't exist on the LightRAG instance until then).
+
+        Raises:
+            KeyError: if doc_id is not present in the graph (chunk never
+                indexed, or graph file missing).
+        """
+        raise NotImplementedError("provided by Phase 2/3")
+
+    def close(self) -> None:
+        """Stop the dedicated event loop. Idempotent.
+
+        Safe to call from atexit. Errors are logged but not raised.
+        """
+        if self._closed:
+            return
+        try:
+            if not self._loop.is_closed():
+                if self._loop.is_running():
+                    self._loop.call_soon_threadsafe(self._loop.stop)
+                self._loop_thread.join(timeout=5)
+        except Exception:
+            _log.exception("LightRAGAdapter event loop teardown failed")
+        self._closed = True
+
     def shutdown(self) -> None:
-        """Stop the dedicated event loop. Idempotent."""
-        if self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._loop.stop)
-        self._loop_thread.join(timeout=2.0)
+        """Backwards-compatible alias for :meth:`close`."""
+        self.close()
 
     # -- internals ----------------------------------------------------------
 
     def _build_lightrag(self) -> Any:
         """Construct the LightRAG instance bound to this user's storage."""
-        from lightrag import LightRAG as _LightRAG
-        from lightrag.utils import EmbeddingFunc
+        from lightrag import LightRAG as _LightRAG  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
+        from lightrag.utils import EmbeddingFunc  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
 
         async def _async_embed(texts: list[str]) -> list[list[float]]:
             loop = asyncio.get_running_loop()
@@ -250,7 +321,7 @@ class LightRAGAdapter:
                 lambda: [self._embedding_fn(t) for t in texts],
             )
 
-        embedding_func = EmbeddingFunc(
+        embedding_func = EmbeddingFunc(  # pyright: ignore[reportUnknownVariableType]
             embedding_dim=self._embedding_dim,
             max_token_size=8192,
             func=_async_embed,
@@ -260,7 +331,7 @@ class LightRAGAdapter:
         os.environ.setdefault("QDRANT_URL", kw.get("url", "") or "")
         os.environ.setdefault("QDRANT_API_KEY", kw.get("api_key", "") or "")
 
-        return _LightRAG(
+        return _LightRAG(  # pyright: ignore[reportUnknownVariableType]
             working_dir=str(self._working_dir),
             embedding_func=embedding_func,
             vector_storage="QdrantVectorDBStorage",

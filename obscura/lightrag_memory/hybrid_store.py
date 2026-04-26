@@ -108,3 +108,37 @@ class HybridVectorMemoryStore(VectorMemoryStore):
         entries: list[VectorEntry],
     ) -> None:
         raise NotImplementedError("provided by Phase 2/3")
+
+    # ------------------------------------------------------------------
+    # Phase 4 — explicit lifecycle.
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:  # type: ignore[override]
+        """Drain pending ingest jobs and stop the LightRAG adapter.
+
+        Called explicitly at logout or process exit. Idempotent.
+        Errors are logged but not raised — shutdown must complete.
+        Always invokes ``super().close()`` so the underlying vector backend
+        connection is closed too.
+        """
+        try:
+            self._ingest_executor.shutdown(wait=True, cancel_futures=False)
+        except Exception:
+            logger.exception(
+                "Failed to drain ingest executor for user %s",
+                self.user_id[:8],
+            )
+        try:
+            self._lr.close()
+        except Exception:
+            logger.exception(
+                "Failed to close LightRAG adapter for user %s",
+                self.user_id[:8],
+            )
+        try:
+            super().close()
+        except Exception:
+            logger.exception(
+                "Failed to close vector backend for user %s",
+                self.user_id[:8],
+            )

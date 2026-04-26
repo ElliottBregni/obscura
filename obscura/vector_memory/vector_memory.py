@@ -309,15 +309,68 @@ class VectorMemoryStore:
         user: AuthenticatedUser,
         embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> VectorMemoryStore:
-        """Get or create a vector memory store for the given user."""
+        """Get or create a vector memory store for the given user.
+
+        When ``OBSCURA_LIGHTRAG=on`` and the ``lightrag`` extra is installed,
+        returns a :class:`HybridVectorMemoryStore` that fans writes out to a
+        per-user :class:`LightRAGAdapter` and routes searches through the
+        hybrid scorer. Otherwise returns the plain :class:`VectorMemoryStore`.
+
+        If hybrid construction fails (Qdrant unreachable for the graph
+        collection, working_dir not writable, lightrag-hku not importable),
+        falls back to the plain store and logs a warning. The user gets a
+        working memory system; the graph layer just stays off this session.
+
+        Once a user's first ``for_user`` call resolves, the chosen variant
+        (hybrid or plain) is locked in for the process lifetime. Toggling
+        ``OBSCURA_LIGHTRAG`` mid-process requires a restart.
+        """
         with cls._lock:
-            if user.user_id not in cls._instances:
-                cls._instances[user.user_id] = cls(user, embedding_fn=embedding_fn)
-            return cls._instances[user.user_id]
+            if user.user_id in cls._instances:
+                return cls._instances[user.user_id]
+
+            instance: VectorMemoryStore
+            from obscura.lightrag_memory import (
+                _lightrag_enabled,  # pyright: ignore[reportPrivateUsage]
+            )
+
+            if _lightrag_enabled():
+                try:
+                    from obscura.lightrag_memory.adapter import LightRAGAdapter
+                    from obscura.lightrag_memory.hybrid_store import (
+                        HybridVectorMemoryStore,
+                    )
+
+                    resolved_emb_fn = embedding_fn or _make_default_embedding_fn()
+                    adapter = LightRAGAdapter.for_user(user, resolved_emb_fn)
+                    instance = HybridVectorMemoryStore(
+                        user,
+                        lightrag_adapter=adapter,
+                        embedding_fn=embedding_fn,
+                    )
+                except Exception as exc:
+                    _log.warning(
+                        "LightRAG hybrid store unavailable for user %s, "
+                        "falling back to plain VectorMemoryStore: %s",
+                        user.user_id[:8],
+                        exc,
+                    )
+                    instance = cls(user, embedding_fn=embedding_fn)
+            else:
+                instance = cls(user, embedding_fn=embedding_fn)
+
+            cls._instances[user.user_id] = instance
+            return instance
 
     @classmethod
     def reset_instances(cls) -> None:
-        """Clear singleton cache. For testing only."""
+        """Clear singleton cache. For testing only.
+
+        Note: clears the in-memory dict but does not clean up LightRAG
+        working dirs on disk. Tests that need a clean slate should also
+        call ``LightRAGAdapter.close_all()`` and remove the per-user
+        ``working_dir``.
+        """
         with cls._lock:
             cls._instances.clear()
 

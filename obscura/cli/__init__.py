@@ -1028,9 +1028,15 @@ async def _repl(
     # Inject memory channel documentation and system-level channel context
     if _context_router is not None:
         try:
-            from obscura.tools.memory_tools import build_channels_prompt_section
+            from obscura.tools.memory_tools import (
+                _is_user_graph_enabled,
+                build_channels_prompt_section,
+            )
 
-            channels_doc = build_channels_prompt_section(_context_router.channels)
+            channels_doc = build_channels_prompt_section(
+                _context_router.channels,
+                is_graph_enabled=_is_user_graph_enabled(cli_user),
+            )
             if channels_doc:
                 custom_sections.append(channels_doc)
 

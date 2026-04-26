@@ -20,8 +20,10 @@ opts in AND ``lightrag-hku`` is installed.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -41,6 +43,30 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+
+
+def _shutdown_all_adapters() -> None:
+    """Close every per-user LightRAGAdapter at process exit.
+
+    Looks the adapter module up via :data:`sys.modules` instead of
+    importing it, so we never trigger the lightrag-hku top-level import
+    here when the user never opted in to the optional extra.
+    """
+    adapter_mod = sys.modules.get("obscura.lightrag_memory.adapter")
+    if adapter_mod is None:
+        return
+    close_all = getattr(
+        getattr(adapter_mod, "LightRAGAdapter", None), "close_all", None
+    )
+    if close_all is None:
+        return
+    try:
+        close_all()
+    except Exception:
+        _log.warning("LightRAG adapter shutdown raised during atexit")
+
+
+atexit.register(_shutdown_all_adapters)
 
 
 @lru_cache(maxsize=1)
@@ -68,7 +94,7 @@ def _lightrag_enabled() -> bool:
         return False
 
     try:
-        import lightrag  # noqa: F401
+        import lightrag  # noqa: F401  # pyright: ignore[reportMissingImports, reportUnusedImport]
     except ImportError:
         _log.warning(
             "OBSCURA_LIGHTRAG requested but lightrag-hku is not installed. "

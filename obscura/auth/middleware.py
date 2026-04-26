@@ -57,6 +57,27 @@ def _ensure_user_account(user: AuthenticatedUser) -> None:
     MemoryStore.for_user(user)
     VectorMemoryStore.for_user(user)
 
+    # Eagerly warm the LightRAG adapter so the user's first graph-aware
+    # query doesn't pay the ~200-500ms NetworkX-pickle + Qdrant-collection
+    # cold-start cost on the request hot path. The for_user call above
+    # already constructs it transitively when the feature flag is on, but
+    # we make the dependency explicit here so that future refactors of
+    # the for_user singleton don't silently regress warm-up.
+    try:
+        from obscura.lightrag_memory import (
+            _lightrag_enabled,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        if _lightrag_enabled():
+            from obscura.lightrag_memory.adapter import LightRAGAdapter
+            from obscura.vector_memory.vector_memory import (
+                _make_default_embedding_fn,  # pyright: ignore[reportPrivateUsage]
+            )
+
+            LightRAGAdapter.for_user(user, _make_default_embedding_fn())
+    except Exception:
+        logger.exception("LightRAG adapter warm-up failed (non-fatal)")
+
     with _PROVISIONED_USERS_LOCK:
         _PROVISIONED_USERS.add(user.user_id)
 
