@@ -17,7 +17,8 @@ import hashlib
 import logging
 import os
 import threading
-from concurrent.futures import Future
+import time
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+_DEFAULT_INSERT_TIMEOUT_SECONDS = 60.0
+_DEFAULT_DELETE_TIMEOUT_SECONDS = 30.0
 _DEFAULT_INDEXABLE_TYPES: frozenset[str] = frozenset({"fact", "summary", "general"})
 
 
@@ -116,6 +119,30 @@ def _qdrant_kwargs() -> dict[str, Any]:
     }
 
 
+def load_indexable_types_from_disk() -> frozenset[str]:
+    """Load ``[vector_memory.lightrag] indexable_types`` from config.toml."""
+    try:
+        from obscura.core.config_io import try_load_config
+
+        cfg = try_load_config(Path.home() / ".obscura" / "config.toml") or {}
+        section = cfg.get("vector_memory", {}).get("lightrag", {})
+        raw: Any = section.get("indexable_types")
+        if raw is None:
+            return _DEFAULT_INDEXABLE_TYPES
+        if not isinstance(raw, list):
+            _log.warning(
+                "vector_memory.lightrag.indexable_types must be a list of "
+                "strings — got %r, falling back to defaults",
+                type(raw).__name__,
+            )
+            return _DEFAULT_INDEXABLE_TYPES
+        items: list[str] = [str(x) for x in raw]  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+        return frozenset(items)
+    except Exception:
+        _log.debug("Could not load indexable_types from disk", exc_info=True)
+        return _DEFAULT_INDEXABLE_TYPES
+
+
 class LightRAGAdapter:
     """Per-user LightRAG instance + a dedicated event-loop thread.
 
@@ -134,10 +161,22 @@ class LightRAGAdapter:
         self,
         user: AuthenticatedUser,
         embedding_fn: Callable[[str], list[float]],
+        *,
+        indexable_types: frozenset[str] | None = None,
+        insert_timeout_seconds: float = _DEFAULT_INSERT_TIMEOUT_SECONDS,
+        delete_timeout_seconds: float = _DEFAULT_DELETE_TIMEOUT_SECONDS,
     ) -> None:
         self.user = user
         self.user_id = user.user_id
         self._embedding_fn = embedding_fn
+        self.indexable_types = (
+            indexable_types
+            if indexable_types is not None
+            else load_indexable_types_from_disk()
+        )
+        self._insert_timeout = insert_timeout_seconds
+        self._delete_timeout = delete_timeout_seconds
+        self._closed = False
 
         self._embedding_dim = len(embedding_fn("test"))
 
@@ -151,6 +190,10 @@ class LightRAGAdapter:
         )
 
         self._lightrag: Any = self._build_lightrag()
+
+        self._latency_samples: list[float] = []
+        self._latency_lock = threading.Lock()
+        self._latency_log_every = 100
 
     @classmethod
     def for_user(
@@ -177,25 +220,128 @@ class LightRAGAdapter:
         doc_id: str,
         text: str,
         metadata: dict[str, Any] | None = None,
-    ) -> Future[Any]:
-        """Schedule an async insert onto the dedicated loop and return.
+    ) -> None:
+        """Run LightRAG ainsert synchronously from a worker thread.
 
-        Phase 1 placeholder: this submits the coroutine and returns the
-        ``concurrent.futures.Future``. Phase 2 will harden the contract so
-        the worker thread blocks on the future with a timeout and logs +
-        swallows any failures.
+        Bridges to the adapter's dedicated event loop. Catches every
+        exception and logs at WARNING; callers must not depend on the
+        return value.
+
+        Idempotency: LightRAG's ainsert with the same doc_id overwrites
+        the previous content cleanly (the doc_id is the dedup key
+        internally). Re-running insert for the same key is safe — it
+        re-extracts entities and re-merges them into the graph.
         """
-        coro = self._ainsert(doc_id, text, metadata or {})
-        future: Future[Any] = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        future.add_done_callback(self._log_future_error("insert", doc_id))
-        return future
+        if self._closed:
+            _log.debug("lr_ingest: adapter closed, skip insert for %s", doc_id)
+            return
 
-    def delete_safe(self, doc_id: str) -> Future[Any]:
-        """Schedule an async delete onto the dedicated loop and return."""
-        coro = self._adelete(doc_id)
-        future: Future[Any] = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        future.add_done_callback(self._log_future_error("delete", doc_id))
-        return future
+        meta = metadata or {}
+        text_len = len(text)
+        memory_type = meta.get("memory_type", "general")
+        _metric_inc("lr_inserts_submitted", memory_type=memory_type)
+        started = time.monotonic()
+
+        try:
+            coro = self._ainsert(doc_id, text, meta)
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            try:
+                future.result(timeout=self._insert_timeout)
+            except FuturesTimeoutError:
+                future.cancel()
+                _metric_inc("lr_inserts_timed_out", memory_type=memory_type)
+                _log.warning(
+                    "lr_ingest: insert timed out (doc=%s, text_len=%d, "
+                    "timeout=%.0fs) — chunk left un-graphed; will be picked "
+                    "up by Phase 5 lazy-on-touch / backfill",
+                    doc_id,
+                    text_len,
+                    self._insert_timeout,
+                )
+                return
+        except Exception as exc:  # noqa: BLE001
+            _metric_inc(
+                "lr_inserts_failed",
+                memory_type=memory_type,
+                exc_type=type(exc).__name__,
+            )
+            _log.warning(
+                "lr_ingest: insert failed (doc=%s, text_len=%d, "
+                "memory_type=%s, exc=%s)",
+                doc_id,
+                text_len,
+                memory_type,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        elapsed = time.monotonic() - started
+        _metric_inc("lr_inserts_succeeded", memory_type=memory_type)
+        _metric_record("lr_insert_duration_seconds", elapsed)
+        self._maybe_log_latency_summary(elapsed)
+
+        _log.info(
+            "lr_ingest: insert ok (doc=%s, text_len=%d, memory_type=%s, elapsed=%.2fs)",
+            doc_id,
+            text_len,
+            memory_type,
+            elapsed,
+        )
+
+        self._record_indexed_marker(doc_id, started)
+
+    def delete_safe(self, doc_id: str) -> None:
+        """Run LightRAG adelete_by_doc_id synchronously from a worker thread.
+
+        Idempotent: deleting an unknown doc_id is a no-op (LightRAG returns
+        without raising; verified against lightrag-hku 1.4 source). This
+        matters for the clear_namespace batch path, which will sometimes
+        include doc_ids that were never indexed (filtered out at write time).
+        """
+        if self._closed:
+            _log.debug("lr_ingest: adapter closed, skip delete for %s", doc_id)
+            return
+
+        _metric_inc("lr_deletes_submitted")
+        started = time.monotonic()
+
+        try:
+            coro = self._adelete(doc_id)
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            try:
+                future.result(timeout=self._delete_timeout)
+            except FuturesTimeoutError:
+                future.cancel()
+                _metric_inc("lr_deletes_timed_out")
+                _log.warning(
+                    "lr_ingest: delete timed out (doc=%s, timeout=%.0fs) — "
+                    "graph may have a dangling node; next upsert overwrites",
+                    doc_id,
+                    self._delete_timeout,
+                )
+                return
+        except Exception as exc:  # noqa: BLE001
+            _metric_inc(
+                "lr_deletes_failed",
+                exc_type=type(exc).__name__,
+            )
+            _log.warning(
+                "lr_ingest: delete failed (doc=%s, exc=%s)",
+                doc_id,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        elapsed = time.monotonic() - started
+        _metric_inc("lr_deletes_succeeded")
+        _metric_record("lr_delete_duration_seconds", elapsed)
+        _log.debug(
+            "lr_ingest: delete ok (doc=%s, elapsed=%.2fs)",
+            doc_id,
+            elapsed,
+        )
 
     async def aquery(
         self,
@@ -226,6 +372,9 @@ class LightRAGAdapter:
 
     def shutdown(self) -> None:
         """Stop the dedicated event loop. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
         if self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
         self._loop_thread.join(timeout=2.0)
@@ -286,23 +435,46 @@ class LightRAGAdapter:
         """Async wrapper around LightRAG's delete-by-doc-id."""
         await self._lightrag.adelete_by_doc_id(doc_id)
 
-    @staticmethod
-    def _log_future_error(op: str, doc_id: str) -> Callable[[Future[Any]], None]:
-        """Done-callback factory: log + swallow exceptions from the future."""
+    def _record_indexed_marker(self, doc_id: str, started: float) -> None:
+        """Record lr_indexed_at on the canonical Qdrant payload.
 
-        def _cb(fut: Future[Any]) -> None:
-            try:
-                fut.result()
-            except Exception:
-                _log.warning(
-                    "LightRAG %s failed for doc_id=%s; vector store write was "
-                    "unaffected.",
-                    op,
-                    doc_id,
-                    exc_info=True,
-                )
+        Phase 2: this is a no-op. The Qdrant payload schema does not yet
+        carry an lr_indexed_at field, and the VectorBackend protocol does
+        not yet expose update_metadata.
 
-        return _cb
+        Phase 5 will:
+          (a) add lr_indexed_at to qdrant_backend.store_vector's payload,
+          (b) extend the VectorBackend protocol with update_metadata(key, partial),
+          (c) implement that on QdrantBackend, SQLiteBackend, PostgreSQLVectorBackend,
+          (d) call into it from here.
+
+        Until then, the lazy-on-touch ingest path (Phase 5) cannot reliably
+        skip already-indexed chunks, but in practice the executor + idempotent
+        ainsert make double-indexing harmless if expensive.
+        """
+        # TODO(phase-5): wire this through VectorBackend.update_metadata once
+        # that method exists. The doc_id parses back to (namespace, key)
+        # via _parse_doc_id (mirror of HybridVectorMemoryStore._make_doc_id).
+        return
+
+    def _maybe_log_latency_summary(self, sample: float) -> None:
+        with self._latency_lock:
+            self._latency_samples.append(sample)
+            if len(self._latency_samples) < self._latency_log_every:
+                return
+            samples = sorted(self._latency_samples)
+            self._latency_samples = []
+        n = len(samples)
+        p50 = samples[n // 2]
+        p99 = samples[max(n - 1, int(n * 0.99))]
+        avg = sum(samples) / n
+        _log.info(
+            "lr_ingest: latency over last %d inserts — avg=%.2fs p50=%.2fs p99=%.2fs",
+            n,
+            avg,
+            p50,
+            p99,
+        )
 
 
 def _start_loop_thread(
@@ -334,3 +506,29 @@ def _start_loop_thread(
         msg = f"asyncio loop thread {name!r} failed to start within 5s"
         raise RuntimeError(msg)
     return loop, thread
+
+
+def _metric_inc(name: str, **labels: str) -> None:
+    """Increment a counter, falling back to stdlib logging when OTel is absent.
+
+    The phase plan calls out OTel-backed counters; the existing
+    :mod:`obscura.telemetry.metrics` exposes pre-declared metric handles
+    rather than a dynamic ``get_meter`` API, so we log a structured DEBUG
+    line and rely on Phase 3+ to upgrade to a typed handle when LightRAG-
+    specific metrics are added to :class:`ObscuraMetrics`.
+    """
+    try:
+        if labels:
+            _log.debug("lr_metric: %s %s", name, labels)
+        else:
+            _log.debug("lr_metric: %s", name)
+    except Exception:
+        pass
+
+
+def _metric_record(name: str, value: float) -> None:
+    """Record a histogram sample as a structured DEBUG log line."""
+    try:
+        _log.debug("lr_metric: %s value=%.4f", name, value)
+    except Exception:
+        pass
