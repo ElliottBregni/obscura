@@ -231,7 +231,6 @@ class ToolRegistry:
             "manage_crontab": "run_shell",
             "security_lookup": "run_shell",
             "discover_all_commands": "which_command",
-            "sleep": "todo_write",
             # copilot (removed — alias to run_shell for backwards compat)
             "copilot": "run_shell",
             "gpt5": "run_shell",

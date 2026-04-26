@@ -17,14 +17,16 @@ def is_coordinator_mode() -> bool:
     """Check if coordinator mode is enabled.
 
     Defaults to **ON** — set ``OBSCURA_COORDINATOR_MODE=0`` to disable.
+    Empty string is treated as off (falsy) so ``set_coordinator_mode(False)``
+    works regardless of which sentinel it writes.
     """
     val = os.environ.get("OBSCURA_COORDINATOR_MODE", "1").strip().lower()
-    return val not in ("0", "false", "no", "off")
+    return val not in ("", "0", "false", "no", "off")
 
 
 def set_coordinator_mode(enabled: bool) -> None:
     """Set coordinator mode environment variable."""
-    os.environ["OBSCURA_COORDINATOR_MODE"] = "1" if enabled else ""
+    os.environ["OBSCURA_COORDINATOR_MODE"] = "1" if enabled else "0"
 
 
 COORDINATOR_SYSTEM_PROMPT = textwrap.dedent("""\
