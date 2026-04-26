@@ -37,7 +37,6 @@ from obscura.providers.models import (
     ChatMessage,
     CompletionParams,
     MCPServerConfig,
-    ModelInfo,
     ToolCallDefinition,
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
@@ -468,12 +467,6 @@ class LocalLLMBackend(BackendToolHostMixin):
 
     # -- Local LLM-specific methods (escape hatch) ---------------------------
 
-    async def list_models(self) -> list[dict[str, Any]]:
-        """List models available on the local server."""
-        self._ensure_client()
-        models = await self._client.models.list()
-        return [ModelInfo.from_openai(m).to_dict() for m in models.data]
-
     async def health_check(self) -> dict[str, Any]:
         """Check if the local server is reachable."""
         try:
@@ -495,36 +488,38 @@ class LocalLLMBackend(BackendToolHostMixin):
     # -- Provider Registry (model discovery) ---------------------------------
 
     async def list_models(self) -> list[RegistryModelInfo]:
-        """List models from local LLM server at runtime."""
+        """List models the local server exposes via its OpenAI-compatible API.
+
+        Uses the openai SDK's ``models.list()`` (the only method this client
+        actually exposes — ``_client.get()`` would AttributeError). Capability
+        flags are inferred from the model id since local servers don't
+        publish them.
+        """
         self._ensure_client()
         try:
-            # Query the server's models endpoint
-            response = await self._client.get("/v1/models")
-            models_data = response.json() if hasattr(response, "json") else response
-
-            model_list = []
-            for model in models_data.get("data", []):
-                model_id = model.get("id", "unknown")
-                # Infer capabilities from model name
-                supports_tools = any(
-                    keyword in model_id.lower()
-                    for keyword in ["tool", "function", "agent"]
-                )
-                supports_vision = "vision" in model_id.lower()
-
-                model_list.append(
-                    RegistryModelInfo(
-                        id=model_id,
-                        name=model.get("name", model_id),
-                        provider="localllm",
-                        supports_tools=supports_tools,
-                        supports_vision=supports_vision,
-                    ),
-                )
-            return model_list
+            models = await self._client.models.list()
         except Exception:
-            # Server unavailable or no models endpoint
+            # Server unreachable or no models endpoint — empty list is fine.
             return []
+
+        out: list[RegistryModelInfo] = []
+        for model in models.data:
+            model_id = getattr(model, "id", "") or "unknown"
+            supports_tools = any(
+                keyword in model_id.lower()
+                for keyword in ("tool", "function", "agent")
+            )
+            supports_vision = "vision" in model_id.lower()
+            out.append(
+                RegistryModelInfo(
+                    id=model_id,
+                    name=getattr(model, "name", None) or model_id,
+                    provider="localllm",
+                    supports_tools=supports_tools,
+                    supports_vision=supports_vision,
+                ),
+            )
+        return out
 
     def get_default_model(self) -> str | None:
         """Return the default model for this provider."""

@@ -4627,6 +4627,40 @@ async def tool_search(query: str, max_results: int = 5) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Sleep — pause execution for a fixed interval
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "sleep",
+    (
+        "Pause execution for the given number of seconds. Useful when you need "
+        "to wait for an external process to settle before continuing."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "seconds": {
+                "type": "number",
+                "description": "How long to sleep, in seconds (max 60).",
+            },
+        },
+        "required": ["seconds"],
+    },
+)
+async def sleep(seconds: float) -> str:
+    try:
+        s = float(seconds)
+    except (TypeError, ValueError):
+        return _json_error("invalid_seconds", value=str(seconds))
+    if s < 0:
+        return _json_error("invalid_seconds", detail="must be >= 0")
+    s = min(s, 60.0)
+    await asyncio.sleep(s)
+    return json.dumps({"ok": True, "slept_seconds": s})
+
+
+# ---------------------------------------------------------------------------
 # Config tool — read/write settings from within agent
 # ---------------------------------------------------------------------------
 
@@ -4904,6 +4938,7 @@ def get_system_tool_specs() -> list[ToolSpec]:
         # Tool search
         cast("ToolSpec", cast("Any", tool_search).spec),
         # Sleep & Config
+        cast("ToolSpec", cast("Any", sleep).spec),
         cast("ToolSpec", cast("Any", config_tool).spec),
     ]
     # Append any dynamically created tools
