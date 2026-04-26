@@ -334,6 +334,76 @@ class SQLiteBackend:
         )
         conn.commit()
 
+    def update_metadata(self, key: MemoryKey, partial: dict[str, Any]) -> bool:
+        """Merge ``partial`` into the row's metadata JSON + accessed_at column.
+
+        ``accessed_at`` (when present in ``partial``) is written to the
+        dedicated column. Everything else folds into the JSON ``metadata``.
+
+        Uses ``json_patch`` (RFC 7396) when available (sqlite >= 3.38);
+        falls back to a SELECT + Python merge + UPDATE on older builds.
+        """
+        if not partial:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT 1 FROM vector_memory WHERE namespace = ? AND key = ?",
+                (key.namespace, key.key),
+            ).fetchone()
+            return row is not None
+
+        accessed_at = partial.get("accessed_at")
+        md_part = {k: v for k, v in partial.items() if k != "accessed_at"}
+
+        conn = self._get_conn()
+        if md_part:
+            patch_json = json.dumps(md_part)
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE vector_memory
+                       SET metadata = json_patch(COALESCE(metadata, '{}'), ?),
+                           accessed_at = COALESCE(?, accessed_at)
+                     WHERE namespace = ? AND key = ?
+                    """,
+                    (patch_json, accessed_at, key.namespace, key.key),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            except sqlite3.OperationalError as e:
+                if "json_patch" not in str(e):
+                    raise
+                cur = conn.execute(
+                    "SELECT metadata FROM vector_memory WHERE namespace = ? AND key = ?",
+                    (key.namespace, key.key),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                existing = json.loads(row["metadata"]) if row["metadata"] else {}
+                merged = {**existing, **md_part}
+                upd = conn.execute(
+                    """
+                    UPDATE vector_memory
+                       SET metadata = ?,
+                           accessed_at = COALESCE(?, accessed_at)
+                     WHERE namespace = ? AND key = ?
+                    """,
+                    (json.dumps(merged), accessed_at, key.namespace, key.key),
+                )
+                conn.commit()
+                return upd.rowcount > 0
+
+        cur = conn.execute(
+            """
+            UPDATE vector_memory
+               SET accessed_at = COALESCE(?, accessed_at)
+             WHERE namespace = ? AND key = ?
+            """,
+            (accessed_at, key.namespace, key.key),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
     def list_by_type(
         self,
         memory_type: str,

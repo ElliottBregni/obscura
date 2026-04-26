@@ -19,12 +19,12 @@ import os
 import threading
 import time
 from concurrent.futures import Future, TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 try:
-    from lightrag import LightRAG, QueryParam  # noqa: F401
+    from lightrag import LightRAG, QueryParam  # noqa: F401  # LightRAG used by tests/type-checking
 except ImportError as exc:  # pragma: no cover
     msg = (
         "obscura.lightrag_memory.adapter requires the 'lightrag' optional "
@@ -51,22 +51,26 @@ class GraphHit:
     """A single retrieval hit from LightRAG, before Obscura hydration.
 
     The adapter populates this from LightRAG's per-mode response shape; the
-    raw graph score (``graph_score``) is mode-dependent and is normalized
-    inside the hybrid store. ``graph_relevance`` is retained as an alias
-    for downstream call-site compatibility.
+    raw ``graph_relevance`` is mode-dependent and is normalized (min-max)
+    inside :meth:`HybridVectorMemoryStore.search_hybrid` before scoring.
     """
 
     namespace: str
     key: str
     vector_sim: float
-    graph_score: float
-    text: str
-    metadata: dict[str, Any]
+    graph_relevance: float
+    text_excerpt: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def graph_relevance(self) -> float:
-        """Alias for downstream consumers (e.g. ``hybrid_score``)."""
-        return self.graph_score
+    def graph_score(self) -> float:
+        """Back-compat alias matching the Phase-3 plan field name."""
+        return self.graph_relevance
+
+    @property
+    def text(self) -> str:
+        """Back-compat alias for ``text_excerpt``."""
+        return self.text_excerpt
 
 
 _DEFAULT_INSERT_TIMEOUT_SECONDS = 60.0
@@ -397,20 +401,28 @@ class LightRAGAdapter:
         query: str,
         mode: str = "hybrid",
         top_k: int = 20,
+        *,
+        namespace: str | None = None,
+        only_need_context: bool = True,
     ) -> list[GraphHit]:
         """Run a hybrid retrieval against the LightRAG instance.
 
-        **Phase 1 placeholder.** Returns ``[]`` unconditionally. Phase 3
-        populates real GraphHits.
+        Issues ``aquery`` with ``only_need_context=True`` to suppress the
+        natural-language answer-synthesis pass. Parses the heterogeneous
+        response shape into a list of :class:`GraphHit` joined back to
+        Obscura's canonical store via the ``obscura_namespace`` /
+        ``obscura_key`` metadata stamped during ingest.
+
+        Raises any exception from the underlying LightRAG call so the
+        hybrid store can apply its fallback policy.
         """
-        _log.debug(
-            "LightRAGAdapter.aquery is a Phase-1 placeholder; returning []. "
-            "query=%r mode=%r top_k=%d",
-            query[:80],
-            mode,
-            top_k,
+        param = QueryParam(
+            mode=mode,
+            top_k=top_k,
+            only_need_context=only_need_context,
         )
-        return []
+        raw = await self._lightrag.aquery(query, param=param)
+        return _parse_aquery_response(raw, namespace=namespace)
 
     def shutdown(self) -> None:
         """Stop the dedicated event loop. Idempotent."""
@@ -528,6 +540,78 @@ class LightRAGAdapter:
                 )
 
         return _cb
+
+
+# ---------------------------------------------------------------------------
+# aquery response parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_aquery_response(
+    raw: Any,
+    *,
+    namespace: str | None,
+) -> list[GraphHit]:
+    """Coerce LightRAG's heterogeneous response into a list of :class:`GraphHit`.
+
+    LightRAG's ``aquery(only_need_context=True)`` may return a string, a
+    dict with ``chunks`` / ``entities`` / ``relations`` keys, or a list of
+    dicts depending on mode and version. We parse defensively. Anything we
+    cannot identify becomes an empty list rather than raising.
+    """
+    hits: list[GraphHit] = []
+    if raw is None:
+        return hits
+
+    items: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        items = [x for x in raw if isinstance(x, dict)]
+    elif isinstance(raw, dict):
+        for k in ("chunks", "context_chunks", "results", "hits"):
+            v = raw.get(k)
+            if isinstance(v, list):
+                items = [x for x in v if isinstance(x, dict)]
+                break
+
+    if not items:
+        return hits
+
+    for item in items:
+        md = item.get("metadata") or {}
+        ns = md.get("obscura_namespace") or item.get("namespace")
+        key = md.get("obscura_key") or item.get("key") or item.get("id")
+        if ns is None or key is None:
+            continue
+        if namespace is not None and ns != namespace:
+            continue
+        sim = (
+            item.get("score") or item.get("vdb_score") or item.get("similarity") or 0.0
+        )
+        graph_score = (
+            item.get("graph_score")
+            or item.get("rerank_score")
+            or item.get("relevance")
+            or 0.0
+        )
+        try:
+            sim_f = float(sim)
+        except (TypeError, ValueError):
+            sim_f = 0.0
+        try:
+            graph_f = float(graph_score)
+        except (TypeError, ValueError):
+            graph_f = 0.0
+        hits.append(
+            GraphHit(
+                namespace=str(ns),
+                key=str(key),
+                vector_sim=sim_f,
+                graph_relevance=graph_f,
+                text_excerpt=str(item.get("content") or item.get("text") or "")[:200],
+                metadata=md if isinstance(md, dict) else {},
+            ),
+        )
+    return hits
 
 
 # ---------------------------------------------------------------------------

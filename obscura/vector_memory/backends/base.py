@@ -94,6 +94,23 @@ class VectorBackend(Protocol):
         """Update ``accessed_at`` to now.  No-op if key doesn't exist."""
         ...
 
+    def update_metadata(
+        self,
+        key: MemoryKey,
+        partial: dict[str, Any],
+    ) -> bool:
+        """Merge ``partial`` into the existing payload metadata for ``key``.
+
+        Top-level fields like ``accessed_at``, ``access_count``, and
+        ``lr_indexed_at`` are merged into the canonical payload; everything
+        else is folded into the user-facing ``metadata`` dict.
+
+        Returns ``True`` if the key existed and was updated, ``False`` if
+        absent. Implementations must be safe to call concurrently:
+        last-write-wins on the same field is acceptable.
+        """
+        ...
+
     def list_by_type(
         self,
         memory_type: str,

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from obscura.core.pg_config import PGPoolManager
@@ -171,10 +171,7 @@ class PostgreSQLVectorBackend:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                sql = (
-                    "SELECT * FROM vector_memory.entries "
-                    "WHERE user_id = %s"
-                )
+                sql = "SELECT * FROM vector_memory.entries WHERE user_id = %s"
                 params: list[Any] = [self._user_id]
 
                 if namespace:
@@ -296,6 +293,32 @@ class PostgreSQLVectorBackend:
                     (self._user_id, key.namespace, key.key),
                 )
             conn.commit()
+        finally:
+            self._put_conn(conn)
+
+    def update_metadata(self, key: Any, partial: dict[str, Any]) -> bool:
+        """Merge ``partial`` into ``metadata`` via Postgres JSONB ``||``."""
+        if not partial:
+            return True
+        import json as _json
+
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE vector_memory.entries "
+                    "SET metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb "
+                    "WHERE user_id = %s AND namespace = %s AND key = %s",
+                    (
+                        _json.dumps(partial),
+                        self._user_id,
+                        key.namespace,
+                        key.key,
+                    ),
+                )
+                rowcount = cur.rowcount
+            conn.commit()
+            return rowcount > 0
         finally:
             self._put_conn(conn)
 

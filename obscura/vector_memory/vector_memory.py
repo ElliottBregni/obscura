@@ -667,11 +667,35 @@ class SemanticMemoryMixin:
         query: str,
         top_k: int = 3,
         memory_types: list[str] | None = None,
+        *,
+        use_graph: bool = True,
         use_reranking: bool = True,
         recency_weight: float = 0.2,
     ) -> list[VectorMemoryEntry]:
-        """Recall semantically similar memories with optional reranking."""
+        """Recall semantically similar memories.
+
+        Routes through the hybrid (graph-aware) path when the underlying
+        store is a :class:`HybridVectorMemoryStore` and ``use_graph`` is
+        True (default). Otherwise falls back to two-stage rerank, then to
+        plain similarity.
+        """
         namespace = f"{self.config.memory_namespace}:semantic"
+
+        if use_graph:
+            try:
+                from obscura.lightrag_memory.hybrid_store import (
+                    HybridVectorMemoryStore,
+                )
+
+                if isinstance(self.vector_memory, HybridVectorMemoryStore):
+                    return self.vector_memory.search_hybrid(
+                        query,
+                        namespace=namespace,
+                        top_k=top_k,
+                        memory_types=memory_types,
+                    )
+            except ImportError:
+                pass
 
         if use_reranking:
             return self.vector_memory.search_reranked(

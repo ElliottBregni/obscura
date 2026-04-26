@@ -412,6 +412,55 @@ class QdrantBackend:
         except Exception:
             pass  # best-effort
 
+    def update_metadata(self, key: MemoryKey, partial: dict[str, Any]) -> bool:
+        """Merge ``partial`` into the existing payload for ``key``.
+
+        Top-level fields (``accessed_at``, ``access_count``, ``lr_indexed_at``,
+        ``lr_index_attempts``, ``lr_index_skip_reason``, ``lr_index_last_error_at``)
+        are written to the payload root via ``set_payload``. Other keys are
+        merged into the nested ``metadata`` dict via a read-modify-write so
+        the merge is shallow (last-write-wins per field; Qdrant's
+        ``set_payload`` would otherwise replace the value at the path).
+        """
+        if not partial:
+            return True
+        point_id = _point_id(key.namespace, key.key)
+        TOP_LEVEL = {
+            "accessed_at",
+            "access_count",
+            "lr_indexed_at",
+            "lr_index_attempts",
+            "lr_index_skip_reason",
+            "lr_index_last_error_at",
+        }
+        top_level = {k: v for k, v in partial.items() if k in TOP_LEVEL}
+        metadata_part = {k: v for k, v in partial.items() if k not in TOP_LEVEL}
+        try:
+            existing = self.client.retrieve(
+                self.collection_name,
+                [point_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not existing:
+                return False
+            payload: dict[str, Any] = {}
+            payload.update(top_level)
+            if metadata_part:
+                current_md = existing[0].payload.get("metadata", {}) or {}
+                payload["metadata"] = {**current_md, **metadata_part}
+            if payload:
+                self.client.set_payload(self.collection_name, payload, [point_id])
+            return True
+        except Exception:
+            logger.debug(
+                "update_metadata failed for %s:%s",
+                key.namespace,
+                key.key,
+                exc_info=True,
+            )
+            return False
+
     def list_by_type(
         self,
         memory_type: str,

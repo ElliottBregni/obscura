@@ -93,12 +93,16 @@ def hybrid_score(
         practice ``<= sum(weights)`` for normalized inputs.
     """
     w = weights or HybridWeights()
-    usage_norm = math.log1p(max(usage_count, 0)) / math.log1p(_USAGE_SATURATION)
+    vec_clamped = max(0.0, vector_sim)
+    usage_norm = min(
+        math.log1p(max(usage_count, 0)) / math.log1p(_USAGE_SATURATION),
+        1.0,
+    )
     return (
-        w.vector * vector_sim
+        w.vector * vec_clamped
         + w.graph * graph_relevance
         + w.decay * decay_multiplier
-        + w.usage * min(usage_norm, 1.0)
+        + w.usage * usage_norm
     )
 
 

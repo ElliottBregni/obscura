@@ -2,23 +2,40 @@
 
 Phase 2 ingest path: overrides ``set`` / ``delete`` / ``clear_namespace`` to
 fan out async writes onto a per-user LightRAG instance via a bounded thread
-pool. Inherits the entire read path from :class:`VectorMemoryStore` — Phase 3
-will add ``search_hybrid``.
+pool.
+
+Phase 3 query path: adds ``search_hybrid`` blending vector + graph + decay
++ usage signals, and ``_touch_and_count_async`` to finally wire usage
+tracking that the base class never connected.
 
 The canonical vector store remains the source of truth: a LightRAG fan-out
-failure is logged but never propagates to the caller of ``set()`` /
-``delete()``.
+or query failure is logged but never propagates to the caller — Phase 3
+falls back to ``search_reranked`` whenever the graph path can't deliver.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
-from concurrent.futures import Future, ThreadPoolExecutor
+import threading
+import time
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+)
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from obscura.lightrag_memory.scoring import (
+    HybridWeights,
+    hybrid_score,
+    load_hybrid_weights_from_disk,
+)
 from obscura.memory import MemoryKey
 from obscura.vector_memory import VectorMemoryStore
+from obscura.vector_memory.decay import compute_decay
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -275,23 +292,290 @@ class HybridVectorMemoryStore(VectorMemoryStore):
                     exc_info=True,
                 )
 
-    def search_hybrid(
+    def _resolve_weights(self, weights: HybridWeights | None) -> HybridWeights:
+        if weights is not None:
+            return weights
+        if getattr(self, "_cached_weights", None) is None:
+            self._cached_weights = load_hybrid_weights_from_disk()
+        return self._cached_weights
+
+    def _lr_default_timeout_ms(self) -> int:
+        """Default query timeout (ms) from env > config.toml > 400."""
+        import os as _os
+
+        env_val = _os.environ.get("OBSCURA_LIGHTRAG_TIMEOUT_MS")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        try:
+            from obscura.core.config_io import try_load_config
+            from pathlib import Path as _Path
+
+            cfg = try_load_config(_Path.home() / ".obscura" / "config.toml") or {}
+            return int(
+                cfg.get("vector_memory", {})
+                .get("lightrag", {})
+                .get("query_timeout_ms", 400)
+            )
+        except Exception:
+            return 400
+
+    def _emit_metric(self, name: str, value: int = 1, **tags: Any) -> None:
+        """Best-effort metric emit; folds into module-level _metric_inc."""
+        try:
+            _metric_inc(f"vector_memory.lightrag.{name}", **tags)
+        except Exception:
+            logger.debug("metric emit failed: %s", name, exc_info=True)
+        if value not in (0, 1):
+            logger.debug("metric %s reported value=%d (counter is unit)", name, value)
+
+    def _run_aquery_blocking(
+        self,
+        *,
+        query: str,
+        namespace: str | None,
+        mode: str,
+        top_k: int,
+        timeout_ms: int | None,
+    ) -> list[Any]:
+        """Blocking wrapper around the adapter's async ``aquery`` with timeout."""
+        coro = self._lr.aquery(
+            query=query,
+            mode=mode,
+            top_k=top_k,
+            namespace=namespace,
+            only_need_context=True,
+        )
+        timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
+        future = asyncio.run_coroutine_threadsafe(coro, self._lr.loop)
+        try:
+            return future.result(timeout=timeout_s)
+        except FuturesTimeoutError:
+            future.cancel()
+            raise asyncio.TimeoutError("LightRAG aquery timed out")
+
+    def _fallback_to_reranked(
         self,
         query: str,
+        namespace: str | None,
+        top_k: int,
+        memory_types: list[str] | None,
         *,
+        reason: str,
+    ) -> list[VectorEntry]:
+        """Vector-only fallback path with hybrid-frame final_score."""
+        self._emit_metric("hybrid_fallback", 1, reason=reason)
+        results = super().search_reranked(
+            query=query,
+            namespace=namespace,
+            top_k=top_k,
+            memory_types=memory_types,
+        )
+        weights = self._resolve_weights(None)
+        for e in results:
+            decay_mult = compute_decay(
+                e.memory_type,
+                e.created_at,
+                e.accessed_at,
+                self.decay_config,
+            )
+            usage_count = int(e.metadata.get("access_count") or 0)
+            e.rerank_score = 0.0
+            e.final_score = hybrid_score(
+                vector_sim=max(0.0, min(1.0, e.score or 0.0)),
+                graph_relevance=0.0,
+                decay_multiplier=decay_mult,
+                usage_count=usage_count,
+                weights=weights,
+            )
+        results.sort(key=lambda x: x.final_score, reverse=True)
+        self._touch_and_count_async(results)
+        return results[:top_k]
+
+    def search_hybrid(  # type: ignore[override]
+        self,
+        query: str,
         namespace: str | None = None,
         top_k: int = 5,
+        *,
         mode: str = "hybrid",
         first_stage_k: int = 50,
-        weights: Any | None = None,
+        weights: HybridWeights | None = None,
+        timeout_ms: int | None = None,
+        fallback_on_timeout: bool = True,
+        memory_types: list[str] | None = None,
     ) -> list[VectorEntry]:
-        raise NotImplementedError("provided by Phase 3")
+        """Hybrid retrieval blending vector + graph + decay + usage.
 
-    async def _touch_and_count_async(
+        Falls back to ``super().search_reranked()`` on:
+        - LightRAG empty result
+        - LightRAG raises
+        - LightRAG exceeds ``timeout_ms``
+        - all hits drift (chunk in graph but absent from canonical store).
+
+        Returns the same shape as ``search_reranked`` for caller compatibility.
+        """
+        if top_k <= 0:
+            return []
+        if first_stage_k <= 0:
+            first_stage_k = max(top_k * 5, 20)
+
+        t_start = time.monotonic()
+        weights = self._resolve_weights(weights)
+        if timeout_ms is None:
+            timeout_ms = self._lr_default_timeout_ms()
+
+        try:
+            t_lr_start = time.monotonic()
+            lr_hits = self._run_aquery_blocking(
+                query=query,
+                namespace=namespace,
+                mode=mode,
+                top_k=first_stage_k,
+                timeout_ms=timeout_ms,
+            )
+            t_lr_ms = (time.monotonic() - t_lr_start) * 1000
+        except asyncio.TimeoutError:
+            self._emit_metric("hybrid_query_timeout", 1, mode=mode)
+            if fallback_on_timeout:
+                return self._fallback_to_reranked(
+                    query, namespace, top_k, memory_types, reason="timeout"
+                )
+            raise
+        except Exception:
+            logger.exception("LightRAG aquery failed; falling back to vector-only")
+            self._emit_metric("hybrid_query_error", 1, mode=mode)
+            return self._fallback_to_reranked(
+                query, namespace, top_k, memory_types, reason="exception"
+            )
+
+        if not lr_hits:
+            self._emit_metric("hybrid_query_empty", 1, mode=mode)
+            return self._fallback_to_reranked(
+                query, namespace, top_k, memory_types, reason="empty"
+            )
+
+        from obscura.vector_memory.backends.base import VectorEntry as _VEntry
+
+        hydrated: list[tuple[_VEntry, float, float]] = []
+        drift_count = 0
+        for hit in lr_hits:
+            if namespace is not None and hit.namespace != namespace:
+                continue
+            entry = self.backend.get_vector(MemoryKey(hit.namespace, hit.key))
+            if entry is None:
+                drift_count += 1
+                continue
+            if memory_types is not None and entry.memory_type not in memory_types:
+                continue
+            hydrated.append((entry, hit.vector_sim, hit.graph_relevance))
+
+        if not hydrated:
+            self._emit_metric("hybrid_query_all_drift", 1, mode=mode)
+            return self._fallback_to_reranked(
+                query, namespace, top_k, memory_types, reason="hydration_empty"
+            )
+
+        if drift_count:
+            logger.info(
+                "search_hybrid: dropped %d/%d drift hits "
+                "(graph references absent from backend)",
+                drift_count,
+                len(lr_hits),
+            )
+            self._emit_metric("hybrid_drift_drops", drift_count, mode=mode)
+
+        graph_raw = [g for (_, _, g) in hydrated]
+        g_min = min(graph_raw)
+        g_max = max(graph_raw)
+        g_range = g_max - g_min
+
+        def normalize_g(raw: float) -> float:
+            if g_range <= 0:
+                return 0.5
+            return (raw - g_min) / g_range
+
+        scored: list[_VEntry] = []
+        for entry, raw_vec, raw_graph in hydrated:
+            vec_sim = max(0.0, min(1.0, raw_vec))
+            graph_norm = normalize_g(raw_graph)
+            decay_mult = compute_decay(
+                entry.memory_type,
+                entry.created_at,
+                entry.accessed_at,
+                self.decay_config,
+            )
+            usage_count = int(entry.metadata.get("access_count") or 0)
+            entry.score = vec_sim
+            entry.rerank_score = graph_norm
+            entry.final_score = hybrid_score(
+                vector_sim=vec_sim,
+                graph_relevance=graph_norm,
+                decay_multiplier=decay_mult,
+                usage_count=usage_count,
+                weights=weights,
+            )
+            scored.append(entry)
+
+        scored.sort(key=lambda e: e.final_score, reverse=True)
+        results = scored[:top_k]
+
+        self._touch_and_count_async(results)
+
+        self._emit_metric("hybrid_query_count", 1, mode=mode)
+        self._emit_metric(
+            "hybrid_query_latency_ms",
+            int((time.monotonic() - t_start) * 1000),
+            mode=mode,
+        )
+        logger.info(
+            "hybrid_query: mode=%s top_k=%d returned=%d hits=%d "
+            "drift=%d t_lr_ms=%.1f t_total_ms=%.1f",
+            mode,
+            top_k,
+            len(results),
+            len(lr_hits),
+            drift_count,
+            t_lr_ms,
+            (time.monotonic() - t_start) * 1000,
+        )
+
+        return results
+
+    def _touch_and_count_async(
         self,
         entries: list[VectorEntry],
     ) -> None:
-        raise NotImplementedError("provided by Phase 3")
+        """Background-touch each entry: bump ``accessed_at`` + ``access_count``.
+
+        Fire-and-forget; lost updates on shutdown are tolerable because
+        ``access_count`` is advisory. Concurrent calls on the same key may
+        lose an increment under race — see Phase 3 §5.6.
+        """
+        if not entries:
+            return
+
+        snapshots = [(e.key, int(e.metadata.get("access_count") or 0)) for e in entries]
+        for e in entries:
+            old = int(e.metadata.get("access_count") or 0)
+            e.metadata["access_count"] = old + 1
+
+        def _do() -> None:
+            now_iso = datetime.now(UTC).isoformat()
+            for key, old_count in snapshots:
+                with contextlib.suppress(Exception):
+                    self.backend.update_metadata(
+                        key,
+                        {
+                            "access_count": old_count + 1,
+                            "accessed_at": now_iso,
+                        },
+                    )
+
+        t = threading.Thread(target=_do, daemon=True)
+        t.start()
 
     def close(self) -> None:
         """Drain the LightRAG executor and close the underlying backend."""
