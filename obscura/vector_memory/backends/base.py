@@ -94,15 +94,6 @@ class VectorBackend(Protocol):
         """Update ``accessed_at`` to now.  No-op if key doesn't exist."""
         ...
 
-    def update_metadata(self, key: MemoryKey, partial: dict[str, Any]) -> None:
-        """Atomic merge of ``partial`` into the existing metadata payload.
-
-        No-op if key doesn't exist.  Disjoint-field updates are race-free at
-        the backend level; updates to the same field race per backend
-        semantics (last-write-wins).
-        """
-        ...
-
     def list_by_type(
         self,
         memory_type: str,

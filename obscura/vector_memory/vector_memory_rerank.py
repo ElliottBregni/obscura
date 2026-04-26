@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from obscura.vector_memory import VectorMemoryEntry
-    from obscura.vector_memory.scoring import HybridWeights
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,29 +101,17 @@ class BM25Reranker:
 
 @dataclass
 class RecencyReranker:
-    """Hybrid reranker blending vector similarity, decay, and usage.
+    """Boost recent memories with exponential decay.
 
-    Internally calls :func:`~obscura.vector_memory.scoring.hybrid_score`
-    with the configured :class:`HybridWeights`.  The graph term is left
-    at 0 by default (forward compat for a future graph-retrieval layer).
-
-    When a :class:`~obscura.vector_memory.decay.DecayConfig` is provided
-    (the common case), the decay component is computed via
-    :func:`~obscura.vector_memory.decay.compute_decay` for per-type
-    half-lives and ``accessed_at`` boost.  Otherwise falls back to a
-    simple ``exp(-age / decay_days)`` formula for the decay term.
+    When a :class:`~obscura.vector_memory.decay.DecayConfig` is provided,
+    delegates to :func:`~obscura.vector_memory.decay.compute_decay` which
+    gives per-type decay rates and respects ``accessed_at``.  Otherwise
+    falls back to a simple ``exp(-age / decay_days)`` formula.
     """
 
     decay_days: float = 30.0
     weight: float = 1.0
     decay_config: Any | None = None  # Optional DecayConfig
-    weights: HybridWeights | None = None
-
-    def __post_init__(self) -> None:
-        if self.weights is None:
-            from obscura.vector_memory.scoring import load_hybrid_weights_from_disk
-
-            self.weights = load_hybrid_weights_from_disk()
 
     def score(
         self,
@@ -132,40 +119,28 @@ class RecencyReranker:
         entry: VectorMemoryEntry,
         query_embedding: list[float],
     ) -> float:
-        from obscura.vector_memory.scoring import HybridWeights, hybrid_score
-
         if self.decay_config is not None:
             from obscura.vector_memory.decay import compute_decay
 
             accessed_at = getattr(entry, "accessed_at", None)
-            decay = compute_decay(
-                entry.memory_type,
-                entry.created_at,
-                accessed_at,
-                self.decay_config,
+            return (
+                compute_decay(
+                    entry.memory_type,
+                    entry.created_at,
+                    accessed_at,
+                    self.decay_config,
+                )
+                * self.weight
             )
-        else:
-            now = datetime.now(UTC)
-            created = entry.created_at
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=UTC)
-            age_days = max((now - created).total_seconds() / 86400, 0)
-            decay = math.exp(-age_days / self.decay_days)
 
-        vector_sim = entry.score or 0.0
-        usage_count = int(entry.metadata.get("access_count") or 0)
-        weights = self.weights if self.weights is not None else HybridWeights()
-
-        return (
-            hybrid_score(
-                vector_sim=vector_sim,
-                decay_multiplier=decay,
-                usage_count=usage_count,
-                graph_relevance=0.0,
-                weights=weights,
-            )
-            * self.weight
-        )
+        # Legacy fallback
+        now = datetime.now(UTC)
+        created = entry.created_at
+        # Handle naive datetimes
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        age_days = max((now - created).total_seconds() / 86400, 0)
+        return math.exp(-age_days / self.decay_days) * self.weight
 
 
 @dataclass

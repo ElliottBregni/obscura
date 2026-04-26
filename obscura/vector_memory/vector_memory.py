@@ -409,33 +409,6 @@ class VectorMemoryStore:
             List of memories sorted by similarity (highest first)
 
         """
-        results = self._search_similar_no_touch(
-            query=query,
-            namespace=namespace,
-            top_k=top_k,
-            threshold=threshold,
-            memory_types=memory_types,
-            metadata_filters=metadata_filters,
-            date_range=date_range,
-        )
-        self._touch_and_count_async(results)
-        return results
-
-    def _search_similar_no_touch(
-        self,
-        query: str,
-        namespace: str | None,
-        top_k: int,
-        threshold: float,
-        memory_types: list[str] | None,
-        metadata_filters: list[MetadataFilter] | None,
-        date_range: tuple[datetime, datetime] | None,
-    ) -> list[VectorMemoryEntry]:
-        """Internal: same as search_similar without the access-count bump.
-
-        Used by search_reranked so that only the final top_k results are
-        counted, not the larger first-stage candidate pool.
-        """
         from obscura.vector_memory.vector_memory_filters import (
             DateRangeFilter,
             MemoryTypeFilter,
@@ -443,6 +416,7 @@ class VectorMemoryStore:
 
         query_embedding = self.embedding_fn(query)
 
+        # Build filter list
         filters: list[MetadataFilter] = list(metadata_filters or [])
         if memory_types:
             filters.append(MemoryTypeFilter(memory_types=memory_types))
@@ -463,6 +437,7 @@ class VectorMemoryStore:
             filters=filters or None,
         )
 
+        # Ensure results are sorted by final_score (backend may apply decay), fallback to score.
         for r in results:
             if not getattr(r, "final_score", None):
                 r.final_score = r.score or 0.0
@@ -508,9 +483,8 @@ class VectorMemoryStore:
         """
         from obscura.vector_memory.vector_memory_rerank import RecencyReranker
 
-        # Stage 1: get candidate pool — no touch here so search_reranked
-        # only bumps access_count for the final top_k after reranking.
-        candidates = self._search_similar_no_touch(
+        # Stage 1: get candidate pool
+        candidates = self.search_similar(
             query=query,
             namespace=namespace,
             top_k=first_stage_k,
@@ -532,20 +506,12 @@ class VectorMemoryStore:
 
         query_embedding = self.embedding_fn(query)
 
-        is_recency = isinstance(reranker, RecencyReranker)
         for entry in candidates:
             entry.rerank_score = reranker.score(query, entry, query_embedding)
-            # RecencyReranker now returns a full hybrid score (vector + decay
-            # + usage already blended).  Other rerankers preserve the legacy
-            # multiplier semantics where rerank_score modulates entry.score.
-            entry.final_score = (
-                entry.rerank_score if is_recency else entry.score * entry.rerank_score
-            )
+            entry.final_score = entry.score * entry.rerank_score
 
         candidates.sort(key=lambda x: x.final_score, reverse=True)
-        results = candidates[:top_k]
-        self._touch_and_count_async(results)
-        return results
+        return candidates[:top_k]
 
     def delete(self, key: str | MemoryKey, namespace: str = "default") -> bool:
         """Delete a memory entry."""
@@ -588,44 +554,16 @@ class VectorMemoryStore:
             key = MemoryKey(namespace=namespace, key=key)
         self.backend.touch_vector(key)
 
-    def _touch_and_count_async(self, entries: list[VectorMemoryEntry]) -> None:
-        """Bump ``access_count`` and ``accessed_at`` for the given entries.
-
-        Best-effort, race-tolerant, non-blocking.  Schedules a background
-        daemon thread that calls ``backend.update_metadata`` per entry.
-        Optimistic local mutation makes the new ``access_count`` visible
-        to the caller synchronously; the durable write is async.
-        """
-        if not entries:
-            return
-
-        snapshots: list[tuple[Any, int]] = []
-        for e in entries:
-            old = int(e.metadata.get("access_count") or 0)
-            snapshots.append((e.key, old))
-            # Optimistic local mutation — caller sees new count immediately.
-            e.metadata["access_count"] = old + 1
+    def _touch_results_async(self, entries: list[VectorEntry]) -> None:
+        """Touch all entries in a background thread (fire-and-forget)."""
 
         def _do() -> None:
-            now_iso = datetime.now(UTC).isoformat()
-            update_metadata = getattr(self.backend, "update_metadata", None)
-            for key, old_count in snapshots:
+            for e in entries:
                 with contextlib.suppress(Exception):
-                    if update_metadata is not None:
-                        update_metadata(
-                            key,
-                            {
-                                "access_count": old_count + 1,
-                                "accessed_at": now_iso,
-                            },
-                        )
-                    else:
-                        # Backend predates update_metadata — fall back to
-                        # touch_vector so accessed_at still bumps.
-                        self.backend.touch_vector(key)
+                    self.backend.touch_vector(e.key)
 
-        # daemon=True: fire-and-forget — losing an in-flight write on
-        # interpreter exit is acceptable for advisory data.
+        # daemon=True: fire-and-forget touch — data loss on exit is acceptable
+        # because touch only updates access timestamps (best-effort freshness).
         t = threading.Thread(target=_do, daemon=True)
         t.start()
 

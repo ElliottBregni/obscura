@@ -412,46 +412,6 @@ class QdrantBackend:
         except Exception:
             pass  # best-effort
 
-    def update_metadata(self, key: MemoryKey, partial: dict[str, Any]) -> None:
-        """Atomic merge of ``partial`` into the entry's payload.
-
-        ``accessed_at`` lives at payload root; everything else is merged
-        into the ``metadata`` sub-dict via read-merge-write because
-        Qdrant's ``set_payload`` replaces values at the path rather than
-        merging dicts.  No-op if the key doesn't exist.
-        """
-        if not partial:
-            return
-        point_id = _point_id(key.namespace, key.key)
-        top_level_keys = {"accessed_at"}
-        top_level = {k: v for k, v in partial.items() if k in top_level_keys}
-        metadata_part = {k: v for k, v in partial.items() if k not in top_level_keys}
-
-        try:
-            if metadata_part:
-                existing = self.client.retrieve(
-                    self.collection_name,
-                    [point_id],
-                    with_payload=True,
-                    with_vectors=False,
-                )
-                if not existing:
-                    return
-                current_md = existing[0].payload.get("metadata", {}) or {}
-                new_md = {**current_md, **metadata_part}
-                payload = {**top_level, "metadata": new_md}
-            else:
-                payload = top_level
-            if payload:
-                self.client.set_payload(self.collection_name, payload, [point_id])
-        except Exception:
-            logger.debug(
-                "update_metadata failed for %s:%s",
-                key.namespace,
-                key.key,
-                exc_info=True,
-            )
-
     def list_by_type(
         self,
         memory_type: str,

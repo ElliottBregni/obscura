@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from obscura.core.pg_config import PGPoolManager
@@ -171,7 +171,10 @@ class PostgreSQLVectorBackend:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                sql = "SELECT * FROM vector_memory.entries WHERE user_id = %s"
+                sql = (
+                    "SELECT * FROM vector_memory.entries "
+                    "WHERE user_id = %s"
+                )
                 params: list[Any] = [self._user_id]
 
                 if namespace:
@@ -292,58 +295,6 @@ class PostgreSQLVectorBackend:
                     "WHERE user_id = %s AND namespace = %s AND key = %s",
                     (self._user_id, key.namespace, key.key),
                 )
-            conn.commit()
-        finally:
-            self._put_conn(conn)
-
-    def update_metadata(self, key: Any, partial: dict[str, Any]) -> None:
-        """Atomic merge of ``partial`` into the metadata JSONB column.
-
-        ``accessed_at`` is split out because it lives in its own column.
-        Everything else is merged into the metadata JSONB via the ``||``
-        operator (shallow merge, last-write-wins per key).  No-op if the
-        key doesn't exist.
-        """
-        if not partial:
-            return
-        accessed_at = partial.get("accessed_at")
-        md_updates = {k: v for k, v in partial.items() if k != "accessed_at"}
-
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                if md_updates and accessed_at is not None:
-                    cur.execute(
-                        "UPDATE vector_memory.entries SET "
-                        "metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb, "
-                        "accessed_at = %s "
-                        "WHERE user_id = %s AND namespace = %s AND key = %s",
-                        (
-                            json.dumps(md_updates),
-                            accessed_at,
-                            self._user_id,
-                            key.namespace,
-                            key.key,
-                        ),
-                    )
-                elif md_updates:
-                    cur.execute(
-                        "UPDATE vector_memory.entries SET "
-                        "metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb "
-                        "WHERE user_id = %s AND namespace = %s AND key = %s",
-                        (
-                            json.dumps(md_updates),
-                            self._user_id,
-                            key.namespace,
-                            key.key,
-                        ),
-                    )
-                elif accessed_at is not None:
-                    cur.execute(
-                        "UPDATE vector_memory.entries SET accessed_at = %s "
-                        "WHERE user_id = %s AND namespace = %s AND key = %s",
-                        (accessed_at, self._user_id, key.namespace, key.key),
-                    )
             conn.commit()
         finally:
             self._put_conn(conn)
