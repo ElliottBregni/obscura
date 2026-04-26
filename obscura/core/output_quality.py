@@ -188,3 +188,45 @@ def log_violations(violations: list[Violation], *, turn: int = 0) -> None:
             v.pattern_name,
             v.snippet,
         )
+
+
+@dataclass(frozen=True)
+class ToolResultSummary:
+    """Compact view of a successful tool result, used to build corrections."""
+
+    tool_name: str
+    snippet: str
+    """First ~200 chars of the tool's stringified result."""
+
+
+def build_correction_prompt(
+    violations: list[Violation],
+    successful_tools: list[ToolResultSummary],
+) -> str:
+    """Build a corrective system message to inject into the next turn.
+
+    Returns an empty string when there's nothing to correct (no
+    violations, or no successful tools to point at as ground truth).
+    """
+    if not violations or not successful_tools:
+        return ""
+
+    bullets: list[str] = []
+    for s in successful_tools:
+        bullets.append(f"- `{s.tool_name}` returned: {s.snippet}")
+
+    pattern_list = ", ".join(sorted({v.pattern_name for v in violations}))
+
+    return (
+        "[OBSCURA CORRECTION] Your previous response narrated tool failure "
+        "or invoked a phantom permission UI, but the actual tool calls in "
+        "that turn succeeded. Patterns flagged: "
+        f"{pattern_list}.\n\n"
+        "Ground-truth tool results from the same turn:\n"
+        + "\n".join(bullets)
+        + "\n\nThere is NO outer permission layer in obscura. "
+        "`user_interact(mode=permission)` returning `approved: true` IS "
+        "the grant. There are no slash commands `/allowed-tools` or "
+        "`/policy allow`. Re-read the actual results above and respond "
+        "accurately. Do not narrate failure when the tool succeeded."
+    )

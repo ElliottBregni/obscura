@@ -118,6 +118,30 @@ async def test_handler_sees_mcp_discovery_report_from_backend() -> None:
 
 
 @pytest.mark.asyncio
+async def test_successful_tool_recorded_for_correction_check() -> None:
+    """Successful tool calls are tracked so the post-turn scanner can compare them
+    against the model's narration."""
+
+    @tool("works", "always succeeds")
+    def works() -> str:
+        return '{"ok": true, "result": "data"}'
+
+    registry = ToolRegistry()
+    registry.register(works.spec)
+    loop = AgentLoop(backend=None, tool_registry=registry)
+    loop._this_turn_successful_tools = []
+
+    tc = ToolCallInfo(tool_use_id="c", name="works", input={})
+    envelope = await loop._execute_single_tool(tc, seen_calls={})
+
+    assert envelope.status == "ok"
+    assert len(loop._this_turn_successful_tools) == 1
+    summary = loop._this_turn_successful_tools[0]
+    assert summary.tool_name == "works"
+    assert "data" in summary.snippet
+
+
+@pytest.mark.asyncio
 async def test_context_unbinds_after_tool_returns() -> None:
     """Bound context is reset after a tool call completes."""
 

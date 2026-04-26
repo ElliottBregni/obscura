@@ -663,6 +663,15 @@ class AgentLoop:
         self._current_session_id: str | None = None
         self._current_user: Any = None
 
+        # Hallucination auto-correction (output_quality):
+        #   _this_turn_successful_tools tracks tool calls that returned
+        #     status="ok" during the current turn. Reset at TURN_START.
+        #   _pending_correction holds a corrective message built when
+        #     the scanner detects hallucination + recent successful tool;
+        #     consumed at the top of the next turn iteration.
+        self._this_turn_successful_tools: list[Any] = []
+        self._pending_correction: str | None = None
+
     # ------------------------------------------------------------------
     # Compiled agent application
     # ------------------------------------------------------------------
@@ -1045,6 +1054,30 @@ class AgentLoop:
                 output_tokens=0,
                 finish_reason="",
             )
+            # Reset per-turn successful-tool tracking; persists only inside one turn.
+            self._this_turn_successful_tools = []
+
+            # Inject any pending hallucination correction into the next prompt.
+            # Set when the prior turn's text-quality scan caught the model
+            # narrating failure that contradicted a successful tool call —
+            # see ``obscura/core/output_quality.py``. Emitted as a
+            # ``CORRECTION_INJECTED`` event so the REPL can surface that a
+            # course-correction was applied.
+            if self._pending_correction:
+                correction = self._pending_correction
+                self._pending_correction = None
+                if current_prompt:
+                    current_prompt = correction + "\n\n" + current_prompt
+                else:
+                    current_prompt = correction
+                correction_event = AgentEvent(
+                    kind=AgentEventKind.CORRECTION_INJECTED,
+                    turn=state.turn,
+                    text=correction,
+                )
+                emitted = await self._emit(correction_event, session_id)
+                if emitted is not None:
+                    yield emitted
 
             # Run post-hook for the previous event before emitting next
             if _prev_event is not None:
@@ -1426,9 +1459,12 @@ class AgentLoop:
             # (model inventing UX flows like "click Allow" or
             # "/allowed-tools" that don't exist in obscura). Logs at
             # WARNING so violations surface in default-level logs without
-            # changing the output the user sees.
+            # changing the output the user sees. When a hallucination
+            # contradicts a successful tool call from the same turn, also
+            # build a corrective message that the next turn will inject.
             try:
                 from obscura.core.output_quality import (
+                    build_correction_prompt,
                     log_violations,
                     scan_text,
                 )
@@ -1436,6 +1472,13 @@ class AgentLoop:
                 violations = scan_text(state.turn_text)
                 if violations:
                     log_violations(violations, turn=state.turn)
+                    if self._this_turn_successful_tools:
+                        correction = build_correction_prompt(
+                            violations,
+                            self._this_turn_successful_tools,
+                        )
+                        if correction:
+                            self._pending_correction = correction
             except Exception:
                 # Quality scan must never break the turn — best-effort.
                 pass
@@ -1792,8 +1835,13 @@ class AgentLoop:
                 params = use.get("parameters") or use.get("args") or {}
                 if not recipient:
                     continue
-                # Normalize dotted provider prefixes
-                if isinstance(recipient, str) and "." in recipient:
+                # Normalize dotted provider prefixes (skip mcp__-prefixed
+                # names — see _parse_tool_call for rationale).
+                if (
+                    isinstance(recipient, str)
+                    and "." in recipient
+                    and not recipient.startswith("mcp__")
+                ):
                     recipient = recipient.split(".")[-1]
 
                 # Skip inner recipients that are not registered to avoid
@@ -2155,6 +2203,24 @@ class AgentLoop:
                 raw=tc.raw,
             )
             seen_calls[dedup_key] = envelope
+            # Track successful tool calls so the post-turn quality scan can
+            # tell whether the model's narration contradicted reality.
+            try:
+                from obscura.core.output_quality import ToolResultSummary
+
+                snippet = (
+                    result
+                    if isinstance(result, str)
+                    else json.dumps(result, default=str)
+                )
+                self._this_turn_successful_tools.append(
+                    ToolResultSummary(
+                        tool_name=call.tool,
+                        snippet=snippet[:200],
+                    )
+                )
+            except Exception:
+                pass
             return envelope
         except Exception as exc:
             logger.warning("Tool %s failed: %s", tc.name, exc)
@@ -2533,7 +2599,10 @@ class AgentLoop:
 
         # Normalize dotted provider prefixes (e.g. "functions.web_search") to
         # the canonical tool name expected by the runtime ("web_search").
-        if isinstance(name, str) and "." in name:
+        # Skip mcp__-prefixed names: those carry meaningful structure that
+        # ToolRegistry.get() resolves on its own (dot↔underscore variants),
+        # and stripping here would discard the server-name segment.
+        if isinstance(name, str) and "." in name and not name.startswith("mcp__"):
             name = name.split(".")[-1]
 
         return ToolCallInfo(
