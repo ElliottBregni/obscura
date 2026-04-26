@@ -467,6 +467,10 @@ class AgentEventKind(enum.Enum):
     SUBAGENT_START = "subagent_start"
     TASK_COMPLETED = "task_completed"
     PLAN_APPROVAL_REQUEST = "plan_approval_request"
+    CORRECTION_INJECTED = "correction_injected"
+    """Fired when output_quality detected a hallucinated narration that
+    contradicted a recent successful tool call, and the agent loop
+    injected a corrective message into the next turn."""
 
 
 @dataclass

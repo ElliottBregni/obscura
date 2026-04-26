@@ -125,6 +125,61 @@ class TestScanText:
         assert "click Allow" in violations[0].snippet
 
 
+class TestBuildCorrectionPrompt:
+    def test_no_violations_returns_empty(self) -> None:
+        from obscura.core.output_quality import (
+            ToolResultSummary,
+            build_correction_prompt,
+        )
+
+        result = build_correction_prompt(
+            [],
+            [ToolResultSummary(tool_name="x", snippet="ok")],
+        )
+        assert result == ""
+
+    def test_no_successful_tools_returns_empty(self) -> None:
+        from obscura.core.output_quality import build_correction_prompt
+
+        result = build_correction_prompt(
+            [Violation(pattern_name="x", snippet="..."),],
+            [],
+        )
+        assert result == ""
+
+    def test_builds_correction_with_evidence(self) -> None:
+        from obscura.core.output_quality import (
+            ToolResultSummary,
+            build_correction_prompt,
+        )
+
+        violations = [
+            Violation(pattern_name="claude_code_sandbox", snippet="..."),
+            Violation(pattern_name="still_blocking_after_approval", snippet="..."),
+        ]
+        tools = [
+            ToolResultSummary(
+                tool_name="user_interact",
+                snippet='{"approved": true}',
+            ),
+            ToolResultSummary(
+                tool_name="prognostic_health_check",
+                snippet='{"polymarket": {"rest": "ok"}}',
+            ),
+        ]
+        result = build_correction_prompt(violations, tools)
+        # Includes both pattern names so the model sees what it did wrong.
+        assert "claude_code_sandbox" in result
+        assert "still_blocking_after_approval" in result
+        # Includes the actual tool results as ground truth.
+        assert "user_interact" in result
+        assert "approved" in result
+        assert "prognostic_health_check" in result
+        # Reinforces the canonical truth.
+        assert "OBSCURA CORRECTION" in result
+        assert "user_interact" in result
+
+
 class TestLogViolations:
     def test_logs_warning_per_violation(
         self, caplog: pytest.LogCaptureFixture
