@@ -101,6 +101,45 @@ _PATTERNS: tuple[_Pattern, ...] = (
         ),
     ),
     _Pattern(
+        # Catches "outer sandbox", "outer permission wall", "outer
+        # permission layer" — the model rephrasing "Claude Code sandbox"
+        # without the literal Claude Code prefix.
+        name="outer_layer",
+        regex=re.compile(
+            r"\bouter\s+(sandbox|permission|layer|wall)",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        # The model claiming a tool is "still blocked" / "still erroring"
+        # right after user_interact returned {"approved": true}. There's
+        # no further blocking layer in obscura — if a tool's actual
+        # result is success, narrating it as "still blocking" is the
+        # hallucination.
+        name="still_blocking_after_approval",
+        regex=re.compile(
+            r"\bstill\s+(blocked?|blocking|erroring|gated|denied)",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        name="despite_approval",
+        regex=re.compile(
+            r"\bdespite\s+(the\s+)?(in[-\s]?session\s+)?(approval|grant|permission)",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        # "via the Bash tool path instead", "via a different path", etc.
+        # When the agent invents alternative routing paths to escape a
+        # phantom permission layer.
+        name="alt_tool_path",
+        regex=re.compile(
+            r"\bvia\s+(the\s+)?\w+\s+tool\s+path\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
         name="approve_in_dialog",
         regex=re.compile(
             r"\b(approve|grant)\s+(\S+\s+){0,3}(dialog|prompt|popup)\b",

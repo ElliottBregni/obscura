@@ -78,6 +78,28 @@ class TestScanText:
         violations = scan_text(text)
         assert any(v.pattern_name == "reply_grant_or_yes" for v in violations)
 
+    def test_outer_sandbox_without_claude_code_prefix(self) -> None:
+        """The model rephrased 'Claude Code sandbox' to 'outer sandbox' to skirt rule 9."""
+        text = (
+            "The outer sandbox is still blocking the MCP tool despite "
+            "in-session approval."
+        )
+        violations = scan_text(text)
+        names = {v.pattern_name for v in violations}
+        assert "outer_layer" in names
+        assert "still_blocking_after_approval" in names
+        assert "despite_approval" in names
+
+    def test_alt_tool_path(self) -> None:
+        text = "Let me try via the Bash tool path instead."
+        violations = scan_text(text)
+        assert any(v.pattern_name == "alt_tool_path" for v in violations)
+
+    def test_still_erroring(self) -> None:
+        text = "The permission was approved but the tool is still erroring."
+        violations = scan_text(text)
+        assert any(v.pattern_name == "still_blocking_after_approval" for v in violations)
+
     def test_full_transcript_finds_multiple(self) -> None:
         """The actual transcript that triggered this work should fire several patterns."""
         text = (
