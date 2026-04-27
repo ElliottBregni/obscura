@@ -102,6 +102,21 @@ def _is_env_first_mode() -> bool:
     return _auth_mode() == "env_first"
 
 
+def _keyring_secret(name: str) -> str | None:
+    """Thin alias so each provider resolver stays one-line.
+
+    Failures (keyring not installed, no backend, value absent) all
+    collapse to None — we never let a keyring miss abort credential
+    resolution.
+    """
+    try:
+        from obscura.core.secret_store import get_secret
+
+        return get_secret(name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _resolve_github_token(
     explicit: str | None,
     oauth_token: str | None = None,
@@ -117,6 +132,16 @@ def _resolve_github_token(
     """
     if explicit:
         return explicit
+
+    # OS keyring — the safer-at-rest option. Slots in after explicit and
+    # before every other source so customers who opt into keyring storage
+    # don't accidentally keep using a stale env var. Respects auth-mode
+    # override: env_first users have already paid the posture cost and
+    # expect env to win.
+    if not _is_env_first_mode():
+        kr = _keyring_secret("github:token")
+        if kr:
+            return kr
 
     token_cmd = os.environ.get("OBSCURA_GITHUB_TOKEN_CMD", "").strip()
     gh_cmd = _resolve_cli_cmd("OBSCURA_GH_CLI_CMD", "gh")
@@ -208,6 +233,10 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
     if explicit:
         return explicit
 
+    kr = _keyring_secret("anthropic:api_key")
+    if kr and not _is_env_first_mode():
+        return kr
+
     for var in _CLAUDE_ENV_VARS:
         key = _secrets.resolve(var)
         if key:
@@ -267,6 +296,11 @@ def _resolve_openai_key(explicit: str | None) -> str:
     """Resolve an OpenAI API key from explicit value, OAuth, env var, or cmd."""
     if explicit:
         return explicit
+
+    if not _is_env_first_mode():
+        kr = _keyring_secret("openai:api_key")
+        if kr:
+            return kr
 
     if _is_env_first_mode():
         for var in _OPENAI_KEY_ENV_VARS:
@@ -416,6 +450,10 @@ def _resolve_moonshot_key(explicit: str | None) -> str:
     """Resolve a Moonshot/Kimi API key from explicit value or env vars."""
     if explicit:
         return explicit
+    if not _is_env_first_mode():
+        kr = _keyring_secret("moonshot:api_key")
+        if kr:
+            return kr
     for var in _MOONSHOT_KEY_ENV_VARS:
         key = _secrets.resolve(var)
         if key:
