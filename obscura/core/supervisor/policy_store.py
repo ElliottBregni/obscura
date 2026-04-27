@@ -10,15 +10,17 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import sqlite3
-import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from obscura.core.supervisor.schema import init_supervisor_schema
+from obscura.core.supervisor.db_backend import (
+    DatabaseBackend,
+    SQLiteSupervisorBackend,
+    translate_sql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +98,23 @@ class PolicyStore:
         run.policy_id = policy.policy_id
     """
 
-    def __init__(self, db_path: str | Path) -> None:
-        self._db_path = Path(db_path)
-        self._local = threading.local()
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        backend: DatabaseBackend | None = None,
+    ) -> None:
+        if backend is not None:
+            self._backend = backend
+        elif db_path is not None:
+            self._backend = SQLiteSupervisorBackend(db_path)
+        else:
+            msg = "Either db_path or backend must be provided"
+            raise ValueError(msg)
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-        return self._local.conn
-
-    def _init_schema(self) -> None:
-        init_supervisor_schema(self._conn())
+    def _sql(self, sql: str) -> str:
+        """Translate SQL for the current dialect."""
+        return translate_sql(sql, self._backend.dialect)
 
     def create_version(
         self,
@@ -121,37 +124,45 @@ class PolicyStore:
         policy_json: dict[str, Any] | None = None,
     ) -> PolicyVersion:
         """Create a new immutable policy version."""
-        conn = self._conn()
-        pjson = policy_json or {}
-        pjson_str = json.dumps(pjson, sort_keys=True)
-        content_hash = hashlib.sha256(pjson_str.encode()).hexdigest()
+        conn = self._backend.get_conn()
+        try:
+            pjson = policy_json or {}
+            pjson_str = json.dumps(pjson, sort_keys=True)
+            content_hash = hashlib.sha256(pjson_str.encode()).hexdigest()
 
-        # Get next version number
-        row = conn.execute(
-            "SELECT COALESCE(MAX(version), 0) AS max_ver "
-            "FROM policy_versions WHERE scope = ? AND scope_id = ?",
-            (scope, scope_id),
-        ).fetchone()
-        next_version = row["max_ver"] + 1
+            # Get next version number
+            cur = conn.execute(
+                self._sql(
+                    "SELECT COALESCE(MAX(version), 0) AS max_ver "
+                    "FROM policy_versions WHERE scope = ? AND scope_id = ?"
+                ),
+                (scope, scope_id),
+            )
+            row = cur.fetchone()
+            next_version = row["max_ver"] + 1
 
-        policy_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
+            policy_id = str(uuid.uuid4())
+            now = datetime.now(UTC)
 
-        conn.execute(
-            "INSERT INTO policy_versions "
-            "(policy_id, scope, scope_id, version, policy_json, hash, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                policy_id,
-                scope,
-                scope_id,
-                next_version,
-                pjson_str,
-                content_hash,
-                now.isoformat(),
-            ),
-        )
-        conn.commit()
+            conn.execute(
+                self._sql(
+                    "INSERT INTO policy_versions "
+                    "(policy_id, scope, scope_id, version, policy_json, hash, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    policy_id,
+                    scope,
+                    scope_id,
+                    next_version,
+                    pjson_str,
+                    content_hash,
+                    now.isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
         return PolicyVersion(
             policy_id=policy_id,
@@ -165,14 +176,15 @@ class PolicyStore:
 
     def get_version(self, policy_id: str) -> PolicyVersion | None:
         """Get a policy version by ID."""
-        row = (
-            self._conn()
-            .execute(
-                "SELECT * FROM policy_versions WHERE policy_id = ?",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql("SELECT * FROM policy_versions WHERE policy_id = ?"),
                 (policy_id,),
             )
-            .fetchone()
-        )
+            row = cur.fetchone()
+        finally:
+            self._backend.put_conn(conn)
         if row is None:
             return None
         return self._row_to_version(row)
@@ -183,16 +195,19 @@ class PolicyStore:
         scope_id: str = "",
     ) -> PolicyVersion | None:
         """Get the latest policy version for a scope."""
-        row = (
-            self._conn()
-            .execute(
-                "SELECT * FROM policy_versions "
-                "WHERE scope = ? AND scope_id = ? "
-                "ORDER BY version DESC LIMIT 1",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql(
+                    "SELECT * FROM policy_versions "
+                    "WHERE scope = ? AND scope_id = ? "
+                    "ORDER BY version DESC LIMIT 1"
+                ),
                 (scope, scope_id),
             )
-            .fetchone()
-        )
+            row = cur.fetchone()
+        finally:
+            self._backend.put_conn(conn)
         if row is None:
             return None
         return self._row_to_version(row)
@@ -203,28 +218,34 @@ class PolicyStore:
         scope_id: str = "",
     ) -> list[PolicyVersion]:
         """List all policy versions for a scope."""
-        rows = (
-            self._conn()
-            .execute(
-                "SELECT * FROM policy_versions "
-                "WHERE scope = ? AND scope_id = ? "
-                "ORDER BY version DESC",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql(
+                    "SELECT * FROM policy_versions "
+                    "WHERE scope = ? AND scope_id = ? "
+                    "ORDER BY version DESC"
+                ),
                 (scope, scope_id),
             )
-            .fetchall()
-        )
+            rows = cur.fetchall()
+        finally:
+            self._backend.put_conn(conn)
         return [self._row_to_version(r) for r in rows]
 
     # -- internal ------------------------------------------------------------
 
     @staticmethod
-    def _row_to_version(row: sqlite3.Row) -> PolicyVersion:
+    def _row_to_version(row: Any) -> PolicyVersion:
         raw = row["policy_json"]
         pjson: dict[str, Any] = {}
         if raw:
-            parsed = json.loads(raw)
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
             if isinstance(parsed, dict):
                 pjson = parsed
+        created = row["created_at"]
+        if isinstance(created, str):
+            created = datetime.fromisoformat(created)
         return PolicyVersion(
             policy_id=row["policy_id"],
             scope=row["scope"],
@@ -232,10 +253,8 @@ class PolicyStore:
             version=row["version"],
             policy_json=pjson,
             hash=row["hash"],
-            created_at=datetime.fromisoformat(row["created_at"]),
+            created_at=created,
         )
 
     def close(self) -> None:
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        self._backend.close()

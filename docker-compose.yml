@@ -7,7 +7,17 @@
 #   docker compose up --watch     # live sync for web-ui files
 #   docker compose logs -f        # tail all logs
 #   docker compose down -v        # tear down (remove volumes)
+#
+# The obscura-sdk image builds from the repo root. See Dockerfile (slim,
+# core + server + telemetry) or Dockerfile.full (slim + every plugin +
+# provider dep, plus the binaries non-pip plugins shell out to).
 # =============================================================================
+
+x-obscura-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   # ---------------------------------------------------------------------------
@@ -17,49 +27,72 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INSTALL_GWS: "0"
+        INSTALL_M365: "0"
+        INSTALL_HF: "0"
     image: obscura-sdk:local
     container_name: obscura-sdk
     ports:
-      - "8080:8080"
-      - "50051:50051"  # A2A gRPC
+      - "8080:8080"     # HTTP API
+      - "50051:50051"   # A2A gRPC
     volumes:
-      # Development: expose host filesystem + local Obscura state to container.
-      # Note: Docker Desktop may require adding host paths to File Sharing.
-      - type: bind
-        source: /
-        target: /host
+      # Persistent Obscura state (memory, supervisor.db, logs, specs).
       - type: bind
         source: ${HOME}/.obscura
         target: /home/obscura/.obscura
-      # OAuth inheritance from host machine (read-only).
+      # OAuth inheritance from host (read-only).
       - type: bind
         source: ${HOME}/.config/gh
         target: /home/obscura/.config/gh
-      # Optional Claude state passthrough (currently read-only).
+        read_only: true
+      # Optional Claude state passthrough (read-only).
       - type: bind
         source: ${HOME}/.claude
         target: /home/obscura/.claude
+        read_only: true
       - type: bind
         source: ${HOME}/.claude.json
         target: /home/obscura/.claude.json
+        read_only: true
     environment:
-      # Auth
-      OBSCURA_AUTH_ENABLED: "true"
-      OBSCURA_API_KEYS: "obscura-dev-key-123:dev-user:admin,agent:copilot,agent:claude,agent:localllm,agent:openai,agent:moonshot,agent:read,sync:write,sessions:manage"
+      # Auth is always on — primary path is Supabase OAuth. API keys only
+      # load when OBSCURA_API_KEYS is set explicitly in your local .env;
+      # leaving this blank forces users to sign in via the web UI / CLI
+      # rather than relying on a shared secret baked into version control.
+      OBSCURA_API_KEYS: "${OBSCURA_API_KEYS:-}"
+      # Supabase (required unless you only use API keys above).
+      SUPABASE_URL: "${SUPABASE_URL:-}"
+      SUPABASE_JWT_SECRET: "${SUPABASE_JWT_SECRET:-}"
+      SUPABASE_JWKS_URL: "${SUPABASE_JWKS_URL:-}"
+      SUPABASE_AUDIENCE: "${SUPABASE_AUDIENCE:-authenticated}"
       # Telemetry (OpenTelemetry)
       OTEL_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_SERVICE_NAME: "obscura-sdk"
       # Logging
-      OBSCURA_LOG_LEVEL: "DEBUG"
+      OBSCURA_LOG_LEVEL: "${OBSCURA_LOG_LEVEL:-DEBUG}"
       OBSCURA_LOG_FORMAT: "json"
       # Backend
-      OBSCURA_DEFAULT_BACKEND: "copilot"
+      OBSCURA_DEFAULT_BACKEND: "${OBSCURA_DEFAULT_BACKEND:-copilot}"
       OBSCURA_AUTH_MODE: "oauth_first"
       # Copilot OAuth inheritance: read token from mounted ~/.config/gh/hosts.yml
       OBSCURA_GITHUB_TOKEN_CMD: "python /app/scripts/print_gh_oauth_token.py"
       # Optional Claude token command (override in shell/.env as needed)
       OBSCURA_CLAUDE_TOKEN_CMD: "${OBSCURA_CLAUDE_TOKEN_CMD:-}"
+      # A2A
+      OBSCURA_A2A_ENABLED: "${OBSCURA_A2A_ENABLED:-false}"
+      OBSCURA_A2A_GRPC_PORT: "50051"
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging: *default-logging
     networks:
       - obscura-net
     restart: unless-stopped
@@ -76,15 +109,19 @@ services:
       - "5173:5173"
     environment:
       VITE_FORCE_DEV_API_KEY: "true"
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-http://localhost:8080}"
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
       obscura-sdk:
-        condition: service_started
+        condition: service_healthy
     develop:
       watch:
         - action: sync
           path: ./web-ui/index.html
           target: /app/index.html
+        - action: sync
+          path: ./web-ui/src
+          target: /app/src
         - action: sync+restart
           path: ./web-ui/vite.config.ts
           target: /app/vite.config.ts
@@ -92,6 +129,7 @@ services:
           path: ./web-ui/package.json
         - action: rebuild
           path: ./web-ui/package-lock.json
+    logging: *default-logging
     networks:
       - obscura-net
     restart: unless-stopped
@@ -109,6 +147,12 @@ services:
       - "4317:4317"   # gRPC OTLP
       - "4318:4318"   # HTTP OTLP
       - "8888:8888"   # Collector metrics
+    depends_on:
+      jaeger:
+        condition: service_started
+      prometheus:
+        condition: service_started
+    logging: *default-logging
     networks:
       - obscura-net
     restart: unless-stopped
@@ -129,6 +173,7 @@ services:
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"
+    logging: *default-logging
     networks:
       - obscura-net
     restart: unless-stopped
@@ -144,6 +189,7 @@ services:
     ports:
       - "16686:16686"  # Jaeger UI
       - "14250:14250"  # gRPC collector
+    logging: *default-logging
     networks:
       - obscura-net
     restart: unless-stopped
@@ -153,10 +199,10 @@ services:
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.3.1
-    container_name: grafana
+    container_name: obscura-grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: obscura
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-obscura}"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
@@ -166,8 +212,11 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - prometheus
-      - jaeger
+      prometheus:
+        condition: service_started
+      jaeger:
+        condition: service_started
+    logging: *default-logging
     networks:
       - obscura-net
     restart: unless-stopped

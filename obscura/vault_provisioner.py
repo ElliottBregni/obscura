@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vault_gen.generator import RepoConfig, RepoType, generate_repo
-from vault_gen.registry import Registry
+from obscura.vault_gen.generator import RepoConfig, RepoType, generate_repo
+from obscura.vault_gen.registry import Registry
 
 
 class VaultProvisionError(RuntimeError):

@@ -8,7 +8,6 @@ OBSCURA_PORT="${OBSCURA_PORT:-8080}"
 OBSCURA_HOST="${OBSCURA_HOST:-0.0.0.0}"
 OBSCURA_A2A_ENABLED="true"
 OBSCURA_A2A_AGENT_NAME="${OBSCURA_A2A_AGENT_NAME:-Claude A2A Agent}"
-OBSCURA_AUTH_ENABLED="${OBSCURA_AUTH_ENABLED:-false}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -43,7 +42,7 @@ BANNER
 
 # Export and start
 export OBSCURA_PORT OBSCURA_HOST OBSCURA_A2A_ENABLED
-export OBSCURA_A2A_AGENT_NAME OBSCURA_AUTH_ENABLED
+export OBSCURA_A2A_AGENT_NAME
 
-cd /Users/elliottbregni/dev/obscura-main
+cd "$(dirname "$0")"
 exec python -m uvicorn obscura.server:app --factory --host "$OBSCURA_HOST" --port "$OBSCURA_PORT"

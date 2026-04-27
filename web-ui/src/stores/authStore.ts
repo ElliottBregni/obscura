@@ -2,15 +2,22 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { decodeJWT, extractUser, isTokenExpired } from '@/lib/jwt';
 import type { DecodedUser } from '@/lib/jwt';
+import { supabase } from '@/lib/supabase';
 
 interface AuthState {
   token: string | null;
   apiKey: string | null;
+  // Supabase-forwarded GitHub OAuth token — captured from
+  // `session.provider_token` after a GitHub sign-in. Sent as `X-GitHub-Token`
+  // on API requests so the server can feed it to Copilot as the "easy path"
+  // fallback (see obscura.core.auth.AuthConfig.oauth_github_token).
+  githubToken: string | null;
   user: DecodedUser | null;
   isAuthenticated: boolean;
 
   setToken: (token: string) => void;
   setApiKey: (key: string) => void;
+  setGithubToken: (token: string | null) => void;
   logout: () => void;
   hasRole: (role: string) => boolean;
   hasAnyRole: (...roles: string[]) => boolean;
@@ -21,6 +28,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       token: null,
       apiKey: null,
+      githubToken: null,
       user: null,
       isAuthenticated: false,
 
@@ -47,8 +55,23 @@ export const useAuthStore = create<AuthState>()(
         });
       },
 
+      setGithubToken: (githubToken: string | null) => {
+        set({ githubToken });
+      },
+
       logout: () => {
-        set({ token: null, apiKey: null, user: null, isAuthenticated: false });
+        set({
+          token: null,
+          apiKey: null,
+          githubToken: null,
+          user: null,
+          isAuthenticated: false,
+        });
+        // Fire-and-forget Supabase sign-out so a browser refresh doesn't
+        // silently re-authenticate the user via a cached refresh token.
+        if (supabase) {
+          void supabase.auth.signOut().catch(() => undefined);
+        }
       },
 
       hasRole: (role: string) => {

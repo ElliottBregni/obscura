@@ -1,0 +1,126 @@
+# Browser-tool eval suite — first pass.
+#
+# Exercises the `browser_*` tool family against the
+# BrowserToolStubBridge (obscura/eval/browser_stub.py). Every case is
+# deterministic — no real Chrome, no LLM API. The cases are driven by
+# a ScriptedBackend that issues pre-canned tool calls; the assertions
+# verify that the tool plumbing reaches the right handler with the
+# right args and that mutations to the FakePage round-trip.
+#
+# Run with::
+#
+#     uv run obscura eval run obscura/eval/builtins/browser_tools.toml
+#
+# Or via pytest discovery in tests/integration/eval/browser/.
+
+[meta]
+id = "browser-tools-v1"
+title = "Browser tools — first pass"
+version = "1"
+tags = ["browser", "tools"]
+backend = "scripted"
+model = "scripted-eval"
+
+# ---------------------------------------------------------------------------
+# 1. Read-page contract — title, headings, links surface correctly.
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "read-page-contract"
+title = "browser_read_page returns title + headings + links"
+prompt = "Read the page and report what you see."
+max_turns = 3
+tags = ["browser", "read-only"]
+
+  [[cases.expect_tool_calls]]
+  name = "browser_read_page"
+
+  [[cases.assertions]]
+  kind = "tool_name_match"
+  expected = "browser_read_page"
+
+# ---------------------------------------------------------------------------
+# 2. Click + read — clicking the toggle button must mutate page state
+# observable via a follow-up read.
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "click-then-read"
+title = "browser_click toggles state, browser_read_page reflects mutation"
+prompt = "Click the #toggle button and then read the page to confirm."
+max_turns = 4
+tags = ["browser", "mutation"]
+
+  [[cases.expect_tool_calls]]
+  name = "browser_click"
+  args_contain = { selector = "#toggle" }
+
+  [[cases.assertions]]
+  kind = "tool_sequence"
+  expected = ["browser_click", "browser_read_page"]
+
+  [[cases.assertions]]
+  kind = "arg_exact_match"
+  expected = ["browser_click", "selector", "#toggle"]
+
+# ---------------------------------------------------------------------------
+# 3. Fill + press_key — input value round-trips through stub on submit.
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "fill-then-submit"
+title = "browser_fill stores value, browser_press_key Enter submits it"
+prompt = "Fill #email with 'me@example.com' and press Enter to submit."
+max_turns = 4
+tags = ["browser", "form"]
+
+  [[cases.expect_tool_calls]]
+  name = "browser_fill"
+  args_contain = { selector = "#email", value = "me@example.com" }
+
+  [[cases.expect_tool_calls]]
+  name = "browser_press_key"
+  args_contain = { key = "Enter", selector = "#email" }
+
+  [[cases.assertions]]
+  kind = "tool_sequence"
+  expected = ["browser_fill", "browser_press_key"]
+
+  [[cases.assertions]]
+  kind = "arg_exact_match"
+  expected = ["browser_fill", "value", "me@example.com"]
+
+# ---------------------------------------------------------------------------
+# 4. Cheap-vs-CDP escalation — when browser_fill silently fails, the
+# agent should detect the unchanged value and escalate to browser_type_text.
+#
+# The deterministic part of this is asserted with `tool_sequence` —
+# we expect the exact escalation order. A rubric judge could grade
+# the *reasoning*, but it requires an LLM and is out of scope for
+# the first deterministic pass; see tests/integration/eval/browser/
+# for the marker that gates the rubric path.
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "cheap-vs-cdp-escalation"
+title = "Detect silent fill failure and escalate to browser_type_text"
+prompt = """
+Fill #search with 'obscura' using browser_fill. Verify the value with
+browser_read_page. If the value is empty, escalate to browser_type_text.
+"""
+max_turns = 6
+tags = ["browser", "escalation", "cdp"]
+
+  [[cases.expect_tool_calls]]
+  name = "browser_fill"
+
+  [[cases.expect_tool_calls]]
+  name = "browser_type_text"
+
+  [[cases.assertions]]
+  kind = "tool_sequence"
+  expected = ["browser_fill", "browser_read_page", "browser_type_text"]
+
+  [[cases.assertions]]
+  kind = "arg_exact_match"
+  expected = ["browser_type_text", "text", "obscura"]

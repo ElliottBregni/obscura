@@ -15,6 +15,7 @@ from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     AgentHookConfig,
@@ -66,7 +67,7 @@ def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
 
     Tiers (kept in order):
       1. Core system tools (always kept)
-      2. MCP tools that match core names (e.g. ``mcp__obscura_tools__run_shell``)
+      2. MCP tools that match core names (e.g. ``mcp__obs__run_shell``)
       3. Non-MCP tools (native plugins)
       4. Remaining MCP tools (plugin MCP tools — dropped first)
     """
@@ -99,7 +100,7 @@ def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
 # ---------------------------------------------------------------------------
 
 
-class CopilotBackend:
+class CopilotBackend(BackendToolHostMixin):
     """BackendProtocol implementation wrapping github-copilot-sdk."""
 
     def __init__(
@@ -123,9 +124,8 @@ class CopilotBackend:
         self._client: Any = None
         self._session: Any = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -225,14 +225,19 @@ class CopilotBackend:
 
     async def start(self) -> None:
         """Initialize the Copilot client and create a default session."""
-        from copilot import CopilotClient
-        from copilot.types import SubprocessConfig
+        from copilot import CopilotClient, SubprocessConfig
 
-        client_opts: Any = None
+        from obscura.integrations.mcp.discovery import (
+            register_external_mcp_tools,
+        )
+
+        await register_external_mcp_tools(self, self._mcp_servers)
+
+        client_config: SubprocessConfig | None = None
         if self._auth.github_token:
-            client_opts = SubprocessConfig(github_token=self._auth.github_token)
+            client_config = SubprocessConfig(github_token=self._auth.github_token)
 
-        self._client = CopilotClient(client_opts)
+        self._client = CopilotClient(client_config)
         await self._client.start()
 
         # Create default session
@@ -488,14 +493,7 @@ class CopilotBackend:
         self._session = session
         return fork_ref
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for use in sessions (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
+    # -- Tools (register_tool comes from BackendToolHostMixin) -------------------
 
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry for agent loop use."""
@@ -615,7 +613,7 @@ class CopilotBackend:
     def _convert_tools_to_copilot(self, tools: list[ToolSpec]) -> list[Any]:
         """Convert Obscura ToolSpec objects to Copilot SDK Tool format.
 
-        The Copilot SDK expects ``copilot.types.Tool`` objects whose handler
+        The Copilot SDK expects ``copilot.tools.Tool`` objects whose handler
         matches ``Callable[[ToolInvocation], ToolResult | Awaitable[ToolResult]]``.
         This method wraps each ``ToolSpec.handler`` so it accepts a
         ``ToolInvocation`` dict and returns a ``ToolResult`` TypedDict.
@@ -624,24 +622,21 @@ class CopilotBackend:
         ``^[a-zA-Z0-9_-]{1,128}$`` (dots and other special chars replaced
         with underscores).
         """
-        from copilot.types import Tool
+        from copilot.tools import Tool
 
         converted: list[Any] = []
         for spec in tools:
-            _handler = spec.handler
 
-            def _wrapper_factory(handler: Callable[..., Any]) -> Callable[..., Any]:
+            def _wrapper_factory(bound_spec: ToolSpec) -> Callable[..., Any]:
                 async def wrapped(invocation: Any) -> Any:
-                    import inspect as _inspect
+                    from copilot.tools import ToolResult as CopilotToolResult
 
-                    from copilot.types import ToolResult as CopilotToolResult
+                    from obscura.core.agent_loop import call_tool_handler
 
                     try:
                         raw_args = invocation.arguments
                         args = cast("dict[str, Any]", raw_args) if raw_args else {}
-                        result: Any = handler(**args)
-                        if _inspect.isawaitable(result):
-                            result = await result
+                        result: Any = await call_tool_handler(bound_spec, args)
                         # Normalize to SDK ToolResult (snake_case fields in 0.2.0)
                         if isinstance(result, CopilotToolResult):
                             return result
@@ -669,7 +664,7 @@ class CopilotBackend:
                 Tool(
                     name=self._sanitize_tool_name(spec.name),
                     description=spec.description,
-                    handler=_wrapper_factory(_handler),
+                    handler=_wrapper_factory(spec),
                     parameters=params,
                     overrides_built_in_tool=True,
                 ),
@@ -683,7 +678,7 @@ class CopilotBackend:
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
 
-        from copilot.types import PermissionRequestResult
+        from copilot.session import PermissionRequestResult
 
         def _approve_all(
             request: PermissionRequest,

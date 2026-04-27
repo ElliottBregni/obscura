@@ -13,14 +13,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
-import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
+from obscura.core.supervisor.db_backend import (
+    DatabaseBackend,
+    SQLiteSupervisorBackend,
+    translate_sql,
+)
 from obscura.core.supervisor.errors import LockAcquisitionError
-from obscura.core.supervisor.schema import init_supervisor_schema
 from obscura.core.supervisor.types import LockInfo
 
 logger = logging.getLogger(__name__)
@@ -50,28 +53,22 @@ class SessionLock:
 
     def __init__(
         self,
-        db_path: str | Path,
+        db_path: str | Path | None = None,
         *,
         default_ttl: float = 60.0,
+        backend: DatabaseBackend | None = None,
     ) -> None:
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        if backend is not None:
+            self._backend = backend
+        elif db_path is not None:
+            self._backend = SQLiteSupervisorBackend(db_path)
+        else:
+            msg = "Either db_path or backend must be provided"
+            raise ValueError(msg)
         self._default_ttl = default_ttl
-        self._local = threading.local()
-        self._init_schema()
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-        return self._local.conn
-
-    def _init_schema(self) -> None:
-        conn = self._conn()
-        init_supervisor_schema(conn)
+    def _sql(self, sql: str) -> str:
+        return translate_sql(sql, self._backend.dialect)
 
     # -- sync helpers --------------------------------------------------------
 
@@ -84,34 +81,55 @@ class SessionLock:
     ) -> LockInfo | None:
         """Try to acquire the lock. Returns LockInfo on success, None if held."""
         ttl = ttl or self._default_ttl
-        conn = self._conn()
+        conn = self._backend.get_conn()
         now = datetime.now(UTC)
         expires = now + timedelta(seconds=ttl)
 
         try:
-            conn.execute("BEGIN IMMEDIATE")
-        except sqlite3.OperationalError:
-            # Another writer is active
-            return None
+            if self._backend.dialect == "postgresql":
+                # PostgreSQL: use advisory lock for serialization
+                conn.execute("BEGIN")
+                conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (session_id,),
+                )
+            else:
+                # SQLite: BEGIN IMMEDIATE for serialization
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                except Exception:
+                    # Another writer is active
+                    self._backend.put_conn(conn)
+                    return None
 
-        try:
-            row = conn.execute(
-                "SELECT holder_id, expires_at FROM session_locks WHERE session_id = ?",
+            cur = conn.execute(
+                self._sql(
+                    "SELECT holder_id, expires_at FROM session_locks WHERE session_id = ?"
+                ),
                 (session_id,),
-            ).fetchone()
+            )
+            row = cur.fetchone()
 
             if row is not None:
                 existing_holder = row["holder_id"]
-                existing_expires = datetime.fromisoformat(row["expires_at"])
+                raw_expires = row["expires_at"]
+                existing_expires = (
+                    datetime.fromisoformat(raw_expires)
+                    if isinstance(raw_expires, str)
+                    else raw_expires
+                )
 
                 if existing_holder == holder_id:
                     # Re-entrant: we already hold it
                     conn.execute(
-                        "UPDATE session_locks SET heartbeat_at = ?, expires_at = ? "
-                        "WHERE session_id = ?",
+                        self._sql(
+                            "UPDATE session_locks SET heartbeat_at = ?, expires_at = ? "
+                            "WHERE session_id = ?"
+                        ),
                         (now.isoformat(), expires.isoformat(), session_id),
                     )
                     conn.commit()
+                    self._backend.put_conn(conn)
                     return LockInfo(
                         session_id=session_id,
                         holder_id=holder_id,
@@ -123,6 +141,7 @@ class SessionLock:
                 if datetime.now(UTC) < existing_expires:
                     # Lock is held and not expired
                     conn.rollback()
+                    self._backend.put_conn(conn)
                     return None
 
                 # Lock expired — steal it
@@ -132,8 +151,10 @@ class SessionLock:
                     existing_holder,
                 )
                 conn.execute(
-                    "UPDATE session_locks SET holder_id = ?, acquired_at = ?, "
-                    "heartbeat_at = ?, expires_at = ? WHERE session_id = ?",
+                    self._sql(
+                        "UPDATE session_locks SET holder_id = ?, acquired_at = ?, "
+                        "heartbeat_at = ?, expires_at = ? WHERE session_id = ?"
+                    ),
                     (
                         holder_id,
                         now.isoformat(),
@@ -143,6 +164,7 @@ class SessionLock:
                     ),
                 )
                 conn.commit()
+                self._backend.put_conn(conn)
                 return LockInfo(
                     session_id=session_id,
                     holder_id=holder_id,
@@ -153,8 +175,10 @@ class SessionLock:
 
             # No lock exists — create one
             conn.execute(
-                "INSERT INTO session_locks (session_id, holder_id, acquired_at, "
-                "heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                self._sql(
+                    "INSERT INTO session_locks (session_id, holder_id, acquired_at, "
+                    "heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?)"
+                ),
                 (
                     session_id,
                     holder_id,
@@ -164,6 +188,7 @@ class SessionLock:
                 ),
             )
             conn.commit()
+            self._backend.put_conn(conn)
             return LockInfo(
                 session_id=session_id,
                 holder_id=holder_id,
@@ -174,20 +199,26 @@ class SessionLock:
 
         except Exception:
             conn.rollback()
+            self._backend.put_conn(conn)
             raise
 
     def _release_sync(self, session_id: str, holder_id: str) -> bool:
         """Release a lock. Returns True if released, False if not held."""
-        conn = self._conn()
-        cursor = conn.execute(
-            "DELETE FROM session_locks WHERE session_id = ? AND holder_id = ?",
-            (session_id, holder_id),
-        )
-        conn.commit()
-        released = cursor.rowcount > 0
-        if released:
-            logger.debug("Released lock for session %s", session_id)
-        return released
+        conn = self._backend.get_conn()
+        try:
+            cursor = conn.execute(
+                self._sql(
+                    "DELETE FROM session_locks WHERE session_id = ? AND holder_id = ?"
+                ),
+                (session_id, holder_id),
+            )
+            conn.commit()
+            released = cursor.rowcount > 0
+            if released:
+                logger.debug("Released lock for session %s", session_id)
+            return released
+        finally:
+            self._backend.put_conn(conn)
 
     def _heartbeat_sync(
         self,
@@ -198,52 +229,66 @@ class SessionLock:
     ) -> bool:
         """Refresh the lock TTL. Returns True if refreshed, False if not held."""
         ttl = ttl or self._default_ttl
-        conn = self._conn()
-        now = datetime.now(UTC)
-        expires = now + timedelta(seconds=ttl)
-
-        cursor = conn.execute(
-            "UPDATE session_locks SET heartbeat_at = ?, expires_at = ? "
-            "WHERE session_id = ? AND holder_id = ?",
-            (now.isoformat(), expires.isoformat(), session_id, holder_id),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        conn = self._backend.get_conn()
+        try:
+            now = datetime.now(UTC)
+            expires = now + timedelta(seconds=ttl)
+            cursor = conn.execute(
+                self._sql(
+                    "UPDATE session_locks SET heartbeat_at = ?, expires_at = ? "
+                    "WHERE session_id = ? AND holder_id = ?"
+                ),
+                (now.isoformat(), expires.isoformat(), session_id, holder_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            self._backend.put_conn(conn)
 
     def _get_lock_sync(self, session_id: str) -> LockInfo | None:
         """Get current lock info for a session."""
-        row = (
-            self._conn()
-            .execute(
-                "SELECT session_id, holder_id, acquired_at, heartbeat_at, expires_at "
-                "FROM session_locks WHERE session_id = ?",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql(
+                    "SELECT session_id, holder_id, acquired_at, heartbeat_at, expires_at "
+                    "FROM session_locks WHERE session_id = ?"
+                ),
                 (session_id,),
             )
-            .fetchone()
-        )
+            row = cur.fetchone()
+        finally:
+            self._backend.put_conn(conn)
         if row is None:
             return None
+
+        def _parse_ts(val: Any) -> datetime:
+            return datetime.fromisoformat(val) if isinstance(val, str) else val
+
         return LockInfo(
             session_id=row["session_id"],
             holder_id=row["holder_id"],
-            acquired_at=datetime.fromisoformat(row["acquired_at"]),
-            heartbeat_at=datetime.fromisoformat(row["heartbeat_at"]),
-            expires_at=datetime.fromisoformat(row["expires_at"]),
+            acquired_at=_parse_ts(row["acquired_at"]),
+            heartbeat_at=_parse_ts(row["heartbeat_at"]),
+            expires_at=_parse_ts(row["expires_at"]),
         )
 
     def _cleanup_expired_sync(self) -> int:
         """Remove all expired locks. Returns count of cleaned locks."""
-        conn = self._conn()
-        now = datetime.now(UTC).isoformat()
-        cursor = conn.execute(
-            "DELETE FROM session_locks WHERE expires_at < ?",
-            (now,),
-        )
-        conn.commit()
-        count = cursor.rowcount
-        if count > 0:
-            logger.info("Cleaned up %d expired locks", count)
-        return count
+        conn = self._backend.get_conn()
+        try:
+            now = datetime.now(UTC).isoformat()
+            cursor = conn.execute(
+                self._sql("DELETE FROM session_locks WHERE expires_at < ?"),
+                (now,),
+            )
+            conn.commit()
+            count = cursor.rowcount
+            if count > 0:
+                logger.info("Cleaned up %d expired locks", count)
+            return count
+        finally:
+            self._backend.put_conn(conn)
 
     # -- async public API ----------------------------------------------------
 
@@ -327,7 +372,5 @@ class SessionLock:
         return not info.is_expired
 
     def close(self) -> None:
-        """Close the thread-local connection."""
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        """Release backend resources."""
+        self._backend.close()

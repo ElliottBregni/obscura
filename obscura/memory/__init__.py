@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
+    from obscura.memory.events import EventSink
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,12 @@ class MemoryStore:
     _instances: dict[str, MemoryStore] = {}
     _lock = threading.Lock()
 
-    def __init__(self, user: AuthenticatedUser, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        user: AuthenticatedUser,
+        db_path: Path | None = None,
+        event_sink: EventSink | None = None,
+    ) -> None:
         self.user = user
         self.user_id = user.user_id
 
@@ -89,7 +95,31 @@ class MemoryStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._local = threading.local()
+        self._event_sink = event_sink
         self._init_db()
+
+    def _emit(
+        self,
+        kind: str,
+        key: MemoryKey,
+        value: Any | None,
+        ttl_seconds: float | None,
+    ) -> None:
+        """Emit a memory event. Imported lazily so NullSink stays near-free."""
+        from obscura.memory.events import EventKind, get_default_sink, make_event
+
+        sink = self._event_sink if self._event_sink is not None else get_default_sink()
+        event_kind: EventKind = kind  # type: ignore[assignment]
+        sink.emit(
+            make_event(
+                kind=event_kind,
+                key=key,
+                value=value,
+                ttl_seconds=ttl_seconds,
+                source="kv",
+                user_id=self.user_id,
+            ),
+        )
 
     @classmethod
     def for_user(cls, user: AuthenticatedUser) -> MemoryStore:
@@ -171,6 +201,12 @@ class MemoryStore:
             (key.namespace, key.key, json.dumps(value), expires_at),
         )
         conn.commit()
+        self._emit(
+            "set",
+            key,
+            value,
+            ttl.total_seconds() if ttl else None,
+        )
 
     def get(
         self,
@@ -198,7 +234,11 @@ class MemoryStore:
         if row["expires_at"]:
             expires = datetime.fromisoformat(row["expires_at"])
             if datetime.now(UTC) > expires:
-                self.delete(key)
+                # Rowcount guard: only the thread that actually removes the
+                # row emits the event. Prevents double-emit when lazy-expire
+                # races with the reaper or a concurrent get().
+                if self._delete_row(key):
+                    self._emit("expire", key, None, None)
                 return default
 
         return json.loads(row["value"])
@@ -208,6 +248,13 @@ class MemoryStore:
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
 
+        existed = self._delete_row(key)
+        if existed:
+            self._emit("delete", key, None, None)
+        return existed
+
+    def _delete_row(self, key: MemoryKey) -> bool:
+        """Remove the row without emitting an event. Used by delete() and expire."""
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM memory WHERE namespace = ? AND key = ?",
@@ -264,7 +311,11 @@ class MemoryStore:
         return cursor.rowcount
 
     def clear_expired(self) -> int:
-        """Clear all expired entries. Returns count deleted."""
+        """Clear all expired entries. Returns count deleted.
+
+        Does NOT emit events. Use :meth:`reap_expired` if you want the
+        reaper-style per-row event emission.
+        """
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ?",
@@ -272,6 +323,34 @@ class MemoryStore:
         )
         conn.commit()
         return cursor.rowcount
+
+    def _expired_keys(self) -> list[MemoryKey]:
+        """Return keys that have passed their ``expires_at``.
+
+        Used by the reaper to select candidates before the delete+emit pair.
+        The actual delete races with other threads; emission is gated on
+        whether *this* caller's delete actually removed the row.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT namespace, key FROM memory "
+            "WHERE expires_at IS NOT NULL AND expires_at < ?",
+            (datetime.now(UTC),),
+        ).fetchall()
+        return [MemoryKey(namespace=r["namespace"], key=r["key"]) for r in rows]
+
+    def reap_expired(self) -> int:
+        """Delete expired rows and emit an ``expire`` event for each one.
+
+        Returns the number of rows *this* call reaped (races with lazy-expire
+        in :meth:`get` are resolved via rowcount: whichever deleter wins emits).
+        """
+        reaped = 0
+        for key in self._expired_keys():
+            if self._delete_row(key):
+                self._emit("expire", key, None, None)
+                reaped += 1
+        return reaped
 
     def get_stats(self) -> dict[str, Any]:
         """Get memory usage statistics."""
@@ -313,10 +392,12 @@ class GlobalMemoryStore(MemoryStore):
     def __init__(self) -> None:
         # Don't call super().__init__ to avoid auth requirement
         self._db_id = "global"
+        self.user_id = "__global__"
         self.db_path = Path.home() / ".obscura" / "memory" / "global.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._local = threading.local()
+        self._event_sink = None
         self._init_db()
 
     @classmethod
@@ -332,3 +413,19 @@ class GlobalMemoryStore(MemoryStore):
         """Override to add audit logging for global writes."""
         # TODO: Add audit logging
         super().set(*args, **kwargs)
+
+
+def create_memory_store(user: AuthenticatedUser) -> MemoryStore:
+    """Factory: return a PostgreSQL or SQLite memory store based on config.
+
+    When ``OBSCURA_DB_TYPE=postgresql``, returns a
+    :class:`~obscura.memory.postgres_memory.PostgreSQLMemoryStore`.
+    Otherwise returns the default SQLite-backed :class:`MemoryStore`.
+    """
+    from obscura.core.pg_config import is_pg_configured
+
+    if is_pg_configured():
+        from obscura.memory.postgres_memory import PostgreSQLMemoryStore
+
+        return PostgreSQLMemoryStore.for_user(user)  # type: ignore[return-value]
+    return MemoryStore.for_user(user)

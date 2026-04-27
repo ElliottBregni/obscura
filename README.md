@@ -93,7 +93,6 @@ brew install sox ffmpeg   # macOS only
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OBSCURA_PORT` | `8080` | API server port |
-| `OBSCURA_AUTH_ENABLED` | `false` | Enforce auth on `/api/` routes |
 | `OBSCURA_API_KEYS` | — | `token:user:scope1,scope2` (`;` separates multiple) |
 | `OBSCURA_VECTOR_BACKEND` | `qdrant` | `qdrant` or `none` |
 | `OBSCURA_QDRANT_URL` | — | Qdrant server URL |
@@ -101,6 +100,36 @@ brew install sox ffmpeg   # macOS only
 | `OBSCURA_UNDERCOVER` | `1` | Strip AI attribution from commits/PRs |
 
 See [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md) for the full reference.
+
+## Authentication
+
+All Obscura API routes (`/api/*`, `/mcp/*`, `/a2a/*`) require authentication — there is no off-switch. Two ways to authorize:
+
+1. **Sign in with GitHub** — interactive use via the Web UI (Supabase bearer token, auto-refreshes)
+2. **API key** — long-lived tokens for scripts, CI, and MCP clients (`OBSCURA_API_KEYS`)
+
+### Create an account / sign in
+
+1. Visit **[auth.modernized-ai.com](https://auth.modernized-ai.com)** (or your own deployed Obscura instance)
+2. Click **Sign in with GitHub**
+3. Authorize the OAuth app — first sign-in creates your account automatically
+4. You're redirected back, authenticated, and ready to use the Web UI
+
+There's no separate sign-up form — your Obscura account is keyed to your GitHub identity. New users default to the `agent:read` role; ask an admin to upgrade if you need broader access (see `obscura/auth/models.py` for the full role list).
+
+### Use the bearer token from CLI / external clients
+
+The Web UI stores your session token in `sessionStorage` under `obscura.supabase.auth` and sends it as `Authorization: Bearer <token>` on every API call. Tokens expire after 15 minutes (`jwt_exp=900`) and refresh automatically while the tab is open.
+
+To make authenticated calls from the CLI or another tool, copy the token from DevTools (Application → sessionStorage → `obscura.supabase.auth`) and use it directly:
+
+```bash
+curl -H "Authorization: Bearer <token>" https://your-deployment/api/v1/whoami
+```
+
+### Self-hosting / using your own auth provider
+
+Want to run Obscura against your own Supabase project, or use API keys instead of OAuth? See **[docs/AUTH_SELF_HOSTING.md](docs/AUTH_SELF_HOSTING.md)** for the full setup — Supabase project, GitHub OAuth app, JWKS configuration, and long-lived API keys for CI/MCP clients.
 
 ## Architecture
 
@@ -334,6 +363,7 @@ See [SETUP.md](SETUP.md) for the full local and production setup guide including
 | Document | Description |
 |----------|-------------|
 | [SETUP.md](SETUP.md) | Full local dev and production setup guide |
+| [docs/AUTH_SELF_HOSTING.md](docs/AUTH_SELF_HOSTING.md) | Run Obscura against your own Supabase + API keys |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture deep-dive |
 | [docs/kairos.md](docs/kairos.md) | Kairos autonomous goal runtime |
 | [docs/web-ui.md](docs/web-ui.md) | Web UI reference |

@@ -14,7 +14,7 @@ from obscura.core.types import Backend, SessionRef
 
 @pytest.fixture
 def app() -> Any:
-    config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+    config = ObscuraConfig(otel_enabled=False)
     from obscura.server import create_app
 
     return create_app(config)
@@ -22,7 +22,7 @@ def app() -> Any:
 
 @pytest.fixture
 def client(app: Any) -> TestClient:
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 class TestSessionCreate:
@@ -75,6 +75,51 @@ class TestSessionList:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 1
+
+
+class TestSessionFetchAndResume:
+    @patch("obscura.routes.sessions._get_event_store")
+    def test_get_session(self, mock_get_store: Any, client: TestClient) -> None:
+        from datetime import UTC, datetime
+        from obscura.core.event_store import SessionRecord, SessionStatus
+
+        store = AsyncMock()
+        store.get_session.return_value = SessionRecord(
+            id="sess-1",
+            status=SessionStatus.RUNNING,
+            backend="copilot",
+            model="",
+            active_agent="",
+            source="live",
+            parent_session_id="",
+            project=None,
+            summary=None,
+            message_count=0,
+            metadata=None,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_get_store.return_value = store
+
+        resp = client.get("/api/v1/sessions/sess-1")
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "sess-1"
+
+    def test_get_session_not_found(self, client: TestClient) -> None:
+        resp = client.get("/api/v1/sessions/does-not-exist")
+        assert resp.status_code in (404, 500)
+
+    def test_resume_session(self, app: Any, client: TestClient) -> None:
+        mock_client: Any = AsyncMock()
+        mock_client.resume_session = AsyncMock()
+        mock_client.stop = AsyncMock()
+        mock_factory: Any = AsyncMock()
+        mock_factory.create.return_value = mock_client
+        app.state.client_factory = mock_factory
+
+        resp = client.post("/api/v1/sessions/sess-1/resume", params={"backend": "copilot"})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
 
 
 class TestSessionDelete:

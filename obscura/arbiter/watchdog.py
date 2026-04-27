@@ -62,6 +62,8 @@ class ArbiterWatchdog:
         actions.extend(self._check_spinning_tasks())
         actions.extend(self._check_orphan_tasks())
         actions.extend(self._check_score_decay())
+        actions.extend(self._check_duplicate_work())
+        actions.extend(self._check_critical_path())
         return actions
 
     # ------------------------------------------------------------------
@@ -208,6 +210,148 @@ class ArbiterWatchdog:
                         metadata={"scores": window},
                     )
                 )
+        return actions
+
+    # ------------------------------------------------------------------
+    # Duplicate work: same goal, near-identical subjects
+    # ------------------------------------------------------------------
+
+    def _check_duplicate_work(self) -> list[WatchdogAction]:
+        """Detect pending tasks within the same goal that do the same work.
+
+        Uses keyword overlap between task subjects to find near-duplicates.
+        When two tasks share a goal and have >60% keyword overlap, the
+        lower-priority task (higher priority number) is flagged for removal.
+        """
+        actions: list[WatchdogAction] = []
+        try:
+            from obscura.arbiter.checks import _stem, _STOP_WORDS
+            from obscura.core.task_queue import _open
+            import re
+
+            def _kw(text: str) -> set[str]:
+                words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())
+                return {_stem(w) for w in words if w not in _STOP_WORDS}
+
+            conn = _open()
+            try:
+                rows = conn.execute(
+                    """SELECT task_id, subject, goal_id, priority
+                       FROM tasks
+                       WHERE status = 'pending'
+                         AND goal_id != ''
+                       ORDER BY goal_id, priority ASC"""
+                ).fetchall()
+            finally:
+                conn.close()
+
+            # Group by goal_id
+            by_goal: dict[str, list[dict]] = {}
+            for row in rows:
+                g = row["goal_id"]
+                by_goal.setdefault(g, []).append(dict(row))
+
+            killed: set[str] = set()
+            for goal_id, tasks in by_goal.items():
+                if len(tasks) < 2:  # noqa: PLR2004
+                    continue
+                for i, t1 in enumerate(tasks):
+                    if t1["task_id"] in killed:
+                        continue
+                    kw1 = _kw(t1["subject"])
+                    if not kw1:
+                        continue
+                    for t2 in tasks[i + 1:]:
+                        if t2["task_id"] in killed:
+                            continue
+                        kw2 = _kw(t2["subject"])
+                        if not kw2:
+                            continue
+                        overlap = kw1 & kw2
+                        ratio = len(overlap) / max(len(kw1), len(kw2))
+                        if ratio >= 0.6:  # noqa: PLR2004
+                            # Kill the lower-priority task (higher priority int)
+                            victim = t2 if t2["priority"] >= t1["priority"] else t1
+                            killed.add(victim["task_id"])
+                            actions.append(
+                                WatchdogAction(
+                                    action="kill_task",
+                                    target_id=victim["task_id"],
+                                    reason=(
+                                        f"Duplicate work: {ratio:.0%} keyword overlap "
+                                        f"with task in same goal '{goal_id}' "
+                                        f"— '{victim['subject'][:60]}'"
+                                    ),
+                                    metadata={"goal_id": goal_id, "overlap_ratio": ratio},
+                                )
+                            )
+        except Exception:
+            logger.debug("Duplicate work check failed", exc_info=True)
+        return actions
+
+    # ------------------------------------------------------------------
+    # Critical path: completed tasks unlock dependents
+    # ------------------------------------------------------------------
+
+    def _check_critical_path(self) -> list[WatchdogAction]:
+        """When a task completes, promote its dependents to high priority.
+
+        Scans for recently completed tasks with dependents still pending
+        at medium/low priority and bumps them to high (25) so they are
+        picked up on the next KAIROS tick.
+        """
+        actions: list[WatchdogAction] = []
+        try:
+            from obscura.core.task_queue import _open
+
+            conn = _open()
+            try:
+                # Find pending tasks blocked by a recently completed task.
+                # blocked_by is stored as comma-separated task IDs.
+                recent_cutoff = time.time() - 300  # completed in last 5 min
+                completed = conn.execute(
+                    """SELECT task_id FROM tasks
+                       WHERE status = 'completed'
+                         AND updated_at > ?""",
+                    (recent_cutoff,),
+                ).fetchall()
+                completed_ids = {row["task_id"] for row in completed}
+
+                if not completed_ids:
+                    return actions
+
+                pending = conn.execute(
+                    """SELECT task_id, subject, priority, blocked_by
+                       FROM tasks
+                       WHERE status = 'pending'
+                         AND priority > 25
+                         AND blocked_by != ''"""
+                ).fetchall()
+
+                for row in pending:
+                    blockers = {b.strip() for b in row["blocked_by"].split(",") if b.strip()}
+                    # All blockers must be completed for this task to be unblocked
+                    if blockers and blockers.issubset(completed_ids):
+                        conn.execute(
+                            "UPDATE tasks SET priority = 25, updated_at = ? WHERE task_id = ?",
+                            (time.time(), row["task_id"]),
+                        )
+                        conn.commit()
+                        actions.append(
+                            WatchdogAction(
+                                action="alert",
+                                target_id=row["task_id"],
+                                reason=(
+                                    f"Critical path: promoted '{row['subject'][:60]}' "
+                                    f"to high priority — all blockers completed"
+                                ),
+                                metadata={"old_priority": row["priority"], "new_priority": 25},
+                            )
+                        )
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("Critical path check failed", exc_info=True)
         return actions
 
     # ------------------------------------------------------------------

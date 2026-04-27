@@ -655,6 +655,23 @@ class AgentLoop:
         self._predictive_cache = PredictiveToolCache()
         self._predictor: ToolPredictor | None = None
 
+        # Conversation history reference for tools that need to inspect
+        # or mutate it (e.g. history_snip). Updated each turn from the
+        # kwargs["messages"] list — None when the backend manages history
+        # opaquely (e.g. Claude SDK session state).
+        self._current_messages: list[Any] | None = None
+        self._current_session_id: str | None = None
+        self._current_user: Any = None
+
+        # Hallucination auto-correction (output_quality):
+        #   _this_turn_successful_tools tracks tool calls that returned
+        #     status="ok" during the current turn. Reset at TURN_START.
+        #   _pending_correction holds a corrective message built when
+        #     the scanner detects hallucination + recent successful tool;
+        #     consumed at the top of the next turn iteration.
+        self._this_turn_successful_tools: list[Any] = []
+        self._pending_correction: str | None = None
+
     # ------------------------------------------------------------------
     # Compiled agent application
     # ------------------------------------------------------------------
@@ -986,13 +1003,32 @@ class AgentLoop:
         )
         current_prompt: str = prompt
         kwargs: dict[str, Any] = stream_kwargs
+        # Expose mutable conversation history to ToolContext so tools like
+        # history_snip can inspect / mutate it. Backends that don't pass
+        # messages through kwargs (e.g. Claude SDK with native sessions)
+        # will leave this as None and history-mutating tools will return
+        # a clean "no_history" error.
+        msgs = kwargs.get("messages")
+        if isinstance(msgs, list):
+            self._current_messages = msgs
+        self._current_session_id = session_id
         _prev_event: AgentEvent | None = None
         _retry_count: int = 0
         _max_retries: int = 3
         _stop_hook_continuations: int = 0
         _max_tokens_retries: int = 0
+        # Dedup cache shared across retries of the same turn. Tools that
+        # already executed (with real side effects) get replayed from this
+        # cache instead of re-executed when the stream is retried after a
+        # timeout / transient error. Cleared at the top of the next fresh
+        # turn (where _retry_count == 0).
+        _seen_calls_for_retry: dict[str, ToolResultEnvelope] = {}
 
         while state.turn < self._max_turns:
+            # Clear the cross-retry dedup cache at the top of each fresh
+            # turn (retries keep _retry_count > 0 and preserve the cache).
+            if _retry_count == 0:
+                _seen_calls_for_retry.clear()
             # Arbiter kill: mechanical stop — no prompt injection, loop ends.
             if self._arbiter_killed:
                 kill_event = AgentEvent(
@@ -1018,6 +1054,30 @@ class AgentLoop:
                 output_tokens=0,
                 finish_reason="",
             )
+            # Reset per-turn successful-tool tracking; persists only inside one turn.
+            self._this_turn_successful_tools = []
+
+            # Inject any pending hallucination correction into the next prompt.
+            # Set when the prior turn's text-quality scan caught the model
+            # narrating failure that contradicted a successful tool call —
+            # see ``obscura/core/output_quality.py``. Emitted as a
+            # ``CORRECTION_INJECTED`` event so the REPL can surface that a
+            # course-correction was applied.
+            if self._pending_correction:
+                correction = self._pending_correction
+                self._pending_correction = None
+                if current_prompt:
+                    current_prompt = correction + "\n\n" + current_prompt
+                else:
+                    current_prompt = correction
+                correction_event = AgentEvent(
+                    kind=AgentEventKind.CORRECTION_INJECTED,
+                    turn=state.turn,
+                    text=correction,
+                )
+                emitted = await self._emit(correction_event, session_id)
+                if emitted is not None:
+                    yield emitted
 
             # Run post-hook for the previous event before emitting next
             if _prev_event is not None:
@@ -1037,6 +1097,12 @@ class AgentLoop:
             # Streaming tool executor: starts tools as they arrive from
             # the model stream, not after the full response completes.
             executor = StreamingToolExecutor(self)
+            # Share the cross-retry dedup cache. If this turn is a retry
+            # after a timeout / transient stream error, any tool that
+            # completed on a prior attempt will be returned from cache
+            # instead of re-executed — preventing duplicate side effects
+            # like double `git commit`.
+            executor._seen_calls = _seen_calls_for_retry
 
             # Predictive tool calling: speculatively prefetch read-only
             # tools based on the model's text output before it even emits
@@ -1182,6 +1248,11 @@ class AgentLoop:
                     if _to_yield is not None:
                         yield _to_yield
                     _feed_new_tools_to_executor()
+
+                # Multimodal images attach only to the first turn's user
+                # message — drop the kwarg now so subsequent turns (tool
+                # results, follow-ups) don't keep re-sending the images.
+                kwargs.pop("images", None)
 
                 # Mark executor closed -- no more tools will arrive
                 executor.close()
@@ -1376,7 +1447,10 @@ class AgentLoop:
                         logger.debug("Failed to mark session failed", exc_info=True)
                 return
             else:
-                # Successful turn: reset retry counter
+                # Successful turn: reset retry counter. The dedup cache is
+                # cleared at the top of the NEXT iteration (once retries
+                # can't fire for this turn), not here — a scheduled tool
+                # task may still need to hit the cache before wait_for_all.
                 _retry_count = 0
 
             # Sync mutable tool_calls back into immutable state
@@ -1385,6 +1459,34 @@ class AgentLoop:
                 emitted_keys=frozenset(_emitted_keys_mut),
                 accumulated_text=state.accumulated_text + state.turn_text,
             )
+
+            # Scan accumulated turn text for known hallucination patterns
+            # (model inventing UX flows like "click Allow" or
+            # "/allowed-tools" that don't exist in obscura). Logs at
+            # WARNING so violations surface in default-level logs without
+            # changing the output the user sees. When a hallucination
+            # contradicts a successful tool call from the same turn, also
+            # build a corrective message that the next turn will inject.
+            try:
+                from obscura.core.output_quality import (
+                    build_correction_prompt,
+                    log_violations,
+                    scan_text,
+                )
+
+                violations = scan_text(state.turn_text)
+                if violations:
+                    log_violations(violations, turn=state.turn)
+                    if self._this_turn_successful_tools:
+                        correction = build_correction_prompt(
+                            violations,
+                            self._this_turn_successful_tools,
+                        )
+                        if correction:
+                            self._pending_correction = correction
+            except Exception:
+                # Quality scan must never break the turn — best-effort.
+                pass
 
             # Emit TURN_COMPLETE
             if _prev_event is not None:
@@ -1738,8 +1840,13 @@ class AgentLoop:
                 params = use.get("parameters") or use.get("args") or {}
                 if not recipient:
                     continue
-                # Normalize dotted provider prefixes
-                if isinstance(recipient, str) and "." in recipient:
+                # Normalize dotted provider prefixes (skip mcp__-prefixed
+                # names — see _parse_tool_call for rationale).
+                if (
+                    isinstance(recipient, str)
+                    and "." in recipient
+                    and not recipient.startswith("mcp__")
+                ):
                     recipient = recipient.split(".")[-1]
 
                 # Skip inner recipients that are not registered to avoid
@@ -1866,6 +1973,32 @@ class AgentLoop:
                 return await coro
 
         return list(await asyncio.gather(*[limited(c) for c in coros]))
+
+    @staticmethod
+    def _read_host_callbacks() -> dict[str, Any]:
+        """Snapshot the legacy module-level host callbacks.
+
+        Returns a dict suitable for splatting into ToolContext(...). Reads
+        each global lazily via the system tools module so failures during
+        early import don't block the agent loop.
+        """
+        try:
+            from obscura.tools import system as _sys
+
+            return {
+                "ask_user_callback": getattr(_sys, "_ask_user_callback", None),
+                "user_interact_callback": getattr(
+                    _sys, "_user_interact_callback", None
+                ),
+                "permission_mode_callback": getattr(
+                    _sys, "_set_permission_mode_callback", None
+                ),
+                "plan_approval_callback": getattr(
+                    _sys, "_plan_approval_callback", None
+                ),
+            }
+        except Exception:
+            return {}
 
     async def _execute_single_tool(
         self,
@@ -2037,7 +2170,26 @@ class AgentLoop:
                 logger.debug("Capability module unavailable", exc_info=True)
 
         try:
-            result = await self._call_handler(spec, tc.input)
+            from obscura.core.tool_context import (
+                ToolContext,
+                bind_tool_context,
+            )
+
+            # Pull current host callbacks from the legacy module-level globals
+            # so tools migrated to ToolContext keep working without any change
+            # to the REPL's wiring code.
+            ctx = ToolContext(
+                registry=self._tools,
+                history=self._current_messages,
+                user=self._current_user,
+                session_id=self._current_session_id,
+                mcp_discovery_report=getattr(
+                    self._backend, "last_mcp_discovery_report", None
+                ),
+                **self._read_host_callbacks(),
+            )
+            with bind_tool_context(ctx):
+                result = await self._call_handler(spec, tc.input)
 
             # Apply output bridge transform if registered
             bridge = TOOL_BRIDGES.get(spec.name)
@@ -2056,6 +2208,24 @@ class AgentLoop:
                 raw=tc.raw,
             )
             seen_calls[dedup_key] = envelope
+            # Track successful tool calls so the post-turn quality scan can
+            # tell whether the model's narration contradicted reality.
+            try:
+                from obscura.core.output_quality import ToolResultSummary
+
+                snippet = (
+                    result
+                    if isinstance(result, str)
+                    else json.dumps(result, default=str)
+                )
+                self._this_turn_successful_tools.append(
+                    ToolResultSummary(
+                        tool_name=call.tool,
+                        snippet=snippet[:200],
+                    )
+                )
+            except Exception:
+                pass
             return envelope
         except Exception as exc:
             logger.warning("Tool %s failed: %s", tc.name, exc)
@@ -2434,7 +2604,10 @@ class AgentLoop:
 
         # Normalize dotted provider prefixes (e.g. "functions.web_search") to
         # the canonical tool name expected by the runtime ("web_search").
-        if isinstance(name, str) and "." in name:
+        # Skip mcp__-prefixed names: those carry meaningful structure that
+        # ToolRegistry.get() resolves on its own (dot↔underscore variants),
+        # and stripping here would discard the server-name segment.
+        if isinstance(name, str) and "." in name and not name.startswith("mcp__"):
             name = name.split(".")[-1]
 
         return ToolCallInfo(
@@ -2926,3 +3099,15 @@ def _audit_tool_denied(tool_name: str, reason: str) -> None:
         )
     except Exception:
         logger.debug("Failed to emit audit event for denied tool", exc_info=True)
+
+
+async def call_tool_handler(spec: ToolSpec, inputs: dict[str, Any]) -> Any:
+    """Dispatch a tool call through the shared bridging pipeline.
+
+    Thin module-level entry point so every dispatch site — the agent loop,
+    the claude provider wrapper, the copilot provider wrapper — shares one
+    definition of bridging, aliasing, validation, coercion, and
+    undeclared-kwarg tolerance. Implementation lives on
+    :meth:`AgentLoop._call_handler`.
+    """
+    return await AgentLoop._call_handler(spec, inputs)  # pyright: ignore[reportPrivateUsage]

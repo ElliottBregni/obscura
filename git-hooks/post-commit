@@ -1,9 +1,0 @@
-#!/bin/bash
-# Auto-sync agent symlinks after commits
-# Install via: ln -sf ~/FV-Copilot/git-hooks/post-commit .git/hooks/post-commit
-
-VAULT_PATH="$HOME/obscura"
-
-if [ -f "$VAULT_PATH/sync.py" ]; then
-    python3 "$VAULT_PATH/sync.py" --mode symlink >/dev/null 2>&1 &
-fi
