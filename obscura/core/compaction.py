@@ -762,14 +762,14 @@ async def tiered_compact(
 
     # Strategy 1: Snip verbose tool outputs
     if tier in ("snip", "compact", "critical"):
-        messages, snipped, freed = snip_tool_outputs(messages)
+        messages, snipped, _freed = snip_tool_outputs(messages)
         if snipped and thresholds.usage_tier(_used()) == "ok":
             return messages, "snip", tokens_before - _used()
 
     # Strategy 2: Microcompact (synthetic boundaries)
     if tier in ("compact", "critical"):
         preserve = thresholds.preserve_recent
-        messages, did_compact, freed = await microcompact(
+        messages, did_compact, _freed = await microcompact(
             messages, model_id, backend, preserve_recent=preserve
         )
         if did_compact and thresholds.usage_tier(_used()) == "ok":

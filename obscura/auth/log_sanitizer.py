@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, override
 
 _SENSITIVE_HEADER_NAMES: frozenset[str] = frozenset(
     {
@@ -76,6 +76,7 @@ class SensitiveHeaderFilter(logging.Filter):
     authoritative fix is to not log secrets in the first place.
     """
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.msg, str):
             record.msg = sanitize_text(record.msg)

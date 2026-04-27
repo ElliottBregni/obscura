@@ -31,7 +31,7 @@ import urllib.parse
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 import click
 import httpx
@@ -151,7 +151,7 @@ _KEYRING_USERNAME = "supabase-session"
 def _keyring_available() -> bool:
     try:
         import keyring  # noqa: F401
-        import keyring.errors  # noqa: F401
+        import keyring.errors  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
         backend = keyring.get_keyring()
         # NullKeyring / FailKeyring don't actually persist — treat as absent.
@@ -467,6 +467,7 @@ def _build_callback_handler(
     done: threading.Event,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
+        @override
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             return
 

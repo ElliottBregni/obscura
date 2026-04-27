@@ -17,7 +17,7 @@ try:
 
     QDRANT_AVAILABLE = True
 except ImportError:
-    QDRANT_AVAILABLE = False
+    QDRANT_AVAILABLE = False  # pyright: ignore[reportConstantRedefinition]
     QdrantBackend = None  # type: ignore
 
 __all__ = [

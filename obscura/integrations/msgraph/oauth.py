@@ -68,4 +68,4 @@ class GraphOAuth:
             desc = str(result.get("error_description"))
             raise RuntimeError("MSAL error: " + err + ": " + desc)
         self._save_cache()
-        return result["access_token"]
+        return str(result["access_token"])

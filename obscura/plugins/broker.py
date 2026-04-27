@@ -139,9 +139,23 @@ class ToolBroker:
         lazy_manager: Any | None = None,
         score_index: Any | None = None,
         permission_mode_engine: Any | None = None,
+        *,
+        allow_unresolved_capabilities: bool = False,
     ) -> None:
+        # SOC2 finding A4 — security default: a broker with no capability
+        # resolver fails closed. Every execute() returns ``denied`` until
+        # either a resolver is supplied or the caller explicitly opts in
+        # via ``allow_unresolved_capabilities=True``. Tests that exercise
+        # the legacy bypass path set the flag explicitly.
         self._policy = policy_engine
         self._resolver = capability_resolver
+        self._allow_unresolved = allow_unresolved_capabilities
+        if capability_resolver is None and not allow_unresolved_capabilities:
+            logger.warning(
+                "ToolBroker constructed without a capability resolver — "
+                "every tool call will be denied. Pass capability_resolver "
+                "or set allow_unresolved_capabilities=True (insecure).",
+            )
         self._approval = approval_callback or _auto_deny
         self._default_timeout = default_timeout
         self._max_retries = max_retries
@@ -305,7 +319,9 @@ class ToolBroker:
                 # Override requires_approval to False since mode auto-approves.
                 object.__setattr__(decision, "_auto_approved", True)
 
-        # 2. Capability check (if resolver available)
+        # 2. Capability check. Fail closed when no resolver was wired up
+        #    unless the caller explicitly opted into the legacy bypass via
+        #    ``allow_unresolved_capabilities=True`` at construction.
         if self._resolver is not None:
             if not self._check_capabilities(envelope):
                 return self._denied(
@@ -314,6 +330,14 @@ class ToolBroker:
                     "capability-check",
                     start,
                 )
+        elif not self._allow_unresolved:
+            return self._denied(
+                envelope,
+                "Tool execution refused: broker has no capability resolver. "
+                "Configure one or pass allow_unresolved_capabilities=True.",
+                "capability-check-no-resolver",
+                start,
+            )
 
         # 3. Approval gate (skip if permission mode auto-approved)
         _mode_auto = getattr(decision, "_auto_approved", False)

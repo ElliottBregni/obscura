@@ -109,7 +109,7 @@ class ModernRenderer:
     - ``_frame_loop`` — async task at 30 FPS that rebuilds + redraws the live region
     """
 
-    FRAME_INTERVAL_S: float = 1.0 / 30  # 30 FPS
+    frame_interval_s: float = 1.0 / 30  # 30 FPS
 
     def __init__(self, streaming_status: object | None = None) -> None:
         self._ss = streaming_status
@@ -156,7 +156,7 @@ class ModernRenderer:
         fps_str = os.environ.get("OBSCURA_RENDERER_FPS", "")
         if fps_str:
             with contextlib.suppress(ValueError):
-                self.FRAME_INTERVAL_S = 1.0 / max(1, int(fps_str))
+                self.frame_interval_s = 1.0 / max(1, int(fps_str))
 
         # SIGWINCH
         with contextlib.suppress(OSError, ValueError):
@@ -618,7 +618,7 @@ class ModernRenderer:
                     self._draw_live_region()
                     self._dirty = False
 
-                await asyncio.sleep(self.FRAME_INTERVAL_S)
+                await asyncio.sleep(self.frame_interval_s)
         except asyncio.CancelledError:
             pass
 

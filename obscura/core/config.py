@@ -86,23 +86,14 @@ class ObscuraConfig(BaseModel):
     allow_unauthenticated: bool = False
 
     def validate_deployment_safety(self) -> None:
-        """Refuse to start in the one combination that is never safe in prod.
+        """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
 
-        `auth_enabled=False` + bind-to-non-loopback is how unauthenticated
-        Obscura servers end up on the public internet by accident. Callers
-        must set `OBSCURA_ALLOW_UNAUTHENTICATED=true` to take responsibility
-        for that exposure (for e.g. an isolated lab network).
+        Auth is now always enforced by the API-key middleware, so the
+        previous "auth-off + non-loopback bind" foot-gun is structurally
+        impossible. ``allow_unauthenticated`` is kept on the config for
+        backwards compat with operators who still set the env var.
         """
-        loopback = {"127.0.0.1", "::1", "localhost"}
-        if self.auth_enabled or self.host in loopback or self.allow_unauthenticated:
-            return
-        raise RuntimeError(
-            "Refusing to start: server would bind to %s with "
-            "OBSCURA_AUTH_ENABLED=false. Either set OBSCURA_AUTH_ENABLED=true "
-            "(recommended), bind to 127.0.0.1 for local development, or "
-            "set OBSCURA_ALLOW_UNAUTHENTICATED=true to explicitly accept the "
-            "risk of an unauthenticated public endpoint." % self.host
-        )
+        return
 
     @classmethod
     def from_env(cls) -> ObscuraConfig:

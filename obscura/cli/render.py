@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, override
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -59,13 +59,13 @@ except Exception:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    ERROR_HEX = module.ERROR_HEX
-    OK_HEX = module.OK_HEX
-    THINKING_HEX = module.THINKING_HEX
-    TOOL_HEX = module.TOOL_HEX
-    WARN_HEX = module.WARN_HEX
-    BLUE = module.BLUE
-    SAPPHIRE = module.SAPPHIRE
+    ERROR_HEX = module.ERROR_HEX  # pyright: ignore[reportConstantRedefinition]
+    OK_HEX = module.OK_HEX  # pyright: ignore[reportConstantRedefinition]
+    THINKING_HEX = module.THINKING_HEX  # pyright: ignore[reportConstantRedefinition]
+    TOOL_HEX = module.TOOL_HEX  # pyright: ignore[reportConstantRedefinition]
+    WARN_HEX = module.WARN_HEX  # pyright: ignore[reportConstantRedefinition]
+    BLUE = module.BLUE  # pyright: ignore[reportConstantRedefinition]
+    SAPPHIRE = module.SAPPHIRE  # pyright: ignore[reportConstantRedefinition]
 
 ACCENT = BLUE.hex
 ACCENT_DIM = SAPPHIRE.hex
@@ -687,6 +687,7 @@ class LabeledStreamRenderer(StreamRenderer):
         self._color = color
         self._header_printed = False
 
+    @override
     def _flush_text(self) -> None:
         if self._text_buf:
             text = "".join(self._text_buf)

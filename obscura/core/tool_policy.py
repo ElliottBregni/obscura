@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -359,6 +359,7 @@ class ToolPolicy:
         filtered = self.filter_tools(tools)
         config["allowed_tools"] = [f"{MCP_TOOL_PREFIX}{t.name}" for t in filtered]
 
+    @override
     def __repr__(self) -> str:
         """String representation for debugging."""
         parts = []

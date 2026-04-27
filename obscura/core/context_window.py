@@ -26,12 +26,12 @@ import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, override
 
 logger = logging.getLogger(__name__)
 
-_TOKENIZER: Any | None = None
-_TOKENIZER_READY = False
+_tokenizer: Any | None = None
+_tokenizer_ready = False
 
 # Mirrors openclaw's context-window-guard.ts constants
 CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000  # Block if available tokens < this
@@ -188,20 +188,20 @@ def estimate_tokens(text: str) -> int:
 
 def _get_tokenizer() -> Any | None:
     """Load and cache tokenizer once per process."""
-    global _TOKENIZER, _TOKENIZER_READY
-    if _TOKENIZER_READY:
-        return _TOKENIZER
-    _TOKENIZER_READY = True
+    global _tokenizer, _tokenizer_ready
+    if _tokenizer_ready:
+        return _tokenizer
+    _tokenizer_ready = True
     try:
         import tiktoken
 
         try:
-            _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+            _tokenizer = tiktoken.get_encoding("cl100k_base")
         except Exception:
-            _TOKENIZER = tiktoken.get_encoding("gpt2")
+            _tokenizer = tiktoken.get_encoding("gpt2")
     except ImportError:
-        _TOKENIZER = None
-    return _TOKENIZER
+        _tokenizer = None
+    return _tokenizer
 
 
 @lru_cache(maxsize=8192)
@@ -279,6 +279,7 @@ class ContextStatus:
     compact_tier: str = "ok"
     """Current compaction tier: 'ok', 'snip', 'compact', or 'critical'."""
 
+    @override
     def __str__(self) -> str:
         s = "BLOCK" if self.should_block else ("WARN" if self.should_warn else "OK")
         tier = f" tier={self.compact_tier}" if self.compact_tier != "ok" else ""

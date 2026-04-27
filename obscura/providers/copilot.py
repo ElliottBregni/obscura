@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
@@ -495,6 +495,7 @@ class CopilotBackend(BackendToolHostMixin):
 
     # -- Tools (register_tool comes from BackendToolHostMixin) -------------------
 
+    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry for agent loop use."""
         return self._tool_registry

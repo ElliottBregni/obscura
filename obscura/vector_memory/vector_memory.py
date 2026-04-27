@@ -47,8 +47,9 @@ try:
 except ImportError:
     QDRANT_AVAILABLE: bool
 
-    def QdrantBackend(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def QdrantBackend(*args: Any, **kwargs: Any) -> VectorBackend:  # type: ignore[misc]
         """Stub when qdrant-client is not installed."""
+        raise RuntimeError("qdrant-client is not installed")
 
 
 import contextlib

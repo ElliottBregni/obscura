@@ -13,11 +13,14 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import UTC, datetime
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.pg_config import PGPoolManager
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
+
+if TYPE_CHECKING:
+    from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 logger = logging.getLogger(__name__)
 
@@ -161,13 +164,13 @@ class PostgreSQLVectorBackend:
     def search_vectors(
         self,
         query_embedding: list[float],
-        *,
-        namespace: str | None = None,
-        limit: int = 10,
-        min_score: float = 0.0,
-        memory_type: str | None = None,
+        namespace: str | None,
+        top_k: int,
+        threshold: float | None,
+        filters: list[MetadataFilter] | None,
     ) -> list[VectorEntry]:
         """Search vectors by cosine similarity (computed in Python)."""
+        min_score = threshold if threshold is not None else 0.0
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -180,9 +183,6 @@ class PostgreSQLVectorBackend:
                 if namespace:
                     sql += " AND namespace = %s"
                     params.append(namespace)
-                if memory_type:
-                    sql += " AND memory_type = %s"
-                    params.append(memory_type)
 
                 # Exclude expired entries
                 sql += " AND (expires_at IS NULL OR expires_at > NOW())"
@@ -207,7 +207,7 @@ class PostgreSQLVectorBackend:
 
         # Sort by score descending, limit
         results.sort(key=lambda e: e.score, reverse=True)
-        return results[:limit]
+        return results[:top_k]
 
     def delete_vector(self, key: Any) -> bool:
         """Delete a vector. Returns True if deleted."""
@@ -302,9 +302,10 @@ class PostgreSQLVectorBackend:
     def list_by_type(
         self,
         memory_type: str,
-        namespace: str | None = None,
+        older_than: datetime | None = None,
+        limit: int = 100,
     ) -> list[VectorEntry]:
-        """List vectors by type."""
+        """List vectors by type, optionally filtered by age."""
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -313,10 +314,11 @@ class PostgreSQLVectorBackend:
                     "WHERE user_id = %s AND memory_type = %s"
                 )
                 params: list[Any] = [self._user_id, memory_type]
-                if namespace:
-                    sql += " AND namespace = %s"
-                    params.append(namespace)
-                sql += " ORDER BY created_at DESC"
+                if older_than is not None:
+                    sql += " AND created_at < %s"
+                    params.append(older_than)
+                sql += " ORDER BY created_at DESC LIMIT %s"
+                params.append(limit)
                 cur.execute(sql, params)
                 return [self._row_to_entry(r) for r in cur.fetchall()]
         finally:

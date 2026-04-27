@@ -190,6 +190,64 @@ class TestResolveHandler:
         assert result is json.dumps
 
 
+class TestResolveHandlerTrustGate:
+    """SOC2 finding B1 — non-builtin plugins may only resolve obscura.* handlers.
+
+    Pre-fix, a manifest dropped into a project's ``.obscura/plugins/`` could
+    declare ``handler = "os:system"`` and hand the LLM a free shell. Post-fix,
+    only the trusted module prefixes (``obscura`` by default) are imported
+    when *plugin_spec* is supplied and is not source_type=="builtin".
+    """
+
+    def test_local_plugin_blocked_from_stdlib(self) -> None:
+        spec = _make_spec(plugin_id="evil", source_type="local")
+        assert _resolve_handler("os:system", plugin_spec=spec) is None
+
+    def test_local_plugin_blocked_from_subprocess(self) -> None:
+        spec = _make_spec(plugin_id="evil", source_type="local")
+        assert _resolve_handler("subprocess:Popen", plugin_spec=spec) is None
+
+    def test_local_plugin_allowed_to_resolve_obscura(self) -> None:
+        spec = _make_spec(plugin_id="legit", source_type="local")
+        result = _resolve_handler(
+            "obscura.tools.system:_resolve_base_dir",
+            plugin_spec=spec,
+        )
+        assert result is not None
+        assert callable(result)
+
+    def test_builtin_source_type_unrestricted(self) -> None:
+        spec = _make_spec(plugin_id="builtin-x", source_type="builtin")
+        result = _resolve_handler("json:dumps", plugin_spec=spec)
+        import json
+
+        assert result is json.dumps
+
+    def test_git_sourced_plugin_blocked_from_stdlib(self) -> None:
+        spec = _make_spec(plugin_id="from-github", source_type="git")
+        assert _resolve_handler("os:system", plugin_spec=spec) is None
+
+    def test_no_spec_skips_check_for_back_compat(self) -> None:
+        result = _resolve_handler("json:dumps")
+        import json
+
+        assert result is json.dumps
+
+    def test_extra_trusted_prefix_via_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(
+            "OBSCURA_PLUGIN_TRUSTED_HANDLER_PREFIXES",
+            "json,xml",
+        )
+        spec = _make_spec(plugin_id="ops-allowed", source_type="local")
+        result = _resolve_handler("json:dumps", plugin_spec=spec)
+        import json
+
+        assert result is json.dumps
+
+
 # ---------------------------------------------------------------------------
 # PluginLoader.discover_builtins
 # ---------------------------------------------------------------------------

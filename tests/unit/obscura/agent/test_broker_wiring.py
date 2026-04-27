@@ -9,7 +9,7 @@ from obscura.plugins.policy import PluginPolicyEngine
 def _make_broker() -> ToolBroker:
     """Create a ToolBroker with a default policy engine."""
     engine = PluginPolicyEngine()
-    return ToolBroker(policy_engine=engine)
+    return ToolBroker(policy_engine=engine, allow_unresolved_capabilities=True)
 
 
 def _dummy_handler(**kwargs: object) -> str:

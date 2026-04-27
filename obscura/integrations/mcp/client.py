@@ -586,7 +586,10 @@ class SSETransport(MCPTransport):
                 message="URL required for SSE transport",
             )
 
-        self._client = httpx.AsyncClient(timeout=self.config.timeout)
+        self._client = httpx.AsyncClient(
+            timeout=self.config.timeout,
+            headers=dict(self.config.headers) if self.config.headers else None,
+        )
 
         # Connect to SSE endpoint to get POST endpoint
         sse_url = f"{self.config.url}/sse"

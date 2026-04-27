@@ -445,7 +445,7 @@ def test_export_queue_snapshot_retries_on_write_failure(
             write_calls.append(len(write_calls) + 1)
             if len(write_calls) < 3:  # noqa: PLR2004
                 raise OSError("NFS write error (simulated)")
-        return original_write_text(self, content, **kwargs)
+        original_write_text(self, content, **kwargs)
 
     monkeypatch.setattr(Path, "write_text", patched_write_text)
 

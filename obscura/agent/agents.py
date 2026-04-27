@@ -179,6 +179,11 @@ class AgentConfig(BaseModel):
     tool_output_level: str = "standard"
     tool_output_overrides: dict[str, str] = Field(default_factory=dict)
 
+    # Backend override for tool routing (e.g. ToolRouter backend hint).
+    # None means fall back to provider. Distinct from provider: provider
+    # names the LLM vendor; backend names the routing target.
+    backend: str | None = None
+
     @property
     def model(self) -> str:
         """Deprecated: use provider instead."""
@@ -317,6 +322,10 @@ class Agent:
         self._error: Exception | None = None
         self._capability_resolver: Any = None
         self._broker: Any = None
+        # Optional compiled workspace (populated externally for lazy plugin loading)
+        self._compiled_workspace: Any = None
+        # Optional semantic recall callable (populated externally when vector memory is attached)
+        self.recall: Any = None
 
     # -- Observability/test accessors -----------------------------------
     @property

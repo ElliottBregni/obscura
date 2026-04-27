@@ -229,6 +229,7 @@ class MCPConnectionConfig:
     args: list[str] = field(default_factory=list)  # For stdio transport
     url: str | None = None  # For SSE/WebSocket transport
     env: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)  # For SSE/HTTP transport
     timeout: float = 30.0
     name: str = ""  # Human-readable server name used as session/tool prefix
 

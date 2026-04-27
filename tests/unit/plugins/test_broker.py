@@ -4,15 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Never
+from typing import Any, Never
 from unittest.mock import AsyncMock, MagicMock
 
 from obscura.core.types import (
     ToolCallEnvelope,
     ToolErrorType,
 )
-from obscura.plugins.broker import BrokerAuditEntry, ToolBroker, _auto_deny
+from obscura.plugins.broker import BrokerAuditEntry, _auto_deny
+from obscura.plugins.broker import ToolBroker as _RealToolBroker
 from obscura.plugins.policy import PolicyAction, PolicyDecision
+
+
+def ToolBroker(*args: Any, **kwargs: Any) -> _RealToolBroker:  # noqa: N802 — drop-in replacement for the class
+    """Construct a ToolBroker with the legacy "no-resolver = allow" bypass.
+
+    Production code constructed without a capability resolver now fails closed
+    (SOC2 finding A4). These tests predate that gate and exercise broker
+    behaviour unrelated to capability resolution, so they opt back into the
+    legacy bypass via ``allow_unresolved_capabilities=True``. New tests should
+    either supply a real resolver or set the flag explicitly.
+    """
+    kwargs.setdefault("allow_unresolved_capabilities", True)
+    return _RealToolBroker(*args, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -202,6 +217,29 @@ class TestCapabilityNoResolver:
     async def test_passes_when_tool_in_resolved_set(self) -> None:
         resolver = _mock_resolver({"my_tool"})
         broker = ToolBroker(policy_engine=_mock_policy(), capability_resolver=resolver)
+        broker.register_handler("my_tool", _sync_handler)
+        result = await broker.execute(_make_envelope())
+        assert result.status == "ok"
+
+
+class TestCapabilityNoResolverFailClosed:
+    """SOC2 finding A4 — broker without a resolver must fail closed by default."""
+
+    async def test_denied_when_no_resolver_and_no_opt_in(self) -> None:
+        broker = _RealToolBroker(policy_engine=_mock_policy())
+        broker.register_handler("my_tool", _sync_handler)
+        result = await broker.execute(_make_envelope())
+        assert result.status == "denied"
+        assert result.error is not None
+        assert result.error.type == ToolErrorType.UNAUTHORIZED
+        assert "no capability resolver" in result.error.message.lower()
+        assert broker.audit_log[0].matched_rule == "capability-check-no-resolver"
+
+    async def test_passes_when_no_resolver_and_explicit_opt_in(self) -> None:
+        broker = _RealToolBroker(
+            policy_engine=_mock_policy(),
+            allow_unresolved_capabilities=True,
+        )
         broker.register_handler("my_tool", _sync_handler)
         result = await broker.execute(_make_envelope())
         assert result.status == "ok"

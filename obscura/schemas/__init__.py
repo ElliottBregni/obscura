@@ -108,13 +108,13 @@ class HealthResponse(BaseModel):
 
 
 # Re-export template schemas for convenience
-from obscura.schemas.agents import (  # noqa: E402, F401
+from obscura.schemas.agents import (  # noqa: E402
     AgentBuilderSpawnSchema,
     AgentBulkSpawnRequest,
     AgentSpawnRequest,
     MCPRuntimeSchema,
 )
-from obscura.schemas.templates import (  # noqa: E402, F401
+from obscura.schemas.templates import (  # noqa: E402
     A2ARemoteToolsSpecSchema,
     APERProfileSchema,
     MCPServerSpecSchema,
@@ -125,3 +125,19 @@ from obscura.schemas.templates import (  # noqa: E402, F401
     TemplateResponse,
     TemplateUpdateRequest,
 )
+
+__all__ = [
+    "AgentBuilderSpawnSchema",
+    "AgentBulkSpawnRequest",
+    "AgentSpawnRequest",
+    "MCPRuntimeSchema",
+    "A2ARemoteToolsSpecSchema",
+    "APERProfileSchema",
+    "MCPServerSpecSchema",
+    "SkillSpecSchema",
+    "SpawnFromTemplateRequest",
+    "TemplateCreateRequest",
+    "TemplateListResponse",
+    "TemplateResponse",
+    "TemplateUpdateRequest",
+]

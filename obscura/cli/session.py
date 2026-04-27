@@ -267,7 +267,7 @@ class ObscuraSession:
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
-        mcp_configs, mcp_names = self._discover_tools(config)
+        mcp_configs, _mcp_names = self._discover_tools(config)
         self._init_vector_memory()
         combined_system = self._compose_system_prompt(config)
         self._combined_system = combined_system

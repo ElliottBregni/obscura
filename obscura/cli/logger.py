@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import override
 
 from obscura.cli import render
 
@@ -25,6 +26,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
     fmt = logging.Formatter("%(levelname)s: %(message)s")
 
     class InfoHandler(logging.Handler):
+        @override
         def emit(self, record: logging.LogRecord) -> None:
             if record.levelno < logging.INFO:
                 return
@@ -39,6 +41,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
                 pass
 
     class DebugHandler(logging.Handler):
+        @override
         def emit(self, record: logging.LogRecord) -> None:
             if record.levelno != logging.DEBUG:
                 return

@@ -22,7 +22,7 @@ try:
 
     HAS_PSYCOPG2 = True
 except ImportError:
-    HAS_PSYCOPG2 = False
+    HAS_PSYCOPG2 = False  # pyright: ignore[reportConstantRedefinition]
 
 
 @dataclass(frozen=True)

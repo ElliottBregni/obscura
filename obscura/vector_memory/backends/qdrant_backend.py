@@ -425,6 +425,7 @@ class QdrantBackend:
         memory_type: str,
         older_than: datetime | None = None,
         limit: int = 100,
+        *,
         with_vectors: bool = False,
     ) -> list[VectorEntry]:
         """List entries of a given type, optionally filtered by age.

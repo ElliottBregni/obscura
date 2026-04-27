@@ -342,7 +342,7 @@ def _observe_session_activity(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-_DROPPED_AUDIT_EVENTS = 0
+_dropped_audit_events = 0
 
 
 def _emit_auth_audit(
@@ -355,10 +355,10 @@ def _emit_auth_audit(
     """Emit an audit event for auth decisions.
 
     Failures are logged (not silenced) so a broken audit backend is visible
-    in logs and ``_DROPPED_AUDIT_EVENTS`` reflects the cumulative count —
+    in logs and ``_dropped_audit_events`` reflects the cumulative count —
     critical for forensic trails and security incident response.
     """
-    global _DROPPED_AUDIT_EVENTS
+    global _dropped_audit_events
     try:
         from obscura.telemetry.audit import AuditEvent, emit_audit_event
 
@@ -374,10 +374,10 @@ def _emit_auth_audit(
             ),
         )
     except Exception:
-        _DROPPED_AUDIT_EVENTS += 1
+        _dropped_audit_events += 1
         logger.exception(
             "Auth audit event dropped (total dropped: %d) path=%s outcome=%s",
-            _DROPPED_AUDIT_EVENTS,
+            _dropped_audit_events,
             path,
             outcome,
         )
@@ -385,4 +385,4 @@ def _emit_auth_audit(
 
 def get_dropped_audit_count() -> int:
     """Observability helper — expose the dropped-audit counter."""
-    return _DROPPED_AUDIT_EVENTS
+    return _dropped_audit_events

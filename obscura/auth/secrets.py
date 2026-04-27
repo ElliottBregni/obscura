@@ -168,10 +168,15 @@ _dotenv_loaded = False
 def _load_dotenv_once() -> None:
     """Load ``.env`` files into the process environment exactly once.
 
-    Searches three locations in order, and never overrides a value already
-    present in the environment. Silently no-ops when ``python-dotenv``
-    isn't installed -- the rest of the resolver still works via plain env
-    vars.
+    Loaded in trust order so a checked-in repo ``.env`` cannot shadow a
+    value the user keeps in ``~/.obscura/.env`` (SOC2 finding D1). With
+    ``override=False`` the *first* loader to set a name wins, so the
+    order matches the documented precedence:
+
+        shell env  >  ~/.obscura/.env  >  ./.obscura/.env  >  ./.env
+
+    Silently no-ops when ``python-dotenv`` isn't installed — the rest of
+    the resolver still works via plain env vars.
     """
     global _dotenv_loaded
     if _dotenv_loaded:
@@ -183,12 +188,15 @@ def _load_dotenv_once() -> None:
     except ImportError:
         return
 
-    # 1. CWD -- standard dotenv behaviour.
-    load_dotenv(override=False)
-    # 2. User home -- survives any working directory.
+    # 1. User home -- highest-trust .env, survives any working directory.
     obscura_home = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura"))
     load_dotenv(obscura_home / ".env", override=False)
-    # 3. Installed package root -- covers editable installs / dev loops.
+    # 2. Project-scoped Obscura overrides under ./.obscura/.env -- second-
+    #    highest trust (committed to a project the user controls).
+    load_dotenv(Path.cwd() / ".obscura" / ".env", override=False)
+    # 3. CWD ./.env -- lowest trust (any cloned repo can drop one in).
+    load_dotenv(override=False)
+    # 4. Installed package root -- covers editable installs / dev loops.
     pkg_root = Path(__file__).resolve().parents[2]
     load_dotenv(pkg_root / ".env", override=False)
 

@@ -14,21 +14,16 @@ import platform
 import re
 import shutil
 import stat as stat_module
-import subprocess
 import sys
 import time as _time
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 from urllib import error as url_error
 from urllib import parse as url_parse
 from urllib import request as url_request
 
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
-from obscura.tools.system.delegation import (
-    build_agent_cards_section,
-    build_delegate_tool_spec,
-)
 from obscura.tools.system.intelligence import (
     causal_trace,
     context_snapshot,
@@ -5206,8 +5201,6 @@ async def run_npx(*args, timeout_seconds: float | None = None, **kwargs) -> str:
         flat_args = [str(x) for x in args[0]]
     else:
         flat_args = [str(x) for x in args]
-
-    cmd = ["npx"] + flat_args
 
     npx_path = _shutil.which("npx")
     if not npx_path:

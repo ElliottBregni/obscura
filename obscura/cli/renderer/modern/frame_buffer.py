@@ -21,7 +21,7 @@ from __future__ import annotations
 import shutil
 import sys
 from dataclasses import dataclass, field
-from typing import IO
+from typing import IO, override
 
 from obscura.cli.renderer.modern.theme import RESET, STYLE_DEFAULT, Style
 
@@ -33,6 +33,7 @@ class Cell:
     char: str = " "
     style: Style = field(default_factory=lambda: STYLE_DEFAULT)
 
+    @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Cell):
             return NotImplemented

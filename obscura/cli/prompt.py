@@ -14,7 +14,7 @@ import os
 import random
 import subprocess
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Iterator, override
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -68,6 +68,7 @@ class KeywordHighlighter(Processor):
     dict.  This makes the keyword glow as you type it.
     """
 
+    @override
     def apply_transformation(
         self,
         ti: object,
@@ -345,7 +346,7 @@ class SlashCommandCompleter(Completer):
         self,
         document: Document,
         complete_event: CompleteEvent,
-    ) -> list[Completion]:
+    ) -> Iterator[Completion]:
         text = document.text_before_cursor.lstrip()
 
         # /slash commands — only at the very start
@@ -377,7 +378,7 @@ class SlashCommandCompleter(Completer):
         # e.g. "$python $se" -> complete "$security"
         word = document.get_word_before_cursor(WORD=True)
         if not word:
-            return []
+            return
 
         if word.startswith("$") and self._dollar_skill_names is not None:
             prefix = word[1:]
@@ -401,7 +402,7 @@ class SlashCommandCompleter(Completer):
                     )
             return
 
-        return []
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -434,16 +435,16 @@ except Exception:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    _C_BLUE = module.BLUE
-    _C_GREEN = module.GREEN
-    _C_LAVENDER = module.LAVENDER
-    _C_OVERLAY0 = module.OVERLAY0
-    _C_PEACH = module.PEACH
-    _C_RED = module.RED
-    _C_SUBTEXT0 = module.SUBTEXT0
-    _C_SURFACE1 = module.SURFACE1
-    _C_TEAL = module.TEAL
-    _C_TEXT = module.TEXT
+    _C_BLUE = module.BLUE  # pyright: ignore[reportConstantRedefinition]
+    _C_GREEN = module.GREEN  # pyright: ignore[reportConstantRedefinition]
+    _C_LAVENDER = module.LAVENDER  # pyright: ignore[reportConstantRedefinition]
+    _C_OVERLAY0 = module.OVERLAY0  # pyright: ignore[reportConstantRedefinition]
+    _C_PEACH = module.PEACH  # pyright: ignore[reportConstantRedefinition]
+    _C_RED = module.RED  # pyright: ignore[reportConstantRedefinition]
+    _C_SUBTEXT0 = module.SUBTEXT0  # pyright: ignore[reportConstantRedefinition]
+    _C_SURFACE1 = module.SURFACE1  # pyright: ignore[reportConstantRedefinition]
+    _C_TEAL = module.TEAL  # pyright: ignore[reportConstantRedefinition]
+    _C_TEXT = module.TEXT  # pyright: ignore[reportConstantRedefinition]
 
 PROMPT_STYLE = Style.from_dict(
     {

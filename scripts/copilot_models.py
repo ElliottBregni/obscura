@@ -92,5 +92,5 @@ def _AUTOMATION_SAFE_MODELS_set():
     return set(_AUTOMATION_SAFE_MODELS)
 
 # Expose internals used by tests
-_AUTOMATION_SAFE_MODELS = set(_AUTOMATION_SAFE_MODELS)
+_AUTOMATION_SAFE_MODELS = set(_AUTOMATION_SAFE_MODELS)  # pyright: ignore[reportConstantRedefinition]
 

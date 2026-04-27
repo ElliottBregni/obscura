@@ -333,13 +333,12 @@ async def _mock_get_runtime(user: Any) -> _FakeAgentRuntime:
 
 
 @pytest.fixture(autouse=True)
-def _reset_fakes() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
+def _reset_fakes() -> None:  # pyright: ignore[reportUnusedFunction]
     """Reset all fake stores between tests."""
     global _shared_runtime
     _shared_runtime = _FakeAgentRuntime()
     _FakeMemoryStore.reset()
     _FakeVectorMemoryStore.reset()
-    return
 
 
 @pytest.fixture

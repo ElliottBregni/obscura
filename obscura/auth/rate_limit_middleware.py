@@ -8,7 +8,7 @@ checks the per-user rate limiter, and returns HTTP 429 with
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
@@ -41,6 +41,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._limiter = limiter
 
+    @override
     async def dispatch(
         self,
         request: Request,

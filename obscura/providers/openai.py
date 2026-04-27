@@ -13,7 +13,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncIterator, Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
@@ -553,6 +553,7 @@ class OpenAIBackend(BackendToolHostMixin):
             pass
         return "\n".join(lines)
 
+    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
         return self._tool_registry
