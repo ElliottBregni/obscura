@@ -415,23 +415,6 @@ class ToolRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._tools
 
-    def for_tier(self, tier_value: str) -> list[ToolSpec]:
-        """Return all non-disabled tools.
-
-        .. deprecated::
-            The tier system is superseded by ToolPolicy + CapabilityResolver.
-            This method now ignores *tier_value* and returns ``self.all()``.
-        """
-        return self.all()
-
-    def names_for_tier(self, tier_value: str) -> list[str]:
-        """Return all non-disabled tool names.
-
-        .. deprecated::
-            See :meth:`for_tier`.
-        """
-        return [t.name for t in self.all()]
-
     # -- Per-tool enable / disable ------------------------------------------
 
     def disable(self, name: str) -> bool:

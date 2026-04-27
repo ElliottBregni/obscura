@@ -865,20 +865,6 @@ class TestToolCallParsing:
         tc = AgentLoop.parse_tool_call("functions.web_search", '{"query":"q"}', None)
         assert tc.name == "web_search"
 
-    def test_format_tool_results(self) -> None:
-        tc = ToolCallInfo(tool_use_id="tool_abc", name="read", input={})
-        formatted = AgentLoop.format_tool_results([(tc, "file content", False)])
-        assert "read" in formatted
-        assert "tool_abc" in formatted
-        assert "file content" in formatted
-        assert "OK" in formatted
-
-    def test_format_error_tool_results(self) -> None:
-        tc = ToolCallInfo(tool_use_id="tool_err", name="write", input={})
-        formatted = AgentLoop.format_tool_results([(tc, "permission denied", True)])
-        assert "ERROR" in formatted
-        assert "permission denied" in formatted
-
 
 class TestToolErrorNormalization:
     def test_missing_argument_maps_to_invalid_args(self) -> None:
