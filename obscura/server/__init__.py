@@ -236,22 +236,15 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     app.state.rate_limiter = rate_limiter
     app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 
-    if config.auth_enabled:
-        app.add_middleware(APIKeyAuthMiddleware)
-    else:
-        bind_all = config.host in ("0.0.0.0", "::")
-        if bind_all:
-            logger.warning(
-                "Authentication is DISABLED and server binds to %s — "
-                "all API endpoints are publicly accessible. "
-                "Set OBSCURA_AUTH_ENABLED=true for production.",
-                config.host,
-            )
-        else:
-            logger.warning(
-                "Authentication is DISABLED. "
-                "Set OBSCURA_AUTH_ENABLED=true for production.",
-            )
+    # Security headers — always on (opt-out via env). Added before auth so
+    # even 401/429 responses carry CSP/HSTS/COOP/etc.
+    from obscura.auth.security_headers import SecurityHeadersMiddleware
+
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # Auth is always on. APIKeyAuthMiddleware accepts both Obscura API keys
+    # (X-API-Key or Bearer) and Supabase-issued JWTs.
+    app.add_middleware(APIKeyAuthMiddleware)
 
     cors_origins = os.environ.get(
         "OBSCURA_CORS_ORIGINS",

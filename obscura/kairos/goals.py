@@ -61,6 +61,7 @@ class Goal:
     last_worked: str | None = None
     body: str = ""
     path: Path = field(default_factory=lambda: Path())
+    project_root: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -112,9 +113,36 @@ class GoalBoard:
                 return self._parse_file(p)
         return None
 
-    def active_goals(self) -> list[Goal]:
-        """Return active/in_progress goals sorted by priority then staleness."""
+    def get_if_newer(self, goal_id: str, since: str) -> Goal | None:
+        """Return the in-memory (disk) goal if its 'updated' timestamp is newer than *since*.
+
+        Used by vault_sync conflict detection: if the agent wrote a newer version
+        to disk than what the user's file claims, the agent copy might have unsaved
+        progress that we should archive before overwriting.
+
+        Args:
+            goal_id: The goal slug to look up.
+            since: ISO 8601 timestamp to compare against.  If the stored goal's
+                ``updated`` field is lexicographically greater (i.e., newer), the
+                goal is returned; otherwise ``None`` is returned.
+        """
+        goal = self.load(goal_id)
+        if goal is None:
+            return None
+        # ISO 8601 strings are lexicographically comparable.
+        if goal.updated > since:
+            return goal
+        return None
+
+    def active_goals(self, *, project_root: str | None = None) -> list[Goal]:
+        """Return active/in_progress goals sorted by priority then staleness.
+
+        If *project_root* is given, only goals matching that root are returned.
+        Pass ``None`` (default) for the global view.
+        """
         active = [g for g in self.load_all() if g.is_active]
+        if project_root is not None:
+            active = [g for g in active if g.project_root == project_root]
         active.sort(key=lambda g: (g.priority_rank, g.updated))
         return active
 
@@ -156,7 +184,7 @@ class GoalBoard:
         if (self._dir / f"{goal_id}.md").exists():
             goal_id = f"{goal_id}-{int(time.time()) % 10000}"
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).isoformat()
         goal = Goal(
             id=goal_id,
             title=title,
@@ -170,6 +198,7 @@ class GoalBoard:
             progress=0,
             body=context,
             path=self._dir / f"{goal_id}.md",
+            project_root=os.getcwd(),
         )
         self._write(goal)
         logger.info("Goal created: %s (%s)", goal_id, title)
@@ -181,7 +210,7 @@ class GoalBoard:
         if goal is None:
             return None
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).isoformat()
         updates: dict[str, Any] = {"updated": now}
 
         for key, val in fields.items():
@@ -253,6 +282,7 @@ class GoalBoard:
                     priority=priority,
                     goal_id=goal.id,
                     blocked_by=blocked_by,
+                    project_root=goal.project_root,
                 )
                 task_ids.append(task_id)
                 prev_id = task_id
@@ -363,6 +393,7 @@ class GoalBoard:
             last_worked=data.get("last_worked"),
             body=body.strip(),
             path=path,
+            project_root=str(data.get("project_root", "")),
         )
 
     def _write(self, goal: Goal) -> None:
@@ -379,6 +410,7 @@ class GoalBoard:
             "tasks": list(goal.tasks),
             "progress": goal.progress,
             "last_worked": goal.last_worked,
+            "project_root": goal.project_root,
         }
         frontmatter = yaml.dump(data, default_flow_style=False, sort_keys=False)
         body = goal.body or ""

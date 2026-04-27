@@ -499,7 +499,7 @@ class TestHallucinationSuppression:
         """Model uses mcp__server__tool naming and hallucinates outcome."""
         spec = _tool_spec("write_text_file")
         turn1 = _make_tool_chunks_with_hallucination(
-            "mcp__obscura_tools__write_text_file",
+            "mcp__obs__write_text_file",
             {"path": "/tmp/test.txt", "text": "hello"},
             "I've written the file. The operation completed without errors.",
         )

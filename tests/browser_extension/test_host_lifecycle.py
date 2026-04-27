@@ -51,6 +51,22 @@ class TestHostBoot:
             or "Empty" in err.get("message", "")
         )
 
+    async def test_fleet_snapshot_on_boot(self, host: HostProcess) -> None:
+        """Host should emit an initial fleet snapshot frame on boot.
+
+        With no AgentRuntime running yet, the snapshot is empty. This is
+        the contract that lets a freshly-opened panel know fleet
+        observability is live (vs. waiting silently).
+        """
+        await host.recv_until("ready", timeout=30)
+        snap = await host.recv_until("fleet", timeout=10)
+        assert snap["type"] == "fleet"
+        assert snap["event"] == "snapshot"
+        assert isinstance(snap.get("agents"), list)
+        # No runtime in the host process at boot.
+        assert snap["agents"] == []
+        assert isinstance(snap.get("timestamp"), int)
+
 
 class TestCommandDispatch:
     async def test_slash_status(self, host: HostProcess) -> None:

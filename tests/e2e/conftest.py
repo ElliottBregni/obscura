@@ -344,11 +344,12 @@ def _reset_fakes() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    """TestClient with auth disabled and mocked backends."""
-    config = ObscuraConfig(
-        auth_enabled=False,
-        otel_enabled=False,
-    )
+    """TestClient with the ``get_current_user`` dep overridden and mocked backends.
+
+    Auth is always on, so the middleware still fires — but the dep override
+    short-circuits role checks, giving each test a stable admin user.
+    """
+    config = ObscuraConfig(otel_enabled=False)
 
     with (
         patch("obscura.deps.get_runtime", side_effect=_mock_get_runtime),
@@ -364,14 +365,11 @@ def client() -> Iterator[TestClient]:
 
 @pytest.fixture
 def client_no_auth_override() -> Iterator[TestClient]:
-    """TestClient with auth ENABLED but no dependency override.
+    """TestClient with auth on and no dependency override.
 
-    Use this to test actual auth behavior (API keys, JWT).
+    Use this to test the real auth flow (API keys, JWT).
     """
-    config = ObscuraConfig(
-        auth_enabled=True,
-        otel_enabled=False,
-    )
+    config = ObscuraConfig(otel_enabled=False)
 
     with (
         patch("obscura.deps.get_runtime", side_effect=_mock_get_runtime),

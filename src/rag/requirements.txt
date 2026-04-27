@@ -1,5 +1,0 @@
-langchain
-faiss-cpu
-sentence-transformers
-transformers
-openai

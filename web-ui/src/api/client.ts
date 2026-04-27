@@ -5,7 +5,7 @@ export async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const { token, apiKey } = useAuthStore.getState();
+  const { token, apiKey, githubToken } = useAuthStore.getState();
   const devApiKey = import.meta.env.VITE_DEV_API_KEY as string | undefined;
   const forceDevApiKey = import.meta.env.VITE_FORCE_DEV_API_KEY === 'true';
 
@@ -20,6 +20,13 @@ export async function fetchApi<T>(
     headers['Authorization'] = `Bearer ${token}`;
   } else if (apiKey) {
     headers['X-API-Key'] = apiKey;
+  }
+
+  // Forward the Supabase-captured GitHub OAuth token so the server can use
+  // it as the "easy path" Copilot fallback. Env vars on the server side
+  // still take precedence (see obscura.core.auth._resolve_github_token).
+  if (githubToken) {
+    headers['X-GitHub-Token'] = githubToken;
   }
 
   const response = await fetch(`${API_URL}${endpoint}`, {

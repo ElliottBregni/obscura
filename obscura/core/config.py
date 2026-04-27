@@ -11,6 +11,8 @@ import os
 
 from pydantic import BaseModel
 
+from obscura.auth import secrets as _secrets
+
 
 class ObscuraConfig(BaseModel):
     """Unified configuration for the Obscura platform.
@@ -23,10 +25,13 @@ class ObscuraConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
 
-    # Auth
-    auth_enabled: bool = (
-        False  # default off for dev; set OBSCURA_AUTH_ENABLED=true in prod
-    )
+    # Supabase OAuth (primary identity provider for human users).
+    # Service/machine callers continue to use X-API-Key as a local bypass.
+    supabase_url: str = ""  # e.g. https://xxxx.supabase.co
+    supabase_jwt_secret: str = ""  # HS256 shared secret from Supabase project
+    supabase_jwks_url: str = ""  # RS256 JWKS URL; takes precedence over the secret
+    supabase_audience: str = "authenticated"  # default Supabase audience claim
+    supabase_issuer: str = ""  # auto-derived from supabase_url when blank
 
     # Telemetry (OpenTelemetry)
     otel_enabled: bool = True
@@ -105,9 +110,17 @@ class ObscuraConfig(BaseModel):
         return cls(
             host=os.environ.get("OBSCURA_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_PORT", "8080")),
-            # Auth
-            auth_enabled=os.environ.get("OBSCURA_AUTH_ENABLED", "false").lower()
-            == "true",
+            # Supabase OAuth -- env wins, then OS keyring, then default.
+            supabase_url=_secrets.resolve("SUPABASE_URL", default="") or "",
+            supabase_jwt_secret=_secrets.resolve("SUPABASE_JWT_SECRET", default="")
+            or "",
+            supabase_jwks_url=_secrets.resolve("SUPABASE_JWKS_URL", default="") or "",
+            supabase_audience=_secrets.resolve(
+                "SUPABASE_AUDIENCE",
+                default="authenticated",
+            )
+            or "authenticated",
+            supabase_issuer=_secrets.resolve("SUPABASE_ISSUER", default="") or "",
             # Telemetry
             otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
             otel_endpoint=os.environ.get(

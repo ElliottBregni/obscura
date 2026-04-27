@@ -237,7 +237,7 @@ class DreamConsolidator:
             return False
 
         try:
-            logger.info("Dream consolidation starting...")
+            logger.debug("Dream consolidation starting...")
             self._memory_dir().mkdir(parents=True, exist_ok=True)
 
             # Ensure MEMORY.md exists.
@@ -265,11 +265,9 @@ class DreamConsolidator:
             self._prune_index()
 
             if agent_result:
-                logger.info("Dream consolidation completed (agent ran successfully)")
+                logger.info("[kairos] Dream complete — memories consolidated")
             else:
-                logger.info(
-                    "Dream consolidation completed (agent unavailable — pruned only)",
-                )
+                logger.info("[kairos] Dream complete — pruned only (agent unavailable)")
             return True
 
         except Exception:
@@ -294,7 +292,7 @@ class DreamConsolidator:
             from obscura.kairos.daily_log import DailyLog
 
             DailyLog().append(report.summary(), source="vault")
-            logger.info("Dream vault sync: %s", report.summary())
+            logger.debug("Dream vault sync: %s", report.summary())
         except Exception:
             logger.warning("Dream vault sync failed", exc_info=True)
 
@@ -333,23 +331,37 @@ class DreamConsolidator:
                 pass
 
             cfg = ObscuraConfig.from_env()
-            async with ObscuraClient(
-                cfg.default_backend,
-                model=None,
-                system_prompt=CONSOLIDATION_PROMPT,
-                tools=dream_tools,
-            ) as client:
-                result = await client.run_loop_to_completion(
-                    "Begin memory consolidation. Follow all phases in the system prompt.",
-                    max_turns=15,
-                    tool_allowlist=_DREAM_AGENT_TOOLS,
-                )
-                logger.debug(
-                    "Dream agent output (%d chars): %s...",
-                    len(result),
-                    result[:200],
-                )
-                return True
+
+            # Restrict filesystem access to the memory directory for the
+            # duration of the agent run.
+            from obscura.core.paths import resolve_obscura_home
+
+            memory_dir = str(resolve_obscura_home() / "memory")
+            _prev_base_dir = os.environ.get("OBSCURA_SYSTEM_TOOLS_BASE_DIR")
+            os.environ["OBSCURA_SYSTEM_TOOLS_BASE_DIR"] = memory_dir
+            try:
+                async with ObscuraClient(
+                    cfg.default_backend,
+                    model=None,
+                    system_prompt=CONSOLIDATION_PROMPT,
+                    tools=dream_tools,
+                ) as client:
+                    result = await client.run_loop_to_completion(
+                        "Begin memory consolidation. Follow all phases in the system prompt.",
+                        max_turns=15,
+                        tool_allowlist=_DREAM_AGENT_TOOLS,
+                    )
+                    logger.debug(
+                        "Dream agent output (%d chars): %s...",
+                        len(result),
+                        result[:200],
+                    )
+                    return True
+            finally:
+                if _prev_base_dir is None:
+                    os.environ.pop("OBSCURA_SYSTEM_TOOLS_BASE_DIR", None)
+                else:
+                    os.environ["OBSCURA_SYSTEM_TOOLS_BASE_DIR"] = _prev_base_dir
         except Exception:
             logger.warning("Dream consolidation agent failed", exc_info=True)
             return False

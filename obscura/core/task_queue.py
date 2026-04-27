@@ -99,6 +99,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     _add_col(conn, "last_heartbeat", "REAL DEFAULT 0")
     _add_col(conn, "error", "TEXT DEFAULT ''")
     _add_col(conn, "output", "TEXT DEFAULT ''")
+    _add_col(conn, "project_root", "TEXT DEFAULT ''")
 
     # Index to make next_ready() fast.
     conn.execute("""
@@ -153,6 +154,7 @@ class TaskQueue:
         run_after: float = 0.0,
         max_retries: int = 3,
         metadata: dict[str, Any] | None = None,
+        project_root: str = "",
     ) -> str:
         """Create a new task in the queue and return its task_id.
 
@@ -168,8 +170,9 @@ class TaskQueue:
                    (task_id, subject, description, status,
                     priority, goal_id, blocked_by, run_after,
                     max_retries, retry_count, metadata,
+                    project_root,
                     created_at, updated_at)
-                   VALUES (?,?,?,'pending',?,?,?,?,?,0,?,?,?)""",
+                   VALUES (?,?,?,'pending',?,?,?,?,?,0,?,?,?,?)""",
                 (
                     task_id,
                     subject,
@@ -180,6 +183,7 @@ class TaskQueue:
                     run_after,
                     max_retries,
                     json.dumps(metadata or {}),
+                    project_root,
                     now,
                     now,
                 ),
@@ -193,7 +197,9 @@ class TaskQueue:
     # Dequeue
     # ------------------------------------------------------------------
 
-    def next_ready(self, *, worker_id: str = "") -> dict[str, Any] | None:
+    def next_ready(
+        self, *, worker_id: str = "", project_root: str | None = None
+    ) -> dict[str, Any] | None:
         """Return the highest-priority task that is ready to be worked.
 
         A task is *ready* when:
@@ -209,18 +215,20 @@ class TaskQueue:
         stale_threshold = now - self._claim_timeout
         conn = _open()
         try:
-            rows = conn.execute(
-                """SELECT * FROM tasks
+            where = """SELECT * FROM tasks
                    WHERE status = 'pending'
                      AND run_after <= ?
                      AND (
                            claimed_by = ''
                            OR claimed_at < ?
-                     )
-                   ORDER BY priority ASC, created_at ASC
-                   LIMIT 50""",
-                (now, stale_threshold),
-            ).fetchall()
+                     )"""
+            params: list[Any] = [now, stale_threshold]
+            if project_root is not None:
+                where += "\n                     AND project_root = ?"
+                params.append(project_root)
+            where += "\n                   ORDER BY priority ASC, created_at ASC"
+            where += "\n                   LIMIT 50"
+            rows = conn.execute(where, params).fetchall()
 
             for row in rows:
                 task = _row_to_dict(row)
@@ -385,19 +393,26 @@ class TaskQueue:
     # ------------------------------------------------------------------
 
     def queue_depth(
-        self, *, status: str = "pending", worker_id: str = ""
+        self,
+        *,
+        status: str = "pending",
+        worker_id: str = "",
+        project_root: str | None = None,
     ) -> dict[str, int]:
         """Return counts by priority bucket for quick diagnostics."""
         conn = _open()
         try:
             where = "WHERE status = ?"
-            params: list[Any] = [status]
+            params_q: list[Any] = [status]
             if worker_id:
                 where += " AND claimed_by = ?"
-                params.append(worker_id)
+                params_q.append(worker_id)
+            if project_root is not None:
+                where += " AND project_root = ?"
+                params_q.append(project_root)
             rows = conn.execute(
                 f"SELECT priority, COUNT(*) as cnt FROM tasks {where} GROUP BY priority",
-                params,
+                params_q,
             ).fetchall()
             return {str(r["priority"]): r["cnt"] for r in rows}
         finally:
@@ -414,14 +429,19 @@ class TaskQueue:
         finally:
             conn.close()
 
-    def list_claimed(self, worker_id: str) -> list[dict[str, Any]]:
+    def list_claimed(
+        self, worker_id: str, *, project_root: str | None = None
+    ) -> list[dict[str, Any]]:
         """Return all tasks currently claimed by *worker_id*."""
         conn = _open()
         try:
-            rows = conn.execute(
-                "SELECT * FROM tasks WHERE claimed_by = ? ORDER BY claimed_at ASC",
-                (worker_id,),
-            ).fetchall()
+            sql = "SELECT * FROM tasks WHERE claimed_by = ?"
+            params: list[Any] = [worker_id]
+            if project_root is not None:
+                sql += " AND project_root = ?"
+                params.append(project_root)
+            sql += " ORDER BY claimed_at ASC"
+            rows = conn.execute(sql, params).fetchall()
             return [_row_to_dict(r) for r in rows]
         finally:
             conn.close()

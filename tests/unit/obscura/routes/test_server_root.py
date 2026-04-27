@@ -33,14 +33,13 @@ _TEST_USER = AuthenticatedUser(
 )
 
 
-def _make_app(*, auth_enabled: bool = False, otel_enabled: bool = False) -> Any:
-    """Create a FastAPI app with auth/otel disabled for testing."""
+def _make_app(*, otel_enabled: bool = False) -> Any:
+    """Create a FastAPI app with otel disabled for testing.
+
+    Auth is always on; route tests authenticate via the ``X-API-Key`` header
+    registered in ``tests/unit/obscura/routes/conftest.py``.
+    """
     config = ObscuraConfig.from_env()
-    # Override config for test
-    object.__setattr__(config, "auth_enabled", auth_enabled) if hasattr(
-        config,
-        "__dataclass_fields__",
-    ) else setattr(config, "auth_enabled", auth_enabled)
     object.__setattr__(config, "otel_enabled", otel_enabled) if hasattr(
         config,
         "__dataclass_fields__",
@@ -69,10 +68,10 @@ class TestHealthEndpoints:
         assert resp.json()["status"] == "ok"
 
     def test_health_no_auth_required(self) -> None:
-        """Health endpoint should work even without Authorization header."""
-        app = _make_app(auth_enabled=True)
+        """Health endpoint should work even without an Authorization header."""
+        app = _make_app()
+        # Bare client with no auth header — /health must remain public.
         client = TestClient(app)
-        # Skip actual auth middleware for this test — health should bypass
         resp = client.get("/health")
         assert resp.status_code == 200
 
@@ -124,9 +123,10 @@ class TestSendEndpoint:
         from obscura.auth.rbac import get_current_user
 
         app = _make_app()
-        # Override auth dependency to bypass auth
         app.dependency_overrides[get_current_user] = lambda: _TEST_USER
-        client = TestClient(app)
+        # Auth middleware fires before the dep override, so authenticate
+        # via the test API key registered in conftest.
+        client = TestClient(app, headers={"X-API-Key": "test-api-key"})
         resp = client.post(
             "/api/v1/send",
             json={"prompt": "", "backend": "copilot"},
@@ -199,7 +199,7 @@ class TestAppFactory:
 
     def test_create_app_stores_config_on_state(self) -> None:
         """Config should be accessible via app.state.config."""
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         app = create_app(config)
         assert app.state.config is config
 
@@ -225,11 +225,9 @@ class TestAppFactory:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When config=None, create_app should build config from environment."""
-        monkeypatch.setenv("OBSCURA_AUTH_ENABLED", "false")
         monkeypatch.setenv("OTEL_ENABLED", "false")
         app = create_app(None)
         assert isinstance(app, FastAPI)
-        assert app.state.config.auth_enabled is False
 
 
 # ---------------------------------------------------------------------------
@@ -255,32 +253,31 @@ class TestOtelMiddlewareConditional:
     def test_otel_middleware_import_error_handled(self) -> None:
         """If ObscuraTelemetryMiddleware import fails, app should still work."""
         with patch.dict("sys.modules", {"obscura.telemetry.middleware": None}):
-            config = ObscuraConfig(auth_enabled=False, otel_enabled=True)
+            config = ObscuraConfig(otel_enabled=True)
             app = create_app(config)
             assert isinstance(app, FastAPI)
 
 
 # ---------------------------------------------------------------------------
-# Auth middleware conditional (from server.py lines 117-125)
+# Auth middleware — always on
 # ---------------------------------------------------------------------------
 
 
-class TestAuthMiddlewareConditional:
-    def test_auth_middleware_skipped_when_disabled(self) -> None:
-        """When auth_enabled=False, APIKeyAuthMiddleware should not be in the stack."""
+class TestAuthMiddleware:
+    def test_auth_middleware_always_present(self) -> None:
+        """APIKeyAuthMiddleware is unconditionally added — auth is always on."""
         from obscura.auth.middleware import APIKeyAuthMiddleware
 
-        app = _make_app(auth_enabled=False)
-        middleware_classes = [m.cls for m in app.user_middleware if hasattr(m, "cls")]
-        assert APIKeyAuthMiddleware not in middleware_classes
-
-    def test_auth_middleware_present_when_enabled(self) -> None:
-        """When auth_enabled=True, APIKeyAuthMiddleware should be in the middleware stack."""
-        from obscura.auth.middleware import APIKeyAuthMiddleware
-
-        app = _make_app(auth_enabled=True)
+        app = _make_app()
         middleware_classes = [m.cls for m in app.user_middleware if hasattr(m, "cls")]
         assert APIKeyAuthMiddleware in middleware_classes
+
+    def test_unauthenticated_request_returns_401(self) -> None:
+        """A request to a protected route without credentials should be rejected."""
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.get("/api/v1/sessions")
+        assert resp.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +330,7 @@ class TestMCPRoutesMounting:
     def test_mcp_import_failure_does_not_crash(self) -> None:
         """If sdk.mcp.server fails to import, create_app should still succeed."""
         with patch.dict("sys.modules", {"obscura.integrations.mcp.server": None}):
-            config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+            config = ObscuraConfig(otel_enabled=False)
             app = create_app(config)
             assert isinstance(app, FastAPI)
 
@@ -370,7 +367,7 @@ class TestLifespan:
         """Lifespan context manager should execute startup and shutdown."""
         from obscura.server import lifespan
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         app = create_app(config)
 
         async with lifespan(app):
@@ -381,7 +378,7 @@ class TestLifespan:
         """Lifespan should handle telemetry init failure gracefully."""
         from obscura.server import lifespan
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=True)
+        config = ObscuraConfig(otel_enabled=True)
         app = create_app(config)
 
         with patch(
@@ -396,7 +393,7 @@ class TestLifespan:
         """If heartbeat monitor fails to start, lifespan should continue."""
         from obscura.server import lifespan
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         app = create_app(config)
 
         # Heartbeat import may fail in test env, which is fine
@@ -411,7 +408,7 @@ class TestLifespan:
         """Lifespan should call stop() on the heartbeat monitor at shutdown."""
         from obscura.server import lifespan
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         app = create_app(config)
 
         mock_monitor = MagicMock()
@@ -427,7 +424,7 @@ class TestLifespan:
         """If heartbeat stop() raises, lifespan should suppress the error."""
         from obscura.server import lifespan
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         app = create_app(config)
 
         mock_monitor = MagicMock()
@@ -443,7 +440,7 @@ class TestLifespan:
         """If _heartbeat_monitor is None at shutdown, cleanup should be skipped."""
         from obscura.server import lifespan
 
-        config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+        config = ObscuraConfig(otel_enabled=False)
         app = create_app(config)
 
         async with lifespan(app):

@@ -18,6 +18,21 @@ if TYPE_CHECKING:
     from obscura.memory_channels.models import MemoryChannel
 
 
+def _project_namespace() -> str:
+    """Derive a memory namespace from the current working directory.
+
+    Returns ``project:<basename>`` so memories are automatically scoped
+    to the active project without the agent needing to specify a namespace.
+    Falls back to ``"default"`` if cwd cannot be read.
+    """
+    import os
+
+    try:
+        return f"project:{os.path.basename(os.getcwd())}"
+    except Exception:
+        return "default"
+
+
 def build_channels_prompt_section(channels: list[MemoryChannel]) -> str:
     """Build a system prompt section describing available memory channels.
 
@@ -112,7 +127,24 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
     ) -> str:
         """Search memory using semantic similarity, optionally in a specific namespace."""
         store = VectorMemoryStore.for_user(user)
-        results = store.search_similar(query, namespace=namespace, top_k=top_k)
+        # When no namespace is specified, search the project namespace first
+        # for relevance, then fall back to searching all namespaces.
+        search_ns = namespace if namespace is not None else None
+        if search_ns is None:
+            proj_ns = _project_namespace()
+            proj_results = store.search_similar(query, namespace=proj_ns, top_k=top_k)
+            global_results = store.search_similar(query, namespace=None, top_k=top_k)
+            # Merge: project results first (higher priority), deduplicate by key.
+            seen_keys: set[str] = set()
+            results = []
+            for r in proj_results + global_results:
+                rk = str(getattr(r, "key", r))
+                if rk not in seen_keys:
+                    seen_keys.add(rk)
+                    results.append(r)
+            results = results[:top_k]
+        else:
+            results = store.search_similar(query, namespace=search_ns, top_k=top_k)
         items = [
             {
                 "key": str(r.key),
@@ -138,16 +170,17 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
     def store_searchable_impl(
         key: str,
         text: str,
-        namespace: str = "default",
+        namespace: str = "",
         memory_type: str = "general",
         metadata: dict[str, Any] | None = None,
     ) -> str:
         """Store text with vector embedding for semantic search in a specific namespace."""
+        resolved_ns = namespace or _project_namespace()
         store = VectorMemoryStore.for_user(user)
         store.set(
             key=key,
             text=text,
-            namespace=namespace,
+            namespace=resolved_ns,
             memory_type=memory_type,
             metadata=metadata or {},
         )
@@ -155,7 +188,7 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
             {
                 "ok": True,
                 "action": "store_searchable",
-                "namespace": namespace,
+                "namespace": resolved_ns,
                 "key": key,
                 "memory_type": memory_type,
                 "text_length": len(text),
@@ -262,9 +295,9 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                         "description": (
                             "Memory channel namespace "
                             "(e.g. 'workspace:architecture', 'project:jira'). "
-                            "Default: 'default'"
+                            "Defaults to project:<cwd-basename> when omitted."
                         ),
-                        "default": "default",
+                        "default": "",
                     },
                     "memory_type": {
                         "type": "string",

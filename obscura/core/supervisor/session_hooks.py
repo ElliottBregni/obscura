@@ -5,7 +5,7 @@ events in the supervisor log. This makes hooks observable, debuggable,
 and replayable.
 
 Key differences from HookRegistry:
-- Hooks are persisted to SQLite (survive restarts)
+- Hooks are persisted to the supervisor database (survive restarts)
 - Hook invocations are logged as supervisor events
 - Hooks are scoped to sessions (not global)
 - Hooks have priority ordering
@@ -16,14 +16,16 @@ from __future__ import annotations
 
 import inspect
 import logging
-import sqlite3
-import threading
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from obscura.core.supervisor.schema import init_supervisor_schema
+from obscura.core.supervisor.db_backend import (
+    DatabaseBackend,
+    SQLiteSupervisorBackend,
+    translate_sql,
+)
 from obscura.core.supervisor.types import (
     SupervisorEvent,
     SupervisorEventKind,
@@ -97,31 +99,29 @@ class SessionHookManager:
 
     def __init__(
         self,
-        db_path: str | Path,
-        session_id: str,
+        db_path: str | Path | None = None,
+        session_id: str = "",
         *,
         run_id: str = "",
+        backend: DatabaseBackend | None = None,
     ) -> None:
-        self._db_path = Path(db_path)
+        if backend is not None:
+            self._backend = backend
+        elif db_path is not None:
+            self._backend = SQLiteSupervisorBackend(db_path)
+        else:
+            msg = "Either db_path or backend must be provided"
+            raise ValueError(msg)
+
         self._session_id = session_id
         self._run_id = run_id
-        self._local = threading.local()
         self._hooks: list[SessionHookEntry] = []
         self._events: list[SupervisorEvent] = []
         self._handler_map: dict[str, BeforeHookFn | AfterHookFn] = {}
-        self._init_schema()
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-        return self._local.conn
-
-    def _init_schema(self) -> None:
-        init_supervisor_schema(self._conn())
+    def _sql(self, sql: str) -> str:
+        """Translate SQL for the current dialect."""
+        return translate_sql(sql, self._backend.dialect)
 
     # -- registration --------------------------------------------------------
 
@@ -322,13 +322,18 @@ class SessionHookManager:
 
     def load_from_db(self) -> int:
         """Load persisted hooks for this session. Returns count loaded."""
-        conn = self._conn()
-        rows = conn.execute(
-            "SELECT hook_point, hook_type, handler_ref, priority, active "
-            "FROM session_hooks WHERE session_id = ? AND active = 1 "
-            "ORDER BY priority",
-            (self._session_id,),
-        ).fetchall()
+        conn = self._backend.get_conn()
+        try:
+            rows = conn.execute(
+                self._sql(
+                    "SELECT hook_point, hook_type, handler_ref, priority, active "
+                    "FROM session_hooks WHERE session_id = ? AND active = 1 "
+                    "ORDER BY priority"
+                ),
+                (self._session_id,),
+            ).fetchall()
+        finally:
+            self._backend.put_conn(conn)
 
         count = 0
         for row in rows:
@@ -355,32 +360,42 @@ class SessionHookManager:
 
     def _persist_hook(self, entry: SessionHookEntry) -> None:
         """Persist a hook to DB (sync)."""
-        conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO session_hooks "
-            "(session_id, hook_point, hook_type, handler_ref, priority, "
-            " active, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 1, ?)",
-            (
-                self._session_id,
-                entry.hook_point.value,
-                entry.hook_type,
-                entry.handler_ref,
-                entry.priority,
-                datetime.now(UTC).isoformat(),
-            ),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            conn.execute(
+                self._sql(
+                    "INSERT OR REPLACE INTO session_hooks "
+                    "(session_id, hook_point, hook_type, handler_ref, priority, "
+                    " active, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?)"
+                ),
+                (
+                    self._session_id,
+                    entry.hook_point.value,
+                    entry.hook_type,
+                    entry.handler_ref,
+                    entry.priority,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def _unpersist_hook(self, handler_ref: str) -> None:
         """Mark a hook as inactive in DB."""
-        conn = self._conn()
-        conn.execute(
-            "UPDATE session_hooks SET active = 0 "
-            "WHERE session_id = ? AND handler_ref = ?",
-            (self._session_id, handler_ref),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            conn.execute(
+                self._sql(
+                    "UPDATE session_hooks SET active = 0 "
+                    "WHERE session_id = ? AND handler_ref = ?"
+                ),
+                (self._session_id, handler_ref),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     # -- internal ------------------------------------------------------------
 
@@ -421,6 +436,4 @@ class SessionHookManager:
         )
 
     def close(self) -> None:
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        self._backend.close()
