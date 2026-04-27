@@ -10,7 +10,11 @@ on:
 
 jobs:
   browser-extension-tests:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -45,17 +49,39 @@ jobs:
         working-directory: packages/browser-extension
         run: npm run check
 
+      - name: Syntax check additional JS sources
+        working-directory: packages/browser-extension
+        # Belt-and-suspenders cover for files outside `npm run check`'s
+        # current scope (sidepanel.js + background.js). Keeps the JS lint
+        # net wide as new top-level scripts get added.
+        run: |
+          node --check src/sidepanel/messaging.js
+          node --check src/sidepanel/markdown.js
+          node --check src/content_scripts/extbridge_content.js
+          node --check src/content_scripts/extbridge_main.js
+          node --check src/tools/extbridge.user.js
+          node --check src/tools/highlighter.user.js
+          node --check src/tools/selector-recorder.user.js
+
       - name: Run JS unit tests (Vitest)
         working-directory: packages/browser-extension
         run: npm test
 
       - name: Install Xvfb for headful Chrome on CI
+        if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - name: Run E2E smoke tests (Puppeteer, layer 1)
+      - name: Run E2E smoke tests (Puppeteer, layer 1) [linux]
+        if: matrix.os == 'ubuntu-latest'
         working-directory: packages/browser-extension
         # Puppeteer's bundled Chrome for Testing blocks native messaging
         # under CI; layer 1 covers manifest/JS/element-id regressions
         # without needing the host chain. Layer 2 (full handshake) is
         # gated on OBSCURA_E2E_FULL=1 and only makes sense locally.
         run: xvfb-run --auto-servernum npm run test:e2e
+
+      - name: Run E2E smoke tests (Puppeteer, layer 1) [macos]
+        if: matrix.os == 'macos-latest'
+        working-directory: packages/browser-extension
+        # macOS runners have a real display; no Xvfb needed.
+        run: npm run test:e2e
