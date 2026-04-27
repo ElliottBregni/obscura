@@ -443,6 +443,7 @@ class StdioTransport(MCPTransport):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
+            limit=16 * 1024 * 1024,
         )
 
         # Start reading stdout
@@ -499,7 +500,25 @@ class StdioTransport(MCPTransport):
 
         try:
             while True:
-                line: bytes = await self._process.stdout.readline()
+                try:
+                    line: bytes = await self._process.stdout.readline()
+                except ValueError:
+                    # asyncio StreamReader buffer overflow on a single line.
+                    # Drain bytes up to the next newline so the next message
+                    # parses cleanly instead of killing the whole connection.
+                    logger.warning(
+                        "MCP server emitted a line exceeding stdout buffer "
+                        "limit; discarding oversize message and resuming",
+                    )
+                    while True:
+                        try:
+                            await self._process.stdout.readuntil(b"\n")
+                            break
+                        except asyncio.LimitOverrunError as e:
+                            await self._process.stdout.readexactly(e.consumed)
+                        except asyncio.IncompleteReadError:
+                            return
+                    continue
                 if not line:
                     break
 
@@ -507,7 +526,7 @@ class StdioTransport(MCPTransport):
                     message: dict[str, Any] = json.loads(line.decode().strip())
                     await self._message_queue.put(message)
                 except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON from MCP server: {line}")
+                    logger.warning(f"Invalid JSON from MCP server: {line!r}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
