@@ -814,6 +814,97 @@ kbd {
   word-break: break-all;
 }
 
+/* Inline JSON pretty-print inside the generic key/value table. */
+.w-detail-rich .w-inline-code {
+  margin: 0;
+  font-size: 11px;
+  max-height: 160px;
+}
+
+/* Small "label:" caption above a value or block. */
+.w-detail-rich .w-detail-label {
+  font-size: 10.5px;
+  color: var(--fg-ghost);
+  margin: 4px 0 2px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+/* Path-like values — monospace, slightly muted, breakable. */
+.w-detail-rich .w-path,
+.w-detail-rich .w-mono {
+  font: 11.5px/1.45 var(--mono);
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.w-detail-rich .w-path {
+  background: rgba(127, 214, 166, 0.06);
+  border-left: 2px solid var(--accent-dim);
+  padding: 2px 6px;
+  margin: 4px 0;
+  border-radius: 2px;
+}
+
+/* Prominent single-line value (e.g. Web URL, browser selector). */
+.w-detail-rich .w-prominent {
+  font: 12.5px/1.4 var(--mono);
+  color: var(--fg);
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin: 2px 0 6px;
+  word-break: break-all;
+}
+
+/* Chip row — small inline badges for flags/options. */
+.w-detail-rich .w-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.w-detail-rich .w-chip {
+  display: inline-block;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  color: var(--fg-dim);
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.w-detail-rich .w-chip-cdp {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(224, 178, 90, 0.08);
+  font-weight: 600;
+}
+
+/* "show more" toggle for truncated string values. */
+.w-detail-rich .w-show-more {
+  margin-left: 6px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: 10.5px var(--mono);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.w-detail-rich .w-show-more:hover {
+  color: var(--accent-dim);
+}
+
+.w-detail-rich .w-value {
+  word-break: break-word;
+}
+
 /* ---------- Plan approval widget ------------------------------------- */
 
 .w-plan-block {

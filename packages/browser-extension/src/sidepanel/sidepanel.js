@@ -563,68 +563,339 @@ function toolResult(msgId, toolUseId, text) {
 
 // ---------------------------------------------------------------------------
 // Rich widget detail rendering
+//
+// Each helper returns either a DocumentFragment / element to append, or null
+// to signal "I don't handle this shape — fall through to the generic table."
+// Keep helpers small (~30 LOC). Tool names are matched case-insensitively
+// because backends spell them differently (`Bash` vs `bash` vs `run_shell`).
 
-function renderRichDetail(detail, toolName) {
-  const container = document.createElement("div");
-  container.className = "w-detail-rich";
+// CDP-attaching browser tools: trigger Chrome's yellow "started debugging"
+// banner, so we surface that cost in the widget. Keep this mirrored with the
+// CDP family in packages/browser-extension/ARCHITECTURE.md.
+const CDP_BROWSER_TOOLS = new Set([
+  "browser_type_text",
+  "browser_native_click",
+  "browser_native_press_key",
+  "browser_upload_file",
+  "browser_console_logs",
+  "browser_network_log",
+  "browser_cdp_detach",
+]);
 
-  // Shell / Python commands
-  if (toolName === "run_shell" || toolName === "run_python3") {
-    const cmd = detail.command || detail.expression || detail.code || "";
-    if (cmd) {
-      const pre = document.createElement("pre");
-      pre.className = "code";
-      const code = document.createElement("code");
-      code.textContent = cmd;
-      pre.appendChild(code);
-      container.appendChild(pre);
-      return container;
-    }
+const PATH_LIKE_KEYS = new Set([
+  "path", "file_path", "filename", "filepath", "dir", "directory", "cwd", "root",
+]);
+
+function _truncate(str, n) {
+  if (typeof str !== "string") return String(str);
+  return str.length > n ? str.slice(0, n) + "\n…[truncated]" : str;
+}
+
+function _label(text, color) {
+  const el = document.createElement("div");
+  el.className = "w-detail-label";
+  if (color) el.style.color = color;
+  el.textContent = text;
+  return el;
+}
+
+function _codeBlock(text, { borderColor } = {}) {
+  const pre = document.createElement("pre");
+  pre.className = "code";
+  if (borderColor) pre.style.borderLeftColor = borderColor;
+  const code = document.createElement("code");
+  code.textContent = text;
+  pre.appendChild(code);
+  return pre;
+}
+
+function _path(text) {
+  const span = document.createElement("div");
+  span.className = "w-path";
+  span.textContent = text;
+  return span;
+}
+
+function _chipRow(items) {
+  // items = [{label, value, kind?}]; skips empty values.
+  const row = document.createElement("div");
+  row.className = "w-chip-row";
+  let any = false;
+  for (const { label, value, kind } of items) {
+    if (value === undefined || value === null || value === "") continue;
+    const chip = document.createElement("span");
+    chip.className = "w-chip" + (kind ? ` w-chip-${kind}` : "");
+    chip.textContent = label ? `${label}: ${value}` : String(value);
+    row.appendChild(chip);
+    any = true;
   }
+  return any ? row : null;
+}
 
-  // File writes — show content
-  if (toolName === "write_text_file" || toolName === "edit_text_file") {
-    const content = detail.content || detail.new_string || detail.text || "";
-    if (content) {
-      const label = document.createElement("div");
-      label.style.cssText = "font-size:10.5px;color:var(--fg-ghost);margin-bottom:4px;";
-      label.textContent = detail.file_path || detail.path || toolName;
-      container.appendChild(label);
-      const pre = document.createElement("pre");
-      pre.className = "code";
-      const code = document.createElement("code");
-      code.textContent = content.length > 4000 ? content.slice(0, 4000) + "\n…[truncated]" : content;
-      pre.appendChild(code);
-      container.appendChild(pre);
-      if (detail.old_string) {
-        const diffLabel = document.createElement("div");
-        diffLabel.style.cssText = "font-size:10.5px;color:var(--red);margin:6px 0 2px;";
-        diffLabel.textContent = "replaces:";
-        container.appendChild(diffLabel);
-        const oldPre = document.createElement("pre");
-        oldPre.className = "code";
-        oldPre.style.borderLeftColor = "var(--red)";
-        const oldCode = document.createElement("code");
-        oldCode.textContent = detail.old_string.length > 2000 ? detail.old_string.slice(0, 2000) + "\n…[truncated]" : detail.old_string;
-        oldPre.appendChild(oldCode);
-        container.appendChild(oldPre);
-      }
-      return container;
-    }
+function _cdpBanner() {
+  const chip = document.createElement("span");
+  chip.className = "w-chip w-chip-cdp";
+  chip.title = "This tool attaches chrome.debugger and shows a yellow 'started debugging' banner.";
+  chip.textContent = "CDP — yellow banner";
+  return chip;
+}
+
+function _expandableValue(text, threshold = 400) {
+  // Returns a span; if `text` exceeds threshold, adds a "show more" toggle.
+  const wrap = document.createElement("span");
+  wrap.className = "w-value";
+  if (text.length <= threshold) {
+    wrap.textContent = text;
+    return wrap;
   }
+  const short = document.createElement("span");
+  short.textContent = text.slice(0, threshold) + "…";
+  const full = document.createElement("span");
+  full.textContent = text;
+  full.hidden = true;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "w-show-more";
+  toggle.textContent = "show more";
+  toggle.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const expanded = !full.hidden;
+    full.hidden = expanded;
+    short.hidden = !expanded;
+    toggle.textContent = expanded ? "show more" : "show less";
+  });
+  wrap.append(short, full, toggle);
+  return wrap;
+}
 
-  // Default: key-value table
+// --- per-tool helpers ------------------------------------------------------
+
+function _renderShellLike(detail) {
+  const cmd = detail.command || detail.expression || detail.code || detail.cmd || "";
+  if (!cmd) return null;
+  const frag = document.createDocumentFragment();
+  if (detail.cwd || detail.timeout || detail.description) {
+    const chips = _chipRow([
+      { label: "cwd", value: detail.cwd },
+      { label: "timeout", value: detail.timeout },
+      { label: "desc", value: detail.description },
+    ]);
+    if (chips) frag.appendChild(chips);
+  }
+  frag.appendChild(_codeBlock(_truncate(cmd, 4000)));
+  return frag;
+}
+
+function _renderFileWrite(detail, toolName) {
+  const content = detail.content || detail.new_string || detail.text || "";
+  if (!content) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_path(detail.file_path || detail.path || toolName));
+  frag.appendChild(_codeBlock(_truncate(content, 4000)));
+  if (detail.old_string) {
+    frag.appendChild(_label("replaces:", "var(--red)"));
+    frag.appendChild(_codeBlock(_truncate(detail.old_string, 2000), { borderColor: "var(--red)" }));
+  }
+  return frag;
+}
+
+function _renderReadFile(detail) {
+  const p = detail.file_path || detail.path;
+  if (!p) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_path(p));
+  let range = "";
+  if (detail.lines) range = String(detail.lines);
+  else if (detail.offset !== undefined || detail.limit !== undefined) {
+    const off = detail.offset ?? 0;
+    const lim = detail.limit;
+    range = lim !== undefined ? `lines ${off}–${off + lim}` : `from line ${off}`;
+  }
+  const chips = _chipRow([
+    { label: "", value: range },
+    { label: "pages", value: detail.pages },
+  ]);
+  if (chips) frag.appendChild(chips);
+  return frag;
+}
+
+function _renderGlob(detail) {
+  const pattern = detail.pattern;
+  if (!pattern) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_codeBlock(pattern));
+  if (detail.path) frag.appendChild(_path(detail.path));
+  return frag;
+}
+
+function _renderGrep(detail) {
+  const pattern = detail.pattern;
+  if (!pattern) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_codeBlock(pattern));
+  if (detail.path) frag.appendChild(_path(detail.path));
+  const chips = _chipRow([
+    { label: "glob", value: detail.glob },
+    { label: "type", value: detail.type },
+    { label: "include", value: detail.include },
+    { label: "mode", value: detail.output_mode },
+    { label: "-i", value: detail["-i"] ? "yes" : null },
+    { label: "-n", value: detail["-n"] ? "yes" : null },
+    { label: "-A", value: detail["-A"] },
+    { label: "-B", value: detail["-B"] },
+    { label: "-C", value: detail["-C"] ?? detail.context },
+    { label: "multiline", value: detail.multiline ? "yes" : null },
+  ]);
+  if (chips) frag.appendChild(chips);
+  return frag;
+}
+
+function _renderWeb(detail, toolName) {
+  const target = detail.url || detail.query;
+  if (!target) return null;
+  const frag = document.createDocumentFragment();
+  const isUrl = !!detail.url;
+  frag.appendChild(_label(isUrl ? "url" : "query", "var(--fg-ghost)"));
+  const big = document.createElement("div");
+  big.className = "w-prominent";
+  big.textContent = target;
+  frag.appendChild(big);
+  if (toolName.toLowerCase() === "webfetch" && detail.prompt) {
+    frag.appendChild(_label("prompt", "var(--fg-ghost)"));
+    frag.appendChild(_expandableValue(detail.prompt));
+  }
+  const chips = _chipRow([
+    { label: "allowed_domains", value: Array.isArray(detail.allowed_domains) ? detail.allowed_domains.join(",") : detail.allowed_domains },
+    { label: "blocked_domains", value: Array.isArray(detail.blocked_domains) ? detail.blocked_domains.join(",") : detail.blocked_domains },
+  ]);
+  if (chips) frag.appendChild(chips);
+  return frag;
+}
+
+function _renderBrowser(detail, toolName) {
+  const frag = document.createDocumentFragment();
+  if (CDP_BROWSER_TOOLS.has(toolName.toLowerCase())) {
+    const banner = document.createElement("div");
+    banner.className = "w-chip-row";
+    banner.appendChild(_cdpBanner());
+    frag.appendChild(banner);
+  }
+  // Prominent line: most browser tools have ONE thing the user cares about.
+  const primary = detail.url || detail.selector || detail.key || detail.text;
+  if (primary !== undefined && primary !== null && primary !== "") {
+    const labelText = detail.url ? "url" : detail.selector ? "selector" : detail.key ? "key" : "text";
+    frag.appendChild(_label(labelText, "var(--fg-ghost)"));
+    const big = document.createElement("div");
+    big.className = "w-prominent";
+    big.textContent = String(primary);
+    frag.appendChild(big);
+  }
+  // Secondary fields as chips.
+  const secondary = [];
+  for (const [k, v] of Object.entries(detail)) {
+    if (k === "tool_name" || k === "input") continue;
+    if (k === "url" || k === "selector" || k === "key" || k === "text") continue;
+    if (v === undefined || v === null || v === "") continue;
+    if (k === "paths" && Array.isArray(v)) {
+      for (const p of v) frag.appendChild(_path(p));
+      continue;
+    }
+    const display = typeof v === "object" ? JSON.stringify(v) : String(v);
+    secondary.push({ label: k, value: display.length > 80 ? display.slice(0, 80) + "…" : display });
+  }
+  const chips = _chipRow(secondary);
+  if (chips) frag.appendChild(chips);
+  return frag.childNodes.length ? frag : null;
+}
+
+function _renderGit(detail, toolName) {
+  // git_* tools: render `git <subcommand> <args>` as a shell-style preview.
+  // Subcommand falls back to the suffix of the tool name, e.g. `git_diff`.
+  const sub = detail.subcommand || detail.command || toolName.replace(/^git[_-]?/i, "") || "";
+  const argsParts = [];
+  if (Array.isArray(detail.args)) argsParts.push(...detail.args.map(String));
+  else if (typeof detail.args === "string") argsParts.push(detail.args);
+  for (const k of ["ref", "branch", "path", "file", "message", "remote"]) {
+    if (detail[k] !== undefined && detail[k] !== null && detail[k] !== "") argsParts.push(`${k}=${detail[k]}`);
+  }
+  const line = ["git", sub, ...argsParts].filter(Boolean).join(" ").trim();
+  if (!line) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_codeBlock(line));
+  if (detail.cwd) {
+    const chips = _chipRow([{ label: "cwd", value: detail.cwd }]);
+    if (chips) frag.appendChild(chips);
+  }
+  return frag;
+}
+
+function _renderGenericTable(detail) {
   const table = document.createElement("table");
   for (const [k, v] of Object.entries(detail)) {
+    if (k === "tool_name" || k === "input") continue;
     const row = document.createElement("tr");
     const keyCell = document.createElement("td");
     keyCell.textContent = k;
     const valCell = document.createElement("td");
-    valCell.textContent = typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
+    if (PATH_LIKE_KEYS.has(k.toLowerCase()) && typeof v === "string") {
+      const span = document.createElement("span");
+      span.className = "w-mono";
+      span.textContent = v;
+      valCell.appendChild(span);
+    } else if (typeof v === "object" && v !== null) {
+      const json = JSON.stringify(v, null, 2);
+      if (json.length > 60) {
+        const pre = document.createElement("pre");
+        pre.className = "code w-inline-code";
+        const code = document.createElement("code");
+        code.textContent = _truncate(json, 2000);
+        pre.appendChild(code);
+        valCell.appendChild(pre);
+      } else {
+        valCell.textContent = json;
+      }
+    } else {
+      valCell.appendChild(_expandableValue(String(v)));
+    }
     row.append(keyCell, valCell);
     table.appendChild(row);
   }
-  container.appendChild(table);
+  return table;
+}
+
+function renderRichDetail(detail, toolName) {
+  const container = document.createElement("div");
+  container.className = "w-detail-rich";
+  const lower = (toolName || "").toLowerCase();
+
+  let rendered = null;
+  if (lower === "run_shell" || lower === "run_python3" || lower === "bash") {
+    rendered = _renderShellLike(detail);
+  } else if (lower === "write_text_file" || lower === "edit_text_file" || lower === "write" || lower === "edit") {
+    rendered = _renderFileWrite(detail, toolName);
+  } else if (lower === "read" || lower === "read_text_file") {
+    rendered = _renderReadFile(detail);
+  } else if (lower === "glob") {
+    rendered = _renderGlob(detail);
+  } else if (lower === "grep") {
+    rendered = _renderGrep(detail);
+  } else if (lower === "webfetch" || lower === "websearch" || lower === "web_fetch" || lower === "web_search") {
+    rendered = _renderWeb(detail, toolName);
+  } else if (lower.startsWith("browser_")) {
+    rendered = _renderBrowser(detail, toolName);
+  } else if (lower.startsWith("git_") || lower.startsWith("git-")) {
+    rendered = _renderGit(detail, toolName);
+  }
+
+  if (rendered) {
+    container.appendChild(rendered);
+    return container;
+  }
+
+  // Fallback: pretty key/value table with path styling, JSON pretty-print
+  // for long objects, and a "show more" toggle for long strings.
+  container.appendChild(_renderGenericTable(detail));
   return container;
 }
 
