@@ -123,7 +123,7 @@ def _resolve_github_token(
 ) -> str:
     """Resolve a GitHub token from explicit value, gh CLI, env vars, or OAuth.
 
-    Priority: ``explicit`` → env / ``gh`` CLI (per mode) → ``oauth_token``.
+    Priority: ``explicit`` → keyring → env / ``gh`` CLI (per mode) → ``oauth_token``.
 
     The OAuth fallback is the "easy path": it kicks in when nothing else is
     configured. Environment variables intentionally override it so operators
