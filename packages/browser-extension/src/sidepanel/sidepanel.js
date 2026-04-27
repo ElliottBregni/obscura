@@ -185,6 +185,11 @@ class TabManager {
       // moment the tab is saved/switched, restored when the tab activates.
       backend: null,
       workspace: null,
+      // Chrome tab-group id this conversation owns. Created lazily the first
+      // time the agent opens a browser tab inside this session; subsequent
+      // browser_new_tab calls add to the same group so the user can see
+      // which tabs the agent is operating on at a glance.
+      tabGroupId: null,
     };
     this._tabs.push(tab);
     return tab;
@@ -291,6 +296,7 @@ function saveTabs() {
       logHTML: t.logHTML,
       backend: t.backend ?? null,
       workspace: t.workspace ?? null,
+      tabGroupId: t.tabGroupId ?? null,
     }));
     chrome.storage.local.set({ [TABS_KEY]: { tabs, activeIdx: tabManager.activeIdx } });
   } catch (err) {
@@ -312,6 +318,10 @@ async function loadTabs() {
       streamStates: {},
       backend: typeof t.backend === "string" ? t.backend : null,
       workspace: typeof t.workspace === "string" ? t.workspace : null,
+      // Validate the persisted group id later — if the group no longer
+      // exists in Chrome, _ensureSessionTabGroup will create a fresh one
+      // on the next browser_new_tab call.
+      tabGroupId: typeof t.tabGroupId === "number" ? t.tabGroupId : null,
     }));
     const idx = Math.min(Math.max(state.activeIdx | 0, 0), tabManager._tabs.length - 1);
     tabManager._activeIdx = idx;
@@ -1476,6 +1486,68 @@ if (typeof chrome !== "undefined" && chrome.debugger) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Per-session tab grouping.
+//
+// Each panel tab represents one obscura conversation; when the agent opens
+// a browser tab on its behalf, we drop that browser tab into a Chrome tab
+// group so the user can see at a glance which tabs the agent is driving.
+// The group is created lazily on first `browser_new_tab` and persisted on
+// the panel-tab record so a panel reload restores the binding.
+//
+// We never group tabs the user opened themselves — only tabs the agent
+// creates via browser_new_tab.
+
+const TAB_GROUP_COLORS = ["blue", "cyan", "green", "yellow", "orange", "pink", "purple", "red", "grey"];
+
+function _pickGroupColor(seed) {
+  // Deterministic pick from a string seed (panel-tab id) so reopening the
+  // same conversation yields the same colour.
+  let h = 0;
+  for (const c of String(seed || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return TAB_GROUP_COLORS[h % TAB_GROUP_COLORS.length];
+}
+
+async function _groupStillExists(groupId) {
+  if (typeof groupId !== "number" || !chrome.tabGroups?.get) return false;
+  try {
+    await chrome.tabGroups.get(groupId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function _ensureAgentTabInGroup(newTabId) {
+  if (!chrome.tabs?.group || !chrome.tabGroups?.update) return;
+  const panelTab = tabManager.active;
+  if (!panelTab) return;
+
+  // Drop a stale id (panel reloaded; group was closed).
+  if (panelTab.tabGroupId != null && !(await _groupStillExists(panelTab.tabGroupId))) {
+    panelTab.tabGroupId = null;
+  }
+
+  if (panelTab.tabGroupId == null) {
+    // First agent-opened tab in this conversation — create the group.
+    const groupId = await chrome.tabs.group({ tabIds: [newTabId] });
+    panelTab.tabGroupId = groupId;
+    saveTabs();
+    const title = `obscura: ${(panelTab.label || "").slice(0, 24) || "session"}`;
+    try {
+      await chrome.tabGroups.update(groupId, {
+        title,
+        color: _pickGroupColor(panelTab.id),
+        collapsed: false,
+      });
+    } catch (e) {
+      console.warn("[obscura] tabGroups.update failed", e);
+    }
+  } else {
+    await chrome.tabs.group({ tabIds: [newTabId], groupId: panelTab.tabGroupId });
+  }
+}
+
 async function runBrowserOp(op, args) {
   const tab = await activeTab();
   if (!tab?.id && op !== "list_tabs") throw new Error("no active tab");
@@ -1703,6 +1775,14 @@ async function runBrowserOp(op, args) {
     case "new_tab": {
       const { url, active = true } = args;
       const created = await chrome.tabs.create({ url, active });
+      // Auto-add to this conversation's tab group so the user can see at a
+      // glance which tabs the agent is operating on. Best-effort — group
+      // failures shouldn't block the tab opening.
+      try {
+        await _ensureAgentTabInGroup(created.id);
+      } catch (e) {
+        console.warn("[obscura] tab grouping failed", e);
+      }
       return { id: created.id, url: created.url };
     }
     case "close_tab": {

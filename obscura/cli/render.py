@@ -36,15 +36,36 @@ LIGHTNING_BOLT = "↯"
 # Theme constants — sourced from Catppuccin Mocha palette
 # ---------------------------------------------------------------------------
 
-from obscura.cli.renderer.modern.theme import (
-    ERROR_HEX,
-    OK_HEX,
-    THINKING_HEX,
-    TOOL_HEX,
-    WARN_HEX,
-    BLUE,
-    SAPPHIRE,
-)
+# Attempt direct package import; fall back to file-load to avoid circular imports
+try:
+    from obscura.cli.renderer.modern.theme import (
+        ERROR_HEX,
+        OK_HEX,
+        THINKING_HEX,
+        TOOL_HEX,
+        WARN_HEX,
+        BLUE,
+        SAPPHIRE,
+    )
+except Exception:
+    import importlib.util
+    import pathlib
+    import sys
+
+    theme_path = pathlib.Path(__file__).parent / "renderer" / "modern" / "theme.py"
+    spec = importlib.util.spec_from_file_location(
+        "obscura.cli.renderer.modern._theme_local", str(theme_path)
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    ERROR_HEX = module.ERROR_HEX
+    OK_HEX = module.OK_HEX
+    THINKING_HEX = module.THINKING_HEX
+    TOOL_HEX = module.TOOL_HEX
+    WARN_HEX = module.WARN_HEX
+    BLUE = module.BLUE
+    SAPPHIRE = module.SAPPHIRE
 
 ACCENT = BLUE.hex
 ACCENT_DIM = SAPPHIRE.hex

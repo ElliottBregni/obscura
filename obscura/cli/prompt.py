@@ -409,18 +409,41 @@ class SlashCommandCompleter(Completer):
 # ---------------------------------------------------------------------------
 
 # Import Catppuccin Mocha hex values from the single source of truth.
-from obscura.cli.renderer.modern.theme import (
-    BLUE as _C_BLUE,
-    GREEN as _C_GREEN,
-    LAVENDER as _C_LAVENDER,
-    OVERLAY0 as _C_OVERLAY0,
-    PEACH as _C_PEACH,
-    RED as _C_RED,
-    SUBTEXT0 as _C_SUBTEXT0,
-    SURFACE1 as _C_SURFACE1,
-    TEAL as _C_TEAL,
-    TEXT as _C_TEXT,
-)
+try:
+    from obscura.cli.renderer.modern.theme import (
+        BLUE as _C_BLUE,
+        GREEN as _C_GREEN,
+        LAVENDER as _C_LAVENDER,
+        OVERLAY0 as _C_OVERLAY0,
+        PEACH as _C_PEACH,
+        RED as _C_RED,
+        SUBTEXT0 as _C_SUBTEXT0,
+        SURFACE1 as _C_SURFACE1,
+        TEAL as _C_TEAL,
+        TEXT as _C_TEXT,
+    )
+except Exception:
+    import importlib.util
+    import pathlib
+    import sys
+
+    theme_path = pathlib.Path(__file__).parent / "renderer" / "modern" / "theme.py"
+    spec = importlib.util.spec_from_file_location(
+        "obscura.cli.renderer.modern._theme_local", str(theme_path)
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    _C_BLUE = module.BLUE
+    _C_GREEN = module.GREEN
+    _C_LAVENDER = module.LAVENDER
+    _C_OVERLAY0 = module.OVERLAY0
+    _C_PEACH = module.PEACH
+    _C_RED = module.RED
+    _C_SUBTEXT0 = module.SUBTEXT0
+    _C_SURFACE1 = module.SURFACE1
+    _C_TEAL = module.TEAL
+    _C_TEXT = module.TEXT
 
 PROMPT_STYLE = Style.from_dict(
     {

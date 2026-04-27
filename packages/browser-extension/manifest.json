@@ -34,7 +34,8 @@
     "tabs",
     "clipboardRead",
     "clipboardWrite",
-    "debugger"
+    "debugger",
+    "tabGroups"
   ],
   "host_permissions": [
     "<all_urls>"
