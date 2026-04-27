@@ -118,8 +118,14 @@ let kairosState = "off";        // "on" | "off"
 let pendingImages = [];          // { dataUrl, name }[] for drag-drop / paste
 let pendingTextFiles = [];       // { name, content }[] for drag-drop
 let checkpointPendingId = null;  // msgId of the in-flight /checkpoint command
-let fleetPendingId = null;       // msgId of the in-flight /agent list command
+let fleetPendingId = null;       // msgId of the in-flight /agent list command (fallback path)
 let mcpPendingId = null;         // msgId of the in-flight /mcp list|discover command
+
+// Live fleet observability — populated by `fleet` frames from the host.
+// Keyed by agent name. Empty when no supervisor/runtime is reporting; the
+// fleet overlay falls back to running `/agent list` in that case.
+const fleetState = new Map();    // name -> { status, lastActivity, lastError, model, expanded }
+let fleetSeeded = false;         // host has sent at least one fleet frame this connection
 
 // Per-Chrome-tab session persistence: track which Chrome tab this panel belongs to.
 let chromeTabId = null;
@@ -2231,6 +2237,10 @@ function connect() {
         showWarningBanner(msg.message || "Warning");
         break;
       }
+      case MsgType.FLEET: {
+        handleFleetFrame(msg);
+        break;
+      }
       case "auth_required": {
         showAuthGate();
         break;
@@ -2858,12 +2868,85 @@ warningBanner.querySelector(".warning-dismiss").addEventListener("click", () => 
 });
 
 // ---------------------------------------------------------------------------
-// Fleet overlay (Feature 3)
+// Fleet overlay — live observability backed by `fleet` frames from the host.
+
+function handleFleetFrame(msg) {
+  fleetSeeded = true;
+  const event = msg.event || "";
+  if (event === "snapshot") {
+    fleetState.clear();
+    const agents = Array.isArray(msg.agents) ? msg.agents : [];
+    for (const a of agents) {
+      if (!a || !a.agent) continue;
+      fleetState.set(a.agent, {
+        status: a.status || "idle",
+        lastActivity: a.lastActivity || 0,
+        lastError: a.lastError || "",
+        model: a.model || "",
+        expanded: false,
+      });
+    }
+  } else {
+    const name = msg.agent || "";
+    if (!name) return;
+    if (event === "agent_stopped" && fleetState.has(name)) {
+      // Keep the row visible briefly so users notice; mark stopped.
+      const prev = fleetState.get(name);
+      fleetState.set(name, {
+        ...prev,
+        status: "stopped",
+        lastActivity: msg.timestamp || Math.floor(Date.now() / 1000),
+        lastError: msg.detail?.error || prev.lastError || "",
+      });
+    } else {
+      const prev = fleetState.get(name) || { expanded: false };
+      fleetState.set(name, {
+        status: msg.status || prev.status || "idle",
+        lastActivity: msg.timestamp || Math.floor(Date.now() / 1000),
+        lastError: msg.detail?.error || (event === "agent_error" ? msg.detail?.message : "") || prev.lastError || "",
+        model: prev.model || "",
+        expanded: prev.expanded || false,
+      });
+    }
+  }
+  updateFleetIndicator();
+  if (!fleetOverlay.classList.contains("hidden")) {
+    renderFleetContent(null, null);
+  }
+}
+
+function updateFleetIndicator() {
+  // Tag the toolbar fleet button with a colored dot + count.
+  const total = fleetState.size;
+  let cls = "";
+  if (total === 0) {
+    cls = "";
+  } else {
+    let hasErr = false;
+    let anyRunning = false;
+    for (const s of fleetState.values()) {
+      if (s.status === "error") hasErr = true;
+      else if (s.status === "running") anyRunning = true;
+    }
+    if (hasErr) cls = "fleet-err";
+    else if (anyRunning) cls = "fleet-running";
+    else cls = "fleet-idle";
+  }
+  sbFleet.classList.remove("fleet-err", "fleet-running", "fleet-idle");
+  if (cls) sbFleet.classList.add(cls);
+  sbFleet.title = total === 0
+    ? "Agent fleet status (no live agents)"
+    : `Agent fleet status (${total} agent${total === 1 ? "" : "s"})`;
+}
 
 function showFleetOverlay() {
   fleetOverlay.classList.remove("hidden");
+  if (fleetSeeded || fleetState.size > 0) {
+    renderFleetContent(null, null);
+    return;
+  }
+  // Host hasn't reported any live fleet yet — fall back to /agent list text.
   fleetContent.innerHTML = '<div class="checkpoint-empty">loading…</div>';
-  // Send /agent list command
   const id = crypto.randomUUID?.() ?? `fl-${Date.now()}`;
   fleetPendingId = id;
   const bubble = document.createElement("div");
@@ -2871,7 +2954,6 @@ function showFleetOverlay() {
   try {
     port?.postMessage({ type: MsgType.COMMAND, id, raw: "/agent list", backend: backendSel.value });
   } catch {
-    // Fallback: request diag data
     port?.postMessage({ type: MsgType.DIAG, id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
   }
 }
@@ -2881,10 +2963,78 @@ function hideFleetOverlay() {
   fleetPendingId = null;
 }
 
+function _fmtRelTime(ts) {
+  if (!ts) return "—";
+  const dt = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (dt < 5) return "just now";
+  if (dt < 60) return `${dt}s ago`;
+  if (dt < 3600) return `${Math.floor(dt / 60)}m ago`;
+  if (dt < 86400) return `${Math.floor(dt / 3600)}h ago`;
+  return `${Math.floor(dt / 86400)}d ago`;
+}
+
 function renderFleetContent(diagData, agentListText) {
   fleetContent.innerHTML = "";
 
-  // If we have diag data, render a card grid
+  // Live path: render from fleetState.
+  if (fleetSeeded || fleetState.size > 0) {
+    if (fleetState.size === 0) {
+      const empty = document.createElement("div");
+      empty.className = "checkpoint-empty";
+      empty.textContent = "no agents running (host is reporting live; fleet is empty)";
+      fleetContent.appendChild(empty);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "fleet-agent-list";
+    const sorted = Array.from(fleetState.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [name, st] of sorted) {
+      const row = document.createElement("div");
+      row.className = `fleet-agent-row fleet-row-${st.status}`;
+
+      const dot = document.createElement("span");
+      dot.className = `fleet-dot fleet-dot-${st.status}`;
+      dot.title = st.status;
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "fleet-agent-name";
+      nameEl.textContent = name;
+
+      const stat = document.createElement("span");
+      stat.className = "fleet-agent-status";
+      stat.textContent = `${st.status} · ${_fmtRelTime(st.lastActivity)}`;
+
+      row.append(dot, nameEl, stat);
+      row.style.cursor = "pointer";
+      row.addEventListener("click", () => {
+        const cur = fleetState.get(name);
+        if (cur) { cur.expanded = !cur.expanded; fleetState.set(name, cur); renderFleetContent(null, null); }
+      });
+      list.appendChild(row);
+
+      if (st.expanded) {
+        const detail = document.createElement("div");
+        detail.className = "fleet-agent-detail";
+        const lines = [];
+        if (st.model) lines.push(`model: ${st.model}`);
+        lines.push(`status: ${st.status}`);
+        lines.push(`last activity: ${_fmtRelTime(st.lastActivity)}`);
+        if (st.lastError) lines.push(`error: ${st.lastError}`);
+        detail.textContent = lines.join("\n");
+        list.appendChild(detail);
+      } else if (st.status === "error" && st.lastError) {
+        // Show errors inline even when collapsed.
+        const errEl = document.createElement("div");
+        errEl.className = "fleet-agent-error-inline";
+        errEl.textContent = st.lastError.length > 140 ? st.lastError.slice(0, 140) + "…" : st.lastError;
+        list.appendChild(errEl);
+      }
+    }
+    fleetContent.appendChild(list);
+    return;
+  }
+
+  // ── Fallback: legacy paths — diag cards or /agent list text ────────────────
   if (diagData) {
     const cards = document.createElement("div");
     cards.className = "fleet-cards";
@@ -2910,7 +3060,6 @@ function renderFleetContent(diagData, agentListText) {
     return;
   }
 
-  // Parse /agent list text
   if (agentListText) {
     const lines = agentListText.split("\n").map((l) => l.trim()).filter(Boolean);
     const agents = lines.filter((l) => !l.startsWith("No ") && !l.startsWith("Usage") && !l.startsWith("#"));
@@ -2935,6 +3084,13 @@ function renderFleetContent(diagData, agentListText) {
     }
   }
 }
+
+// Refresh "X seconds ago" labels every 5s while overlay is open.
+setInterval(() => {
+  if (!fleetOverlay.classList.contains("hidden") && (fleetSeeded || fleetState.size > 0)) {
+    renderFleetContent(null, null);
+  }
+}, 5000);
 
 sbFleet.addEventListener("click", showFleetOverlay);
 fleetClose.addEventListener("click", hideFleetOverlay);

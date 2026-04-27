@@ -122,6 +122,7 @@ multiplexing; responses echo the same `id`.
 | `widget` | `{id (widget_id), kind, question, actions, default?, detail?}` | Confirmation / attention / question dialog |
 | `browser-tool` | `{id, op, args}` | Request to run DOM op in the panel |
 | `kairos` | `{state}` | Daemon state change |
+| `fleet` | `{event, agent?, status?, timestamp, detail?, agents?}` | Live fleet observability — `event` ∈ `snapshot` / `agent_started` / `agent_stopped` / `agent_error` / `agent_activity`. `snapshot` carries `agents: [{agent, status, lastActivity, lastError, model}]`; per-agent events carry `agent` + `status` (`running`/`idle`/`error`/`stopped`). Emitted by the host's fleet observer (lifecycle hook on every `AgentRuntime` in-process + 2 s polling diff). Silent when no runtime is active — panel falls back to `/agent list`. |
 | `auth_required` | `{id, message}` | Auth gate challenge |
 | `done` | `{id, session_id, text_len}` | Turn finished |
 | `error` | `{id?, message, trace?}` | Any failure |
