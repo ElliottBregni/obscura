@@ -827,6 +827,17 @@ async def _ensure_session(
             supervise=False,  # no agent fleet — panel is single-user
             compiled_ws=compiled_ws,
             extra_mcp_servers=extra_mcp_servers or None,
+            # Scope events.db + vector memory to ``~/.obscura/profiles/<profile_id>/``.
+            # Without this, two Chrome profiles running obscura at once
+            # share ``events.db`` and corrupt each other's session ids.
+            # ``_profile_id`` is learned from the panel's first frame
+            # (boot ping) and is set by the time the user issues a send/
+            # command, since native-messaging frames are FIFO and the
+            # boot ping is dispatched before any send. Falls back to the
+            # legacy path when None — typical when the panel hasn't
+            # generated a profile id yet (older extension build) or
+            # tests drive the host directly.
+            profile_id=_profile_id,
         )
 
         _session = await ObscuraSession.create(config)
@@ -1538,6 +1549,11 @@ async def _stop_socket_bridge() -> None:
 
 
 async def _main() -> None:
+    # ``_profile_id`` is module-global; the inbound-frame loop below
+    # mutates it. Declared once up front so the ``ready`` frame's
+    # read of it doesn't trip Python's "name used prior to global" rule.
+    global _profile_id
+
     _install_widget_broker()
     _install_renderer_factory()
     _install_console_proxy()
@@ -1561,6 +1577,12 @@ async def _main() -> None:
             "pid": os.getpid(),
             "peers": _peer_hosts(),
             "socket_bridge": socket_bridge_state,
+            # Echo the profile id back so the panel can confirm what
+            # the host learned. May be None if no panel ping has
+            # arrived yet (the ready frame races the boot ping); the
+            # panel already knows its own id and can ignore the field
+            # in that case.
+            "profile_id": _profile_id,
         }
     )
 
@@ -1596,9 +1618,9 @@ async def _main() -> None:
             # Capture profile_id from the first frame that carries one.
             # Every subsequent log line is tagged so teammates sharing a
             # machine can correlate their session against this host.
+            # ``global _profile_id`` is declared at the top of _main().
             pid_in_msg = msg.get("profile_id")
             if isinstance(pid_in_msg, str) and pid_in_msg:
-                global _profile_id
                 if _profile_id != pid_in_msg:
                     _profile_id = pid_in_msg
                     log.info("profile_id=%s (host pid=%d)", _profile_id, os.getpid())

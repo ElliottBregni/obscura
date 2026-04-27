@@ -173,6 +173,33 @@ class SessionConfig:
     # server exposing the browser tools on Codex sessions.  Safe to
     # leave as ``None`` — equivalent to an empty list.
     extra_mcp_servers: list[dict[str, Any]] | None = None
+    # Optional storage scope. When set, ``events.db`` and the SQLite
+    # vector-memory directory are routed under
+    # ``~/.obscura/profiles/<profile_id>/`` so multiple Chrome profiles
+    # can run obscura side-by-side without sharing SQLite session ids.
+    # ``None`` (the default) preserves legacy single-tenant behaviour:
+    # the terminal REPL keeps writing to ``~/.obscura/events.db``.
+    profile_id: str | None = None
+
+
+def _resolve_profile_home(profile_id: str | None) -> Path:
+    """Return the storage root for a given profile.
+
+    With ``profile_id=None`` this is the legacy ``~/.obscura`` (terminal
+    REPL behaviour, unchanged). With a profile id set, it's
+    ``~/.obscura/profiles/<profile_id>``. The directory is *not* created
+    here — callers materialise it on first write (``SQLiteEventStore``
+    auto-creates parents, the vector memory backend auto-creates its dir).
+
+    Note: this is *not* a migration helper. If the legacy ``events.db``
+    exists and a profile-scoped one does not, the legacy db is left
+    alone — it's shared across profiles and overwriting it would corrupt
+    other profiles' state. The profile gets a fresh db on first use.
+    """
+    home = resolve_obscura_home()
+    if profile_id:
+        return home / "profiles" / profile_id
+    return home
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +216,7 @@ class ObscuraSession:
 
     # Populated by create()
     _config: SessionConfig
+    _profile_home: Path
     _store: SQLiteEventStore
     _sid: str
     _ctx: REPLContext
@@ -230,7 +258,12 @@ class ObscuraSession:
         self._tip_scheduler = None
         self._background_tasks = set()
 
-        self._store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        # Profile-scoped storage. ``profile_id`` is supplied by the
+        # browser-extension native host (one host process per Chrome
+        # profile); terminal REPL leaves it as ``None`` and keeps the
+        # legacy shared paths.
+        self._profile_home = _resolve_profile_home(config.profile_id)
+        self._store = SQLiteEventStore(self._profile_home / "events.db")
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
@@ -1105,6 +1138,18 @@ class ObscuraSession:
         )
         self._cli_user = cli_user
 
+        # Scope the SQLite vector backend to the profile dir if a
+        # profile_id is set and the env var hasn't been explicitly
+        # overridden by the caller. The vector backend reads this env
+        # var lazily on first instantiation, so set it before
+        # ``init_vector_store`` runs. We don't migrate any existing
+        # ``~/.obscura/vector_memory/`` data — the profile gets a fresh
+        # store on first write, mirroring the events.db policy.
+        if self._config.profile_id and "OBSCURA_VECTOR_MEMORY_DIR" not in os.environ:
+            os.environ["OBSCURA_VECTOR_MEMORY_DIR"] = str(
+                self._profile_home / "vector_memory",
+            )
+
         self._vector_store = init_vector_store(cli_user)
 
         if self._vector_store is not None:
@@ -1141,7 +1186,9 @@ class ObscuraSession:
         if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
             include_default = False
 
-        db_path = resolve_obscura_home() / "events.db"
+        # Reuse the profile-scoped events.db computed in ``create()``
+        # so memory loading sees the same store the session writes to.
+        db_path = self._profile_home / "events.db"
         memory_context = load_obscura_memory(self._sid, db_path)
         custom_sections: list[str] = [memory_context] if memory_context else []
 
@@ -1685,7 +1732,7 @@ class ObscuraSession:
 
                 return summarize_session_for_resume(
                     config.session_id,
-                    resolve_obscura_home() / "events.db",
+                    self._profile_home / "events.db",
                 )
             except Exception:
                 pass

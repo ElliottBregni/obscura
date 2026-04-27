@@ -113,7 +113,7 @@ multiplexing; responses echo the same `id`.
 
 | `type` | Payload | Notes |
 |--------|---------|-------|
-| `ready` | `{version, python, git_commit, backends, commands, skills, at_commands, workspaces, pid}` | Once on connect |
+| `ready` | `{version, python, git_commit, backends, commands, skills, at_commands, workspaces, pid, peers, socket_bridge, profile_id}` | Once on connect. `profile_id` echoes whatever the host learned from the panel's first frame; may be `null` if the ready frame races the boot ping. |
 | `chunk` | `{id, text}` | Assistant text delta |
 | `thinking` | `{id, text}` | Reasoning delta (collapsible in UI) |
 | `tool_start` / `tool_delta` / `tool_end` | `{id, tool_use_id, tool_name?, delta?}` | Tool-call lifecycle |
@@ -254,15 +254,35 @@ flow already handles arbitrary action sets.
 | Location | What | Cleared by |
 |----------|------|------------|
 | `chrome.storage.local` | Per-profile panel state: settings, transcript, session list, tab state | Extension uninstall or panel's `/clear` |
-| `~/.obscura/events.db` | SQLite event log (turns, tool calls) — shared with terminal REPL | `rm` or `/session clear` |
-| `~/.obscura/vector_memory/` or Qdrant | Vector memory — shared | `/memory clear` |
+| `~/.obscura/profiles/<profile_id>/events.db` | SQLite event log (turns, tool calls) — scoped per Chrome profile | `rm` or `/session clear` |
+| `~/.obscura/profiles/<profile_id>/vector_memory/` | Vector memory (SQLite backend) — scoped per Chrome profile | `/memory clear` |
+| `~/.obscura/events.db` | Legacy single-tenant event log used by the terminal REPL when no `profile_id` is supplied | `rm` or `/session clear` |
+| `~/.obscura/vector_memory/` | Legacy vector memory used by the terminal REPL when no `profile_id` is supplied | `/memory clear` |
 | `~/.obscura/logs/browser-extension-host.log` | Host stderr / logging | Manual rotation |
-| `~/.obscura/browser-host.pid` | PID file (advisory lock) | Host exit |
+| `~/.obscura/browser-hosts/<pid>.pid` | Per-process PID file (one host per Chrome profile) | Host exit |
 | `~/.obscura/browser-host.env` | User secrets (GH_TOKEN, API keys) | Manual edit |
 
-**Multi-profile warning:** two Chrome profiles running obscura on the
-same machine today share `events.db` and can corrupt session ids. See
-roadmap item 4.1 — use `chrome.runtime.id` to scope the path.
+**Multi-profile storage scoping.** Each Chrome profile generates a
+stable UUID stored in `chrome.storage.local`, sent to the host on
+every frame as `profile_id`. The host threads it through
+`SessionConfig.profile_id`, which routes the SQLite event log and the
+SQLite vector-memory backend under
+`~/.obscura/profiles/<profile_id>/`. The terminal REPL passes
+`profile_id=None` and keeps the legacy shared paths.
+
+The migration policy is **leave the legacy data alone**: if
+`~/.obscura/events.db` exists and the profile-scoped one does not, the
+profile gets a fresh database on first write. We never auto-migrate —
+the legacy db is also being read by the terminal REPL and concurrent
+agents, so silently moving rows would corrupt them. Users who want
+their old browser history under a profile can copy the file manually
+when no obscura process is running.
+
+**Qdrant note:** when `OBSCURA_QDRANT_*` env vars route vector memory
+to Qdrant, profile scoping is the user's responsibility (use a per-
+profile collection name or `OBSCURA_QDRANT_PATH`). The
+`OBSCURA_VECTOR_MEMORY_DIR` we set only affects the SQLite fallback
+backend.
 
 ---
 
