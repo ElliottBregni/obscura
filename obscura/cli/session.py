@@ -352,16 +352,67 @@ class ObscuraSession:
         *,
         streaming_status: Any | None = None,
         loop_kwargs: dict[str, Any] | None = None,
+        images: list[Any] | None = None,
+        attached_files: list[dict[str, Any]] | None = None,
     ) -> str:
         """Send a chat message and stream the response.
 
         Returns the accumulated assistant text.  All pre/post-processing
         (vector memory, auto-compact, auto-title, plan parsing) is included.
+
+        ``images`` accepts a list of either data URLs (``data:image/png;
+        base64,…``), raw base64 strings, or dicts with ``data``/``dataUrl``/
+        ``base64`` and optional ``media_type``. They are forwarded to the
+        backend as multimodal content blocks (Claude); other backends
+        receive the plain prompt and a textual marker per image.
+
+        ``attached_files`` accepts a list of ``{name, content}`` dicts and is
+        prepended to the prompt as ``<file path="…">…</file>`` blocks.
         """
         from obscura.cli import trace as trace_mod
 
         ctx = self._ctx
         effective_kwargs = loop_kwargs if loop_kwargs is not None else self._loop_kwargs
+
+        # ── Attached files: prepend as tagged blocks before the user prompt.
+        if attached_files:
+            file_blocks: list[str] = []
+            for f in attached_files:
+                try:
+                    name = str(f.get("name") or "attachment")
+                    content = str(f.get("content") or "")
+                except Exception:
+                    continue
+                if not content:
+                    continue
+                # Escape the closing tag so file content can't break out.
+                safe = content.replace("</file>", "<\u2009/file>")
+                file_blocks.append(f'<file path="{name}">\n{safe}\n</file>')
+            if file_blocks:
+                text = "\n\n".join(file_blocks) + "\n\n" + text
+
+        # ── Images: append a textual marker per image so backends without
+        # vision plumbing still know images were referenced. The actual
+        # image data is forwarded via ``run_loop(images=…)`` below.
+        normalized_images: list[Any] = []
+        if images:
+            markers: list[str] = []
+            for i, item in enumerate(images):
+                name = ""
+                if isinstance(item, dict):
+                    from typing import cast as _cast
+
+                    item_dict = _cast("dict[str, Any]", item)
+                    raw_name = item_dict.get("name") or item_dict.get("filename")
+                    if isinstance(raw_name, str):
+                        name = raw_name
+                if not name:
+                    name = f"image-{i + 1}"
+                markers.append(f"[image: {name}]")
+                normalized_images.append(item)
+            if markers:
+                marker_block = " ".join(markers)
+                text = f"{text}\n\n{marker_block}" if text else marker_block
 
         # Inline agent check
         inline_agent_response = await _run_inline_agent_from_mention(ctx, text)
@@ -506,6 +557,12 @@ class ObscuraSession:
                     ]
                 except (ValueError, KeyError):
                     pass
+            # Forward multimodal images so the Claude backend can attach them
+            # as content blocks. Other backends receive the kwarg through
+            # ``**kwargs`` and silently ignore it (a textual ``[image: name]``
+            # marker is already in the prompt as a fallback for them).
+            if normalized_images:
+                _effective_kwargs["images"] = normalized_images
             _s = ctx.client.run_loop(
                 augmented_text,
                 max_turns=ctx.max_turns,
