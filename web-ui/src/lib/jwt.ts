@@ -1,10 +1,31 @@
+/**
+ * JWT decoding for Obscura.
+ *
+ * Supports tokens from two issuers:
+ *   - Supabase (primary) — roles from `app_metadata.roles`
+ *   - Zitadel (legacy)   — roles from `urn:zitadel:iam:org:project:roles`
+ *
+ * Per Supabase skill: never read authorization data from `user_metadata`
+ * (user-editable). Only `app_metadata` is trusted for role claims.
+ */
+
+export interface SupabaseAppMetadata {
+  roles?: string[];
+  role?: string;
+  org_id?: string;
+}
+
 export interface JWTPayload {
   sub: string;
   email?: string;
-  'urn:zitadel:iam:org:project:roles'?: Record<string, Record<string, string>>;
-  'urn:zitadel:iam:org:id'?: string;
   exp: number;
   iat: number;
+  // Supabase
+  app_metadata?: SupabaseAppMetadata;
+  role?: string;
+  // Zitadel (legacy)
+  'urn:zitadel:iam:org:project:roles'?: Record<string, Record<string, string>>;
+  'urn:zitadel:iam:org:id'?: string;
 }
 
 export interface DecodedUser {
@@ -21,15 +42,39 @@ export function decodeJWT(token: string): JWTPayload {
   return JSON.parse(json);
 }
 
+const DEFAULT_AUTHENTICATED_ROLES = ['agent:read'];
+
 export function extractUser(payload: JWTPayload): DecodedUser {
-  const rolesObj = payload['urn:zitadel:iam:org:project:roles'];
-  const roles = rolesObj ? Object.keys(rolesObj) : [];
+  const app = payload.app_metadata;
+  const zitadelRoles = payload['urn:zitadel:iam:org:project:roles'];
+
+  let roles: string[];
+  let orgId: string | null;
+
+  if (app) {
+    if (Array.isArray(app.roles)) {
+      roles = app.roles.filter((r) => typeof r === 'string');
+    } else if (typeof app.role === 'string') {
+      roles = app.role === 'authenticated' ? DEFAULT_AUTHENTICATED_ROLES : [app.role];
+    } else if (payload.role === 'authenticated') {
+      roles = DEFAULT_AUTHENTICATED_ROLES;
+    } else {
+      roles = DEFAULT_AUTHENTICATED_ROLES;
+    }
+    orgId = app.org_id ?? null;
+  } else if (zitadelRoles) {
+    roles = Object.keys(zitadelRoles);
+    orgId = payload['urn:zitadel:iam:org:id'] ?? null;
+  } else {
+    roles = payload.role === 'authenticated' ? DEFAULT_AUTHENTICATED_ROLES : [];
+    orgId = null;
+  }
 
   return {
     userId: payload.sub,
     email: payload.email || '',
     roles,
-    orgId: payload['urn:zitadel:iam:org:id'] ?? null,
+    orgId,
   };
 }
 

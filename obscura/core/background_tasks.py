@@ -62,11 +62,14 @@ class BackgroundTaskManager:
             f"{command}:{cwd}:{time.time()}".encode(),
         ).hexdigest()[:12]
 
+        from obscura.auth.secrets import safe_subprocess_env
+
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=cwd or None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=safe_subprocess_env(),
         )
 
         task = BackgroundTask(

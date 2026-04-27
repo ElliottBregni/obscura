@@ -11,10 +11,12 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
+from obscura.kairos.state import KairosState
 from obscura.kairos.vault_sync import VaultSync
 
 logger = logging.getLogger(__name__)
@@ -152,6 +154,8 @@ class KairosEngine:
         self._started = False
         self._start_time = 0.0
         self._observation_count = 0
+        self._session_id = uuid.uuid4().hex[:12]
+        self._state = KairosState.load()
 
     @property
     def is_running(self) -> bool:
@@ -164,6 +168,10 @@ class KairosEngine:
         self._started = True
         self._start_time = time.time()
 
+        # Record session in persistent state.
+        self._state.record_session_start(self._session_id)
+        self._state.save()
+
         # Log engine start.
         self.log("KAIROS engine started")
 
@@ -175,7 +183,7 @@ class KairosEngine:
         if self._proactive is not None:
             await self._proactive.start()
 
-        logger.info(
+        logger.debug(
             "KAIROS engine started (proactive=%s dream=%s vault_sync=%s)",
             self._proactive_enabled,
             self._dream_enabled,
@@ -193,13 +201,17 @@ class KairosEngine:
         # Run vault sync before dream consolidation.
         await self._maybe_vault_sync()
 
+        # Record session end in persistent state.
+        self._state.record_session_end()
+        self._state.save()
+
         self.log("KAIROS engine stopped")
         self._started = False
 
         # Check if dream consolidation should run.
         await self._maybe_dream()
 
-        logger.info(
+        logger.debug(
             "KAIROS engine stopped after %.0fs, %d observations",
             time.time() - self._start_time,
             self._observation_count,
@@ -264,11 +276,27 @@ class KairosEngine:
                 q = TaskQueue()
                 # Reclaim any stale claims from crashed workers.
                 q.reclaim_stale()
-                task = q.next_ready(worker_id="kairos")
+                task = q.next_ready(worker_id="kairos", project_root=os.getcwd())
                 if task is not None and q.claim(task["task_id"], "kairos"):
                     goal_ctx = ""
                     if task.get("goal_id"):
                         goal_ctx = f' goal="{task["goal_id"]}"'
+                        # Stamp last_worked on the parent goal.
+                        try:
+                            from datetime import UTC, datetime
+
+                            from obscura.kairos.goals import GoalBoard
+
+                            GoalBoard().update(
+                                task["goal_id"],
+                                last_worked=datetime.now(UTC).isoformat(),
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Could not stamp last_worked on goal %s",
+                                task["goal_id"],
+                                exc_info=True,
+                            )
                     inject(
                         f"<tick>#{tick_count}</tick>\n"
                         f'<task id="{task["task_id"]}" '
@@ -279,6 +307,9 @@ class KairosEngine:
                         f"Work this task. When done call "
                         f'task_update(task_id="{task["task_id"]}", '
                         f'status="completed").'
+                    )
+                    logger.info(
+                        "[kairos] \u2192 Working: %s", task["subject"]
                     )
                     self.log(
                         f"tick #{tick_count}: claimed task {task['task_id']} "
@@ -329,7 +360,7 @@ class KairosEngine:
             min_sessions=self._dream_min_sessions,
         )
         if consolidator.should_run():
-            logger.info("Starting dream consolidation...")
+            logger.debug("Dream consolidation triggered")
             self.log("Dream consolidation triggered")
             await consolidator.run()
             self.log("Dream consolidation completed")

@@ -31,12 +31,39 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture(autouse=True)
 def reset_shared_state() -> None:
-    """Reset module-level mutable state to prevent cross-test pollution."""
+    """Reset module-level mutable state to prevent cross-test pollution.
+
+    These resets cover state that lives in module-level globals or
+    process-wide caches and would otherwise leak between tests:
+
+    * ``reset_audit_logs`` / ``reset_rate_limits`` — admin route state
+    * ``secrets.clear_cache`` — secrets resolution memo (test that sets
+      MOONSHOT_API_KEY then a later test that deletes it would otherwise
+      see the cached value)
+    * ``set_tool_registry(None)`` / ``set_snip_message_history(None)`` —
+      module-level fallbacks for tools that read from ToolContext when
+      bound and fall back to these globals when not
+    """
     from obscura.deps import reset_audit_logs
     from obscura.routes.admin import reset_rate_limits
 
     reset_audit_logs()
     reset_rate_limits()
+
+    try:
+        from obscura.auth import secrets as _secrets
+
+        _secrets.clear_cache()
+    except Exception:
+        pass
+
+    try:
+        from obscura.tools import system as _sys
+
+        _sys._tool_registry_ref = None
+        _sys._snip_message_history = None
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)

@@ -342,8 +342,9 @@ class ToolPolicy:
     def apply_to_claude(self, config: dict[str, Any], tools: list[ToolSpec]) -> None:
         """Apply this ToolPolicy to Claude backend options in-place.
 
-        Claude uses MCP-style naming (``mcp__obscura_tools__<name>``), so
-        the allowed-tools list is mapped accordingly.
+        Claude uses MCP-style naming (``mcp__<server>__<name>`` — the
+        server name comes from ``obscura.providers.claude.MCP_SERVER_NAME``),
+        so the allowed-tools list is mapped accordingly.
         """
         if not tools:
             return
@@ -352,8 +353,11 @@ class ToolPolicy:
             # allow_all — no restriction needed
             return
 
+        # Local import avoids a circular dep with ``obscura.providers.claude``.
+        from obscura.providers.claude import MCP_TOOL_PREFIX
+
         filtered = self.filter_tools(tools)
-        config["allowed_tools"] = [f"mcp__obscura_tools__{t.name}" for t in filtered]
+        config["allowed_tools"] = [f"{MCP_TOOL_PREFIX}{t.name}" for t in filtered]
 
     def __repr__(self) -> str:
         """String representation for debugging."""

@@ -10,6 +10,20 @@ if TYPE_CHECKING:
     from starlette.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _enable_dev_api_key(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """E2E tests use the public dev API key, which only loads when
+    OBSCURA_DEV_MODE=true (production never ships it)."""
+    from obscura.auth.rbac import _load_api_keys
+
+    monkeypatch.setenv("OBSCURA_DEV_MODE", "true")
+    monkeypatch.delenv("OBSCURA_API_KEYS", raising=False)
+    _load_api_keys()
+    yield
+    monkeypatch.delenv("OBSCURA_DEV_MODE", raising=False)
+    _load_api_keys()
+
+
 @pytest.mark.e2e
 class TestAPIKeyAuth:
     """Test API key authentication flows."""
@@ -63,24 +77,3 @@ class TestAPIKeyAuth:
         assert data["status"] == "ok"
 
 
-@pytest.mark.e2e
-class TestAuthBypass:
-    """Test auth bypass when disabled."""
-
-    def test_no_auth_when_disabled(self, client: TestClient) -> None:
-        """No auth needed when OBSCURA_AUTH_ENABLED=false."""
-        # This client has auth disabled
-        resp = client.get("/api/v1/agents")
-        assert resp.status_code == 200
-
-    def test_spawn_without_auth_when_disabled(self, client: TestClient) -> None:
-        """Can spawn agent without auth when disabled."""
-        resp = client.post(
-            "/api/v1/agents",
-            json={"name": "no-auth-test", "model": "claude"},
-        )
-        assert resp.status_code == 200
-        data: Any = resp.json()
-
-        # Cleanup
-        client.delete(f"/api/v1/agents/{data['agent_id']}")

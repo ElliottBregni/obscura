@@ -2,14 +2,18 @@
 
 Provides tools for agents to:
   - Query Arbiter status and recent verdicts
+  - Query the live arbiter.db store with filtering
   - Appeal a DENY verdict with reasoning
 """
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, cast
+import sqlite3
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -132,9 +136,109 @@ async def arbiter_appeal(target_id: str, reasoning: str) -> str:
         return json.dumps({"ok": False, "error": str(exc)})
 
 
+@tool(
+    "query_arbiter_verdicts",
+    (
+        "Query recent arbiter verdicts from the live store. "
+        "Returns verdicts filtered by session, kind, or verdict type. "
+        "Read-only — never writes to the store."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of verdicts to return (default 20, max 100).",
+            },
+            "session_id": {
+                "type": "string",
+                "description": "Filter to a specific session ID.",
+            },
+            "verdict": {
+                "type": "string",
+                "description": "Filter by verdict type: 'accept', 'revise', 'deny', or 'kill'.",
+                "enum": ["accept", "revise", "deny", "kill"],
+            },
+            "kind": {
+                "type": "string",
+                "description": (
+                    "Filter by event kind: 'tool_call', 'model_turn', "
+                    "'task_complete', or 'goal_transition'."
+                ),
+                "enum": ["tool_call", "model_turn", "task_complete", "goal_transition"],
+            },
+            "min_score": {
+                "type": "number",
+                "description": "Only return verdicts with composite score >= this value.",
+            },
+        },
+    },
+)
+async def query_arbiter_verdicts(
+    limit: int = 20,
+    session_id: str = "",
+    verdict: str = "",
+    kind: str = "",
+    min_score: float | None = None,
+) -> str:
+    """Query arbiter verdicts from the live SQLite store with optional filters."""
+    try:
+        db_path: Path = resolve_obscura_home() / "arbiter.db"
+        if not db_path.exists():
+            return json.dumps({"ok": True, "verdicts": [], "message": "No arbiter.db found."})
+
+        limit = max(1, min(limit, 100))
+
+        conn = sqlite3.connect(str(db_path), timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            clauses: list[str] = []
+            params: list[Any] = []
+
+            if session_id:
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            if verdict:
+                clauses.append("verdict = ?")
+                params.append(verdict)
+            if kind:
+                clauses.append("kind = ?")
+                params.append(kind)
+            if min_score is not None:
+                clauses.append("composite >= ?")
+                params.append(min_score)
+
+            where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            params.append(limit)
+
+            rows = conn.execute(
+                f"SELECT * FROM verdicts {where} ORDER BY created_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+
+            verdicts_out = []
+            for row in rows:
+                r = dict(row)
+                # Decode JSON fields for readability
+                for field_name in ("details", "metadata"):
+                    if isinstance(r.get(field_name), str):
+                        try:
+                            r[field_name] = json.loads(r[field_name])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                verdicts_out.append(r)
+
+            return json.dumps({"ok": True, "count": len(verdicts_out), "verdicts": verdicts_out})
+        finally:
+            conn.close()
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
+
 def get_arbiter_tool_specs() -> list[ToolSpec]:
     """Return Arbiter tool specs for registration."""
     return [
         cast("ToolSpec", arbiter_status.spec),
         cast("ToolSpec", arbiter_appeal.spec),
+        cast("ToolSpec", query_arbiter_verdicts.spec),
     ]

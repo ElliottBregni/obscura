@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shlex
 import uuid
 from collections.abc import Awaitable, Callable
@@ -632,6 +633,7 @@ async def cmd_help(_args: str, _ctx: REPLContext) -> str | None:
         "  /review [ref]          AI code review",
         "  /security-review [ref] Security-focused review",
         "  /branch [name|create|delete|list]   Git branch management",
+        "  /worktree [list|status|sweep|cleanup]  Isolated worktrees",
         "  /pr [base]             Create pull request",
         "",
         " [bold]Context & Memory[/]",
@@ -962,14 +964,107 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
     return None
 
 
-async def cmd_plan(_args: str, ctx: REPLContext) -> str | None:
-    """Show the current plan."""
+async def cmd_plan(args: str, ctx: REPLContext) -> str | None:
+    """Structured planning. Usage: /plan [show|save|execute|clear] or /plan <description>."""
+    from obscura.cli.app.modes import Plan, TUIMode
+
     mm = ctx.get_mode_manager()
-    plan = mm.active_plan
-    if plan is None:
-        print_info("No active plan. Use /mode plan and ask the model to create one.")
+    val = args.strip()
+    sub = val.split(None, 1)[0].lower() if val else ""
+
+    # /plan (no args) or /plan show — display current plan
+    if not val or sub == "show":
+        plan = mm.active_plan
+        if plan is None:
+            print_info(
+                "No active plan. Use /plan <description> to create one, "
+                "or /mode plan and describe what you want to build."
+            )
+            return None
+        render_plan(plan)
         return None
-    render_plan(plan)
+
+    # /plan clear — discard the active plan
+    if sub == "clear":
+        mm.active_plan = None
+        print_ok("Plan cleared.")
+        return None
+
+    # /plan save — persist to vault
+    if sub == "save":
+        plan = mm.active_plan
+        if plan is None:
+            print_error("No active plan to save.")
+            return None
+        vault_dir = Path.home() / ".obscura" / "vault" / "shared" / "decisions"
+        vault_dir.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", plan.title.lower()).strip("-")[:50]
+        path = vault_dir / f"plan-{slug}.md"
+        content = plan.to_markdown()
+        path.write_text(content, encoding="utf-8")
+        print_ok(f"Plan saved to {path}")
+        return None
+
+    # /plan execute — switch to code mode and inject approved steps
+    if sub == "execute":
+        plan = mm.active_plan
+        if plan is None:
+            print_error("No active plan to execute.")
+            return None
+        approved = [s for s in plan.steps if s.status in ("approved", "edited")]
+        if not approved:
+            print_error("No approved steps. Use /approve <n|all> first.")
+            return None
+        mm.switch(TUIMode.CODE)
+        ctx.tools_enabled = True
+        await ctx.recreate_client(ctx.backend, ctx.model)
+        print_ok(
+            f"Switched to code mode with {len(approved)} approved steps. "
+            "The plan is injected into context."
+        )
+        return None
+
+    # /plan <description> — create a new plan via the agent
+    # Switch to plan mode if not already there
+    if mm.current != TUIMode.PLAN:
+        mm.switch(TUIMode.PLAN)
+        allowed = mm.get_allowed_tool_names()
+        ctx.tools_enabled = allowed is None or len(allowed) > 0
+        await ctx.recreate_client(ctx.backend, ctx.model)
+
+    prompt = (
+        f"Create a structured implementation plan for: {val}\n\n"
+        "Research the codebase first using file reading and grep tools, "
+        "then produce a numbered plan. Each step should include the files "
+        "it touches and any risks."
+    )
+
+    from obscura.cli.render import render_event
+
+    collected: list[str] = []
+    try:
+        async for event in ctx.client.run_loop(prompt):
+            render_event(event)
+            if hasattr(event, "text") and event.text:
+                collected.append(event.text)
+    except Exception as exc:
+        print_error(str(exc))
+        return None
+
+    # Parse the response into a Plan
+    full_text = "".join(collected)
+    if full_text.strip():
+        plan = Plan.parse(full_text)
+        if plan.steps:
+            mm.active_plan = plan
+            console.print()
+            print_ok(
+                f"Plan created with {len(plan.steps)} steps. "
+                "Use /approve <n|all>, /reject <n|all>, then /plan execute."
+            )
+        else:
+            print_warning("Could not parse numbered steps from the response.")
+
     return None
 
 
@@ -1766,7 +1861,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     # Fallback: spawn with SDK defaults (with warning)
     if not manifest_loaded:
         print_warning(
-            f"No manifest found for '{name}\. "
+            f"No manifest found for '{name}'. "
             "Using SDK defaults (no skill filters, tool restrictions, or limits).",
         )
         agent = runtime.spawn(
@@ -4138,6 +4233,47 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+async def cmd_migrate(args: str, _ctx: REPLContext) -> str | None:
+    """Detect and import external agent configs (Cursor, Copilot, Claude, ...).
+
+    Usage:
+        /migrate external          Prompt to import any detected sources
+        /migrate external --force  Re-run including sources marked "never"
+        /migrate external --list   Show detected sources without importing
+    """
+    from obscura.core.migrate_external import (
+        clear_decisions,
+        migrate_all,
+        scan,
+    )
+
+    parts = args.split()
+    target = parts[0] if parts else "external"
+    if target != "external":
+        print_error(f"Unknown migrate target: {target}. Try /migrate external.")
+        return None
+
+    cwd = Path.cwd()
+    if "--force" in parts:
+        clear_decisions(cwd)
+
+    sources = scan(cwd)
+    if not sources:
+        print_info("No external agent configs detected.")
+        return None
+
+    if "--list" in parts:
+        print_info(f"Detected {len(sources)} source(s):")
+        for s in sources:
+            print_info(f"  • [{s.scope}] {s.label}  →  {s.dest}")
+        return None
+
+    print_info(f"Importing {len(sources)} source(s):")
+    imported = migrate_all(sources, cwd, emit=print_info)
+    print_ok(f"Imported {imported} of {len(sources)}.")
+    return None
+
+
 async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
     """Initialise a local .obscura/ workspace and bootstrap plugins."""
     from obscura.core.workspace import (
@@ -5399,8 +5535,10 @@ async def cmd_review(args: str, ctx: REPLContext) -> str | None:
     import asyncio as _aio
 
     ref = args.strip() or "HEAD"
-    proc = await _aio.create_subprocess_shell(
-        f"git diff {ref}",
+    proc = await _aio.create_subprocess_exec(
+        "git",
+        "diff",
+        ref,
         stdout=_aio.subprocess.PIPE,
         stderr=_aio.subprocess.PIPE,
     )
@@ -5534,8 +5672,10 @@ async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
     import asyncio as _aio
 
     ref = args.strip() or "HEAD"
-    proc = await _aio.create_subprocess_shell(
-        f"git diff {ref}",
+    proc = await _aio.create_subprocess_exec(
+        "git",
+        "diff",
+        ref,
         stdout=_aio.subprocess.PIPE,
         stderr=_aio.subprocess.PIPE,
     )
@@ -5584,6 +5724,269 @@ Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
             render_event(event)
     except Exception as exc:
         print_error(str(exc))
+    return None
+
+
+async def cmd_ultrareview(args: str, ctx: REPLContext) -> str | None:
+    """Multi-agent parallel code review. Usage: /ultrareview [PR#|ref]."""
+    import asyncio as _aio
+
+    ref = args.strip()
+
+    # If a PR number is given, fetch the diff from GitHub
+    if ref and ref.isdigit():
+        proc = await _aio.create_subprocess_exec(
+            "gh",
+            "pr",
+            "diff",
+            ref,
+            stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        diff = stdout.decode("utf-8", errors="replace").strip()
+        if not diff:
+            print_warning(
+                f"Could not fetch PR #{ref} diff via gh: {stderr.decode()[:200]}"
+            )
+            return None
+        review_target = f"PR #{ref}"
+    else:
+        # Local diff — use subprocess_exec to prevent shell injection
+        git_ref = ref or "HEAD"
+        proc = await _aio.create_subprocess_exec(
+            "git",
+            "diff",
+            git_ref,
+            stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        diff = stdout.decode("utf-8", errors="replace").strip()
+        if not diff:
+            print_info(f"No changes found for ref: {git_ref}")
+            return None
+        review_target = f"ref {git_ref}"
+
+    # --- Split diff into per-file hunks ---
+    file_diffs: list[tuple[str, str]] = []
+    current_file = ""
+    current_lines: list[str] = []
+    for line in diff.split("\n"):
+        if line.startswith("diff --git"):
+            if current_file and current_lines:
+                file_diffs.append((current_file, "\n".join(current_lines)))
+            parts = line.split(" b/", 1)
+            current_file = parts[1] if len(parts) > 1 else line
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+    if current_file and current_lines:
+        file_diffs.append((current_file, "\n".join(current_lines)))
+
+    total_files = len(file_diffs)
+    total_bytes = len(diff)
+    print_info(
+        f"Launching ultrareview of {review_target}: "
+        f"{total_files} files, {total_bytes:,} bytes"
+    )
+
+    # --- Distribute file diffs across 5 specialists ---
+    # Each specialist gets a DIFFERENT slice of files, not the same truncated prefix.
+    # Budget: ~30k chars per specialist (fits comfortably in most context windows).
+    _BUDGET_PER_AGENT = 30000
+
+    specialists: list[tuple[str, str, str]] = [
+        (
+            "security",
+            "You are a security expert.",
+            "Focus ONLY on security issues: injection flaws, auth bypass, "
+            "privilege escalation, data exposure, hardcoded secrets, crypto "
+            "weaknesses, path traversal, deserialization. Report only HIGH/MEDIUM "
+            "confidence findings with file:line references.",
+        ),
+        (
+            "correctness",
+            "You are a logic and correctness expert.",
+            "Focus ONLY on correctness: logic errors, off-by-one, null/None "
+            "handling, race conditions, async bugs, type mismatches, edge cases, "
+            "error handling gaps. Report with file:line references.",
+        ),
+        (
+            "architecture",
+            "You are a software architect.",
+            "Focus ONLY on architecture and design: coupling, cohesion, API "
+            "design, naming, abstraction levels, dependency direction, breaking "
+            "changes, backwards compatibility. Report structural concerns only.",
+        ),
+        (
+            "test-coverage",
+            "You are a testing specialist.",
+            "Focus ONLY on test coverage: missing tests for new code paths, "
+            "untested edge cases, test quality (are assertions meaningful?), "
+            "mock correctness, integration vs unit balance. Report gaps only.",
+        ),
+        (
+            "performance",
+            "You are a performance engineer.",
+            "Focus ONLY on performance: N+1 queries, unnecessary allocations, "
+            "blocking in async code, missing caching opportunities, O(n²) "
+            "algorithms, large payload handling. Report with file:line references.",
+        ),
+    ]
+    num_specialists = len(specialists)
+
+    # Build per-specialist diff chunks by round-robin distributing files
+    specialist_chunks: list[str] = [""] * num_specialists
+    specialist_files: list[list[str]] = [[] for _ in range(num_specialists)]
+    for i, (fname, fdiff) in enumerate(file_diffs):
+        slot = i % num_specialists
+        # Respect per-agent budget
+        if len(specialist_chunks[slot]) + len(fdiff) <= _BUDGET_PER_AGENT:
+            specialist_chunks[slot] += fdiff + "\n"
+            specialist_files[slot].append(fname)
+        else:
+            # Over budget — try to fit in any slot with room
+            placed = False
+            for s in range(num_specialists):
+                if len(specialist_chunks[s]) + len(fdiff) <= _BUDGET_PER_AGENT:
+                    specialist_chunks[s] += fdiff + "\n"
+                    specialist_files[s].append(fname)
+                    placed = True
+                    break
+            if not placed:
+                # All slots full — truncate this file diff and add to original slot
+                remaining = _BUDGET_PER_AGENT - len(specialist_chunks[slot])
+                if remaining > 500:
+                    specialist_chunks[slot] += fdiff[:remaining] + "\n[truncated]\n"
+                    specialist_files[slot].append(f"{fname} (truncated)")
+
+    # Show distribution
+    for i, (name, _, _) in enumerate(specialists):
+        fcount = len(specialist_files[i])
+        chars = len(specialist_chunks[i])
+        if fcount:
+            fnames = ", ".join(specialist_files[i][:5])
+            if fcount > 5:
+                fnames += f", ... (+{fcount - 5} more)"
+            print_info(f"  {name}: {fcount} files, {chars:,} chars — {fnames}")
+
+    console.print()
+    runtime = await ctx.get_runtime()
+
+    async def _run_specialist(
+        idx: int,
+        name: str,
+        persona: str,
+        focus: str,
+    ) -> tuple[str, str]:
+        chunk = specialist_chunks[idx]
+        files = specialist_files[idx]
+        if not chunk.strip():
+            return name, "No files assigned to this specialist."
+
+        agent_name = f"ultrareview-{name}-{uuid.uuid4().hex[:4]}"
+        agent = runtime.spawn(
+            agent_name,
+            model=ctx.backend,
+            system_prompt=f"{persona} You are reviewing code changes.",
+        )
+        await agent.start()
+        file_list = "\n".join(f"- {f}" for f in files)
+        prompt = f"""{focus}
+
+You are reviewing {len(files)} files:
+{file_list}
+
+```diff
+{chunk}
+```
+
+Rules:
+- Be concise. One paragraph per finding.
+- Include file:line references.
+- Rate each finding: HIGH or MEDIUM severity.
+- If you find nothing significant, say "No issues found."
+- Do NOT repeat findings across categories — stay in your lane.
+"""
+        output_lines: list[str] = []
+        try:
+            async for event in agent.stream_loop(prompt, max_turns=3):
+                if hasattr(event, "text") and event.text:
+                    output_lines.append(event.text)
+        except Exception as exc:
+            output_lines.append(f"Error: {exc}")
+        return name, "".join(output_lines)
+
+    # Run all 5 in parallel
+    results: list[tuple[str, str]] = await _aio.gather(
+        *[_run_specialist(i, n, p, f) for i, (n, p, f) in enumerate(specialists)],
+    )
+
+    # Display per-specialist results
+    from rich.markdown import Markdown
+    from rich.rule import Rule
+
+    colors = ["red", "yellow", "blue", "green", "magenta"]
+    for idx, (name, output) in enumerate(results):
+        color = colors[idx % len(colors)]
+        fcount = len(specialist_files[idx])
+        console.print(
+            Rule(
+                f"[bold {color}]{name.upper()}[/] ({fcount} files)",
+                style=color,
+            )
+        )
+        if output.strip() and output.strip() != "No files assigned to this specialist.":
+            console.print(Markdown(output))
+        else:
+            console.print("[dim]No issues found.[/]")
+        console.print()
+
+    # Verification pass — synthesize, deduplicate, and rank
+    print_info("Running verification pass...")
+    all_findings = "\n\n".join(
+        f"## {name.upper()} ({len(specialist_files[i])} files)\n{output}"
+        for i, (name, output) in enumerate(results)
+        if output.strip() and output.strip() != "No files assigned to this specialist."
+    )
+
+    verifier_prompt = f"""You are a senior engineer doing a final review pass. Below are findings
+from 5 specialist reviewers. Each reviewer examined DIFFERENT files from the same PR.
+
+Your job:
+1. DEDUPLICATE: remove any findings that appear more than once
+2. VERIFY: remove obvious false positives
+3. PRIORITIZE: rank remaining findings by impact
+4. CROSS-CUT: add any concerns that span multiple specialists' file sets
+5. Output a unified report — do NOT repeat findings:
+
+### Critical (must fix before merge)
+- Finding with file:line
+
+### Important (should fix)
+- Finding with file:line
+
+### Minor (nice to have)
+- Finding with file:line
+
+### Summary
+One paragraph overall assessment. Mention total files reviewed: {total_files}.
+
+--- SPECIALIST FINDINGS ---
+
+{all_findings[:20000]}
+"""
+
+    from obscura.cli.render import render_event
+
+    console.print(Rule("[bold white]UNIFIED REPORT[/]", style="white"))
+    try:
+        async for event in ctx.client.run_loop(verifier_prompt):
+            render_event(event)
+    except Exception as exc:
+        print_error(f"Verification pass failed: {exc}")
+
     return None
 
 
@@ -5954,7 +6357,9 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
             for row in recent:
                 import datetime as _dt
 
-                ts = _dt.datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M")
+                ts = _dt.datetime.fromtimestamp(row["created_at"]).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
                 v = row["verdict"].upper()
                 color = {
                     "accept": "green",
@@ -6009,7 +6414,9 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
             print_error(f"Watchdog sweep failed: {exc}")
         return None
 
-    print_error(f"Unknown subcommand: {sub_cmd}. Try /arbiter, /arbiter verdicts, /arbiter stats, /arbiter watchdog")
+    print_error(
+        f"Unknown subcommand: {sub_cmd}. Try /arbiter, /arbiter verdicts, /arbiter stats, /arbiter watchdog"
+    )
     return None
 
 
@@ -6662,18 +7069,32 @@ async def cmd_send(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
-    """Add a directory to the working context. Usage: /add-dir <path>."""
-    target = args.strip()
-    if not target:
-        print_error("Usage: /add-dir <path>")
+    """Allow a directory for tool access at runtime. Usage: /add-dir <path>
+
+    Registers the path with the system tools allowlist so agents can read/write
+    it regardless of OBSCURA_SYSTEM_TOOLS_BASE_DIR. Does NOT change cwd.
+    Pass --chdir to also change the working directory.
+    """
+    parts = args.strip().split()
+    if not parts:
+        print_error("Usage: /add-dir <path> [--chdir]")
         return None
+    do_chdir = "--chdir" in parts
+    path_parts = [p for p in parts if p != "--chdir"]
+    target = " ".join(path_parts)
     p = Path(target).expanduser().resolve()
     if not p.is_dir():
         print_error(f"Not a directory: {p}")
         return None
-    # Change working directory.
-    os.chdir(p)
-    print_ok(f"Working directory changed to {p}")
+    # Register with system tools allowlist.
+    from obscura.tools.system import add_allowed_dir
+
+    add_allowed_dir(p)
+    if do_chdir:
+        os.chdir(p)
+        print_ok(f"Allowed and changed working directory to: {p}")
+    else:
+        print_ok(f"Allowed for tool access: {p}")
     return None
 
 
@@ -7551,6 +7972,128 @@ async def cmd_branch(args: str, _ctx: REPLContext) -> str | None:
     return None
 
 
+# ── /worktree ─────────────────────────────────────────────────────────────
+
+
+async def cmd_worktree(args: str, _ctx: REPLContext) -> str | None:
+    """Inspect and manage git worktrees tracked in ~/.obscura/worktrees/.
+
+    Usage:
+        /worktree                 — list active worktrees for this repo
+        /worktree list            — list all worktrees across all repos
+        /worktree status <slug>   — show details + observer summary for a slug
+        /worktree sweep           — mark dead-PID entries as orphan
+        /worktree cleanup         — sweep + prune missing paths + drop orphan dirs
+    """
+    from obscura.tools import worktree_observer, worktree_registry
+
+    parts = args.strip().split(None, 1)
+    sub = parts[0].lower() if parts else ""
+    sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+    def _render_entries(entries: list[worktree_registry.WorktreeEntry]) -> None:
+        if not entries:
+            print_info("No worktrees tracked.")
+            return
+        active_slugs = set(worktree_observer.active_slugs())
+        table = Table(title="Worktrees", expand=False)
+        table.add_column("slug", no_wrap=True)
+        table.add_column("status")
+        table.add_column("obs", justify="center", width=3)
+        table.add_column("branch", no_wrap=True)
+        table.add_column("owner")
+        table.add_column("pid", justify="right")
+        table.add_column("path", max_width=55)
+        for e in entries:
+            obs = "[green]●[/]" if e.slug in active_slugs else "[dim]·[/]"
+            status_color = {
+                "active": "green",
+                "kept": "yellow",
+                "orphan": "red",
+            }.get(e.status, "white")
+            who = e.agent_name or e.owner
+            table.add_row(
+                e.slug,
+                f"[{status_color}]{e.status}[/]",
+                obs,
+                e.branch,
+                who,
+                str(e.pid),
+                e.worktree_path,
+            )
+        console.print(table)
+
+    if not sub:
+        # List entries for the current repo.
+        proc = await asyncio.create_subprocess_shell(
+            "git rev-parse --path-format=absolute --git-common-dir",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            print_error("Not inside a git repository.")
+            return None
+        common = Path(stdout.decode().strip())
+        repo_root = str(common.parent) if common.name == ".git" else str(common)
+        _render_entries(worktree_registry.list_for_repo(repo_root))
+        return None
+
+    if sub == "list":
+        _render_entries(worktree_registry.load())
+        return None
+
+    if sub == "status":
+        if not sub_arg:
+            print_error("Usage: /worktree status <slug>")
+            return None
+        entry = worktree_registry.get(sub_arg)
+        if entry is None:
+            print_error(f"Unknown worktree: {sub_arg}")
+            return None
+        console.print(f"[bold]slug[/]:   {entry.slug}")
+        console.print(f"[bold]branch[/]: {entry.branch}")
+        console.print(f"[bold]repo[/]:   {entry.repo_root}")
+        console.print(f"[bold]path[/]:   {entry.worktree_path}")
+        console.print(f"[bold]status[/]: {entry.status}")
+        console.print(f"[bold]owner[/]:  {entry.agent_name or entry.owner}")
+        console.print(f"[bold]pid[/]:    {entry.pid}")
+        summary = worktree_observer.summary(entry.slug)
+        if summary is None:
+            console.print("[dim]observer: not active[/]")
+        else:
+            console.print(
+                f"[bold]observer[/]: +{summary['created']} ~{summary['modified']} "
+                f"-{summary['deleted']} (baseline {summary['baseline_files']})",
+            )
+        return None
+
+    if sub in {"sweep", "cleanup"}:
+        orphans = worktree_registry.sweep_dead_pids()
+        if orphans:
+            print_warning(
+                f"Marked {len(orphans)} entry(s) as orphan: "
+                + ", ".join(e.slug for e in orphans)
+            )
+        else:
+            print_info("No orphan owners found.")
+        if sub == "cleanup":
+            dropped = worktree_registry.prune_missing_paths()
+            if dropped:
+                print_ok(
+                    f"Pruned {len(dropped)} missing-path entry(s): {', '.join(dropped)}"
+                )
+            removed = worktree_registry.cleanup_orphan_dirs()
+            if removed:
+                print_ok(f"Removed {removed} unreferenced checkout dir(s).")
+            if not dropped and not removed and not orphans:
+                print_info("Registry clean.")
+        return None
+
+    print_error("Usage: /worktree [list|status <slug>|sweep|cleanup]")
+    return None
+
+
 # ── /config ───────────────────────────────────────────────────────────────
 
 
@@ -7744,45 +8287,34 @@ async def cmd_listen(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_login(args: str, _ctx: REPLContext) -> str | None:
-    """Show auth status or login hints. Usage: /login [provider]."""
-    provider = args.strip().lower()
+    """Login for a provider. Usage: /login [provider]."""
+    provider = args.strip().lower() or "copilot"
 
-    if not provider:
-        statuses: list[tuple[str, bool, str]] = []
-        ck = os.environ.get("ANTHROPIC_API_KEY", "")
-        statuses.append(("claude", bool(ck), f"...{ck[-4:]}" if ck else ""))
-        ok = os.environ.get("OPENAI_API_KEY", "")
-        statuses.append(("openai", bool(ok), f"...{ok[-4:]}" if ok else ""))
-        cp = (Path.home() / ".config" / "github-copilot" / "hosts.json").exists()
-        statuses.append(("copilot", cp, "token file" if cp else ""))
+    if provider in ("copilot", "github"):
+        from obscura.cli.auth_commands import ensure_github_oauth_session
 
-        table = Table(title="Auth Status", expand=False)
-        table.add_column("Provider", width=12)
-        table.add_column("Status", width=14)
-        table.add_column("Key", width=15, style="dim")
-        for name, authed, hint in statuses:
-            st = "[green]authenticated[/]" if authed else "[red]not configured[/]"
-            table.add_row(name, st, hint)
-        console.print(table)
+        session = ensure_github_oauth_session(open_browser=True)
+        if session is None:
+            print_error(
+                "GitHub OAuth login unavailable. Configure Supabase via "
+                "`/secrets set SUPABASE_URL`, env vars, or ~/.obscura/.env.",
+            )
+            return None
+        print_ok(f"Signed in via GitHub OAuth as {session.email}.")
         return None
 
     if provider in ("claude", "anthropic"):
         console.print("  [bold]export ANTHROPIC_API_KEY=sk-ant-...[/]")
     elif provider in ("openai", "gpt"):
         console.print("  [bold]export OPENAI_API_KEY=sk-...[/]")
-    elif provider in ("copilot", "github"):
-        console.print("  [bold]! obscura auth copilot[/]")
     else:
         print_error(f"Unknown provider: {provider}. Known: claude, openai, copilot")
     return None
 
 
 async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
-    """Clear auth for a provider. Usage: /logout <provider>."""
-    provider = args.strip().lower()
-    if not provider:
-        print_error("Usage: /logout <provider>  (claude, openai, copilot)")
-        return None
+    """Clear auth for a provider. Usage: /logout [provider]."""
+    provider = args.strip().lower() or "copilot"
     env_map = {
         "claude": "ANTHROPIC_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
@@ -7800,6 +8332,129 @@ async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
         print_info("Remove ~/.config/github-copilot/hosts.json to deauthorize.")
     else:
         print_error(f"Unknown provider: {provider}")
+    return None
+
+
+# ── /whoami + /secrets ────────────────────────────────────────────────────
+
+
+async def cmd_whoami(_args: str, _ctx: REPLContext) -> str | None:
+    """Show the currently authenticated Supabase user. Usage: /whoami."""
+    import time as _time
+
+    from obscura.cli.auth_commands import CREDENTIALS_PATH, load_session
+
+    session = load_session()
+    if session is None:
+        print_info("Not signed in. Run /login to authenticate via Supabase.")
+        return None
+
+    remaining = session.expires_at - int(_time.time())
+    state = "valid" if remaining > 0 else "EXPIRED"
+    gh_state = "yes" if session.provider_token else "no"
+    console.print(f"  user:         {session.email or session.user_id}")
+    console.print(f"  user_id:      {session.user_id}")
+    console.print(f"  provider:     {session.provider}")
+    console.print(f"  token:        {state} (expires in {max(0, remaining)}s)")
+    console.print(f"  github oauth: {gh_state}")
+    console.print(f"  file:         {CREDENTIALS_PATH}")
+    return None
+
+
+async def cmd_secrets(args: str, _ctx: REPLContext) -> str | None:
+    """Manage service secrets in the OS keyring.
+
+    Usage:
+      /secrets list [--only-set]             -- show where every value resolves
+      /secrets get <NAME> [--reveal]         -- show one value (masked by default)
+      /secrets set <NAME> <value> [--force]  -- persist to OS keyring
+      /secrets delete <NAME> [--force]       -- remove from OS keyring
+
+    Known names include Supabase identity config, LLM backend keys
+    (ANTHROPIC_API_KEY, OPENAI_API_KEY, GITHUB_TOKEN, …), and common
+    plugin credentials (NOTION_TOKEN, QDRANT_API_KEY, …). Pass ``--force``
+    to store any other name.
+
+    Env vars always win over keyring, so Docker/CI keep working unchanged.
+    For hidden-input ``set``, prefer ``obscura-auth secrets set <NAME>``.
+    """
+    from obscura.auth import secrets as _secrets
+
+    raw_tokens = args.strip().split()
+    force = "--force" in raw_tokens
+    only_set = "--only-set" in raw_tokens
+    reveal = "--reveal" in raw_tokens
+    positional = [t for t in raw_tokens if not t.startswith("--")]
+    sub = positional[0].lower() if positional else "list"
+
+    if sub == "list":
+        mapping = _secrets.sources()
+        kr_ready = _secrets.keyring_available()
+        console.print(
+            f"  Keyring backend: {'available' if kr_ready else 'unavailable'}",
+        )
+        width = max(len(name) for name in mapping)
+        for name, source in mapping.items():
+            if only_set and source == "missing":
+                continue
+            console.print(f"  {name.ljust(width)}  {source}")
+        return None
+
+    if sub in {"get", "set", "delete"} and len(positional) < 2:
+        print_error(f"Usage: /secrets {sub} <NAME> [...]")
+        return None
+
+    name = positional[1].strip().upper() if len(positional) >= 2 else ""
+    if name and not force and name not in _secrets.KNOWN_SECRET_NAMES:
+        known = ", ".join(_secrets.KNOWN_SECRET_NAMES)
+        print_error(
+            f"Unknown secret '{positional[1]}'. Pass --force to store an "
+            f"arbitrary name, or pick from: {known}",
+        )
+        return None
+
+    if sub == "get":
+        value = _secrets.resolve(name)
+        if value is None:
+            console.print(f"  {name}: (unset)")
+            return None
+        source = _secrets.sources([name]).get(name, "missing")
+        shown = value if reveal else _secrets.mask(value)
+        console.print(f"  {name}: {shown} [source: {source}]")
+        return None
+
+    if sub == "set":
+        if len(positional) < 3 or not positional[2].strip():
+            print_error(
+                "Value required inline. For hidden input use "
+                "`obscura-auth secrets set " + name + "` outside the REPL.",
+            )
+            return None
+        if not _secrets.keyring_available():
+            print_error(
+                "No OS keyring backend available. "
+                f"Set {name} as an env var or in ~/.obscura/.env instead.",
+            )
+            return None
+        try:
+            stored = _secrets.store(name, positional[2].strip())
+        except _secrets.SecretsValidationError as exc:
+            print_error(str(exc))
+            return None
+        if not stored:
+            print_error(f"Failed to store {name} in keyring.")
+            return None
+        print_ok(f"Stored {name} in keyring.")
+        return None
+
+    if sub == "delete":
+        if _secrets.delete(name):
+            print_ok(f"Removed {name} from keyring.")
+        else:
+            print_info(f"No keyring entry found for {name}.")
+        return None
+
+    print_error(f"Unknown subcommand: {sub}. Try /secrets list|get|set|delete.")
     return None
 
 
@@ -9427,6 +10082,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "memory": cmd_memory,
     # Workspace
     "init": cmd_init,
+    "migrate": cmd_migrate,
     # Control & status
     "status": cmd_status,
     "policies": cmd_policies,
@@ -9440,7 +10096,9 @@ COMMANDS: dict[str, CommandHandler] = {
     "review": cmd_review,
     "pr": cmd_pr,
     "branch": cmd_branch,
+    "worktree": cmd_worktree,
     "security-review": cmd_security_review,
+    "ultrareview": cmd_ultrareview,
     # Utility
     "cat": cmd_cat,
     "search-tools": cmd_search_tools,
@@ -9500,6 +10158,11 @@ COMMANDS: dict[str, CommandHandler] = {
     "hooks": cmd_hooks,
     "bug": cmd_bug,
     "voice": cmd_voice,
+    # Auth / Supabase identity
+    "login": cmd_login,
+    "logout": cmd_logout,
+    "whoami": cmd_whoami,
+    "secrets": cmd_secrets,
 }
 
 # Subcommand completions for readline tab-complete
@@ -9515,7 +10178,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "tools": ["on", "off", "list", "enable", "disable"],
     "confirm": ["on", "off"],
     "mode": ["ask", "plan", "code"],
-    "plan": [],
+    "plan": ["show", "save", "execute", "clear"],
     "permissions": ["default", "plan", "accept_edits", "bypass"],
     "approve": ["all"],
     "reject": ["all"],
@@ -9538,6 +10201,7 @@ COMPLETIONS: dict[str, list[str]] = {
     "inspect": ["workspace", "agent", "capability", "pack"],
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "init": ["--force"],
+    "migrate": ["external", "--force", "--list"],
     "memory": ["stats", "search", "clear"],
     "status": ["--json"],
     "policies": [],
@@ -9550,7 +10214,9 @@ COMPLETIONS: dict[str, list[str]] = {
     "review": [],
     "pr": ["main", "master", "develop"],
     "branch": ["list", "create", "delete"],
+    "worktree": ["list", "status", "sweep", "cleanup"],
     "security-review": [],
+    "ultrareview": [],
     "cat": [],
     "search-tools": [],
     "add-dir": [],
@@ -9626,6 +10292,11 @@ COMPLETIONS: dict[str, list[str]] = {
     "bug": ["report"],
     "voice": ["on", "off"],
     "caffeinate": ["on", "off", "status"],
+    # Auth
+    "login": ["github", "copilot", "claude", "openai"],
+    "logout": ["github", "copilot", "claude", "openai"],
+    "whoami": [],
+    "secrets": ["list", "get", "set", "delete"],
 }
 
 # Add secret menu stub (tests toggle visibility)

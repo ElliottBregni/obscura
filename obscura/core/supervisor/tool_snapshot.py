@@ -13,14 +13,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import sqlite3
-import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from obscura.core.supervisor.schema import init_supervisor_schema
+from obscura.core.supervisor.db_backend import (
+    DatabaseBackend,
+    SQLiteSupervisorBackend,
+    translate_sql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -296,51 +298,59 @@ class FrozenToolRegistry:
 class ToolSnapshotStore:
     """Persists and retrieves tool snapshots."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self._db_path = Path(db_path)
-        self._local = threading.local()
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        backend: DatabaseBackend | None = None,
+    ) -> None:
+        if backend is not None:
+            self._backend = backend
+        elif db_path is not None:
+            self._backend = SQLiteSupervisorBackend(db_path)
+        else:
+            msg = "Either db_path or backend must be provided"
+            raise ValueError(msg)
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-        return self._local.conn
-
-    def _init_schema(self) -> None:
-        init_supervisor_schema(self._conn())
+    def _sql(self, sql: str) -> str:
+        return translate_sql(sql, self._backend.dialect)
 
     def save(self, snapshot: FrozenToolRegistry, run_id: str) -> None:
         """Persist a tool snapshot (sync)."""
-        conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO tool_snapshots "
-            "(snapshot_id, run_id, tools_hash, tools_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (
-                snapshot.snapshot_id,
-                run_id,
-                snapshot.hash,
-                snapshot.to_json(),
-                datetime.now(UTC).isoformat(),
-            ),
-        )
-        conn.commit()
+        conn = self._backend.get_conn()
+        try:
+            conn.execute(
+                self._sql(
+                    "INSERT OR REPLACE INTO tool_snapshots "
+                    "(snapshot_id, run_id, tools_hash, tools_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)"
+                ),
+                (
+                    snapshot.snapshot_id,
+                    run_id,
+                    snapshot.hash,
+                    snapshot.to_json(),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            self._backend.put_conn(conn)
 
     def load(self, snapshot_id: str) -> FrozenToolRegistry | None:
         """Load a tool snapshot by ID (sync)."""
-        row = (
-            self._conn()
-            .execute(
-                "SELECT snapshot_id, tools_json FROM tool_snapshots "
-                "WHERE snapshot_id = ?",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql(
+                    "SELECT snapshot_id, tools_json FROM tool_snapshots "
+                    "WHERE snapshot_id = ?"
+                ),
                 (snapshot_id,),
             )
-            .fetchone()
-        )
+            row = cur.fetchone()
+        finally:
+            self._backend.put_conn(conn)
         if row is None:
             return None
         return FrozenToolRegistry.from_json(
@@ -350,15 +360,18 @@ class ToolSnapshotStore:
 
     def load_for_run(self, run_id: str) -> FrozenToolRegistry | None:
         """Load the tool snapshot used in a specific run (sync)."""
-        row = (
-            self._conn()
-            .execute(
-                "SELECT snapshot_id, tools_json FROM tool_snapshots "
-                "WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
+        conn = self._backend.get_conn()
+        try:
+            cur = conn.execute(
+                self._sql(
+                    "SELECT snapshot_id, tools_json FROM tool_snapshots "
+                    "WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
+                ),
                 (run_id,),
             )
-            .fetchone()
-        )
+            row = cur.fetchone()
+        finally:
+            self._backend.put_conn(conn)
         if row is None:
             return None
         return FrozenToolRegistry.from_json(
@@ -367,9 +380,7 @@ class ToolSnapshotStore:
         )
 
     def close(self) -> None:
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        self._backend.close()
 
 
 # ---------------------------------------------------------------------------

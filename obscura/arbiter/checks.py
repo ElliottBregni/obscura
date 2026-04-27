@@ -88,6 +88,107 @@ _STOP_WORDS = frozenset(
 )
 
 # ---------------------------------------------------------------------------
+# Lightweight suffix stemmer (for keyword extraction)
+# ---------------------------------------------------------------------------
+
+
+_VOWELS = frozenset("aeiou")
+
+
+def _stem(word: str) -> str:
+    """Lightweight English suffix stripper for keyword matching.
+
+    Not a full Porter stemmer — handles the most common suffixes that
+    cause arbiter drift/relevance false negatives. Each rule carries its
+    own minimum stem length to avoid over-stripping short words.
+
+    Special cases:
+    - After "-ing", doubled trailing consonants are collapsed (running→run).
+    - After "-er", stems ending consonant+"l" are rejected (handler stays
+      "handler"; checker→check is fine because "ck" is a valid ending).
+    - After "-er", doubled trailing consonants are collapsed (runner→run).
+    - "-s"/"-es" rules skip if the resulting stem itself ends in "s".
+    """
+    if len(word) <= 3:
+        return word
+
+    # Each entry: (suffix, replacement, min_stem_length_after_strip)
+    # Longest suffixes first so they fire before shorter overlapping rules.
+    _RULES: tuple[tuple[str, str, int], ...] = (
+        # 7-char
+        ("ational", "ate",  4),
+        # 6-char
+        ("tional",  "tion", 4),
+        ("encies",  "ence", 4),
+        ("ancing",  "ance", 4),
+        # 5-char — pluralise before singular so "migrations"→"migrate"
+        ("ations",  "ate",  4),
+        ("ation",   "ate",  4),
+        ("izing",   "ize",  4),
+        ("ising",   "ise",  4),
+        ("ating",   "ate",  4),
+        ("ities",   "ity",  4),
+        ("iness",   "y",    4),
+        ("ments",   "",     5),
+        ("ators",   "ate",  4),
+        # 4-char
+        ("ness",    "",     5),
+        ("ment",    "",     5),
+        ("tion",    "",     5),  # min 5: "function"→"func"(4) rejected → stays "function"
+        ("sion",    "",     5),
+        ("ious",    "",     5),
+        ("eous",    "",     5),
+        ("ible",    "",     5),
+        ("able",    "",     5),
+        ("ally",    "",     5),
+        ("ical",    "",     5),
+        ("ator",    "ate",  4),
+        ("ures",    "",     4),  # failures→fail
+        # 3-char
+        ("ing",     "",     4),
+        ("ies",     "y",    4),
+        ("ors",     "or",   4),
+        ("ers",     "er",   4),
+        ("ent",     "",     5),
+        ("ant",     "",     5),
+        ("ous",     "",     5),
+        ("ive",     "",     5),
+        ("ize",     "",     4),
+        ("ise",     "",     4),
+        # 2-char
+        ("ed",      "",     4),
+        ("ly",      "",     4),
+        ("es",      "",     5),
+        ("er",      "",     4),
+        # 1-char (last resort)
+        ("s",       "",     4),
+    )
+
+    for suffix, replacement, min_len in _RULES:
+        if word.endswith(suffix):
+            stem = word[: -len(suffix)] + replacement
+            if len(stem) < min_len:
+                continue
+            # After stripping "-ing": collapse doubled trailing consonant.
+            # stopping→stopp→stop, running→runn→run.
+            if suffix == "ing" and len(stem) >= 2:
+                if stem[-1] == stem[-2] and stem[-1] not in _VOWELS:
+                    stem = stem[:-1]
+            # "-s"/"-es": skip if stem itself ends in "s" (databases→databas → skip).
+            if suffix in ("s", "es") and stem.endswith("s"):
+                continue
+            # "-er": reject consonant+"l" endings (handler→handl is not a base form).
+            # Also de-double trailing consonant (runner→runn→run).
+            if suffix == "er" and len(stem) >= 2:
+                if stem[-1] == "l" and stem[-2] not in _VOWELS:
+                    continue
+                if stem[-1] == stem[-2] and stem[-1] not in _VOWELS:
+                    stem = stem[:-1]
+            return stem
+    return word
+
+
+# ---------------------------------------------------------------------------
 # Dangerous shell patterns (SAFETY-level)
 # ---------------------------------------------------------------------------
 
@@ -172,6 +273,7 @@ def check_model_turn(
     output_text: str,
     *,
     tool_error_count: int = 0,
+    tool_call_count: int = 0,
     repeated_errors: int = 0,
     lint_errors: Mapping[str, str] | None = None,
 ) -> tuple[float, list[str]]:
@@ -182,10 +284,12 @@ def check_model_turn(
     issues: list[str] = []
     score = 1.0
 
-    # Empty output
+    # Empty output — only flag when the model made no tool calls either.
+    # Pure tool-call turns (no narration) are valid agentic behaviour.
     if not output_text or not output_text.strip():
-        issues.append("model produced empty output")
-        score -= 0.3
+        if tool_call_count == 0:
+            issues.append("model produced empty output")
+            score -= 0.3
 
     # Tool errors this turn
     if tool_error_count > 0:
@@ -203,7 +307,7 @@ def check_model_turn(
         issues.append(f"{total} lint error(s) in {len(lint_errors)} file(s)")
         score -= 0.3
 
-    return max(score, 0.0), issues
+    return round(max(score, 0.0), 10), issues
 
 
 # ---------------------------------------------------------------------------
@@ -215,22 +319,30 @@ def check_task_complete(
     task: Mapping[str, Any],
     *,
     output_text: str = "",
+    files_changed: list[str] | None = None,
+    tool_call_count: int = 0,
 ) -> tuple[float, list[str]]:
     """Score a task that has been marked completed.
 
     *output_text* is the agent's output for relevance checking against
-    the task subject/description.
+    the task subject/description.  *files_changed* and *tool_call_count*
+    are used as proxies for "work was done" when no text output exists
+    (common for pure tool-call / KAIROS daemon turns).
 
     Returns (score, issues).
     """
     issues: list[str] = []
     score = 1.0
 
-    # Output should be non-empty for completed tasks
+    # Output should be non-empty — but tool-call-only turns produce no
+    # narration text.  Skip the penalty when files were changed or tools
+    # were called, as those are clear evidence of productive work.
     output = str(task.get("output", "") or output_text or "")
     if not output.strip():
-        issues.append("task completed with no output")
-        score -= 0.3
+        work_done = bool(files_changed) or tool_call_count > 0
+        if not work_done:
+            issues.append("task completed with no output")
+            score -= 0.3
 
     # Error field should be empty
     error = str(task.get("error", "") or "")
@@ -282,11 +394,20 @@ def check_goal_transition(
     goal: Mapping[str, Any],
     *,
     linked_task_statuses: Sequence[str] | None = None,
+    output_text: str = "",
+    files_changed: Sequence[str] = (),
+    test_outcome: object | None = None,
+    error_count: int = 0,
 ) -> tuple[float, list[str]]:
     """Score a goal status transition.
 
     *linked_task_statuses* should be the status of each task linked
     to the goal (e.g. ``["completed", "completed", "pending"]``).
+
+    When *output_text* and *files_changed* are provided, acceptance
+    criteria are verified using structured pattern matching (tests,
+    lint, file existence, error absence) via
+    :func:`check_acceptance_criteria`.
 
     Returns (score, issues).
     """
@@ -311,11 +432,23 @@ def check_goal_transition(
             issues.append(f"goal completing at {progress}% (expected 100%)")
             score -= 0.2
 
-        # Should have acceptance criteria satisfied (basic presence check)
-        criteria = goal.get("acceptance_criteria") or []
-        if criteria and not linked_task_statuses:
-            issues.append("goal has acceptance criteria but no linked tasks")
-            score -= 0.2
+        # Verify acceptance criteria using structured pattern matching.
+        criteria = list(goal.get("acceptance_criteria") or [])
+        if criteria:
+            crit_score, crit_issues = check_acceptance_criteria(
+                criteria,
+                output_text,
+                files_changed=files_changed,
+                test_outcome=test_outcome,
+                error_count=error_count,
+            )
+            if crit_score < 1.0:
+                # Weight criteria satisfaction at up to 0.3 of total score.
+                score -= (1.0 - crit_score) * 0.3
+                issues.extend(crit_issues)
+        elif not linked_task_statuses:
+            issues.append("goal has no acceptance criteria or linked tasks")
+            score -= 0.1
 
     return max(score, 0.0), issues
 
@@ -326,9 +459,38 @@ def check_goal_transition(
 
 
 def _extract_keywords(text: str) -> set[str]:
-    """Extract meaningful keywords from text (lowercase, no stop words)."""
-    words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())
-    return {w for w in words if w not in _STOP_WORDS}
+    """Extract meaningful keywords from text (lowercase, stemmed, no stop words)."""
+    raw = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())) - _STOP_WORDS
+    return {_stem(w) for w in raw}
+
+
+def check_acceptance_criteria(
+    criteria: Sequence[str],
+    output_text: str,
+    *,
+    files_changed: Sequence[str] = (),
+    test_outcome: object | None = None,
+    error_count: int = 0,
+) -> tuple[float, list[str]]:
+    """Score whether acceptance criteria are satisfied.
+
+    Delegates to :mod:`obscura.arbiter.criteria` for structured pattern
+    matching (tests pass, lint clean, file exists, no errors) before
+    falling back to keyword overlap.  The LLM judge handles nuanced
+    evaluation of criteria that don't match any pattern.
+
+    Returns (score, issues).
+    """
+    from obscura.arbiter.criteria import verify_criteria
+
+    score, issues, _ = verify_criteria(
+        criteria,
+        output_text=output_text,
+        files_changed=files_changed,
+        test_outcome=test_outcome,  # type: ignore[arg-type]
+        error_count=error_count,
+    )
+    return max(score, 0.0), issues
 
 
 def check_drift(
@@ -614,7 +776,9 @@ def check_file_relevance(
             # Strip extension.
             name = part.rsplit(".", 1)[0] if "." in part else part
             tokens = re.split(r"[-_./]", name.lower())
-            path_words.update(t for t in tokens if len(t) > 2 and t not in _STOP_WORDS)
+            path_words.update(
+                _stem(t) for t in tokens if len(t) > 2 and t not in _STOP_WORDS
+            )
 
         if not path_words:
             continue

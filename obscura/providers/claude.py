@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
 from obscura.core.tool_policy import ToolPolicy
-from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -38,11 +38,28 @@ if TYPE_CHECKING:
     from obscura.core.tool_router import RoutingResult
 
 # ---------------------------------------------------------------------------
+# MCP server name + tool prefix
+# ---------------------------------------------------------------------------
+#
+# Claude Agent SDK requires every custom tool to live inside an MCP server
+# and be exposed as ``mcp__<server>__<tool>``. There's no escape hatch in
+# the SDK — the ``tools`` field on ``ClaudeAgentOptions`` is an enable list
+# for Claude's own native tools (Bash, Read, Edit, …), not a way to
+# register new ones. So our in-process MCP server's name is always part of
+# the prefix the model sees.
+#
+# Keep the name short — the prefix shows up everywhere in tool listings
+# and tool-call traces.
+MCP_SERVER_NAME = "obs"
+MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
+
+# ---------------------------------------------------------------------------
 # Backend implementation
 # ---------------------------------------------------------------------------
 
 
-class ClaudeBackend:
+class ClaudeBackend(BackendToolHostMixin):
     """BackendProtocol implementation wrapping claude-agent-sdk."""
 
     def __init__(
@@ -70,9 +87,8 @@ class ClaudeBackend:
         self._client: Any = None
         self._last_session_id: str | None = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -209,15 +225,107 @@ class ClaudeBackend:
         """Initialize the Claude SDK client."""
         from claude_agent_sdk import ClaudeSDKClient
 
+        # Probe external MCP servers and register shadow ToolSpecs so they
+        # appear in the system prompt's tool listing and are discoverable
+        # via tool_search. Claude SDK still dispatches the actual calls
+        # via mcp_servers passthrough — these specs are discovery-only.
+        from obscura.integrations.mcp.discovery import (
+            register_external_mcp_tools,
+        )
+
+        await register_external_mcp_tools(self, self._mcp_servers)
+
+        # Snapshot baseline MCP subprocess PIDs so we can identify (and
+        # later reap) the ones Claude SDK spawns for *this* session. The
+        # snapshot uses ``ps`` and is best-effort — see
+        # ``obscura.integrations.mcp.process_cleanup``.
+        self._mcp_pids_at_start = self._snapshot_mcp_pids()
+
         options = self._build_options()
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
 
     async def stop(self) -> None:
-        """Disconnect from Claude."""
+        """Disconnect from Claude and reap any MCP subprocess we spawned."""
         if self._client is not None:
-            await self._client.disconnect()
-            self._client = None
+            try:
+                await self._client.disconnect()
+            finally:
+                self._client = None
+
+        await self._reap_session_mcp_subprocesses()
+
+    def _snapshot_mcp_pids(self) -> set[int]:
+        """Return the set of currently-running PIDs matching configured MCP servers.
+
+        Used as a baseline at session start so we can compute "what
+        appeared during my session" at stop time without clobbering
+        subprocesses owned by a concurrent obscura session in another
+        shell.
+        """
+        if not self._mcp_servers:
+            return set()
+        try:
+            from obscura.integrations.mcp.process_cleanup import (
+                find_processes_for_command,
+            )
+        except ImportError:
+            return set()
+
+        pids: set[int] = set()
+        for server in self._mcp_servers:
+            command = str(server.get("command") or "")
+            if not command:
+                continue
+            for proc in find_processes_for_command(command):
+                pids.add(proc.pid)
+        return pids
+
+    async def _reap_session_mcp_subprocesses(self) -> None:
+        """Kill MCP subprocesses that appeared during this session.
+
+        Computes the diff between *now* and ``_mcp_pids_at_start``, then
+        further filters to descendants of our own Python process so a
+        subprocess spawned by a concurrent obscura session never gets
+        reaped. Best-effort and silent on any error.
+        """
+        baseline: set[int] = getattr(self, "_mcp_pids_at_start", set())
+        if not self._mcp_servers:
+            return
+        try:
+            import os
+
+            from obscura.integrations.mcp.process_cleanup import (
+                build_descendant_set,
+                cleanup_orphans,
+                find_processes_for_command,
+            )
+        except ImportError:
+            return
+
+        own_subtree = build_descendant_set(os.getpid())
+
+        new_pids: list[int] = []
+        for server in self._mcp_servers:
+            command = str(server.get("command") or "")
+            if not command:
+                continue
+            for proc in find_processes_for_command(command):
+                if proc.pid in baseline:
+                    continue
+                if proc.pid not in own_subtree:
+                    # Owned by a concurrent obscura session — leave it alone.
+                    continue
+                new_pids.append(proc.pid)
+
+        if not new_pids:
+            return
+
+        try:
+            cleanup_orphans(new_pids)
+        except Exception:
+            # Cleanup is best-effort — never raise out of stop().
+            pass
 
     # -- Send / Stream -------------------------------------------------------
 
@@ -308,18 +416,7 @@ class ClaudeBackend:
         """Remove a session from tracking."""
         self._session_store.remove(ref.session_id)
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool for use in sessions (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
-
-    def get_tool_registry(self) -> ToolRegistry:
-        """Return the tool registry for agent loop use."""
-        return self._tool_registry
+    # -- Tools (register_tool / get_tool_registry come from BackendToolHostMixin) -----
 
     # -- Hooks ---------------------------------------------------------------
 
@@ -449,15 +546,128 @@ class ClaudeBackend:
                 int(max_thinking) if int(max_thinking) > 0 else None
             )
 
+        # Pull multimodal images out of kwargs — the rest of the kwargs
+        # pipeline doesn't understand them, and the Claude SDK only accepts
+        # them through the AsyncIterable message form below.
+        raw_images: Any = kwargs.pop("images", None)
+        images: list[Any] = (
+            list(cast("list[Any]", raw_images)) if isinstance(raw_images, list) else []
+        )
+
         query_kwargs = self._build_query_kwargs(kwargs)
+
+        # Multimodal path: when images are attached, hand the SDK an async
+        # iterable of message dicts whose ``content`` is a list of
+        # ``{"type": "text"|"image"}`` blocks. Claude's wire format requires
+        # each image to carry ``source.type=base64``, ``media_type``, and
+        # ``data`` — we accept either raw base64 strings or full data URLs
+        # (``data:image/png;base64,…``) and normalise here.
+        if images:
+            prompt_payload: Any = self._build_image_message_iterable(prompt, images)
+        else:
+            prompt_payload = prompt
+
         if query_kwargs:
             try:
-                await self._client.query(prompt, **query_kwargs)
+                await self._client.query(prompt_payload, **query_kwargs)
                 return
             except TypeError:
                 # Older SDKs may not accept query kwargs.
                 pass
-        await self._client.query(prompt)
+        await self._client.query(prompt_payload)
+
+    @staticmethod
+    def _build_image_message_iterable(
+        prompt: str,
+        images: list[Any],
+    ) -> Any:
+        """Build an ``AsyncIterable[dict]`` carrying a multimodal user message.
+
+        Each entry in ``images`` may be:
+          - a string data URL (``data:image/png;base64,…``)
+          - a plain base64 string
+          - a dict with ``data``/``dataUrl``/``base64`` and optional
+            ``media_type`` / ``mediaType``
+
+        Anything that can't be parsed is silently skipped — the text prompt
+        always reaches the model so the turn doesn't fail.
+        """
+        import base64 as _b64
+        import re as _re
+
+        content_blocks: list[dict[str, Any]] = []
+        if prompt:
+            content_blocks.append({"type": "text", "text": prompt})
+
+        data_url_re = _re.compile(r"^data:(?P<mt>[^;]+);base64,(?P<data>.*)$", _re.S)
+
+        for entry in images:
+            data: str = ""
+            media_type: str = "image/png"
+            if isinstance(entry, str):
+                m = data_url_re.match(entry)
+                if m:
+                    media_type = m.group("mt") or "image/png"
+                    data = m.group("data") or ""
+                else:
+                    data = entry
+            elif isinstance(entry, dict):
+                entry_dict: dict[str, Any] = cast("dict[str, Any]", entry)
+                raw_val: Any = (
+                    entry_dict.get("data")
+                    or entry_dict.get("dataUrl")
+                    or entry_dict.get("base64")
+                    or ""
+                )
+                mt_val: Any = (
+                    entry_dict.get("media_type")
+                    or entry_dict.get("mediaType")
+                    or media_type
+                )
+                if isinstance(mt_val, str):
+                    media_type = mt_val
+                if isinstance(raw_val, str):
+                    m = data_url_re.match(raw_val)
+                    if m:
+                        media_type = m.group("mt") or media_type
+                        data = m.group("data") or ""
+                    else:
+                        data = raw_val
+
+            if not data:
+                continue
+            # Strip whitespace and validate base64 cheaply — bad data should
+            # not crash the turn.
+            data = data.strip()
+            try:
+                _b64.b64decode(data, validate=True)
+            except Exception:
+                continue
+            content_blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data,
+                    },
+                }
+            )
+
+        # Fall back to a plain text-only message if nothing decoded.
+        if not any(b["type"] == "image" for b in content_blocks):
+            return prompt or ""
+
+        message = {
+            "type": "user",
+            "message": {"role": "user", "content": content_blocks},
+            "parent_tool_use_id": None,
+        }
+
+        async def _iter() -> Any:
+            yield message
+
+        return _iter()
 
     def _build_query_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Convert unified kwargs into Claude query kwargs.
@@ -493,7 +703,7 @@ class ClaudeBackend:
         if choice is None:
             return {}
 
-        tool_names = [f"mcp__obscura_tools__{t.name}" for t in self._tools]
+        tool_names = [f"{MCP_TOOL_PREFIX}{t.name}" for t in self._tools]
         if isinstance(choice, ToolChoice):
             if choice.mode == "auto":
                 return {}
@@ -503,7 +713,7 @@ class ClaudeBackend:
                 return {"allowed_tools": tool_names} if tool_names else {}
             if choice.mode == "function" and choice.function_name:
                 return {
-                    "allowed_tools": [f"mcp__obscura_tools__{choice.function_name}"],
+                    "allowed_tools": [f"{MCP_TOOL_PREFIX}{choice.function_name}"],
                 }
             return {}
 
@@ -615,7 +825,7 @@ class ClaudeBackend:
                 # When native tools are blocked (default) OR the filter reduced
                 # the set, set an explicit allowlist so the LLM can only call
                 # registered Obscura tool names — prevents hallucinated names.
-                allowed = [f"mcp__obscura_tools__{t.name}" for t in filtered]
+                allowed = [f"{MCP_TOOL_PREFIX}{t.name}" for t in filtered]
                 opts["allowed_tools"] = allowed
 
         # Extended thinking (set at session level, not per-query)
@@ -659,41 +869,33 @@ class ClaudeBackend:
         returns from Obscura tools are converted to plain text content
         that the MCP protocol expects.
         """
-        import functools
-        import inspect
-
         from claude_agent_sdk import create_sdk_mcp_server
         from claude_agent_sdk import tool as claude_tool
 
-        def _wrap_handler(handler: Any) -> Any:
-            """Ensure the handler always returns a plain string for MCP.
+        def _wrap_handler(bound_spec: Any) -> Any:
+            """Bridge the claude_agent_sdk calling convention.
 
-            The claude_agent_sdk calls ``handler(arguments)`` with the
-            arguments dict as a single positional arg, but Obscura tool
-            handlers expect keyword arguments.  This wrapper bridges the
-            two calling conventions.
+            The SDK calls ``handler(arguments)`` with the arguments dict as
+            a single positional arg. We route through
+            :func:`call_tool_handler` so bridging, aliasing, coercion, and
+            undeclared-kwarg tolerance match the copilot and agent-loop
+            paths.
             """
-            if inspect.iscoroutinefunction(handler):
+            from obscura.core.agent_loop import call_tool_handler
 
-                @functools.wraps(handler)
-                async def _async_wrapper(
-                    arguments: dict[str, Any] | None = None, **kwargs: Any
-                ) -> str:
-                    merged = {**(arguments or {}), **kwargs}
-                    result = await handler(**merged)
-                    return str(result) if result is not None else ""
-
-                return _async_wrapper
-
-            @functools.wraps(handler)
-            def _sync_wrapper(
+            async def _async_wrapper(
                 arguments: dict[str, Any] | None = None, **kwargs: Any
-            ) -> str:
+            ) -> dict[str, Any]:
                 merged = {**(arguments or {}), **kwargs}
-                result = handler(**merged)
-                return str(result) if result is not None else ""
+                result = await call_tool_handler(bound_spec, merged)
+                # claude_agent_sdk expects {"content": [{"type": "text", ...}]}.
+                # Returning a bare string makes the SDK do `"content" in result`
+                # on the string (substring match) and either silently drop the
+                # result or raise TypeError on `result["content"]`.
+                text = str(result) if result is not None else ""
+                return {"content": [{"type": "text", "text": text}]}
 
-            return _sync_wrapper
+            return _async_wrapper
 
         claude_tools: list[Any] = []
         seen_names: set[str] = set()
@@ -701,7 +903,7 @@ class ClaudeBackend:
             if spec.name in seen_names:
                 continue
             seen_names.add(spec.name)
-            wrapped = _wrap_handler(spec.handler)
+            wrapped = _wrap_handler(spec)
             decorated = claude_tool(
                 spec.name,
                 spec.description,
@@ -710,11 +912,11 @@ class ClaudeBackend:
             claude_tools.append(decorated)
 
         server = create_sdk_mcp_server(
-            name="obscura_tools",
+            name=MCP_SERVER_NAME,
             version="1.0.0",
             tools=claude_tools,
         )
-        return {"obscura_tools": server}
+        return {MCP_SERVER_NAME: server}
 
     def _build_hooks_config(self) -> dict[str, Any] | None:
         """Translate registered hooks to Claude SDK hook config."""

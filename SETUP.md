@@ -59,14 +59,13 @@ cd /Users/elliottbregni/dev/obscura-main
 
 export OBSCURA_API_KEYS="obscura_LcTDYtNivCUsvdn4H9gh0O2lj-skhDVrmqGE9Olgkdw:admin:agent:read,agent:copilot,sessions:manage,sync:write"
 export OBSCURA_PORT=8080
-export OBSCURA_AUTH_ENABLED=true
 export OBSCURA_QDRANT_URL=http://localhost:6333
 export OBSCURA_VECTOR_BACKEND=qdrant
 
 .venv/bin/python -m obscura.main
 ```
 
-Verify: `curl http://localhost:8080/health` → `{"status":"ok","auth_enabled":true}`
+Verify: `curl http://localhost:8080/health` → `{"status":"ok"}`
 
 ### 2. Web UI `.env` (already created at `web-ui/.env`)
 
@@ -117,7 +116,6 @@ Key config block:
 ```bash
 OBSCURA_ENV=prod
 OBSCURA_PORT=8080
-OBSCURA_AUTH_ENABLED=true
 OBSCURA_JWKS_STRICT=true
 OBSCURA_AUTH_MODE=oauth_first
 
@@ -184,7 +182,6 @@ server {
 | Variable | Default | Description |
 |---|---|---|
 | `OBSCURA_PORT` | `8080` | API listen port |
-| `OBSCURA_AUTH_ENABLED` | `false` | Enforce auth on all `/api/` routes |
 | `OBSCURA_API_KEYS` | — | `token:user:role1,role2` (multiple separated by `;`) |
 | `OBSCURA_JWKS_STRICT` | `false` | Require valid JWKS for JWT auth |
 | `OBSCURA_AUTH_MODE` | `oauth_first` | `oauth_first` or `api_key_only` |

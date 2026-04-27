@@ -57,11 +57,18 @@ def cleanup_stale_files(max_age_days: int = 30) -> dict[str, int]:
       - Old daily logs (>max_age_days)
       - Expired background task output
       - Stale export files
-      - Empty worktree directories
+      - Orphaned git worktrees (owner process gone) under ~/.obscura/worktrees/
 
     Returns counts of items cleaned per category.
     """
-    counts: dict[str, int] = {"logs": 0, "output": 0, "exports": 0, "worktrees": 0}
+    counts: dict[str, int] = {
+        "logs": 0,
+        "output": 0,
+        "exports": 0,
+        "worktrees_marked_orphan": 0,
+        "worktrees_pruned": 0,
+        "worktrees_orphan_dirs": 0,
+    }
     cutoff = time.time() - (max_age_days * 86400)
     home = Path.home() / ".obscura"
 
@@ -97,6 +104,17 @@ def cleanup_stale_files(max_age_days: int = 30) -> dict[str, int]:
                     counts["exports"] += 1
             except OSError:
                 pass
+
+    # Worktree registry sweep — owners whose process is gone, and directories
+    # not referenced by the registry at all.
+    try:
+        from obscura.tools import worktree_registry
+
+        counts["worktrees_marked_orphan"] = len(worktree_registry.sweep_dead_pids())
+        counts["worktrees_pruned"] = len(worktree_registry.prune_missing_paths())
+        counts["worktrees_orphan_dirs"] = worktree_registry.cleanup_orphan_dirs()
+    except Exception:
+        logger.debug("Worktree registry cleanup failed", exc_info=True)
 
     return counts
 

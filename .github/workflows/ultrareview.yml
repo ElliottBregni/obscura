@@ -1,0 +1,96 @@
+name: Ultrareview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ultrareview:
+    runs-on: ubuntu-latest
+    # Skip draft PRs and dependabot
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.actor != 'dependabot[bot]'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.5'
+          cache: 'pip'
+
+      - name: Install Obscura
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,server]"
+
+      - name: Fetch PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} > /tmp/pr.diff
+          DIFF_SIZE=$(wc -c < /tmp/pr.diff)
+          echo "diff_size=$DIFF_SIZE" >> "$GITHUB_OUTPUT"
+          echo "PR diff: $DIFF_SIZE bytes"
+
+      - name: Skip if diff is empty
+        if: steps.diff.outputs.diff_size == '0'
+        run: echo "No diff found, skipping review."
+
+      - name: Run ultrareview
+        if: steps.diff.outputs.diff_size != '0'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OBSCURA_DEFAULT_BACKEND: ${{ vars.ULTRAREVIEW_BACKEND || 'copilot' }}
+        run: |
+          # Run ultrareview in single-shot mode and capture output
+          obscura -b "${OBSCURA_DEFAULT_BACKEND}" \
+            -p "/ultrareview ${{ github.event.pull_request.number }}" \
+            2>/dev/null | tee /tmp/review.md
+
+          # Trim to GitHub comment size limit (65536 chars)
+          head -c 60000 /tmp/review.md > /tmp/review_trimmed.md
+
+      - name: Post review comment
+        if: steps.diff.outputs.diff_size != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if we already have a review comment on this PR
+          EXISTING=$(gh api \
+            repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            --jq '.[] | select(.body | startswith("## Ultrareview")) | .id' \
+            | head -1)
+
+          BODY="## Ultrareview
+
+          $(cat /tmp/review_trimmed.md)
+
+          ---
+          _Reviewed at commit ${{ github.event.pull_request.head.sha }}._"
+
+          if [ -n "$EXISTING" ]; then
+            # Update existing comment
+            gh api \
+              repos/${{ github.repository }}/issues/comments/$EXISTING \
+              -X PATCH \
+              -f body="$BODY"
+            echo "Updated existing review comment."
+          else
+            # Create new comment
+            gh pr comment ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --body "$BODY"
+            echo "Posted new review comment."
+          fi

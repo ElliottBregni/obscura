@@ -1,6 +1,16 @@
 {
   "include": ["."],
-  "exclude": ["**/__pycache__", "**/node_modules", "**/.venv", "**/web-ui", "sdk/scripts"],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.venv",
+    "**/web-ui",
+    "sdk/scripts",
+    ".claude",
+    ".obscura",
+    "output",
+    "tests/unit/obscura/vault_gen_tests"
+  ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.13",
   "reportMissingTypeStubs": true,

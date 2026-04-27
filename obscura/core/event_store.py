@@ -311,6 +311,10 @@ class SQLiteEventStore:
             ("message_count", "INTEGER NOT NULL DEFAULT 0"),
             ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
             ("parent_session_id", "TEXT NOT NULL DEFAULT ''"),
+            # user_id enables SOC2 C1 user-initiated deletion to cascade
+            # from sessions to events. Existing rows default to '' and
+            # are treated as orphaned (not deleted by delete_user_data).
+            ("user_id", "TEXT NOT NULL DEFAULT ''"),
         ]
         for col_name, col_def in _migrations:
             try:
@@ -327,6 +331,8 @@ class SQLiteEventStore:
             "CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)",
+            # Index user_id so deletion-by-user is not a full-table scan.
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id) WHERE user_id != ''",
         ]:
             conn.execute(idx_sql)
         conn.commit()

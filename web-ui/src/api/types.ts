@@ -161,7 +161,6 @@ export interface HealthSummary {
     last_heartbeat: string | null;
     missed_count: number;
   }[];
-  auth_enabled?: boolean;
 }
 
 // ========== Metrics ==========

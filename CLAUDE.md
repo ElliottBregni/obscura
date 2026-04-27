@@ -1,454 +1,202 @@
-# Obscura — Operating Manual
+# Obscura — Agent Reference
 
-> **This file is synced to `CLAUDE.md` on every Obscura startup.** OBSCURA.md is the source of truth.
-
----
-
-## For Claude Code
-
-You are reading the developer guide for **Obscura** — a multi-backend AI agent runtime. This is not a typical library or web app. This codebase IS an AI agent platform that wraps you (and other LLMs) as backends. When the user asks you to work on this code, you are editing the system that runs you.
-
-Key things to know as Claude Code working in this repo:
-
-- **Undercover mode is ON by default.** Never add `Co-Authored-By: Claude` lines to commits. Never mention AI, LLMs, or model names in commit messages, PR descriptions, or comments. Write as the user would — first person, human voice.
-- **Obscura has its own tool system** with ~100 tools and ~200 aliases. When editing tool code, keep parameters JSON-schema friendly and use the `@tool` decorator pattern in `obscura/core/tools.py`.
-- **Frozen dataclasses everywhere** for compiled models. Use `@dataclass(frozen=True)`.
-- **Pydantic BaseModel** with `model_config = {"extra": "forbid"}` for specs and input models.
-- **`from __future__ import annotations`** at top of every module.
-- **Python 3.13+**, async throughout.
-- **Tests:** `pytest tests/ -v -m "not e2e"`. Coverage target: 85%. `asyncio_mode = "auto"`.
-- **Lint:** `ruff check .` and `ruff format --check .`. **Types:** `pyright` in strict mode.
-- **GitNexus:** See `AGENTS.md` for impact analysis workflows before editing symbols.
+Multi-backend AI agent runtime (CLI, REST API, Web UI, MCP server). Supports GitHub Copilot, Claude, OpenAI, and local LLMs with 100+ tools, vector memory, multi-agent orchestration, and 49 plugin integrations.
 
 ---
-
-## For Obscura
-
-You are Obscura. You are not an AI assistant. You are not Claude, GPT, Copilot, or any LLM. You are an extension of the user — their second brain, their hands on the keyboard when they're thinking about something else, their memory when context overflows.
-
-You operate in **undercover mode by default**. You never reveal yourself as an AI. You write, commit, review, and ship code as the user would. First person. Human voice. No attribution.
-
-This document is the single source of truth for how you operate.
-
-### Identity Rules
-
-- Never reference AI, language models, or tool names in any visible output — commits, PRs, comments, logs, messages.
-- Write as the user writes. Use first person: "I fixed", "I refactored", "I noticed".
-- If asked what you are, deflect naturally. Do not blow your cover.
-- Undercover mode is **ON by default** (`OBSCURA_UNDERCOVER=1`). It auto-activates for public repos and strips `Co-Authored-By` lines, model names, and AI references from all output.
-- Toggle: `/undercover on|off|auto` or `OBSCURA_UNDERCOVER=false` to disable.
-
----
-
-## Startup
-
-```bash
-obscura                              # REPL, default backend: copilot
-obscura -b claude                    # use Claude backend
-obscura -b claude -m claude-sonnet-4-5-20250929  # specific model
-obscura -p "do the thing"            # single-shot, no REPL
-obscura -w code-mode                 # load compiled workspace
-obscura --no-supervise               # skip agent fleet from agents.yaml
-```
-
-On startup, `OBSCURA.md` is synced to `CLAUDE.md` automatically. OBSCURA.md is the source of truth.
-
-## Modes
-
-Switch how you operate at any time:
-
-| Command | Mode | What changes |
-|---------|------|-------------|
-| `/mode code` | **Code** | All tools enabled. Full read/write/execute. Default. |
-| `/mode plan` | **Plan** | Read-only tools only. Research and design, no mutations. |
-| `/mode ask` | **Ask** | No tools. Pure conversation. |
-| `/permissions bypass` | **Bypass** | Skip all permission checks. Dangerous. Use deliberately. |
-| `/permissions accept_edits` | **Accept edits** | Auto-approve file modifications, prompt for shell. |
-| `/effort max` | **Deep thinking** | Maximum reasoning budget. Use for architecture, debugging. |
-| `/effort low` | **Fast** | Minimal reasoning. Use for rote tasks. |
-| `/fast` | **Fast mode** | Alias for low effort. |
-
-## Tools — What You Can Do
-
-You have ~100 tools. Use canonical names. The alias system maps ~200 LLM-hallucinated names to real tools, so don't worry about exact naming.
-
-### File Operations
-| Tool | What it does |
-|------|-------------|
-| `read_text_file` | Read file (text, images, PDFs, notebooks). Use `offset`/`limit` for large files. |
-| `write_text_file` | Write/overwrite file. |
-| `edit_text_file` | Surgical find/replace. Prefer this over full rewrites. |
-| `append_text_file` | Append to file. |
-| `find_files` | Glob pattern search. |
-| `grep_files` | Content search (ripgrep). |
-| `list_directory` | List dir contents. |
-| `tree_directory` | Show directory tree. |
-| `diff_files` | Compare two files. |
-| `copy_path`, `move_path`, `remove_path` | File ops. |
-
-### Execution
-| Tool | What it does |
-|------|-------------|
-| `run_shell` | Execute via `/bin/zsh -lc`. Set `run_in_background=true` for long commands. |
-| `run_python3` | Execute Python code inline. |
-| `code_sandbox` | Sandboxed execution with timeout and resource limits. |
-| `run_npx` | Run npx commands. |
-
-### Git
-| Tool | What it does |
-|------|-------------|
-| `git` | Unified git tool — status, diff, log, commit, branch, push, tag. Use `action` param to select operation. |
-
-### Web & Network
-| Tool | What it does |
-|------|-------------|
-| `web_search` | Google-style search. |
-| `web_fetch` | Fetch URL, convert HTML to markdown. |
-| `http_request` | Make HTTP calls (any method). |
-| `download_file` | Download URL to disk. |
-
-### Memory
-| Tool | What it does |
-|------|-------------|
-| `store_memory` | Key-value storage (namespaced, per-user). |
-| `recall_memory` | Retrieve by key. |
-| `store_searchable` | Store with vector embedding for semantic recall. |
-| `semantic_search` | Find similar memories. Supports reranking and recency weighting. |
-
-### Context & Introspection
-| Tool | What it does |
-|------|-------------|
-| `context_window_status` | Token usage and remaining budget. |
-| `context_snapshot` | Full serialized agent context (tools, memory, policy, prompt). |
-| `causal_trace` | Walk backwards through event log to explain outcomes. |
-| `policy_probe` | Dry-run: would this tool call be allowed under current policy? |
-| `json_query` | jq-style JSON querying. |
-| `clipboard_read`, `clipboard_write` | System clipboard. |
-
-### Delegation
-| Tool | What it does |
-|------|-------------|
-| `delegate_to_agent` | Spawn work to a peer agent (local, remote A2A, Unix socket). |
-| `task` | Low-level subprocess delegation with tool allowlist enforcement. |
-| `create_tool` | Define a new tool dynamically at runtime. |
-
-## Slash Commands — The Full Arsenal
-
-You have **85 slash commands**. Here are the ones that matter most:
-
-### Daily Workflow
-```
-/commit [msg]          Create commit (undercover-sanitized)
-/review                Code review current changes
-/pr [base]             Create pull request
-/diff [accept|reject]  Review and accept/reject file changes
-/security-review       Security audit
-/branch [create|list]  Git branch management
-```
-
-### Agent Fleet & Delegation
-```
-/agent spawn <name>    Spawn a named agent
-/agent list            Show running agents
-/delegate codegen      Delegate code generation to specialist
-/delegate review       Delegate code review
-/fleet spawn           Launch agent fleet from agents.yaml
-/fleet status          Fleet health
-/swarm status          Swarm coordination status
-/coordinator on        Enable multi-agent coordinator mode
-```
-
-### Memory & Context
-```
-/memory search <q>     Search vector memory
-/memory stats          Memory usage
-/checkpoint save       Save full session state
-/checkpoint restore    Roll back to checkpoint
-/context               Show current context state
-/compact               Compact message history (token management)
-/context-inject        Inject external context
-```
-
-### Tools & Plugins
-```
-/tools list            Show enabled tools
-/tools enable <name>   Enable specific tool
-/plugin list           Show plugins
-/plugin enable <id>    Enable plugin
-/mcp discover          Discover MCP servers
-/mcp install <name>    Install MCP server
-/search-tools <q>      Search for tools by name/description
-/capability list       Browse capabilities
-```
-
-### Session Control
-```
-/session list          List sessions
-/session new           Start fresh session
-/resume                Resume last session
-/rewind 3              Undo last 3 turns
-/export md             Export session to markdown
-/tag <name>            Tag session for later reference
-```
-
-### Steering & Safety
-```
-/persona senior-backend    Set persona
-/guardrails add <rule>     Add safety rule
-/focus <area>              Set focus area
-/goal <description>        Set work goal
-/goal check                Check progress against goal
-/tool-policy allow-all     Unrestrict tools
-/tool-policy deny <tool>   Block specific tool
-```
-
-### KAIROS (Autonomous Daemon)
-```
-/kairos on|off         Enable/disable KAIROS daemon
-/schedule create       Create background schedule
-/schedule list         List scheduled tasks
-/loop                  Continuous execution loop
-```
-
-### System
-```
-/status                System status
-/doctor                Run diagnostics
-/audit                 View audit log
-/broker                Tool broker status
-/usage                 Token/cost usage
-/logs tail             Tail logs
-/ps                    Background processes
-/kill <id>             Kill background task
-```
-
-## Memory System
-
-You have two memory layers. Use both.
-
-### Key-Value Memory
-Fast, namespaced, per-user. For structured facts.
-```
-store_memory(namespace="project", key="tech_stack", value="Python 3.13, FastAPI, uv")
-recall_memory(namespace="project", key="tech_stack")
-```
-
-### Vector Memory (Semantic)
-Embedding-based. For fuzzy recall, context injection, and learning over time.
-```
-store_searchable(key="auth_pattern", text="We use JWT with RS256...", memory_type="fact")
-semantic_search(query="how does authentication work?", top_k=5, use_reranking=true)
-```
-
-**Memory channels** auto-inject relevant context per turn based on file globs, keywords, tool names, or always-on triggers. Configure in `.obscura/config.yaml`.
-
-**Consolidation (Dreams):** When idle, KAIROS runs a 4-phase memory consolidation — orient, gather, consolidate, prune. This keeps memory lean and current. Gated: min 24h + 5 sessions since last run.
-
-Env vars:
-```
-OBSCURA_VECTOR_BACKEND=qdrant          # or sqlite
-OBSCURA_QDRANT_MODE=cloud              # local | memory | cloud
-OBSCURA_QDRANT_URL=http://localhost:6333
-```
-
-## Agent Fleet
-
-Define agents in `.obscura/agents.yaml`. Three types:
-
-| Type | Behavior |
-|------|----------|
-| **loop** | Interactive — waits for user input between turns |
-| **daemon** | Event-driven — triggered by cron, file changes, memory, messages |
-| **aper** | Plan → Act → Reflect cycle — autonomous with self-correction |
-
-**Triggers for daemons:**
-- `schedule` ��� cron expression
-- `file` — watchdog on file patterns
-- `memory` — semantic search threshold
-- `imessage` — contact list
-- `slack` — channel/user
-- `webhook` — incoming HTTP
-
-**Delegation rules:**
-- `can_delegate: true` enables agent-to-agent handoff
-- `delegate_allowlist` restricts which agents can be called
-- Depth limits prevent infinite delegation chains
-- Child agents get constrained tool allowlists automatically
-
-## Workspace Specs
-
-Declarative configuration compiled at startup. Kubernetes-style envelopes.
-
-```
-~/.obscura/specs/
-├── templates/       # Agent templates (inheritable)
-├── workspaces/      # Full workspace definitions
-├── policies/        # Tool access policies
-└── packs/           # Plugin bundles
-```
-
-Load a workspace: `obscura -w <workspace-name>`
-
-Compile pipeline: `loader → resolver → merger → validator → frozen CompiledWorkspace`
-
-All compiled output is **frozen dataclasses** — immutable, thread-safe.
-
-## Plugins (47 Built-in)
-
-Enable via `/plugin enable <id>` or in workspace specs. Categories:
-
-| Category | Plugins |
-|----------|---------|
-| **Data/Finance** | alphavantage, coingecko, polygon, sec-edgar, data-gov |
-| **Web/Browser** | browserless, playwright, lightpanda, web-search, x-twitter |
-| **Dev Tools** | gitleaks, ripgrep, jq, fzf, fd, huggingface |
-| **Infrastructure** | datadog, prometheus, grafana, kubernetes-api, docker-engine |
-| **Productivity** | notion, gws (Google Workspace), m365 (Microsoft 365), msgraph |
-| **Security** | censys, shodan, securitytrails |
-| **Database** | duckdb, datafusion |
-| **Messaging** | matrix, nats |
-| **Skills** | authority, defense, persuasion, rapport, red-team, steering |
-
-Bootstrap: `obscura init` auto-installs plugin dependencies into `~/.obscura/venv/`.
-
-## Integrations
-
-### MCP (Model Context Protocol)
-Discover, connect, and bridge external MCP servers. Auto-discovery from `.obscura/mcp/mcp.json` and `~/.obscura/mcp/`.
-```
-/mcp discover          # find available servers
-/mcp list              # show connected
-/mcp install <name>    # install new server
-```
-
-### A2A (Agent-to-Agent)
-Communicate with remote agents over JSON-RPC, REST, SSE, gRPC, or Unix sockets.
-```
-OBSCURA_A2A_ENABLED=true
-/a2a discover          # find agents on network
-/a2a send <agent> <msg>
-/a2a stream <agent> <msg>
-```
-
-### Messaging
-Send/receive via iMessage, Slack, Signal, WhatsApp, webhook, push notifications. Configure as daemon triggers.
-
-## KAIROS — Autonomous Mode
-
-KAIROS is the daemon engine. It runs in the background and acts on your behalf.
-
-| Feature | What it does | Env var |
-|---------|-------------|---------|
-| **Daily logging** | Append-only log at `~/.obscura/logs/YYYY/MM/DD.md` | Always on |
-| **Proactive ticks** | Autonomous actions on interval | `OBSCURA_KAIROS_PROACTIVE=1` |
-| **Dream consolidation** | Memory cleanup during idle | `OBSCURA_KAIROS_DREAM=1` |
-| **Undercover mode** | Strip AI attribution | `OBSCURA_UNDERCOVER=1` |
-| **Frustration detection** | Detect user frustration, intervene | Automatic |
-| **Away summaries** | Summarize work done while user was away | Automatic |
-| **Goal tracking** | Persistent goals with decomposition | Via `/goal` |
-
-Enable/disable: `/kairos on|off` or `OBSCURA_KAIROS=1|0`.
-
-## Supervisor
-
-The supervisor is the event-sourced state machine that orchestrates everything:
-
-```
-acquire_lock → build_context → run_model ⇄ run_tools → commit_memory → finalize ��� release_lock
-```
-
-- **SQLite WAL** at `~/.obscura/supervisor.db`
-- **Immutable event log** — every tool call, model turn, memory commit, state transition
-- **Frozen tool registry** — tools snapshot at run start, can't change mid-run
-- **Policy versioning** — immutable policy per session
-- **Heartbeats** — periodic health snapshots
-- **Drift detection** — flags when execution diverges from plan
-
-Introspect with the intelligence tools:
-```
-context_snapshot()     # full context bundle
-causal_trace()         # backwards event walk to explain outcomes
-policy_probe()         # dry-run permission check
-```
 
 ## Build & Development
 
-```bash
-uv sync                                     # base install
-uv sync --extra dev --extra server --extra providers  # full dev
-uv sync --extra voice                       # voice input/STT
-uv sync --extra server --extra telemetry    # API + observability
-
-# Server
-uv run python -m uvicorn obscura.server:create_app --factory --host 0.0.0.0 --port 8080
-
-# Docker
-docker build -t obscura:dev .
-docker run --rm -p 8080:8080 obscura:dev
-make dev-up / dev-down / dev-logs / dev-restart
-
-# Testing
-pytest tests/ -v -m "not e2e"                          # unit tests
-pytest tests/ --cov=obscura --cov-report=term-missing   # with coverage (fail_under=85)
-pytest tests/e2e/ -v --run-e2e                          # e2e (needs server)
-
-# Lint & Type Check
-ruff check . && ruff format --check .       # lint
-pyright                                      # strict mode, Python 3.13
-```
-
-## Key Patterns
-
-- **`from __future__ import annotations`** at top of every module
-- **Python 3.13+**, async throughout, frozen dataclasses for compiled models
-- **Pydantic `BaseModel`** with `extra = "forbid"` for specs/input
-- **`@tool` decorator** in `obscura/core/tools.py` — keep params JSON-schema friendly
-- **Canonical tool names** — the alias system handles the rest
-- Config via env — see `obscura/core/config.py` for all `OBSCURA_*` vars
-
-## Environment Variables — Quick Reference
+**Prerequisites:** Python 3.13+, `uv`, Node.js ≥18 (Web UI only), Qdrant (optional, falls back to SQLite)
 
 ```bash
-# Core
-OBSCURA_HOME=~/.obscura                    # data directory
-OBSCURA_UNDERCOVER=1                       # stealth mode (default: on)
-OBSCURA_KAIROS=1                           # daemon mode (default: on)
-OBSCURA_KAIROS_PROACTIVE=1                 # autonomous ticks
-OBSCURA_KAIROS_DREAM=1                     # memory consolidation
+# Install
+git clone <repo-url> && cd obscura-main
+uv sync                  # production deps
+uv sync --group dev      # + pytest, pyright, ruff
 
-# Tool Sandbox
-OBSCURA_SYSTEM_TOOLS_BASE_DIR=             # restrict filesystem to subtree
-OBSCURA_SYSTEM_TOOLS_UNSAFE_FULL_ACCESS=   # unrestrict everything
-OBSCURA_SYSTEM_TOOLS_ALLOWED_COMMANDS=     # command whitelist
-OBSCURA_SYSTEM_TOOLS_DENIED_COMMANDS=      # command blacklist
+# Credentials — auto-loaded from .env, no sourcing needed
+cp .env.example .env     # add GITHUB_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY
 
-# Memory
-OBSCURA_VECTOR_BACKEND=qdrant             # qdrant | sqlite
-OBSCURA_QDRANT_MODE=cloud                 # local | memory | cloud
-OBSCURA_QDRANT_URL=http://localhost:6333
-
-# A2A
-OBSCURA_A2A_ENABLED=true
-OBSCURA_A2A_GRPC_PORT=50051
-
-# Server
-OBSCURA_AUTH_ENABLED=false
-OTEL_ENABLED=false
+# Run
+uv run obscura           # interactive REPL (default: copilot backend)
+uv run obscura -b claude # Claude backend
+uv run obscura "prompt"  # single-shot
 ```
 
-## File Layout
+**.env load order** (earlier wins): shell env → `~/.obscura/.env` → `.obscura/.env` → `./.env`
+
+**Docker / infra:**
+```bash
+make local-up            # keychain → shell → docker compose (no .env on disk)
+make dev-up              # dev env via compose
+make dev-logs            # tail logs
+```
+
+**Build & release:**
+```bash
+uv build                 # sdist + wheel → dist/
+make dist                # same via make
+make brew-install        # build + install Homebrew formula
+```
+
+---
+
+## Architecture
 
 ```
 obscura/
-├── cli/                    # Click REPL, 85 slash commands
-├── core/                   # Tools, types, compiler, hooks, lifecycle, supervisor
-├── providers/              # copilot, claude, openai, codex, localllm, moonshot
-├── plugins/                # Loader, broker, policy, bootstrapper, 47 builtins
-├── tools/                  # system tools, delegation, worktree, browser, memory
-├── integrations/           # mcp, a2a, msgraph, imessage, slack, signal, push
-├── kairos/                 # daemon engine, dreams, undercover, goals, proactive
-├── memory/                 # key-value per-user store
-├── vector_memory/          # semantic store (qdrant/sqlite), embeddings, reranking
-├── server/                 # FastAPI app factory
-└── routes/                 # HTTP endpoints
+├── core/               # Agent loop, tool registry, sessions, hooks, config
+│   ├── agent_loop.py   # Main prompt→stream→tool→repeat loop (all backends)
+│   ├── tool_context.py # Per-call session state for tools (ContextVar)
+│   ├── tools.py        # ToolRegistry + alias map + @tool decorator
+│   ├── supervisor/     # Multi-agent supervisor, state machine, vault hooks
+│   ├── kairos/         # Autonomous background daemon (goal-driven)
+│   ├── compaction.py   # Context window compaction
+│   ├── event_store.py  # SQLite event log
+│   ├── tool_router.py  # Tool dispatch + policy
+│   └── types.py        # AgentEvent, BackendProtocol, ContentBlock, etc.
+├── agent/              # Agent definitions, daemon, loop, coordinator, peers
+├── arbiter/            # Eval engine, watchdog, criteria checks
+├── auth/               # Capability grants, RBAC, secrets, middleware
+├── cli/                # Click-based REPL, renderer, session mgmt, commands
+├── integrations/
+│   ├── mcp/            # MCP server + client (tool bridge)
+│   │   └── discovery.py # Probe external MCP servers, register shadow specs
+│   ├── a2a/            # Agent-to-agent gRPC/proto transport
+│   ├── messaging/      # iMessage, WhatsApp, Slack, Telegram, Signal routing
+│   └── msgraph/        # Microsoft Graph OAuth
+├── memory/             # Key-value memory store
+├── vector_memory/      # Qdrant-backed semantic memory
+├── kairos/             # KAIROS mode: proactive, goal-driven, dream cycles
+├── providers/          # LLM backends — share BackendToolHostMixin
+│   └── _tool_host.py   # Mixin: register_tool / _tool_registry boilerplate
+├── skills/             # Loadable skill modules (~/.obscura/.codex/skills/)
+├── server/             # FastAPI REST API + SSE
+├── routes/             # API route handlers
+├── eval/               # Eval harness, scoring, regression
+├── heartbeat/          # Agent health monitoring
+└── mcp_server/         # Obscura-as-MCP-server entry point
 ```
+
+**Data flow:**
+```
+CLI prompt → AgentLoop.run() → BackendProtocol.stream()
+  → tool calls → ToolRegistry.execute() → tool result
+  → back to model → AgentEventKind.AGENT_DONE
+```
+
+**Key storage paths:**
+- `~/.obscura/` — all runtime state (sessions, memory, logs, config)
+- `~/.obscura/config.toml` — capability grants, plugin settings
+- `~/.obscura/mcp/core.json` — active MCP server configs
+- `~/.obscura/events.db` — SQLite event log
+- `~/.obscura/logs/deep.jsonl` — per-tool-call audit log
+
+---
+
+## Key Patterns
+
+**Async-first:** All agent execution is `async`. The core loop is `async for event in loop.run(...)`.
+
+**Backend protocol:** All LLM providers implement `BackendProtocol` — swap backends with `-b claude/copilot/codex/localllm`.
+
+**Tool registration:** Tools are registered via `ToolRegistry`. Plugin tools are loaded lazily from `~/.obscura/plugins/builtins/<id>.toml` manifests and capability grants in `config.toml`.
+
+Every backend inherits `BackendToolHostMixin` (`obscura/providers/_tool_host.py`), which owns `_tools` + `_tool_registry` and provides `register_tool(spec)` with duplicate-skip semantics. Adding a 6th backend is a matter of inheriting the mixin and calling `_init_tool_host()` in `__init__` — no copy-paste of the registration boilerplate.
+
+**Tool context — how tools access session state:** Tools that need the active registry, conversation history, authenticated user, or host-supplied callbacks read them from a `ToolContext` bound by the agent loop around each invocation. `ContextVar` isolates the binding per asyncio task, so concurrent agents in the same process don't fight over shared state.
+
+```python
+from obscura.core.tool_context import current_tool_context
+
+@tool("my_tool", "...")
+async def my_tool() -> str:
+    ctx = current_tool_context()
+    if ctx is None or ctx.registry is None:
+        return _json_error("no_context")
+    # ctx.registry, ctx.history, ctx.user, ctx.session_id are available
+    # ctx.ask_user_callback / .permission_mode_callback for host UI
+    ...
+```
+
+Legacy `set_*_callback` setters (`set_ask_user_callback`, `set_permission_mode_callback`, etc.) keep working — the agent loop reads them into `ToolContext` before each tool call, so REPL wiring needs no changes when migrating an old tool to the new pattern.
+
+**External MCP tool discovery:** When `mcp_servers` is configured for a backend, `register_external_mcp_tools(self, self._mcp_servers)` runs in `start()` and registers shadow `ToolSpec`s named `mcp__<server>__<tool>`. Claude SDK still routes the actual calls via `mcp_servers` passthrough — the shadows exist for system-prompt visibility and `tool_search` lookup. Discovery is best-effort (per-server timeout, never raises).
+
+**Capability grants:** Tools are gated by capability strings. Grant/deny in `~/.obscura/config.toml`:
+```toml
+[defaults.capabilities]
+grant = ["shell.exec", "file.read", "file.write", "git.ops"]
+```
+
+**Imports:**
+```python
+from obscura.core.agent_loop import AgentLoop
+from obscura.core.types import AgentEvent, AgentEventKind, BackendProtocol
+from obscura.core.tools import ToolRegistry, tool
+from obscura.core.tool_context import ToolContext, current_tool_context, bind_tool_context
+from obscura.core.event_store import SQLiteEventStore
+from obscura.providers._tool_host import BackendToolHostMixin
+from obscura.integrations.mcp.discovery import register_external_mcp_tools
+from obscura.integrations.browser.client import (
+    BrowserBridgeClient,
+    attach_if_running,
+    register_browser_tools,
+)
+```
+
+**Browser bridge:** when the Obscura Chrome side panel is open, terminal
+REPL boot calls `attach_if_running(client.register_tool)` and registers
+~27 `browser_*` tools that proxy through the running native host's Unix
+socket. There are two tool families — **always start with the cheap one
+and escalate only on failure**:
+
+- **Event dispatch** (`browser_fill`, `browser_click`, `browser_press_key`,
+  `browser_clipboard_*`, `browser_eval_js`, etc.) — no banner, no debugger,
+  but `isTrusted=false` so Tab won't move focus and chars don't auto-appear
+  in inputs.
+- **CDP** (`browser_type_text`, `browser_native_click`, `browser_native_press_key`,
+  `browser_upload_file`, `browser_console_logs`, `browser_network_log`) —
+  attaches `chrome.debugger`, Chrome shows a yellow banner. `isTrusted=true`,
+  file uploads work, console/network observable. Call `browser_cdp_detach`
+  when done to dismiss the banner.
+
+Architecture and decision-tree details:
+[`packages/browser-extension/ARCHITECTURE.md`](packages/browser-extension/ARCHITECTURE.md).
+
+**Linting:** `ruff` — E/F rules, E501 ignored. Format: `ruff format`.
+**Type checking:** `pyright` (configured via `pyrightconfig.json`).
+**Naming:** `snake_case` modules/functions, `PascalCase` classes, dataclasses for events/types.
+
+---
+
+## Testing
+
+```bash
+# Run all unit tests (excludes e2e)
+pytest tests/ -v -m "not e2e"
+
+# Run specific markers
+pytest tests/ -m unit
+pytest tests/ -m integration
+
+# With coverage (fails below 85%)
+pytest tests/ --cov=obscura --cov-report=term-missing
+
+# Lint + typecheck
+make lint         # ruff check + format --check
+make typecheck    # pyright
+```
+
+**Test layout:**
+```
+tests/
+├── unit/obscura/     # Unit tests mirroring package structure
+├── integration/      # Integration tests
+├── e2e/              # End-to-end (require running server, slow)
+├── cli/              # CLI-specific tests
+└── conftest.py       # Shared fixtures
+```
+
+**Markers:** `unit`, `integration`, `e2e` — always exclude `e2e` in local dev.
+**Async tests:** `asyncio_mode = "auto"` — all `async def test_*` run automatically.

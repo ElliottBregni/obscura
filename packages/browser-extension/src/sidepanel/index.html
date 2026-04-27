@@ -24,6 +24,7 @@
         <select id="session-picker" title="Recent sessions">
           <option value="">current</option>
         </select>
+        <button id="recent-sessions-btn" type="button" title="Browse past sessions on the host">⏱</button>
         <label class="toggle" title="Attach the current tab's URL, title, and selection">
           <input type="checkbox" id="include-context" checked />
           <span>ctx</span>
@@ -67,6 +68,8 @@
       <span class="sb-sep">·</span>
       <span class="sb-item" id="sb-git">—</span>
       <span class="sb-sep">·</span>
+      <span class="sb-item sb-profile" id="sb-profile" title="Chrome profile id (storage scope)" hidden></span>
+      <span class="sb-sep" id="sb-profile-sep" hidden>·</span>
       <button id="sb-kairos" class="sb-kairos" type="button" title="Toggle KAIROS daemon">kairos</button>
       <span class="sb-sep">·</span>
       <button id="sb-rewind" class="sb-rewind" type="button" title="Checkpoint / rewind">⟲</button>
@@ -108,6 +111,9 @@
       <div class="diag-panel">
         <div class="diag-header">
           <span class="diag-title">diagnostics</span>
+          <span id="diag-toast" class="diag-toast" hidden></span>
+          <button id="diag-copy" class="diag-action" type="button" title="Copy diagnostics as JSON">copy</button>
+          <button id="diag-refresh" class="diag-action" type="button" title="Re-fetch diagnostics from host">refresh</button>
           <button id="diag-close" class="diag-close" type="button">×</button>
         </div>
         <div id="diag-content" class="diag-content"></div>
@@ -119,6 +125,7 @@
       <div class="auth-panel">
         <div class="auth-title">authentication required</div>
         <input id="auth-token-input" type="password" placeholder="Enter auth token" autocomplete="off" />
+        <div id="auth-error" class="auth-error hidden"></div>
         <button id="auth-submit" type="button">submit</button>
       </div>
     </div>
@@ -129,6 +136,78 @@
       <button class="warning-dismiss" type="button" title="Dismiss">×</button>
     </div>
 
+    <!-- Host-missing banner (no `ready` frame within ~5s of connect) -->
+    <div id="host-missing-banner" class="host-missing-banner hidden">
+      <span class="banner-text">Native host not responding. Run <code>make ext-install</code> from the obscura repo.</span>
+      <button id="host-missing-setup" type="button" class="banner-link">Show setup steps</button>
+      <button id="host-missing-dismiss" type="button" class="banner-dismiss" title="Dismiss">×</button>
+    </div>
+
+    <!-- First-run welcome / onboarding overlay -->
+    <div id="welcome-overlay" class="modal-overlay hidden">
+      <div class="modal-card welcome-card">
+        <div class="modal-header">
+          <span class="modal-title">welcome to obscura</span>
+          <button id="welcome-close" class="modal-close" type="button">×</button>
+        </div>
+        <div class="welcome-body">
+          <p class="welcome-intro">A few quick steps to get your panel talking to obscura.</p>
+          <ol class="welcome-steps">
+            <li class="welcome-step" data-step="1">
+              <label class="welcome-step-head">
+                <input type="checkbox" class="welcome-step-check" data-step-check="1" />
+                <span class="welcome-step-title">Install the native host</span>
+              </label>
+              <div class="welcome-step-body">
+                <div class="welcome-cmd-row">
+                  <code class="welcome-cmd" id="welcome-cmd-install">cd packages/browser-extension/native-host &amp;&amp; ./install.sh</code>
+                  <button type="button" class="welcome-copy-btn" data-copy-target="welcome-cmd-install">copy</button>
+                </div>
+                <p class="welcome-hint">Run this from your obscura checkout. It registers a Chrome native-messaging host.</p>
+              </div>
+            </li>
+            <li class="welcome-step" data-step="2">
+              <label class="welcome-step-head">
+                <input type="checkbox" class="welcome-step-check" data-step-check="2" />
+                <span class="welcome-step-title">Set a backend API key</span>
+              </label>
+              <div class="welcome-step-body">
+                <div class="welcome-row">
+                  <label class="welcome-inline-label" for="welcome-backend">Backend</label>
+                  <select id="welcome-backend">
+                    <option value="claude">claude</option>
+                    <option value="copilot" selected>copilot</option>
+                    <option value="openai">openai</option>
+                  </select>
+                </div>
+                <div class="welcome-cmd-row">
+                  <code class="welcome-cmd" id="welcome-envvar">GITHUB_TOKEN</code>
+                  <button type="button" class="welcome-copy-btn" data-copy-target="welcome-envvar">copy</button>
+                </div>
+                <p class="welcome-hint" id="welcome-envvar-hint">Add to <code>~/.obscura/.env</code> or export in your shell.</p>
+              </div>
+            </li>
+            <li class="welcome-step" data-step="3">
+              <label class="welcome-step-head">
+                <input type="checkbox" class="welcome-step-check" data-step-check="3" />
+                <span class="welcome-step-title">Test the connection</span>
+              </label>
+              <div class="welcome-step-body">
+                <div class="welcome-row">
+                  <button type="button" id="welcome-test-btn" class="welcome-test-btn">Test connection</button>
+                  <span id="welcome-test-result" class="welcome-test-result"></span>
+                </div>
+                <p class="welcome-hint" id="welcome-host-info"></p>
+              </div>
+            </li>
+          </ol>
+        </div>
+        <div class="welcome-footer">
+          <button id="welcome-done" type="button" class="welcome-done-btn">Got it</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Checkpoint modal -->
     <div id="checkpoint-modal" class="checkpoint-modal hidden">
       <div class="checkpoint-panel">
@@ -136,6 +215,7 @@
           <span class="checkpoint-title">checkpoints</span>
           <button id="checkpoint-close" class="checkpoint-close" type="button">×</button>
         </div>
+        <div id="checkpoint-error" class="checkpoint-error hidden"></div>
         <div class="checkpoint-save-row">
           <input id="checkpoint-name-input" type="text" placeholder="checkpoint name" autocomplete="off" />
           <button id="checkpoint-save-btn" type="button">save</button>
@@ -155,6 +235,17 @@
       </div>
     </div>
 
+    <!-- Recent sessions modal -->
+    <div id="recent-sessions-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <span class="modal-title">recent sessions</span>
+          <button id="recent-sessions-close" class="modal-close" type="button">×</button>
+        </div>
+        <div id="recent-sessions-list" class="recent-sessions-list">Loading…</div>
+      </div>
+    </div>
+
     <!-- MCP overlay -->
     <div id="mcp-overlay" class="mcp-overlay hidden">
       <div class="mcp-panel">
@@ -162,6 +253,10 @@
           <span class="mcp-title">MCP servers</span>
           <button id="mcp-discover-btn" class="mcp-discover-btn" type="button">discover</button>
           <button id="mcp-close" class="mcp-close" type="button">×</button>
+        </div>
+        <div class="mcp-install-row">
+          <input id="mcp-install-input" type="text" placeholder="install slug (e.g. github)" autocomplete="off" />
+          <button id="mcp-install-btn" type="button" title="Install MCP server by registry slug">install</button>
         </div>
         <div id="mcp-content" class="mcp-content">Loading…</div>
       </div>

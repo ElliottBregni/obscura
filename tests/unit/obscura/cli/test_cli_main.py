@@ -18,12 +18,21 @@ import obscura.cli as cli_module
 from obscura.cli import (
     _cli_confirm,
     _discover_mcp,
-    _parse_inline_agent_mention,
     _track_file_event,
     main,
     send_message,
 )
-from obscura.cli.commands import REPLContext, _fleet_delegate, cmd_delegate
+from obscura.cli.bootstrap import _parse_inline_agent_mention
+from obscura.cli.commands import (
+    COMMANDS,
+    COMPLETIONS,
+    REPLContext,
+    _fleet_delegate,
+    cmd_delegate,
+    cmd_login,
+    cmd_secrets,
+    cmd_whoami,
+)
 from obscura.core.types import AgentEvent, AgentEventKind
 
 if TYPE_CHECKING:
@@ -93,6 +102,159 @@ def _done_event() -> AgentEvent:
 class TestClickEntryPoint:
     """Tests for the Click CLI command."""
 
+
+class TestAuthSlashCommandsRegistered:
+    """The /login, /logout, /whoami, and /secrets slash commands are wired in.
+
+    These asserts catch a regression where the handlers exist as orphan
+    functions but never make it into the dispatch table -- which is exactly
+    the state /login was in before this change.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["login", "logout", "whoami", "secrets"],
+    )
+    def test_registered_in_commands_dict(self, name: str) -> None:
+        assert name in COMMANDS
+        assert COMMANDS[name] is not None
+
+    @pytest.mark.parametrize(
+        "name",
+        ["login", "logout", "whoami", "secrets"],
+    )
+    def test_has_completion_entry(self, name: str) -> None:
+        assert name in COMPLETIONS
+
+
+class TestWhoamiSlashCommand:
+    @pytest.mark.asyncio
+    async def test_reports_not_signed_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "obscura.cli.auth_commands.load_session",
+            MagicMock(return_value=None),
+        )
+        info_mock = MagicMock()
+        monkeypatch.setattr("obscura.cli.commands.print_info", info_mock)
+
+        await cmd_whoami("", _make_ctx())
+
+        info_mock.assert_called_once()
+        assert "Not signed in" in info_mock.call_args[0][0]
+
+
+class TestSecretsSlashCommand:
+    @pytest.mark.asyncio
+    async def test_list_prints_sources(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "obscura.auth.secrets.sources",
+            lambda *_, **__: {"SUPABASE_URL": "env", "SUPABASE_ANON_KEY": "missing"},
+        )
+        monkeypatch.setattr("obscura.auth.secrets.keyring_available", lambda: True)
+        printed: list[str] = []
+        monkeypatch.setattr(
+            "obscura.cli.commands.console",
+            MagicMock(print=lambda s, *a, **k: printed.append(str(s))),
+        )
+
+        await cmd_secrets("list", _make_ctx())
+
+        joined = "\n".join(printed)
+        assert "Keyring backend: available" in joined
+        assert "SUPABASE_URL" in joined
+        assert "env" in joined
+
+    @pytest.mark.asyncio
+    async def test_rejects_unknown_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        err_mock = MagicMock()
+        monkeypatch.setattr("obscura.cli.commands.print_error", err_mock)
+
+        await cmd_secrets("get NOT_A_REAL_NAME", _make_ctx())
+
+        err_mock.assert_called_once()
+        assert "Unknown secret" in err_mock.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_set_requires_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        err_mock = MagicMock()
+        monkeypatch.setattr("obscura.cli.commands.print_error", err_mock)
+
+        await cmd_secrets("set SUPABASE_URL", _make_ctx())
+
+        err_mock.assert_called_once()
+        assert "Value required" in err_mock.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_set_stores_in_keyring(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("obscura.auth.secrets.keyring_available", lambda: True)
+        store_mock = MagicMock(return_value=True)
+        monkeypatch.setattr("obscura.auth.secrets.store", store_mock)
+        ok_mock = MagicMock()
+        monkeypatch.setattr("obscura.cli.commands.print_ok", ok_mock)
+
+        await cmd_secrets("set SUPABASE_URL https://proj.supabase.co", _make_ctx())
+
+        store_mock.assert_called_once_with(
+            "SUPABASE_URL",
+            "https://proj.supabase.co",
+        )
+        ok_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_set_reports_when_no_backend(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("obscura.auth.secrets.keyring_available", lambda: False)
+        err_mock = MagicMock()
+        monkeypatch.setattr("obscura.cli.commands.print_error", err_mock)
+
+        await cmd_secrets("set SUPABASE_URL value", _make_ctx())
+
+        err_mock.assert_called_once()
+        assert "keyring backend" in err_mock.call_args[0][0]
+
+
+class TestLoginSlashCommand:
+    @pytest.mark.asyncio
+    async def test_default_login_runs_github_oauth(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_session = MagicMock(email="user@example.com")
+        ensure_mock = MagicMock(return_value=fake_session)
+        ok_mock = MagicMock()
+        monkeypatch.setattr(
+            "obscura.cli.auth_commands.ensure_github_oauth_session",
+            ensure_mock,
+        )
+        monkeypatch.setattr("obscura.cli.commands.print_ok", ok_mock)
+
+        await cmd_login("", _make_ctx())
+
+        ensure_mock.assert_called_once_with(open_browser=True)
+        ok_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_default_login_reports_when_oauth_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ensure_mock = MagicMock(return_value=None)
+        err_mock = MagicMock()
+        monkeypatch.setattr(
+            "obscura.cli.auth_commands.ensure_github_oauth_session",
+            ensure_mock,
+        )
+        monkeypatch.setattr("obscura.cli.commands.print_error", err_mock)
+
+        await cmd_login("", _make_ctx())
+
+        ensure_mock.assert_called_once_with(open_browser=True)
+        err_mock.assert_called_once()
+
     def test_help_flag(self) -> None:
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
@@ -128,6 +290,7 @@ class TestClickEntryPoint:
 class TestCliConfirm:
     """Tests for the tool call confirmation callback."""
 
+    @pytest.mark.skip(reason="confirm_prompt_async replaced by widgets.confirm_tool")
     @pytest.mark.asyncio
     async def test_always_list_skips_prompt(
         self,

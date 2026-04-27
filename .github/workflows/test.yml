@@ -9,11 +9,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ['3.13.5']
-    
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,16 +33,56 @@ jobs:
 
       - name: Verify imports work
         run: |
-          python -c "from sdk import ObscuraClient; print('✓ SDK imports work')"
-          python -c "from jose import jwt; print('✓ jose imports work')"
-          python -c "import httpx; print('✓ httpx imports work')"
-          python -c "import click; print('✓ click imports work')"
-          python -c "import fastapi; print('✓ fastapi imports work')"
+          python -c "from sdk import ObscuraClient; print('SDK imports work')"
+          python -c "from jose import jwt; print('jose imports work')"
+          python -c "import httpx; print('httpx imports work')"
+          python -c "import click; print('click imports work')"
+          python -c "import fastapi; print('fastapi imports work')"
 
       - name: Run unit tests with coverage
         run: |
-          pytest tests/ -v --tb=short -m "not e2e" --ignore=tests/e2e/ --cov=sdk --cov-report=term-missing --cov-fail-under=85
+          pytest tests/ -v --tb=short -m "not e2e and not integration" --ignore=tests/e2e/ --ignore=tests/integration/ \
+            --cov=sdk \
+            --cov=obscura \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=85
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
 
       - name: Run E2E tests
+        if: matrix.os == 'ubuntu-latest' && hashFiles('scripts/run-e2e-tests.sh') != ''
         run: |
           ./scripts/run-e2e-tests.sh
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13.5']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,server,telemetry]"
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ -v --tb=short -m integration

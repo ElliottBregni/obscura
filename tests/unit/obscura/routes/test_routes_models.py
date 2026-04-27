@@ -12,7 +12,7 @@ from obscura.core.config import ObscuraConfig
 
 @pytest.fixture
 def app() -> Any:
-    config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+    config = ObscuraConfig(otel_enabled=False)
     from obscura.server import create_app
 
     return create_app(config)
@@ -20,7 +20,7 @@ def app() -> Any:
 
 @pytest.fixture
 def client(app: Any) -> TestClient:
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 class TestListModels:

@@ -15,19 +15,24 @@ from obscura.memory import MemoryStore
 
 
 def _anonymous_user() -> AuthenticatedUser:
+    """Mock user that matches the API key wired up in ``conftest.py``.
+
+    Route tests authenticate as ``test-user`` via ``X-API-Key``, so any
+    storage we seed directly must be scoped to the same user.
+    """
     return AuthenticatedUser(
-        user_id="anonymous",
-        email="anonymous@obscura.local",
+        user_id="test-user",
+        email="test-user@obscura.local",
         roles=("admin",),
         org_id="local",
-        token_type="anonymous",
+        token_type="api_key",
         raw_token="",
     )
 
 
 @pytest.fixture
 def app() -> Any:
-    config = ObscuraConfig(auth_enabled=False, otel_enabled=False)
+    config = ObscuraConfig(otel_enabled=False)
     from obscura.server import create_app
 
     return create_app(config)
@@ -35,7 +40,7 @@ def app() -> Any:
 
 @pytest.fixture
 def client(app: Any) -> TestClient:
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def test_observe_snapshot_returns_states_and_stale_ids(client: TestClient) -> None:
@@ -72,7 +77,7 @@ def test_observe_snapshot_returns_states_and_stale_ids(client: TestClient) -> No
     )
     asyncio.run(
         create_tool_approval_request(
-            user_id="anonymous",
+            user_id="test-user",
             agent_id="agent-1",
             tool_use_id="tool-use-1",
             tool_name="run_shell",
@@ -114,7 +119,7 @@ def test_observe_stream_once_emits_snapshot_event(client: TestClient) -> None:
     )
     asyncio.run(
         create_tool_approval_request(
-            user_id="anonymous",
+            user_id="test-user",
             agent_id="agent-xyz",
             tool_use_id="tool-use-xyz",
             tool_name="run_python3",

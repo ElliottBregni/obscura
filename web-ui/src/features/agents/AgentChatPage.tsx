@@ -19,7 +19,6 @@ import { useAgentStream } from '@/hooks/useAgentStream';
 import { useChatStore, type ChatMessage, type ToolCall } from '@/stores/chatStore';
 import { useAgent } from '@/api/hooks/useAgents';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { cn } from '@/lib/utils';
 

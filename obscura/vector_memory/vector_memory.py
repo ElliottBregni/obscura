@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from obscura.auth.models import AuthenticatedUser
+    from obscura.memory.events import EventSink
     from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 _log = logging.getLogger(__name__)
@@ -182,6 +183,7 @@ class VectorMemoryStore:
         backend: VectorBackend | None = None,
         embedding_fn: Callable[[str], list[float]] | None = None,
         decay_config: DecayConfig | None = None,
+        event_sink: EventSink | None = None,
     ) -> None:
         self.user = user
         self.user_id = user.user_id
@@ -195,6 +197,30 @@ class VectorMemoryStore:
             backend = self._create_default_backend()
 
         self.backend = backend
+        self._event_sink = event_sink
+
+    def _emit(
+        self,
+        kind: str,
+        key: MemoryKey,
+        value: Any | None,
+        ttl_seconds: float | None,
+    ) -> None:
+        """Emit a memory event after the backend has accepted the write."""
+        from obscura.memory.events import EventKind, get_default_sink, make_event
+
+        sink = self._event_sink if self._event_sink is not None else get_default_sink()
+        event_kind: EventKind = kind  # type: ignore[assignment]
+        sink.emit(
+            make_event(
+                kind=event_kind,
+                key=key,
+                value=value,
+                ttl_seconds=ttl_seconds,
+                source="vector",
+                user_id=self.user_id,
+            ),
+        )
 
     def _create_default_backend(self) -> VectorBackend:
         """Create the default backend based on environment configuration."""
@@ -202,7 +228,11 @@ class VectorMemoryStore:
         import logging
 
         logger = logging.getLogger(__name__)
-        backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "qdrant").lower()
+        backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "").lower()
+        if not backend_type:
+            # Auto-detect from OBSCURA_DB_TYPE
+            db_type = os.environ.get("OBSCURA_DB_TYPE", "sqlite").lower()
+            backend_type = "postgresql" if db_type == "postgresql" else "qdrant"
 
         try:
             half_life = float(os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS"))
@@ -242,7 +272,22 @@ class VectorMemoryStore:
                 # Qdrant not available, fall back to SQLite
                 backend_type = "sqlite"
 
-        # SQLite backend (default fallback if Qdrant unavailable)
+        # PostgreSQL backend
+        if backend_type == "postgresql":
+            try:
+                from obscura.vector_memory.backends.postgres_backend import (
+                    PostgreSQLVectorBackend,
+                )
+
+                return PostgreSQLVectorBackend(config=config)
+            except Exception as e:
+                logger.warning(
+                    "PostgreSQL vector backend failed, falling back to SQLite: %s",
+                    e,
+                )
+                backend_type = "sqlite"
+
+        # SQLite backend (default fallback)
         base_dir = Path(
             os.environ.get(
                 "OBSCURA_VECTOR_MEMORY_DIR",
@@ -313,6 +358,12 @@ class VectorMemoryStore:
             metadata=metadata or {},
             memory_type=memory_type,
             expires_at=expires_at,
+        )
+        self._emit(
+            "set",
+            key,
+            text,
+            ttl.total_seconds() if ttl else None,
         )
 
     def get(
@@ -467,7 +518,10 @@ class VectorMemoryStore:
         if isinstance(key, str):
             key = MemoryKey(namespace=namespace, key=key)
 
-        return self.backend.delete_vector(key)
+        existed = self.backend.delete_vector(key)
+        if existed:
+            self._emit("delete", key, None, None)
+        return existed
 
     def list_keys(self, namespace: str | None = None) -> list[MemoryKey]:
         """List all memory keys."""
