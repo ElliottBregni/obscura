@@ -750,6 +750,22 @@ async def _handle_send(msg: dict[str, Any]) -> None:
         await _write_frame({"type": "error", "id": msg_id, "message": "Empty prompt"})
         return
 
+    # Pull pasted/dropped images and attached text files out of the panel's
+    # context payload. The rest of ``context`` is page-metadata (url, title,
+    # selection, headings, etc.) that ``_assemble_prompt`` knows how to fold
+    # into the prompt — strip the multimodal keys first so it doesn't try to
+    # render base64 image blobs as page text.
+    raw_images = context.pop("images", None)
+    raw_attached = context.pop("attached_files", None)
+    images_list: list[Any] = (
+        list(cast("list[Any]", raw_images)) if isinstance(raw_images, list) else []
+    )
+    attached_files_list: list[dict[str, Any]] = []
+    if isinstance(raw_attached, list):
+        for item in cast("list[Any]", raw_attached):
+            if isinstance(item, dict):
+                attached_files_list.append(cast("dict[str, Any]", item))
+
     try:
         session = await _ensure_session(
             backend=backend,
@@ -778,7 +794,11 @@ async def _handle_send(msg: dict[str, Any]) -> None:
         # modes, effort-level thinking budget, file-change tracking, auto-save
         # turn, plan-parse, auto-title. Via the patched BrowserRenderer, every
         # agent event streams back to the panel.
-        assistant_text = await session.send(full_prompt)
+        assistant_text = await session.send(
+            full_prompt,
+            images=images_list or None,
+            attached_files=attached_files_list or None,
+        )
     except asyncio.CancelledError:
         log.info("send cancelled msg_id=%s", msg_id)
         await _write_frame({"type": "error", "id": msg_id, "message": "cancelled"})
