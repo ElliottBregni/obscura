@@ -336,6 +336,8 @@ body {
 }
 
 .msg .body {
+  grid-column: 2 / 3;
+  min-width: 0;
   color: var(--fg);
 }
 
