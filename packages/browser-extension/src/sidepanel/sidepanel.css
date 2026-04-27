@@ -1818,6 +1818,20 @@ details.tool-card.has-result .tool-dot {
   white-space: nowrap;
 }
 
+.checkpoint-row .cp-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.checkpoint-row .cp-time {
+  color: var(--fg-ghost);
+  font-size: 10px;
+  margin-right: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .checkpoint-row .cp-restore {
   font: inherit;
   font-size: 10.5px;
@@ -1834,6 +1848,46 @@ details.tool-card.has-result .tool-dot {
   background: var(--amber);
   color: var(--bg-deep);
 }
+
+.checkpoint-row .cp-delete {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--fg-ghost);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.checkpoint-row:hover .cp-delete { color: var(--fg-dim); }
+.checkpoint-row .cp-delete:hover { color: var(--red); border-color: var(--red); }
+
+.checkpoint-row.confirming { border-color: var(--red); gap: 6px; }
+.checkpoint-row.confirming .cp-confirm-text {
+  flex: 1; color: var(--fg); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.checkpoint-row.confirming .cp-confirm-text strong { color: var(--red); font-weight: 600; }
+
+.checkpoint-row .cp-confirm-cancel,
+.checkpoint-row .cp-confirm-delete {
+  font: inherit; font-size: 10.5px; border-radius: 3px;
+  padding: 2px 7px; cursor: pointer; background: transparent;
+}
+.checkpoint-row .cp-confirm-cancel { color: var(--fg-dim); border: 1px solid var(--line-strong); }
+.checkpoint-row .cp-confirm-cancel:hover { color: var(--fg); border-color: var(--fg-dim); }
+.checkpoint-row .cp-confirm-delete { color: var(--red); border: 1px solid var(--red); }
+.checkpoint-row .cp-confirm-delete:hover { background: var(--red); color: var(--bg-deep); }
+
+.checkpoint-error {
+  margin: 8px 14px 0; padding: 6px 10px;
+  background: var(--bg-alt); border: 1px solid var(--red); border-radius: 3px;
+  color: var(--red); font-size: 11px; line-height: 1.35;
+  word-break: break-word; transition: opacity 200ms ease;
+}
+.checkpoint-error.hidden { display: none; }
+.checkpoint-error.fading { opacity: 0; }
 
 .checkpoint-empty {
   color: var(--fg-ghost);
