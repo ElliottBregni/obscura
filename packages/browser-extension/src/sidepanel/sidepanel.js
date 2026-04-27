@@ -4216,6 +4216,155 @@ async function ensureProfileId() {
 const tagMessage = (msg) => withProfileId(msg, profileId);
 
 // ---------------------------------------------------------------------------
+// Welcome / onboarding overlay + host-missing banner + test-connection
+//
+// First-run UX. The overlay walks new users through native-host install,
+// API-key env var, and a ping/pong round-trip. Dismissed via the
+// `obscura.onboarded.v1` storage flag; re-openable from the diag overlay.
+// (These were referenced earlier in connect()/port.onMessage but the
+// definitions themselves had to live below the rest of the message-
+// handling block — they're forward-referenced via hoisting.)
+
+const welcomeOverlay = $("#welcome-overlay");
+const hostMissingBanner = $("#host-missing-banner");
+
+function showWelcomeOverlay() {
+  if (!welcomeOverlay) return;
+  hideHostMissingBanner();  // avoid stacking
+  welcomeOverlay.classList.remove("hidden");
+  // Reset step visual states; step 1 active.
+  welcomeOverlay.querySelectorAll(".welcome-step").forEach((el, i) => {
+    el.classList.remove("active", "done");
+    if (i === 0) el.classList.add("active");
+    const cb = el.querySelector(".welcome-step-check");
+    if (cb) cb.checked = false;
+  });
+  updateWelcomeEnvvar();
+  updateWelcomeHostInfo();
+  const result = $("#welcome-test-result");
+  if (result) { result.textContent = ""; result.className = "welcome-test-result"; }
+}
+
+function hideWelcomeOverlay() { welcomeOverlay?.classList.add("hidden"); }
+
+async function dismissWelcomeAndPersist() {
+  hideWelcomeOverlay();
+  try { await chrome.storage.local.set({ [ONBOARDED_KEY]: true }); } catch {}
+  // If still no `ready`, leave the user a path back to setup steps.
+  if (!hostReadyReceived && hostReadyTimer === null) showHostMissingBanner();
+}
+
+async function maybeShowWelcomeOnBoot() {
+  try {
+    const store = await chrome.storage.local.get([ONBOARDED_KEY]);
+    if (!store[ONBOARDED_KEY]) showWelcomeOverlay();
+  } catch {}
+}
+
+function advanceWelcomeStep(stepNum) {
+  // Mark prior steps done; reveal next.
+  welcomeOverlay?.querySelectorAll(".welcome-step").forEach((el) => {
+    const n = Number(el.dataset.step);
+    if (n <= stepNum) { el.classList.add("done"); el.classList.remove("active"); }
+    else if (n === stepNum + 1) el.classList.add("active");
+  });
+}
+
+function updateWelcomeEnvvar() {
+  const wbSel = $("#welcome-backend");
+  const envvar = $("#welcome-envvar");
+  if (!wbSel || !envvar) return;
+  envvar.textContent = ENV_VAR_BY_BACKEND[wbSel.value] || "OBSCURA_API_KEY";
+}
+
+function updateWelcomeHostInfo() {
+  const el = $("#welcome-host-info");
+  if (!el) return;
+  if (lastReadySnapshot?.version) {
+    const backends = Array.isArray(lastReadySnapshot.backends) ? lastReadySnapshot.backends.join(", ") : "";
+    el.textContent = `Host v${lastReadySnapshot.version}${backends ? ` · backends: ${backends}` : ""}`;
+  } else el.textContent = "";
+}
+
+$("#welcome-close")?.addEventListener("click", hideWelcomeOverlay);
+$("#welcome-done")?.addEventListener("click", dismissWelcomeAndPersist);
+welcomeOverlay?.addEventListener("click", (e) => { if (e.target === welcomeOverlay) hideWelcomeOverlay(); });
+$("#welcome-backend")?.addEventListener("change", updateWelcomeEnvvar);
+
+welcomeOverlay?.querySelectorAll(".welcome-step-check").forEach((cb) => {
+  cb.addEventListener("change", () => {
+    if (cb.checked) advanceWelcomeStep(Number(cb.dataset.stepCheck));
+  });
+});
+
+welcomeOverlay?.querySelectorAll(".welcome-copy-btn").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const target = document.getElementById(btn.dataset.copyTarget);
+    try {
+      await navigator.clipboard.writeText(target?.textContent ?? "");
+      const orig = btn.textContent;
+      btn.classList.add("copied"); btn.textContent = "copied";
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1200);
+    } catch { btn.textContent = "copy failed"; }
+  });
+});
+
+$("#welcome-test-btn")?.addEventListener("click", async () => {
+  const result = $("#welcome-test-result");
+  if (!result) return;
+  result.className = "welcome-test-result pending"; result.textContent = "pinging…";
+  const res = await runTestConnection();
+  result.className = `welcome-test-result ${res.ok ? "ok" : "err"}`;
+  result.textContent = res.ok ? `✓ Connected (${res.latencyMs}ms)` : `✗ ${res.error}`;
+  if (res.ok) {
+    const cb = welcomeOverlay?.querySelector('[data-step-check="3"]');
+    if (cb && !cb.checked) { cb.checked = true; advanceWelcomeStep(3); }
+  }
+});
+
+// Host-missing banner: surface install instructions if no `ready` in 5s.
+function startHostReadyTimer() {
+  clearHostReadyTimer();
+  hostReadyTimer = setTimeout(() => {
+    hostReadyTimer = null;
+    if (hostReadyReceived) return;
+    // Don't stack the banner on top of the welcome overlay.
+    if (welcomeOverlay && !welcomeOverlay.classList.contains("hidden")) return;
+    showHostMissingBanner();
+  }, HOST_READY_TIMEOUT_MS);
+}
+function clearHostReadyTimer() { if (hostReadyTimer) { clearTimeout(hostReadyTimer); hostReadyTimer = null; } }
+function showHostMissingBanner() { hostMissingBanner?.classList.remove("hidden"); }
+function hideHostMissingBanner() { hostMissingBanner?.classList.add("hidden"); }
+
+$("#host-missing-setup")?.addEventListener("click", () => { hideHostMissingBanner(); showWelcomeOverlay(); });
+$("#host-missing-dismiss")?.addEventListener("click", hideHostMissingBanner);
+
+// Send a `ping` and resolve on matching `pong` (3s timeout). Pong handler in
+// the port.onMessage switch resolves the entry from `pingResolvers`.
+function runTestConnection() {
+  return new Promise((resolve) => {
+    if (!port) { resolve({ ok: false, error: "Not connected to service worker" }); return; }
+    const id = crypto.randomUUID?.() ?? `ping-${Date.now()}-${Math.random()}`;
+    const start = performance.now();
+    const timer = setTimeout(() => {
+      pingResolvers.delete(id);
+      resolve({ ok: false, error: `Host not responding (${PING_TIMEOUT_MS / 1000}s)` });
+    }, PING_TIMEOUT_MS);
+    pingResolvers.set(id, {
+      resolve: () => resolve({ ok: true, latencyMs: Math.round(performance.now() - start) }),
+      reject: () => resolve({ ok: false, error: "Disconnected" }),
+      timer,
+    });
+    try { port.postMessage({ type: MsgType.PING, id }); }
+    catch (err) {
+      clearTimeout(timer); pingResolvers.delete(id);
+      resolve({ ok: false, error: String(err?.message || err) });
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 
 (async () => {
@@ -4237,4 +4386,8 @@ const tagMessage = (msg) => withProfileId(msg, profileId);
   // dropped into the log.
   await loadTabs();
   connect();
+  // First-run welcome — runs after connect() so the overlay can display
+  // host info as soon as the `ready` frame arrives. No-op once the
+  // obscura.onboarded.v1 storage flag is set.
+  void maybeShowWelcomeOnBoot();
 })();
