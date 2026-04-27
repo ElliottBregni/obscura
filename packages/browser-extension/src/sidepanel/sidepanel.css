@@ -1624,6 +1624,30 @@ details.tool-card.has-result .tool-dot {
   padding: 10px 14px;
 }
 
+/* Health banner — surfaced above the diag table when memory backends
+   are errored or peer hosts are detected. Errors get the standard red
+   palette; presence of the banner is the high-signal cue. */
+.diag-health-banner {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: rgba(243, 139, 168, 0.08);
+  border: 1px solid var(--red, #f38ba8);
+  border-radius: 4px;
+  color: var(--red, #f38ba8);
+  font: 11px/1.5 var(--mono);
+}
+
+.diag-health-head {
+  font-weight: 600;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
+.diag-health-item {
+  padding: 2px 0;
+  color: var(--text, #cdd6f4);
+}
+
 .diag-content table {
   width: 100%;
   border-collapse: collapse;

@@ -3283,9 +3283,50 @@ sbDiag.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Diagnostics overlay
 
+function _collectDiagHealthIssues(data) {
+  // Surface obvious problems above the table: errored memory backends and
+  // detected peer hosts. Returns an array of short human-readable strings.
+  const issues = [];
+  const memErr = (key) => {
+    const v = data?.[key];
+    if (v && typeof v === "object" && v.status === "error") {
+      const msg = v.message || v.error || "unknown error";
+      issues.push(`${key.replace(/_/g, " ")}: ${String(msg).slice(0, 200)}`);
+    }
+  };
+  memErr("vector_memory");
+  memErr("kv_memory");
+  memErr("memory");
+  const peers = Array.isArray(data?.peers) ? data.peers : [];
+  if (peers.length > 0) {
+    issues.push(
+      `${peers.length} other obscura host(s) running (PIDs: ${peers.join(", ")})`,
+    );
+  }
+  return issues;
+}
+
 function showDiagOverlay(data) {
   diagContent.innerHTML = "";
   const skip = new Set(["type", "id"]);
+
+  const issues = _collectDiagHealthIssues(data);
+  if (issues.length) {
+    const banner = document.createElement("div");
+    banner.className = "diag-health-banner";
+    const head = document.createElement("div");
+    head.className = "diag-health-head";
+    head.textContent = `${issues.length} issue${issues.length === 1 ? "" : "s"} detected`;
+    banner.appendChild(head);
+    for (const text of issues) {
+      const li = document.createElement("div");
+      li.className = "diag-health-item";
+      li.textContent = text;
+      banner.appendChild(li);
+    }
+    diagContent.appendChild(banner);
+  }
+
   const table = document.createElement("table");
 
   const addRow = (key, val) => {
