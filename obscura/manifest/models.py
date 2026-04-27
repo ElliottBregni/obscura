@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def _empty_str_list() -> list[str]:
@@ -19,6 +19,43 @@ def _empty_str_list() -> list[str]:
 
 def _empty_dict() -> dict[str, str]:
     return {}
+
+
+def _empty_any_dict() -> dict[str, Any]:
+    return {}
+
+
+# Keys accepted under `completion_params`. Mirrors providers.models.CompletionParams.
+_COMPLETION_PARAM_KEYS: frozenset[str] = frozenset(
+    {
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "response_format",
+        "tool_choice",
+    },
+)
+
+
+def _filter_completion_params(value: Any) -> dict[str, Any]:
+    """Drop unknown keys from a completion_params dict, with a debug log."""
+    if not isinstance(value, dict):
+        return {}
+    import logging as _logging
+
+    log = _logging.getLogger(__name__)
+    cleaned: dict[str, Any] = {}
+    raw_dict = cast("dict[str, Any]", value)
+    for k, v in raw_dict.items():
+        if k in _COMPLETION_PARAM_KEYS:
+            cleaned[k] = v
+        else:
+            log.warning("ignoring unknown completion_params key: %r", k)
+    return cleaned
 
 
 class PermissionConfig(BaseModel):
@@ -111,6 +148,7 @@ class AgentManifest(BaseModel):
     description: str = ""
     provider: str = Field("copilot", alias="model")
     model_id: str | None = None
+    completion_params: dict[str, Any] = Field(default_factory=_empty_any_dict)
     system_prompt: str = ""
     tools: list[str] = Field(default_factory=_empty_str_list)
     tool_allowlist: list[str] | None = None
@@ -151,6 +189,11 @@ class AgentManifest(BaseModel):
     source_path: Path | None = None
 
     model_config = {"arbitrary_types_allowed": True, "populate_by_name": True}
+
+    @field_validator("completion_params", mode="before")
+    @classmethod
+    def _filter_completion_params(cls, v: Any) -> dict[str, Any]:
+        return _filter_completion_params(v)
 
     @property
     def model(self) -> str:
@@ -199,6 +242,7 @@ def agent_manifest_from_frontmatter(
         "description",
         "provider",
         "model_id",
+        "completion_params",
         "tools",
         "tool_allowlist",
         "mcp_servers",

@@ -136,6 +136,7 @@ class AgentConfig(BaseModel):
     model_id: str | None = (
         None  # Specific model (optional, uses provider default if None)
     )
+    completion_params: dict[str, Any] = Field(default_factory=dict)
     system_prompt: str = ""
     memory_namespace: str = "default"
     max_iterations: int = 10
@@ -228,6 +229,8 @@ class AgentConfig(BaseModel):
         return cls(
             name=manifest.name,
             provider=manifest.provider,
+            model_id=manifest.model_id,
+            completion_params=dict(manifest.completion_params),
             system_prompt=proxy.system_prompt,
             max_iterations=manifest.max_turns,
             tools=list(manifest.tools),
@@ -472,7 +475,8 @@ class Agent:
             self._capability_resolver = None
 
         self._client = ObscuraClient(
-            self.config.model,
+            self.config.provider,
+            model=self.config.model_id,
             system_prompt=self.config.system_prompt,
             lazy_load_skills=self.config.lazy_load_skills,
             skill_filter=self.config.skill_filter,
@@ -908,7 +912,7 @@ class Agent:
 
             # Execute with timeout enforcement
             message = await asyncio.wait_for(
-                self._client.send(full_prompt),
+                self._client.send(full_prompt, **self.config.completion_params),
                 timeout=self.config.timeout_seconds,
             )
             self._result = message.text
@@ -964,7 +968,10 @@ class Agent:
             relevant_memory = self._load_relevant_memory(prompt)
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
-            async for chunk in self._client.stream(full_prompt):
+            async for chunk in self._client.stream(
+                full_prompt,
+                **self.config.completion_params,
+            ):
                 yield chunk.text if hasattr(chunk, "text") else str(chunk)
 
             self.status = AgentStatus.COMPLETED
@@ -1100,6 +1107,7 @@ class Agent:
                 full_prompt,
                 max_turns=max_turns,
                 on_confirm=on_confirm,
+                **self.config.completion_params,
             ):
                 if event.kind == AgentEventKind.TEXT_DELTA:
                     text_parts.append(event.text)

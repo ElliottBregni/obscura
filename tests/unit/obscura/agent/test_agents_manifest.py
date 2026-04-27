@@ -30,6 +30,42 @@ class TestAgentConfigFromManifest:
         assert "You are a developer." in config.system_prompt
         assert config.max_iterations == 10
 
+    def test_model_id_propagates(self) -> None:
+        manifest = AgentManifest(
+            name="opus-agent",
+            provider="claude",
+            model_id="claude-opus-4-7",
+        )
+        config = AgentConfig.from_manifest(manifest)
+        assert config.provider == "claude"
+        assert config.model_id == "claude-opus-4-7"
+
+    def test_model_id_defaults_to_none(self) -> None:
+        manifest = AgentManifest(name="default-model", provider="claude")
+        config = AgentConfig.from_manifest(manifest)
+        assert config.model_id is None
+
+    def test_completion_params_propagate(self) -> None:
+        manifest = AgentManifest(
+            name="precise",
+            provider="claude",
+            completion_params={"temperature": 0.1, "max_tokens": 2000},
+        )
+        config = AgentConfig.from_manifest(manifest)
+        assert config.completion_params == {"temperature": 0.1, "max_tokens": 2000}
+
+    def test_completion_params_drops_unknown_keys(self) -> None:
+        manifest = AgentManifest(
+            name="typo",
+            completion_params={"temperature": 0.5, "tempertaure": 0.9, "junk": True},
+        )
+        assert manifest.completion_params == {"temperature": 0.5}
+
+    def test_completion_params_default_empty(self) -> None:
+        manifest = AgentManifest(name="plain")
+        config = AgentConfig.from_manifest(manifest)
+        assert config.completion_params == {}
+
     def test_tools_and_tags(self) -> None:
         manifest = AgentManifest(
             name="x",

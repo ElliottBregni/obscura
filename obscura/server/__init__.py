@@ -197,7 +197,7 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     load_dotenv()
 
     if config is None:
-        config = ObscuraConfig.from_env()
+        config = ObscuraConfig.load()
 
     app = FastAPI(
         title="Obscura SDK API",

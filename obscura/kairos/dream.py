@@ -330,7 +330,7 @@ class DreamConsolidator:
             except Exception:
                 pass
 
-            cfg = ObscuraConfig.from_env()
+            cfg = ObscuraConfig.load()
 
             # Restrict filesystem access to the memory directory for the
             # duration of the agent run.
@@ -395,7 +395,7 @@ class DreamConsolidator:
         try:
             from obscura.core.config import ObscuraConfig
 
-            cfg = ObscuraConfig.from_env()
+            cfg = ObscuraConfig.load()
             events_db = (
                 Path(cfg.data_dir) / "events.db"
                 if hasattr(cfg, "data_dir")

@@ -567,10 +567,26 @@ class SSETransport(MCPTransport):
                 message="URL required for SSE transport",
             )
 
-        self._client = httpx.AsyncClient(timeout=self.config.timeout)
+        # Outbound headers: bearer tokens / API keys configured on the
+        # server entry. Forwarded via httpx client defaults so every GET
+        # and POST below carries them.
+        headers = dict(self.config.headers) if self.config.headers else None
+        self._client = httpx.AsyncClient(
+            timeout=self.config.timeout,
+            headers=headers,
+        )
 
-        # Connect to SSE endpoint to get POST endpoint
-        sse_url = f"{self.config.url}/sse"
+        # Build the SSE handshake URL. Naively appending ``/sse`` to a
+        # URL that already carries a path or query string (e.g.
+        # ``https://mcp.example.com/mcp?project_ref=…``) produces an
+        # invalid URL. Treat any URL with a query string -- or one
+        # already pointing at ``/sse`` / ``/mcp`` -- as the full
+        # endpoint. Otherwise append ``/sse`` for the legacy convention.
+        base = self.config.url.rstrip("/")
+        if "?" in base or base.endswith(("/sse", "/mcp")):
+            sse_url = self.config.url
+        else:
+            sse_url = f"{base}/sse"
 
         # Simple SSE connection - just get the initial endpoint
         response = await self._client.get(sse_url)

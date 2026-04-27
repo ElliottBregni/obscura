@@ -121,39 +121,40 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
                         parsed_mcp.append(cast(dict[str, Any], server))
                     elif isinstance(server, str) and server.strip():
                         parsed_mcp.append({"name": server.strip()})
+            raw_model_id = cfg.get("model_id")
+            raw_params = cfg.get("completion_params") or {}
             # AgentManifest uses pydantic field aliases (``provider`` exposed as
-            # ``model``, ``mcp_servers`` exposed as ``mcp_server_refs``).
-            # ``populate_by_name=True`` makes both forms valid at runtime but
-            # pyright follows the alias — we use the python field names here.
-            manifest = AgentManifest.model_validate(
-                {
-                    "name": str(cfg.get("name", agent_name)),
-                    "provider": str(
-                        cfg.get("provider") or cfg.get("model", ctx.backend)
-                    ),
-                    "system_prompt": str(cfg.get("system_prompt", "")),
-                    "max_turns": int(cfg.get("max_turns", ctx.max_turns)),
-                    "tools": list(cast(list[Any], cfg.get("tools", [])))
-                    if isinstance(cfg.get("tools"), list)
-                    else [],
-                    "tags": list(cast(list[Any], cfg.get("tags", [])))
-                    if isinstance(cfg.get("tags"), list)
-                    else [],
-                    "mcp_servers": parsed_mcp,
-                    "skills_config": skills_cfg,
-                    "can_delegate": bool(cfg.get("can_delegate", False)),
-                    "delegate_allowlist": list(
-                        cast(list[Any], cfg.get("delegate_allowlist", []))
-                    )
-                    if isinstance(cfg.get("delegate_allowlist"), list)
-                    else [],
-                    "max_delegation_depth": int(cfg.get("max_delegation_depth", 3)),
-                    "tool_allowlist": list(
-                        cast(list[Any], cfg.get("tool_allowlist", []))
-                    )
-                    if isinstance(cfg.get("tool_allowlist"), list)
-                    else None,
-                }
+            # ``model``); ``populate_by_name=True`` makes both forms valid at
+            # runtime — we use the python field names here.
+            manifest = AgentManifest(
+                name=str(cfg.get("name", agent_name)),
+                provider=str(cfg.get("provider") or ctx.backend),
+                model_id=str(raw_model_id) if raw_model_id else None,
+                completion_params=raw_params
+                if isinstance(raw_params, dict)
+                else {},
+                system_prompt=str(cfg.get("system_prompt", "")),
+                max_turns=int(cfg.get("max_turns", ctx.max_turns)),
+                tools=list(cast(list[Any], cfg.get("tools", [])))
+                if isinstance(cfg.get("tools"), list)
+                else [],
+                tags=list(cast(list[Any], cfg.get("tags", [])))
+                if isinstance(cfg.get("tags"), list)
+                else [],
+                mcp_servers=parsed_mcp,
+                skills_config=skills_cfg,
+                can_delegate=bool(cfg.get("can_delegate", False)),
+                delegate_allowlist=list(
+                    cast(list[Any], cfg.get("delegate_allowlist", []))
+                )
+                if isinstance(cfg.get("delegate_allowlist"), list)
+                else [],
+                max_delegation_depth=int(cfg.get("max_delegation_depth", 3)),
+                tool_allowlist=list(
+                    cast(list[Any], cfg.get("tool_allowlist", []))
+                )
+                if isinstance(cfg.get("tool_allowlist"), list)
+                else None,
             )
     except Exception as exc:
         print_warning(f"Failed loading @{agent_name} manifest: {exc}")

@@ -1,29 +1,35 @@
-"""obscura.cli.auth_commands -- Supabase OAuth + magic-link login from the CLI.
+"""obscura.cli.auth_commands -- SSO login (via auth.modernized-ai.com) +
+magic-link from the CLI.
 
 Exposes three commands under the ``obscura-auth`` script entry:
 
-* ``obscura-auth login [--provider github|google|magic]`` — OAuth via a local
-  callback server, or magic-link email.
+* ``obscura-auth login [--provider github|google|magic]`` — SSO via
+  ``auth.modernized-ai.com`` (the unified front door for all Modernized AI
+  products) and a local callback server, or magic-link email.
 * ``obscura-auth logout`` — delete stored credentials.
 * ``obscura-auth whoami`` — print the currently authenticated user.
 
-Uses Supabase REST auth endpoints directly (no extra runtime deps):
+OAuth flow: CLI opens ``auth.modernized-ai.com/?next=<localhost>&response_mode=query``.
+The auth site does the OAuth dance with Supabase, then redirects back to the
+local callback with tokens in the query string. CLI parses tokens, persists
+the session, syncs provider secrets to Supabase user_metadata.
 
-* ``/auth/v1/authorize`` — OAuth redirect with PKCE (S256).
-* ``/auth/v1/token?grant_type=pkce`` — code → session exchange.
+Refresh + magic-link still call Supabase REST endpoints directly:
+
 * ``/auth/v1/token?grant_type=refresh_token`` — session refresh.
 * ``/auth/v1/otp`` + ``/auth/v1/verify`` — magic link.
+
+Override the SSO host with ``OBSCURA_SSO_AUTH_HOST`` for testing against a
+local copy of the auth site.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import http.server
 import json
 import logging
 import os
-import secrets
 import socket
 import threading
 import time
@@ -39,6 +45,10 @@ import click
 import httpx
 
 from obscura.auth import secrets as _secrets
+
+_SSO_AUTH_HOST = os.environ.get(
+    "OBSCURA_SSO_AUTH_HOST", "https://auth.modernized-ai.com",
+).rstrip("/")
 
 logger = logging.getLogger(__name__)
 
@@ -422,14 +432,7 @@ def ensure_github_oauth_session(*, open_browser: bool = True) -> StoredSession |
 # ---------------------------------------------------------------------------
 
 
-_CALLBACK_HTML_SUCCESS = """<!doctype html>
-<html><head><title>Obscura — signed in</title>
-<style>body{font-family:system-ui;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-.card{background:#1b1b1b;padding:2rem 3rem;border-radius:12px;border:1px solid #333;max-width:420px;text-align:center}
-h1{margin:0 0 .5rem;font-size:1.25rem}p{margin:0;color:#aaa;font-size:.9rem}</style></head>
-<body><div class="card"><h1>Signed in to Obscura</h1>
-<p>You can close this window and return to the terminal.</p></div></body></html>
-"""
+_CLI_DONE_URL = f"{_SSO_AUTH_HOST}/cli-done/"
 
 _CALLBACK_HTML_ERROR = """<!doctype html>
 <html><head><title>Obscura — sign-in failed</title></head>
@@ -438,22 +441,27 @@ _CALLBACK_HTML_ERROR = """<!doctype html>
 """
 
 
-def _pkce_pair() -> tuple[str, str]:
-    verifier = secrets.token_urlsafe(64)
-    digest = hashlib.sha256(verifier.encode("ascii")).digest()
-    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return verifier, challenge
-
-
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
+def _decode_jwt_payload(token: str) -> dict[str, Any]:
+    """Decode JWT payload without verifying — caller must trust the source."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))  # type: ignore[no-any-return]
+    except Exception:
+        return {}
+
+
 @dataclass
 class _CallbackResult:
-    code: str | None = None
+    tokens: dict[str, str] | None = None
     error: str | None = None
 
 
@@ -470,9 +478,13 @@ def _build_callback_handler(
             parsed = urllib.parse.urlparse(self.path)
             qs = urllib.parse.parse_qs(parsed.query)
 
-            if "error" in qs:
-                result.error = qs["error"][0]
-                body = _CALLBACK_HTML_ERROR.format(error=result.error).encode("utf-8")
+            err = qs.get("error_description", qs.get("error", [None]))[0]
+            access_token = qs.get("access_token", [None])[0]
+            refresh_token = qs.get("refresh_token", [None])[0]
+
+            if err:
+                result.error = err
+                body = _CALLBACK_HTML_ERROR.format(error=err).encode("utf-8")
                 self.send_response(400)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -481,15 +493,19 @@ def _build_callback_handler(
                 done.set()
                 return
 
-            code = qs.get("code", [None])[0]
-            if code:
-                result.code = code
-                body = _CALLBACK_HTML_SUCCESS.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
+            if access_token and refresh_token:
+                result.tokens = {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "expires_in": qs.get("expires_in", ["3600"])[0],
+                    "provider_token": qs.get("provider_token", [""])[0],
+                }
+                # Redirect to the hosted "you're done" page so the address bar
+                # doesn't keep showing tokens.
+                self.send_response(302)
+                self.send_header("Location", _CLI_DONE_URL)
+                self.send_header("Content-Length", "0")
                 self.end_headers()
-                self.wfile.write(body)
                 done.set()
                 return
 
@@ -508,14 +524,12 @@ def _run_oauth_flow(
 ) -> StoredSession:
     port = _free_port()
     redirect_uri = f"http://127.0.0.1:{port}/callback"
-    verifier, challenge = _pkce_pair()
 
-    authorize_url = f"{cfg.url}/auth/v1/authorize?" + urllib.parse.urlencode(
+    sso_url = f"{_SSO_AUTH_HOST}/?" + urllib.parse.urlencode(
         {
+            "next": redirect_uri,
+            "response_mode": "query",
             "provider": provider,
-            "redirect_to": redirect_uri,
-            "code_challenge": challenge,
-            "code_challenge_method": "s256",
         },
     )
 
@@ -527,49 +541,33 @@ def _run_oauth_flow(
     thread.start()
 
     try:
-        click.echo(f"Opening browser to sign in with {provider}…")
-        click.echo(f"If it didn't open, visit: {authorize_url}")
+        click.echo(f"Opening browser to sign in with {provider} via {_SSO_AUTH_HOST}…")
+        click.echo(f"If it didn't open, visit: {sso_url}")
         if open_browser:
-            webbrowser.open(authorize_url)
+            webbrowser.open(sso_url)
 
         if not done.wait(timeout=timeout_seconds):
-            raise RuntimeError("Timed out waiting for OAuth callback")
+            raise RuntimeError("Timed out waiting for SSO callback")
     finally:
         server.shutdown()
         server.server_close()
 
     if result.error:
-        raise RuntimeError(f"OAuth provider returned error: {result.error}")
-    if not result.code:
-        raise RuntimeError("No authorization code received")
+        raise RuntimeError(f"Sign-in failed: {result.error}")
+    if not result.tokens:
+        raise RuntimeError("No tokens received from SSO callback")
 
-    resp = httpx.post(
-        f"{cfg.url}/auth/v1/token",
-        params={"grant_type": "pkce"},
-        headers={"apikey": cfg.anon_key, "Content-Type": "application/json"},
-        json={"auth_code": result.code, "code_verifier": verifier},
-        timeout=20.0,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"Code exchange failed ({resp.status_code}): {resp.text}")
-    body: dict[str, Any] = cast(dict[str, Any], resp.json())
-    user_raw: Any = body.get("user") or {}
-    user: dict[str, Any] = (
-        cast(dict[str, Any], user_raw) if isinstance(user_raw, dict) else {}
-    )
-    provider_token = body.get("provider_token")
-    provider_refresh_token = body.get("provider_refresh_token")
+    tokens = result.tokens
+    claims = _decode_jwt_payload(tokens["access_token"])
     session = StoredSession(
-        access_token=body["access_token"],
-        refresh_token=body["refresh_token"],
-        expires_at=int(time.time()) + int(body.get("expires_in", 3600)),
-        user_id=str(user.get("id", "")),
-        email=str(user.get("email", "")),
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        expires_at=int(time.time()) + int(tokens["expires_in"]),
+        user_id=str(claims.get("sub", "")),
+        email=str(claims.get("email", "")),
         provider=provider,
-        provider_token=str(provider_token) if provider_token else None,
-        provider_refresh_token=(
-            str(provider_refresh_token) if provider_refresh_token else None
-        ),
+        provider_token=tokens["provider_token"] or None,
+        provider_refresh_token=None,
     )
     save_session(session)
     _sync_provider_secrets_to_supabase(cfg, provider=provider, session=session)

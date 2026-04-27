@@ -258,7 +258,7 @@ wheels = [
 [[package]]
 name = "codex-app-server-sdk"
 version = "0.2.0"
-source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#2e228969be104daf2066dc7167e0674d47e8855c" }
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#789f387982c51e8032766f91d4b026f4c50b0ff8" }
 dependencies = [
     { name = "pydantic" },
 ]

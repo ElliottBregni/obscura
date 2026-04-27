@@ -999,11 +999,61 @@ class TestSSETransport:
         mock_httpxclient = AsyncMock()
         mock_httpxclient.get = AsyncMock(return_value=mock_response)
 
-        with patch("httpx.AsyncClient", return_value=mock_httpxclient):
+        with patch("httpx.AsyncClient", return_value=mock_httpxclient) as ctor:
             await transport.connect()
 
         assert transport.client is mock_httpxclient
         assert transport.endpoint == "http://localhost:3000/rpc"
+        # Bare base URL: ``/sse`` is appended for the legacy handshake.
+        mock_httpxclient.get.assert_awaited_once_with("http://localhost:3000/sse")
+        # No headers were configured -> httpx.AsyncClient called with headers=None.
+        ctor_kwargs = ctor.call_args.kwargs
+        assert ctor_kwargs.get("headers") is None
+
+    @pytest.mark.asyncio
+    async def test_connect_forwards_configured_headers(self) -> None:
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE,
+            url="https://mcp.example.com/mcp?project_ref=abc",
+            headers={"Authorization": "Bearer pat-xyz"},
+        )
+        transport = SSETransport(config)
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+
+        mock_httpxclient = AsyncMock()
+        mock_httpxclient.get = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient", return_value=mock_httpxclient) as ctor:
+            await transport.connect()
+
+        # URL has a query string -> use as-is, do not append ``/sse``.
+        mock_httpxclient.get.assert_awaited_once_with(
+            "https://mcp.example.com/mcp?project_ref=abc",
+        )
+        # Headers were forwarded into the httpx client defaults.
+        ctor_kwargs = ctor.call_args.kwargs
+        assert ctor_kwargs.get("headers") == {"Authorization": "Bearer pat-xyz"}
+
+    @pytest.mark.asyncio
+    async def test_connect_does_not_double_append_sse_suffix(self) -> None:
+        config = MCPConnectionConfig(
+            transport=MCPTransportType.SSE,
+            url="https://example.com/sse",
+        )
+        transport = SSETransport(config)
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+
+        mock_httpxclient = AsyncMock()
+        mock_httpxclient.get = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient", return_value=mock_httpxclient):
+            await transport.connect()
+
+        mock_httpxclient.get.assert_awaited_once_with("https://example.com/sse")
 
     @pytest.mark.asyncio
     async def test_send_post_with_id(self) -> None:

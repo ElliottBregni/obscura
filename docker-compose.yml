@@ -98,41 +98,10 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Web UI — Vite dev server
+  # Web UI — now a separate repo: ~/dev/obscura-web-ui
+  # Run: cd ~/dev/obscura-web-ui && npm run dev  (http://localhost:5173)
+  # Or:  docker compose -f ~/dev/obscura-web-ui/docker-compose.yml up
   # ---------------------------------------------------------------------------
-  web-ui:
-    build:
-      context: ./web-ui
-      dockerfile: Dockerfile.dev
-    container_name: obscura-web-ui
-    ports:
-      - "5173:5173"
-    environment:
-      VITE_FORCE_DEV_API_KEY: "true"
-      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-http://localhost:8080}"
-      CHOKIDAR_USEPOLLING: "true"
-    depends_on:
-      obscura-sdk:
-        condition: service_healthy
-    develop:
-      watch:
-        - action: sync
-          path: ./web-ui/index.html
-          target: /app/index.html
-        - action: sync
-          path: ./web-ui/src
-          target: /app/src
-        - action: sync+restart
-          path: ./web-ui/vite.config.ts
-          target: /app/vite.config.ts
-        - action: rebuild
-          path: ./web-ui/package.json
-        - action: rebuild
-          path: ./web-ui/package-lock.json
-    logging: *default-logging
-    networks:
-      - obscura-net
-    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # OpenTelemetry Collector

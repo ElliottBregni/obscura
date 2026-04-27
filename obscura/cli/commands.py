@@ -7402,22 +7402,52 @@ async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-async def _oneshot_stream(client: Any, prompt: str, timeout: float = 30.0) -> str:
+class _OneshotStalled(Exception):
+    """Raised when ``_oneshot_stream`` hits its per-chunk idle timeout.
+
+    Carries any text already collected so callers can still render partial
+    output instead of losing it on stall.
+    """
+
+    def __init__(self, partial: str, idle_timeout: float) -> None:
+        super().__init__(f"no output for {idle_timeout:.0f}s")
+        self.partial = partial
+        self.idle_timeout = idle_timeout
+
+
+async def _oneshot_stream(client: Any, prompt: str, idle_timeout: float = 60.0) -> str:
     """Stream a one-shot prompt and return the concatenated text.
 
     Uses streaming instead of ``client.send()`` to avoid session state
-    conflicts with the copilot backend after ``run_loop`` streaming.
-    Resets the session first, then streams with a timeout.
+    conflicts with the copilot backend after ``run_loop`` streaming. Uses
+    a per-chunk idle timeout so long answers complete as long as the model
+    keeps producing output; only aborts if no chunk arrives within
+    ``idle_timeout`` seconds, raising ``_OneshotStalled`` carrying any
+    text received so far.
     """
     await client.reset_session()
     parts: list[str] = []
 
-    async def _collect() -> None:
-        async for chunk in client.stream(prompt):
+    stream = client.stream(prompt).__aiter__()
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    stream.__anext__(), timeout=idle_timeout
+                )
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                raise _OneshotStalled("".join(parts), idle_timeout) from None
             if hasattr(chunk, "text") and chunk.text:
                 parts.append(chunk.text)
-
-    await asyncio.wait_for(_collect(), timeout=timeout)
+    finally:
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                pass
     return "".join(parts)
 
 
@@ -7444,8 +7474,18 @@ async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
             console.print(RichMarkdown(text))
         else:
             print_info("(no response)")
-    except asyncio.TimeoutError:
-        print_error("Side question timed out after 30 s.")
+    except _OneshotStalled as stalled:
+        if stalled.partial:
+            from rich.markdown import Markdown as RichMarkdown
+
+            console.print(RichMarkdown(stalled.partial))
+            print_info(
+                f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
+            )
+        else:
+            print_error(
+                f"Side question stalled — no output for {stalled.idle_timeout:.0f}s."
+            )
     except Exception as exc:
         print_error(f"Side question failed: {exc}")
     return None
@@ -7490,8 +7530,18 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
             console.print(RichMarkdown(text))
         else:
             print_info("(no summary generated)")
-    except asyncio.TimeoutError:
-        print_error("Summary timed out after 30 s.")
+    except _OneshotStalled as stalled:
+        if stalled.partial:
+            from rich.markdown import Markdown as RichMarkdown
+
+            console.print(RichMarkdown(stalled.partial))
+            print_info(
+                f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
+            )
+        else:
+            print_error(
+                f"Summary stalled — no output for {stalled.idle_timeout:.0f}s."
+            )
     except Exception as exc:
         print_error(f"Summary failed: {exc}")
     return None
@@ -9322,8 +9372,18 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
             console.print(RichMarkdown(text))
         else:
             print_info("(no recap generated)")
-    except asyncio.TimeoutError:
-        print_error("Recap timed out.")
+    except _OneshotStalled as stalled:
+        if stalled.partial:
+            from rich.markdown import Markdown as RichMarkdown
+
+            console.print(RichMarkdown(stalled.partial))
+            print_info(
+                f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
+            )
+        else:
+            print_error(
+                f"Recap stalled — no output for {stalled.idle_timeout:.0f}s."
+            )
     except Exception as exc:
         print_error(f"Recap failed: {exc}")
     return None

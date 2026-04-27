@@ -33,8 +33,8 @@ def _get_db_path() -> str:
 
 def _get_kairos(agent_loop: Any = None) -> Kairos:
     """Instantiate Kairos with the default DB path."""
-    from obscura.core.agent_loop import AgentLoop
     from obscura.core.auth import resolve_auth
+    from obscura.core.kairos.types import KairosConfig
     from obscura.core.tools import ToolRegistry
     from obscura.core.types import Backend
     from obscura.providers import CopilotBackend
@@ -43,10 +43,20 @@ def _get_kairos(agent_loop: Any = None) -> Kairos:
     backend = CopilotBackend(auth)
     registry = ToolRegistry()
     loop = agent_loop or AgentLoop(backend=backend, tool_registry=registry)
+
+    # Read notification recipient from settings so interventions ping iMessage
+    settings = _read_settings()
+    notification_recipient: str = (
+        settings.get("kairos", {}).get("notification_recipient", "")
+        or settings.get("notification_recipient", "")
+    )
+    kairos_config = KairosConfig(notification_recipient=notification_recipient)
+
     return Kairos(
         db_path=_get_db_path(),
         agent_loop=loop,
         backend=backend,
+        config=kairos_config,
     )
 
 

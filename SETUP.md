@@ -67,7 +67,7 @@ export OBSCURA_VECTOR_BACKEND=qdrant
 
 Verify: `curl http://localhost:8080/health` → `{"status":"ok"}`
 
-### 2. Web UI `.env` (already created at `web-ui/.env`)
+### 2. Web UI `.env` (already created at `~/dev/obscura-web-ui/.env`)
 
 ```dotenv
 VITE_DEV_API_KEY=obscura_LcTDYtNivCUsvdn4H9gh0O2lj-skhDVrmqGE9Olgkdw
@@ -81,7 +81,8 @@ VITE_WS_PROXY_TARGET=ws://localhost:8080
 ### 3. Start the Web UI
 
 ```bash
-cd web-ui
+cd ~/dev/obscura-web-ui
+cp .env.example .env  # set VITE_API_URL=http://localhost:8080
 npm install      # first time only
 npm run dev      # → http://localhost:5173
 ```
@@ -139,13 +140,13 @@ docker compose up -d
 ### 2. Build Frontend
 
 ```bash
-cd web-ui
+cd ~/dev/obscura-web-ui
 
 # Point frontend at the deployed API
 echo 'VITE_API_URL=https://obscura.yourdomain.com' > .env.production
 
 npm run build
-# Output: web-ui/dist/  → serve as static files
+# Output: ~/dev/obscura-web-ui/dist/  → serve as static files
 ```
 
 ### 3. Nginx Config (reverse proxy)
@@ -236,7 +237,7 @@ server {
 The MCP server subprocess does not inherit shell env vars. Ensure `OBSCURA_API_KEYS` is in the `"env"` block of `~/.claude/claude_desktop_config.json`. Restart Claude Code after changing.
 
 **Web UI shows login screen despite `VITE_FORCE_DEV_API_KEY=true`**
-Check that `web-ui/.env` exists with both `VITE_DEV_API_KEY` and `VITE_FORCE_DEV_API_KEY=true`. Restart `npm run dev` — Vite must restart to pick up `.env` changes.
+Check that `~/dev/obscura-web-ui/.env` exists with both `VITE_DEV_API_KEY` and `VITE_FORCE_DEV_API_KEY=true`. Restart `npm run dev` — Vite must restart to pick up `.env` changes.
 
 **API returns 404 on `/api/sessions`**
 All routes are prefixed `/api/v1/` — use `/api/v1/sessions`, `/api/v1/agents`, etc.

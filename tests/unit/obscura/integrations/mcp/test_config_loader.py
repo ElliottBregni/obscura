@@ -54,6 +54,68 @@ class TestDiscoverMCPServers:
         assert server.tools == ("browser_navigate",)
         assert server.missing_env == ()
 
+    def test_resolves_header_placeholders(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config_path = tmp_path / "mcp-config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "supabase": {
+                            "type": "http",
+                            "url": "https://mcp.example.com/mcp?project_ref=abc",
+                            "headers": {
+                                "Authorization": "Bearer ${SUPABASE_ACCESS_TOKEN}",
+                            },
+                        },
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SUPABASE_ACCESS_TOKEN", "sb-pat-123")
+
+        discovered = discover_mcp_servers(config_path)
+        assert len(discovered) == 1
+        server = discovered[0]
+        assert server.transport is MCPTransportType.SSE
+        assert server.headers == {"Authorization": "Bearer sb-pat-123"}
+        assert server.missing_env == ()
+
+    def test_missing_header_env_records_in_missing_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config_path = tmp_path / "mcp-config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "supabase": {
+                            "type": "http",
+                            "url": "https://mcp.example.com/mcp",
+                            "headers": {
+                                "Authorization": "Bearer ${SUPABASE_ACCESS_TOKEN}",
+                            },
+                        },
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("SUPABASE_ACCESS_TOKEN", raising=False)
+
+        discovered = discover_mcp_servers(config_path)
+        server = discovered[0]
+        # Inline substitution leaves the surrounding literal in place when
+        # the env var is unset; the empty replacement is what flags the gap.
+        assert server.headers == {"Authorization": "Bearer "}
+        assert "SUPABASE_ACCESS_TOKEN" in server.missing_env
+
     def test_raises_for_unknown_transport(self, tmp_path: Path) -> None:
         config_path = tmp_path / "mcp-config.json"
         config_path.write_text(
@@ -133,6 +195,41 @@ class TestBuildRuntimeServerConfigs:
         assert configs[0]["tools"] == ["browser_navigate"]
         assert configs[1]["transport"] == "sse"
         assert configs[1]["url"] == "https://example.com/sse"
+
+    def test_forwards_headers_for_http_servers(self) -> None:
+        discovered = [
+            DiscoveredMCPServer(
+                name="supabase",
+                transport=MCPTransportType.SSE,
+                command="",
+                args=(),
+                url="https://mcp.example.com/mcp",
+                env={},
+                tools=(),
+                missing_env=(),
+                headers={"Authorization": "Bearer pat-xyz"},
+            ),
+        ]
+
+        configs = build_runtime_server_configs(discovered)
+        assert configs[0]["headers"] == {"Authorization": "Bearer pat-xyz"}
+
+    def test_omits_headers_key_when_empty(self) -> None:
+        discovered = [
+            DiscoveredMCPServer(
+                name="remote",
+                transport=MCPTransportType.SSE,
+                command="",
+                args=(),
+                url="https://example.com/sse",
+                env={},
+                tools=(),
+                missing_env=(),
+            ),
+        ]
+
+        configs = build_runtime_server_configs(discovered)
+        assert "headers" not in configs[0]
 
     def test_selects_named_servers(self) -> None:
         discovered = [

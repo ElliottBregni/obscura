@@ -94,6 +94,10 @@ class ObscuraClient:
         # Prompt injection control
         inject_tier_prompt: bool = False,  # opt-in: prepend tier system prompt
         inject_claude_context: bool = False,  # opt-in: load ~/.claude/ context
+        # Host-supplied callbacks surfaced to tools via ToolContext.
+        # Recognised keys: ask_user_callback, user_interact_callback,
+        # permission_mode_callback, plan_approval_callback.
+        host_callbacks: dict[str, Any] | None = None,
     ) -> None:
         if isinstance(backend, str):
             backend = Backend(backend)
@@ -103,6 +107,7 @@ class ObscuraClient:
             tool_policy or ToolPolicy.custom_only()
         )  # Default: block native tools
         self._hooks = hooks
+        self._host_callbacks: dict[str, Any] = host_callbacks or {}
 
         # Resolve model via copilot_models aliases
         resolved_model = self._resolve_model(
@@ -254,6 +259,7 @@ class ObscuraClient:
                         args=server.get("args", []),
                         url=server.get("url"),
                         env=server.get("env", {}),
+                        headers=server.get("headers", {}),
                         name=server.get("name", ""),
                     ),
                 )
@@ -517,6 +523,7 @@ class ObscuraClient:
             model_name=self._model,
             context_budget=context_budget,
             tool_allowlist=tool_allowlist,
+            host_callbacks=self._host_callbacks,
         )
         self._current_loop = loop
         return loop.run(
@@ -549,6 +556,7 @@ class ObscuraClient:
             model_name=self._model,
             turn_timeout_s=turn_timeout_s,
             tool_allowlist=tool_allowlist,
+            host_callbacks=self._host_callbacks,
         )
         return await loop.run_to_completion(prompt, **kwargs)
 

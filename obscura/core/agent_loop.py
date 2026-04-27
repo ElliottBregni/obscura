@@ -612,6 +612,7 @@ class AgentLoop:
         compiled_agent: Any | None = None,
         tool_output_level: str = "standard",
         tool_output_overrides: dict[str, str] | None = None,
+        host_callbacks: dict[str, Any] | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -635,6 +636,7 @@ class AgentLoop:
         self._arbiter_killed = False  # Set by Arbiter to force-stop the loop.
         self._arbiter_kill_reason = ""
         self._tool_output_overrides = tool_output_overrides or {}
+        self._host_callbacks: dict[str, Any] = host_callbacks or {}
 
         # Apply compiled agent settings if provided
         if compiled_agent is not None:
@@ -2004,25 +2006,13 @@ class AgentLoop:
 
         return list(await asyncio.gather(*[limited(c) for c in coros]))
 
-    @staticmethod
-    def _read_host_callbacks() -> dict[str, Any]:
-        """Snapshot the legacy module-level host callbacks.
+    def _read_host_callbacks(self) -> dict[str, Any]:
+        """Return the host callbacks registered with this loop.
 
-        Returns a dict suitable for splatting into ToolContext(...). Reads
-        each global lazily via the system tools module so failures during
-        early import don't block the agent loop.
+        Filters out None entries so unset callbacks don't override
+        ToolContext defaults.
         """
-        try:
-            from obscura.tools.system import UI, Session
-
-            return {
-                "ask_user_callback": UI.ask_user_callback,
-                "user_interact_callback": UI.user_interact_callback,
-                "permission_mode_callback": Session.permission_mode_callback,
-                "plan_approval_callback": Session.plan_approval_callback,
-            }
-        except Exception:
-            return {}
+        return {k: v for k, v in self._host_callbacks.items() if v is not None}
 
     async def _execute_single_tool(
         self,
@@ -2199,9 +2189,6 @@ class AgentLoop:
                 bind_tool_context,
             )
 
-            # Pull current host callbacks from the legacy module-level globals
-            # so tools migrated to ToolContext keep working without any change
-            # to the REPL's wiring code.
             ctx = ToolContext(
                 registry=self._tools,
                 history=self._current_messages,

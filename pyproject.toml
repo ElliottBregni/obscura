@@ -201,7 +201,7 @@ obscura = ["py.typed"]
 
 # Exclude non-package directories
 [tool.setuptools.exclude-package-data]
-obscura = ["tests/*", "helm/*", "infra/*", "docs/*", "web-ui/*", "examples/*", "scripts/*"]
+obscura = ["tests/*", "helm/*", "infra/*", "docs/*", "examples/*", "scripts/*"]
 
 # End-to-end test configuration
 [tool.pytest.ini_options]

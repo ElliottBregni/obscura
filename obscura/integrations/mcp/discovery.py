@@ -125,7 +125,7 @@ def _shadow_handler_factory(qualified_name: str) -> Any:
     return _shadow_handler
 
 
-def build_mcp_connection_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
+def _build_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
     """Translate an obscura mcp_servers entry into an MCPConnectionConfig.
 
     Returns None if the entry is malformed (e.g. missing command for stdio).
@@ -162,11 +162,6 @@ def build_mcp_connection_config(server: dict[str, Any]) -> MCPConnectionConfig |
         )
 
     return None
-
-
-# Backwards-compatible private alias — keeps direct test references working
-# (``discovery._build_config(...)``) while new callers use the public name.
-_build_config = build_mcp_connection_config
 
 
 def _resolve_server_timeout(server: dict[str, Any]) -> float:
@@ -212,7 +207,7 @@ async def _probe_one_server(
     transport = str(server.get("transport") or "stdio")
     started = time.monotonic()
 
-    config = build_mcp_connection_config(server)
+    config = _build_config(server)
     if config is None:
         logger.warning("MCP discovery: malformed config for %s", name)
         return [], DiscoveryStatus(
@@ -317,7 +312,9 @@ async def register_external_mcp_tools(
             try:
                 register(spec)
             except Exception as exc:
-                logger.warning("Failed to register shadow spec %s: %s", spec.name, exc)
+                logger.warning(
+                    "Failed to register shadow spec %s: %s", spec.name, exc
+                )
 
     _set_last_report(backend, report)
     return report

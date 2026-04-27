@@ -296,9 +296,13 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     if isinstance(plugins_cfg, dict)
                     else PluginDepsConfig()
                 )
+                raw_model_id = cfg.get("model_id")
+                raw_params = cfg.get("completion_params") or {}
                 manifest = AgentManifest(
                     name=cfg["name"],
-                    provider=model or cfg.get("model", ctx.backend),
+                    provider=cfg.get("provider") or model or ctx.backend,
+                    model_id=str(raw_model_id) if raw_model_id else None,
+                    completion_params=raw_params if isinstance(raw_params, dict) else {},
                     system_prompt=cfg.get("system_prompt", ""),
                     max_turns=cfg.get("max_turns", 25),
                     tools=cfg.get("tools", []),
@@ -512,9 +516,13 @@ async def _run_one_agent(
                 if isinstance(plugins_cfg, dict)
                 else PluginDepsConfig()
             )
+            raw_model_id = cfg.get("model_id")
+            raw_params = cfg.get("completion_params") or {}
             manifest = AgentManifest(
                 name=cfg["name"],
-                provider=model or cfg.get("model", ctx.backend),
+                provider=cfg.get("provider") or model or ctx.backend,
+                model_id=str(raw_model_id) if raw_model_id else None,
+                completion_params=raw_params if isinstance(raw_params, dict) else {},
                 system_prompt=cfg.get("system_prompt", ""),
                 max_turns=cfg.get("max_turns", 25),
                 tools=cfg.get("tools", []),

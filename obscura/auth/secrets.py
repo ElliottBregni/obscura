@@ -78,6 +78,7 @@ SUPABASE_SECRET_NAMES: tuple[str, ...] = (
     "SUPABASE_AUDIENCE",
     "SUPABASE_ISSUER",
     "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_ACCESS_TOKEN",  # Personal access token for the Supabase MCP HTTP server.
 )
 
 # LLM backend credentials. These names mirror the env-var tuples in
@@ -164,6 +165,33 @@ class SecretsValidationError(ValueError):
 
 _dotenv_loaded = False
 
+# In-process resolution cache. Each name is queried through the full
+# tier walk at most once per process lifetime. The big payoff is on
+# macOS, where every keyring read is an IPC to securityd that may pop
+# an authorization dialog -- without this cache, ~30 BACKEND/PLUGIN
+# names get walked on every startup and again on every config refresh.
+# Invalidated by ``store()`` / ``delete()`` and by ``clear_cache()``.
+# ``None`` is a valid cached value meaning "we already looked and it
+# wasn't anywhere," so we use a sentinel to distinguish "missing from
+# cache" from "cached as unset."
+_RESOLVE_MISS = object()
+_resolve_cache: dict[str, str | None] = {}
+_resolve_cache_lock = threading.Lock()
+
+
+def clear_cache(name: str | None = None) -> None:
+    """Drop cached resolutions so the next ``resolve()`` walks the tiers again.
+
+    Pass *name* to invalidate a single entry; omit to clear the entire
+    cache. Used by ``store()`` / ``delete()`` and exposed for tests and
+    administrative tools that mutate secrets out-of-band.
+    """
+    with _resolve_cache_lock:
+        if name is None:
+            _resolve_cache.clear()
+        else:
+            _resolve_cache.pop(name, None)
+
 
 def _load_dotenv_once() -> None:
     """Load ``.env`` files into the process environment exactly once.
@@ -235,30 +263,45 @@ def resolve(name: str, *, default: str | None = None) -> str | None:
     ``default`` when nothing is configured. Empty strings in every tier
     are treated as unset so callers don't have to distinguish ``""``
     from ``None``.
+
+    Results are cached for the lifetime of the process so the same name
+    isn't re-queried through keyring / cloud vault on every call. Use
+    :func:`clear_cache` after mutating secrets out-of-band.
     """
+    cached = _resolve_cache.get(name, _RESOLVE_MISS)
+    if cached is not _RESOLVE_MISS:
+        return cached if cached is not None else default
+
+    value: str | None = None
+
     # Tier 1 -- shell env (captured at module import, before any dotenv).
     shell_value = _shell_env_snapshot.get(name, "").strip()
     if shell_value:
-        return shell_value
+        value = shell_value
 
     # Tier 2 -- OS keyring.
-    if keyring_available():
+    if value is None and keyring_available():
         kr_value = _keyring_lookup(name)
         if kr_value:
-            return kr_value
+            value = kr_value
 
     # Tier 3 -- Supabase encrypted vault. Silent if locked/absent.
-    vault_value = _vault_lookup(name)
-    if vault_value:
-        return vault_value
+    if value is None:
+        vault_value = _vault_lookup(name)
+        if vault_value:
+            value = vault_value
 
     # Tier 4 -- dotenv-loaded values (arrive in ``os.environ`` below).
-    _load_dotenv_once()
-    env_value = os.environ.get(name, "").strip()
-    if env_value:
-        return env_value
+    if value is None:
+        _load_dotenv_once()
+        env_value = os.environ.get(name, "").strip()
+        if env_value:
+            value = env_value
 
-    return default
+    with _resolve_cache_lock:
+        _resolve_cache[name] = value
+
+    return value if value is not None else default
 
 
 # Re-entry guard: ``get_client()`` itself calls ``SupabaseCliConfig.from_env()``
@@ -338,6 +381,7 @@ def store(name: str, value: str) -> bool:
     except keyring.errors.KeyringError as exc:
         logger.warning("Keyring write for %s failed: %s", name, exc)
         return False
+    clear_cache(name)
     return True
 
 
@@ -385,6 +429,7 @@ def delete(name: str) -> bool:
     except keyring.errors.KeyringError as exc:
         logger.debug("Keyring delete for %s failed: %s", name, exc)
         return False
+    clear_cache(name)
     return True
 
 

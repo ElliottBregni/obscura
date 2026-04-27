@@ -69,6 +69,19 @@ _OPTIONAL_RELAXATIONS: dict[str, tuple[str, ...]] = {
     "Thread": ("ephemeral",),
 }
 
+# Models that embed ``Thread`` (or another relaxed model) as a nested field.
+# Pydantic v2 caches an inner-validator schema for nested models when the
+# outer model is first built, so relaxing + rebuilding the inner class alone
+# isn't enough — the parent keeps validating against the pre-relaxation
+# child schema. Force-rebuilding the parents pulls in the relaxed child.
+_RELAX_PARENT_REBUILDS: tuple[str, ...] = (
+    "ThreadStartResponse",
+    "ThreadResumeResponse",
+    "ThreadForkResponse",
+    "ThreadReadResponse",
+    "ThreadUnarchiveResponse",
+)
+
 
 def _relax_strict_response_models(mod: Any) -> None:
     """Make selected SDK response fields optional to tolerate version skew.
@@ -86,8 +99,8 @@ def _relax_strict_response_models(mod: Any) -> None:
         if v2 is not None:
             candidates.append(v2)
 
-    for model_name, field_names in _OPTIONAL_RELAXATIONS.items():
-        cls = next(
+    def _resolve(model_name: str) -> Any:
+        return next(
             (
                 getattr(c, model_name)
                 for c in candidates
@@ -96,6 +109,10 @@ def _relax_strict_response_models(mod: Any) -> None:
             ),
             None,
         )
+
+    any_changed = False
+    for model_name, field_names in _OPTIONAL_RELAXATIONS.items():
+        cls = _resolve(model_name)
         if cls is None:
             continue
         changed = False
@@ -106,8 +123,19 @@ def _relax_strict_response_models(mod: Any) -> None:
             field.default = None
             changed = True
         if changed:
+            any_changed = True
             try:
                 cls.model_rebuild(force=True)
+            except Exception:
+                pass
+
+    if any_changed:
+        for parent_name in _RELAX_PARENT_REBUILDS:
+            parent = _resolve(parent_name)
+            if parent is None:
+                continue
+            try:
+                parent.model_rebuild(force=True)
             except Exception:
                 pass
 

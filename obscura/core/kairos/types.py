@@ -234,6 +234,9 @@ class KairosConfig:
     # Budget defaults (applied to goals without explicit budgets)
     default_budget: GoalBudget = field(default_factory=GoalBudget)
 
+    # Notification
+    notification_recipient: str = ""  # iMessage handle to alert on interventions
+
 
 # ---------------------------------------------------------------------------
 # Core domain types

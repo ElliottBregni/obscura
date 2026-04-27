@@ -109,7 +109,7 @@ async def _generate_llm_summary(context: str) -> str:
         from obscura.core.client import ObscuraClient
         from obscura.core.config import ObscuraConfig
 
-        cfg = ObscuraConfig.from_env()
+        cfg = ObscuraConfig.load()
         prompt = f"{AWAY_SUMMARY_PROMPT}\n\nRecent conversation:\n{context[:3000]}"
         async with ObscuraClient(
             cfg.default_backend,

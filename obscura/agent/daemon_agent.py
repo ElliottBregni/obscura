@@ -262,7 +262,11 @@ class DaemonAgent:
         self._last_heartbeat_monotonic: float = 0.0
         self._lock_name = f"daemon:{self._name}"
         self._lock_owner = f"{self._agent_id}:{id(self)}"
-        self._lock_stale_after_s: float = 300.0
+        # 45 s = 4.5× the heartbeat interval (10 s).  A crashed process that
+        # stops sending heartbeats will lose its lock after 45 s, allowing a
+        # fresh daemon to start promptly.  The old 300 s window caused the bot
+        # to appear "dead" for up to 5 minutes after an unclean exit.
+        self._lock_stale_after_s: float = 45.0
         self._lock_retry_interval_s: float = 5.0
         self._lock_heartbeat_interval_s: float = 10.0
         self._last_lock_heartbeat_monotonic: float = 0.0
@@ -335,22 +339,23 @@ class DaemonAgent:
         logger.info("[%s] daemon agent started (id=%s)", self._name, self._agent_id)
         self._stopped = False
 
-        if not self._lock_store.try_acquire(
+        while not self._lock_store.try_acquire(
             lock_name=self._lock_name,
             owner_id=self._lock_owner,
             stale_after_s=self._lock_stale_after_s,
         ):
             logger.info(
-                "[%s] skipping: another daemon instance already owns lock '%s'",
+                "[%s] another daemon instance owns lock '%s'; waiting to acquire...",
                 self._name,
                 self._lock_name,
             )
             self._record_runtime_event(
-                "daemon_lock_skipped",
+                "daemon_lock_waiting",
                 details={"lock_name": self._lock_name},
             )
-            self._stopped = True
-            return
+            if self._stopped:
+                return
+            await asyncio.sleep(self._lock_retry_interval_s)
 
         if self._stopped:
             return

@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 _ENV_VAR_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+_ENV_VAR_INLINE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class DiscoveredMCPServer:
     env: dict[str, str]
     tools: tuple[str, ...]
     missing_env: tuple[str, ...]
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def _resolve_env_value(raw: str, *, resolve_env: bool) -> tuple[str, str | None]:
@@ -45,6 +47,28 @@ def _resolve_env_value(raw: str, *, resolve_env: bool) -> tuple[str, str | None]
     if value:
         return value, None
     return "", key
+
+
+def _resolve_inline_env(raw: str, *, resolve_env: bool) -> tuple[str, list[str]]:
+    """Substitute every ``${VAR}`` occurrence inside *raw*.
+
+    Returns ``(resolved_string, missing_var_names)``. Used for fields like
+    HTTP ``headers`` where the value is templated (``"Bearer ${TOKEN}"``)
+    rather than the whole field being a single placeholder.
+    """
+    if not resolve_env:
+        return raw, []
+    missing: list[str] = []
+
+    def _sub(match: re.Match[str]) -> str:
+        key = match.group(1)
+        value = os.environ.get(key, "")
+        if not value:
+            missing.append(key)
+            return ""
+        return value
+
+    return _ENV_VAR_INLINE_PATTERN.sub(_sub, raw), missing
 
 
 def _load_config_root(path: Path) -> dict[str, Any]:
@@ -223,6 +247,22 @@ def discover_mcp_servers(
             if missing_key is not None:
                 missing_env.append(missing_key)
 
+        # ``headers`` mirrors ``env`` for HTTP/SSE transports — used to
+        # attach bearer tokens or API keys to outbound requests. Headers
+        # are templated (``"Bearer ${TOKEN}"``), so they use the inline
+        # substitution variant. Unresolved references accumulate into
+        # ``missing_env`` so the CLI can warn the operator before the
+        # server fails to connect.
+        headers_map = _dict_of_any(entry.get("headers", {}))
+        resolved_headers: dict[str, str] = {}
+        for key, raw_value in headers_map.items():
+            value, header_missing = _resolve_inline_env(
+                str(raw_value),
+                resolve_env=resolve_env,
+            )
+            resolved_headers[key] = value
+            missing_env.extend(header_missing)
+
         discovered.append(
             DiscoveredMCPServer(
                 name=name,
@@ -231,6 +271,7 @@ def discover_mcp_servers(
                 args=args,
                 url=str(entry.get("url", "")),
                 env=resolved_env,
+                headers=resolved_headers,
                 tools=tools,
                 missing_env=tuple(missing_env),
             ),
@@ -284,6 +325,8 @@ def build_runtime_server_configs(
             payload["args"] = list(server.args)
         else:
             payload["url"] = server.url
+            if server.headers:
+                payload["headers"] = dict(server.headers)
         runtime_servers.append(payload)
 
     return runtime_servers

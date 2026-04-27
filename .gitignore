@@ -1,95 +1,111 @@
-resume_elliott_bregni_datadog.md
-resume_elliott_bregni.md
-# Personal scratch dropped into the repo root by past sessions.
-2025_spending_report.md
-se_michigan_homes_325k_analysis.md
-# Stale -- Obscura uses pyproject.toml for dependencies.
-/requirements.txt
-
-# Python bytecode
+# =============================================================================
+# Python
+# =============================================================================
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.uvcache/
+obscura.egg-info/
+/requirements.txt          # Stale — Obscura uses pyproject.toml
 
-# Obsidian metadata
-.obsidian/
-.DS_Store
+# Pyright / pytest output
+pyright_out.json
+pyright_out.txt
+pytest-report.xml
+*.tmp
 
-# Symlinked repos (tracked in their respective repos)
-repos/
-repo/
-
-# Agent system-level symlinks (machine-specific paths)
-agents/copilot
-agents/claude
-
-# Agent CLI state (synced bidirectionally, user-specific configs)
-# Not committed to vault repo (local sync only)
-*-cli/
-
-# Package files (MCP servers, plugins, etc.)
-**/pkg/
-pkg/
-*.pkg
-
-# Vault-only folders (can be committed to vault repo if desired)
-scratch/
-thinking/
-_attachments/
-scratch/*
-thinking/*
-
-crawlers/*
-crawlers/
-
-tests/__pycache__
-__pycache__
-node_modules/
-
-# Infrastructure secrets
+# =============================================================================
+# Secrets & environment
+# =============================================================================
+.env
+.env.local
 *.tfstate
 *.tfstate.backup
 .terraform/
-
-# Docker
-.env
-
-# Helm dependencies (downloaded charts)
-helm/obscura/charts/
-helm/obscura/Chart.lock
 scripts/test_private_key.pem
 scripts/test_jwks.json
 
-# Browser-extension signing keys.
-# The public key + derived extension id are committed so the unpacked
-# extension has a stable identity (.keys/EXTENSION_ID, extension.pub.b64).
-# The private key must NEVER be committed — anyone with it can sign a
-# malicious CRX that Chrome treats as equivalent to ours.
+# Browser-extension signing keys — never commit
 packages/browser-extension/.keys/*.pem
 packages/browser-extension/.keys/*.key
-# Canonical location — OUTSIDE the loaded extension dir so Chrome's unpacked
-# loader doesn't scan/ship private keys. Whole directory is ignored.
 packages/browser-extension-keys/
-
-# Local browser-extension artefacts
+packages/browser-extension/native-host/com.obscura.host.json
+packages/browser-extension/native-host/obscura-native-host
 packages/browser-extension/dist/
 packages/browser-extension/node_modules/
-packages/browser-extension/native-host/obscura-native-host
-obscura.egg-info
+
+# =============================================================================
+# Build artefacts & runtime state
+# =============================================================================
+dist/
 logs/
 audit.jsonl
 .obscura/
-.claude/
-.pytest_caache/
+.gitnexus/
+.home/
 .worktrees/
-.vscode/
-.venv/
-obscura.egg-info/
 research_findings/
-scripts/
+firebase-debug.log
+
+# Per-environment compose overrides (generated)
 docker-compose.base.yml
 docker-compose.dev.yml
 docker-compose.prod.yml
 docker-compose.staging.yml
+
+# =============================================================================
+# IDE / editor / OS metadata
+# =============================================================================
+.idea/
+.vscode/
+.obsidian/
+.DS_Store
+.npm/
+node_modules/
+*.iml
+
+# =============================================================================
+# Symlinks & vault-only directories
+# =============================================================================
+repos/
+repo/
+agents/copilot
+agents/claude
+*-cli/
+**/pkg/
+pkg/
+*.pkg
+scratch/
+thinking/
+_attachments/
+crawlers/
+
+# =============================================================================
+# Legacy / out-of-scope directories — kept on disk, untracked.
+# =============================================================================
+agents/house_hunter/
+config/
+docs/
+examples/
+git-hooks/
+helm/
+homebrew-obscura/
+notebooks/
+output/
+src/rag/
+
+# =============================================================================
+# Personal scratch / drafts in repo root
+# =============================================================================
+plan.md
+user_profile.md
+resume_*.md
+*_analysis.md
+*_spending_report.md
+_fix_*.py
+*_tmp.py
 partity_matrix
 
 firebase-debug.log
@@ -101,6 +117,15 @@ docs/*
 # Pyright and pytest output
 pyright_out.json
 pytest-report.xml
+
+# =============================================================================
+# Deprecated launch / migration scripts (no callers; kept on disk).
+# =============================================================================
+AGENTS.md
 OBSCURA.md
-# Rendered at install time by install.sh — must not be tracked.
-packages/browser-extension/native-host/com.obscura.host.json
+obscura-launch.sh
+obscura-migrate.sh
+obscura-migrate-agents-hooks.sh
+obscura-workspace-setup.sh
+package.json
+package-lock.json

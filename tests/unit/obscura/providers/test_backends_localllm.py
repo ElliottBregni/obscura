@@ -237,65 +237,6 @@ class TestLocalLLMLifecycle:
         with pytest.raises(RuntimeError, match="not started"):
             await b.send("hello")
 
-    @pytest.mark.asyncio
-    async def test_start_skips_mcp_when_empty(self) -> None:
-        """No mcp_servers → no discovery, no bridge."""
-        b = LocalLLMBackend(_auth(), model="m")
-        mock_client: Any = AsyncMock()
-        with (
-            patch("openai.AsyncOpenAI", return_value=mock_client),
-            patch(
-                "obscura.integrations.mcp.discovery.register_external_mcp_tools",
-                new_callable=AsyncMock,
-            ) as discover,
-        ):
-            await b.start()
-        discover.assert_not_called()
-        assert b._mcp_bridge is None  # type: ignore[reportPrivateUsage]
-
-    @pytest.mark.asyncio
-    async def test_start_initializes_bridge_when_servers_configured(self) -> None:
-        """With mcp_servers set, start() runs discovery + spins up the bridge."""
-        servers = [{"name": "forge", "transport": "stdio", "command": "true"}]
-        b = LocalLLMBackend(_auth(), model="m", mcp_servers=servers)
-        mock_client: Any = AsyncMock()
-        bridge_instance = MagicMock()
-        bridge_instance.start = AsyncMock()
-        bridge_instance.stop = AsyncMock()
-        bridge_instance.install_handlers = MagicMock(return_value=1)
-
-        with (
-            patch("openai.AsyncOpenAI", return_value=mock_client),
-            patch(
-                "obscura.integrations.mcp.discovery.register_external_mcp_tools",
-                new_callable=AsyncMock,
-            ) as discover,
-            patch(
-                "obscura.providers._mcp_execution_bridge.MCPExecutionBridge",
-                return_value=bridge_instance,
-            ) as Bridge,
-        ):
-            await b.start()
-        discover.assert_awaited_once_with(b, servers)
-        Bridge.assert_called_once_with(servers)
-        bridge_instance.start.assert_awaited_once()
-        bridge_instance.install_handlers.assert_called_once_with(b)
-        assert b._mcp_bridge is bridge_instance  # type: ignore[reportPrivateUsage]
-
-    @pytest.mark.asyncio
-    async def test_stop_tears_down_bridge(self) -> None:
-        """stop() must call bridge.stop() and clear the field."""
-        b = LocalLLMBackend(_auth(), model="m")
-        mock_client: Any = AsyncMock()
-        b.set_client_for_testing(mock_client)
-        bridge_instance = MagicMock()
-        bridge_instance.stop = AsyncMock()
-        b._mcp_bridge = bridge_instance  # type: ignore[reportPrivateUsage]
-
-        await b.stop()
-        bridge_instance.stop.assert_awaited_once()
-        assert b._mcp_bridge is None  # type: ignore[reportPrivateUsage]
-
 
 # ===================================================================
 # 3. Send

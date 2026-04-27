@@ -519,6 +519,17 @@ async def policy_probe(
     policy_source = "unknown"
 
     if policy_override:
+        if not isinstance(policy_override, dict):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": (
+                        f"policy_override must be an object with keys "
+                        f"allow_list/deny_list/base_dir/full_access, "
+                        f"got {type(policy_override).__name__}"
+                    ),
+                },
+            )
         try:
             raw_allow = cast("list[str]", policy_override.get("allow_list") or [])
             raw_deny = cast("list[str]", policy_override.get("deny_list") or [])

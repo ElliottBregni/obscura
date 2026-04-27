@@ -50,6 +50,14 @@ def _no_vault(monkeypatch: pytest.MonkeyPatch) -> None:
     _vault.reset()
 
 
+@pytest.fixture(autouse=True)
+def _clear_resolve_cache() -> None:
+    """Reset the resolver cache between tests so tier mutations take effect."""
+    secrets_module.clear_cache()
+    yield
+    secrets_module.clear_cache()
+
+
 @pytest.fixture
 def _fake_vault(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """Install an in-memory vault snapshot for tests that need one."""
@@ -249,6 +257,80 @@ class TestResolvePrecedence:
         _set_dotenv_env(monkeypatch, "SUPABASE_URL", "https://dotenv.example")
 
         assert secrets_module.resolve("SUPABASE_URL") == "https://dotenv.example"
+
+
+class TestResolveCache:
+    """The in-process cache short-circuits keyring on repeat resolves."""
+
+    def test_repeat_resolve_does_not_re_hit_keyring(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_keyring: dict[str, str],
+    ) -> None:
+        _clear_env(monkeypatch)
+        _fake_keyring["obscura-cli:SUPABASE_URL"] = "https://keyring.example"
+
+        calls: list[str] = []
+        original = secrets_module._keyring_lookup
+
+        def _spy(name: str) -> str | None:
+            calls.append(name)
+            return original(name)
+
+        monkeypatch.setattr(secrets_module, "_keyring_lookup", _spy)
+
+        assert secrets_module.resolve("SUPABASE_URL") == "https://keyring.example"
+        assert secrets_module.resolve("SUPABASE_URL") == "https://keyring.example"
+        assert secrets_module.resolve("SUPABASE_URL") == "https://keyring.example"
+
+        assert calls == ["SUPABASE_URL"]
+
+    def test_unset_value_is_cached_too(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_keyring: dict[str, str],
+    ) -> None:
+        """A 'nothing configured' result is cached so we don't keep re-asking."""
+        _clear_env(monkeypatch)
+
+        calls: list[str] = []
+        original = secrets_module._keyring_lookup
+
+        def _spy(name: str) -> str | None:
+            calls.append(name)
+            return original(name)
+
+        monkeypatch.setattr(secrets_module, "_keyring_lookup", _spy)
+
+        assert secrets_module.resolve("SUPABASE_URL") is None
+        assert secrets_module.resolve("SUPABASE_URL", default="fallback") == "fallback"
+
+        assert calls == ["SUPABASE_URL"]
+
+    def test_store_invalidates_cache(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_keyring: dict[str, str],
+    ) -> None:
+        _clear_env(monkeypatch)
+
+        assert secrets_module.resolve("SUPABASE_ANON_KEY") is None
+        secrets_module.store("SUPABASE_ANON_KEY", "anon-123")
+
+        assert secrets_module.resolve("SUPABASE_ANON_KEY") == "anon-123"
+
+    def test_delete_invalidates_cache(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _fake_keyring: dict[str, str],
+    ) -> None:
+        _clear_env(monkeypatch)
+        _fake_keyring["obscura-cli:SUPABASE_ANON_KEY"] = "anon-123"
+
+        assert secrets_module.resolve("SUPABASE_ANON_KEY") == "anon-123"
+        secrets_module.delete("SUPABASE_ANON_KEY")
+
+        assert secrets_module.resolve("SUPABASE_ANON_KEY") is None
 
 
 # ---------------------------------------------------------------------------

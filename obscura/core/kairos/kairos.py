@@ -454,12 +454,18 @@ class Kairos:
                     )
                     return
                 except InterventionRequiredError as exc:
-                    yield KairosEvent(
+                    # Transition goal to BLOCKED so status queries show it correctly
+                    self._store.update_goal_status(goal.goal_id, GoalStatus.BLOCKED)
+                    iv_event = KairosEvent(
                         kind=KairosEventKind.INTERVENTION_RAISED,
                         goal_id=goal.goal_id,
                         task_id=task.task_id,
                         payload={"intervention_id": exc.intervention_id},
                     )
+                    self._emit(iv_event)
+                    yield iv_event
+                    # Notify via iMessage so Elliott can respond
+                    await self._notify_intervention(goal, exc)
                     return
 
                 self._store.save_task_result(result)
@@ -578,6 +584,38 @@ class Kairos:
             goal_id, GoalStatus.FAILED, completed_at=datetime.now(UTC)
         )
         logger.error("Goal %s failed: %s", goal_id, reason)
+
+    async def _notify_intervention(
+        self, goal: "Goal", exc: "InterventionRequiredError"
+    ) -> None:
+        """Fire-and-forget iMessage alert when a goal blocks on an Intervention."""
+        recipient = self._config.notification_recipient
+        if not recipient:
+            return
+        short_id = exc.intervention_id[:8] if exc.intervention_id else "?"
+        msg = (
+            f"⚠ Kairos needs input\n"
+            f"Goal: {goal.title}\n"
+            f"Task: {exc.task_id[:8] if exc.task_id else '?'}\n"
+            f"Reason: {exc}\n"
+            f"Reply: obscura kairos respond {goal.goal_id} {exc.intervention_id} \"<your answer>\""
+        )
+        try:
+            from obscura.integrations.imessage.client import IMessageClient
+            client = IMessageClient(contacts=[recipient])
+            await asyncio.wait_for(
+                client.send_message(recipient, msg), timeout=10.0
+            )
+            logger.info(
+                "Intervention alert sent to %s for goal %s",
+                recipient,
+                goal.goal_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to send intervention iMessage alert",
+                exc_info=True,
+            )
 
     def _emit(self, event: KairosEvent) -> None:
         """Persist event to the append-only log."""

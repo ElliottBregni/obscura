@@ -377,10 +377,22 @@ class AgentSupervisor:
                     agent_def.model,
                 )
                 await self._run_agent(runtime, agent_def)
-                # Clean exit — no restart needed
-                logger.info("[supervisor] agent '%s' exited cleanly", agent_def.name)
-                backoff = 1.0
-                break
+                if agent_def.type == "daemon":
+                    # Daemon exited cleanly — unexpected, restart after brief pause.
+                    logger.warning(
+                        "[supervisor] daemon agent '%s' exited cleanly (unexpected);"
+                        " restarting in 5s",
+                        agent_def.name,
+                    )
+                    backoff = 5.0
+                    await asyncio.sleep(5.0)
+                    # Reset backoff so next crash still gets short delay
+                    backoff = 1.0
+                else:
+                    # Loop/aper agents exit cleanly when done — no restart needed.
+                    logger.info("[supervisor] agent '%s' exited cleanly", agent_def.name)
+                    backoff = 1.0
+                    break
 
             except asyncio.CancelledError:
                 logger.info("[supervisor] agent '%s' cancelled", agent_def.name)
