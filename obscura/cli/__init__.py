@@ -2913,28 +2913,13 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 main.add_command(_kairos_group)
 
 
-# Backwards-compat aliases added by test harness
-def _emit_context_warnings(*args, **kwargs):
-    from .warnings import emit_context_warnings as _impl
+from obscura.cli.secrets_commands import secrets_group as _secrets_group  # noqa: E402
 
-    return _impl(*args, **kwargs)
+main.add_command(_secrets_group)
 
+from obscura.cli.admin_commands import admin_group as _admin_group  # noqa: E402
 
-def _copilot_budget_pct(tokens: int, context_window: int):
-    from .warnings import get_copilot_budget_pct as _impl
-
-    return _impl(tokens, context_window)
+main.add_command(_admin_group)
 
 
-def _parse_confirm_decision(answer: str) -> str | None:
-    a = (answer or "").lower()
-    if "approve" in a or a.strip().startswith("yes") or "accept" in a:
-        return "approve"
-    if "deny" in a or a.strip().startswith("no") or "do not" in a or "dont" in a:
-        return "deny"
-    return None
 
-
-def _track_task_surface_event(ctx, ev) -> None:
-    """Compatibility stub: track a task-surface event (no-op)."""
-    return
