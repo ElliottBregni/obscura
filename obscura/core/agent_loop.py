@@ -1249,6 +1249,11 @@ class AgentLoop:
                         yield _to_yield
                     _feed_new_tools_to_executor()
 
+                # Multimodal images attach only to the first turn's user
+                # message — drop the kwarg now so subsequent turns (tool
+                # results, follow-ups) don't keep re-sending the images.
+                kwargs.pop("images", None)
+
                 # Mark executor closed -- no more tools will arrive
                 executor.close()
 

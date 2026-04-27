@@ -113,7 +113,7 @@ multiplexing; responses echo the same `id`.
 
 | `type` | Payload | Notes |
 |--------|---------|-------|
-| `ready` | `{version, python, git_commit, backends, commands, skills, at_commands, workspaces, pid}` | Once on connect |
+| `ready` | `{version, python, git_commit, backends, commands, skills, at_commands, workspaces, pid, peers, socket_bridge, profile_id}` | Once on connect. `profile_id` echoes whatever the host learned from the panel's first frame; may be `null` if the ready frame races the boot ping. |
 | `chunk` | `{id, text}` | Assistant text delta |
 | `thinking` | `{id, text}` | Reasoning delta (collapsible in UI) |
 | `tool_start` / `tool_delta` / `tool_end` | `{id, tool_use_id, tool_name?, delta?}` | Tool-call lifecycle |
@@ -122,6 +122,7 @@ multiplexing; responses echo the same `id`.
 | `widget` | `{id (widget_id), kind, question, actions, default?, detail?}` | Confirmation / attention / question dialog |
 | `browser-tool` | `{id, op, args}` | Request to run DOM op in the panel |
 | `kairos` | `{state}` | Daemon state change |
+| `fleet` | `{event, agent?, status?, timestamp, detail?, agents?}` | Live fleet observability — `event` ∈ `snapshot` / `agent_started` / `agent_stopped` / `agent_error` / `agent_activity`. `snapshot` carries `agents: [{agent, status, lastActivity, lastError, model}]`; per-agent events carry `agent` + `status` (`running`/`idle`/`error`/`stopped`). Emitted by the host's fleet observer (lifecycle hook on every `AgentRuntime` in-process + 2 s polling diff). Silent when no runtime is active — panel falls back to `/agent list`. |
 | `auth_required` | `{id, message}` | Auth gate challenge |
 | `done` | `{id, session_id, text_len}` | Turn finished |
 | `error` | `{id?, message, trace?}` | Any failure |
@@ -253,17 +254,135 @@ flow already handles arbitrary action sets.
 | Location | What | Cleared by |
 |----------|------|------------|
 | `chrome.storage.local` | Per-profile panel state: settings, transcript, session list, tab state | Extension uninstall or panel's `/clear` |
-| `~/.obscura/events.db` | SQLite event log (turns, tool calls) — shared with terminal REPL | `rm` or `/session clear` |
-| `~/.obscura/vector_memory/` or Qdrant | Vector memory — shared | `/memory clear` |
+| `~/.obscura/profiles/<profile_id>/events.db` | SQLite event log (turns, tool calls) — scoped per Chrome profile | `rm` or `/session clear` |
+| `~/.obscura/profiles/<profile_id>/vector_memory/` | Vector memory (SQLite backend) — scoped per Chrome profile | `/memory clear` |
+| `~/.obscura/events.db` | Legacy single-tenant event log used by the terminal REPL when no `profile_id` is supplied | `rm` or `/session clear` |
+| `~/.obscura/vector_memory/` | Legacy vector memory used by the terminal REPL when no `profile_id` is supplied | `/memory clear` |
 | `~/.obscura/logs/browser-extension-host.log` | Host stderr / logging | Manual rotation |
-| `~/.obscura/browser-host.pid` | PID file (advisory lock) | Host exit |
+| `~/.obscura/browser-hosts/<pid>.pid` | Per-process PID file (one host per Chrome profile) | Host exit |
 | `~/.obscura/browser-host.env` | User secrets (GH_TOKEN, API keys) | Manual edit |
 
-**Multi-profile warning:** two Chrome profiles running obscura on the
-same machine today share `events.db` and can corrupt session ids. See
-roadmap item 4.1 — use `chrome.runtime.id` to scope the path.
+**Multi-profile storage scoping.** Each Chrome profile generates a
+stable UUID stored in `chrome.storage.local`, sent to the host on
+every frame as `profile_id`. The host threads it through
+`SessionConfig.profile_id`, which routes the SQLite event log and the
+SQLite vector-memory backend under
+`~/.obscura/profiles/<profile_id>/`. The terminal REPL passes
+`profile_id=None` and keeps the legacy shared paths.
+
+The migration policy is **leave the legacy data alone**: if
+`~/.obscura/events.db` exists and the profile-scoped one does not, the
+profile gets a fresh database on first write. We never auto-migrate —
+the legacy db is also being read by the terminal REPL and concurrent
+agents, so silently moving rows would corrupt them. Users who want
+their old browser history under a profile can copy the file manually
+when no obscura process is running.
+
+**Qdrant note:** when `OBSCURA_QDRANT_*` env vars route vector memory
+to Qdrant, profile scoping is the user's responsibility (use a per-
+profile collection name or `OBSCURA_QDRANT_PATH`). The
+`OBSCURA_VECTOR_MEMORY_DIR` we set only affects the SQLite fallback
+backend.
 
 ---
+
+## Socket bridge (multi-process fan-out)
+
+The native host is normally one-to-one with the panel that spawned it. To let
+*separate* obscura processes (terminal REPL, REST API, headless agents) drive
+the same browser, the host also opens a Unix socket at
+`/tmp/obscura-browser/<user>/<pid>.sock` and runs a tiny length-prefixed JSON
+RPC server on it. Multiple clients can connect concurrently; each tool call
+dispatches into the same `browser_tools._call()` path that the in-host
+session uses.
+
+Discovery is via `~/.obscura/browser/active.json`, which the host maintains
+on start/exit (with stale-pid pruning on every read). External processes use
+the Python client at `obscura.integrations.browser.client:BrowserBridgeClient`
+to find a host and dispatch calls — or `register_browser_tools(registry)` to
+proxy every browser tool into an obscura `ToolRegistry`.
+
+```
+   terminal `obscura`        REST API process       headless agent
+        │                          │                       │
+        └──────────┬───────────────┴───────────┬───────────┘
+                   │                           │
+            length-prefixed JSON over Unix socket
+                   │                           │
+                   ▼                           ▼
+        ┌────────────────────────────────────────────┐
+        │  Native host  (one per Chrome profile)     │
+        │    obscura_native_host.py                  │
+        │    + obscura.integrations.browser.server   │  (SocketBridge)
+        └─────────────────────┬──────────────────────┘
+                              │ chrome native messaging
+                              ▼
+                    Chrome extension / panel
+```
+
+Set `OBSCURA_BROWSER_SOCKET_DISABLE=1` to keep the host but skip the socket
+(useful in CI). Override the socket dir with `OBSCURA_BROWSER_SOCKET_DIR=…`.
+
+## Choosing the right browser tool
+
+There are two parallel families of input tools, with a sharp UX cost
+difference. **Always start with the cheap family. Escalate to CDP only
+when the cheap path silently does nothing, or when the feature genuinely
+requires it.**
+
+### Family 1 — event dispatch (free, silent)
+
+`browser_fill`, `browser_click`, `browser_press_key`, `browser_eval_js`,
+`browser_clipboard_read/write`. Implemented via `chrome.scripting.executeScript`
++ `dispatchEvent`. No banner, no permission prompt at runtime. **Limitation:**
+synthesised events have `isTrusted=false`. Browser-default behaviours that
+hang off real input (Tab moving focus, characters appearing in inputs from
+keypresses, drag-drop, file picker) **will not fire**.
+
+Covers ~80% of real-world automation: form filling, button clicks,
+clipboard exchange, app-level keyboard shortcuts (`Cmd+K` palettes,
+`/` search focus, `Enter` to submit, `Escape` to close).
+
+### Family 2 — CDP (`chrome.debugger`, yellow banner)
+
+`browser_type_text`, `browser_native_press_key`, `browser_native_click`,
+`browser_upload_file`, `browser_console_logs`, `browser_network_log`,
+`browser_cdp_detach`. Same wire protocol Puppeteer/Playwright use. **Cost:**
+on first call per tab, Chrome attaches a debugger and shows a persistent
+yellow banner *"Obscura started debugging this browser"*. Banner stays
+until `browser_cdp_detach` is called or the tab closes.
+
+Use when:
+- The cheap path silently does nothing — `browser_fill` set the value but
+  the page reverted it, or `browser_click` fired but nothing happened.
+- The feature has no cheap-family equivalent: file uploads
+  (`browser_upload_file`), console output, network logs, real Tab focus
+  motion, real hover for hover-only menus.
+
+### Recommended workflow
+
+1. Try cheap family first.
+2. Verify with `browser_read_page` or `browser_query_selector` that the
+   action actually took effect.
+3. If it didn't, switch to the matching CDP tool (`browser_native_click` /
+   `browser_type_text` / `browser_native_press_key`).
+4. When CDP work is done, call `browser_cdp_detach` to dismiss the banner.
+
+Typical "fill + submit a form" sequence (cheap path):
+
+```
+browser_fill(selector="#email", value="me@x.com")
+browser_fill(selector="#password", value="…")
+browser_press_key(key="Enter", selector="#password")  # form submit
+```
+
+If the site gates submit on `isTrusted`, escalate just the keypress:
+
+```
+browser_fill(...)
+browser_native_press_key(key="Enter", selector="#password")
+browser_cdp_detach()
+```
 
 ## Files index
 
@@ -277,11 +396,17 @@ packages/browser-extension/
 │       ├── sidepanel.css             Dark-terminal theme
 │       └── sidepanel.js              Panel logic (1700+ LOC, no framework)
 ├── native-host/
-│   ├── obscura_native_host.py        Adapter (v0.3.0) — monkey-patches + main loop
+│   ├── obscura_native_host.py        Adapter — monkey-patches + main loop + socket bridge
 │   ├── browser_tools.py              Browser ToolSpecs (read_page, click, fill, eval, …)
 │   ├── com.obscura.host.json.tmpl    Native-messaging manifest template
 │   ├── install.sh                    Generates launcher + installs manifest
 │   └── obscura-native-host           (generated — not committed) launcher shell script
+
+obscura/integrations/browser/        # Multi-process bridge — importable by any obscura process
+├── wire.py                          Shared length-prefixed JSON framing
+├── server.py                        SocketBridge — async Unix-socket server (used by native host)
+├── client.py                        BrowserBridgeClient + register_browser_tools helper
+└── active_hosts.py                  ~/.obscura/browser/active.json registry
 ├── .keys/
 │   ├── EXTENSION_ID                  Pinned id derived from public key
 │   ├── extension.pub.b64             Public key for manifest.json "key" field

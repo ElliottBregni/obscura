@@ -56,8 +56,8 @@ class TestToolSpecs:
             assert tool.description, f"Tool {tool.name} has no description"
 
     def test_tool_count(self, tools: list[Any]) -> None:
-        # 9 original ops + 8 permission-free additions.
-        assert len(tools) == 17, f"Expected 17 browser tools, got {len(tools)}"
+        # 9 original + 8 permission-free + 3 keyboard/clipboard + 7 CDP.
+        assert len(tools) == 27, f"Expected 27 browser tools, got {len(tools)}"
 
     def test_mutating_tools_marked(self, tools: list[Any]) -> None:
         mutating = {
@@ -72,12 +72,58 @@ class TestToolSpecs:
             "browser_reload_tab",
             "browser_go_back",
             "browser_go_forward",
+            "browser_press_key",
+            "browser_clipboard_write",
         }
         for tool in tools:
             if tool.name in mutating:
                 assert tool.side_effects == "mutating", (
                     f"Tool {tool.name} should be marked mutating"
                 )
+
+    def test_keyboard_and_clipboard_tools_present(self, tools: list[Any]) -> None:
+        names = {t.name for t in tools}
+        assert "browser_press_key" in names
+        assert "browser_clipboard_read" in names
+        assert "browser_clipboard_write" in names
+
+    def test_cdp_tools_present(self, tools: list[Any]) -> None:
+        names = {t.name for t in tools}
+        cdp = {
+            "browser_type_text",
+            "browser_native_press_key",
+            "browser_native_click",
+            "browser_upload_file",
+            "browser_console_logs",
+            "browser_network_log",
+            "browser_cdp_detach",
+        }
+        assert cdp.issubset(names), f"Missing CDP tools: {cdp - names}"
+
+    def test_upload_file_schema(self, tools: list[Any]) -> None:
+        spec = next(t for t in tools if t.name == "browser_upload_file")
+        params: dict[str, Any] = dict(spec.parameters)
+        assert set(params["required"]) == {"selector", "paths"}
+        assert params["properties"]["paths"]["type"] == "array"
+        assert params["properties"]["paths"]["items"]["type"] == "string"
+
+    def test_press_key_schema_requires_key(self, tools: list[Any]) -> None:
+        spec = next(t for t in tools if t.name == "browser_press_key")
+        params: dict[str, Any] = dict(spec.parameters)
+        assert "key" in params["required"]
+        assert "key" in params["properties"]
+        # Modifiers are optional and constrained to the four standard mods.
+        mod_enum = (
+            params["properties"]["modifiers"]
+            .get("items", {})
+            .get("enum", [])
+        )
+        assert set(mod_enum) == {"Control", "Shift", "Alt", "Meta"}
+
+    def test_clipboard_write_schema_requires_text(self, tools: list[Any]) -> None:
+        spec = next(t for t in tools if t.name == "browser_clipboard_write")
+        params: dict[str, Any] = dict(spec.parameters)
+        assert params["required"] == ["text"]
 
     def test_readonly_tools_not_mutating(self, tools: list[Any]) -> None:
         readonly = {

@@ -36,15 +36,36 @@ LIGHTNING_BOLT = "↯"
 # Theme constants — sourced from Catppuccin Mocha palette
 # ---------------------------------------------------------------------------
 
-from obscura.cli.renderer.modern.theme import (
-    ERROR_HEX,
-    OK_HEX,
-    THINKING_HEX,
-    TOOL_HEX,
-    WARN_HEX,
-    BLUE,
-    SAPPHIRE,
-)
+# Attempt direct package import; fall back to file-load to avoid circular imports
+try:
+    from obscura.cli.renderer.modern.theme import (
+        ERROR_HEX,
+        OK_HEX,
+        THINKING_HEX,
+        TOOL_HEX,
+        WARN_HEX,
+        BLUE,
+        SAPPHIRE,
+    )
+except Exception:
+    import importlib.util
+    import pathlib
+    import sys
+
+    theme_path = pathlib.Path(__file__).parent / "renderer" / "modern" / "theme.py"
+    spec = importlib.util.spec_from_file_location(
+        "obscura.cli.renderer.modern._theme_local", str(theme_path)
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    ERROR_HEX = module.ERROR_HEX
+    OK_HEX = module.OK_HEX
+    THINKING_HEX = module.THINKING_HEX
+    TOOL_HEX = module.TOOL_HEX
+    WARN_HEX = module.WARN_HEX
+    BLUE = module.BLUE
+    SAPPHIRE = module.SAPPHIRE
 
 ACCENT = BLUE.hex
 ACCENT_DIM = SAPPHIRE.hex
@@ -1060,6 +1081,7 @@ def print_banner(
     available_agents: list[str] | None = None,
     agent_infos: list[Any] | None = None,
     health_checks: list[Any] | None = None,
+    browser_status: dict[str, Any] | None = None,
 ) -> None:
     """Print the REPL startup banner."""
     _obscura_ascii_banner()
@@ -1082,6 +1104,16 @@ def print_banner(
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
+    if browser_status:
+        bs_browser = str(browser_status.get("browser") or "browser")
+        bs_count = int(browser_status.get("tool_count") or 0)
+        bs_profile = browser_status.get("profile_id") or ""
+        suffix = f" · profile {str(bs_profile)[:8]}" if bs_profile else ""
+        console.print(
+            f"  [bold]browser:[/]   [{ACCENT}]{bs_browser}[/] "
+            f"[{TOOL_COLOR}]{bs_count} tools[/]{suffix}   "
+            "[dim]⌘⇧O reopens panel[/]",
+        )
 
     # Show health warnings for degraded/unavailable optional dependencies
     if health_checks:

@@ -80,6 +80,30 @@ class ObscuraConfig(BaseModel):
     # Undercover mode — strips AI attribution from commits (default on)
     undercover_enabled: bool = True  # OBSCURA_UNDERCOVER=false to show attribution
 
+    # Deployment-safety override. When the server binds to a non-loopback
+    # address with auth disabled, startup aborts unless this is explicitly
+    # set to true. Intended only for isolated/air-gapped environments.
+    allow_unauthenticated: bool = False
+
+    def validate_deployment_safety(self) -> None:
+        """Refuse to start in the one combination that is never safe in prod.
+
+        `auth_enabled=False` + bind-to-non-loopback is how unauthenticated
+        Obscura servers end up on the public internet by accident. Callers
+        must set `OBSCURA_ALLOW_UNAUTHENTICATED=true` to take responsibility
+        for that exposure (for e.g. an isolated lab network).
+        """
+        loopback = {"127.0.0.1", "::1", "localhost"}
+        if self.auth_enabled or self.host in loopback or self.allow_unauthenticated:
+            return
+        raise RuntimeError(
+            "Refusing to start: server would bind to %s with "
+            "OBSCURA_AUTH_ENABLED=false. Either set OBSCURA_AUTH_ENABLED=true "
+            "(recommended), bind to 127.0.0.1 for local development, or "
+            "set OBSCURA_ALLOW_UNAUTHENTICATED=true to explicitly accept the "
+            "risk of an unauthenticated public endpoint." % self.host
+        )
+
     @classmethod
     def from_env(cls) -> ObscuraConfig:
         """Build config from environment variables with sensible defaults."""
@@ -157,4 +181,11 @@ class ObscuraConfig(BaseModel):
             # Undercover
             undercover_enabled=os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower()
             not in ("0", "false", "no", "off"),
+            # Deployment safety
+            allow_unauthenticated=os.environ.get(
+                "OBSCURA_ALLOW_UNAUTHENTICATED", "false"
+            )
+            .strip()
+            .lower()
+            == "true",
         )
