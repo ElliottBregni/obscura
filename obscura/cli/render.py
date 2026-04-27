@@ -1060,6 +1060,7 @@ def print_banner(
     available_agents: list[str] | None = None,
     agent_infos: list[Any] | None = None,
     health_checks: list[Any] | None = None,
+    browser_status: dict[str, Any] | None = None,
 ) -> None:
     """Print the REPL startup banner."""
     _obscura_ascii_banner()
@@ -1082,6 +1083,16 @@ def print_banner(
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
+    if browser_status:
+        bs_browser = str(browser_status.get("browser") or "browser")
+        bs_count = int(browser_status.get("tool_count") or 0)
+        bs_profile = browser_status.get("profile_id") or ""
+        suffix = f" · profile {str(bs_profile)[:8]}" if bs_profile else ""
+        console.print(
+            f"  [bold]browser:[/]   [{ACCENT}]{bs_browser}[/] "
+            f"[{TOOL_COLOR}]{bs_count} tools[/]{suffix}   "
+            "[dim]⌘⇧O reopens panel[/]",
+        )
 
     # Show health warnings for degraded/unavailable optional dependencies
     if health_checks:

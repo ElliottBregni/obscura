@@ -1212,6 +1212,104 @@ _MSG_HANDLERS: dict[str, tuple[Any, bool, bool]] = {
 
 
 # ---------------------------------------------------------------------------
+# Socket bridge — fan-out to external obscura processes.
+
+_socket_bridge: Any = None
+
+
+def _detect_browser() -> str | None:
+    """Best-effort: parent process name when launched via native messaging."""
+    try:
+        import psutil  # type: ignore[import-untyped,import-not-found]
+    except Exception:
+        return None
+    try:
+        return psutil.Process(os.getppid()).name()  # type: ignore[no-any-return]
+    except Exception:
+        return None
+
+
+def _build_tool_specs() -> list[dict[str, Any]]:
+    specs = _ensure_browser_tools()
+    out: list[dict[str, Any]] = []
+    for s in specs:
+        out.append(
+            {
+                "name": s.name,
+                "description": s.description,
+                "parameters": s.parameters,
+                "side_effects": getattr(s, "side_effects", "unknown"),
+            }
+        )
+    return out
+
+
+def _build_tool_dispatch() -> dict[str, Any]:
+    return {s.name: s.handler for s in _ensure_browser_tools()}
+
+
+async def _socket_call(name: str, args: dict[str, Any]) -> Any:
+    handlers = _build_tool_dispatch()
+    handler = handlers.get(name)
+    if handler is None:
+        msg = f"unknown tool: {name}"
+        raise ValueError(msg)
+    return await handler(**args)
+
+
+async def _start_socket_bridge() -> dict[str, Any]:
+    """Start the Unix-socket fan-out and return state for the ready frame."""
+    global _socket_bridge
+    if os.environ.get("OBSCURA_BROWSER_SOCKET_DISABLE") == "1":
+        return {"enabled": False, "reason": "disabled by env"}
+    try:
+        from obscura.integrations.browser import active_hosts, server as sb
+    except Exception:
+        log.exception("socket bridge import failed")
+        return {"enabled": False, "reason": "import failed"}
+
+    try:
+        path = sb.default_socket_path()
+        bridge = sb.SocketBridge(
+            path=path,
+            tools_provider=_build_tool_specs,
+            call=_socket_call,
+            profile_id=lambda: _profile_id,
+        )
+        await bridge.start()
+        _socket_bridge = bridge
+        active_hosts.register(
+            pid=os.getpid(),
+            socket=path,
+            profile_id=_profile_id,
+            browser=_detect_browser(),
+            version=VERSION,
+        )
+        return {"enabled": True, "socket": str(path), "version": sb.VERSION}
+    except Exception as exc:
+        log.exception("socket bridge start failed")
+        return {"enabled": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+
+async def _stop_socket_bridge() -> None:
+    global _socket_bridge
+    bridge = _socket_bridge
+    _socket_bridge = None
+    if bridge is None:
+        return
+    try:
+        from obscura.integrations.browser import active_hosts
+
+        active_hosts.unregister(pid=os.getpid())
+    except Exception:
+        log.debug("active_hosts.unregister failed", exc_info=True)
+    try:
+        await bridge.stop()
+    except Exception:
+        log.debug("socket bridge stop failed", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 
 
@@ -1221,6 +1319,7 @@ async def _main() -> None:
     _install_console_proxy()
 
     await _acquire_pid_lock()
+    socket_bridge_state = await _start_socket_bridge()
 
     await _write_frame(
         {
@@ -1236,6 +1335,7 @@ async def _main() -> None:
             "workspaces": _available_workspaces(),
             "pid": os.getpid(),
             "peers": _peer_hosts(),
+            "socket_bridge": socket_bridge_state,
         }
     )
 
@@ -1304,6 +1404,7 @@ async def _main() -> None:
                 task.add_done_callback(lambda _, k=msg_id: _active_sends.pop(k, None))
     finally:
         _release_pid_lock()
+        await _stop_socket_bridge()
 
     # Drain outstanding work.
     if _active_sends:

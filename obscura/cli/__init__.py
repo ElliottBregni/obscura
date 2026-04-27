@@ -1579,6 +1579,23 @@ async def _repl(
         agent_infos = _discover_agent_infos()
         available_agents = [a.name for a in agent_infos] or None
 
+        # Best-effort attach to a running browser-extension host so terminal
+        # prompts can drive the user's existing Chrome. Silently skipped when
+        # no host is running or when tools are disabled.
+        browser_bridge_client: Any = None
+        browser_status: dict[str, Any] | None = None
+        if tools_enabled:
+            try:
+                from obscura.integrations.browser.client import attach_if_running
+
+                browser_bridge_client, browser_status = await attach_if_running(
+                    client.register_tool,
+                )
+            except Exception:
+                browser_bridge_client, browser_status = None, None
+        if browser_status is not None:
+            tool_count += int(browser_status.get("tool_count") or 0)
+
         print_banner(
             backend,
             model,
@@ -1588,6 +1605,7 @@ async def _repl(
             mode=mm.current.value,
             available_agents=available_agents,
             agent_infos=agent_infos or None,
+            browser_status=browser_status,
         )
 
         # Start supervisor if --supervise (default) and agents.yaml has agents
@@ -2402,6 +2420,12 @@ async def _repl(
 
         finally:
             spinner_task.cancel()
+            # Detach the browser bridge before tearing down the rest of the
+            # session — the bridge socket is fast to close and avoids leaving
+            # a stale FD if anything below this raises.
+            if browser_bridge_client is not None:
+                with contextlib.suppress(Exception):
+                    await browser_bridge_client.close()
             # Stop supervisor fleet
             if supervisor_task is not None:
                 if _supervisor is not None:

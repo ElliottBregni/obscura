@@ -265,6 +265,104 @@ roadmap item 4.1 — use `chrome.runtime.id` to scope the path.
 
 ---
 
+## Socket bridge (multi-process fan-out)
+
+The native host is normally one-to-one with the panel that spawned it. To let
+*separate* obscura processes (terminal REPL, REST API, headless agents) drive
+the same browser, the host also opens a Unix socket at
+`/tmp/obscura-browser/<user>/<pid>.sock` and runs a tiny length-prefixed JSON
+RPC server on it. Multiple clients can connect concurrently; each tool call
+dispatches into the same `browser_tools._call()` path that the in-host
+session uses.
+
+Discovery is via `~/.obscura/browser/active.json`, which the host maintains
+on start/exit (with stale-pid pruning on every read). External processes use
+the Python client at `obscura.integrations.browser.client:BrowserBridgeClient`
+to find a host and dispatch calls — or `register_browser_tools(registry)` to
+proxy every browser tool into an obscura `ToolRegistry`.
+
+```
+   terminal `obscura`        REST API process       headless agent
+        │                          │                       │
+        └──────────┬───────────────┴───────────┬───────────┘
+                   │                           │
+            length-prefixed JSON over Unix socket
+                   │                           │
+                   ▼                           ▼
+        ┌────────────────────────────────────────────┐
+        │  Native host  (one per Chrome profile)     │
+        │    obscura_native_host.py                  │
+        │    + obscura.integrations.browser.server   │  (SocketBridge)
+        └─────────────────────┬──────────────────────┘
+                              │ chrome native messaging
+                              ▼
+                    Chrome extension / panel
+```
+
+Set `OBSCURA_BROWSER_SOCKET_DISABLE=1` to keep the host but skip the socket
+(useful in CI). Override the socket dir with `OBSCURA_BROWSER_SOCKET_DIR=…`.
+
+## Choosing the right browser tool
+
+There are two parallel families of input tools, with a sharp UX cost
+difference. **Always start with the cheap family. Escalate to CDP only
+when the cheap path silently does nothing, or when the feature genuinely
+requires it.**
+
+### Family 1 — event dispatch (free, silent)
+
+`browser_fill`, `browser_click`, `browser_press_key`, `browser_eval_js`,
+`browser_clipboard_read/write`. Implemented via `chrome.scripting.executeScript`
++ `dispatchEvent`. No banner, no permission prompt at runtime. **Limitation:**
+synthesised events have `isTrusted=false`. Browser-default behaviours that
+hang off real input (Tab moving focus, characters appearing in inputs from
+keypresses, drag-drop, file picker) **will not fire**.
+
+Covers ~80% of real-world automation: form filling, button clicks,
+clipboard exchange, app-level keyboard shortcuts (`Cmd+K` palettes,
+`/` search focus, `Enter` to submit, `Escape` to close).
+
+### Family 2 — CDP (`chrome.debugger`, yellow banner)
+
+`browser_type_text`, `browser_native_press_key`, `browser_native_click`,
+`browser_upload_file`, `browser_console_logs`, `browser_network_log`,
+`browser_cdp_detach`. Same wire protocol Puppeteer/Playwright use. **Cost:**
+on first call per tab, Chrome attaches a debugger and shows a persistent
+yellow banner *"Obscura started debugging this browser"*. Banner stays
+until `browser_cdp_detach` is called or the tab closes.
+
+Use when:
+- The cheap path silently does nothing — `browser_fill` set the value but
+  the page reverted it, or `browser_click` fired but nothing happened.
+- The feature has no cheap-family equivalent: file uploads
+  (`browser_upload_file`), console output, network logs, real Tab focus
+  motion, real hover for hover-only menus.
+
+### Recommended workflow
+
+1. Try cheap family first.
+2. Verify with `browser_read_page` or `browser_query_selector` that the
+   action actually took effect.
+3. If it didn't, switch to the matching CDP tool (`browser_native_click` /
+   `browser_type_text` / `browser_native_press_key`).
+4. When CDP work is done, call `browser_cdp_detach` to dismiss the banner.
+
+Typical "fill + submit a form" sequence (cheap path):
+
+```
+browser_fill(selector="#email", value="me@x.com")
+browser_fill(selector="#password", value="…")
+browser_press_key(key="Enter", selector="#password")  # form submit
+```
+
+If the site gates submit on `isTrusted`, escalate just the keypress:
+
+```
+browser_fill(...)
+browser_native_press_key(key="Enter", selector="#password")
+browser_cdp_detach()
+```
+
 ## Files index
 
 ```
@@ -277,11 +375,17 @@ packages/browser-extension/
 │       ├── sidepanel.css             Dark-terminal theme
 │       └── sidepanel.js              Panel logic (1700+ LOC, no framework)
 ├── native-host/
-│   ├── obscura_native_host.py        Adapter (v0.3.0) — monkey-patches + main loop
+│   ├── obscura_native_host.py        Adapter — monkey-patches + main loop + socket bridge
 │   ├── browser_tools.py              Browser ToolSpecs (read_page, click, fill, eval, …)
 │   ├── com.obscura.host.json.tmpl    Native-messaging manifest template
 │   ├── install.sh                    Generates launcher + installs manifest
 │   └── obscura-native-host           (generated — not committed) launcher shell script
+
+obscura/integrations/browser/        # Multi-process bridge — importable by any obscura process
+├── wire.py                          Shared length-prefixed JSON framing
+├── server.py                        SocketBridge — async Unix-socket server (used by native host)
+├── client.py                        BrowserBridgeClient + register_browser_tools helper
+└── active_hosts.py                  ~/.obscura/browser/active.json registry
 ├── .keys/
 │   ├── EXTENSION_ID                  Pinned id derived from public key
 │   ├── extension.pub.b64             Public key for manifest.json "key" field

@@ -563,68 +563,339 @@ function toolResult(msgId, toolUseId, text) {
 
 // ---------------------------------------------------------------------------
 // Rich widget detail rendering
+//
+// Each helper returns either a DocumentFragment / element to append, or null
+// to signal "I don't handle this shape — fall through to the generic table."
+// Keep helpers small (~30 LOC). Tool names are matched case-insensitively
+// because backends spell them differently (`Bash` vs `bash` vs `run_shell`).
 
-function renderRichDetail(detail, toolName) {
-  const container = document.createElement("div");
-  container.className = "w-detail-rich";
+// CDP-attaching browser tools: trigger Chrome's yellow "started debugging"
+// banner, so we surface that cost in the widget. Keep this mirrored with the
+// CDP family in packages/browser-extension/ARCHITECTURE.md.
+const CDP_BROWSER_TOOLS = new Set([
+  "browser_type_text",
+  "browser_native_click",
+  "browser_native_press_key",
+  "browser_upload_file",
+  "browser_console_logs",
+  "browser_network_log",
+  "browser_cdp_detach",
+]);
 
-  // Shell / Python commands
-  if (toolName === "run_shell" || toolName === "run_python3") {
-    const cmd = detail.command || detail.expression || detail.code || "";
-    if (cmd) {
-      const pre = document.createElement("pre");
-      pre.className = "code";
-      const code = document.createElement("code");
-      code.textContent = cmd;
-      pre.appendChild(code);
-      container.appendChild(pre);
-      return container;
-    }
+const PATH_LIKE_KEYS = new Set([
+  "path", "file_path", "filename", "filepath", "dir", "directory", "cwd", "root",
+]);
+
+function _truncate(str, n) {
+  if (typeof str !== "string") return String(str);
+  return str.length > n ? str.slice(0, n) + "\n…[truncated]" : str;
+}
+
+function _label(text, color) {
+  const el = document.createElement("div");
+  el.className = "w-detail-label";
+  if (color) el.style.color = color;
+  el.textContent = text;
+  return el;
+}
+
+function _codeBlock(text, { borderColor } = {}) {
+  const pre = document.createElement("pre");
+  pre.className = "code";
+  if (borderColor) pre.style.borderLeftColor = borderColor;
+  const code = document.createElement("code");
+  code.textContent = text;
+  pre.appendChild(code);
+  return pre;
+}
+
+function _path(text) {
+  const span = document.createElement("div");
+  span.className = "w-path";
+  span.textContent = text;
+  return span;
+}
+
+function _chipRow(items) {
+  // items = [{label, value, kind?}]; skips empty values.
+  const row = document.createElement("div");
+  row.className = "w-chip-row";
+  let any = false;
+  for (const { label, value, kind } of items) {
+    if (value === undefined || value === null || value === "") continue;
+    const chip = document.createElement("span");
+    chip.className = "w-chip" + (kind ? ` w-chip-${kind}` : "");
+    chip.textContent = label ? `${label}: ${value}` : String(value);
+    row.appendChild(chip);
+    any = true;
   }
+  return any ? row : null;
+}
 
-  // File writes — show content
-  if (toolName === "write_text_file" || toolName === "edit_text_file") {
-    const content = detail.content || detail.new_string || detail.text || "";
-    if (content) {
-      const label = document.createElement("div");
-      label.style.cssText = "font-size:10.5px;color:var(--fg-ghost);margin-bottom:4px;";
-      label.textContent = detail.file_path || detail.path || toolName;
-      container.appendChild(label);
-      const pre = document.createElement("pre");
-      pre.className = "code";
-      const code = document.createElement("code");
-      code.textContent = content.length > 4000 ? content.slice(0, 4000) + "\n…[truncated]" : content;
-      pre.appendChild(code);
-      container.appendChild(pre);
-      if (detail.old_string) {
-        const diffLabel = document.createElement("div");
-        diffLabel.style.cssText = "font-size:10.5px;color:var(--red);margin:6px 0 2px;";
-        diffLabel.textContent = "replaces:";
-        container.appendChild(diffLabel);
-        const oldPre = document.createElement("pre");
-        oldPre.className = "code";
-        oldPre.style.borderLeftColor = "var(--red)";
-        const oldCode = document.createElement("code");
-        oldCode.textContent = detail.old_string.length > 2000 ? detail.old_string.slice(0, 2000) + "\n…[truncated]" : detail.old_string;
-        oldPre.appendChild(oldCode);
-        container.appendChild(oldPre);
-      }
-      return container;
-    }
+function _cdpBanner() {
+  const chip = document.createElement("span");
+  chip.className = "w-chip w-chip-cdp";
+  chip.title = "This tool attaches chrome.debugger and shows a yellow 'started debugging' banner.";
+  chip.textContent = "CDP — yellow banner";
+  return chip;
+}
+
+function _expandableValue(text, threshold = 400) {
+  // Returns a span; if `text` exceeds threshold, adds a "show more" toggle.
+  const wrap = document.createElement("span");
+  wrap.className = "w-value";
+  if (text.length <= threshold) {
+    wrap.textContent = text;
+    return wrap;
   }
+  const short = document.createElement("span");
+  short.textContent = text.slice(0, threshold) + "…";
+  const full = document.createElement("span");
+  full.textContent = text;
+  full.hidden = true;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "w-show-more";
+  toggle.textContent = "show more";
+  toggle.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const expanded = !full.hidden;
+    full.hidden = expanded;
+    short.hidden = !expanded;
+    toggle.textContent = expanded ? "show more" : "show less";
+  });
+  wrap.append(short, full, toggle);
+  return wrap;
+}
 
-  // Default: key-value table
+// --- per-tool helpers ------------------------------------------------------
+
+function _renderShellLike(detail) {
+  const cmd = detail.command || detail.expression || detail.code || detail.cmd || "";
+  if (!cmd) return null;
+  const frag = document.createDocumentFragment();
+  if (detail.cwd || detail.timeout || detail.description) {
+    const chips = _chipRow([
+      { label: "cwd", value: detail.cwd },
+      { label: "timeout", value: detail.timeout },
+      { label: "desc", value: detail.description },
+    ]);
+    if (chips) frag.appendChild(chips);
+  }
+  frag.appendChild(_codeBlock(_truncate(cmd, 4000)));
+  return frag;
+}
+
+function _renderFileWrite(detail, toolName) {
+  const content = detail.content || detail.new_string || detail.text || "";
+  if (!content) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_path(detail.file_path || detail.path || toolName));
+  frag.appendChild(_codeBlock(_truncate(content, 4000)));
+  if (detail.old_string) {
+    frag.appendChild(_label("replaces:", "var(--red)"));
+    frag.appendChild(_codeBlock(_truncate(detail.old_string, 2000), { borderColor: "var(--red)" }));
+  }
+  return frag;
+}
+
+function _renderReadFile(detail) {
+  const p = detail.file_path || detail.path;
+  if (!p) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_path(p));
+  let range = "";
+  if (detail.lines) range = String(detail.lines);
+  else if (detail.offset !== undefined || detail.limit !== undefined) {
+    const off = detail.offset ?? 0;
+    const lim = detail.limit;
+    range = lim !== undefined ? `lines ${off}–${off + lim}` : `from line ${off}`;
+  }
+  const chips = _chipRow([
+    { label: "", value: range },
+    { label: "pages", value: detail.pages },
+  ]);
+  if (chips) frag.appendChild(chips);
+  return frag;
+}
+
+function _renderGlob(detail) {
+  const pattern = detail.pattern;
+  if (!pattern) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_codeBlock(pattern));
+  if (detail.path) frag.appendChild(_path(detail.path));
+  return frag;
+}
+
+function _renderGrep(detail) {
+  const pattern = detail.pattern;
+  if (!pattern) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_codeBlock(pattern));
+  if (detail.path) frag.appendChild(_path(detail.path));
+  const chips = _chipRow([
+    { label: "glob", value: detail.glob },
+    { label: "type", value: detail.type },
+    { label: "include", value: detail.include },
+    { label: "mode", value: detail.output_mode },
+    { label: "-i", value: detail["-i"] ? "yes" : null },
+    { label: "-n", value: detail["-n"] ? "yes" : null },
+    { label: "-A", value: detail["-A"] },
+    { label: "-B", value: detail["-B"] },
+    { label: "-C", value: detail["-C"] ?? detail.context },
+    { label: "multiline", value: detail.multiline ? "yes" : null },
+  ]);
+  if (chips) frag.appendChild(chips);
+  return frag;
+}
+
+function _renderWeb(detail, toolName) {
+  const target = detail.url || detail.query;
+  if (!target) return null;
+  const frag = document.createDocumentFragment();
+  const isUrl = !!detail.url;
+  frag.appendChild(_label(isUrl ? "url" : "query", "var(--fg-ghost)"));
+  const big = document.createElement("div");
+  big.className = "w-prominent";
+  big.textContent = target;
+  frag.appendChild(big);
+  if (toolName.toLowerCase() === "webfetch" && detail.prompt) {
+    frag.appendChild(_label("prompt", "var(--fg-ghost)"));
+    frag.appendChild(_expandableValue(detail.prompt));
+  }
+  const chips = _chipRow([
+    { label: "allowed_domains", value: Array.isArray(detail.allowed_domains) ? detail.allowed_domains.join(",") : detail.allowed_domains },
+    { label: "blocked_domains", value: Array.isArray(detail.blocked_domains) ? detail.blocked_domains.join(",") : detail.blocked_domains },
+  ]);
+  if (chips) frag.appendChild(chips);
+  return frag;
+}
+
+function _renderBrowser(detail, toolName) {
+  const frag = document.createDocumentFragment();
+  if (CDP_BROWSER_TOOLS.has(toolName.toLowerCase())) {
+    const banner = document.createElement("div");
+    banner.className = "w-chip-row";
+    banner.appendChild(_cdpBanner());
+    frag.appendChild(banner);
+  }
+  // Prominent line: most browser tools have ONE thing the user cares about.
+  const primary = detail.url || detail.selector || detail.key || detail.text;
+  if (primary !== undefined && primary !== null && primary !== "") {
+    const labelText = detail.url ? "url" : detail.selector ? "selector" : detail.key ? "key" : "text";
+    frag.appendChild(_label(labelText, "var(--fg-ghost)"));
+    const big = document.createElement("div");
+    big.className = "w-prominent";
+    big.textContent = String(primary);
+    frag.appendChild(big);
+  }
+  // Secondary fields as chips.
+  const secondary = [];
+  for (const [k, v] of Object.entries(detail)) {
+    if (k === "tool_name" || k === "input") continue;
+    if (k === "url" || k === "selector" || k === "key" || k === "text") continue;
+    if (v === undefined || v === null || v === "") continue;
+    if (k === "paths" && Array.isArray(v)) {
+      for (const p of v) frag.appendChild(_path(p));
+      continue;
+    }
+    const display = typeof v === "object" ? JSON.stringify(v) : String(v);
+    secondary.push({ label: k, value: display.length > 80 ? display.slice(0, 80) + "…" : display });
+  }
+  const chips = _chipRow(secondary);
+  if (chips) frag.appendChild(chips);
+  return frag.childNodes.length ? frag : null;
+}
+
+function _renderGit(detail, toolName) {
+  // git_* tools: render `git <subcommand> <args>` as a shell-style preview.
+  // Subcommand falls back to the suffix of the tool name, e.g. `git_diff`.
+  const sub = detail.subcommand || detail.command || toolName.replace(/^git[_-]?/i, "") || "";
+  const argsParts = [];
+  if (Array.isArray(detail.args)) argsParts.push(...detail.args.map(String));
+  else if (typeof detail.args === "string") argsParts.push(detail.args);
+  for (const k of ["ref", "branch", "path", "file", "message", "remote"]) {
+    if (detail[k] !== undefined && detail[k] !== null && detail[k] !== "") argsParts.push(`${k}=${detail[k]}`);
+  }
+  const line = ["git", sub, ...argsParts].filter(Boolean).join(" ").trim();
+  if (!line) return null;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_codeBlock(line));
+  if (detail.cwd) {
+    const chips = _chipRow([{ label: "cwd", value: detail.cwd }]);
+    if (chips) frag.appendChild(chips);
+  }
+  return frag;
+}
+
+function _renderGenericTable(detail) {
   const table = document.createElement("table");
   for (const [k, v] of Object.entries(detail)) {
+    if (k === "tool_name" || k === "input") continue;
     const row = document.createElement("tr");
     const keyCell = document.createElement("td");
     keyCell.textContent = k;
     const valCell = document.createElement("td");
-    valCell.textContent = typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
+    if (PATH_LIKE_KEYS.has(k.toLowerCase()) && typeof v === "string") {
+      const span = document.createElement("span");
+      span.className = "w-mono";
+      span.textContent = v;
+      valCell.appendChild(span);
+    } else if (typeof v === "object" && v !== null) {
+      const json = JSON.stringify(v, null, 2);
+      if (json.length > 60) {
+        const pre = document.createElement("pre");
+        pre.className = "code w-inline-code";
+        const code = document.createElement("code");
+        code.textContent = _truncate(json, 2000);
+        pre.appendChild(code);
+        valCell.appendChild(pre);
+      } else {
+        valCell.textContent = json;
+      }
+    } else {
+      valCell.appendChild(_expandableValue(String(v)));
+    }
     row.append(keyCell, valCell);
     table.appendChild(row);
   }
-  container.appendChild(table);
+  return table;
+}
+
+function renderRichDetail(detail, toolName) {
+  const container = document.createElement("div");
+  container.className = "w-detail-rich";
+  const lower = (toolName || "").toLowerCase();
+
+  let rendered = null;
+  if (lower === "run_shell" || lower === "run_python3" || lower === "bash") {
+    rendered = _renderShellLike(detail);
+  } else if (lower === "write_text_file" || lower === "edit_text_file" || lower === "write" || lower === "edit") {
+    rendered = _renderFileWrite(detail, toolName);
+  } else if (lower === "read" || lower === "read_text_file") {
+    rendered = _renderReadFile(detail);
+  } else if (lower === "glob") {
+    rendered = _renderGlob(detail);
+  } else if (lower === "grep") {
+    rendered = _renderGrep(detail);
+  } else if (lower === "webfetch" || lower === "websearch" || lower === "web_fetch" || lower === "web_search") {
+    rendered = _renderWeb(detail, toolName);
+  } else if (lower.startsWith("browser_")) {
+    rendered = _renderBrowser(detail, toolName);
+  } else if (lower.startsWith("git_") || lower.startsWith("git-")) {
+    rendered = _renderGit(detail, toolName);
+  }
+
+  if (rendered) {
+    container.appendChild(rendered);
+    return container;
+  }
+
+  // Fallback: pretty key/value table with path styling, JSON pretty-print
+  // for long objects, and a "show more" toggle for long strings.
+  container.appendChild(_renderGenericTable(detail));
   return container;
 }
 
@@ -887,6 +1158,104 @@ async function handleBrowserTool(msg) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Chrome DevTools Protocol bridge.
+//
+// Synthesised KeyboardEvents / MouseEvents from `chrome.scripting` have
+// isTrusted=false, so they can't drive the browser's own input handlers
+// (Tab focus motion, characters appearing in inputs, drag-and-drop, file
+// pickers). The CDP path attaches the extension as a debugger to the active
+// tab and routes input through `Input.dispatchKeyEvent` / `dispatchMouseEvent`
+// — same protocol Puppeteer/Playwright use, so isTrusted=true.
+//
+// Cost: a yellow banner appears on the tab while attached. We attach lazily
+// (only when a CDP-backed tool is invoked) and stay attached for the life
+// of the panel; the model can call browser_cdp_detach to dismiss it.
+
+const cdpState = {
+  attached: new Set(),
+  consoleLogs: new Map(),  // tabId -> [{level, text, ts}]
+  networkLog: new Map(),   // tabId -> [{requestId, method, url, status, mime, ts}]
+};
+
+const CDP_LOG_LIMIT = 250;
+
+function _cdpModifiers(modifiers) {
+  // CDP modifiers bitfield: 1=Alt, 2=Ctrl, 4=Meta, 8=Shift.
+  let flags = 0;
+  for (const m of modifiers || []) {
+    if (m === "Alt") flags |= 1;
+    else if (m === "Control" || m === "Ctrl") flags |= 2;
+    else if (m === "Meta" || m === "Command") flags |= 4;
+    else if (m === "Shift") flags |= 8;
+  }
+  return flags;
+}
+
+function _keyToCode(key) {
+  if (key.length === 1) {
+    const c = key.toUpperCase();
+    if (c >= "A" && c <= "Z") return `Key${c}`;
+    if (c >= "0" && c <= "9") return `Digit${c}`;
+  }
+  return key;  // "Enter", "Escape", etc. match KeyboardEvent.code names.
+}
+
+async function ensureCdpAttached(tabId) {
+  if (cdpState.attached.has(tabId)) return;
+  await chrome.debugger.attach({ tabId }, "1.3");
+  cdpState.attached.add(tabId);
+  cdpState.consoleLogs.set(tabId, []);
+  cdpState.networkLog.set(tabId, []);
+  // Enable the domains we read from. Network adds slight overhead (every
+  // request fires events) but is essential for `browser_network_log`.
+  await chrome.debugger.sendCommand({ tabId }, "Runtime.enable");
+  await chrome.debugger.sendCommand({ tabId }, "Network.enable");
+}
+
+if (typeof chrome !== "undefined" && chrome.debugger) {
+  chrome.debugger.onDetach.addListener((source) => {
+    if (source.tabId !== undefined) {
+      cdpState.attached.delete(source.tabId);
+      cdpState.consoleLogs.delete(source.tabId);
+      cdpState.networkLog.delete(source.tabId);
+    }
+  });
+
+  chrome.debugger.onEvent.addListener((source, method, params) => {
+    const tabId = source.tabId;
+    if (tabId === undefined) return;
+    if (method === "Runtime.consoleAPICalled") {
+      const buf = cdpState.consoleLogs.get(tabId);
+      if (!buf) return;
+      const text = (params.args || [])
+        .map((a) => a.value ?? a.description ?? a.unserializableValue ?? "")
+        .map((s) => String(s).slice(0, 400))
+        .join(" ");
+      buf.push({ level: params.type || "log", text, ts: Date.now() });
+      if (buf.length > CDP_LOG_LIMIT) buf.splice(0, buf.length - CDP_LOG_LIMIT);
+    } else if (method === "Network.requestWillBeSent") {
+      const buf = cdpState.networkLog.get(tabId);
+      if (!buf) return;
+      buf.push({
+        requestId: params.requestId,
+        method: params.request.method,
+        url: params.request.url,
+        ts: Date.now(),
+      });
+      if (buf.length > CDP_LOG_LIMIT) buf.splice(0, buf.length - CDP_LOG_LIMIT);
+    } else if (method === "Network.responseReceived") {
+      const buf = cdpState.networkLog.get(tabId);
+      if (!buf) return;
+      const rec = buf.find((e) => e.requestId === params.requestId);
+      if (rec) {
+        rec.status = params.response.status;
+        rec.mime = params.response.mimeType;
+      }
+    }
+  });
+}
+
 async function runBrowserOp(op, args) {
   const tab = await activeTab();
   if (!tab?.id && op !== "list_tabs") throw new Error("no active tab");
@@ -956,14 +1325,69 @@ async function runBrowserOp(op, args) {
       return await execInTab(tab.id, (sel, val) => {
         const el = document.querySelector(sel);
         if (!el) return { ok: false, error: "no match" };
-        const proto = el.tagName === "TEXTAREA"
-          ? HTMLTextAreaElement.prototype
-          : HTMLInputElement.prototype;
-        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-        if (setter) setter.call(el, val); else el.value = val;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: true };
+
+        // Native input / textarea: use the prototype's value setter so React,
+        // Vue, Svelte, etc. observe the change.
+        const isInput = el.tagName === "INPUT" || el.tagName === "TEXTAREA";
+        if (isInput) {
+          const proto = el.tagName === "TEXTAREA"
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+          if (setter) setter.call(el, val); else el.value = val;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return { ok: true, kind: "input" };
+        }
+
+        // contenteditable host (Notion, Google Docs, Linear's editor, ProseMirror,
+        // Slate, Lexical). Walk up to find the editable root; rich-text editors
+        // route InputEvents from any descendant up to the host.
+        let host = el;
+        while (host && host !== document.body) {
+          if (host.isContentEditable) break;
+          host = host.parentElement;
+        }
+        if (!host || !host.isContentEditable) {
+          return {
+            ok: false,
+            error: "selector matched a non-input, non-contenteditable element",
+          };
+        }
+
+        host.focus();
+        // Select existing content so insertText replaces (matches user paste).
+        const range = document.createRange();
+        range.selectNodeContents(host);
+        const selObj = window.getSelection();
+        selObj?.removeAllRanges();
+        selObj?.addRange(range);
+
+        // Dispatch a beforeinput so editors that gate on it (ProseMirror, Lexical,
+        // Slate) accept the change. Then fall back to execCommand("insertText")
+        // which most rich-text editors translate into their internal model
+        // mutations.
+        const inputEvent = new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertReplacementText",
+          data: val,
+        });
+        host.dispatchEvent(inputEvent);
+
+        if (!inputEvent.defaultPrevented) {
+          // execCommand is deprecated but still the most reliable cross-editor
+          // path. Editors that don't support it can listen on `beforeinput`
+          // (above) and apply the change themselves.
+          document.execCommand("insertText", false, val);
+        }
+
+        host.dispatchEvent(new InputEvent("input", {
+          bubbles: true,
+          inputType: "insertReplacementText",
+          data: val,
+        }));
+        return { ok: true, kind: "contenteditable" };
       }, [selector, value]);
     }
     case "eval_js": {
@@ -1075,6 +1499,196 @@ async function runBrowserOp(op, args) {
     }
     case "go_forward": {
       await chrome.tabs.goForward(tab.id);
+      return { ok: true };
+    }
+    case "press_key": {
+      // Synthesised KeyboardEvents have isTrusted=false. Browser-default
+      // behaviours that hang off real keypresses (Tab moving focus, Escape
+      // closing native dialogs, typing into inputs) won't fire — but app-level
+      // listeners (most "press / to search", "Cmd-K palette", form submit on
+      // Enter, custom modal close on Escape) work fine.
+      const { key, modifiers = [], selector = null } = args;
+      return await execInTab(tab.id, (k, mods, sel) => {
+        let target;
+        if (sel) {
+          target = document.querySelector(sel);
+          if (!target) return { ok: false, error: "no match" };
+          target.focus?.();
+        } else {
+          target = document.activeElement || document.body;
+        }
+        const ctrl = mods.includes("Control") || mods.includes("Ctrl");
+        const shift = mods.includes("Shift");
+        const alt = mods.includes("Alt");
+        const meta = mods.includes("Meta") || mods.includes("Command");
+        const init = {
+          key: k,
+          code: k.length === 1 ? `Key${k.toUpperCase()}` : k,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          ctrlKey: ctrl,
+          shiftKey: shift,
+          altKey: alt,
+          metaKey: meta,
+        };
+        target.dispatchEvent(new KeyboardEvent("keydown", init));
+        if (k.length === 1 && !ctrl && !meta) {
+          target.dispatchEvent(new KeyboardEvent("keypress", init));
+        }
+        target.dispatchEvent(new KeyboardEvent("keyup", init));
+        return {
+          ok: true,
+          target: {
+            tag: target.tagName?.toLowerCase() || "",
+            id: target.id || "",
+          },
+        };
+      }, [key, modifiers, selector]);
+    }
+    case "clipboard_read": {
+      // Run in the side-panel context (extension page), where the
+      // clipboardRead permission is granted unconditionally. Reading via the
+      // tab's content script would require transient activation per page.
+      try {
+        const text = await navigator.clipboard.readText();
+        return { text };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+    case "clipboard_write": {
+      const { text } = args;
+      try {
+        await navigator.clipboard.writeText(String(text ?? ""));
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+    case "type_text": {
+      // Real native typing — characters actually appear in the focused input,
+      // including in cross-origin iframes. isTrusted=true.
+      const { text, selector = null } = args;
+      if (selector) {
+        await execInTab(tab.id, (sel) => {
+          document.querySelector(sel)?.focus?.();
+        }, [selector]);
+      }
+      await ensureCdpAttached(tab.id);
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.insertText",
+        { text: String(text ?? "") },
+      );
+      return { ok: true };
+    }
+    case "native_press_key": {
+      // CDP keyboard event. Tab moves focus, arrow keys navigate, Enter
+      // submits — all the browser-default behaviours synthesised events
+      // can't trigger.
+      const { key, modifiers = [], selector = null } = args;
+      if (selector) {
+        await execInTab(tab.id, (sel) => {
+          document.querySelector(sel)?.focus?.();
+        }, [selector]);
+      }
+      await ensureCdpAttached(tab.id);
+      const mods = _cdpModifiers(modifiers);
+      const code = _keyToCode(key);
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
+        type: "rawKeyDown", key, code, modifiers: mods,
+      });
+      // Single printable char: also send a "char" event so the character
+      // shows up in inputs without needing Input.insertText.
+      if (key.length === 1 && (mods & 6) === 0) {  // no Ctrl/Meta
+        await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
+          type: "char", key, code, text: key, unmodifiedText: key, modifiers: mods,
+        });
+      }
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
+        type: "keyUp", key, code, modifiers: mods,
+      });
+      return { ok: true };
+    }
+    case "native_click": {
+      // Real mouse: hover (mouseMoved) + press + release. Hover-dependent
+      // UI like dropdown menus and tooltips actually shows. Drag-drop
+      // is implemented separately if needed.
+      const { selector } = args;
+      const rect = await execInTab(tab.id, (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        el.scrollIntoView({ block: "center", inline: "center" });
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, [selector]);
+      if (!rect) return { ok: false, error: "no match" };
+      await ensureCdpAttached(tab.id);
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
+        type: "mouseMoved", x: rect.x, y: rect.y, button: "none",
+      });
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
+        type: "mousePressed", x: rect.x, y: rect.y, button: "left", clickCount: 1,
+      });
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: rect.x, y: rect.y, button: "left", clickCount: 1,
+      });
+      return { ok: true };
+    }
+    case "upload_file": {
+      // Sets files on an <input type="file"> via DOM.setFileInputFiles, the
+      // only path that works without OS-level UI automation. ``paths`` are
+      // absolute paths on the user's machine — both processes are local so
+      // the browser can read them.
+      const { selector, paths } = args;
+      if (!Array.isArray(paths) || paths.length === 0) {
+        return { ok: false, error: "paths must be a non-empty array of absolute paths" };
+      }
+      await ensureCdpAttached(tab.id);
+      const doc = await chrome.debugger.sendCommand({ tabId: tab.id }, "DOM.getDocument", {});
+      const found = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "DOM.querySelector",
+        { nodeId: doc.root.nodeId, selector },
+      );
+      if (!found?.nodeId) return { ok: false, error: "no match" };
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "DOM.setFileInputFiles",
+        { nodeId: found.nodeId, files: paths.map(String) },
+      );
+      return { ok: true, file_count: paths.length };
+    }
+    case "console_logs": {
+      const { limit = 50 } = args;
+      await ensureCdpAttached(tab.id);
+      const buf = cdpState.consoleLogs.get(tab.id) || [];
+      return { logs: buf.slice(-Number(limit)) };
+    }
+    case "network_log": {
+      const { limit = 50, url_contains = null } = args;
+      await ensureCdpAttached(tab.id);
+      let buf = cdpState.networkLog.get(tab.id) || [];
+      if (url_contains) {
+        const needle = String(url_contains);
+        buf = buf.filter((e) => e.url?.includes(needle));
+      }
+      return { entries: buf.slice(-Number(limit)) };
+    }
+    case "cdp_detach": {
+      // Lets the model dismiss the yellow banner once it's done with
+      // CDP-backed work. Idempotent.
+      if (cdpState.attached.has(tab.id)) {
+        try {
+          await chrome.debugger.detach({ tabId: tab.id });
+        } catch {
+          // already detached — fine.
+        }
+      }
+      cdpState.attached.delete(tab.id);
+      cdpState.consoleLogs.delete(tab.id);
+      cdpState.networkLog.delete(tab.id);
       return { ok: true };
     }
     default:
