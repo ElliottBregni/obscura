@@ -60,6 +60,8 @@ const stopBtn = $("#stop");
 const sbBackend = $("#sb-backend");
 const sbHost = $("#sb-host");
 const sbGit = $("#sb-git");
+const sbProfile = $("#sb-profile");
+const sbProfileSep = $("#sb-profile-sep");
 const sbKairos = $("#sb-kairos");
 const sbRewind = $("#sb-rewind");
 const sbFleet = $("#sb-fleet");
@@ -112,12 +114,24 @@ const TABS_KEY = "obscura.tabs.v1";
 const THEME_KEY = "obscura_theme";
 const TOOL_PERMS_KEY = "obscura_tool_perms";
 const PROFILE_ID_KEY = "obscura.profile_id";
+const AUTH_TOKEN_KEY = "obscura.auth_token.v1";
+const ONBOARDED_KEY = "obscura.onboarded.v1";
+
+// Onboarding / host-missing detection
+const HOST_READY_TIMEOUT_MS = 5000;
+const PING_TIMEOUT_MS = 3000;
+let hostReadyTimer = null;       // fires if `ready` doesn't arrive within HOST_READY_TIMEOUT_MS
+let hostReadyReceived = false;   // set on first `ready` frame; cleared on disconnect
+let lastReadySnapshot = null;    // most recent `ready` payload, for test-connection display
+const pingResolvers = new Map(); // pingId -> { resolve, reject, timer }
+const ENV_VAR_BY_BACKEND = { claude: "ANTHROPIC_API_KEY", copilot: "GITHUB_TOKEN", openai: "OPENAI_API_KEY" };
 
 let port = null;
 let sessionId = null;            // per-panel conversation id (from host)
 let pending = new Map();         // msgId -> { bubble, toolBox, toolMap, streamedText, thinkingText, thinkingEl }
 let busy = false;
 let authToken = null;            // shared-secret token for the native host (OBSCURA_AUTH_TOKEN)
+let lastSubmittedToken = false;  // true after we send a frame carrying authToken; cleared on accept/reject
 let commandIndex = [];           // from ready.commands ({name, doc, subcommands})
 let skillIndex = [];             // from ready.skills       (string[])
 let atCommandIndex = [];         // from ready.at_commands  (string[])
@@ -2378,6 +2392,13 @@ function connect() {
 
   port.onMessage.addListener((msg) => {
     if (!msg || typeof msg !== "object") return;
+    // Token-acceptance signal: if we recently sent a frame carrying
+    // authToken and the host replies with anything other than another
+    // auth_required, the token was accepted — persist it for next launch.
+    if (lastSubmittedToken && msg.type !== "auth_required" && authToken) {
+      lastSubmittedToken = false;
+      StorageManager.set({ [AUTH_TOKEN_KEY]: authToken }).catch(() => {});
+    }
     switch (msg.type) {
       case MsgType.BRIDGE_READY:
         status.textContent = "";
@@ -2397,6 +2418,11 @@ function connect() {
         }
         break;
       case MsgType.READY:
+        hostReadyReceived = true;
+        lastReadySnapshot = msg;
+        clearHostReadyTimer();
+        hideHostMissingBanner();
+        updateWelcomeHostInfo();
         updateStatusbar(msg);
         if (Array.isArray(msg.commands)) commandIndex = msg.commands;
         if (Array.isArray(msg.skills)) skillIndex = msg.skills;
@@ -2594,7 +2620,18 @@ function connect() {
         break;
       }
       case "auth_required": {
-        showAuthGate();
+        // If we just sent a frame carrying authToken, this auth_required is
+        // a rejection — clear the stored token and show the gate with an
+        // inline error. Otherwise the host is asking for the first time
+        // (no token attached yet) and we just show the gate.
+        if (lastSubmittedToken) {
+          lastSubmittedToken = false;
+          authToken = null;
+          chrome.storage.local.remove(AUTH_TOKEN_KEY).catch(() => {});
+          showAuthGate({ rejected: true });
+        } else {
+          showAuthGate();
+        }
         break;
       }
       case MsgType.SESSIONS: {
@@ -2605,6 +2642,16 @@ function connect() {
           recentSessionsTimeout = null;
         }
         renderRecentSessions(Array.isArray(msg.sessions) ? msg.sessions : []);
+        break;
+      }
+      case MsgType.PONG: {
+        // Resolve test-connection ping if we're tracking this id.
+        const r = msg.id ? pingResolvers.get(msg.id) : null;
+        if (r) {
+          if (r.timer) clearTimeout(r.timer);
+          pingResolvers.delete(msg.id);
+          r.resolve(msg);
+        }
         break;
       }
       case "browser-tool": {
@@ -2651,9 +2698,21 @@ function connect() {
     setBusy(false);
     setLiveStatus("");
     port = null;
+    hostReadyReceived = false;
+    clearHostReadyTimer();
+    // Drop any in-flight test-connection pings so they don't dangle.
+    for (const [, r] of pingResolvers) {
+      if (r.timer) clearTimeout(r.timer);
+      r.reject(new Error("disconnected"));
+    }
+    pingResolvers.clear();
     setHostStatus("disconnected", "err");
     showDisconnectBanner();
   });
+
+  // Arm the host-missing detector. If no `ready` frame arrives within
+  // HOST_READY_TIMEOUT_MS, surface the install instructions banner.
+  startHostReadyTimer();
 
   // Kick the service worker to spawn the native host. Without this the SW
   // only spawns the host on the first outgoing message, so the initial
@@ -2680,6 +2739,17 @@ function updateStatusbar(ready) {
   if (ready.pid) bits.push(`pid ${ready.pid}`);
   setHostStatus(bits.join(" · ") || "up", "ok");
   sbGit.textContent = ready.git_commit ? `@${ready.git_commit}` : "—";
+  // Profile chip: dim, only shown when we know the id. Helps users with
+  // multiple Chrome profiles tell their panels apart at a glance.
+  // Prefer the id we generated locally (always present); fall back to
+  // whatever the host echoed if for some reason ours is null.
+  const pid = profileId || ready.profile_id || "";
+  if (pid && sbProfile && sbProfileSep) {
+    sbProfile.textContent = `profile ${String(pid).slice(0, 8)}`;
+    sbProfile.title = `Chrome profile id: ${pid}\nStorage: ~/.obscura/profiles/${pid}/`;
+    sbProfile.hidden = false;
+    sbProfileSep.hidden = false;
+  }
 }
 
 function updateBackendStatus() {
@@ -3143,6 +3213,7 @@ function dispatchSend(desc) {
         ...(authToken ? { auth_token: authToken } : {}),
       });
     }
+    if (authToken) lastSubmittedToken = true;
   } catch (err) {
     pending.delete(desc.id);
     setBusy(false);
@@ -3238,13 +3309,52 @@ function showDiagOverlay(data) {
   const clearLink = document.createElement("button");
   clearLink.type = "button";
   clearLink.textContent = "clear tool permissions";
-  clearLink.style.cssText = "margin-top:10px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
+  clearLink.style.cssText = "margin-top:10px;margin-right:8px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
   clearLink.addEventListener("click", async () => {
     await clearToolPerms();
     clearLink.textContent = "cleared ✓";
     setTimeout(() => { clearLink.textContent = "clear tool permissions"; }, 1500);
   });
   diagContent.appendChild(clearLink);
+
+  // "Log out" — clears the persisted auth token and re-shows the gate.
+  const logoutLink = document.createElement("button");
+  logoutLink.type = "button";
+  logoutLink.textContent = "log out";
+  logoutLink.style.cssText = "margin-top:10px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
+  logoutLink.addEventListener("click", () => {
+    logoutAuth();
+    hideDiagOverlay();
+  });
+  diagContent.appendChild(logoutLink);
+
+  // "Test connection" — ping the host with a 3s timeout, show inline result.
+  const testLink = document.createElement("button");
+  testLink.type = "button";
+  testLink.textContent = "test connection";
+  testLink.className = "diag-welcome-link";
+  const testResult = document.createElement("span");
+  testResult.style.cssText = "margin-left:8px;font-size:10.5px;font-family:var(--mono);";
+  testLink.addEventListener("click", async () => {
+    testResult.className = "welcome-test-result pending";
+    testResult.textContent = "pinging…";
+    const res = await runTestConnection();
+    testResult.className = `welcome-test-result ${res.ok ? "ok" : "err"}`;
+    testResult.textContent = res.ok ? `✓ Connected (${res.latencyMs}ms)` : `✗ ${res.error}`;
+  });
+  diagContent.appendChild(testLink);
+  diagContent.appendChild(testResult);
+
+  // "Show welcome again" — re-open the onboarding overlay regardless of flag.
+  const welcomeLink = document.createElement("button");
+  welcomeLink.type = "button";
+  welcomeLink.textContent = "show welcome again";
+  welcomeLink.className = "diag-welcome-link";
+  welcomeLink.addEventListener("click", () => {
+    hideDiagOverlay();
+    showWelcomeOverlay({ force: true });
+  });
+  diagContent.appendChild(welcomeLink);
 
   diagOverlay.classList.remove("hidden");
 }
@@ -3700,9 +3810,20 @@ sbExport.addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 // Auth gate
 
-function showAuthGate() {
+const authError = $("#auth-error");
+
+function showAuthGate(opts) {
   authGate.classList.remove("hidden");
   authTokenInput.value = "";
+  if (authError) {
+    if (opts && opts.rejected) {
+      authError.textContent = "Token rejected. Try again.";
+      authError.classList.remove("hidden");
+    } else {
+      authError.textContent = "";
+      authError.classList.add("hidden");
+    }
+  }
   setTimeout(() => authTokenInput.focus(), 50);
 }
 
@@ -3714,6 +3835,14 @@ function submitAuthToken() {
   const val = authTokenInput.value.trim();
   if (!val) return;
   authToken = val;
+  // Clear any prior rejection notice; the next outgoing frame will mark
+  // lastSubmittedToken=true and the receive-side handler will either
+  // persist this token (acceptance) or re-show the gate with the
+  // rejection error if the host emits another auth_required.
+  if (authError) {
+    authError.textContent = "";
+    authError.classList.add("hidden");
+  }
   hideAuthGate();
 }
 
@@ -3722,9 +3851,35 @@ authTokenInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); submitAuthToken(); }
   if (e.key === "Escape") { e.preventDefault(); hideAuthGate(); }
 });
+// Clear the rejection notice as soon as the user starts editing the field.
+authTokenInput.addEventListener("input", () => {
+  if (authError && !authError.classList.contains("hidden")) {
+    authError.textContent = "";
+    authError.classList.add("hidden");
+  }
+});
 authGate.addEventListener("click", (e) => {
   if (e.target === authGate) hideAuthGate();
 });
+
+async function loadPersistedAuthToken() {
+  try {
+    const store = await StorageManager.get([AUTH_TOKEN_KEY]);
+    const saved = store[AUTH_TOKEN_KEY];
+    if (typeof saved === "string" && saved) {
+      authToken = saved;
+    }
+  } catch {
+    // Storage failures are non-fatal — user will just be prompted again.
+  }
+}
+
+function logoutAuth() {
+  authToken = null;
+  lastSubmittedToken = false;
+  chrome.storage.local.remove(AUTH_TOKEN_KEY).catch(() => {});
+  showAuthGate();
+}
 
 // ---------------------------------------------------------------------------
 // Theme switching
@@ -3815,6 +3970,10 @@ const tagMessage = (msg) => withProfileId(msg, profileId);
 (async () => {
   await migrateStorage();
   await ensureProfileId();
+  // Load any persisted auth token *before* connect() so the first
+  // outgoing send/command piggybacks it. If the host rejects (wrong or
+  // stale token), the auth_required handler will clear and re-prompt.
+  await loadPersistedAuthToken();
   loadTheme();
   loadSettings();
   loadSessionPicker();
