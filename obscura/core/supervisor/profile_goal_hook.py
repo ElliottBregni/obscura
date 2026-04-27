@@ -79,6 +79,19 @@ def register_profile_goal_hooks(
         except Exception:
             logger.debug("Could not inject profile context", exc_info=True)
 
+        # -- Arbiter recent verdicts (self-awareness) --------------------------
+        try:
+            from obscura.arbiter.hooks import get_engine
+
+            engine = get_engine()
+            if engine is not None:
+                summary = engine.get_recent_verdict_summary(limit=3)
+                if summary:
+                    context["_arbiter_context"] = "## Recent Arbiter Verdicts\n" + summary
+                    logger.debug("Injected arbiter verdict summary")
+        except Exception:
+            logger.debug("Could not inject arbiter context", exc_info=True)
+
     hooks.register(
         SupervisorHookPoint.PRE_BUILD_CONTEXT,
         "before",

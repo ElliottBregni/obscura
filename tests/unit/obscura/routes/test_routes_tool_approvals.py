@@ -11,8 +11,8 @@ from obscura.core.config import ObscuraConfig
 def _make_client() -> TestClient:
     from obscura.server import create_app
 
-    app = create_app(ObscuraConfig(auth_enabled=False, otel_enabled=False))
-    return TestClient(app)
+    app = create_app(ObscuraConfig(otel_enabled=False))
+    return TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def test_tool_approvals_list_and_resolve() -> None:
@@ -21,7 +21,7 @@ def test_tool_approvals_list_and_resolve() -> None:
     asyncio.run(clear_tool_approvals())
     created = asyncio.run(
         create_tool_approval_request(
-            user_id="anonymous",
+            user_id="test-user",
             agent_id="agent-1",
             tool_use_id="tool-u-1",
             tool_name="run_shell",

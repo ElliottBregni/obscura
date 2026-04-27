@@ -52,6 +52,13 @@ class AuthenticatedUser(BaseModel):
     org_id: str | None
     token_type: str  # "user" | "service" | "api_key"
     raw_token: str
+    # Supabase Authenticator Assurance Level — ``aal1`` = password/OAuth only,
+    # ``aal2`` = MFA completed. ``None`` for non-Supabase credentials
+    # (API keys, mock users).
+    aal: str | None = None
+    # Supabase session_id (JWT ``session_id`` claim). Used for revocation
+    # checks against ``auth.sessions`` on sensitive routes.
+    session_id: str | None = None
 
     # -- convenience helpers ------------------------------------------------
 

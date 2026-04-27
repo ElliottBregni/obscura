@@ -47,6 +47,16 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset(
         "file_info",
         "diff_files",
         "git",
+        # Legacy per-action git tool names — predate the unified `git` tool.
+        # Kept allowed so older agents and prompts that still call e.g.
+        # `git_status` (rather than `git` with action="status") work in plan
+        # mode. Write actions (commit/push/etc.) are still blocked because
+        # they don't match this exact allowlist.
+        "git_status",
+        "git_diff",
+        "git_log",
+        "git_branch",
+        "git_show",
         "web_search",
         "web_fetch",
         "which_command",

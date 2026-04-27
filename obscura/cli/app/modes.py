@@ -143,6 +143,21 @@ class Plan:
 
         return cls(title=title, steps=steps, raw_text=text)
 
+    def to_markdown(self) -> str:
+        """Serialize the plan to markdown for vault storage."""
+        lines = [f"# {self.title}", ""]
+        for step in self.steps:
+            status_icon = {
+                "pending": "[ ]",
+                "approved": "[x]",
+                "rejected": "[~]",
+                "edited": "[*]",
+            }.get(step.status, "[ ]")
+            lines.append(f"{step.number}. {status_icon} {step.description}")
+            if step.original and step.original != step.description:
+                lines.append(f"   _Originally: {step.original}_")
+        return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # System prompts
@@ -151,9 +166,18 @@ class Plan:
 _MODE_SYSTEM_PROMPTS: dict[TUIMode, str] = {
     TUIMode.ASK: "",
     TUIMode.PLAN: (
-        "You are in planning mode. Respond with structured, numbered "
-        "implementation plans. Each step should be actionable and specific. "
-        "Do not write code yet."
+        "You are in planning mode. When asked to plan, respond with a "
+        "structured implementation plan using this format:\n\n"
+        "# Plan Title\n\n"
+        "1. First step — specific, actionable description\n"
+        "2. Second step — include file paths where relevant\n"
+        "3. ...\n\n"
+        "Each step should be independently reviewable. Include:\n"
+        "- File paths that will be touched\n"
+        "- Key risks or trade-offs for non-obvious decisions\n"
+        "- Dependencies between steps\n\n"
+        "You may use read-only tools (file reading, grep, web search) to "
+        "research before proposing the plan. Do not write code yet."
     ),
     TUIMode.CODE: (
         "You are in code mode. Use tools to read and write files. "

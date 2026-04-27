@@ -25,12 +25,25 @@ from obscura.openclaw_bridge import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _load_test_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register a high-privilege API key so the authed bridge tests pass."""
+    monkeypatch.setenv(
+        "OBSCURA_API_KEYS",
+        "test-api-key:test-user:admin,agent:read,agent:claude,agent:copilot,"
+        "sync:write,sessions:manage",
+    )
+    from obscura.auth import rbac
+
+    rbac._load_api_keys()  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 async def test_openclaw_bridge_smoke_end_to_end() -> None:
     """Bridge should perform basic agent + memory + semantic operations."""
     from obscura.server import create_app
 
-    app = create_app(ObscuraConfig(auth_enabled=False, otel_enabled=False))
+    app = create_app(ObscuraConfig(otel_enabled=False))
     transport = ASGITransport(app=app)
 
     agent = MagicMock()
@@ -61,7 +74,7 @@ async def test_openclaw_bridge_smoke_end_to_end() -> None:
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
-        headers={"Authorization": "Bearer local-dev-token"},
+        headers={"X-API-Key": "test-api-key"},
     ) as client:
         bridge = OpenClawBridge(
             OpenClawBridgeConfig(base_url="http://testserver"),
@@ -115,7 +128,7 @@ async def test_openclaw_bridge_smoke_end_to_end() -> None:
 async def test_openclaw_bridge_run_workflow_uses_routing_policy() -> None:
     from obscura.server import create_app
 
-    app = create_app(ObscuraConfig(auth_enabled=False, otel_enabled=False))
+    app = create_app(ObscuraConfig(otel_enabled=False))
     transport = ASGITransport(app=app)
 
     agent = MagicMock()
@@ -137,7 +150,7 @@ async def test_openclaw_bridge_run_workflow_uses_routing_policy() -> None:
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
-        headers={"Authorization": "Bearer local-dev-token"},
+        headers={"X-API-Key": "test-api-key"},
     ) as client:
         bridge = OpenClawBridge(
             OpenClawBridgeConfig(base_url="http://testserver"),
@@ -175,7 +188,7 @@ async def test_openclaw_bridge_sets_request_and_idempotency_headers() -> None:
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
-        headers={"Authorization": "Bearer local-dev-token"},
+        headers={"X-API-Key": "test-api-key"},
     ) as client:
         bridge = OpenClawBridge(
             OpenClawBridgeConfig(base_url="http://testserver"),
@@ -210,7 +223,7 @@ async def test_openclaw_bridge_run_agent_sends_timeout_and_cancellation() -> Non
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
-        headers={"Authorization": "Bearer local-dev-token"},
+        headers={"X-API-Key": "test-api-key"},
     ) as client:
         bridge = OpenClawBridge(
             OpenClawBridgeConfig(base_url="http://testserver"),
@@ -257,7 +270,7 @@ async def test_openclaw_bridge_workflow_retries_then_succeeds() -> None:
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
-        headers={"Authorization": "Bearer local-dev-token"},
+        headers={"X-API-Key": "test-api-key"},
     ) as client:
         bridge = OpenClawBridge(config, client=client)
         result = await bridge.run_workflow(
@@ -304,7 +317,7 @@ async def test_openclaw_bridge_workflow_fallback_to_next_model() -> None:
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
-        headers={"Authorization": "Bearer local-dev-token"},
+        headers={"X-API-Key": "test-api-key"},
     ) as client:
         bridge = OpenClawBridge(config, routing_policy=policy, client=client)
         result = await bridge.run_workflow(

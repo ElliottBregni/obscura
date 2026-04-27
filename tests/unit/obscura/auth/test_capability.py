@@ -628,6 +628,16 @@ class TestAgentLoopCapabilityEnforcement:
 class TestCapabilityAPIEndpoints:
     """Integration tests for /api/v1/capabilities/* endpoints."""
 
+    @pytest.fixture(autouse=True)
+    def _register_test_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "OBSCURA_API_KEYS",
+            "test-api-key:test-user:admin,agent:read,tier:privileged",
+        )
+        from obscura.auth import rbac
+
+        rbac._load_api_keys()  # noqa: SLF001
+
     @pytest.fixture
     def app(self) -> Any:
         """Create a minimal FastAPI app with capabilities router."""
@@ -637,20 +647,13 @@ class TestCapabilityAPIEndpoints:
 
         app = FastAPI()
         app.include_router(router)
-
-        # Mock config with auth disabled
-        class MockConfig:
-            auth_enabled = False
-
-        app.state.config = MockConfig()
-
         return app
 
     @pytest.fixture
     def client(self, app: Any) -> Any:
         from starlette.testclient import TestClient
 
-        return TestClient(app)
+        return TestClient(app, headers={"X-API-Key": "test-api-key"})
 
     def test_get_tier(self, client: Any) -> None:
         resp = client.get("/api/v1/capabilities/tier")

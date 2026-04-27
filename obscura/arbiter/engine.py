@@ -65,7 +65,7 @@ class ArbiterEngine:
         session_id: str = "",
         run_id: str = "",
     ) -> None:
-        self._config = config or ArbiterConfig()
+        self._config = config or ArbiterConfig.from_settings()
         self._session_id = session_id
         self._run_id = run_id
         self._judge_calls = 0
@@ -73,6 +73,8 @@ class ArbiterEngine:
         self._session_errors: dict[str, list[str]] = {}  # cross-turn error memory
         self._events: list[ArbiterEvent] = []
         self._started = False
+        self._historical_patterns: str = ""  # loaded from previous sessions on start()
+        self._project_root: str = ""  # set in start() from os.getcwd()
 
     @property
     def config(self) -> ArbiterConfig:
@@ -88,6 +90,7 @@ class ArbiterEngine:
 
     def start(self) -> None:
         self._started = True
+        self._load_historical_patterns()
         logger.info(
             "Arbiter started (judge_mode=%s, accept=%.1f, revise=%.1f)",
             self._config.judge_mode,
@@ -252,6 +255,8 @@ class ArbiterEngine:
             return check_task_complete(
                 task,
                 output_text=str(context.get("output_text", "")),
+                files_changed=context.get("files_changed"),
+                tool_call_count=int(context.get("tool_call_count", 0)),
             )
 
         if kind == ArbiterCheckKind.GOAL_TRANSITION:
@@ -280,6 +285,7 @@ class ArbiterEngine:
         base_score, base_issues = check_model_turn(
             output_text=str(context.get("output_text", "")),
             tool_error_count=int(context.get("tool_error_count", 0)),
+            tool_call_count=int(context.get("tool_call_count", 0)),
             repeated_errors=int(context.get("repeated_errors", 0)),
             lint_errors=context.get("lint_errors"),
         )
@@ -433,8 +439,13 @@ class ArbiterEngine:
         return raw
 
     def _resolve_phantom_level(self) -> int:
-        """Get the current phantom level (config override > env var > 0)."""
-        if self._config.phantom_level > 0:
+        """Get the current phantom level (config override > env var > 0).
+
+        phantom_level=-1 means "read from OBSCURA_PHANTOM_LEVEL env var".
+        phantom_level=0  means "off" (env var is ignored).
+        phantom_level>0  means that exact level (env var is ignored).
+        """
+        if self._config.phantom_level >= 0:
             return self._config.phantom_level
         import os
 
@@ -530,6 +541,99 @@ class ArbiterEngine:
             DailyLog().append(entry, source="arbiter")
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    # Agent self-awareness
+    # ------------------------------------------------------------------
+
+
+    def _load_historical_patterns(self) -> None:
+        """Load cross-session patterns from previous runs for this project."""
+        try:
+            import os
+            from obscura.arbiter.store import ArbiterStore
+            project_root = os.getcwd()
+            self._project_root = project_root
+            self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
+            if self._historical_patterns:
+                logger.info(
+                    "Arbiter: loaded historical patterns for %s — %s",
+                    project_root,
+                    self._historical_patterns[:120],
+                )
+        except Exception:
+            logger.debug("Could not load historical patterns", exc_info=True)
+
+    def get_recent_verdict_summary(self, limit: int = 5) -> str:
+        """Return a short summary of recent verdicts for agent self-awareness.
+
+        Injected into the agent's system prompt so it can adjust its
+        behavior based on recent quality signals.
+        """
+        recent = self._events[-limit:] if self._events else []
+        if not recent:
+            # Still surface historical patterns even if no in-session events yet.
+            return self._historical_patterns if self._historical_patterns else ""
+
+        lines = ["## Recent Arbiter Verdicts", ""]
+        verdict_counts: dict[str, int] = {}
+        for event in reversed(recent):
+            v = event.verdict.value
+            verdict_counts[v] = verdict_counts.get(v, 0) + 1
+            feedback = event.score.feedback
+            details = "; ".join(event.score.details[:3]) if event.score.details else ""
+            summary = feedback[:120] if feedback else details[:120]
+            lines.append(
+                f"- [{v.upper()}] {event.kind.value}: {summary}" if summary
+                else f"- [{v.upper()}] {event.kind.value}"
+            )
+
+        # Add behavioral guidance based on patterns
+        lines.append("")
+        if verdict_counts.get("revise", 0) >= 3:
+            lines.append(
+                "_Pattern: High revision rate. Double-check your output "
+                "quality, ensure responses are complete, and verify tool "
+                "calls before executing._"
+            )
+        if verdict_counts.get("deny", 0) >= 2:
+            lines.append(
+                "_Pattern: Multiple denials. You may be drifting from the "
+                "task scope. Re-read the original request before continuing._"
+            )
+        if verdict_counts.get("accept", 0) >= 4:
+            lines.append(
+                "_Pattern: Strong acceptance rate. Current approach is working well._"
+            )
+
+        if self._historical_patterns:
+            lines.append("")
+            lines.append(f"_Historical: {self._historical_patterns}_")
+
+        # Regression warning: flag if current session is tracking >10% below baseline.
+        try:
+            from obscura.arbiter.store import ArbiterStore
+            reg = ArbiterStore().score_regression(
+                session_id=self._session_id,
+                project_root=self._project_root,
+            )
+            if reg["regression"]:
+                pct = int(reg["drop"] * 100)
+                lines.append("")
+                lines.append(
+                    f"_⚠ Score regression: session avg {reg['session_avg']:.2f} is "
+                    f"{pct}% below 7-day baseline {reg['baseline_avg']:.2f}. "
+                    f"Review recent verdicts and adjust approach._"
+                )
+        except Exception:
+            pass
+
+        return "\n".join(lines)
+
+    @property
+    def has_quality_signal(self) -> bool:
+        """True if there are enough events to provide meaningful feedback."""
+        return len(self._events) >= 3
 
     # ------------------------------------------------------------------
     # Introspection

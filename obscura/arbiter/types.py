@@ -57,7 +57,7 @@ class ArbiterConfig:
 
     Loaded from env / settings.json at startup; immutable per session.
 
-    *phantom_level* (0-5) is read from ``OBSCURA_PHANTOM_LEVEL``.
+    *phantom_level* (-1=auto/env, 0=off, 1-5=shadow..takeover). Default -1 reads ``OBSCURA_PHANTOM_LEVEL``.
     At level 4+ (lead/takeover), non-safety verdicts are capped at
     REVISE — the agent gets steering feedback instead of hard blocks.
     Level 0 means phantom is off (normal Arbiter behavior).
@@ -70,8 +70,56 @@ class ArbiterConfig:
     max_retries: int = 2
     max_judge_calls_per_session: int = 15
     kill_on_safety_violation: bool = True
-    phantom_level: int = 0  # 0=off, 1-5 = shadow..takeover
+    phantom_level: int = -1  # -1=auto (read env), 0=off, 1-5=shadow..takeover
     is_daemon: bool = False  # True for daemon/background agents
+
+    @classmethod
+    def from_settings(cls, path: str | None = None) -> ArbiterConfig:
+        """Load config from settings.json, env vars, then defaults.
+
+        Settings file path: ``~/.obscura/settings.json`` (or *path*).
+        JSON key: ``"arbiter"`` (dict with snake_case field names).
+        Env prefix: ``OBSCURA_ARBITER_`` (e.g. ``OBSCURA_ARBITER_ENABLED``).
+        """
+        import json
+        import os
+        from pathlib import Path
+
+        settings: dict[str, Any] = {}
+        settings_path = Path(path) if path else Path.home() / ".obscura" / "settings.json"
+        if settings_path.is_file():
+            try:
+                raw = json.loads(settings_path.read_text(encoding="utf-8"))
+                settings = raw.get("arbiter", {}) if isinstance(raw, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        def _get(key: str, default: Any, cast: type) -> Any:
+            # Settings file takes priority, then env, then default
+            if key in settings:
+                val = settings[key]
+                if cast is bool and isinstance(val, str):
+                    return val.lower() in ("true", "1", "yes")
+                return cast(val)
+            env_key = f"OBSCURA_ARBITER_{key.upper()}"
+            env_val = os.environ.get(env_key)
+            if env_val is not None:
+                if cast is bool:
+                    return env_val.lower() in ("true", "1", "yes")
+                return cast(env_val)
+            return default
+
+        return cls(
+            enabled=_get("enabled", True, bool),
+            judge_mode=_get("judge_mode", "on_ambiguity", str),
+            accept_threshold=_get("accept_threshold", 0.8, float),
+            revise_threshold=_get("revise_threshold", 0.3, float),
+            max_retries=_get("max_retries", 2, int),
+            max_judge_calls_per_session=_get("max_judge_calls_per_session", 15, int),
+            kill_on_safety_violation=_get("kill_on_safety_violation", True, bool),
+            phantom_level=_get("phantom_level", -1, int),
+            is_daemon=_get("is_daemon", False, bool),
+        )
 
 
 @dataclass(frozen=True)

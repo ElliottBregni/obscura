@@ -5,6 +5,10 @@ Provides filesystem and memory isolation for agents:
   - Memory namespace enforcement (agents can't read each other's memory)
   - Tool allowlist enforcement (agents restricted to their definition)
 
+Worktrees live under ``~/.obscura/worktrees/{repo_hash}/agent-{name}/`` and
+are tracked in :mod:`obscura.tools.worktree_registry` so orphaned checkouts
+can be reaped on next startup.
+
 Usage::
 
     isolation = AgentWorkspaceIsolation(agent_config)
@@ -19,7 +23,10 @@ import asyncio
 import contextlib
 import logging
 import os
-from pathlib import Path
+import time
+
+import obscura.tools.worktree_observer as worktree_observer
+import obscura.tools.worktree_registry as worktree_registry
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +56,7 @@ class AgentWorkspaceIsolation:
         self._original_cwd = original_cwd or os.getcwd()
         self._worktree_path: str = ""
         self._worktree_branch: str = ""
+        self._slug: str = ""
         self._active = False
 
     @property
@@ -70,23 +78,25 @@ class AgentWorkspaceIsolation:
     async def setup(self) -> bool:
         """Set up workspace isolation. Returns True if isolation was applied."""
         if self._isolation_mode != "worktree":
-            # No filesystem isolation — just enforce memory namespace.
             self._active = True
             return True
 
-        # Create git worktree.
         try:
-            rc, git_root, _ = await _git("rev-parse", "--show-toplevel")
+            rc, git_root, _ = await _main_repo_root()
             if rc != 0:
                 logger.warning("Agent isolation: not a git repo, skipping worktree")
                 self._active = True
                 return False
 
             slug = f"agent-{self._agent_name}"
+            self._slug = slug
             self._worktree_branch = f"agent/{slug}"
             self._worktree_path = str(
-                Path(git_root).parent / ".obscura-worktrees" / slug,
+                worktree_registry.worktree_path_for(git_root, slug)
             )
+            from pathlib import Path as _Path
+
+            _Path(self._worktree_path).parent.mkdir(parents=True, exist_ok=True)
 
             rc, _, err = await _git(
                 "worktree",
@@ -110,6 +120,22 @@ class AgentWorkspaceIsolation:
                     self._active = True
                     return False
 
+            worktree_registry.add(
+                worktree_registry.WorktreeEntry(
+                    slug=slug,
+                    repo_root=git_root,
+                    repo_hash=worktree_registry.repo_hash(git_root),
+                    worktree_path=self._worktree_path,
+                    branch=self._worktree_branch,
+                    original_cwd=self._original_cwd,
+                    owner="agent",
+                    pid=os.getpid(),
+                    created_at=time.time(),
+                    agent_name=self._agent_name,
+                ),
+            )
+            worktree_observer.start(slug, self._worktree_path)
+
             os.chdir(self._worktree_path)
             self._active = True
             logger.info(
@@ -129,14 +155,15 @@ class AgentWorkspaceIsolation:
         if not self._active:
             return
 
-        # Restore original working directory.
         with contextlib.suppress(OSError):
             os.chdir(self._original_cwd)
 
+        if self._slug:
+            worktree_observer.stop(self._slug)
+
         if self._worktree_path and not keep_worktree:
-            # Remove worktree.
             try:
-                rc, git_root, _ = await _git("rev-parse", "--show-toplevel")
+                rc, git_root, _ = await _main_repo_root()
                 if rc == 0:
                     await _git(
                         "worktree",
@@ -152,8 +179,12 @@ class AgentWorkspaceIsolation:
                         cwd=git_root,
                     )
                     logger.info("Agent %s worktree removed", self._agent_name)
+                if self._slug:
+                    worktree_registry.remove(self._slug)
             except Exception:
                 logger.debug("Worktree cleanup failed", exc_info=True)
+        elif self._slug:
+            worktree_registry.update(self._slug, status="kept")
 
         self._active = False
 
@@ -166,6 +197,21 @@ class AgentWorkspaceIsolation:
             f"Changes here do not affect the main working tree. "
             f"Your memory namespace is '{self._memory_namespace}'."
         )
+
+
+async def _main_repo_root() -> tuple[int, str, str]:
+    """Resolve the primary worktree root (works inside linked worktrees)."""
+    rc, common_dir, err = await _git(
+        "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    if rc != 0:
+        return rc, "", err
+    from pathlib import Path as _Path
+
+    common = _Path(common_dir)
+    if common.name == ".git":
+        return 0, str(common.parent), ""
+    return await _git("rev-parse", "--show-toplevel")
 
 
 async def _git(*args: str, cwd: str | None = None) -> tuple[int, str, str]:

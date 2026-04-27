@@ -1,0 +1,76 @@
+#!/bin/bash
+# Native-messaging launcher for the Obscura browser extension.
+#
+# Self-locating: resolves the repo root from this script's own path, so the
+# same file works on any machine without substitution. install.sh only has
+# to render the Chrome manifest JSON that points at this launcher.
+set -u
+
+LOG="${HOME}/.obscura/logs/browser-extension-host.log"
+mkdir -p "$(dirname "$LOG")"
+
+# Resolve this script's directory, following symlinks.
+SELF="${BASH_SOURCE[0]}"
+while [[ -L "$SELF" ]]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *)  SELF="$(cd "$(dirname "$SELF")" && pwd)/$LINK" ;;
+  esac
+done
+SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+HOST="$SELF_DIR/obscura_native_host.py"
+REPO="$(cd "$SELF_DIR/../../.." && pwd)"
+
+# Chrome launches native hosts with a minimal environment — no shell rc,
+# restricted PATH. Put Homebrew & common bins on PATH so `gh`, `uv`, etc.
+# resolve when backends need them.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+
+# Per-user overrides (any env vars the user wants to inject into the host —
+# GH_TOKEN, OPENAI_API_KEY, ANTHROPIC_API_KEY, OBSCURA_*, etc.).
+if [[ -f "${HOME}/.obscura/browser-host.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${HOME}/.obscura/browser-host.env"
+  set +a
+fi
+
+# Fetch a Copilot-compatible GitHub token from `gh` if none is set.
+if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" && -z "${COPILOT_GITHUB_TOKEN:-}" ]]; then
+  for gh_bin in /opt/homebrew/bin/gh /usr/local/bin/gh "$(command -v gh 2>/dev/null)"; do
+    if [[ -x "$gh_bin" ]]; then
+      tok="$("$gh_bin" auth token 2>/dev/null || true)"
+      if [[ -n "$tok" ]]; then
+        export GH_TOKEN="$tok"
+        break
+      fi
+    fi
+  done
+fi
+
+if [[ -f "$SELF_DIR/ensure_playwright.sh" ]]; then
+  echo "Running ensure_playwright.sh" >> "$LOG"
+  bash "$SELF_DIR/ensure_playwright.sh" >> "$LOG" 2>&1 || echo "ensure_playwright failed" >> "$LOG"
+fi
+
+echo "---- launcher boot $(date) repo=$REPO ----" >> "$LOG"
+
+# Python resolution order:
+#   1. OBSCURA_PYTHON override
+#   2. Repo-local venv at $REPO/.venv/bin/python
+#   3. `uv run` inside the repo
+#   4. python3 / python on PATH
+if [[ -n "${OBSCURA_PYTHON:-}" && -x "${OBSCURA_PYTHON}" ]]; then
+  exec "$OBSCURA_PYTHON" "$HOST"
+fi
+if [[ -x "$REPO/.venv/bin/python" ]]; then
+  exec "$REPO/.venv/bin/python" "$HOST"
+fi
+if command -v uv >/dev/null 2>&1; then
+  exec uv run --quiet --directory "$REPO" python "$HOST"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$HOST"
+fi
+exec python "$HOST"

@@ -114,6 +114,8 @@ async def task_create(
     max_retries: int = 3,
     metadata: dict[str, Any] | None = None,
 ) -> str:
+    import os
+
     from obscura.core.task_queue import TaskQueue
 
     q = TaskQueue()
@@ -126,6 +128,7 @@ async def task_create(
         run_after=run_after,
         max_retries=max_retries,
         metadata=metadata,
+        project_root=os.getcwd(),
     )
 
     # Back-fill active_form if provided (not in TaskQueue.enqueue signature).
@@ -369,6 +372,10 @@ async def task_update(
         db.commit()
     finally:
         db.close()
+
+    # Auto-sync goal progress when a task is marked completed via task_update.
+    if status == "completed" and "status" in updated_fields:
+        _sync_goal_progress(task_id)
 
     return json.dumps(
         {"ok": True, "task_id": task_id, "updated_fields": updated_fields},
@@ -622,15 +629,20 @@ async def queue_depth(status: str = "pending") -> str:
 
 
 def _sync_goal_progress(task_id: str) -> None:
-    """If the completed task is linked to a goal, update goal progress."""
+    """If the completed task is linked to a goal, update goal progress and last_worked."""
     try:
         from obscura.core.task_queue import TaskQueue
 
         task = TaskQueue().get(task_id)
-        if task and task.get("goal_id"):
+        goal_id = task.get("goal_id") if task else None
+        if goal_id:
+            from datetime import UTC, datetime
+
             from obscura.kairos.goals import GoalBoard
 
-            GoalBoard().sync_task_progress(task["goal_id"])
+            board = GoalBoard()
+            board.sync_task_progress(goal_id)
+            board.update(goal_id, last_worked=datetime.now(UTC).isoformat())
     except Exception:
         pass
 

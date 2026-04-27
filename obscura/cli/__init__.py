@@ -134,6 +134,27 @@ def _sync_provider_settings() -> None:
 _session_state: dict[str, bool] = {"titled": False}
 
 
+def _is_interactive_repl(prompt: str | None) -> bool:
+    """Return True when running the interactive REPL (not single-shot)."""
+    return prompt is None
+
+
+def _ensure_cli_auth_for_startup(
+    backend: str,
+    prompt: str | None,
+) -> None:
+    """Auto-run CLI GitHub OAuth for interactive Copilot sessions when needed."""
+    if backend != "copilot" or not _is_interactive_repl(prompt):
+        return
+
+    try:
+        from obscura.cli.auth_commands import ensure_github_oauth_session
+
+        ensure_github_oauth_session(open_browser=True)
+    except Exception as exc:
+        _log.debug("CLI auto-auth skipped: %s", exc)
+
+
 def _swallow(label: str, exc: Exception) -> None:
     """Log a swallowed exception at DEBUG level instead of silently ignoring."""
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
@@ -507,6 +528,7 @@ async def send_message(
                     elif event.kind == AgentEventKind.TOOL_RESULT:
                         dlog.tool_call(
                             getattr(event, "tool_name", ""),
+                            getattr(event, "tool_input", {}),
                             ok=not getattr(event, "is_error", False),
                             result_preview=str(getattr(event, "tool_result", ""))[:200],
                         )
@@ -917,6 +939,16 @@ async def _repl(
 
         # 3. CWD .env (won't overwrite already-set vars)
         load_dotenv()
+    except Exception:
+        pass
+
+    # 4. Materialise OS keyring entries into os.environ so plugins that read
+    # env vars directly can see keys stored via `/secrets set`. Never
+    # overwrites existing values, so shell env and .env files still win.
+    try:
+        from obscura.auth.secrets import materialize_to_environ
+
+        materialize_to_environ()
     except Exception:
         pass
 
@@ -1395,7 +1427,10 @@ async def _repl(
 
         project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
 
-    # Wire Kairos tool-call and turn-complete logging hooks (closure over _kairos_engine)
+    # Wire Kairos tool-call and turn-complete logging hooks (closure over
+    # _kairos_engine). The real engine is assigned later (see ~L1698); bind
+    # a placeholder here so the hook's free variable has a cell at call time.
+    _kairos_engine: Any = None
     try:
         from obscura.kairos.engine import is_kairos_enabled as _kie2
 
@@ -1544,6 +1579,23 @@ async def _repl(
         agent_infos = _discover_agent_infos()
         available_agents = [a.name for a in agent_infos] or None
 
+        # Best-effort attach to a running browser-extension host so terminal
+        # prompts can drive the user's existing Chrome. Silently skipped when
+        # no host is running or when tools are disabled.
+        browser_bridge_client: Any = None
+        browser_status: dict[str, Any] | None = None
+        if tools_enabled:
+            try:
+                from obscura.integrations.browser.client import attach_if_running
+
+                browser_bridge_client, browser_status = await attach_if_running(
+                    client.register_tool,
+                )
+            except Exception:
+                browser_bridge_client, browser_status = None, None
+        if browser_status is not None:
+            tool_count += int(browser_status.get("tool_count") or 0)
+
         print_banner(
             backend,
             model,
@@ -1553,6 +1605,7 @@ async def _repl(
             mode=mm.current.value,
             available_agents=available_agents,
             agent_infos=agent_infos or None,
+            browser_status=browser_status,
         )
 
         # Start supervisor if --supervise (default) and agents.yaml has agents
@@ -2367,6 +2420,12 @@ async def _repl(
 
         finally:
             spinner_task.cancel()
+            # Detach the browser bridge before tearing down the rest of the
+            # session — the bridge socket is fast to close and avoids leaving
+            # a stale FD if anything below this raises.
+            if browser_bridge_client is not None:
+                with contextlib.suppress(Exception):
+                    await browser_bridge_client.close()
             # Stop supervisor fleet
             if supervisor_task is not None:
                 if _supervisor is not None:
@@ -2535,6 +2594,16 @@ def main(
     # Disable provider permission layers — Obscura's policy engine is authoritative.
     _sync_provider_settings()
 
+    # Detect and optionally import external agent configs (Cursor, Copilot,
+    # Windsurf, Gemini, Claude Code, Codex) into canonical Obscura locations.
+    # Skipped for single-shot invocations (-p) to avoid blocking pipelines.
+    try:
+        from obscura.core.migrate_external import run_startup_migration
+
+        run_startup_migration(interactive=prompt is None)
+    except Exception as exc:
+        _log.debug("External migration check failed: %s", exc)
+
     # Compile workspace if specified
     compiled_ws = None
     if workspace_name is not None:
@@ -2553,6 +2622,8 @@ def main(
             )
         except Exception as exc:
             click.echo(f"Failed to load workspace '{workspace_name}': {exc}", err=True)
+
+    _ensure_cli_auth_for_startup(backend, prompt)
 
     # Resolve session ID: --resume > --session > --continue (last session)
     resolved_session = resume or session
@@ -2841,33 +2912,14 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 
 main.add_command(_kairos_group)
 
+
 from obscura.cli.secrets_commands import secrets_group as _secrets_group  # noqa: E402
 
 main.add_command(_secrets_group)
 
+from obscura.cli.admin_commands import admin_group as _admin_group  # noqa: E402
 
-# Backwards-compat aliases added by test harness
-def _emit_context_warnings(*args, **kwargs):
-    from .warnings import emit_context_warnings as _impl
-
-    return _impl(*args, **kwargs)
+main.add_command(_admin_group)
 
 
-def _copilot_budget_pct(tokens: int, context_window: int):
-    from .warnings import get_copilot_budget_pct as _impl
 
-    return _impl(tokens, context_window)
-
-
-def _parse_confirm_decision(answer: str) -> str | None:
-    a = (answer or "").lower()
-    if "approve" in a or a.strip().startswith("yes") or "accept" in a:
-        return "approve"
-    if "deny" in a or a.strip().startswith("no") or "do not" in a or "dont" in a:
-        return "deny"
-    return None
-
-
-def _track_task_surface_event(ctx, ev) -> None:
-    """Compatibility stub: track a task-surface event (no-op)."""
-    return

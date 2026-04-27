@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -36,7 +37,6 @@ from obscura.providers.models import (
     ChatMessage,
     CompletionParams,
     MCPServerConfig,
-    ModelInfo,
     ToolCallDefinition,
 )
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from obscura.core.auth import AuthConfig
 
 
-class LocalLLMBackend:
+class LocalLLMBackend(BackendToolHostMixin):
     """BackendProtocol implementation for local LLM servers.
 
     Uses the ``openai`` Python SDK pointed at a local endpoint. Works with
@@ -73,13 +73,19 @@ class LocalLLMBackend:
         self._mcp_servers: list[MCPServerConfig] = [
             MCPServerConfig.from_dict(s) for s in (mcp_servers or [])
         ]
+        # Keep the raw dicts for discovery + bridge — MCPServerConfig is lossy
+        # (drops name/args/url/headers/timeout) and cannot be round-tripped
+        # back to the full schema register_external_mcp_tools expects.
+        self._mcp_servers_raw: list[dict[str, Any]] = list(mcp_servers or [])
 
         # SDK client (set on start())
         self._client: Any = None
+        # Bridge that lets this non-SDK-native backend invoke external MCP
+        # tools at runtime; set on start() when mcp_servers are configured.
+        self._mcp_bridge: Any = None
 
-        # Tool and hook registries
-        self._tools: list[ToolSpec] = []
-        self._tool_registry = ToolRegistry()
+        # Tool list + registry (provided by BackendToolHostMixin)
+        self._init_tool_host()
         self._hooks: dict[HookPoint, list[Callable[..., Any]]] = {
             hp: [] for hp in HookPoint
         }
@@ -169,8 +175,32 @@ class LocalLLMBackend:
         if self._model is None:
             self._model = await self._discover_model()
 
+        # Discover any configured external MCP servers and install real
+        # handlers. Local LLMs hit the OpenAI-compatible chat API and have
+        # no native MCP routing, so without the bridge a model call to
+        # ``mcp__forge__generate_image`` would hit the discovery shadow
+        # and fail. Both calls are best-effort — failures leave the
+        # backend usable for non-MCP work.
+        if self._mcp_servers_raw:
+            from obscura.integrations.mcp.discovery import (
+                register_external_mcp_tools,
+            )
+            from obscura.providers._mcp_execution_bridge import (
+                MCPExecutionBridge,
+            )
+
+            await register_external_mcp_tools(self, self._mcp_servers_raw)
+            self._mcp_bridge = MCPExecutionBridge(self._mcp_servers_raw)
+            await self._mcp_bridge.start()
+            self._mcp_bridge.install_handlers(self)
+
     async def stop(self) -> None:
-        """Close the client."""
+        """Close the client and tear down the MCP bridge."""
+        if self._mcp_bridge is not None:
+            try:
+                await self._mcp_bridge.stop()
+            finally:
+                self._mcp_bridge = None
         if self._client is not None:
             await self._client.close()
             self._client = None
@@ -437,18 +467,7 @@ class LocalLLMBackend:
         self._active_session = session_id
         return fork_ref
 
-    # -- Tools ---------------------------------------------------------------
-
-    def register_tool(self, spec: ToolSpec) -> None:
-        """Register a tool (skips duplicates)."""
-        if any(t.name == spec.name for t in self._tools):
-            return
-        self._tools.append(spec)
-        self._tool_registry.register(spec)
-
-    def get_tool_registry(self) -> ToolRegistry:
-        """Return the tool registry."""
-        return self._tool_registry
+    # -- Tools (register_tool / get_tool_registry from BackendToolHostMixin) -----
 
     # -- Hooks ---------------------------------------------------------------
 
@@ -479,12 +498,6 @@ class LocalLLMBackend:
 
     # -- Local LLM-specific methods (escape hatch) ---------------------------
 
-    async def list_models(self) -> list[dict[str, Any]]:
-        """List models available on the local server."""
-        self._ensure_client()
-        models = await self._client.models.list()
-        return [ModelInfo.from_openai(m).to_dict() for m in models.data]
-
     async def health_check(self) -> dict[str, Any]:
         """Check if the local server is reachable."""
         try:
@@ -506,36 +519,37 @@ class LocalLLMBackend:
     # -- Provider Registry (model discovery) ---------------------------------
 
     async def list_models(self) -> list[RegistryModelInfo]:
-        """List models from local LLM server at runtime."""
+        """List models the local server exposes via its OpenAI-compatible API.
+
+        Uses the openai SDK's ``models.list()`` (the only method this client
+        actually exposes — ``_client.get()`` would AttributeError). Capability
+        flags are inferred from the model id since local servers don't
+        publish them.
+        """
         self._ensure_client()
         try:
-            # Query the server's models endpoint
-            response = await self._client.get("/v1/models")
-            models_data = response.json() if hasattr(response, "json") else response
-
-            model_list = []
-            for model in models_data.get("data", []):
-                model_id = model.get("id", "unknown")
-                # Infer capabilities from model name
-                supports_tools = any(
-                    keyword in model_id.lower()
-                    for keyword in ["tool", "function", "agent"]
-                )
-                supports_vision = "vision" in model_id.lower()
-
-                model_list.append(
-                    RegistryModelInfo(
-                        id=model_id,
-                        name=model.get("name", model_id),
-                        provider="localllm",
-                        supports_tools=supports_tools,
-                        supports_vision=supports_vision,
-                    ),
-                )
-            return model_list
+            models = await self._client.models.list()
         except Exception:
-            # Server unavailable or no models endpoint
+            # Server unreachable or no models endpoint — empty list is fine.
             return []
+
+        out: list[RegistryModelInfo] = []
+        for model in models.data:
+            model_id = getattr(model, "id", "") or "unknown"
+            supports_tools = any(
+                keyword in model_id.lower() for keyword in ("tool", "function", "agent")
+            )
+            supports_vision = "vision" in model_id.lower()
+            out.append(
+                RegistryModelInfo(
+                    id=model_id,
+                    name=getattr(model, "name", None) or model_id,
+                    provider="localllm",
+                    supports_tools=supports_tools,
+                    supports_vision=supports_vision,
+                ),
+            )
+        return out
 
     def get_default_model(self) -> str | None:
         """Return the default model for this provider."""

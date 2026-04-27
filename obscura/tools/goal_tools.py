@@ -261,6 +261,7 @@ def goal_tool(
             acceptance_criteria=acceptance_criteria,
             depends_on=depends_on,
         )
+        # project_root is captured inside GoalBoard.create() via os.getcwd()
         _emit_goal_event(g.id, title, "created", f"priority={priority}", priority)
         _notify_vault(g.id)
         return _json_ok(goal_id=g.id, goal=_goal_dict(g))

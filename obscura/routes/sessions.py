@@ -6,13 +6,13 @@ import asyncio
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import require_role
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.types import Backend, SessionRef
-from obscura.deps import ClientFactory, audit
+from obscura.deps import ClientFactory, audit, get_oauth_github_token
 from obscura.routes.session_ingest import (
     preflight_system_session_ingest,
     sync_and_ingest_system_sessions,
@@ -44,10 +44,15 @@ async def create_session(
     body: SessionCreateRequest,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))],
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
 ) -> SessionResponse:
     """Create a new session."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(body.backend, user=user)
+    client = await factory.create(
+        body.backend,
+        user=user,
+        oauth_github_token=oauth_gh_token,
+    )
     try:
         ref = await client.create_session()
         audit(
@@ -200,16 +205,70 @@ async def ingest_sessions_preflight(
     return JSONResponse(content=checks)
 
 
+@router.get("/sessions/{session_id}", response_model=SessionResponse)
+async def get_session(
+    session_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))],
+) -> SessionResponse:
+    """Fetch a single session from the unified event store."""
+    store = _get_event_store(request)
+    rec = await store.get_session(session_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return SessionResponse(
+        session_id=rec.id,
+        backend=rec.backend,
+        created_at=rec.created_at.isoformat() if rec.created_at else None,
+        source=rec.source,
+    )
+
+
+@router.post("/sessions/{session_id}/resume")
+async def resume_session(
+    session_id: str,
+    request: Request,
+    backend: str = "copilot",
+    user: Annotated[AuthenticatedUser, Depends(require_role("sessions:manage"))] = None,
+    oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
+) -> JSONResponse:
+    """Resume an existing session to validate liveness and access."""
+    assert user is not None
+    factory: ClientFactory = request.app.state.client_factory
+    client = await factory.create(
+        backend,
+        user=user,
+        oauth_github_token=oauth_gh_token,
+    )
+    try:
+        ref = SessionRef(session_id=session_id, backend=Backend(backend))
+        await client.resume_session(ref)
+        return JSONResponse(
+            content={
+                "ok": True,
+                "session_id": session_id,
+                "backend": backend,
+            },
+        )
+    finally:
+        await client.stop()
+
+
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
     request: Request,
     backend: str = "copilot",
     user: AuthenticatedUser = Depends(require_role("sessions:manage")),
+    oauth_gh_token: str | None = Depends(get_oauth_github_token),
 ) -> JSONResponse:
     """Delete a session by ID."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(backend, user=user)
+    client = await factory.create(
+        backend,
+        user=user,
+        oauth_github_token=oauth_gh_token,
+    )
     try:
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
         await client.delete_session(ref)

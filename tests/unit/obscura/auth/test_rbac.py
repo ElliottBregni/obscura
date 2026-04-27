@@ -15,11 +15,25 @@ from fastapi.testclient import TestClient
 from obscura.auth.middleware import APIKeyAuthMiddleware
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import (
+    _load_api_keys,
     get_current_user,
     require_any_role,
     require_role,
     user_from_api_key,
 )
+
+
+@pytest.fixture(autouse=True)
+def _enable_dev_mode(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """RBAC tests historically relied on the public dev key — opt in via
+    OBSCURA_DEV_MODE now that the key no longer auto-loads in production.
+    """
+    monkeypatch.setenv("OBSCURA_DEV_MODE", "true")
+    monkeypatch.delenv("OBSCURA_API_KEYS", raising=False)
+    _load_api_keys()
+    yield
+    monkeypatch.delenv("OBSCURA_DEV_MODE", raising=False)
+    _load_api_keys()
 
 # ---------------------------------------------------------------------------
 # AuthenticatedUser model tests

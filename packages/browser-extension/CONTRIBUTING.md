@@ -172,9 +172,12 @@ loads unpacked directly). If you genuinely need one:
 4. **Writing to `~/.obscura/` without considering multi-profile.**
    Two Chrome profiles = two panels = one shared directory.
    Use `chrome.runtime.id`-scoped paths for per-profile state.
-5. **Committing `.keys/extension.pem`.** It's gitignored. Don't force
-   it. Don't put it in tickets. Don't paste it in Slack. If it leaks,
-   regenerate immediately — the old id is forever unsafe.
+5. **Putting `extension.pem` anywhere inside `packages/browser-extension/`.**
+   Chrome's unpacked loader scans the whole directory and warns when it
+   finds a private key — if a pack script ever runs, the key ships.
+   Canonical location is `packages/browser-extension-keys/extension.pem`
+   (sibling, gitignored). Don't force-add it, don't paste it anywhere. If
+   it leaks, regenerate immediately — the old id is forever unsafe.
 
 ---
 

@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter
 
-from obscura.core.config import ObscuraConfig
 from obscura.schemas import HealthResponse
 
 router = APIRouter(tags=["infra"])
@@ -11,8 +10,7 @@ router = APIRouter(tags=["infra"])
 @router.get("/health")
 async def health() -> HealthResponse:
     """Liveness probe -- always returns 200."""
-    cfg = ObscuraConfig()
-    return HealthResponse(status="ok", auth_enabled=cfg.auth_enabled)
+    return HealthResponse(status="ok")
 
 
 @router.get("/ready")
