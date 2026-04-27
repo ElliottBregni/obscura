@@ -15,6 +15,10 @@ the core code. The host owns:
                 through the side panel
   * bridges   — ``browser-tool`` frames that let obscura call into the
                 active tab's DOM via ``chrome.scripting.executeScript``
+  * fleet     — ``fleet`` frames emitted whenever an in-process
+                ``AgentRuntime`` agent starts, stops, errors, or
+                changes status (lifecycle hook + 2-second polling
+                diff). Defensive: silent when no runtime is present.
 
 Everything else — $skill and @command parsing, vector memory, session
 resume, skill context, auto-compact, permission modes, KAIROS — lives
@@ -32,6 +36,7 @@ import os
 import re
 import struct
 import sys
+import time as _time
 import traceback
 import uuid
 from pathlib import Path
@@ -325,6 +330,205 @@ def _install_widget_broker() -> None:
     _widgets_mod.confirm_permission = _browser_confirm_permission
     _widgets_mod.ask_model_question = _browser_ask_model_question
     log.info("widget broker installed")
+
+
+# ---------------------------------------------------------------------------
+# Fleet observer — ``fleet`` frames on every agent lifecycle change.
+#
+# We monkey-patch ``AgentRuntime.__init__`` so any runtime built in this
+# process (daemon agents, swarm tool, ``/agent run``) auto-registers our
+# lifecycle hook and gets polled every 2 s for status drift. With no
+# runtime present (the common case for panel sessions) the observer
+# emits one empty ``snapshot`` after the ready frame and stays silent —
+# the panel falls through to its ``/agent list`` text path.
+
+_fleet_runtimes: "list[Any]" = []
+_fleet_state: dict[str, dict[str, Any]] = {}
+_fleet_poll_task: asyncio.Task[None] | None = None
+
+_STATUS_MAP = {
+    "RUNNING": "running",
+    "FAILED": "error",
+    "STOPPED": "stopped",
+    "PENDING": "idle",
+    "WAITING": "idle",
+    "COMPLETED": "idle",
+}
+
+_LIFECYCLE_MAP = {
+    "agent.starting": ("running", "agent_started"),
+    "agent.ready": ("idle", "agent_started"),
+    "agent.stopping": ("stopped", "agent_stopped"),
+    "agent.stopped": ("stopped", "agent_stopped"),
+    "agent.start_failed": ("error", "agent_error"),
+}
+
+
+def _agent_status_label(status: Any) -> str:
+    return _STATUS_MAP.get(getattr(status, "name", str(status)).upper(), "idle")
+
+
+def _fleet_emit(event: str, **fields: Any) -> None:
+    """Post a fleet frame. Never raises."""
+    payload: dict[str, Any] = {
+        "type": "fleet",
+        "event": event,
+        "timestamp": int(_time.time()),
+        **fields,
+    }
+    try:
+        _post(payload)
+    except Exception:
+        log.debug("fleet emit failed", exc_info=True)
+
+
+def _fleet_set(name: str, *, status: str, error: str = "", model: str = "") -> None:
+    prev = _fleet_state.get(name, {})
+    _fleet_state[name] = {
+        "status": status,
+        "model": model or prev.get("model", ""),
+        "lastActivity": int(_time.time()),
+        "lastError": error or prev.get("lastError", ""),
+    }
+
+
+def _fleet_handle_runtime_event(event: Any) -> None:
+    """RuntimeLifecycleEvent → fleet frame."""
+    name = getattr(event, "agent_name", None) or ""
+    if not name:
+        return  # runtime-level events ignored; we surface per-agent state only
+    kind = getattr(event, "kind", "") or ""
+    status, out_event = _LIFECYCLE_MAP.get(kind, (None, "agent_activity"))
+    if status is None:
+        status = _fleet_state.get(name, {}).get("status", "idle")
+    details_raw = getattr(event, "details", {}) or {}
+    details: dict[str, Any] = (
+        cast("dict[str, Any]", details_raw) if isinstance(details_raw, dict) else {}
+    )
+    err = str(details.get("error", ""))
+    _fleet_set(name, status=status, error=err, model=getattr(event, "model", "") or "")
+    _fleet_emit(
+        out_event,
+        agent=name,
+        status=status,
+        detail={"message": getattr(event, "message", ""), "error": err},
+    )
+
+
+async def _fleet_poll_loop() -> None:
+    """Poll tracked runtimes every 2 s and emit diff frames."""
+    while True:
+        try:
+            await asyncio.sleep(2.0)
+        except asyncio.CancelledError:
+            return
+        try:
+            _fleet_poll_tick()
+        except Exception:
+            log.debug("fleet poll tick failed", exc_info=True)
+
+
+def _fleet_poll_tick() -> None:
+    seen: set[str] = set()
+    for runtime in list(_fleet_runtimes):
+        try:
+            agents = runtime.list_agents()
+        except Exception:
+            continue
+        for agent in agents:
+            name = getattr(getattr(agent, "config", None), "name", "") or ""
+            if not name:
+                continue
+            seen.add(name)
+            status = _agent_status_label(getattr(agent, "status", None))
+            err_obj = getattr(agent, "_error", None)
+            err = str(err_obj) if err_obj is not None else ""
+            prev = _fleet_state.get(name, {})
+            if prev.get("status") == status and prev.get("lastError") == err:
+                continue
+            _fleet_set(
+                name,
+                status=status,
+                error=err,
+                model=getattr(agent.config, "model", "") or "",
+            )
+            _fleet_emit(
+                "agent_error" if status == "error" else "agent_activity",
+                agent=name,
+                status=status,
+                detail={"error": err},
+            )
+    # Drop tracked agents that disappeared from any active runtime.
+    if _fleet_runtimes:
+        for name in [n for n in _fleet_state if n not in seen]:
+            prev = _fleet_state.pop(name)
+            _fleet_emit(
+                "agent_stopped",
+                agent=name,
+                status="stopped",
+                detail={"error": prev.get("lastError", "")},
+            )
+
+
+def _fleet_track_runtime(runtime: Any) -> None:
+    if runtime in _fleet_runtimes:
+        return
+    _fleet_runtimes.append(runtime)
+    try:
+        runtime.set_lifecycle_hook(_fleet_handle_runtime_event)
+    except Exception:
+        log.debug("set_lifecycle_hook failed", exc_info=True)
+
+
+def _install_fleet_observer() -> None:
+    """Monkey-patch AgentRuntime.__init__ to track every runtime in-process."""
+    try:
+        from obscura.agent import agents as _agents_mod
+    except Exception:
+        log.debug("fleet observer: AgentRuntime import failed", exc_info=True)
+        return
+    runtime_cls = getattr(_agents_mod, "AgentRuntime", None)
+    if runtime_cls is None or getattr(runtime_cls, "_fleet_observer_installed", False):
+        return
+    original_init = runtime_cls.__init__
+
+    def _patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        try:
+            _fleet_track_runtime(self)
+        except Exception:
+            log.debug("fleet runtime track failed", exc_info=True)
+
+    runtime_cls.__init__ = _patched_init
+    runtime_cls._fleet_observer_installed = True
+    log.info("fleet observer installed")
+
+
+async def _start_fleet_observer() -> None:
+    """Start the periodic polling task and emit the initial snapshot."""
+    global _fleet_poll_task
+    if _fleet_poll_task is None or _fleet_poll_task.done():
+        _fleet_poll_task = asyncio.create_task(
+            _fleet_poll_loop(), name="fleet-observer-poll"
+        )
+    _fleet_emit(
+        "snapshot",
+        agents=[
+            {"agent": n, **{k: v for k, v in s.items() if k != "expanded"}}
+            for n, s in _fleet_state.items()
+        ],
+    )
+
+
+async def _stop_fleet_observer() -> None:
+    global _fleet_poll_task
+    task = _fleet_poll_task
+    _fleet_poll_task = None
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
 
 
 # ---------------------------------------------------------------------------
@@ -1337,6 +1541,7 @@ async def _main() -> None:
     _install_widget_broker()
     _install_renderer_factory()
     _install_console_proxy()
+    _install_fleet_observer()
 
     await _acquire_pid_lock()
     socket_bridge_state = await _start_socket_bridge()
@@ -1373,6 +1578,10 @@ async def _main() -> None:
                 "peers": peers,
             }
         )
+
+    # Start the fleet observer AFTER ready so the initial snapshot lands
+    # at a predictable position in the panel's message stream.
+    await _start_fleet_observer()
 
     loop = asyncio.get_running_loop()
 
@@ -1425,6 +1634,7 @@ async def _main() -> None:
     finally:
         _release_pid_lock()
         await _stop_socket_bridge()
+        await _stop_fleet_observer()
 
     # Drain outstanding work.
     if _active_sends:
