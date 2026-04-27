@@ -107,6 +107,7 @@ const STORAGE_VERSION_KEY = "obscura.storage.version";
 const SETTINGS_KEY = "obscura.settings.v1";
 const TRANSCRIPT_KEY = "obscura.transcript.v1";
 const SESSIONS_KEY = "obscura.sessions.v1";
+const TABS_KEY = "obscura.tabs.v1";
 const THEME_KEY = "obscura_theme";
 const TOOL_PERMS_KEY = "obscura_tool_perms";
 const PROFILE_ID_KEY = "obscura.profile_id";
@@ -189,6 +190,7 @@ function createTab(label = "new", activate = true) {
   if (!tab) return;
   if (activate) switchTab(tabManager.count - 1);
   renderTabs();
+  saveTabs();
 }
 
 function closeTab(idx) {
@@ -196,6 +198,7 @@ function closeTab(idx) {
   if (!tabManager.close(idx)) return;
   restoreTab(tabManager.activeIdx);
   renderTabs();
+  saveTabs();
 }
 
 function switchTab(idx) {
@@ -205,6 +208,7 @@ function switchTab(idx) {
   tabManager.activate(idx);
   restoreTab(idx);
   renderTabs();
+  saveTabs();
 }
 
 function restoreTab(idx) {
@@ -216,21 +220,163 @@ function restoreTab(idx) {
   scrollToBottom();
 }
 
+// --- Persistence: serialise the tab strip across panel reloads. -----------
+// We snapshot the active tab into the in-memory record before writing so the
+// stored copy reflects the current transcript/sessionId.
+
+function saveTabs() {
+  try {
+    tabManager.saveActive(log.innerHTML, sessionId, pending);
+    const tabs = tabManager.all.map((t) => ({
+      id: t.id,
+      label: t.label,
+      sessionId: t.sessionId,
+      logHTML: t.logHTML,
+    }));
+    chrome.storage.local.set({ [TABS_KEY]: { tabs, activeIdx: tabManager.activeIdx } });
+  } catch (err) {
+    console.warn("[obscura] saveTabs failed", err);
+  }
+}
+
+async function loadTabs() {
+  try {
+    const store = await chrome.storage.local.get([TABS_KEY]);
+    const state = store[TABS_KEY];
+    if (!state || !Array.isArray(state.tabs) || state.tabs.length === 0) return false;
+    tabManager._tabs = state.tabs.map((t) => ({
+      id: t.id || crypto.randomUUID(),
+      label: typeof t.label === "string" && t.label ? t.label : "session",
+      sessionId: t.sessionId ?? null,
+      logHTML: typeof t.logHTML === "string" ? t.logHTML : "",
+      pending: new Map(),
+      streamStates: {},
+    }));
+    const idx = Math.min(Math.max(state.activeIdx | 0, 0), tabManager._tabs.length - 1);
+    tabManager._activeIdx = idx;
+    restoreTab(idx);
+    renderTabs();
+    return true;
+  } catch (err) {
+    console.warn("[obscura] loadTabs failed", err);
+    return false;
+  }
+}
+
+// --- Inline rename: dbl-click swaps label <span> for an <input>. ---------
+// Enter / blur commit, Escape reverts. Empty value reverts to original.
+let _editingTabIdx = -1;
+
+function beginRenameTab(idx, labelEl) {
+  if (_editingTabIdx === idx) return;
+  _editingTabIdx = idx;
+  const tab = tabManager.all[idx];
+  if (!tab) return;
+  const original = tab.label;
+  const inp = document.createElement("input");
+  inp.type = "text";
+  inp.className = "tab-label tab-label-edit";
+  inp.value = original;
+  inp.maxLength = 40;
+  let settled = false;
+  const commit = (next) => {
+    if (settled) return;
+    settled = true;
+    _editingTabIdx = -1;
+    const trimmed = (next || "").trim().slice(0, 20);
+    tab.label = trimmed || original || "untitled";
+    renderTabs();
+    saveTabs();
+  };
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(inp.value); }
+    else if (e.key === "Escape") { e.preventDefault(); settled = true; _editingTabIdx = -1; renderTabs(); }
+    e.stopPropagation();
+  });
+  inp.addEventListener("blur", () => commit(inp.value));
+  inp.addEventListener("click", (e) => e.stopPropagation());
+  inp.addEventListener("dblclick", (e) => e.stopPropagation());
+  labelEl.replaceWith(inp);
+  inp.focus();
+  inp.select();
+}
+
+// --- Drag-to-reorder. ----------------------------------------------------
+let _dragSrcIdx = -1;
+
+function _clearDropMarkers() {
+  for (const el of tabStrip.querySelectorAll(".tab-item.drop-before, .tab-item.drop-after")) {
+    el.classList.remove("drop-before", "drop-after");
+  }
+}
+
 function renderTabs() {
   tabStrip.innerHTML = "";
   if (tabManager.count <= 1) return; // hide tab strip when only 1 tab
   tabManager.all.forEach((tab, i) => {
     const el = document.createElement("div");
     el.className = "tab-item" + (i === tabManager.activeIdx ? " active" : "");
+    el.draggable = true;
     const label = document.createElement("span");
     label.className = "tab-label";
     label.textContent = tab.label;
+    label.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      beginRenameTab(i, label);
+    });
     const close = document.createElement("span");
     close.className = "tab-close";
     close.textContent = "×";
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(i); });
     el.append(label, close);
     el.addEventListener("click", () => switchTab(i));
+
+    // Drag-and-drop reorder.
+    el.addEventListener("dragstart", (e) => {
+      _dragSrcIdx = i;
+      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(i)); } catch {}
+      el.classList.add("dragging");
+    });
+    el.addEventListener("dragend", () => {
+      _dragSrcIdx = -1;
+      el.classList.remove("dragging");
+      _clearDropMarkers();
+    });
+    el.addEventListener("dragover", (e) => {
+      if (_dragSrcIdx < 0 || _dragSrcIdx === i) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch {}
+      _clearDropMarkers();
+      const rect = el.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      el.classList.add(before ? "drop-before" : "drop-after");
+    });
+    el.addEventListener("dragleave", () => {
+      el.classList.remove("drop-before", "drop-after");
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const src = _dragSrcIdx;
+      _clearDropMarkers();
+      if (src < 0 || src === i) return;
+      const rect = el.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      let dst = before ? i : i + 1;
+      // Snapshot active tab before reordering so we don't lose live transcript.
+      tabManager.saveActive(log.innerHTML, sessionId, pending);
+      const activeId = tabManager.active?.id ?? null;
+      const [moved] = tabManager._tabs.splice(src, 1);
+      if (src < dst) dst -= 1;
+      tabManager._tabs.splice(dst, 0, moved);
+      // Re-anchor activeIdx to whatever was active before.
+      if (activeId) {
+        const newIdx = tabManager._tabs.findIndex((t) => t.id === activeId);
+        if (newIdx >= 0) tabManager._activeIdx = newIdx;
+      }
+      renderTabs();
+      saveTabs();
+    });
+
     tabStrip.appendChild(el);
   });
   const plus = document.createElement("span");
@@ -2288,6 +2434,7 @@ function connect() {
             if (firstUser) {
               tabManager.active.label = (firstUser.textContent || "").slice(0, 20) || "session";
               renderTabs();
+              saveTabs();
             }
           }
           // Save session metadata
@@ -2793,6 +2940,7 @@ form.addEventListener("submit", async (e) => {
   if (tabManager.active && (tabManager.active.label === "new" || tabManager.active.label === "session")) {
     tabManager.active.label = (prompt || "file").slice(0, 20);
     renderTabs();
+    saveTabs();
   }
 
   // `/foo` = slash command (routed to obscura.cli.handle_command).
@@ -2892,6 +3040,7 @@ clearBtn.addEventListener("click", () => {
   log.innerHTML = "";
   addMessage("system", "new session.");
   chrome.storage.local.remove(TRANSCRIPT_KEY);
+  saveTabs();
 });
 
 stopBtn.addEventListener("click", () => {
@@ -3397,5 +3546,10 @@ const tagMessage = (msg) => withProfileId(msg, profileId);
   // Per-tab state is loaded via tab_context message from background after connect().
   // We also try to load it eagerly if chromeTabId is already known (e.g. reopened panel).
   loadTabState();
+  // Restore the multi-tab strip from chrome.storage.local. If no prior
+  // state exists, the default single seed tab created at module load
+  // remains in place and will pick up whatever loadSettings/loadTabState
+  // dropped into the log.
+  await loadTabs();
   connect();
 })();

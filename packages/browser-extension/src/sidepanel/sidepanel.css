@@ -264,6 +264,31 @@ body {
   color: var(--accent);
 }
 
+/* Inline rename input — slot in where the .tab-label span used to live. */
+.tab-item .tab-label-edit {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 10.5px;
+  outline: none;
+  width: 110px;
+  max-width: 110px;
+}
+
+/* Drag-and-drop reorder. */
+.tab-item.dragging {
+  opacity: 0.55;
+}
+.tab-item.drop-before {
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
+.tab-item.drop-after {
+  box-shadow: inset -2px 0 0 0 var(--accent);
+}
+
 /* ---------- Log / transcript ---------------------------------------- */
 
 .log {
