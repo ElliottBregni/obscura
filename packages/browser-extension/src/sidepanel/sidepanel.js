@@ -82,6 +82,7 @@ const checkpointClose = $("#checkpoint-close");
 const checkpointNameInput = $("#checkpoint-name-input");
 const checkpointSaveBtn = $("#checkpoint-save-btn");
 const checkpointList = $("#checkpoint-list");
+const checkpointError = $("#checkpoint-error");
 const fleetOverlay = $("#fleet-overlay");
 const fleetClose = $("#fleet-close");
 const fleetContent = $("#fleet-content");
@@ -117,7 +118,9 @@ let historyDraft = "";           // saved current input when stepping into histo
 let kairosState = "off";        // "on" | "off"
 let pendingImages = [];          // { dataUrl, name }[] for drag-drop / paste
 let pendingTextFiles = [];       // { name, content }[] for drag-drop
-let checkpointPendingId = null;  // msgId of the in-flight /checkpoint command
+let checkpointPendingId = null;  // msgId of the in-flight /checkpoint list command
+const checkpointOpIds = new Map(); // msgId -> {op, name} for in-flight checkpoint save/restore/delete
+let checkpointErrorTimer = null;
 let fleetPendingId = null;       // msgId of the in-flight /agent list command
 let mcpPendingId = null;         // msgId of the in-flight /mcp list|discover command
 
@@ -1861,73 +1864,166 @@ sbKairos.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Checkpoint / rewind
 
+function refreshCheckpointList() {
+  const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
+  checkpointPendingId = id;
+  checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+  pending.set(id, { bubble: document.createElement("div"), streamedText: "", silent: true });
+  try { port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value }); } catch {}
+}
+
 function showCheckpointModal() {
   checkpointModal.classList.remove("hidden");
   checkpointNameInput.value = "";
-  checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
-  // Send /checkpoint list
-  const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
-  checkpointPendingId = id;
-  // Suppress default message rendering by not adding a visible bubble
-  const bubble = document.createElement("div");
-  pending.set(id, { bubble, streamedText: "", silent: true });
-  try {
-    port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value });
-  } catch {}
+  hideCheckpointError();
+  refreshCheckpointList();
 }
 
 function hideCheckpointModal() {
   checkpointModal.classList.add("hidden");
   checkpointPendingId = null;
+  hideCheckpointError();
+}
+
+function showCheckpointError(message) {
+  if (!checkpointError) return;
+  if (checkpointErrorTimer) { clearTimeout(checkpointErrorTimer); checkpointErrorTimer = null; }
+  checkpointError.textContent = message;
+  checkpointError.classList.remove("hidden", "fading");
+  // Auto-fade after a few seconds; next user action clears it via hideCheckpointError().
+  checkpointErrorTimer = setTimeout(() => {
+    checkpointError.classList.add("fading");
+    checkpointErrorTimer = setTimeout(() => {
+      checkpointError.classList.add("hidden");
+      checkpointError.classList.remove("fading");
+      checkpointErrorTimer = null;
+    }, 220);
+  }, 4500);
+}
+
+function hideCheckpointError() {
+  if (!checkpointError) return;
+  if (checkpointErrorTimer) { clearTimeout(checkpointErrorTimer); checkpointErrorTimer = null; }
+  checkpointError.classList.add("hidden");
+  checkpointError.classList.remove("fading");
+  checkpointError.textContent = "";
+}
+
+// cmd_checkpoint emits failures via console.print_error rather than an ERROR
+// frame, so we scrape the streamed text for the "error:" prefix.
+function extractCheckpointError(text) {
+  if (!text) return null;
+  for (const raw of text.split("\n")) {
+    const m = /^error:\s*(.+)$/i.exec(raw.trim());
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
 }
 
 function parseCheckpointList(text) {
-  // Extract checkpoint names from lines like "  · name" or "name" or "- name"
-  const names = [];
-  for (const line of text.split("\n")) {
-    const m = /^\s*[·\-\*]?\s*([^\s][^\n]+)$/.exec(line.trim());
-    if (m && m[1] && !m[1].startsWith("checkpoint") && !m[1].startsWith("No ") && !m[1].startsWith("Usage")) {
-      names.push(m[1].trim());
-    }
+  // /checkpoint list renders a Rich table: │ Name │ Messages │ Saved │.
+  // Pull name (col 1) and saved time (col 3) out of each data row.
+  const rows = [];
+  const seen = new Set();
+  for (const raw of text.split("\n")) {
+    if (!raw.includes("│")) continue;
+    const cells = raw.split("│").map((c) => c.trim()).filter(Boolean);
+    const name = cells[0];
+    if (!name || name.toLowerCase() === "name" || /^[─━┄┈]+$/.test(name)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    rows.push({ name, saved: cells[2] || "" });
   }
-  return names;
+  return rows;
 }
 
 function renderCheckpointList(text) {
   checkpointList.innerHTML = "";
-  const names = parseCheckpointList(text);
-  if (names.length === 0) {
+  const rows = parseCheckpointList(text);
+  if (rows.length === 0) {
     const empty = document.createElement("div");
     empty.className = "checkpoint-empty";
     empty.textContent = "no checkpoints saved";
     checkpointList.appendChild(empty);
     return;
   }
-  for (const name of names) {
+  for (const { name, saved } of rows) {
     const row = document.createElement("div");
     row.className = "checkpoint-row";
+    row.dataset.name = name;
+
     const nameEl = document.createElement("span");
     nameEl.className = "cp-name";
     nameEl.textContent = name;
+    row.appendChild(nameEl);
+
+    const actions = document.createElement("span");
+    actions.className = "cp-actions";
+
+    if (saved) {
+      const timeEl = document.createElement("span");
+      timeEl.className = "cp-time";
+      timeEl.textContent = saved;
+      actions.appendChild(timeEl);
+    }
+
     const restoreBtn = document.createElement("button");
     restoreBtn.className = "cp-restore";
     restoreBtn.textContent = "restore";
     restoreBtn.addEventListener("click", () => {
       hideCheckpointModal();
-      sendSilentCommand(`/checkpoint restore ${name}`);
+      sendSilentCommand(`/checkpoint restore ${name}`, { op: "restore", name });
     });
-    row.append(nameEl, restoreBtn);
+    actions.appendChild(restoreBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "cp-delete";
+    deleteBtn.title = `Delete checkpoint ${name}`;
+    deleteBtn.setAttribute("aria-label", `Delete checkpoint ${name}`);
+    deleteBtn.textContent = "✕";
+    deleteBtn.addEventListener("click", () => enterDeleteConfirm(row, name));
+    actions.appendChild(deleteBtn);
+
+    row.appendChild(actions);
     checkpointList.appendChild(row);
   }
 }
 
-function sendSilentCommand(raw) {
+function enterDeleteConfirm(row, name) {
+  hideCheckpointError();
+  row.classList.add("confirming");
+  row.innerHTML = "";
+  const text = document.createElement("span");
+  text.className = "cp-confirm-text";
+  const strong = document.createElement("strong");
+  strong.textContent = name;
+  text.append("Delete ", strong, "?");
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "cp-confirm-cancel";
+  cancelBtn.textContent = "cancel";
+  cancelBtn.addEventListener("click", () => refreshCheckpointList());
+  const confirmBtn = document.createElement("button");
+  confirmBtn.className = "cp-confirm-delete";
+  confirmBtn.textContent = "delete";
+  confirmBtn.addEventListener("click", () => {
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    sendSilentCommand(`/checkpoint delete ${name}`, { op: "delete", name });
+  });
+  row.append(text, cancelBtn, confirmBtn);
+}
+
+function sendSilentCommand(raw, opts) {
   const id = crypto.randomUUID?.() ?? `sc-${Date.now()}`;
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
+  if (opts && opts.op) {
+    checkpointOpIds.set(id, { op: opts.op, name: opts.name || "" });
+  }
   try {
     port?.postMessage({ type: MsgType.COMMAND, id, raw, backend: backendSel.value });
   } catch {}
+  return id;
 }
 
 sbRewind.addEventListener("click", showCheckpointModal);
@@ -1940,19 +2036,10 @@ checkpointModal.addEventListener("click", (e) => {
 checkpointSaveBtn.addEventListener("click", () => {
   const name = checkpointNameInput.value.trim();
   if (!name) return;
-  sendSilentCommand(`/checkpoint save ${name}`);
+  hideCheckpointError();
+  sendSilentCommand(`/checkpoint save ${name}`, { op: "save", name });
   checkpointNameInput.value = "";
-  // Refresh list after a short delay
-  setTimeout(() => {
-    const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
-    checkpointPendingId = id;
-    checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
-    const bubble = document.createElement("div");
-    pending.set(id, { bubble, streamedText: "", silent: true });
-    try {
-      port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value });
-    } catch {}
-  }, 600);
+  // List refresh happens in the DONE handler for the save op; no fixed delay.
 });
 
 checkpointNameInput.addEventListener("keydown", (e) => {
@@ -2156,6 +2243,21 @@ function connect() {
           } else if (msg.id === mcpPendingId) {
             renderMcpContent(text);
             mcpPendingId = null;
+          } else if (checkpointOpIds.has(msg.id)) {
+            // Save / restore / delete completed. cmd_checkpoint emits
+            // failures via console (chunked text starting with "error:")
+            // rather than an ERROR frame, so scan the streamed text.
+            const opInfo = checkpointOpIds.get(msg.id);
+            checkpointOpIds.delete(msg.id);
+            const errMsg = extractCheckpointError(text);
+            if (errMsg && !checkpointModal.classList.contains("hidden")) {
+              showCheckpointError(errMsg);
+            } else if (!checkpointModal.classList.contains("hidden")) {
+              // Successful op while modal is open — refresh list so the
+              // user sees the change. (Restore closes the modal first,
+              // so this only fires for save / delete.)
+              if (opInfo && opInfo.op !== "restore") refreshCheckpointList();
+            }
           }
           pending.delete(msg.id);
           if (pending.size === 0) { setBusy(false); setLiveStatus(""); drainQueue(); }
@@ -2241,7 +2343,24 @@ function connect() {
       }
       case MsgType.ERROR: {
         const st = msg.id ? pending.get(msg.id) : null;
-        if (st?.bubble) {
+        // Checkpoint operation errors surface inline in the modal, not in
+        // the transcript — the user is in the modal and shouldn't see a
+        // detached error bubble for an action they can't see firing.
+        const isCheckpointOp = msg.id && checkpointOpIds.has(msg.id);
+        const isCheckpointList = msg.id && msg.id === checkpointPendingId;
+        if ((isCheckpointOp || isCheckpointList) && !checkpointModal.classList.contains("hidden")) {
+          if (isCheckpointOp) checkpointOpIds.delete(msg.id);
+          if (isCheckpointList) {
+            checkpointPendingId = null;
+            // Empty list area so it doesn't sit on "loading…".
+            checkpointList.innerHTML = "";
+            const empty = document.createElement("div");
+            empty.className = "checkpoint-empty";
+            empty.textContent = "could not load checkpoints";
+            checkpointList.appendChild(empty);
+          }
+          showCheckpointError(msg.message || "Unknown error");
+        } else if (st?.bubble) {
           const bubble = st.bubble;
           bubble.parentElement?.classList.remove("cursor");
           bubble.parentElement.classList.remove("assistant");
