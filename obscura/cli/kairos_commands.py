@@ -18,6 +18,11 @@ from typing import Any
 
 import click
 
+# Route user-visible output through the shared render console so the
+# browser-extension native host's console proxy can stream it into the side
+# panel. ``click.echo`` writes to ``sys.stdout`` directly and bypasses the
+# proxy, which is fine for terminal use but invisible in the panel.
+from obscura.cli.render import console
 from obscura.core.kairos import (
     Kairos,
     GoalBudget,
@@ -25,6 +30,11 @@ from obscura.core.kairos import (
     KairosEventKind,
 )
 from obscura.core.paths import resolve_obscura_home
+
+
+def _emit(text: str) -> None:
+    """Plain-text print through the shared console (panel-safe)."""
+    console.print(text, markup=False, highlight=False, soft_wrap=True)
 
 
 def _get_db_path() -> str:
@@ -95,16 +105,16 @@ def kairos_run(
                 success_criteria=list(criteria),
                 budget=budget,
             )
-            click.echo(f"✓ Goal created: {goal_id}")
-            click.echo(f"  Title: {title}")
+            _emit(f"✓ Goal created: {goal_id}")
+            _emit(f"  Title: {title}")
             if criteria:
-                click.echo(f"  Criteria: {', '.join(criteria)}")
+                _emit(f"  Criteria: {', '.join(criteria)}")
 
             if dry_run:
-                click.echo("  (dry-run: not executing)")
+                _emit("  (dry-run: not executing)")
                 return
 
-            click.echo("\nRunning...\n")
+            _emit("\nRunning...\n")
             async for event in kairos.run(goal_id):
                 _print_event(event)
         finally:
@@ -134,7 +144,7 @@ def kairos_status(goal_id: str, show_all: bool) -> None:
                 status_filter = None if show_all else GoalStatus.ACTIVE
                 goals = kairos.list_goals(status=status_filter, limit=50)
                 if not goals:
-                    click.echo("No goals found.")
+                    _emit("No goals found.")
                     return
                 for g in goals:
                     _print_goal(g, verbose=False, kairos=kairos)
@@ -153,7 +163,7 @@ def kairos_pause(goal_id: str) -> None:
         kairos = _get_kairos()
         try:
             await kairos.pause(goal_id)
-            click.echo(f"⏸  Goal {goal_id} paused.")
+            _emit(f"⏸  Goal {goal_id} paused.")
         finally:
             await kairos.close()
 
@@ -168,7 +178,7 @@ def kairos_resume(goal_id: str) -> None:
     async def _run() -> None:
         kairos = _get_kairos()
         try:
-            click.echo(f"▶  Resuming goal {goal_id}...\n")
+            _emit(f"▶  Resuming goal {goal_id}...\n")
             async for event in kairos.resume(goal_id):
                 _print_event(event)
         finally:
@@ -187,7 +197,7 @@ def kairos_cancel(goal_id: str) -> None:
         kairos = _get_kairos()
         try:
             await kairos.cancel(goal_id)
-            click.echo(f"✗ Goal {goal_id} cancelled.")
+            _emit(f"✗ Goal {goal_id} cancelled.")
         finally:
             await kairos.close()
 
@@ -205,7 +215,7 @@ def kairos_respond(goal_id: str, intervention_id: str, response: str) -> None:
         kairos = _get_kairos()
         try:
             await kairos.resolve_intervention(goal_id, intervention_id, response)
-            click.echo(f"✓ Intervention {intervention_id} resolved.")
+            _emit(f"✓ Intervention {intervention_id} resolved.")
         finally:
             await kairos.close()
 
@@ -229,7 +239,7 @@ def kairos_goals(status: str, limit: int) -> None:
             status_filter = GoalStatus(status) if status else None
             goals = kairos.list_goals(status=status_filter, limit=limit)
             if not goals:
-                click.echo("No goals.")
+                _emit("No goals.")
                 return
             for g in goals:
                 _print_goal(g, verbose=False, kairos=kairos)
@@ -303,29 +313,29 @@ def _print_event(event: Any) -> None:
     elif event.kind == KairosEventKind.CHECKPOINT_CREATED:
         detail = f"  {p.get('completed', 0)}/{p.get('completed', 0) + p.get('pending', 0)} done"
 
-    click.echo(f"{icon} {kind}{detail}")
+    _emit(f"{icon} {kind}{detail}")
 
 
 def _print_goal(goal: Any, *, verbose: bool, kairos: Kairos) -> None:
     icon = _STATUS_ICONS.get(goal.status, "?")
     short_id = goal.goal_id[:8]
-    click.echo(f"{icon} [{short_id}] {goal.title}  ({goal.status.value})")
+    _emit(f"{icon} [{short_id}] {goal.title}  ({goal.status.value})")
     if verbose:
         if goal.description and goal.description != goal.title:
-            click.echo(f"   Description: {goal.description}")
+            _emit(f"   Description: {goal.description}")
         if goal.success_criteria:
-            click.echo("   Success criteria:")
+            _emit("   Success criteria:")
             for c in goal.success_criteria:
-                click.echo(f"     • {c}")
+                _emit(f"     • {c}")
         usage = kairos.get_budget_usage(goal.goal_id)
         if usage.tasks_run > 0:
-            click.echo(
+            _emit(
                 f"   Progress: {usage.tasks_run} tasks, "
                 f"{usage.turns_used} turns, "
                 f"{int(usage.elapsed_seconds)}s elapsed"
             )
         if goal.created_at:
-            click.echo(f"   Created: {goal.created_at.strftime('%Y-%m-%d %H:%M')}")
+            _emit(f"   Created: {goal.created_at.strftime('%Y-%m-%d %H:%M')}")
 
 
 # --- Kairos CLI global settings helpers (enable/disable/status) ---
@@ -356,7 +366,7 @@ def kairos_enable() -> None:
     cfg["kairos"]["enabled"] = True
     cfg["kairos_enabled"] = True
     _write_settings(cfg)
-    click.echo("Kairos enabled for this home (~/.obscura/settings.json updated).")
+    _emit("Kairos enabled for this home (~/.obscura/settings.json updated).")
 
 @kairos_group.command("disable")
 def kairos_disable() -> None:
@@ -366,11 +376,11 @@ def kairos_disable() -> None:
     cfg["kairos"]["enabled"] = False
     cfg["kairos_enabled"] = False
     _write_settings(cfg)
-    click.echo("Kairos disabled for this home (~/.obscura/settings.json updated).")
+    _emit("Kairos disabled for this home (~/.obscura/settings.json updated).")
 
 @kairos_group.command("enabled")
 def kairos_enabled_status() -> None:
     """Show whether Kairos is enabled for this home."""
     cfg = _read_settings()
     enabled = bool(cfg.get("kairos_enabled") or cfg.get("kairos", {}).get("enabled"))
-    click.echo(f"Kairos enabled: {enabled}")
+    _emit(f"Kairos enabled: {enabled}")

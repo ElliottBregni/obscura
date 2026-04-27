@@ -36,9 +36,20 @@ from typing import Any
 import click
 import httpx
 
+# Route user-readable output through the shared render console so the
+# browser-extension native host's console proxy can stream it into the side
+# panel as `chunk` frames. ``click.echo`` writes straight to ``sys.stdout``
+# and bypasses that proxy. Stays plain text (no Rich markup interpretation)
+# so eval-style output (`secrets export`) is unaffected.
 from obscura.auth import secrets as _secrets
+from obscura.cli.render import console
 
 logger = logging.getLogger(__name__)
+
+
+def _emit(text: str) -> None:
+    """Plain-text print through the shared console (panel-safe)."""
+    console.print(text, markup=False, highlight=False, soft_wrap=True)
 
 CREDENTIALS_PATH = Path(
     os.environ.get("OBSCURA_CREDENTIALS_FILE")
@@ -657,9 +668,9 @@ def login(provider: str, email: str | None, no_browser: bool) -> None:
 def logout() -> None:
     """Remove stored Supabase credentials from this machine."""
     if clear_session():
-        click.echo(f"Removed {CREDENTIALS_PATH}.")
+        _emit(f"Removed {CREDENTIALS_PATH}.")
     else:
-        click.echo("No stored credentials to remove.")
+        _emit("No stored credentials to remove.")
 
 
 @auth_group.command("whoami")
@@ -667,18 +678,18 @@ def whoami() -> None:
     """Print the currently authenticated Supabase user."""
     session = load_session()
     if session is None:
-        click.echo("Not signed in.")
+        _emit("Not signed in.")
         raise SystemExit(1)
 
     remaining = session.expires_at - int(time.time())
     state = "valid" if remaining > 0 else "EXPIRED"
     gh_state = "yes" if session.provider_token else "no"
-    click.echo(f"user:        {session.email or session.user_id}")
-    click.echo(f"user_id:     {session.user_id}")
-    click.echo(f"provider:    {session.provider}")
-    click.echo(f"token:       {state} (expires in {max(0, remaining)}s)")
-    click.echo(f"github oauth: {gh_state}")
-    click.echo(f"file:        {CREDENTIALS_PATH}")
+    _emit(f"user:        {session.email or session.user_id}")
+    _emit(f"user_id:     {session.user_id}")
+    _emit(f"provider:    {session.provider}")
+    _emit(f"token:       {state} (expires in {max(0, remaining)}s)")
+    _emit(f"github oauth: {gh_state}")
+    _emit(f"file:        {CREDENTIALS_PATH}")
 
 
 # ---------------------------------------------------------------------------
@@ -764,11 +775,11 @@ def secrets_get(name: str, reveal: bool, force: bool) -> None:
     normalized = _validate_secret_name(name, force=force)
     value = _secrets.resolve(normalized)
     if value is None:
-        click.echo(f"{normalized}: (unset)")
+        _emit(f"{normalized}: (unset)")
         raise SystemExit(1)
     source = _secrets.sources([normalized]).get(normalized, "missing")
     shown = value if reveal else _secrets.mask(value)
-    click.echo(f"{normalized}: {shown} [source: {source}]")
+    _emit(f"{normalized}: {shown} [source: {source}]")
 
 
 @secrets_group.command("delete")
@@ -784,7 +795,7 @@ def secrets_delete(name: str, force: bool) -> None:
     if _secrets.delete(normalized):
         click.secho(f"Removed {normalized} from keyring.", fg="green")
     else:
-        click.echo(f"No keyring entry found for {normalized}.")
+        _emit(f"No keyring entry found for {normalized}.")
 
 
 @secrets_group.command("list")
@@ -797,12 +808,12 @@ def secrets_list(only_set: bool) -> None:
     """Show where every known secret is currently resolved from."""
     mapping = _secrets.sources()
     kr_ready = _secrets.keyring_available()
-    click.echo(f"Keyring backend: {'available' if kr_ready else 'unavailable'}")
+    _emit(f"Keyring backend: {'available' if kr_ready else 'unavailable'}")
     width = max(len(name) for name in mapping)
     for name, source in mapping.items():
         if only_set and source == "missing":
             continue
-        click.echo(f"  {name.ljust(width)}  {source}")
+        _emit(f"  {name.ljust(width)}  {source}")
 
 
 @secrets_group.command("export")
