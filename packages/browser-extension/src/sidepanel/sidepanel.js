@@ -25,6 +25,8 @@ const MsgType = {
   CANCEL: "cancel",
   PING: "ping",
   PONG: "pong",
+  LIST_SESSIONS: "list_sessions",
+  SESSIONS: "sessions",
 };
 
 const StorageManager = {
@@ -90,6 +92,12 @@ const mcpClose = $("#mcp-close");
 const mcpDiscoverBtn = $("#mcp-discover-btn");
 const mcpContent = $("#mcp-content");
 const micBtn = $("#mic-btn");
+const recentSessionsBtn = $("#recent-sessions-btn");
+const recentSessionsModal = $("#recent-sessions-modal");
+const recentSessionsClose = $("#recent-sessions-close");
+const recentSessionsList = $("#recent-sessions-list");
+let recentSessionsRequestId = null;
+let recentSessionsTimeout = null;
 
 // Storage keys. Bump STORAGE_VERSION any time a stored schema changes and
 // add a migration in `migrateStorage()`. chrome.storage.local is already
@@ -1881,6 +1889,101 @@ function hideCheckpointModal() {
   checkpointPendingId = null;
 }
 
+// ---------- Recent sessions modal ----------
+
+function showRecentSessionsModal() {
+  recentSessionsModal.classList.remove("hidden");
+  recentSessionsList.innerHTML = '<div class="recent-sessions-empty">Loading…</div>';
+  const id = crypto.randomUUID?.() ?? `rs-${Date.now()}`;
+  recentSessionsRequestId = id;
+  if (recentSessionsTimeout) clearTimeout(recentSessionsTimeout);
+  recentSessionsTimeout = setTimeout(() => {
+    if (recentSessionsRequestId !== id) return;
+    recentSessionsList.innerHTML =
+      '<div class="recent-sessions-empty">Could not load sessions (timeout).</div>';
+    recentSessionsRequestId = null;
+  }, 5000);
+  try {
+    port?.postMessage({ type: MsgType.LIST_SESSIONS, id });
+  } catch {}
+}
+
+function hideRecentSessionsModal() {
+  recentSessionsModal.classList.add("hidden");
+  recentSessionsRequestId = null;
+  if (recentSessionsTimeout) {
+    clearTimeout(recentSessionsTimeout);
+    recentSessionsTimeout = null;
+  }
+}
+
+function relativeTime(iso) {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const sec = Math.max(1, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function renderRecentSessions(sessions) {
+  recentSessionsList.innerHTML = "";
+  if (!sessions.length) {
+    const empty = document.createElement("div");
+    empty.className = "recent-sessions-empty";
+    empty.textContent = "No saved sessions.";
+    recentSessionsList.appendChild(empty);
+    return;
+  }
+  for (const s of sessions) {
+    const row = document.createElement("div");
+    row.className = "recent-session-row";
+    row.dataset.sid = s.session_id || "";
+
+    const title = document.createElement("div");
+    title.className = "recent-session-title";
+    const summary = (s.summary || "").trim();
+    title.textContent = summary
+      ? (summary.length > 60 ? summary.slice(0, 60) + "…" : summary)
+      : (s.session_id || "(no title)");
+
+    const meta = document.createElement("div");
+    meta.className = "recent-session-meta";
+    const parts = [];
+    if (s.backend) parts.push(s.backend);
+    if (s.message_count) parts.push(`${s.message_count} msgs`);
+    const rel = relativeTime(s.created);
+    if (rel) parts.push(rel);
+    meta.textContent = parts.join(" · ");
+
+    row.appendChild(title);
+    row.appendChild(meta);
+    row.addEventListener("click", () => {
+      const sid = row.dataset.sid;
+      if (!sid) return;
+      hideRecentSessionsModal();
+      const id = crypto.randomUUID?.() ?? `r-${Date.now()}`;
+      try {
+        port?.postMessage({
+          type: MsgType.COMMAND,
+          id,
+          raw: `/resume ${sid}`,
+          backend: backendSel.value,
+        });
+      } catch {}
+    });
+    recentSessionsList.appendChild(row);
+  }
+}
+
+recentSessionsBtn?.addEventListener("click", showRecentSessionsModal);
+recentSessionsClose?.addEventListener("click", hideRecentSessionsModal);
+recentSessionsModal?.addEventListener("click", (e) => {
+  if (e.target === recentSessionsModal) hideRecentSessionsModal();
+});
+
 function parseCheckpointList(text) {
   // Extract checkpoint names from lines like "  · name" or "name" or "- name"
   const names = [];
@@ -2233,6 +2336,16 @@ function connect() {
       }
       case "auth_required": {
         showAuthGate();
+        break;
+      }
+      case MsgType.SESSIONS: {
+        // Reply to our list_sessions probe — render the modal list.
+        if (msg.id !== recentSessionsRequestId) break;
+        if (recentSessionsTimeout) {
+          clearTimeout(recentSessionsTimeout);
+          recentSessionsTimeout = null;
+        }
+        renderRecentSessions(Array.isArray(msg.sessions) ? msg.sessions : []);
         break;
       }
       case "browser-tool": {
@@ -2590,6 +2703,11 @@ document.addEventListener("keydown", (e) => {
       hideDiagOverlay();
       return;
     }
+    if (!recentSessionsModal.classList.contains("hidden")) {
+      e.preventDefault();
+      hideRecentSessionsModal();
+      return;
+    }
     if (shortcutsVisible()) {
       e.preventDefault();
       hideShortcuts();
@@ -2607,6 +2725,23 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     toggleShortcuts();
     return;
+  }
+
+  // "/" — focus composer and trigger slash autocomplete (when not already
+  // typing into an input/textarea/select).
+  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const t = document.activeElement;
+    const tag = t?.tagName;
+    const editable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable;
+    if (!editable) {
+      e.preventDefault();
+      input.focus();
+      // Insert "/" at the start so the existing slash autocomplete fires.
+      input.value = "/" + input.value;
+      input.setSelectionRange(1, 1);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
   }
 
   // ⌘/Ctrl+T and ⌘/Ctrl+W from anywhere

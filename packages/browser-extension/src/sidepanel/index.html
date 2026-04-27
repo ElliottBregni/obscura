@@ -24,6 +24,7 @@
         <select id="session-picker" title="Recent sessions">
           <option value="">current</option>
         </select>
+        <button id="recent-sessions-btn" type="button" title="Browse past sessions on the host">⏱</button>
         <label class="toggle" title="Attach the current tab's URL, title, and selection">
           <input type="checkbox" id="include-context" checked />
           <span>ctx</span>
@@ -152,6 +153,17 @@
           <button id="fleet-close" class="fleet-close" type="button">×</button>
         </div>
         <div id="fleet-content" class="fleet-content"></div>
+      </div>
+    </div>
+
+    <!-- Recent sessions modal -->
+    <div id="recent-sessions-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <span class="modal-title">recent sessions</span>
+          <button id="recent-sessions-close" class="modal-close" type="button">×</button>
+        </div>
+        <div id="recent-sessions-list" class="recent-sessions-list">Loading…</div>
       </div>
     </div>
 
