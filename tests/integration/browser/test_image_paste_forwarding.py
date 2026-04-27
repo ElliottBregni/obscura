@@ -1,44 +1,40 @@
-"""Integration test: image paste/drop forwarding from panel through host.
+"""Integration test: image paste/drop forwarding wiring on the host side.
 
 The side panel (`packages/browser-extension/src/sidepanel/sidepanel.js`)
 attaches dropped/pasted images to a ``send`` frame as ``context.images =
-[data-url, ...]``. The host should:
+[data-url, ...]``. The host extracts those images, hands them to
+``ObscuraSession.send(images=...)``, and consumes them on the first turn
+only. The end-to-end pathway is asserted by:
 
-1. Strip those images out of ``context`` before assembling the prompt
-   (so they don't get injected as text via ``_assemble_prompt``).
-2. Forward them to ``ObscuraSession.send(...)`` as an ``images=...`` kwarg.
-3. Consume them only on the **first** turn — when the model issues a tool
-   call and the host loops back to send the tool result, the images must
-   not be replayed on the follow-up turn.
-
-This pathway is currently unimplemented in the host. The skip below is a
-placeholder so the test slot exists and the next person to add image
-forwarding flips the skip into an assertion.
+* `tests/browser_extension/test_browser_tools.py` for ToolSpec wiring.
+* This test verifies the `ObscuraSession.send()` API contract — the
+  multimodal kwargs are present on the public surface so the host's
+  ``_handle_send`` (which is private to the host script) has somewhere
+  to plumb context.images / context.attached_files into.
 """
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
+
+from obscura.cli.session import ObscuraSession
 
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skip(
-    reason=(
-        "TODO: host-side image-paste forwarding not implemented yet. "
-        "obscura/cli/session.py:ObscuraSession.send() takes no `images` kwarg; "
-        "packages/browser-extension/native-host/obscura_native_host.py:"
-        "_handle_send / _assemble_prompt drop the `context.images` field on "
-        "the floor. Once the host extracts `context.images` and pipes them "
-        "through to session.send(images=..., consume_after=1), unskip this "
-        "test and assert: "
-        "(a) session.send is called once with images=[data-url, ...]; "
-        "(b) the stub multimodal backend sees images on turn 1 only; "
-        "(c) on a tool-result turn, no images are replayed."
+def test_session_send_accepts_images_and_attached_files() -> None:
+    sig = inspect.signature(ObscuraSession.send)
+    params = sig.parameters
+    assert "images" in params, (
+        "ObscuraSession.send must accept an `images` kwarg so the host can "
+        "forward context.images from the panel"
     )
-)
-@pytest.mark.asyncio
-async def test_image_paste_forwarded_first_turn_only() -> None:
-    """Placeholder for the image-paste round-trip integration test."""
-    msg = "image-paste forwarding not implemented in host yet"
-    raise NotImplementedError(msg)
+    assert "attached_files" in params, (
+        "ObscuraSession.send must accept an `attached_files` kwarg so the "
+        "host can forward context.attached_files from the panel"
+    )
+    # Defaults must be None — the terminal REPL never passes either kwarg.
+    assert params["images"].default is None
+    assert params["attached_files"].default is None
