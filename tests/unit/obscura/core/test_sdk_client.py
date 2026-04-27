@@ -334,6 +334,7 @@ def _make_client_with_mock_backend() -> tuple[ObscuraClient, MagicMock]:
     client._circuit_registry = CircuitBreakerRegistry()  # pyright: ignore[reportPrivateUsage]
     client._max_retries = 2  # pyright: ignore[reportPrivateUsage]
     client._retry_initial_backoff = 0.5  # pyright: ignore[reportPrivateUsage]
+    client._host_callbacks = {}  # pyright: ignore[reportPrivateUsage]
     return client, mock_backend
 
 

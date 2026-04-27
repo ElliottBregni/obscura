@@ -2,30 +2,28 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from obscura.tools.system import UI
+from obscura.core.tool_context import ToolContext, bind_tool_context
+from obscura.tools.system import user_interact
 
-user_interact = UI.user_interact
 
-
-@pytest.fixture(autouse=True)
-def _reset_callback():
-    """Reset the user_interact callback before/after each test."""
-    UI.set_user_interact_callback(None)
-    yield
-    UI.set_user_interact_callback(None)
+@contextlib.contextmanager
+def _user_interact_ctx(cb: Any) -> Iterator[None]:
+    """Bind a ToolContext with the given user_interact callback."""
+    with bind_tool_context(ToolContext(user_interact_callback=cb)):
+        yield
 
 
 def _make_callback(return_value: dict[str, Any]) -> AsyncMock:
-    cb = AsyncMock(return_value=return_value)
-    UI.set_user_interact_callback(cb)
-    return cb
+    return AsyncMock(return_value=return_value)
 
 
 # ---------------------------------------------------------------------------
@@ -35,13 +33,14 @@ def _make_callback(return_value: dict[str, Any]) -> AsyncMock:
 
 @pytest.mark.asyncio
 async def test_permission_approved() -> None:
-    _make_callback({"approved": True})
-    raw = await user_interact(
-        mode="permission",
-        action="delete file",
-        reason="cleanup",
-        risk="high",
-    )
+    cb = _make_callback({"approved": True})
+    with _user_interact_ctx(cb):
+        raw = await user_interact(
+            mode="permission",
+            action="delete file",
+            reason="cleanup",
+            risk="high",
+        )
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["approved"] is True
@@ -50,13 +49,14 @@ async def test_permission_approved() -> None:
 
 @pytest.mark.asyncio
 async def test_permission_denied() -> None:
-    _make_callback({"approved": False})
-    raw = await user_interact(
-        mode="permission",
-        action="drop table",
-        reason="migration",
-        risk="critical",
-    )
+    cb = _make_callback({"approved": False})
+    with _user_interact_ctx(cb):
+        raw = await user_interact(
+            mode="permission",
+            action="drop table",
+            reason="migration",
+            risk="critical",
+        )
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["approved"] is False
@@ -79,13 +79,14 @@ async def test_permission_no_callback() -> None:
 @pytest.mark.asyncio
 async def test_notify_tui_channel() -> None:
     cb = _make_callback({})
-    raw = await user_interact(
-        mode="notify",
-        title="Done",
-        message="Task complete",
-        priority="normal",
-        channels=["tui"],
-    )
+    with _user_interact_ctx(cb):
+        raw = await user_interact(
+            mode="notify",
+            title="Done",
+            message="Task complete",
+            priority="normal",
+            channels=["tui"],
+        )
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["delivered"] is True
@@ -157,8 +158,12 @@ async def test_notify_no_callback_still_delivers_bell() -> None:
 @pytest.mark.asyncio
 async def test_notify_default_channels() -> None:
     """Default channels are tui + bell."""
-    _make_callback({})
-    with patch.object(sys.stdout, "write"), patch.object(sys.stdout, "flush"):
+    cb = _make_callback({})
+    with (
+        _user_interact_ctx(cb),
+        patch.object(sys.stdout, "write"),
+        patch.object(sys.stdout, "flush"),
+    ):
         raw = await user_interact(
             mode="notify",
             title="Alert",
@@ -177,12 +182,13 @@ async def test_notify_default_channels() -> None:
 
 @pytest.mark.asyncio
 async def test_question_with_choices() -> None:
-    _make_callback({"selected": "Option B"})
-    raw = await user_interact(
-        mode="question",
-        question="Pick one",
-        choices=["Option A", "Option B"],
-    )
+    cb = _make_callback({"selected": "Option B"})
+    with _user_interact_ctx(cb):
+        raw = await user_interact(
+            mode="question",
+            question="Pick one",
+            choices=["Option A", "Option B"],
+        )
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["selected"] == "Option B"
@@ -190,8 +196,9 @@ async def test_question_with_choices() -> None:
 
 @pytest.mark.asyncio
 async def test_question_freetext() -> None:
-    _make_callback({"selected": "my custom answer"})
-    raw = await user_interact(mode="question", question="What do you think?")
+    cb = _make_callback({"selected": "my custom answer"})
+    with _user_interact_ctx(cb):
+        raw = await user_interact(mode="question", question="What do you think?")
     result = json.loads(raw)
     assert result["ok"] is True
     assert result["selected"] == "my custom answer"

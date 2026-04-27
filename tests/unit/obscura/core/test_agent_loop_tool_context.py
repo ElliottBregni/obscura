@@ -44,10 +44,8 @@ async def test_handler_sees_bound_tool_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handler_sees_host_callbacks_from_globals() -> None:
-    """Legacy ``set_*_callback`` globals are surfaced in the bound ToolContext."""
-    from obscura.tools import system as system_mod
-
+async def test_handler_sees_host_callbacks_from_loop_construction() -> None:
+    """Host callbacks passed to AgentLoop are surfaced in the bound ToolContext."""
     seen: dict[str, object] = {}
 
     @tool("captures_callbacks", "capture host callbacks")
@@ -63,20 +61,19 @@ async def test_handler_sees_host_callbacks_from_globals() -> None:
     def _mode(mode: str) -> None:
         pass
 
-    prev_ask = system_mod._ask_user_callback
-    prev_mode = system_mod._set_permission_mode_callback
-    system_mod._ask_user_callback = _ask
-    system_mod._set_permission_mode_callback = _mode
-    try:
-        registry = ToolRegistry()
-        registry.register(captures_callbacks.spec)
-        loop = AgentLoop(backend=None, tool_registry=registry)
+    registry = ToolRegistry()
+    registry.register(captures_callbacks.spec)
+    loop = AgentLoop(
+        backend=None,
+        tool_registry=registry,
+        host_callbacks={
+            "ask_user_callback": _ask,
+            "permission_mode_callback": _mode,
+        },
+    )
 
-        tc = ToolCallInfo(tool_use_id="c", name="captures_callbacks", input={})
-        envelope = await loop._execute_single_tool(tc, seen_calls={})
-    finally:
-        system_mod._ask_user_callback = prev_ask
-        system_mod._set_permission_mode_callback = prev_mode
+    tc = ToolCallInfo(tool_use_id="c", name="captures_callbacks", input={})
+    envelope = await loop._execute_single_tool(tc, seen_calls={})
 
     assert envelope.status == "ok"
     assert seen["ask_user"] is _ask

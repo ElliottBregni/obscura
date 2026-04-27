@@ -25,14 +25,14 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from obscura.cli.bootstrap import (
-    _discover_mcp,  # pyright: ignore[reportPrivateUsage]
-    _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]
+    _discover_mcp,
+    _run_inline_agent_from_mention,
 )
 from obscura.cli.commands import (
-    _FILE_WRITE_TOOLS,  # pyright: ignore[reportPrivateUsage]
+    _FILE_WRITE_TOOLS,
     REPLContext,
     handle_command,
 )
@@ -68,7 +68,7 @@ _log = logging.getLogger("obscura.cli.session")
 _session_state: dict[str, bool] = {"titled": False}
 
 
-def _swallow(label: str, exc: Exception) -> None:  # pyright: ignore[reportUnusedFunction]
+def _swallow(label: str, exc: Exception) -> None:
     """Log a swallowed exception at DEBUG level instead of silently ignoring."""
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
@@ -82,13 +82,13 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
                 before = ""
-            ctx._pending_file_reads[ev.tool_use_id] = (path, before)  # pyright: ignore[reportPrivateUsage]
+            ctx._pending_file_reads[ev.tool_use_id] = (path, before)
 
     elif (
         ev.kind == AgentEventKind.TOOL_RESULT
-        and ev.tool_use_id in ctx._pending_file_reads  # pyright: ignore[reportPrivateUsage]
+        and ev.tool_use_id in ctx._pending_file_reads
     ):
-        path, before = ctx._pending_file_reads.pop(ev.tool_use_id)  # pyright: ignore[reportPrivateUsage]
+        path, before = ctx._pending_file_reads.pop(ev.tool_use_id)
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
@@ -120,7 +120,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
 
 def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     """If in PLAN mode, attempt to parse a structured plan from the response."""
-    mm = ctx._mode_manager  # pyright: ignore[reportPrivateUsage]
+    mm = ctx._mode_manager
     if mm is None:
         return
 
@@ -140,7 +140,7 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
         render_plan(plan)
 
 
-def _track_task_surface_event(ctx: Any, ev: Any) -> None:  # pyright: ignore[reportUnusedFunction]
+def _track_task_surface_event(ctx: Any, ev: Any) -> None:
     """Compatibility stub: track a task-surface event (no-op)."""
     return
 
@@ -173,6 +173,33 @@ class SessionConfig:
     # server exposing the browser tools on Codex sessions.  Safe to
     # leave as ``None`` — equivalent to an empty list.
     extra_mcp_servers: list[dict[str, Any]] | None = None
+    # Optional storage scope. When set, ``events.db`` and the SQLite
+    # vector-memory directory are routed under
+    # ``~/.obscura/profiles/<profile_id>/`` so multiple Chrome profiles
+    # can run obscura side-by-side without sharing SQLite session ids.
+    # ``None`` (the default) preserves legacy single-tenant behaviour:
+    # the terminal REPL keeps writing to ``~/.obscura/events.db``.
+    profile_id: str | None = None
+
+
+def _resolve_profile_home(profile_id: str | None) -> Path:
+    """Return the storage root for a given profile.
+
+    With ``profile_id=None`` this is the legacy ``~/.obscura`` (terminal
+    REPL behaviour, unchanged). With a profile id set, it's
+    ``~/.obscura/profiles/<profile_id>``. The directory is *not* created
+    here — callers materialise it on first write (``SQLiteEventStore``
+    auto-creates parents, the vector memory backend auto-creates its dir).
+
+    Note: this is *not* a migration helper. If the legacy ``events.db``
+    exists and a profile-scoped one does not, the legacy db is left
+    alone — it's shared across profiles and overwriting it would corrupt
+    other profiles' state. The profile gets a fresh db on first use.
+    """
+    home = resolve_obscura_home()
+    if profile_id:
+        return home / "profiles" / profile_id
+    return home
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +216,7 @@ class ObscuraSession:
 
     # Populated by create()
     _config: SessionConfig
+    _profile_home: Path
     _store: SQLiteEventStore
     _sid: str
     _ctx: REPLContext
@@ -230,17 +258,24 @@ class ObscuraSession:
         self._tip_scheduler = None
         self._background_tasks = set()
 
-        self._store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        # Profile-scoped storage. ``profile_id`` is supplied by the
+        # browser-extension native host (one host process per Chrome
+        # profile); terminal REPL leaves it as ``None`` and keeps the
+        # legacy shared paths.
+        self._profile_home = _resolve_profile_home(config.profile_id)
+        self._store = SQLiteEventStore(self._profile_home / "events.db")
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
-        mcp_configs, _ = self._discover_tools(config)
+        mcp_configs, _mcp_names = self._discover_tools(config)
         self._init_vector_memory()
         combined_system = self._compose_system_prompt(config)
         self._combined_system = combined_system
         system_tools, tool_count = self._assemble_tools(config)
         self._tool_count = tool_count
-        project_hooks = self._wire_callbacks_and_hooks(config, system_tools)
+        host_callbacks, project_hooks = self._wire_callbacks_and_hooks(
+            config, system_tools
+        )
 
         # Build client
         client = ObscuraClient(
@@ -250,6 +285,7 @@ class ObscuraSession:
             tools=system_tools or None,
             mcp_servers=mcp_configs or None,
             hooks=project_hooks,
+            host_callbacks=host_callbacks,
         )
         self._client_cm = client
         await client.__aenter__()
@@ -352,16 +388,67 @@ class ObscuraSession:
         *,
         streaming_status: Any | None = None,
         loop_kwargs: dict[str, Any] | None = None,
+        images: list[Any] | None = None,
+        attached_files: list[dict[str, Any]] | None = None,
     ) -> str:
         """Send a chat message and stream the response.
 
         Returns the accumulated assistant text.  All pre/post-processing
         (vector memory, auto-compact, auto-title, plan parsing) is included.
+
+        ``images`` accepts a list of either data URLs (``data:image/png;
+        base64,…``), raw base64 strings, or dicts with ``data``/``dataUrl``/
+        ``base64`` and optional ``media_type``. They are forwarded to the
+        backend as multimodal content blocks (Claude); other backends
+        receive the plain prompt and a textual marker per image.
+
+        ``attached_files`` accepts a list of ``{name, content}`` dicts and is
+        prepended to the prompt as ``<file path="…">…</file>`` blocks.
         """
         from obscura.cli import trace as trace_mod
 
         ctx = self._ctx
         effective_kwargs = loop_kwargs if loop_kwargs is not None else self._loop_kwargs
+
+        # ── Attached files: prepend as tagged blocks before the user prompt.
+        if attached_files:
+            file_blocks: list[str] = []
+            for f in attached_files:
+                try:
+                    name = str(f.get("name") or "attachment")
+                    content = str(f.get("content") or "")
+                except Exception:
+                    continue
+                if not content:
+                    continue
+                # Escape the closing tag so file content can't break out.
+                safe = content.replace("</file>", "<\u2009/file>")
+                file_blocks.append(f'<file path="{name}">\n{safe}\n</file>')
+            if file_blocks:
+                text = "\n\n".join(file_blocks) + "\n\n" + text
+
+        # ── Images: append a textual marker per image so backends without
+        # vision plumbing still know images were referenced. The actual
+        # image data is forwarded via ``run_loop(images=…)`` below.
+        normalized_images: list[Any] = []
+        if images:
+            markers: list[str] = []
+            for i, item in enumerate(images):
+                name = ""
+                if isinstance(item, dict):
+                    from typing import cast as _cast
+
+                    item_dict = _cast("dict[str, Any]", item)
+                    raw_name = item_dict.get("name") or item_dict.get("filename")
+                    if isinstance(raw_name, str):
+                        name = raw_name
+                if not name:
+                    name = f"image-{i + 1}"
+                markers.append(f"[image: {name}]")
+                normalized_images.append(item)
+            if markers:
+                marker_block = " ".join(markers)
+                text = f"{text}\n\n{marker_block}" if text else marker_block
 
         # Inline agent check
         inline_agent_response = await _run_inline_agent_from_mention(ctx, text)
@@ -377,7 +464,7 @@ class ObscuraSession:
                     text,
                     inline_agent_response,
                     turn_number=turn_num,
-                    classifier=ctx._turn_classifier,  # pyright: ignore[reportPrivateUsage]
+                    classifier=ctx._turn_classifier,
                 )
             return inline_agent_response
 
@@ -385,10 +472,9 @@ class ObscuraSession:
 
         renderer = create_renderer(streaming_status=streaming_status)
         # Feed session context into the modern renderer's status bar
-        renderer_any: Any = renderer
         if hasattr(renderer, "set_session_context"):
             _ps = getattr(ctx, "_prompt_status", None)
-            renderer_any.set_session_context(
+            renderer.set_session_context(
                 title=getattr(_ps, "session_title", "") or "",
                 model=ctx.model or "",
                 ctx_pct=getattr(_ps, "ctx_pct", 0),
@@ -433,7 +519,7 @@ class ObscuraSession:
         _compact_threshold = int(_context_window * 0.60)
         _warn_threshold = ctx.client.context_warn_threshold
 
-        from obscura.tools.system import Session
+        from obscura.tools.system import update_token_usage
 
         # ── Vector memory pre-search ──────────────────────────────────────
         augmented_text = text
@@ -442,8 +528,8 @@ class ObscuraSession:
             augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
         if ctx.vector_store is not None:
-            if ctx._context_router is not None:  # pyright: ignore[reportPrivateUsage]
-                vm_context = search_with_router(ctx._context_router, text)  # pyright: ignore[reportPrivateUsage]
+            if ctx._context_router is not None:
+                vm_context = search_with_router(ctx._context_router, text)
             else:
                 vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
             if vm_context:
@@ -453,7 +539,7 @@ class ObscuraSession:
             ctx,
             pending_user_text=augmented_text,
         )
-        Session.update_token_usage(
+        update_token_usage(
             input_tokens=_pre_tokens,
             context_window=_context_window,
             compact_threshold=_compact_threshold,
@@ -471,7 +557,7 @@ class ObscuraSession:
                     return
                 if now - _last_usage_push < 0.75:
                     return
-            Session.update_token_usage(
+            update_token_usage(
                 input_tokens=_pre_tokens,
                 output_tokens=est_output_tokens,
                 context_window=_context_window,
@@ -497,16 +583,22 @@ class ObscuraSession:
             nonlocal _stream_output_chars
             _buf: list[str] = []
             _effective_kwargs = dict(effective_kwargs)
-            if hasattr(ctx, "_effort_level") and ctx._effort_level:  # pyright: ignore[reportPrivateUsage]
+            if hasattr(ctx, "_effort_level") and ctx._effort_level:
                 try:
                     from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
-                    _lvl = EffortLevel(ctx._effort_level)  # pyright: ignore[reportPrivateUsage]
+                    _lvl = EffortLevel(ctx._effort_level)
                     _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[
                         _lvl
                     ]
                 except (ValueError, KeyError):
                     pass
+            # Forward multimodal images so the Claude backend can attach them
+            # as content blocks. Other backends receive the kwarg through
+            # ``**kwargs`` and silently ignore it (a textual ``[image: name]``
+            # marker is already in the prompt as a fallback for them).
+            if normalized_images:
+                _effective_kwargs["images"] = normalized_images
             _s = ctx.client.run_loop(
                 augmented_text,
                 max_turns=ctx.max_turns,
@@ -572,8 +664,8 @@ class ObscuraSession:
                             from obscura.cli.tool_collapse import ToolCollapser
 
                             if not hasattr(ctx, "_collapser"):
-                                ctx._collapser = ToolCollapser()  # pyright: ignore[reportPrivateUsage]
-                            ctx._collapser.record(tool_name, tool_input)  # pyright: ignore[reportPrivateUsage]
+                                ctx._collapser = ToolCollapser()
+                            ctx._collapser.record(tool_name, tool_input)
                         except Exception:
                             pass
                         # Tips
@@ -604,16 +696,13 @@ class ObscuraSession:
                     ):
                         meta = getattr(event, "metadata", None)
                         if meta is not None:
-                            _usage: Any = getattr(meta, "usage", None) or {}
+                            _usage = getattr(meta, "usage", None) or {}
                             if isinstance(_usage, dict):
-                                _usage_dict = cast(dict[str, Any], _usage)
-                                inp: int = int(_usage_dict.get("input_tokens", 0) or 0)
-                                out: int = int(
-                                    _usage_dict.get("output_tokens", 0) or 0
-                                )
+                                inp = _usage.get("input_tokens", 0) or 0
+                                out = _usage.get("output_tokens", 0) or 0
                             else:
-                                inp = int(getattr(_usage, "input_tokens", 0) or 0)
-                                out = int(getattr(_usage, "output_tokens", 0) or 0)
+                                inp = getattr(_usage, "input_tokens", 0) or 0
+                                out = getattr(_usage, "output_tokens", 0) or 0
                             if inp > 0 or out > 0:
                                 try:
                                     from obscura.core.cost_tracker import (
@@ -711,13 +800,13 @@ class ObscuraSession:
                 text,
                 response_text,
                 turn_number=turn_num,
-                classifier=ctx._turn_classifier,  # pyright: ignore[reportPrivateUsage]
+                classifier=ctx._turn_classifier,
             )
 
         # Post-send: update token tracker
         _push_stream_token_usage(force=True)
         _post_tokens = estimate_effective_context_tokens(ctx)
-        Session.update_token_usage(
+        update_token_usage(
             input_tokens=_post_tokens,
             output_tokens=len(response_text) // 4,
             context_window=_context_window,
@@ -753,18 +842,14 @@ class ObscuraSession:
             try:
                 from obscura.core.session_utils import generate_session_title
 
-                title = await generate_session_title(
-                    text,
-                    ctx.client._backend,  # pyright: ignore[reportPrivateUsage]
-                )
+                title = await generate_session_title(text, ctx.client._backend)
                 if title:
                     await ctx.store.update_session(ctx.session_id, summary=title)
-                    ctx_any: Any = ctx
                     if (
                         hasattr(ctx, "_prompt_status")
-                        and ctx_any._prompt_status is not None
+                        and ctx._prompt_status is not None
                     ):
-                        ctx_any._prompt_status.session_title = title
+                        ctx._prompt_status.session_title = title
                     console.print(
                         f"  [dim]session titled:[/] [bold bright_cyan]{title}[/]",
                         highlight=False,
@@ -777,10 +862,10 @@ class ObscuraSession:
 
         # Auto-detect question choices
         try:
-            from obscura.tools.system import UI
+            from obscura.tools.system import reset_ask_user_called, was_ask_user_called
 
-            _tool_asked = UI.was_ask_user_called()
-            UI.reset_ask_user_called()
+            _tool_asked = was_ask_user_called()
+            reset_ask_user_called()
 
             if not _tool_asked:
                 from obscura.cli.widgets import (
@@ -924,7 +1009,7 @@ class ObscuraSession:
                         contacts=tuple(im_cfg.get("contacts", [])),
                         poll_interval=im_cfg.get("poll_interval", 30),
                         notify_user=tdef.notify_user,
-                        priority=cast(Any, tdef.priority),
+                        priority=tdef.priority,
                         data=im_data,
                     ),
                 )
@@ -971,7 +1056,7 @@ class ObscuraSession:
                 _log.debug("Failed to load persisted schedules: %s", _sched_exc)
 
             daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
-            daemon._bus = bus  # pyright: ignore[reportPrivateUsage]
+            daemon._bus = bus
             task: asyncio.Task[None] = asyncio.create_task(
                 daemon.loop_forever(),
                 name=f"daemon-{agent_def.name}",
@@ -1056,6 +1141,18 @@ class ObscuraSession:
         )
         self._cli_user = cli_user
 
+        # Scope the SQLite vector backend to the profile dir if a
+        # profile_id is set and the env var hasn't been explicitly
+        # overridden by the caller. The vector backend reads this env
+        # var lazily on first instantiation, so set it before
+        # ``init_vector_store`` runs. We don't migrate any existing
+        # ``~/.obscura/vector_memory/`` data — the profile gets a fresh
+        # store on first write, mirroring the events.db policy.
+        if self._config.profile_id and "OBSCURA_VECTOR_MEMORY_DIR" not in os.environ:
+            os.environ["OBSCURA_VECTOR_MEMORY_DIR"] = str(
+                self._profile_home / "vector_memory",
+            )
+
         self._vector_store = init_vector_store(cli_user)
 
         if self._vector_store is not None:
@@ -1092,7 +1189,9 @@ class ObscuraSession:
         if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
             include_default = False
 
-        db_path = resolve_obscura_home() / "events.db"
+        # Reuse the profile-scoped events.db computed in ``create()``
+        # so memory loading sees the same store the session writes to.
+        db_path = self._profile_home / "events.db"
         memory_context = load_obscura_memory(self._sid, db_path)
         custom_sections: list[str] = [memory_context] if memory_context else []
 
@@ -1347,58 +1446,70 @@ class ObscuraSession:
         self,
         config: SessionConfig,
         system_tools: list[Any],
-    ) -> Any:
-        """Wire ask_user, permission, plan callbacks and project hooks."""
-        # We need a forward reference to ctx for callbacks.
-        # The callbacks capture `self` and access self._ctx at call time.
+    ) -> tuple[dict[str, Any], Any]:
+        """Build host callbacks (ask_user, plan-mode, user_interact) and
+        wire project hooks. Returns ``(host_callbacks, project_hooks)``.
+        """
+        # Callbacks capture ``self`` and resolve ``self._ctx`` at call time,
+        # since the REPL context is created after this function returns.
 
+        host_callbacks: dict[str, Any] = {}
         if config.tools_enabled:
-            # ask_user callback
-            try:
-                from obscura.tools.system import UI as _UI_for_ask
+            async def _ask_user_handler(
+                question: str,
+                choices: list[str],
+                allow_custom: bool = False,
+            ) -> str:
+                from obscura.cli.widgets import (
+                    AttentionWidgetRequest,
+                    ModelQuestionRequest,
+                    ask_model_question,
+                    confirm_attention,
+                )
 
-                async def _ask_user_handler(
-                    question: str,
-                    choices: list[str],
-                    allow_custom: bool = False,
-                ) -> str:
-                    from obscura.cli.widgets import (
-                        AttentionWidgetRequest,
-                        ModelQuestionRequest,
-                        ask_model_question,
-                        confirm_attention,
+                if choices:
+                    result = await confirm_attention(
+                        AttentionWidgetRequest(
+                            request_id="ask_user",
+                            agent_name="assistant",
+                            message=question,
+                            priority="normal",
+                            actions=tuple(choices),
+                        ),
                     )
+                    return result.action
+                result = await ask_model_question(
+                    ModelQuestionRequest(question=question),
+                )
+                return result.text
 
-                    if choices:
-                        result = await confirm_attention(
-                            AttentionWidgetRequest(
-                                request_id="ask_user",
-                                agent_name="assistant",
-                                message=question,
-                                priority="normal",
-                                actions=tuple(choices),
-                            ),
-                        )
-                        return result.action
-                    result = await ask_model_question(
-                        ModelQuestionRequest(question=question),
-                    )
-                    return result.text
+            host_callbacks["ask_user_callback"] = _ask_user_handler
 
-                _UI_for_ask.set_ask_user_callback(_ask_user_handler)
-            except Exception:
-                pass
+            def _set_permission_mode(mode: str) -> None:
+                self._ctx._permission_mode = mode
 
-            # Permission mode + plan approval callbacks
-            try:
-                from obscura.tools.system import Session as _Session_for_plan
+            async def _plan_approval_handler(plan_summary: str) -> bool:
+                from obscura.cli.widgets import (
+                    PermissionWidgetRequest,
+                    confirm_permission,
+                )
 
-                def _set_permission_mode(mode: str) -> None:
-                    self._ctx._permission_mode = mode  # pyright: ignore[reportPrivateUsage]
+                result = await confirm_permission(
+                    PermissionWidgetRequest(
+                        action="Exit plan mode and begin implementation",
+                        reason=plan_summary or "Agent wants to leave plan mode.",
+                        risk="medium",
+                    ),
+                )
+                return result.action == "approve"
 
-                _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
+            host_callbacks["permission_mode_callback"] = _set_permission_mode
+            host_callbacks["plan_approval_callback"] = _plan_approval_handler
 
-                async def _plan_approval_handler(plan_summary: str) -> bool:
+            async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
+                mode = kwargs.get("mode", "question")
+
+                if mode == "permission":
                     from obscura.cli.widgets import (
                         PermissionWidgetRequest,
                         confirm_permission,
@@ -1406,102 +1517,74 @@ class ObscuraSession:
 
                     result = await confirm_permission(
                         PermissionWidgetRequest(
-                            action="Exit plan mode and begin implementation",
-                            reason=plan_summary or "Agent wants to leave plan mode.",
-                            risk="medium",
+                            action=kwargs.get("action", ""),
+                            reason=kwargs.get("reason", ""),
+                            risk=kwargs.get("risk", "low"),
                         ),
                     )
-                    return result.action == "approve"
+                    return {"approved": result.action == "approve"}
 
-                _Session_for_plan.set_plan_approval_callback(_plan_approval_handler)
-            except Exception:
-                pass
-
-            # user_interact callback
-            try:
-                from obscura.tools.system import UI as _UI_for_interact
-
-                async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
-                    mode = kwargs.get("mode", "question")
-
-                    if mode == "permission":
-                        from obscura.cli.widgets import (
-                            PermissionWidgetRequest,
-                            confirm_permission,
-                        )
-
-                        result = await confirm_permission(
-                            PermissionWidgetRequest(
-                                action=kwargs.get("action", ""),
-                                reason=kwargs.get("reason", ""),
-                                risk=kwargs.get("risk", "low"),
-                            ),
-                        )
-                        return {"approved": result.action == "approve"}
-
-                    if mode == "notify":
-                        from obscura.cli.widgets import (
-                            NotifyWidgetRequest,
-                            render_notification_banner,
-                        )
-
-                        render_notification_banner(
-                            NotifyWidgetRequest(
-                                title=kwargs.get("title", ""),
-                                message=kwargs.get("message", ""),
-                                priority=kwargs.get("priority", "normal"),
-                            ),
-                        )
-                        return {}
-
-                    if mode == "multi_select":
-                        from obscura.cli.widgets import (
-                            MultiSelectRequest,
-                            ask_multi_select as _ask_multi_select,
-                        )
-
-                        choices = kwargs.get("choices", [])
-                        question = kwargs.get("question", "")
-                        result = await _ask_multi_select(
-                            MultiSelectRequest(
-                                question=question,
-                                choices=tuple(choices),
-                            ),
-                        )
-                        selected = [
-                            s.strip() for s in result.text.split(",") if s.strip()
-                        ]
-                        return {"selected": selected}
-
-                    # question mode (default)
+                if mode == "notify":
                     from obscura.cli.widgets import (
-                        AttentionWidgetRequest,
-                        ModelQuestionRequest,
-                        ask_model_question,
-                        confirm_attention,
+                        NotifyWidgetRequest,
+                        render_notification_banner,
+                    )
+
+                    render_notification_banner(
+                        NotifyWidgetRequest(
+                            title=kwargs.get("title", ""),
+                            message=kwargs.get("message", ""),
+                            priority=kwargs.get("priority", "normal"),
+                        ),
+                    )
+                    return {}
+
+                if mode == "multi_select":
+                    from obscura.cli.widgets import (
+                        MultiSelectRequest,
+                        ask_multi_select as _ask_multi_select,
                     )
 
                     choices = kwargs.get("choices", [])
                     question = kwargs.get("question", "")
-                    if choices:
-                        result = await confirm_attention(
-                            AttentionWidgetRequest(
-                                request_id="user_interact",
-                                agent_name="assistant",
-                                message=question,
-                                priority="normal",
-                                actions=tuple(choices),
-                            ),
-                        )
-                        return {"selected": result.action}
-                    result = await ask_model_question(
-                        ModelQuestionRequest(question=question),
+                    result = await _ask_multi_select(
+                        MultiSelectRequest(
+                            question=question,
+                            choices=tuple(choices),
+                        ),
                     )
-                    return {"selected": result.text}
+                    selected = [
+                        s.strip() for s in result.text.split(",") if s.strip()
+                    ]
+                    return {"selected": selected}
 
-                _UI_for_interact.set_user_interact_callback(_user_interact_handler)
-            except Exception:
-                pass
+                # question mode (default)
+                from obscura.cli.widgets import (
+                    AttentionWidgetRequest,
+                    ModelQuestionRequest,
+                    ask_model_question,
+                    confirm_attention,
+                )
+
+                choices = kwargs.get("choices", [])
+                question = kwargs.get("question", "")
+                if choices:
+                    result = await confirm_attention(
+                        AttentionWidgetRequest(
+                            request_id="user_interact",
+                            agent_name="assistant",
+                            message=question,
+                            priority="normal",
+                            actions=tuple(choices),
+                        ),
+                    )
+                    return {"selected": result.action}
+                result = await ask_model_question(
+                    ModelQuestionRequest(question=question),
+                )
+                return {"selected": result.text}
+
+            host_callbacks["user_interact_callback"] = _user_interact_handler
 
         # Project hooks
         project_hooks = None
@@ -1569,7 +1652,7 @@ class ObscuraSession:
         except Exception:
             pass
 
-        return project_hooks
+        return host_callbacks, project_hooks
 
     def _wire_tool_router(self, config: SessionConfig) -> None:
         """Wire eval-driven tool router after client creation."""
@@ -1581,7 +1664,7 @@ class ObscuraSession:
             from obscura.core.tool_score_index import ToolScoreIndex
             from obscura.plugins.loader import (
                 PluginLoader,
-                _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
+                _load_plugin_config_flag,
             )
             from obscura.plugins.registries.capability_index import CapabilityIndex
 
@@ -1590,7 +1673,7 @@ class ObscuraSession:
 
             _cap_index = CapabilityIndex()
             _pl = PluginLoader()
-            _all_pspecs: list[Any] = []
+            _all_pspecs = []
             if _load_plugin_config_flag("load_builtins"):
                 _all_pspecs.extend(_pl.discover_builtins())
             _all_pspecs.extend(_pl.discover_local())
@@ -1605,11 +1688,7 @@ class ObscuraSession:
                 capability_index=_cap_index,
                 backend=config.backend,
             )
-            from obscura.core.types import ToolRouterCapable
-
-            backend = self._client._backend  # pyright: ignore[reportPrivateUsage]
-            if isinstance(backend, ToolRouterCapable):
-                backend.set_tool_router(_router)
+            self._client._backend.set_tool_router(_router)
             self._tool_router_ref = _router
         except Exception:
             pass
@@ -1633,16 +1712,12 @@ class ObscuraSession:
             with contextlib.suppress(Exception):
                 await self._client.reset_session()
             try:
-                # ``summarize_session_for_resume`` is provided when the session
-                # context module is available; absent in trimmed installs.
-                ctx_mod: Any = __import__(
-                    "obscura.core.context", fromlist=["summarize_session_for_resume"]
-                )
-                summary: Any = ctx_mod.summarize_session_for_resume(
+                from obscura.core.context import summarize_session_for_resume
+
+                return summarize_session_for_resume(
                     config.session_id,
-                    resolve_obscura_home() / "events.db",
+                    self._profile_home / "events.db",
                 )
-                return str(summary) if summary else ""
             except Exception:
                 pass
         return ""
