@@ -174,7 +174,18 @@ class TabManager {
 
   create(label = "new") {
     if (this._tabs.length >= this._maxTabs) return false;
-    const tab = { id: crypto.randomUUID(), label, sessionId: null, logHTML: "", pending: new Map(), streamStates: {} };
+    const tab = {
+      id: crypto.randomUUID(),
+      label,
+      sessionId: null,
+      logHTML: "",
+      pending: new Map(),
+      streamStates: {},
+      // Per-tab UI selections — captured from the live dropdowns at the
+      // moment the tab is saved/switched, restored when the tab activates.
+      backend: null,
+      workspace: null,
+    };
     this._tabs.push(tab);
     return tab;
   }
@@ -186,13 +197,15 @@ class TabManager {
     return true;
   }
 
-  saveActive(logHTML, sessionId, pending, streamStates) {
+  saveActive(logHTML, sessionId, pending, streamStates, opts = {}) {
     const t = this.active;
     if (!t) return;
     t.logHTML = logHTML;
     t.sessionId = sessionId;
     t.pending = pending;
     t.streamStates = streamStates ?? {};
+    if (opts.backend !== undefined) t.backend = opts.backend;
+    if (opts.workspace !== undefined) t.workspace = opts.workspace;
   }
 
   activate(idx) {
@@ -216,8 +229,15 @@ function createTab(label = "new", activate = true) {
   saveTabs();
 }
 
+function _captureActiveSelections() {
+  return {
+    backend: backendSel?.value || null,
+    workspace: workspaceSel?.value ?? "",
+  };
+}
+
 function closeTab(idx) {
-  tabManager.saveActive(log.innerHTML, sessionId, pending);
+  tabManager.saveActive(log.innerHTML, sessionId, pending, undefined, _captureActiveSelections());
   if (!tabManager.close(idx)) return;
   restoreTab(tabManager.activeIdx);
   renderTabs();
@@ -226,8 +246,9 @@ function closeTab(idx) {
 
 function switchTab(idx) {
   if (idx === tabManager.activeIdx && tabManager.count > 0) return;
-  // save current tab state
-  tabManager.saveActive(log.innerHTML, sessionId, pending);
+  // save current tab state — including the live backend / workspace
+  // selections so the next switch back restores exactly what the user saw.
+  tabManager.saveActive(log.innerHTML, sessionId, pending, undefined, _captureActiveSelections());
   tabManager.activate(idx);
   restoreTab(idx);
   renderTabs();
@@ -240,6 +261,19 @@ function restoreTab(idx) {
   log.innerHTML = tab.logHTML;
   sessionId = tab.sessionId;
   pending = tab.pending || new Map();
+  // Restore per-tab backend / workspace if they were captured. Falls back
+  // to whatever the dropdown currently shows (preserves legacy behaviour
+  // for tabs that pre-date this change).
+  if (tab.backend && backendSel) {
+    if ([...backendSel.options].some((o) => o.value === tab.backend)) {
+      backendSel.value = tab.backend;
+    }
+  }
+  if (tab.workspace !== undefined && tab.workspace !== null && workspaceSel) {
+    if ([...workspaceSel.options].some((o) => o.value === tab.workspace)) {
+      workspaceSel.value = tab.workspace;
+    }
+  }
   scrollToBottom();
 }
 
@@ -249,12 +283,14 @@ function restoreTab(idx) {
 
 function saveTabs() {
   try {
-    tabManager.saveActive(log.innerHTML, sessionId, pending);
+    tabManager.saveActive(log.innerHTML, sessionId, pending, undefined, _captureActiveSelections());
     const tabs = tabManager.all.map((t) => ({
       id: t.id,
       label: t.label,
       sessionId: t.sessionId,
       logHTML: t.logHTML,
+      backend: t.backend ?? null,
+      workspace: t.workspace ?? null,
     }));
     chrome.storage.local.set({ [TABS_KEY]: { tabs, activeIdx: tabManager.activeIdx } });
   } catch (err) {
@@ -274,6 +310,8 @@ async function loadTabs() {
       logHTML: typeof t.logHTML === "string" ? t.logHTML : "",
       pending: new Map(),
       streamStates: {},
+      backend: typeof t.backend === "string" ? t.backend : null,
+      workspace: typeof t.workspace === "string" ? t.workspace : null,
     }));
     const idx = Math.min(Math.max(state.activeIdx | 0, 0), tabManager._tabs.length - 1);
     tabManager._activeIdx = idx;
@@ -478,6 +516,11 @@ function scheduleTranscriptSave() {
 
 backendSel.addEventListener("change", saveSettings);
 ctxToggle.addEventListener("change", saveSettings);
+
+// Persist per-tab dropdown selections immediately so a panel reload
+// without an explicit switch still restores them.
+backendSel.addEventListener("change", () => saveTabs());
+workspaceSel?.addEventListener("change", () => saveTabs());
 
 // ---------------------------------------------------------------------------
 // Per-Chrome-tab state persistence
@@ -3727,6 +3770,41 @@ mcpDiscoverBtn.addEventListener("click", () => {
   } catch {}
 });
 
+// Install-by-slug — small inline form so users can pull a registry entry
+// without dropping to the terminal. Triggers `/mcp install <slug>` and
+// re-runs `/mcp list` afterwards so the panel reflects the new state.
+const mcpInstallInput = $("#mcp-install-input");
+const mcpInstallBtn = $("#mcp-install-btn");
+function _runMcpInstallSlug() {
+  const slug = (mcpInstallInput?.value || "").trim();
+  if (!slug) return;
+  const id = crypto.randomUUID?.() ?? `mcp-${Date.now()}`;
+  mcpPendingId = id;
+  mcpContent.innerHTML = `<div class="mcp-empty">installing ${slug}…</div>`;
+  pending.set(id, {
+    bubble: document.createElement("div"),
+    streamedText: "",
+    silent: true,
+    op: "mcp_install",
+  });
+  try {
+    port?.postMessage({
+      type: MsgType.COMMAND,
+      id,
+      raw: `/mcp install ${slug.replace(/[`\s]/g, "")}`,
+      backend: backendSel.value,
+    });
+  } catch {}
+  mcpInstallInput.value = "";
+}
+mcpInstallBtn?.addEventListener("click", _runMcpInstallSlug);
+mcpInstallInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    _runMcpInstallSlug();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Voice input (Feature 5)
 
@@ -3802,9 +3880,13 @@ mcpDiscoverBtn.addEventListener("click", () => {
 
 // ---------------------------------------------------------------------------
 // Export conversation
+//
+// Default click → markdown. Shift-click → JSON (structured array of
+// {role, text, tools}). Right-click also opens a small picker so users
+// who don't know about Shift get a discoverable affordance.
 
-sbExport.addEventListener("click", async () => {
-  const lines = [];
+function _collectTranscript() {
+  const items = [];
   for (const msg of log.querySelectorAll(".msg")) {
     const role = [...msg.classList].find((c) =>
       ["user", "assistant", "system", "error"].includes(c),
@@ -3813,31 +3895,26 @@ sbExport.addEventListener("click", async () => {
     const raw = msg.dataset.raw;
     const text = raw ?? msg.querySelector(".body")?.textContent ?? "";
     if (!text.trim()) continue;
-
-    const toolCards = msg.querySelectorAll(".tool-input");
-    let toolMd = "";
-    for (const pre of toolCards) {
-      if (pre.textContent.trim()) {
-        toolMd += `\n\`\`\`json\n${pre.textContent.trim()}\n\`\`\`\n`;
+    const tools = [];
+    for (const pre of msg.querySelectorAll(".tool-input")) {
+      const t = pre.textContent.trim();
+      if (!t) continue;
+      try {
+        tools.push({ input: JSON.parse(t) });
+      } catch {
+        tools.push({ input: t });
       }
     }
-
-    if (role === "user") {
-      lines.push(`**You:** ${text.trim()}`);
-    } else if (role === "assistant") {
-      if (toolMd) lines.push(toolMd.trim());
-      lines.push(text.trim());
-    } else {
-      lines.push(`> ${text.trim()}`);
-    }
-    lines.push("");
+    items.push({ role, text: text.trim(), tools });
   }
+  return items;
+}
 
-  const md = lines.join("\n");
+function _downloadBlob(content, mime, ext) {
   const date = new Date().toISOString().slice(0, 10);
   const sid = sessionId ? sessionId.slice(0, 8) : "unknown";
-  const filename = `obscura-session-${sid}-${date}.md`;
-  const blob = new Blob([md], { type: "text/markdown" });
+  const filename = `obscura-session-${sid}-${date}.${ext}`;
+  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -3845,8 +3922,61 @@ sbExport.addEventListener("click", async () => {
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 1000);
+}
+
+function exportAsMarkdown() {
+  const items = _collectTranscript();
+  const lines = [];
+  for (const it of items) {
+    const toolMd = it.tools
+      .map(
+        (t) =>
+          `\n\`\`\`json\n${
+            typeof t.input === "string"
+              ? t.input
+              : JSON.stringify(t.input, null, 2)
+          }\n\`\`\`\n`,
+      )
+      .join("");
+    if (it.role === "user") {
+      lines.push(`**You:** ${it.text}`);
+    } else if (it.role === "assistant") {
+      if (toolMd) lines.push(toolMd.trim());
+      lines.push(it.text);
+    } else {
+      lines.push(`> ${it.text}`);
+    }
+    lines.push("");
+  }
+  _downloadBlob(lines.join("\n"), "text/markdown", "md");
+}
+
+function exportAsJson() {
+  const payload = {
+    session_id: sessionId,
+    backend: backendSel?.value ?? null,
+    workspace: workspaceSel?.value || null,
+    exported_at: new Date().toISOString(),
+    messages: _collectTranscript(),
+  };
+  _downloadBlob(JSON.stringify(payload, null, 2), "application/json", "json");
+}
+
+sbExport.addEventListener("click", (e) => {
+  if (e.shiftKey) exportAsJson();
+  else exportAsMarkdown();
 });
+
+sbExport.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  exportAsJson();
+});
+
+sbExport.title = "Export transcript (click=markdown · shift-click or right-click=JSON)";
 
 // ---------------------------------------------------------------------------
 // Auth gate

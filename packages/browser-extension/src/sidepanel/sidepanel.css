@@ -2308,6 +2308,43 @@ details.tool-card.has-result .tool-dot {
   color: var(--fg);
 }
 
+.mcp-install-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mcp-install-row input {
+  flex: 1;
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font: 11px var(--mono);
+  color: var(--fg);
+}
+
+.mcp-install-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mcp-install-row button {
+  background: var(--bg-alt);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font: 11px var(--mono);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.mcp-install-row button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .mcp-content {
   overflow-y: auto;
   padding: 10px 14px;
