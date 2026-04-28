@@ -32,8 +32,7 @@ if [ -z "$QDRANT_BIN" ]; then
 fi
 
 # Start Qdrant, binding only to localhost
-"$QDRANT_BIN" \
-  --storage-path "$STORAGE_PATH" \
+QDRANT__STORAGE__STORAGE_PATH="$STORAGE_PATH" "$QDRANT_BIN" \
   >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"

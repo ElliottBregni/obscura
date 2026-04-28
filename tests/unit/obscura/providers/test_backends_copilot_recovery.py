@@ -243,3 +243,123 @@ class TestStreamPropagatesPriorMessages:
         fresh_session.send.assert_awaited_once()
         sent_text = fresh_session.send.call_args.args[0]
         assert "User: What is the weather?" in sent_text
+
+
+class TestEmptyPromptOnRecoveryOnly:
+    """Healthy-session post-tool turns must pass ``prompt=""`` through
+    verbatim — the live Copilot session has the tool_use + tool_result
+    in server-side state and continues normally. Only the recovery
+    retry path swaps in the internal cue, because the freshly-recovered
+    session lacks that implicit "tool result waiting" context.
+    """
+
+    async def test_normal_empty_prompt_passes_through_verbatim(self) -> None:
+        """No session expiry — empty prompt must NOT be swapped. Injecting
+        a cue every continuation makes the model parrot it back ('user
+        keeps saying continue from where you left off')."""
+        backend = _backend()
+        backend._session = MagicMock()
+        backend._client = MagicMock()
+
+        seen_prompts: list[str] = []
+
+        async def _do_stream_fake(prompt: str, **_: Any) -> Any:
+            seen_prompts.append(prompt)
+            if False:
+                yield  # pragma: no cover
+            return
+
+        backend._do_stream = _do_stream_fake  # type: ignore[assignment]
+
+        async for _ in backend.stream("", messages=_make_messages()):
+            pass
+
+        assert seen_prompts == [""], (
+            "Empty post-tool prompts must not be modified on the healthy path."
+        )
+
+    async def test_recovery_retry_swaps_empty_to_internal_cue(self) -> None:
+        """When the first call raises session-expired, the retry must use
+        the cue (the freshly-recovered session has no implicit context)."""
+        backend = _backend()
+        old_session = MagicMock()
+        old_session.session_id = "old-sid"
+        backend._session = old_session
+
+        fresh_session = MagicMock()
+        fresh_session.send = AsyncMock()
+        client = MagicMock()
+        client.resume_session = AsyncMock(side_effect=RuntimeError("expired"))
+        client.create_session = AsyncMock(return_value=fresh_session)
+        backend._client = client
+
+        seen_prompts: list[str] = []
+        call_count = {"n": 0}
+
+        async def _do_stream_fake(prompt: str, **_: Any) -> Any:
+            call_count["n"] += 1
+            seen_prompts.append(prompt)
+            if call_count["n"] == 1:
+                raise RuntimeError("session not found")
+            if False:
+                yield  # pragma: no cover
+            return
+
+        backend._do_stream = _do_stream_fake  # type: ignore[assignment]
+
+        async for _ in backend.stream("", messages=_make_messages()):
+            pass
+
+        assert seen_prompts == ["", backend._CONTINUATION_CUE], (
+            "Healthy-path call must be empty; recovery retry must use the cue."
+        )
+
+    async def test_recovery_retry_preserves_real_prompt(self) -> None:
+        """A real user prompt at recovery time must be replayed verbatim,
+        not replaced by the cue."""
+        backend = _backend()
+        old_session = MagicMock()
+        old_session.session_id = "old-sid"
+        backend._session = old_session
+
+        fresh_session = MagicMock()
+        fresh_session.send = AsyncMock()
+        client = MagicMock()
+        client.resume_session = AsyncMock(side_effect=RuntimeError("expired"))
+        client.create_session = AsyncMock(return_value=fresh_session)
+        backend._client = client
+
+        seen_prompts: list[str] = []
+        call_count = {"n": 0}
+
+        async def _do_stream_fake(prompt: str, **_: Any) -> Any:
+            call_count["n"] += 1
+            seen_prompts.append(prompt)
+            if call_count["n"] == 1:
+                raise RuntimeError("session not found")
+            if False:
+                yield  # pragma: no cover
+            return
+
+        backend._do_stream = _do_stream_fake  # type: ignore[assignment]
+
+        async for _ in backend.stream("hello there", messages=_make_messages()):
+            pass
+
+        assert seen_prompts == ["hello there", "hello there"]
+
+    def test_helper_swaps_only_empty(self) -> None:
+        cue = CopilotBackend._CONTINUATION_CUE
+        assert CopilotBackend._prompt_for_recovery_retry("") == cue
+        assert CopilotBackend._prompt_for_recovery_retry("   \n\t") == cue
+        assert CopilotBackend._prompt_for_recovery_retry("real") == "real"
+
+    def test_internal_cue_is_clearly_framed(self) -> None:
+        """Sanity: the cue must contain the harness-internal markers and
+        the do-not-echo / do-not-thank guidance — that's what stops the
+        model from leaking it back into user-facing output."""
+        cue = CopilotBackend._CONTINUATION_CUE
+        assert "[internal:obscura-harness]" in cue
+        assert "[/internal:obscura-harness]" in cue
+        assert "did NOT type" in cue
+        assert "Do not echo" in cue

@@ -755,7 +755,18 @@ class AgentLoop:
 
         The text becomes the prompt for the next model turn and a
         USER_INPUT event is emitted.  Thread-safe.
+
+        Empty / whitespace-only payloads are dropped silently. They
+        otherwise produce a ghost turn the model rationalizes as "the
+        user sent an empty message" — confusing for human users when
+        the actual source is an autonomous caller (KAIROS proactive
+        tick, supervisor probe, etc.) that had nothing to say.
         """
+        if not text or not text.strip():
+            logger.debug(
+                "inject_user_input: dropping empty payload from autonomous caller",
+            )
+            return
         self._user_input_queue.put_nowait(text)
 
     def arbiter_kill(self, reason: str = "") -> None:

@@ -298,6 +298,7 @@ class KairosEngine:
                                 exc_info=True,
                             )
                     inject(
+                        f"<kairos>\n"
                         f"<tick>#{tick_count}</tick>\n"
                         f'<task id="{task["task_id"]}" '
                         f"priority={task['priority']}{goal_ctx}>\n"
@@ -306,7 +307,8 @@ class KairosEngine:
                         f"</task>\n"
                         f"Work this task. When done call "
                         f'task_update(task_id="{task["task_id"]}", '
-                        f'status="completed").'
+                        f'status="completed").\n'
+                        f"</kairos>"
                     )
                     logger.info(
                         "[kairos] \u2192 Working: %s", task["subject"]
@@ -323,6 +325,12 @@ class KairosEngine:
                 )
 
             # --- Fallback: goal-level hint (no specific task) ---
+            #
+            # If no task was claimed and no goal hint can be assembled, we
+            # have no actionable payload. Returning here avoids burning a
+            # model turn on a bare "<kairos><tick>#42</tick></kairos>" — the
+            # model rationalizes that as "the user sent an empty message"
+            # and replies with apologetic filler, polluting the transcript.
             goal_hint = ""
             try:
                 from obscura.kairos.goals import GoalBoard
@@ -333,7 +341,13 @@ class KairosEngine:
                     goal_hint = f" focus={top[0].id}({top[0].progress}%)"
             except Exception:
                 pass
-            inject(f"<tick>#{tick_count}{goal_hint}</tick>")
+            if not goal_hint:
+                logger.debug(
+                    "Proactive tick #%d skipped: no task claim, no goal hint",
+                    tick_count,
+                )
+                return
+            inject(f"<kairos><tick>#{tick_count}{goal_hint}</tick></kairos>")
         except Exception:
             logger.debug("Proactive tick injection failed", exc_info=True)
 
@@ -379,11 +393,19 @@ class KairosEngine:
             "- Respect the 15-second blocking budget for proactive actions",
             "- Work toward active goals on the goal board",
             "",
+            "Daemon-origin turn framing:",
+            "- Turns wrapped in <kairos>...</kairos> come from this daemon, not the user.",
+            "- The user did NOT type these — never reply 'looks like that came through empty'",
+            "  or apologise for a 'blank message' in response to a <kairos> turn.",
+            "- If a <kairos> turn has no actionable payload, stay silent: emit no text and",
+            "  do not call any tools.",
+            "",
             "Task queue protocol:",
-            "- On <tick> with a <task> element: work the claimed task to completion.",
+            "- On <kairos> containing a <task> element: work the claimed task to completion.",
             '- When done: call task_update(task_id="...", status="completed").',
             '- On failure: call task_update(task_id="...", status="failed", error="...").',
-            "- If no <task> is present, improvise toward the top goal.",
+            "- On a <kairos> with only a <tick> (goal hint, no <task>), improvise toward",
+            "  the named goal. If even that hint is missing, stay silent.",
         ]
 
         # Inject user profile summary (prefer vector-backed, fall back to markdown).

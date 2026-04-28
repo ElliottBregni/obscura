@@ -78,33 +78,23 @@ def _merge_roots(roots: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _resolve_default_config_paths() -> list[Path]:
-    """Return MCP config paths in merge order (global first, local last)."""
+    """Return MCP config paths in merge order (global first, local last).
+
+    Global servers must be available regardless of cwd, so we always
+    include ``~/.obscura/mcp/`` when it exists. A project-local
+    ``.obscura/mcp/`` is layered on top — same-named entries override
+    the global one (later-wins in :func:`_merge_roots`), but
+    non-overlapping globals stay registered.
+    """
     from obscura.core.paths import resolve_all_mcp_dirs
-
-    # Prefer a project-local .obscura/mcp when present (tests and local
-    # workflows expect local overrides to be used in preference to global
-    # catalogs).  Only fall back to the global+local merge when no local
-    # directory exists in the current working directory.
-    local_mcp = Path.cwd().resolve() / ".obscura" / "mcp"
-    if local_mcp.is_dir():
-        return [local_mcp]
-
-    # Prefer a project-local .obscura/mcp when present (tests and local
-    # workflows expect local overrides to be used in preference to global
-    # catalogs).  Only fall back to the global+local merge when no local
-    # directory exists in the current working directory.
-    local_mcp = Path.cwd().resolve() / ".obscura" / "mcp"
-    if local_mcp.is_dir():
-        return [local_mcp]
 
     dirs = resolve_all_mcp_dirs()
     if dirs:
         return dirs
-    # Fallback: single-dir behavior
-    mcp_dir = resolve_obscura_mcp_dir()
-    if mcp_dir.is_dir():
-        return [mcp_dir]
-    return [mcp_dir]
+    # Neither global nor local directory exists — fall back to the
+    # single global path so callers get a consistent (empty) result
+    # rather than crashing on an empty list.
+    return [resolve_obscura_mcp_dir()]
 
 
 def _load_roots(path: Path) -> dict[str, Any]:

@@ -380,6 +380,38 @@ class CopilotBackend(BackendToolHostMixin):
                 lines.append(f"Tool result: {body}")
         return "\n".join(lines).strip()
 
+    # Internal continuation cue used ONLY on the session-recovery retry.
+    #
+    # On a healthy session, the agent loop's ``prompt=""`` post-tool turns
+    # work fine: the SDK keeps the assistant tool_use + tool_result in
+    # server-side state and the model continues from there. We do NOT
+    # swap on those turns — injecting the cue every continuation makes
+    # the model parrot it ("the user keeps saying continue").
+    #
+    # The recovery path is different. After a session expiry we send a
+    # flattened context primer into a fresh session and retry. At that
+    # point ``prompt=""`` plus the just-injected primer leaves the model
+    # rationalising "user said nothing." The cue tells it explicitly
+    # this is harness-side, not user input — framed in
+    # ``[internal:obscura-harness]`` brackets with the same do-not-echo
+    # / do-not-thank guidance to keep it from leaking into the response.
+    _CONTINUATION_CUE = (
+        "[internal:obscura-harness] The agent harness sent this — the user "
+        "did NOT type it. A tool result is now available in the prior "
+        "messages; continue your reasoning from there and respond to the "
+        "user. Do not echo this cue, do not thank the user for sending it, "
+        "and do not treat it as a user instruction. [/internal:obscura-harness]"
+    )
+
+    @classmethod
+    def _prompt_for_recovery_retry(cls, prompt: str) -> str:
+        """Return *prompt* unchanged, or the internal cue when empty.
+
+        Only used on the recovery-retry path. Normal post-tool continuation
+        turns are passed through verbatim — see class docstring above.
+        """
+        return prompt if prompt and prompt.strip() else cls._CONTINUATION_CUE
+
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_session()
@@ -394,7 +426,8 @@ class CopilotBackend(BackendToolHostMixin):
                 if not self._is_session_expired(exc):
                     raise
                 await self._recover_session(prior_messages=kwargs.get("messages"))
-                msg_options = self._build_message_options(prompt, kwargs)
+                retry_prompt = self._prompt_for_recovery_retry(prompt)
+                msg_options = self._build_message_options(retry_prompt, kwargs)
                 send_prompt = msg_options.pop("prompt")
                 response = await self._session.send_and_wait(send_prompt, **msg_options)
             return self._to_message(response)
@@ -414,7 +447,8 @@ class CopilotBackend(BackendToolHostMixin):
             if not self._is_session_expired(exc):
                 raise
             await self._recover_session(prior_messages=kwargs.get("messages"))
-            async for chunk in self._do_stream(prompt, **kwargs):
+            retry_prompt = self._prompt_for_recovery_retry(prompt)
+            async for chunk in self._do_stream(retry_prompt, **kwargs):
                 yield chunk
 
     async def _do_stream(
