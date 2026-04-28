@@ -272,11 +272,113 @@ class CopilotBackend(BackendToolHostMixin):
             "json-rpc error" in msg and "session" in msg
         )
 
-    async def _recover_session(self) -> None:
-        """Recreate the session after an expiry/idle timeout."""
-        self._log.warning("Session expired after idle — recreating session")
+    async def _recover_session(
+        self,
+        prior_messages: list[Message] | None = None,
+    ) -> None:
+        """Recover from an expired/idle-timeout session.
+
+        Strategy:
+
+        1. **Resume by ID** — try ``client.resume_session(old_id)`` first.
+           If the server-side state is still around (e.g. transient
+           connectivity blip, not a hard expiry) this preserves the entire
+           conversation seamlessly.
+        2. **Fresh session + context primer** — if resume fails, create a
+           new session and replay the prior conversation as a single
+           priming message built from ``prior_messages`` (the
+           ``kwargs["messages"]`` the agent loop accumulated). Without
+           this, the new session has no history and the next stream call
+           with ``prompt=""`` lands in an empty session, which the model
+           rationalizes as "user sent an empty message".
+        """
+        old_session_id = (
+            getattr(self._session, "session_id", None)
+            if self._session is not None
+            else None
+        )
         config = self.build_session_config()
+
+        # 1) Try resume by ID — keeps server-side history intact.
+        if old_session_id:
+            try:
+                self._log.warning(
+                    "Session expired — attempting resume_session(%s)",
+                    old_session_id,
+                )
+                self._session = await self._client.resume_session(
+                    str(old_session_id),
+                    **config,
+                )
+                self._log.info(
+                    "Recovered session via resume_session(%s)", old_session_id
+                )
+                return
+            except Exception as exc:
+                self._log.warning(
+                    "resume_session(%s) failed (%s) — falling back to "
+                    "fresh session with context replay",
+                    old_session_id,
+                    exc,
+                )
+
+        # 2) Fallback: fresh session, prime with prior conversation if any.
+        self._log.warning("Session expired after idle — recreating session")
         self._session = await self._client.create_session(**config)
+        if prior_messages:
+            primer = self._build_context_primer(prior_messages)
+            if primer:
+                try:
+                    await self._session.send(primer)
+                    self._log.info(
+                        "Primed fresh session with %d-message context replay",
+                        len(prior_messages),
+                    )
+                except Exception:
+                    self._log.exception(
+                        "Failed to prime fresh session with prior context"
+                    )
+
+    @staticmethod
+    def _build_context_primer(messages: list[Message]) -> str:
+        """Serialize a structured message history into a single primer prompt.
+
+        The Copilot SDK has no "seed history" API for new sessions, so we
+        flatten the prior conversation into a context block and tell the
+        model to continue from there without asking the user to repeat
+        themselves. Tool calls are summarized rather than re-executed.
+        """
+        lines: list[str] = [
+            "[Session was recovered after expiry. Below is the prior",
+            "conversation that the user has already had with you. Continue",
+            "from where you left off — do NOT ask the user to repeat their",
+            "question, and do NOT re-run the tool calls listed below; their",
+            "results are already shown.]",
+            "",
+        ]
+        for msg in messages:
+            role = getattr(msg, "role", None)
+            text_parts: list[str] = []
+            tool_summaries: list[str] = []
+            for block in getattr(msg, "content", ()) or ():
+                text = getattr(block, "text", None)
+                if text:
+                    text_parts.append(text)
+                tool_name = getattr(block, "tool_name", None)
+                if tool_name:
+                    tool_input = getattr(block, "tool_input", None)
+                    tool_summaries.append(f"{tool_name}({tool_input!r})")
+            body = " ".join(text_parts).strip()
+            if role == Role.USER and body:
+                lines.append(f"User: {body}")
+            elif role == Role.ASSISTANT:
+                if body:
+                    lines.append(f"Assistant: {body}")
+                for ts in tool_summaries:
+                    lines.append(f"Assistant tool call: {ts}")
+            elif role == Role.TOOL_RESULT and body:
+                lines.append(f"Tool result: {body}")
+        return "\n".join(lines).strip()
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
@@ -291,7 +393,7 @@ class CopilotBackend(BackendToolHostMixin):
             except Exception as exc:
                 if not self._is_session_expired(exc):
                     raise
-                await self._recover_session()
+                await self._recover_session(prior_messages=kwargs.get("messages"))
                 msg_options = self._build_message_options(prompt, kwargs)
                 send_prompt = msg_options.pop("prompt")
                 response = await self._session.send_and_wait(send_prompt, **msg_options)
@@ -300,7 +402,9 @@ class CopilotBackend(BackendToolHostMixin):
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks.
 
-        Automatically recovers from expired sessions (idle timeout).
+        Automatically recovers from expired sessions (idle timeout) by
+        resuming the same session ID when possible, or replaying the
+        prior conversation into a fresh session as a context primer.
         """
         self._ensure_session()
         try:
@@ -309,7 +413,7 @@ class CopilotBackend(BackendToolHostMixin):
         except Exception as exc:
             if not self._is_session_expired(exc):
                 raise
-            await self._recover_session()
+            await self._recover_session(prior_messages=kwargs.get("messages"))
             async for chunk in self._do_stream(prompt, **kwargs):
                 yield chunk
 
