@@ -1121,6 +1121,33 @@ class TestOpenAIBuildMessages:
         assert messages[2] == {"role": "assistant", "content": "Reply"}
         assert messages[3] == {"role": "user", "content": "New"}
 
+    def test_empty_prompt_does_not_append_user_turn(self) -> None:
+        """Regression: an empty prompt must NOT be appended as a user turn.
+
+        After a tool call the agent loop calls stream("") with structured
+        messages already representing the conversation. Appending a fresh
+        {"role": "user", "content": ""} produced a malformed empty turn
+        that the model rationalized as "user sent an empty message".
+        """
+        b = _backend()
+        messages = b.build_messages("")
+        assert messages == []
+
+    def test_empty_prompt_with_history_does_not_append_user_turn(self) -> None:
+        """Empty prompt with history: history is preserved, no empty user appended."""
+        b = _backend()
+        b.conversations["sess1"] = [
+            ChatMessage(role="user", content="First"),
+            ChatMessage(role="assistant", content="Response"),
+        ]
+        b.set_active_session_for_testing("sess1")
+
+        messages = b.build_messages("")
+        assert messages == [
+            {"role": "user", "content": "First"},
+            {"role": "assistant", "content": "Response"},
+        ]
+
 
 # ===================================================================
 # 9. TestOpenAIToMessage (internal helper)

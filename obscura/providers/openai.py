@@ -950,7 +950,14 @@ class OpenAIBackend(BackendToolHostMixin):
                 [m.to_dict() for m in self._conversations[self._active_session]],
             )
 
-        messages.append({"role": "user", "content": prompt})
+        # Only append a fresh user turn when there's actual prompt content.
+        # During post-tool-call iterations the agent loop passes prompt=""
+        # alongside structured_messages that already contain the running
+        # conversation; appending {"role": "user", "content": ""} here would
+        # produce a malformed empty user turn that the model rationalizes as
+        # "user sent an empty message".
+        if prompt:
+            messages.append({"role": "user", "content": prompt})
         return messages
 
     def build_create_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:

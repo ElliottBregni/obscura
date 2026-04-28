@@ -493,6 +493,72 @@ class TestMissingToolResults:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Post-tool-call history seeding
+# ---------------------------------------------------------------------------
+
+
+class TestPostToolCallHistorySeeding:
+    """After a tool call, the user's original prompt must remain in the
+    structured messages history. Without this, providers that build a
+    fresh user turn from `prompt` (e.g. OpenAI) would emit a malformed
+    empty user turn and the model rationalizes it as
+    "user sent an empty message"."""
+
+    async def test_user_message_seeded_after_tool_call(self) -> None:
+        """The second stream() call must receive messages including the user turn."""
+
+        captured_kwargs: list[dict[str, Any]] = []
+        captured_prompts: list[str] = []
+
+        class _CapturingBackend(MockBackend):
+            @override
+            async def stream(
+                self, prompt: str, **kwargs: Any
+            ) -> AsyncIterator[StreamChunk]:
+                captured_prompts.append(prompt)
+                captured_kwargs.append(kwargs)
+                async for chunk in super().stream(prompt, **kwargs):
+                    yield chunk
+
+        spec = _tool_spec("noop_tool")
+        backend = _CapturingBackend(
+            [
+                _make_tool_call_chunks("noop_tool", {}),
+                _make_text_chunks("done"),
+            ]
+        )
+        reg = _make_registry(spec)
+        loop = AgentLoop(backend, reg)
+
+        await _collect_events(loop, prompt="What is the weather?")
+
+        assert len(captured_kwargs) >= 2, (
+            f"Expected at least 2 stream() calls, got {len(captured_kwargs)}"
+        )
+
+        # First call: user prompt sent directly, no structured messages required
+        assert captured_prompts[0] == "What is the weather?"
+
+        # Second call: prompt is empty (continuation), but messages must
+        # contain the original user turn before the (assistant, tool_result)
+        # pair so the model has a complete conversation.
+        assert captured_prompts[1] == ""
+        msgs = captured_kwargs[1].get("messages")
+        assert msgs is not None and len(msgs) >= 3, (
+            "Expected messages to include user + assistant + tool_result"
+        )
+        assert msgs[0].role == Role.USER, (
+            f"First message must be USER, got {msgs[0].role}"
+        )
+        user_text = "".join(
+            getattr(b, "text", "") for b in msgs[0].content
+        )
+        assert user_text == "What is the weather?", (
+            f"User message must preserve original prompt, got {user_text!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tests: Dropped kwargs visibility
 # ---------------------------------------------------------------------------
 

@@ -1002,6 +1002,11 @@ class AgentLoop:
             accumulated_text=accumulated_text,
         )
         current_prompt: str = prompt
+        # Original user prompt — preserved so it can be seeded into the
+        # structured message history after the first tool call. Without
+        # this, post-tool iterations send the model `[assistant, tool_result]`
+        # with no user turn, and the model reasons "user sent empty message".
+        original_user_prompt: str = prompt
         kwargs: dict[str, Any] = stream_kwargs
         # Expose mutable conversation history to ToolContext so tools like
         # history_snip can inspect / mutate it. Backends that don't pass
@@ -1710,7 +1715,29 @@ class AgentLoop:
             # Pass structured messages via kwargs so backends can
             # persist full tool call/result history.  Merge rather
             # than replace so callers' kwargs (e.g. tool_choice) survive.
-            kwargs = {**kwargs, "messages": structured}
+            #
+            # Accumulate history across tool-call iterations: keep any
+            # prior messages and append the new (assistant, tool_result)
+            # pair. On the first iteration, seed the user's original
+            # prompt so the model sees a complete conversation
+            # [user, assistant, tool_result] rather than a headless
+            # [assistant, tool_result] pair (which the model rationalizes
+            # as "user sent an empty message").
+            existing_msgs: list[Message] = list(kwargs.get("messages") or [])
+            has_user_msg = any(
+                getattr(m, "role", None) == Role.USER for m in existing_msgs
+            )
+            if not has_user_msg and original_user_prompt:
+                existing_msgs = [
+                    Message(
+                        role=Role.USER,
+                        content=[
+                            ContentBlock(kind="text", text=original_user_prompt)
+                        ],
+                    ),
+                    *existing_msgs,
+                ]
+            kwargs = {**kwargs, "messages": existing_msgs + structured}
 
             # Context budget: track accumulated chars and compact when
             # the internal message list grows too large.
