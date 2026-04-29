@@ -668,9 +668,77 @@ class AgentLoop:
         #     status="ok" during the current turn. Reset at TURN_START.
         #   _pending_correction holds a corrective message built when
         #     the scanner detects hallucination + recent successful tool;
-        #     consumed at the top of the next turn iteration.
+        #     consumed at the top of the next *user-driven* turn iteration.
+        #   _pending_correction_age counts how many iterations the
+        #     correction has been held without being consumed (i.e. the
+        #     intervening turns were continuations / internal cues, not
+        #     real user input). After ``_PENDING_CORRECTION_TTL`` it gets
+        #     dropped — a correction tied to a long-stale hallucination
+        #     just confuses fresh user input.
         self._this_turn_successful_tools: list[Any] = []
         self._pending_correction: str | None = None
+        self._pending_correction_age: int = 0
+
+    # Maximum number of agent-loop iterations a queued correction is
+    # allowed to outlive without being consumed. We're trying to interrupt
+    # a *next-turn* loop, not preserve a grudge across half a session.
+    _PENDING_CORRECTION_TTL: int = 4
+
+    # Prefix used by the Copilot recovery cue (and any future internal
+    # harness primers). A correction that would prepend onto one of these
+    # is being layered onto another harness-internal message, not a real
+    # user prompt — keep the correction queued instead.
+    _INTERNAL_HARNESS_PREFIX: str = "[internal:obscura-harness]"
+
+    def _consume_pending_correction(
+        self, current_prompt: str
+    ) -> tuple[str, str | None]:
+        """Decide whether to consume the queued hallucination correction.
+
+        Returns ``(possibly_modified_prompt, correction_text_or_None)``.
+        When the second element is non-None, the caller emits a
+        ``CORRECTION_INJECTED`` event with that text.
+
+        The correction is held in place — not consumed — when the
+        upcoming prompt isn't real user text. Two cases qualify:
+
+        * **Continuation**: empty / whitespace-only prompt (the agent
+          loop's post-tool turn pattern). Prepending a correction onto
+          this turns it into a fake user message that would let the
+          model claim the user asked for self-reflection.
+        * **Internal cue**: prompt starts with ``_INTERNAL_HARNESS_PREFIX``
+          (the Copilot recovery cue, future harness primers). Layering
+          another ``[OBSCURA CORRECTION]`` block on top of an explicitly
+          harness-tagged message would just nest harness directives.
+
+        Held corrections are dropped after ``_PENDING_CORRECTION_TTL``
+        held iterations — a correction tied to a long-stale hallucination
+        only confuses fresh user input that arrives later in the session.
+        """
+        if not self._pending_correction:
+            return current_prompt, None
+
+        is_continuation = not current_prompt or not current_prompt.strip()
+        is_internal_cue = bool(current_prompt) and current_prompt.lstrip().startswith(
+            self._INTERNAL_HARNESS_PREFIX
+        )
+
+        if is_continuation or is_internal_cue:
+            self._pending_correction_age += 1
+            if self._pending_correction_age > self._PENDING_CORRECTION_TTL:
+                logger.debug(
+                    "Dropping pending correction after %d non-user turns "
+                    "without a prompt to attach it to",
+                    self._pending_correction_age,
+                )
+                self._pending_correction = None
+                self._pending_correction_age = 0
+            return current_prompt, None
+
+        correction = self._pending_correction
+        self._pending_correction = None
+        self._pending_correction_age = 0
+        return correction + "\n\n" + current_prompt, correction
 
     # ------------------------------------------------------------------
     # Compiled agent application
@@ -1074,22 +1142,18 @@ class AgentLoop:
             self._this_turn_successful_tools = []
 
             # Inject any pending hallucination correction into the next prompt.
-            # Set when the prior turn's text-quality scan caught the model
-            # narrating failure that contradicted a successful tool call —
-            # see ``obscura/core/output_quality.py``. Emitted as a
-            # ``CORRECTION_INJECTED`` event so the REPL can surface that a
-            # course-correction was applied.
-            if self._pending_correction:
-                correction = self._pending_correction
-                self._pending_correction = None
-                if current_prompt:
-                    current_prompt = correction + "\n\n" + current_prompt
-                else:
-                    current_prompt = correction
+            # Gating logic lives in :meth:`_consume_pending_correction` —
+            # see its docstring for why we hold corrections across
+            # continuation / harness-cue turns instead of consuming
+            # eagerly.
+            current_prompt, correction_to_emit = self._consume_pending_correction(
+                current_prompt
+            )
+            if correction_to_emit is not None:
                 correction_event = AgentEvent(
                     kind=AgentEventKind.CORRECTION_INJECTED,
                     turn=state.turn,
-                    text=correction,
+                    text=correction_to_emit,
                 )
                 emitted = await self._emit(correction_event, session_id)
                 if emitted is not None:
@@ -1485,6 +1549,7 @@ class AgentLoop:
             # build a corrective message that the next turn will inject.
             try:
                 from obscura.core.output_quality import (
+                    build_blank_message_correction,
                     build_correction_prompt,
                     log_violations,
                     scan_text,
@@ -1493,13 +1558,22 @@ class AgentLoop:
                 violations = scan_text(state.turn_text)
                 if violations:
                     log_violations(violations, turn=state.turn)
+                    correction_parts: list[str] = []
                     if self._this_turn_successful_tools:
-                        correction = build_correction_prompt(
+                        existing = build_correction_prompt(
                             violations,
                             self._this_turn_successful_tools,
                         )
-                        if correction:
-                            self._pending_correction = correction
+                        if existing:
+                            correction_parts.append(existing)
+                    blank_msg = build_blank_message_correction(violations)
+                    if blank_msg:
+                        correction_parts.append(blank_msg)
+                    if correction_parts:
+                        self._pending_correction = "\n\n".join(correction_parts)
+                        # Reset age — this is a fresh correction, not a
+                        # carry-over from earlier in the loop.
+                        self._pending_correction_age = 0
             except Exception:
                 # Quality scan must never break the turn — best-effort.
                 pass

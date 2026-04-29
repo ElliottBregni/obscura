@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
+import traceback
 from typing import TYPE_CHECKING, Any, cast, override
 
 from obscura.core.sessions import SessionStore
@@ -60,6 +62,60 @@ _CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "git",
     },
 )
+
+
+# ---------------------------------------------------------------------------
+# Empty-prompt diagnostics
+# ---------------------------------------------------------------------------
+#
+# When ``prompt`` is empty/whitespace, the Copilot SDK emits a ``user.message``
+# event with ``content=""`` and a ``transformedContent`` of just
+# ``<current_datetime>...</current_datetime>``. The model then rationalises
+# that as "the user sent a blank message" and produces filler like
+# ``"Looks like your message came in blank — what's up?"``.
+#
+# Empty prompts ARE legitimate inside the agent loop's post-tool continuation
+# turns (``current_prompt = ""`` after a tool call). What we want to catch is
+# empty prompts arriving from somewhere ELSE — a stray ``backend.send("")``
+# call from a consolidator, arbiter, REPL plumbing, etc. Set
+# ``OBSCURA_DEBUG_EMPTY_PROMPT=1`` to upgrade the log to WARNING and dump
+# the full Python stack so the caller is identifiable. Otherwise we emit at
+# DEBUG so the probe is silent in normal use.
+_EMPTY_PROMPT_DEBUG = os.environ.get("OBSCURA_DEBUG_EMPTY_PROMPT", "").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+
+def _maybe_log_empty_prompt(
+    method: str,
+    prompt: str,
+    kwargs: dict[str, Any],
+    log: logging.Logger,
+) -> None:
+    """Log a stack trace iff ``prompt`` is empty/whitespace.
+
+    Used to find the caller responsible for phantom blank ``user.message``
+    events in the Copilot session log. See module-level comment.
+    """
+    if prompt and prompt.strip():
+        return
+    level = logging.WARNING if _EMPTY_PROMPT_DEBUG else logging.DEBUG
+    if not log.isEnabledFor(level):
+        return
+    # ``limit=12`` is enough to span async REPL → client → loop → backend
+    # without flooding the log if this fires repeatedly.
+    stack = "".join(traceback.format_stack(limit=12))
+    log.log(
+        level,
+        "[EMPTY_PROMPT_PROBE] CopilotBackend.%s called with empty prompt "
+        "(kwargs_keys=%s)\n%s",
+        method,
+        sorted(kwargs.keys()),
+        stack,
+    )
 
 
 def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
@@ -415,6 +471,7 @@ class CopilotBackend(BackendToolHostMixin):
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
         self._ensure_session()
+        _maybe_log_empty_prompt("send", prompt, kwargs, self._log)
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("copilot.send") as span:
             _set_span_attr(span, "backend", "copilot")
@@ -432,6 +489,50 @@ class CopilotBackend(BackendToolHostMixin):
                 response = await self._session.send_and_wait(send_prompt, **msg_options)
             return self._to_message(response)
 
+    async def send_isolated(self, prompt: str, **kwargs: Any) -> Message:
+        """Send a one-shot prompt on a fresh ephemeral session.
+
+        Use this for backend calls that must NOT pollute the live
+        conversation — auto-titling, memory consolidation summaries, eval
+        scoring, etc. The Copilot SDK persists every ``backend.send`` into
+        the session's server-side history, so reusing the live session
+        leaves the title-gen prompt + reply visible to the model on the
+        next turn.
+
+        We create a temp session, send, then drop it. This costs a session
+        creation round-trip but keeps the live conversation clean. Other
+        backends without persistent server-side sessions can default to
+        plain ``send`` — :func:`obscura.core.session_utils.send_isolated`
+        handles that fallback.
+        """
+        self._ensure_client()
+        _maybe_log_empty_prompt("send_isolated", prompt, kwargs, self._log)
+        # Build a session config for the temp session. Strip tool listings
+        # — title-gen / consolidator prompts don't need tools and shipping
+        # them costs tokens.
+        config = self.build_session_config()
+        # ``streaming=True`` is irrelevant for send_and_wait; leave it.
+        temp_session = await self._client.create_session(**config)
+        try:
+            msg_options = self._build_message_options(prompt, kwargs)
+            send_prompt = msg_options.pop("prompt")
+            response = await temp_session.send_and_wait(send_prompt, **msg_options)
+            return self._to_message(response)
+        finally:
+            close = getattr(temp_session, "close", None) or getattr(
+                temp_session, "stop", None
+            )
+            if close is not None:
+                try:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:
+                    self._log.debug(
+                        "send_isolated: failed to close ephemeral session",
+                        exc_info=True,
+                    )
+
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks.
 
@@ -440,6 +541,7 @@ class CopilotBackend(BackendToolHostMixin):
         prior conversation into a fresh session as a context primer.
         """
         self._ensure_session()
+        _maybe_log_empty_prompt("stream", prompt, kwargs, self._log)
         try:
             async for chunk in self._do_stream(prompt, **kwargs):
                 yield chunk

@@ -153,7 +153,137 @@ _PATTERNS: tuple[_Pattern, ...] = (
             re.IGNORECASE,
         ),
     ),
+    # ----------------------------------------------------------------
+    # Blank-message rationalisation. The model hallucinates that the
+    # user sent an empty message — happens after a Copilot session
+    # recovery, KAIROS tick, or just when the model pattern-completes
+    # apologetic filler from earlier in the same session. Once the
+    # model has produced one of these, it tends to keep producing them
+    # even on real user input. Detecting the phrases lets us inject a
+    # correction that breaks the loop before it compounds.
+    _Pattern(
+        name="blank_message_came_in_blank",
+        regex=re.compile(
+            r"\b(came (in |through )?blank|came (in |through )?empty)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        name="blank_message_user_sent_blank",
+        regex=re.compile(
+            r"\byou\s+sent\s+(a|an)?\s*(blank|empty)\s+message\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        name="blank_message_looks_like_blank",
+        regex=re.compile(
+            r"\blooks?\s+like\s+(that\s+|your\s+)?(message\s+|one\s+)?"
+            r"(came|was)\s+(in|through)?\s*(blank|empty)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        name="blank_message_did_you_mean_send",
+        regex=re.compile(
+            r"\bdid\s+you\s+mean\s+to\s+send\s+(something|anything|a\s+message)",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        name="blank_message_another_blank",
+        regex=re.compile(
+            r"\banother\s+(blank|empty)\s+(one|message)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        name="blank_message_sending_by_accident",
+        regex=re.compile(
+            r"\bsending\s+(messages?|empty)\s+by\s+accident\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        # "Still getting blank messages from you", "getting empty messages" —
+        # the model framing repeated apparent-blank turns as an ongoing pattern
+        # it's observing. Seen verbatim in a real session screenshot.
+        name="blank_message_still_getting",
+        regex=re.compile(
+            r"\b(still\s+)?getting\s+(blank|empty)\s+messages?\b",
+            re.IGNORECASE,
+        ),
+    ),
+    _Pattern(
+        # "might be a copy-paste issue on your end" / "copy paste glitch" —
+        # the model rationalising the (false) blankness as a user-side input
+        # problem. Pairs with the other blank-message patterns; also fires
+        # standalone when the model is offering an explanation rather than
+        # naming the symptom.
+        name="blank_message_copy_paste_issue",
+        regex=re.compile(
+            r"\bcopy[-\s]?paste\s+(issue|problem|glitch|error)\b",
+            re.IGNORECASE,
+        ),
+    ),
 )
+
+
+# Names of patterns whose presence in a turn means the model produced
+# blank-message filler. Kept as a frozenset so callers don't have to
+# enumerate the pattern strings inline.
+BLANK_MESSAGE_PATTERN_NAMES: frozenset[str] = frozenset(
+    name
+    for name in (
+        "blank_message_came_in_blank",
+        "blank_message_user_sent_blank",
+        "blank_message_looks_like_blank",
+        "blank_message_did_you_mean_send",
+        "blank_message_another_blank",
+        "blank_message_sending_by_accident",
+        "blank_message_still_getting",
+        "blank_message_copy_paste_issue",
+    )
+)
+
+
+def has_blank_message_violation(violations: list[Violation]) -> bool:
+    """True iff *violations* contains any blank-message pattern match."""
+    return any(v.pattern_name in BLANK_MESSAGE_PATTERN_NAMES for v in violations)
+
+
+def build_blank_message_correction(violations: list[Violation]) -> str:
+    """Build a corrective message for blank-message hallucinations.
+
+    Unlike :func:`build_correction_prompt`, this one doesn't need a list
+    of successful tool calls — the contradiction is between the model's
+    "user sent blank" claim and the real user turn that's already in
+    the conversation history. The correction tells the model to stop
+    asserting blankness and re-read what the user actually wrote.
+
+    Returns ``""`` when no blank-message patterns fired so callers can
+    short-circuit cleanly.
+    """
+    if not has_blank_message_violation(violations):
+        return ""
+
+    flagged = sorted(
+        {v.pattern_name for v in violations if v.pattern_name in BLANK_MESSAGE_PATTERN_NAMES}
+    )
+    return (
+        "[OBSCURA CORRECTION] Your previous response asserted the user "
+        "sent a blank/empty message. This is wrong. The user did type a "
+        "message — re-read the most recent user turn in the conversation "
+        "history and respond to its actual content.\n\n"
+        f"Patterns flagged: {', '.join(flagged)}.\n\n"
+        "If a turn appears empty to you, it is a harness artifact (e.g. a "
+        "post-tool-call continuation or a recovered session primer), NOT "
+        "the user. Never reply with phrases like 'looks like that came in "
+        "blank', 'you sent a blank message', 'message came through empty', "
+        "or 'did you mean to send something' — these are forbidden. Stay "
+        "silent or call a tool instead. The user will speak when they have "
+        "something to say."
+    )
 
 
 def scan_text(text: str, *, context_chars: int = 40) -> list[Violation]:

@@ -363,3 +363,112 @@ class TestEmptyPromptOnRecoveryOnly:
         assert "[/internal:obscura-harness]" in cue
         assert "did NOT type" in cue
         assert "Do not echo" in cue
+
+
+class TestEmptyPromptProbe:
+    """``_maybe_log_empty_prompt`` is the diagnostic that pins down who's
+    calling ``backend.send("")`` — that's the source of the phantom blank
+    ``user.message`` events the model rationalises as "user sent blank"."""
+
+    def test_logs_at_warning_when_env_var_set(
+        self,
+        monkeypatch: Any,
+        caplog: Any,
+    ) -> None:
+        import importlib
+        import logging
+
+        monkeypatch.setenv("OBSCURA_DEBUG_EMPTY_PROMPT", "1")
+        # Re-import the module so the env-var-driven flag is re-read.
+        from obscura.providers import copilot as copilot_mod
+
+        importlib.reload(copilot_mod)
+        try:
+            log = logging.getLogger("test-probe")
+            with caplog.at_level(logging.WARNING, logger="test-probe"):
+                copilot_mod._maybe_log_empty_prompt("send", "", {"foo": 1}, log)
+            warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+            assert any("EMPTY_PROMPT_PROBE" in r.message for r in warnings)
+            # The kwargs keys are surfaced so we can tell title-gen apart
+            # from continuation passes that include ``messages=``.
+            assert any("'foo'" in r.message for r in warnings)
+        finally:
+            # Revert so other tests in the same process see the default.
+            monkeypatch.delenv("OBSCURA_DEBUG_EMPTY_PROMPT", raising=False)
+            importlib.reload(copilot_mod)
+
+    def test_silent_for_non_empty_prompt(self, caplog: Any) -> None:
+        import logging
+
+        from obscura.providers.copilot import _maybe_log_empty_prompt
+
+        log = logging.getLogger("test-probe-silent")
+        with caplog.at_level(logging.DEBUG, logger="test-probe-silent"):
+            _maybe_log_empty_prompt("send", "real text", {}, log)
+        assert not any("EMPTY_PROMPT_PROBE" in r.message for r in caplog.records)
+
+    def test_whitespace_only_treated_as_empty(self, caplog: Any) -> None:
+        import logging
+
+        from obscura.providers.copilot import _maybe_log_empty_prompt
+
+        log = logging.getLogger("test-probe-ws")
+        log.setLevel(logging.DEBUG)
+        with caplog.at_level(logging.DEBUG, logger="test-probe-ws"):
+            _maybe_log_empty_prompt("send", "  \n\t  ", {}, log)
+        assert any("EMPTY_PROMPT_PROBE" in r.message for r in caplog.records)
+
+
+class TestSendIsolated:
+    """``send_isolated`` must run on an ephemeral session so the live
+    Copilot conversation history isn't polluted by title-gen / consolidator
+    / arbiter calls."""
+
+    async def test_creates_temp_session_and_does_not_mutate_self_session(
+        self,
+    ) -> None:
+        backend = _backend()
+        live_session = MagicMock()
+        live_session.session_id = "live-sid"
+        backend._session = live_session
+
+        temp_session = MagicMock()
+        temp_session.session_id = "temp-sid"
+        temp_response = MagicMock()
+        temp_response.content = []
+        temp_session.send_and_wait = AsyncMock(return_value=temp_response)
+        temp_session.close = MagicMock()
+
+        client = MagicMock()
+        client.create_session = AsyncMock(return_value=temp_session)
+        backend._client = client
+
+        await backend.send_isolated("title please")
+
+        # We must have created a NEW session (not reused the live one).
+        client.create_session.assert_awaited_once()
+        # The live session must NOT have been touched.
+        assert backend._session is live_session
+        # The send happened on the temp session, not the live one.
+        temp_session.send_and_wait.assert_awaited_once()
+        live_session.send_and_wait.assert_not_called()
+        # And the temp session was cleaned up after.
+        temp_session.close.assert_called_once()
+
+    async def test_close_failure_does_not_propagate(self) -> None:
+        backend = _backend()
+        backend._session = MagicMock()
+
+        temp_session = MagicMock()
+        temp_response = MagicMock()
+        temp_response.content = []
+        temp_session.send_and_wait = AsyncMock(return_value=temp_response)
+        temp_session.close = MagicMock(side_effect=RuntimeError("boom"))
+
+        client = MagicMock()
+        client.create_session = AsyncMock(return_value=temp_session)
+        backend._client = client
+
+        # Cleanup failure must not raise — the response is what callers care
+        # about.
+        await backend.send_isolated("anything")
