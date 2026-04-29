@@ -65,7 +65,7 @@ _log = logging.getLogger("obscura.cli.session")
 # Helpers
 # ---------------------------------------------------------------------------
 
-_session_state: dict[str, bool] = {"titled": False}
+_session_state: dict[str, bool] = {"titled": False, "memory_searched": False}
 
 
 def _swallow(label: str, exc: Exception) -> None:
@@ -454,6 +454,8 @@ class ObscuraSession:
             if inline_agent_response:
                 ctx.message_history.append(("assistant", inline_agent_response))
             if ctx.vector_store is not None and inline_agent_response:
+                from obscura.cli.vector_memory_bridge import derive_project_key
+
                 turn_num = len([m for m in ctx.message_history if m[0] == "user"])
                 auto_save_turn(
                     ctx.vector_store,
@@ -462,6 +464,7 @@ class ObscuraSession:
                     inline_agent_response,
                     turn_number=turn_num,
                     classifier=ctx._turn_classifier,
+                    project_key=derive_project_key(),
                 )
             return inline_agent_response
 
@@ -519,18 +522,40 @@ class ObscuraSession:
         from obscura.tools.system import update_token_usage
 
         # ── Vector memory pre-search ──────────────────────────────────────
+        # See ``cli/__init__.py`` for the full rationale on why we don't
+        # search every turn — same env knobs apply here.
         augmented_text = text
         slash_skill_context = ctx.build_active_skill_context()
         if slash_skill_context:
             augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
-        if ctx.vector_store is not None:
+        from obscura.cli.vector_memory_bridge import (
+            derive_project_key,
+            get_memory_injection_mode,
+            is_project_scope_enabled,
+        )
+
+        _injection_mode = get_memory_injection_mode()
+        _project_key = derive_project_key() if is_project_scope_enabled() else None
+        _should_inject = _injection_mode == "every" or (
+            _injection_mode == "first" and not _session_state["memory_searched"]
+        )
+
+        if ctx.vector_store is not None and _should_inject:
             if ctx._context_router is not None:
-                vm_context = search_with_router(ctx._context_router, text)
+                vm_context = search_with_router(
+                    ctx._context_router, text, project_key=_project_key
+                )
             else:
-                vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
+                vm_context = search_relevant_context(
+                    ctx.vector_store,
+                    text,
+                    top_k=3,
+                    project_key=_project_key,
+                )
             if vm_context:
                 augmented_text = f"{vm_context}\n\n---\n\n{augmented_text}"
+            _session_state["memory_searched"] = True
 
         _pre_tokens = estimate_effective_context_tokens(
             ctx,
@@ -798,6 +823,7 @@ class ObscuraSession:
                 response_text,
                 turn_number=turn_num,
                 classifier=ctx._turn_classifier,
+                project_key=_project_key,
             )
 
         # Post-send: update token tracker
@@ -832,8 +858,8 @@ class ObscuraSession:
             except Exception:
                 pass
 
-        # Auto-title
-        global _session_state
+        # Auto-title (mutating the module-global dict; no ``global``
+        # declaration needed because we only assign to keys).
         if not _session_state["titled"] and len(ctx.message_history) >= 2:
             _session_state["titled"] = True
             try:

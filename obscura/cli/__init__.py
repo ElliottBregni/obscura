@@ -131,7 +131,13 @@ def _sync_provider_settings() -> None:
         _log.debug("Provider settings sync failed (claude): %s", exc)
 
 
-_session_state: dict[str, bool] = {"titled": False}
+_session_state: dict[str, bool] = {
+    "titled": False,
+    # Gates first-message-only vector-memory injection. Mode "every" in
+    # ``OBSCURA_MEMORY_INJECTION_MODE`` ignores this flag and searches
+    # on every turn (legacy behaviour).
+    "memory_searched": False,
+}
 
 
 def _is_interactive_repl(prompt: str | None) -> bool:
@@ -208,6 +214,80 @@ from obscura.core.client import ObscuraClient  # noqa: E402  # noqa: E402
 from obscura.core.event_store import SessionStatus, SQLiteEventStore  # noqa: E402  # noqa: E402
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir  # noqa: E402  # noqa: E402
 from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice  # noqa: E402  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Per-turn context budget breakdown
+# ---------------------------------------------------------------------------
+
+
+def _log_context_budget(
+    ctx: REPLContext,
+    *,
+    user_text: str,
+    slash_skill_context: str,
+    vm_context: str,
+) -> None:
+    """Log a one-line breakdown of where this turn's context is going.
+
+    Helps answer the "why is auto-compact firing every other turn?"
+    question without having to dump the full request payload. Sources
+    surfaced:
+
+    * ``user``       — the raw user message
+    * ``memory``     — vector-memory injection (channel router or
+                       cross-namespace fallback). Cheapest knob to tune
+                       (``top_k``, score threshold, channel triggers).
+    * ``skill``      — slash-skill prefix (``/skill ...``).
+    * ``history``    — accumulated message history bytes.
+    * ``system``     — system prompt + tool listings shipped to the
+                       backend. For Copilot this includes the entire
+                       MCP tool surface.
+
+    All sizes in chars (≈4 chars per token); a percentage-of-window
+    column lets you tell at a glance whether one source is eating the
+    budget.
+    """
+    try:
+        history_chars = sum(len(t) for _, t in (ctx.message_history or []))
+        sys_chars = len(ctx.system_prompt or "")
+        # Tool listings live inside the backend's session config, not
+        # ctx.system_prompt. For Copilot, _build_tool_listing() generates
+        # the whole MCP surface; surface its size when we can.
+        tools_chars = 0
+        backend = getattr(ctx.client, "_backend", None)
+        if backend is not None and hasattr(backend, "_build_tool_listing"):
+            try:
+                tools_chars = len(backend._build_tool_listing() or "")
+            except Exception:
+                tools_chars = 0
+        window = getattr(ctx.client, "context_window", 0) or 0
+        # ≈4 chars per token; tolerate window=0 to avoid div-by-zero.
+        total = (
+            len(user_text)
+            + len(vm_context)
+            + len(slash_skill_context)
+            + history_chars
+            + sys_chars
+            + tools_chars
+        )
+        pct = (total / 4 / window * 100) if window else 0.0
+        _log.info(
+            "[ctx-budget] user=%dB memory=%dB skill=%dB history=%dB "
+            "system=%dB tools=%dB total=%dB (~%.1f%% of %d-tok window)",
+            len(user_text),
+            len(vm_context),
+            len(slash_skill_context),
+            history_chars,
+            sys_chars,
+            tools_chars,
+            total,
+            pct,
+            window,
+        )
+    except Exception:
+        # Diagnostics must never break the turn.
+        _log.debug("Context budget logging failed", exc_info=True)
+
 
 # ---------------------------------------------------------------------------
 # Tool confirmation callback
@@ -334,6 +414,8 @@ async def send_message(
             ctx.message_history.append(("assistant", inline_agent_response))
 
         if ctx.vector_store is not None and inline_agent_response:
+            from obscura.cli.vector_memory_bridge import derive_project_key
+
             turn_num = len([m for m in ctx.message_history if m[0] == "user"])
             auto_save_turn(
                 ctx.vector_store,
@@ -342,6 +424,7 @@ async def send_message(
                 inline_agent_response,
                 turn_number=turn_num,
                 classifier=ctx._turn_classifier,
+                project_key=derive_project_key(),
             )
         return inline_agent_response
 
@@ -413,13 +496,51 @@ async def send_message(
     if slash_skill_context:
         augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
-    if ctx.vector_store is not None:
+    # Vector memory injection is gated by mode + first-turn flag.
+    # See ``vector_memory_bridge.get_memory_injection_mode`` for the
+    # rationale: per-turn search drowns the model in cross-project noise
+    # and double-pays for what conversation history already covers.
+    vm_context = ""
+    from obscura.cli.vector_memory_bridge import (
+        derive_project_key,
+        get_memory_injection_mode,
+        is_project_scope_enabled,
+    )
+
+    _injection_mode = get_memory_injection_mode()
+    _project_key = derive_project_key() if is_project_scope_enabled() else None
+    _should_inject = _injection_mode == "every" or (
+        _injection_mode == "first" and not _session_state["memory_searched"]
+    )
+
+    if ctx.vector_store is not None and _should_inject:
         if ctx._context_router is not None:
-            vm_context = search_with_router(ctx._context_router, text)
+            vm_context = search_with_router(
+                ctx._context_router, text, project_key=_project_key
+            )
         else:
-            vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
+            vm_context = search_relevant_context(
+                ctx.vector_store,
+                text,
+                top_k=3,
+                project_key=_project_key,
+            )
         if vm_context:
             augmented_text = f"{vm_context}\n\n---\n\n{augmented_text}"
+        # Mark searched even if the search returned nothing — re-running
+        # on the next turn would just produce the same empty result.
+        _session_state["memory_searched"] = True
+
+    # ── Context budget breakdown (per turn) ──────────────────────────────
+    # Surface where each kilobyte is going so we can tell whether memory
+    # injection / tool listings / conversation history is the source of
+    # auto-compact pressure. Logged at INFO; visible without DEBUG.
+    _log_context_budget(
+        ctx,
+        user_text=text,
+        slash_skill_context=slash_skill_context,
+        vm_context=vm_context,
+    )
 
     _pre_tokens = estimate_effective_context_tokens(
         ctx,
@@ -681,6 +802,7 @@ async def send_message(
             response_text,
             turn_number=turn_num,
             classifier=ctx._turn_classifier,
+            project_key=_project_key,
         )
 
     # Post-send: update token tracker and show nudge
@@ -1889,9 +2011,9 @@ async def _repl(
             _swallow("uds_init", _e)
             _uds_inbox = None
 
-        # --- Auto-title tracking (mutable container for closure access) ---
+        # --- Per-session flags (mutable container for closure access) ---
         global _session_state
-        _session_state = {"titled": False}
+        _session_state = {"titled": False, "memory_searched": False}
 
         background_tasks: set[asyncio.Task[str]] = set()
         try:
