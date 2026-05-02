@@ -47,6 +47,7 @@ import os
 import time
 import uuid
 from collections.abc import Coroutine
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, cast
@@ -67,6 +68,7 @@ from obscura.core.types import (
     ToolErrorType,
     ToolExecutionError,
     ToolResultEnvelope,
+    ToolRouterCapable,
     ToolSpec,
 )
 
@@ -114,24 +116,29 @@ class StreamingToolExecutor:
 
     def __init__(
         self,
-        agent_loop: AgentLoop,
+        tool_lookup: Callable[[str], ToolSpec | None],
+        execute_tool: Callable[
+            [ToolCallInfo, dict[str, ToolResultEnvelope]],
+            Awaitable[ToolResultEnvelope],
+        ],
         max_concurrency: int = MAX_TOOL_CONCURRENCY,
     ) -> None:
-        self._agent_loop = agent_loop
+        self._tool_lookup = tool_lookup
+        self._execute_tool = execute_tool
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._pending: list[ToolCallInfo] = []  # tools waiting to start
-        self._in_flight: dict[str, asyncio.Task[None]] = {}  # tool_use_id -> task
+        self.in_flight: dict[str, asyncio.Task[None]] = {}  # tool_use_id -> task
         self._completed: dict[str, ToolResultEnvelope] = {}  # tool_use_id -> result
-        self._order: list[str] = []  # tool_use_ids in submission order
+        self.order: list[str] = []  # tool_use_ids in submission order
         self._tool_call_map: dict[str, ToolCallInfo] = {}  # tool_use_id -> ToolCallInfo
         self._all_done = asyncio.Event()
         self._safe_in_flight_count: int = (
             0  # how many concurrency-safe tools are running
         )
-        self._seen_calls: dict[
+        self.seen_calls: dict[
             str, ToolResultEnvelope
         ] = {}  # dedup cache shared across turn
-        self._abort = asyncio.Event()  # sibling abort signal
+        self.abort_event = asyncio.Event()  # sibling abort signal
         self._closed = False  # set when stream errors; reject further adds
 
     def add_tool(self, tc: ToolCallInfo) -> None:
@@ -141,10 +148,10 @@ class StreamingToolExecutor:
         """
         if self._closed:
             return
-        self._order.append(tc.tool_use_id)
+        self.order.append(tc.tool_use_id)
         self._tool_call_map[tc.tool_use_id] = tc
 
-        spec = self._agent_loop._tools.get(tc.name)
+        spec = self._tool_lookup(tc.name)
         is_safe = spec is not None and spec.is_concurrency_safe()
 
         if is_safe and self._all_in_flight_are_safe():
@@ -161,20 +168,32 @@ class StreamingToolExecutor:
 
     def _start_tool(self, tc: ToolCallInfo) -> None:
         """Launch a tool execution task."""
-        spec = self._agent_loop._tools.get(tc.name)
+        spec = self._tool_lookup(tc.name)
         is_safe = spec is not None and spec.is_concurrency_safe()
         if is_safe:
             self._safe_in_flight_count += 1
         task: asyncio.Task[None] = asyncio.create_task(self._run_tool(tc))
-        self._in_flight[tc.tool_use_id] = task
+        self.in_flight[tc.tool_use_id] = task
 
     async def _run_tool(self, tc: ToolCallInfo) -> None:
         """Execute a single tool with semaphore limiting."""
-        spec = self._agent_loop._tools.get(tc.name)
+        spec = self._tool_lookup(tc.name)
         is_safe = spec is not None and spec.is_concurrency_safe()
+        result: ToolResultEnvelope = ToolResultEnvelope(
+            call_id=tc.tool_use_id,
+            tool=tc.name,
+            status="error",
+            error=ToolExecutionError(
+                type=ToolErrorType.UNKNOWN,
+                message="Tool execution did not produce a result.",
+                safe_to_retry=False,
+            ),
+            tool_use_id=tc.tool_use_id,
+            raw=tc.raw,
+        )
         try:
             async with self._semaphore:
-                if self._abort.is_set():
+                if self.abort_event.is_set():
                     # Abort signalled -- return an error result
                     result = ToolResultEnvelope(
                         call_id=tc.tool_use_id,
@@ -189,9 +208,7 @@ class StreamingToolExecutor:
                         raw=tc.raw,
                     )
                 else:
-                    result = await self._agent_loop._execute_single_tool(
-                        tc, self._seen_calls
-                    )
+                    result = await self._execute_tool(tc, self.seen_calls)
         except Exception as exc:
             logger.warning("StreamingToolExecutor: tool %s raised: %s", tc.name, exc)
             result = ToolResultEnvelope(
@@ -208,26 +225,26 @@ class StreamingToolExecutor:
             )
         finally:
             self._completed[tc.tool_use_id] = result
-            del self._in_flight[tc.tool_use_id]
+            del self.in_flight[tc.tool_use_id]
             if is_safe:
                 self._safe_in_flight_count -= 1
 
             # Sibling abort: if a non-safe tool errors, signal others
             if not is_safe and result.status == "error":
-                self._abort.set()
+                self.abort_event.set()
 
             self._process_queue()
-            if not self._in_flight and not self._pending:
+            if not self.in_flight and not self._pending:
                 self._all_done.set()
 
     def _process_queue(self) -> None:
         """Start pending tools if concurrency allows."""
         while self._pending:
             tc = self._pending[0]
-            spec = self._agent_loop._tools.get(tc.name)
+            spec = self._tool_lookup(tc.name)
             is_safe = spec is not None and spec.is_concurrency_safe()
 
-            if not self._in_flight:
+            if not self.in_flight:
                 # Nothing in flight, start this tool
                 self._pending.pop(0)
                 self._start_tool(tc)
@@ -242,9 +259,9 @@ class StreamingToolExecutor:
 
     def _all_in_flight_are_safe(self) -> bool:
         """Check if all currently in-flight tools are concurrency-safe."""
-        if not self._in_flight:
+        if not self.in_flight:
             return True
-        return self._safe_in_flight_count == len(self._in_flight)
+        return self._safe_in_flight_count == len(self.in_flight)
 
     def get_completed_in_order(self) -> list[ToolResultEnvelope]:
         """Return completed results in submission order (non-blocking).
@@ -253,7 +270,7 @@ class StreamingToolExecutor:
         results are always contiguous from the start.
         """
         results: list[ToolResultEnvelope] = []
-        for tid in self._order:
+        for tid in self.order:
             if tid in self._completed:
                 results.append(self._completed[tid])
             else:
@@ -265,24 +282,24 @@ class StreamingToolExecutor:
 
         Returns results in submission order.
         """
-        if self._in_flight or self._pending:
+        if self.in_flight or self._pending:
             self._all_done.clear()
             await self._all_done.wait()
-        return [self._completed[tid] for tid in self._order]
+        return [self._completed[tid] for tid in self.order]
 
     def get_tool_calls_in_order(self) -> list[ToolCallInfo]:
         """Return all submitted ToolCallInfo objects in submission order."""
-        return [self._tool_call_map[tid] for tid in self._order]
+        return [self._tool_call_map[tid] for tid in self.order]
 
     @property
     def has_pending_or_in_flight(self) -> bool:
         """True if there are tools still pending or executing."""
-        return bool(self._pending or self._in_flight)
+        return bool(self._pending or self.in_flight)
 
     @property
     def has_tools(self) -> bool:
         """True if any tools were submitted."""
-        return bool(self._order)
+        return bool(self.order)
 
 
 # ---------------------------------------------------------------------------
@@ -453,25 +470,7 @@ class TurnState:
 
     def replace(self, **changes: Any) -> TurnState:
         """Return a new ``TurnState`` with the given fields replaced."""
-        current = {
-            "turn": self.turn,
-            "turn_text": self.turn_text,
-            "accumulated_text": self.accumulated_text,
-            "accumulated_chars": self.accumulated_chars,
-            "tool_calls": self.tool_calls,
-            "current_tool_name": self.current_tool_name,
-            "current_tool_input_json": self.current_tool_input_json,
-            "current_tool_raw": self.current_tool_raw,
-            "inside_tool_accumulation": self.inside_tool_accumulation,
-            "emitted_keys": self.emitted_keys,
-            "messages": self.messages,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "has_attempted_reactive_compact": self.has_attempted_reactive_compact,
-            "finish_reason": self.finish_reason,
-        }
-        current.update(changes)
-        return TurnState(**current)
+        return dataclasses.replace(self, **changes)
 
     def add_tool_call(self, tc: ToolCallInfo) -> TurnState:
         """Return a new state with *tc* appended to tool_calls."""
@@ -693,9 +692,7 @@ class AgentLoop:
                     score_index=ToolScoreIndex(),
                     backend=self._backend_name or "copilot",
                 )
-                if self._backend is not None and hasattr(
-                    self._backend, "set_tool_router"
-                ):
+                if isinstance(self._backend, ToolRouterCapable):
                     self._backend.set_tool_router(router)
                 logger.info("Applied tool routing from compiled agent")
             except Exception:
@@ -990,7 +987,7 @@ class AgentLoop:
         start_turn: int,
         accumulated_text: str,
         stream_kwargs: dict[str, Any],
-        initial_messages: list | None = None,
+        initial_messages: list[Message] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Core loop body shared by :meth:`run` and :meth:`resume`.
 
@@ -1096,13 +1093,16 @@ class AgentLoop:
 
             # Streaming tool executor: starts tools as they arrive from
             # the model stream, not after the full response completes.
-            executor = StreamingToolExecutor(self)
+            executor = StreamingToolExecutor(
+                tool_lookup=self._tools.get,
+                execute_tool=self._execute_single_tool,
+            )
             # Share the cross-retry dedup cache. If this turn is a retry
             # after a timeout / transient stream error, any tool that
             # completed on a prior attempt will be returned from cache
             # instead of re-executed — preventing duplicate side effects
             # like double `git commit`.
-            executor._seen_calls = _seen_calls_for_retry
+            executor.seen_calls = _seen_calls_for_retry
 
             # Predictive tool calling: speculatively prefetch read-only
             # tools based on the model's text output before it even emits
@@ -1110,14 +1110,12 @@ class AgentLoop:
             if self._predictive_enabled:
                 self._predictive_cache.clear()
                 self._predictor = ToolPredictor(
-                    tool_registry=dict(self._tools.items())
-                    if hasattr(self._tools, "items")
-                    else {},
+                    tool_registry={spec.name: spec for spec in self._tools.all()},
                 )
 
             def _feed_new_tools_to_executor() -> None:
                 """Hand any newly-flushed tool calls to the executor."""
-                fed = len(executor._order)
+                fed = len(executor.order)
                 for tc in _tool_calls_mut[fed:]:
                     executor.add_tool(tc)
 
@@ -1227,11 +1225,14 @@ class AgentLoop:
                             finish_reason = (
                                 getattr(chunk.metadata, "finish_reason", "") or ""
                             )
-                            updates: dict[str, Any] = {"finish_reason": finish_reason}
                             if usage is not None:
-                                updates["input_tokens"] = usage.get("input_tokens", 0)
-                                updates["output_tokens"] = usage.get("output_tokens", 0)
-                            state = state.replace(**updates)
+                                state = state.replace(
+                                    finish_reason=finish_reason,
+                                    input_tokens=usage.get("input_tokens", 0),
+                                    output_tokens=usage.get("output_tokens", 0),
+                                )
+                            else:
+                                state = state.replace(finish_reason=finish_reason)
 
                 # Flush last tool call (fallback if no TOOL_USE_END received)
                 if state.current_tool_name:
@@ -1260,8 +1261,8 @@ class AgentLoop:
                         _max_tokens_retries += 1
 
                         # Cancel any in-flight tools from the truncated response
-                        executor._abort.set()
-                        for task in list(executor._in_flight.values()):
+                        executor.abort_event.set()
+                        for task in list(executor.in_flight.values()):
                             task.cancel()
 
                         # Escalate max_tokens
@@ -1302,8 +1303,8 @@ class AgentLoop:
                 # surface as a retryable TRANSIENT error so the existing
                 # backoff logic can kick in.
                 executor.close()
-                executor._abort.set()
-                for task in list(executor._in_flight.values()):
+                executor.abort_event.set()
+                for task in list(executor.in_flight.values()):
                     task.cancel()
 
                 if _retry_count < _max_retries:
@@ -1350,8 +1351,8 @@ class AgentLoop:
             except Exception as exc:
                 # Close executor and cancel in-flight tools on stream error
                 executor.close()
-                executor._abort.set()
-                for task in list(executor._in_flight.values()):
+                executor.abort_event.set()
+                for task in list(executor.in_flight.values()):
                     task.cancel()
 
                 category = categorize_error(exc)
@@ -1825,23 +1826,29 @@ class AgentLoop:
         # Special-case: expand multi-tool wrapper payloads (e.g. "parallel"
         # or other orchestrators that carry a list of nested tool_uses).
         multi_wrappers = {"parallel", "multi_tool", "multi_tool_use"}
-        if isinstance(tc.name, str) and tc.name in multi_wrappers:
-            inner = tc.input.get("tool_uses") or tc.input.get("toolUses") or []
+        if tc.name in multi_wrappers:
+            inner_raw: Any = tc.input.get("tool_uses") or tc.input.get("toolUses")
+            inner: list[Any] = (
+                cast(list[Any], inner_raw) if isinstance(inner_raw, list) else []
+            )
             last_emitted: AgentEvent | None = None
-            for use in inner:
-                if not isinstance(use, dict):
+            for use_any in inner:
+                if not isinstance(use_any, dict):
                     continue
-                recipient = use.get("recipient_name") or use.get("recipient")
-                params = use.get("parameters") or use.get("args") or {}
-                if not recipient:
+                use = cast(dict[str, Any], use_any)
+                recipient_raw: Any = use.get("recipient_name") or use.get("recipient")
+                params_raw: Any = use.get("parameters") or use.get("args")
+                if not recipient_raw or not isinstance(recipient_raw, str):
                     continue
+                recipient: str = recipient_raw
+                params: dict[str, Any] = (
+                    cast(dict[str, Any], params_raw)
+                    if isinstance(params_raw, dict)
+                    else {}
+                )
                 # Normalize dotted provider prefixes (skip mcp__-prefixed
                 # names — see _parse_tool_call for rationale).
-                if (
-                    isinstance(recipient, str)
-                    and "." in recipient
-                    and not recipient.startswith("mcp__")
-                ):
+                if "." in recipient and not recipient.startswith("mcp__"):
                     recipient = recipient.split(".")[-1]
 
                 # Skip inner recipients that are not registered to avoid
@@ -1852,9 +1859,7 @@ class AgentLoop:
                 inner_tc = ToolCallInfo(
                     tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
                     name=recipient,
-                    input=cast(dict[str, Any], params)
-                    if isinstance(params, dict)
-                    else {},
+                    input=params,
                     raw=use,
                 )
                 dedup_key = (
@@ -2226,7 +2231,7 @@ class AgentLoop:
             logger.warning("Tool %s failed: %s", tc.name, exc)
             err = self._normalize_tool_error(exc)
             # Enrich INVALID_ARGS errors with the tool's required params
-            if err.type == ToolErrorType.INVALID_ARGS and spec is not None:
+            if err.type == ToolErrorType.INVALID_ARGS:
                 required = spec.parameters.get("required", [])
                 props = spec.parameters.get("properties", {})
                 if required:
@@ -2602,7 +2607,7 @@ class AgentLoop:
         # Skip mcp__-prefixed names: those carry meaningful structure that
         # ToolRegistry.get() resolves on its own (dot↔underscore variants),
         # and stripping here would discard the server-name segment.
-        if isinstance(name, str) and "." in name and not name.startswith("mcp__"):
+        if "." in name and not name.startswith("mcp__"):
             name = name.split(".")[-1]
 
         return ToolCallInfo(

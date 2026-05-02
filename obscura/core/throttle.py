@@ -484,6 +484,11 @@ class ThrottledBackend:
     def capabilities(self) -> BackendCapabilities:
         return self._wrapped.capabilities()
 
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self.__dict__["_wrapped"], name)
+
 
 # ---------------------------------------------------------------------------
 # Factory — wire-in point used by Client._create_backend

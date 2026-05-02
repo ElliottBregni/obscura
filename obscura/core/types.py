@@ -21,6 +21,14 @@ if TYPE_CHECKING:
     from obscura.core.tools import ToolRegistry
 
 
+def _empty_str_any_dict() -> dict[str, Any]:
+    return {}
+
+
+def _empty_any_list() -> list[Any]:
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Backend enum
 # ---------------------------------------------------------------------------
@@ -77,7 +85,7 @@ class UnifiedRequest:
     messages: list[Message] | None = None
     tool_choice: ToolChoice | None = None
     session: SessionRef | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     native: ProviderNativeRequest | None = None
 
 
@@ -105,7 +113,7 @@ class ContentBlock:
     kind: str  # "text", "thinking", "tool_use", "tool_result"
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_input: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     tool_use_id: str = ""
     is_error: bool = False
 
@@ -204,7 +212,7 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., Any]
-    output_schema: dict[str, Any] = field(default_factory=dict)
+    output_schema: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     _pydantic_model: type | None = None
     required_tier: str = "public"
     side_effects: str = "none"
@@ -348,7 +356,7 @@ class HookContext:
 
     hook: HookPoint
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_input: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     tool_output: Any = None
     message: Message | None = None
     prompt: str = ""
@@ -380,9 +388,9 @@ class AgentContext:
     input_data: Any = None
     analysis: Any = None
     plan: Any = None
-    results: list[Any] = field(default_factory=list)
+    results: list[Any] = field(default_factory=_empty_any_list)
     response: Any = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_str_any_dict)
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +421,22 @@ class BackendProtocol(Protocol):
     @property
     def native(self) -> NativeHandle: ...
     def capabilities(self) -> BackendCapabilities: ...
+
+
+@runtime_checkable
+class ToolRouterCapable(Protocol):
+    """Optional capability — implemented by backends that support per-call tool routing."""
+
+    def set_tool_router(self, router: Any) -> None: ...
+
+
+@runtime_checkable
+class ConfirmationCapable(Protocol):
+    """Optional capability — implemented by backends that gate tool calls via a confirmation hook."""
+
+    def enable_confirmation(
+        self, confirm_fn: Callable[[str, dict[str, Any]], bool]
+    ) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +503,7 @@ class ToolCallInfo:
 
     tool_use_id: str
     name: str
-    input: dict[str, Any] = field(default_factory=dict)
+    input: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     raw: Any = None
     classification: Any = None
 
@@ -514,7 +538,7 @@ class ToolCallEnvelope:
     call_id: str
     agent_id: str
     tool: str
-    args: dict[str, Any] = field(default_factory=dict)
+    args: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     context: ToolCallContext = field(default_factory=ToolCallContext)
 
 
@@ -574,7 +598,7 @@ class AgentEvent:
     kind: AgentEventKind
     text: str = ""
     tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_input: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     tool_result: str = ""
     tool_use_id: str = ""
     is_error: bool = False
