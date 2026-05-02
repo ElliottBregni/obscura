@@ -13,7 +13,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncIterator, Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
@@ -553,7 +553,6 @@ class OpenAIBackend(BackendToolHostMixin):
             pass
         return "\n".join(lines)
 
-    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
         return self._tool_registry
@@ -950,14 +949,7 @@ class OpenAIBackend(BackendToolHostMixin):
                 [m.to_dict() for m in self._conversations[self._active_session]],
             )
 
-        # Only append a fresh user turn when there's actual prompt content.
-        # During post-tool-call iterations the agent loop passes prompt=""
-        # alongside structured_messages that already contain the running
-        # conversation; appending {"role": "user", "content": ""} here would
-        # produce a malformed empty user turn that the model rationalizes as
-        # "user sent an empty message".
-        if prompt:
-            messages.append({"role": "user", "content": prompt})
+        messages.append({"role": "user", "content": prompt})
         return messages
 
     def build_create_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:

@@ -484,18 +484,6 @@ class ThrottledBackend:
     def capabilities(self) -> BackendCapabilities:
         return self._wrapped.capabilities()
 
-    def enable_confirmation(
-        self,
-        confirm_fn: Callable[[str, dict[str, Any]], bool],
-    ) -> None:
-        """Forward to wrapped backend (Claude-only — see providers/claude.py)."""
-        fn = getattr(self._wrapped, "enable_confirmation", None)
-        if fn is None:
-            raise AttributeError(
-                f"{type(self._wrapped).__name__} has no attribute 'enable_confirmation'",
-            )
-        fn(confirm_fn)
-
 
 # ---------------------------------------------------------------------------
 # Factory — wire-in point used by Client._create_backend

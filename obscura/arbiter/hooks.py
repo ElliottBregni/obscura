@@ -162,7 +162,7 @@ async def _run_tests_on_complete() -> str:
 
         from dataclasses import asdict
 
-        _, test_issues = check_test_results(asdict(outcome))
+        test_score, test_issues = check_test_results(asdict(outcome))
         if test_issues:
             return f"Test failures after completion: {'; '.join(test_issues)}"
         return ""

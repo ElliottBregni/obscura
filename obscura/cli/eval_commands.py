@@ -7,16 +7,9 @@ import sys
 from pathlib import Path
 
 import click
+from rich.console import Console
 
-# Use the shared render console so output is captured by the browser-extension
-# native host's console proxy and shows up in the side panel as `chunk` frames.
-# Constructing a fresh ``rich.console.Console()`` here would bypass that proxy.
-from obscura.cli.render import console
-
-
-def _emit(text: str) -> None:
-    """Plain-text print through the shared console (panel-safe)."""
-    console.print(text, markup=False, highlight=False, soft_wrap=True)
+console = Console()
 
 
 @click.group("eval")
@@ -148,9 +141,9 @@ def run_cmd(
             console.print(f"[green]Baseline set: {summary.run_id}[/green]")
 
         if output_format == "json":
-            _emit(render_json(summary))
+            click.echo(render_json(summary))
         elif output_format == "md":
-            _emit(render_markdown(summary))
+            click.echo(render_markdown(summary))
         else:
             render_table(summary, console=console)
 

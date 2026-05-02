@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, override
+from typing import Any
 
 
 class ToolResult:
@@ -198,7 +198,6 @@ class ToolResult:
         """Serialize to a JSON string (the return type expected by handlers)."""
         return json.dumps(self._payload)
 
-    @override
     def __repr__(self) -> str:
         ok = self._payload.get("ok", "?")
         keys = ", ".join(sorted(self._payload.keys()))

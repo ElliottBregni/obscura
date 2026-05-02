@@ -9,15 +9,6 @@
   "action": {
     "default_title": "Open Obscura"
   },
-  "commands": {
-    "_execute_action": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+O",
-        "mac": "Command+Shift+O"
-      },
-      "description": "Open the Obscura side panel"
-    }
-  },
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
@@ -31,11 +22,7 @@
     "storage",
     "activeTab",
     "scripting",
-    "tabs",
-    "clipboardRead",
-    "clipboardWrite",
-    "debugger",
-    "tabGroups"
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"

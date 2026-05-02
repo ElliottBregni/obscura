@@ -3895,7 +3895,8 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
     sub = tokens[0]
 
     try:
-        from obscura.plugins.registries import CapabilityIndex
+        from obscura.plugins.capabilities import CapabilityResolver
+        from obscura.plugins.registries import CapabilityIndex, ToolIndex
     except ImportError:
         print_error("Capability management not available.")
         return None
@@ -4830,7 +4831,7 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
       /audit errors       — Show only errors/denials
     """
     try:
-        from obscura.plugins.broker import ToolBroker  # pyright: ignore[reportUnusedImport]
+        from obscura.plugins.broker import ToolBroker
     except ImportError:
         print_error("Broker module not available.")
         return None

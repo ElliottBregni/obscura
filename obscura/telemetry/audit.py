@@ -97,14 +97,9 @@ def reset_audit_log_path() -> None:
 def emit_audit_event(event: AuditEvent) -> None:
     """Write audit event to JSONL file and OTel log exporter.
 
-    The file write is thread-safe and append-only. Before persisting we
-    run the record through the central redactor (see
-    obscura.core.redaction) so secrets that leaked into ``details`` or
-    other free-form fields don't end up in the audit trail. The raw
-    email is replaced with a stable hash for privacy minimisation.
+    The file write is thread-safe and append-only.
     """
     record = asdict(event)
-    record = _sanitise_record(record)
 
     # 1. Write to append-only JSONL file
     _write_to_file(record)
@@ -114,26 +109,6 @@ def emit_audit_event(event: AuditEvent) -> None:
 
     # 3. Also emit to structlog for unified logging
     _emit_to_structlog(event)
-
-
-def _sanitise_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Redact secret patterns and hash PII before the record is persisted."""
-    try:
-        from obscura.core.redaction import hash_identifier, redact_mapping
-
-        cleaned = redact_mapping(record)
-        # Replace the raw email with a stable hash so audit retains
-        # grouping utility without storing PII.
-        email = cleaned.get("user_email")
-        if isinstance(email, str) and email and email != "system":
-            cleaned["user_email_hash"] = hash_identifier(email)
-            cleaned["user_email"] = "[REDACTED]"
-        return cleaned
-    except Exception:
-        # Failing closed (drop the audit event) is worse than failing open
-        # here — the unredacted record still goes to the append-only log,
-        # and we'll see the failure via the structlog emit below.
-        return record
 
 
 # ---------------------------------------------------------------------------

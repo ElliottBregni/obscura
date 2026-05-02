@@ -103,41 +103,6 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get("X-API-Key")
         user = user_from_api_key(api_key)
         if user is not None:
-            # Revocation + idle-timeout checks. Bearer-tokened sessions
-            # (when the Supabase path merges) will carry a JTI;
-            # API-key flows reuse the key-derived session id so admin
-            # revocation can reach both.
-            jti = _extract_jti(request, user)
-            session_id = _extract_session_id(request, user)
-            if jti and _is_token_revoked(jti):
-                _emit_auth_audit(
-                    request.url.path,
-                    user.user_id,
-                    user.email,
-                    "denied",
-                    reason="token_revoked",
-                    jti=jti,
-                )
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Token has been revoked"},
-                )
-            if session_id and _is_session_idle(session_id):
-                _emit_auth_audit(
-                    request.url.path,
-                    user.user_id,
-                    user.email,
-                    "denied",
-                    reason="session_idle_timeout",
-                    session_id=session_id,
-                )
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Session idle timeout — re-authenticate"},
-                )
-            if session_id:
-                _observe_session_activity(session_id)
-
             request.state.user = user
             return await call_next(request)
 
@@ -277,72 +242,11 @@ def _user_from_bearer(request: Request) -> AuthenticatedUser | None:
 
 
 # ---------------------------------------------------------------------------
-# Revocation + idle-timeout helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_jti(request: Request, user: Any) -> str:
-    """Return the JTI for this request's token, if known.
-
-    Bearer-tokened requests (when the Supabase JWT path lands on this
-    branch) carry a JTI in the validated claims — middleware stashes it
-    on ``request.state.token_jti``. API-key flows have no JTI of their
-    own, but an operator can still revoke an API key by putting the key
-    itself in the blocklist under its own identifier; callers set
-    ``request.state.token_jti`` to that identifier if they want this
-    middleware to enforce it.
-    """
-    jti = getattr(request.state, "token_jti", None)
-    if isinstance(jti, str) and jti:
-        return jti
-    return ""
-
-
-def _extract_session_id(request: Request, user: Any) -> str:
-    """Return a stable session identifier for idle-timeout tracking."""
-    session_id = getattr(request.state, "session_id", None)
-    if isinstance(session_id, str) and session_id:
-        return session_id
-    # API-key flow: there's one implicit session per (user_id, api_key).
-    # user_id alone is usually enough — one idle window per user.
-    return getattr(user, "user_id", "") or ""
-
-
-def _is_token_revoked(jti: str) -> bool:
-    """Cheap wrapper around the default blocklist — isolated so tests
-    can monkeypatch without importing internals."""
-    try:
-        from obscura.auth.revocation import default_blocklist
-
-        return default_blocklist().is_revoked(jti)
-    except Exception:  # noqa: BLE001 — never fail open on our own bug
-        return False
-
-
-def _is_session_idle(session_id: str) -> bool:
-    try:
-        from obscura.auth.session_activity import default_tracker
-
-        return default_tracker().is_idle(session_id)
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _observe_session_activity(session_id: str) -> None:
-    try:
-        from obscura.auth.session_activity import default_tracker
-
-        default_tracker().observe(session_id)
-    except Exception:  # noqa: BLE001
-        pass
-
-
-# ---------------------------------------------------------------------------
 # Auth audit helper
 # ---------------------------------------------------------------------------
 
 
-_dropped_audit_events = 0
+_DROPPED_AUDIT_EVENTS = 0
 
 
 def _emit_auth_audit(
@@ -355,10 +259,10 @@ def _emit_auth_audit(
     """Emit an audit event for auth decisions.
 
     Failures are logged (not silenced) so a broken audit backend is visible
-    in logs and ``_dropped_audit_events`` reflects the cumulative count —
+    in logs and ``_DROPPED_AUDIT_EVENTS`` reflects the cumulative count —
     critical for forensic trails and security incident response.
     """
-    global _dropped_audit_events
+    global _DROPPED_AUDIT_EVENTS
     try:
         from obscura.telemetry.audit import AuditEvent, emit_audit_event
 
@@ -374,10 +278,10 @@ def _emit_auth_audit(
             ),
         )
     except Exception:
-        _dropped_audit_events += 1
+        _DROPPED_AUDIT_EVENTS += 1
         logger.exception(
             "Auth audit event dropped (total dropped: %d) path=%s outcome=%s",
-            _dropped_audit_events,
+            _DROPPED_AUDIT_EVENTS,
             path,
             outcome,
         )
@@ -385,4 +289,4 @@ def _emit_auth_audit(
 
 def get_dropped_audit_count() -> int:
     """Observability helper — expose the dropped-audit counter."""
-    return _dropped_audit_events
+    return _DROPPED_AUDIT_EVENTS

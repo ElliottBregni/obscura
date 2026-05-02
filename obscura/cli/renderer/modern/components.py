@@ -10,7 +10,7 @@ from __future__ import annotations
 import textwrap
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 from obscura.cli.renderer.modern.layout import (
     BorderStyle,
@@ -82,7 +82,6 @@ class Component:
 class RootComponent(Component):
     """Top-level container that stacks children vertically."""
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         total_h = 0
         for child in self.children:
@@ -91,7 +90,6 @@ class RootComponent(Component):
                 total_h += h
         return (available_width, total_h)
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         cursor_y = region.y
         for child in self.children:
@@ -128,14 +126,12 @@ class TextComponent(Component):
         self.text = text
         self.text_style = text_style or STYLE_DEFAULT
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         if not self.text:
             return (0, 0)
         lines = self._wrap(available_width)
         return (available_width, len(lines))
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         if not self.text:
             return 0
@@ -222,7 +218,6 @@ class StreamingTextComponent(Component):
         self._buf.clear()
         self._reveal_pos = 0
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         text = self.text[: self._reveal_pos]
         if not text:
@@ -230,7 +225,6 @@ class StreamingTextComponent(Component):
         lines = self._wrap(text, available_width)
         return (available_width, len(lines))
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         text = self.text[: self._reveal_pos]
         if not text:
@@ -287,11 +281,9 @@ class RuleComponent(Component):
         self.char = char
         self.rule_style = rule_style or Style(fg=MUTED, dim=True)
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         return (available_width, 1)
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         line = self.char * region.width
         buf.write_line(region.y, region.x, line, self.rule_style)
@@ -348,7 +340,6 @@ class PanelComponent(Component):
     def clear(self) -> None:
         self._lines.clear()
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         inner_w = max(0, available_width - 2)  # 2 for left+right border
         text = self.content
@@ -367,7 +358,6 @@ class PanelComponent(Component):
             return self._PULSE_PALETTE[self._pulse_idx]
         return self.border_color
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         h, v, tl, tr, bl, br = get_border_chars(self.border)
         color = self._effective_border_color
@@ -503,11 +493,9 @@ class SpinnerComponent(Component):
         secs = int(elapsed % 60)
         return f"{minutes}m{secs:02d}s"
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         return (available_width, 1)
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         col = region.x
 
@@ -569,11 +557,9 @@ class ToolCallComponent(Component):
             return 1.0
         return self._age / self._FADE_FRAMES
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         return (available_width, 1)
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         if self.status == "error":
             icon = "✘"
@@ -633,14 +619,12 @@ class DiffComponent(Component):
         self.diff_lines: list[DiffLine] = lines or []
         self.filepath = filepath
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         h = len(self.diff_lines)
         if self.filepath:
             h += 1  # header line
         return (available_width, h)
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         row = region.y
 
@@ -688,7 +672,6 @@ class SearchResultsComponent(Component):
         # List of (filepath, [(line_no, line_content), ...])
         self.results: list[tuple[str, list[tuple[int, str]]]] = results or []
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         h = 0
         for _filepath, matches in self.results:
@@ -696,7 +679,6 @@ class SearchResultsComponent(Component):
             h += len(matches)  # match lines
         return (available_width, max(h, 0))
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         row = region.y
         for filepath, matches in self.results:
@@ -737,11 +719,9 @@ class FileTreeComponent(Component):
         # List of (depth, name, is_directory)
         self.entries: list[tuple[int, str, bool]] = entries or []
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         return (available_width, len(self.entries))
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         row = region.y
         for depth, name, is_dir in self.entries:
@@ -779,7 +759,6 @@ class CodeBlockComponent(Component):
         self.show_line_numbers = show_line_numbers
         self.start_line = start_line
 
-    @override
     def measure(self, available_width: int) -> tuple[int, int]:
         lines = self.code.split("\n")
         h = len(lines)
@@ -787,7 +766,6 @@ class CodeBlockComponent(Component):
             h += 1  # language header
         return (available_width, h)
 
-    @override
     def render(self, buf: FrameBuffer, region: Region) -> int:
         row = region.y
         lines = self.code.split("\n")

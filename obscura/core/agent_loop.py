@@ -668,106 +668,9 @@ class AgentLoop:
         #     status="ok" during the current turn. Reset at TURN_START.
         #   _pending_correction holds a corrective message built when
         #     the scanner detects hallucination + recent successful tool;
-        #     consumed at the top of the next *user-driven* turn iteration.
-        #   _pending_correction_age counts how many iterations the
-        #     correction has been held without being consumed (i.e. the
-        #     intervening turns were continuations / internal cues, not
-        #     real user input). After ``_PENDING_CORRECTION_TTL`` it gets
-        #     dropped — a correction tied to a long-stale hallucination
-        #     just confuses fresh user input.
+        #     consumed at the top of the next turn iteration.
         self._this_turn_successful_tools: list[Any] = []
         self._pending_correction: str | None = None
-        self._pending_correction_age: int = 0
-        # Pre-built harness-tagged variant of the queued correction. Set
-        # alongside ``_pending_correction`` whenever the violations that
-        # produced it included a blank-message pattern. This variant gets
-        # injected on the next continuation turn (instead of holding the
-        # correction) to break the blank-message pattern-completion loop —
-        # see :meth:`_consume_pending_correction` for the branching.
-        # ``None`` means the queued correction does NOT cover blank-message
-        # hallucinations and the standard hold-on-continuation behaviour
-        # applies.
-        self._pending_blank_msg_cue: str | None = None
-
-    # Maximum number of agent-loop iterations a queued correction is
-    # allowed to outlive without being consumed. We're trying to interrupt
-    # a *next-turn* loop, not preserve a grudge across half a session.
-    _PENDING_CORRECTION_TTL: int = 4
-
-    # Prefix used by the Copilot recovery cue (and any future internal
-    # harness primers). A correction that would prepend onto one of these
-    # is being layered onto another harness-internal message, not a real
-    # user prompt — keep the correction queued instead.
-    _INTERNAL_HARNESS_PREFIX: str = "[internal:obscura-harness]"
-
-    def _consume_pending_correction(
-        self, current_prompt: str
-    ) -> tuple[str, str | None]:
-        """Decide whether to consume the queued hallucination correction.
-
-        Returns ``(possibly_modified_prompt, correction_text_or_None)``.
-        When the second element is non-None, the caller emits a
-        ``CORRECTION_INJECTED`` event with that text.
-
-        Three cases:
-
-        * **Real user prompt**: prepend the correction and consume.
-        * **Continuation** (empty / whitespace-only prompt — the agent
-          loop's post-tool turn pattern): normally hold, since prepending
-          ``[OBSCURA CORRECTION]`` here fabricates a user message. But
-          when the queued correction was triggered by a *blank-message*
-          violation (``_pending_blank_msg_cue`` set), inject the
-          harness-tagged cue variant *instead of* the raw correction —
-          that breaks the blank-message rationalisation loop on this
-          continuation without faking user input.
-        * **Internal cue** (prompt starts with ``_INTERNAL_HARNESS_PREFIX``
-          — the Copilot recovery cue or other harness primer): always
-          hold. Layering another harness directive on top would just
-          nest them.
-
-        Held corrections are dropped after ``_PENDING_CORRECTION_TTL``
-        held iterations — a correction tied to a long-stale hallucination
-        only confuses fresh user input that arrives later in the session.
-        """
-        if not self._pending_correction:
-            return current_prompt, None
-
-        is_continuation = not current_prompt or not current_prompt.strip()
-        is_internal_cue = bool(current_prompt) and current_prompt.lstrip().startswith(
-            self._INTERNAL_HARNESS_PREFIX
-        )
-
-        if is_continuation and self._pending_blank_msg_cue is not None:
-            # Blank-message loop interrupt: replace the empty continuation
-            # with the harness-tagged cue. The cue is self-identifying
-            # (starts with ``[internal:obscura-harness]``) so the model
-            # knows it isn't user input. We consume both the cue and the
-            # underlying correction in the same step — the cue text IS
-            # the correction for this code path.
-            cue = self._pending_blank_msg_cue
-            self._pending_correction = None
-            self._pending_correction_age = 0
-            self._pending_blank_msg_cue = None
-            return cue, cue
-
-        if is_continuation or is_internal_cue:
-            self._pending_correction_age += 1
-            if self._pending_correction_age > self._PENDING_CORRECTION_TTL:
-                logger.debug(
-                    "Dropping pending correction after %d non-user turns "
-                    "without a prompt to attach it to",
-                    self._pending_correction_age,
-                )
-                self._pending_correction = None
-                self._pending_correction_age = 0
-                self._pending_blank_msg_cue = None
-            return current_prompt, None
-
-        correction = self._pending_correction
-        self._pending_correction = None
-        self._pending_correction_age = 0
-        self._pending_blank_msg_cue = None
-        return correction + "\n\n" + current_prompt, correction
 
     # ------------------------------------------------------------------
     # Compiled agent application
@@ -852,18 +755,7 @@ class AgentLoop:
 
         The text becomes the prompt for the next model turn and a
         USER_INPUT event is emitted.  Thread-safe.
-
-        Empty / whitespace-only payloads are dropped silently. They
-        otherwise produce a ghost turn the model rationalizes as "the
-        user sent an empty message" — confusing for human users when
-        the actual source is an autonomous caller (KAIROS proactive
-        tick, supervisor probe, etc.) that had nothing to say.
         """
-        if not text or not text.strip():
-            logger.debug(
-                "inject_user_input: dropping empty payload from autonomous caller",
-            )
-            return
         self._user_input_queue.put_nowait(text)
 
     def arbiter_kill(self, reason: str = "") -> None:
@@ -1110,11 +1002,6 @@ class AgentLoop:
             accumulated_text=accumulated_text,
         )
         current_prompt: str = prompt
-        # Original user prompt — preserved so it can be seeded into the
-        # structured message history after the first tool call. Without
-        # this, post-tool iterations send the model `[assistant, tool_result]`
-        # with no user turn, and the model reasons "user sent empty message".
-        original_user_prompt: str = prompt
         kwargs: dict[str, Any] = stream_kwargs
         # Expose mutable conversation history to ToolContext so tools like
         # history_snip can inspect / mutate it. Backends that don't pass
@@ -1171,18 +1058,22 @@ class AgentLoop:
             self._this_turn_successful_tools = []
 
             # Inject any pending hallucination correction into the next prompt.
-            # Gating logic lives in :meth:`_consume_pending_correction` —
-            # see its docstring for why we hold corrections across
-            # continuation / harness-cue turns instead of consuming
-            # eagerly.
-            current_prompt, correction_to_emit = self._consume_pending_correction(
-                current_prompt
-            )
-            if correction_to_emit is not None:
+            # Set when the prior turn's text-quality scan caught the model
+            # narrating failure that contradicted a successful tool call —
+            # see ``obscura/core/output_quality.py``. Emitted as a
+            # ``CORRECTION_INJECTED`` event so the REPL can surface that a
+            # course-correction was applied.
+            if self._pending_correction:
+                correction = self._pending_correction
+                self._pending_correction = None
+                if current_prompt:
+                    current_prompt = correction + "\n\n" + current_prompt
+                else:
+                    current_prompt = correction
                 correction_event = AgentEvent(
                     kind=AgentEventKind.CORRECTION_INJECTED,
                     turn=state.turn,
-                    text=correction_to_emit,
+                    text=correction,
                 )
                 emitted = await self._emit(correction_event, session_id)
                 if emitted is not None:
@@ -1202,23 +1093,6 @@ class AgentLoop:
             # Mutable list used by _flush_pending_tool (passed by reference)
             _tool_calls_mut: list[ToolCallInfo] = []
             _emitted_keys_mut: set[str] = set()
-
-            # Stream-time blank-message suppressor — only active on
-            # post-tool continuation turns where ``current_prompt == ""``.
-            # When the model rationalises the empty prompt as "user sent
-            # blank message", this guard buffers the first ~80 chars of
-            # text events, scans for the pattern, and drops the buffer
-            # before emitting if a hit lands inside the window. On real
-            # user turns the suppressor is constructed inactive and
-            # passes events through unchanged.
-            from obscura.core.output_quality import (
-                ContinuationTextSuppressor,
-            )
-
-            _is_continuation_turn = not current_prompt or not current_prompt.strip()
-            _text_suppressor = ContinuationTextSuppressor(
-                active=_is_continuation_turn,
-            )
 
             # Streaming tool executor: starts tools as they arrive from
             # the model stream, not after the full response completes.
@@ -1263,32 +1137,16 @@ class AgentLoop:
 
                         event = self._map_chunk(chunk, state.turn)
                         if event is not None:
-                            # Route through stream-time blank-message
-                            # suppressor. On real-user turns this is a
-                            # passthrough (active=False). On continuation
-                            # turns text events are buffered; the buffer
-                            # gets flushed when (a) the window is exhausted
-                            # without a hit, (b) a non-text event arrives,
-                            # or (c) is dropped entirely if a blank-message
-                            # pattern fires inside the window.
-                            if event.kind == AgentEventKind.TEXT_DELTA:
-                                _events_to_emit = _text_suppressor.offer_text(event)
-                            else:
-                                _events_to_emit = _text_suppressor.offer_non_text(event)
-                            for _ev in _events_to_emit:
-                                if _prev_event is not None:
-                                    await self._post_emit(_prev_event)
-                                    _prev_event = None
-                                emitted = await self._emit(_ev, session_id)
-                                if emitted is not None:
-                                    yield emitted
-                                    _prev_event = emitted
+                            # Run post-hook for previous, then emit new
+                            if _prev_event is not None:
+                                await self._post_emit(_prev_event)
+                                _prev_event = None
+                            emitted = await self._emit(event, session_id)
+                            if emitted is not None:
+                                yield emitted
+                                _prev_event = emitted
 
-                        # Accumulate text. We accumulate even text the
-                        # suppressor will drop — the post-turn scanner
-                        # needs to see it so it can queue the harness cue
-                        # for the next continuation. Suppressed text is
-                        # stripped from turn_text after the stream loop.
+                        # Accumulate text
                         if chunk.kind == ChunkKind.TEXT_DELTA:
                             state = state.replace(
                                 turn_text=state.turn_text + chunk.text
@@ -1390,66 +1248,6 @@ class AgentLoop:
                     if _to_yield is not None:
                         yield _to_yield
                     _feed_new_tools_to_executor()
-
-                # Stream ended — flush any text events the suppressor was
-                # still buffering (window not exhausted, no terminating
-                # non-text event arrived). Suppressed events are NOT
-                # flushed here — they were dropped when the pattern fired.
-                for _ev in _text_suppressor.finalize():
-                    if _prev_event is not None:
-                        await self._post_emit(_prev_event)
-                        _prev_event = None
-                    emitted = await self._emit(_ev, session_id)
-                    if emitted is not None:
-                        yield emitted
-                        _prev_event = emitted
-
-                # If the suppressor caught a blank-message hallucination
-                # mid-stream, drop the offending text from state.turn_text
-                # so downstream uses (TURN_COMPLETE event, accumulated_text,
-                # the assistant message persisted into history) reflect
-                # what the user actually saw. Queue the harness cue
-                # directly: we can't rely on the post-turn scanner to do
-                # it because we just stripped the violation text from
-                # turn_text, so the scanner won't fire on this turn.
-                if _text_suppressor.suppressed:
-                    suppressed_text = _text_suppressor.suppressed_text
-                    logger.warning(
-                        "Suppressed blank-message hallucination at "
-                        "stream-time (turn=%d, %d chars dropped): %r",
-                        state.turn,
-                        len(suppressed_text),
-                        suppressed_text[:200],
-                    )
-                    if state.turn_text.startswith(suppressed_text):
-                        state = state.replace(
-                            turn_text=state.turn_text[len(suppressed_text):]
-                        )
-                    try:
-                        from obscura.core.output_quality import (
-                            build_blank_message_correction,
-                            build_blank_message_harness_cue,
-                            scan_blank_message_only,
-                        )
-
-                        violations = scan_blank_message_only(suppressed_text)
-                        if violations:
-                            correction = build_blank_message_correction(
-                                violations
-                            )
-                            cue = build_blank_message_harness_cue(violations)
-                            if correction:
-                                self._pending_correction = correction
-                                self._pending_correction_age = 0
-                                self._pending_blank_msg_cue = cue or None
-                    except Exception:
-                        # Cue queuing must never break the turn — best-effort.
-                        pass
-
-                # Multimodal images attach only to the first turn's user
-                # message — drop the kwarg now so subsequent turns (tool
-                # results, follow-ups) don't keep re-sending the images.
-                kwargs.pop("images", None)
 
                 # Mark executor closed -- no more tools will arrive
                 executor.close()
@@ -1666,8 +1464,6 @@ class AgentLoop:
             # build a corrective message that the next turn will inject.
             try:
                 from obscura.core.output_quality import (
-                    build_blank_message_correction,
-                    build_blank_message_harness_cue,
                     build_correction_prompt,
                     log_violations,
                     scan_text,
@@ -1676,30 +1472,13 @@ class AgentLoop:
                 violations = scan_text(state.turn_text)
                 if violations:
                     log_violations(violations, turn=state.turn)
-                    correction_parts: list[str] = []
                     if self._this_turn_successful_tools:
-                        existing = build_correction_prompt(
+                        correction = build_correction_prompt(
                             violations,
                             self._this_turn_successful_tools,
                         )
-                        if existing:
-                            correction_parts.append(existing)
-                    blank_msg = build_blank_message_correction(violations)
-                    if blank_msg:
-                        correction_parts.append(blank_msg)
-                    if correction_parts:
-                        self._pending_correction = "\n\n".join(correction_parts)
-                        # Reset age — this is a fresh correction, not a
-                        # carry-over from earlier in the loop.
-                        self._pending_correction_age = 0
-                        # Pre-build the harness-cue variant so the next
-                        # continuation can break the blank-message loop
-                        # without fabricating user input. ``""`` when no
-                        # blank-message pattern fired, which we normalise
-                        # to None so the consumer's ``is not None`` check
-                        # is the right signal.
-                        cue = build_blank_message_harness_cue(violations)
-                        self._pending_blank_msg_cue = cue or None
+                        if correction:
+                            self._pending_correction = correction
             except Exception:
                 # Quality scan must never break the turn — best-effort.
                 pass
@@ -1926,29 +1705,7 @@ class AgentLoop:
             # Pass structured messages via kwargs so backends can
             # persist full tool call/result history.  Merge rather
             # than replace so callers' kwargs (e.g. tool_choice) survive.
-            #
-            # Accumulate history across tool-call iterations: keep any
-            # prior messages and append the new (assistant, tool_result)
-            # pair. On the first iteration, seed the user's original
-            # prompt so the model sees a complete conversation
-            # [user, assistant, tool_result] rather than a headless
-            # [assistant, tool_result] pair (which the model rationalizes
-            # as "user sent an empty message").
-            existing_msgs: list[Message] = list(kwargs.get("messages") or [])
-            has_user_msg = any(
-                getattr(m, "role", None) == Role.USER for m in existing_msgs
-            )
-            if not has_user_msg and original_user_prompt:
-                existing_msgs = [
-                    Message(
-                        role=Role.USER,
-                        content=[
-                            ContentBlock(kind="text", text=original_user_prompt)
-                        ],
-                    ),
-                    *existing_msgs,
-                ]
-            kwargs = {**kwargs, "messages": existing_msgs + structured}
+            kwargs = {**kwargs, "messages": structured}
 
             # Context budget: track accumulated chars and compact when
             # the internal message list grows too large.

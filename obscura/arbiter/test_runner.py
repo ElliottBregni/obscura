@@ -168,7 +168,7 @@ async def _run_pytest(
             ),
             timeout=timeout_s,
         )
-        stdout_bytes, _ = await asyncio.wait_for(
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(),
             timeout=timeout_s,
         )

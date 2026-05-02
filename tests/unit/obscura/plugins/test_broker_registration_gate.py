@@ -29,20 +29,14 @@ class FakeToolSpec:
 
 class TestRegistrationGate:
     def test_valid_tool_registers(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec()
         result = broker.register_tool_spec(spec)
         assert result.status == "registered"
         assert spec.name in broker.registered_tools
 
     def test_missing_handler_quarantines(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec(handler="not_callable")
         result = broker.register_tool_spec(spec)
         assert result.status == "quarantined"
@@ -50,47 +44,32 @@ class TestRegistrationGate:
         assert spec.name in broker.quarantined_tools
 
     def test_invalid_name_quarantines(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec(name="")
         result = broker.register_tool_spec(spec)
         assert result.status == "quarantined"
 
     def test_invalid_name_special_chars_quarantines(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec(name="bad name with spaces")
         result = broker.register_tool_spec(spec)
         assert result.status == "quarantined"
 
     def test_missing_description_warns_but_registers(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec(description="")
         result = broker.register_tool_spec(spec)
         assert result.status == "registered"
         assert any(i.level == "warning" for i in result.issues)
 
     def test_valid_dotted_name(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         spec = FakeToolSpec(name="m365.teams.message.send")
         result = broker.register_tool_spec(spec)
         assert result.status == "registered"
 
     def test_quarantined_tools_list(self) -> None:
-        broker = ToolBroker(
-            policy_engine=_make_policy(),
-            allow_unresolved_capabilities=True,
-        )
+        broker = ToolBroker(policy_engine=_make_policy())
         broker.register_tool_spec(FakeToolSpec(name="good"))
         broker.register_tool_spec(FakeToolSpec(name="", handler="bad"))
         assert "good" in broker.registered_tools

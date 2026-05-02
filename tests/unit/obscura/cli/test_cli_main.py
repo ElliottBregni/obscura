@@ -604,12 +604,6 @@ class TestSendMessage:
     ) -> None:
         ctx = _make_ctx()
 
-        # Reset the session-state flag so the first-turn-only injection
-        # gate fires (other tests in this module run before this one and
-        # may have flipped ``memory_searched`` to True).
-        cli_module._session_state["memory_searched"] = False
-        cli_module._session_state["titled"] = False
-
         # Mock vector store
         mock_vs = MagicMock()
         ctx.vector_store = mock_vs
@@ -627,12 +621,10 @@ class TestSendMessage:
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
         )
-        # ``search_relevant_context`` gained a ``project_key`` kwarg
-        # (project-scope filter); the test stub must accept it.
         monkeypatch.setattr(
             cli_module,
             "search_relevant_context",
-            lambda vs, q, top_k, project_key=None: "[memory] relevant info",
+            lambda vs, q, top_k: "[memory] relevant info",
         )
         monkeypatch.setattr(
             cli_module,
@@ -669,7 +661,7 @@ class TestSendMessage:
         monkeypatch.setattr(
             cli_module,
             "search_relevant_context",
-            lambda vs, q, top_k, project_key=None: "",
+            lambda vs, q, top_k: "",
         )
         monkeypatch.setattr(
             ctx,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response
@@ -77,7 +77,6 @@ def _make_app_with_user(
     from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
     class _UserInjector(BaseHTTPMiddleware):
-        @override
         async def dispatch(
             self,
             request: Request,

@@ -65,7 +65,7 @@ _log = logging.getLogger("obscura.cli.session")
 # Helpers
 # ---------------------------------------------------------------------------
 
-_session_state: dict[str, bool] = {"titled": False, "memory_searched": False}
+_session_state: dict[str, bool] = {"titled": False}
 
 
 def _swallow(label: str, exc: Exception) -> None:
@@ -173,33 +173,6 @@ class SessionConfig:
     # server exposing the browser tools on Codex sessions.  Safe to
     # leave as ``None`` — equivalent to an empty list.
     extra_mcp_servers: list[dict[str, Any]] | None = None
-    # Optional storage scope. When set, ``events.db`` and the SQLite
-    # vector-memory directory are routed under
-    # ``~/.obscura/profiles/<profile_id>/`` so multiple Chrome profiles
-    # can run obscura side-by-side without sharing SQLite session ids.
-    # ``None`` (the default) preserves legacy single-tenant behaviour:
-    # the terminal REPL keeps writing to ``~/.obscura/events.db``.
-    profile_id: str | None = None
-
-
-def _resolve_profile_home(profile_id: str | None) -> Path:
-    """Return the storage root for a given profile.
-
-    With ``profile_id=None`` this is the legacy ``~/.obscura`` (terminal
-    REPL behaviour, unchanged). With a profile id set, it's
-    ``~/.obscura/profiles/<profile_id>``. The directory is *not* created
-    here — callers materialise it on first write (``SQLiteEventStore``
-    auto-creates parents, the vector memory backend auto-creates its dir).
-
-    Note: this is *not* a migration helper. If the legacy ``events.db``
-    exists and a profile-scoped one does not, the legacy db is left
-    alone — it's shared across profiles and overwriting it would corrupt
-    other profiles' state. The profile gets a fresh db on first use.
-    """
-    home = resolve_obscura_home()
-    if profile_id:
-        return home / "profiles" / profile_id
-    return home
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +189,6 @@ class ObscuraSession:
 
     # Populated by create()
     _config: SessionConfig
-    _profile_home: Path
     _store: SQLiteEventStore
     _sid: str
     _ctx: REPLContext
@@ -258,16 +230,11 @@ class ObscuraSession:
         self._tip_scheduler = None
         self._background_tasks = set()
 
-        # Profile-scoped storage. ``profile_id`` is supplied by the
-        # browser-extension native host (one host process per Chrome
-        # profile); terminal REPL leaves it as ``None`` and keeps the
-        # legacy shared paths.
-        self._profile_home = _resolve_profile_home(config.profile_id)
-        self._store = SQLiteEventStore(self._profile_home / "events.db")
+        self._store = SQLiteEventStore(resolve_obscura_home() / "events.db")
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
-        mcp_configs, _mcp_names = self._discover_tools(config)
+        mcp_configs, mcp_names = self._discover_tools(config)
         self._init_vector_memory()
         combined_system = self._compose_system_prompt(config)
         self._combined_system = combined_system
@@ -385,67 +352,16 @@ class ObscuraSession:
         *,
         streaming_status: Any | None = None,
         loop_kwargs: dict[str, Any] | None = None,
-        images: list[Any] | None = None,
-        attached_files: list[dict[str, Any]] | None = None,
     ) -> str:
         """Send a chat message and stream the response.
 
         Returns the accumulated assistant text.  All pre/post-processing
         (vector memory, auto-compact, auto-title, plan parsing) is included.
-
-        ``images`` accepts a list of either data URLs (``data:image/png;
-        base64,…``), raw base64 strings, or dicts with ``data``/``dataUrl``/
-        ``base64`` and optional ``media_type``. They are forwarded to the
-        backend as multimodal content blocks (Claude); other backends
-        receive the plain prompt and a textual marker per image.
-
-        ``attached_files`` accepts a list of ``{name, content}`` dicts and is
-        prepended to the prompt as ``<file path="…">…</file>`` blocks.
         """
         from obscura.cli import trace as trace_mod
 
         ctx = self._ctx
         effective_kwargs = loop_kwargs if loop_kwargs is not None else self._loop_kwargs
-
-        # ── Attached files: prepend as tagged blocks before the user prompt.
-        if attached_files:
-            file_blocks: list[str] = []
-            for f in attached_files:
-                try:
-                    name = str(f.get("name") or "attachment")
-                    content = str(f.get("content") or "")
-                except Exception:
-                    continue
-                if not content:
-                    continue
-                # Escape the closing tag so file content can't break out.
-                safe = content.replace("</file>", "<\u2009/file>")
-                file_blocks.append(f'<file path="{name}">\n{safe}\n</file>')
-            if file_blocks:
-                text = "\n\n".join(file_blocks) + "\n\n" + text
-
-        # ── Images: append a textual marker per image so backends without
-        # vision plumbing still know images were referenced. The actual
-        # image data is forwarded via ``run_loop(images=…)`` below.
-        normalized_images: list[Any] = []
-        if images:
-            markers: list[str] = []
-            for i, item in enumerate(images):
-                name = ""
-                if isinstance(item, dict):
-                    from typing import cast as _cast
-
-                    item_dict = _cast("dict[str, Any]", item)
-                    raw_name = item_dict.get("name") or item_dict.get("filename")
-                    if isinstance(raw_name, str):
-                        name = raw_name
-                if not name:
-                    name = f"image-{i + 1}"
-                markers.append(f"[image: {name}]")
-                normalized_images.append(item)
-            if markers:
-                marker_block = " ".join(markers)
-                text = f"{text}\n\n{marker_block}" if text else marker_block
 
         # Inline agent check
         inline_agent_response = await _run_inline_agent_from_mention(ctx, text)
@@ -454,8 +370,6 @@ class ObscuraSession:
             if inline_agent_response:
                 ctx.message_history.append(("assistant", inline_agent_response))
             if ctx.vector_store is not None and inline_agent_response:
-                from obscura.cli.vector_memory_bridge import derive_project_key
-
                 turn_num = len([m for m in ctx.message_history if m[0] == "user"])
                 auto_save_turn(
                     ctx.vector_store,
@@ -464,7 +378,6 @@ class ObscuraSession:
                     inline_agent_response,
                     turn_number=turn_num,
                     classifier=ctx._turn_classifier,
-                    project_key=derive_project_key(),
                 )
             return inline_agent_response
 
@@ -522,40 +435,18 @@ class ObscuraSession:
         from obscura.tools.system import update_token_usage
 
         # ── Vector memory pre-search ──────────────────────────────────────
-        # See ``cli/__init__.py`` for the full rationale on why we don't
-        # search every turn — same env knobs apply here.
         augmented_text = text
         slash_skill_context = ctx.build_active_skill_context()
         if slash_skill_context:
             augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
-        from obscura.cli.vector_memory_bridge import (
-            derive_project_key,
-            get_memory_injection_mode,
-            is_project_scope_enabled,
-        )
-
-        _injection_mode = get_memory_injection_mode()
-        _project_key = derive_project_key() if is_project_scope_enabled() else None
-        _should_inject = _injection_mode == "every" or (
-            _injection_mode == "first" and not _session_state["memory_searched"]
-        )
-
-        if ctx.vector_store is not None and _should_inject:
+        if ctx.vector_store is not None:
             if ctx._context_router is not None:
-                vm_context = search_with_router(
-                    ctx._context_router, text, project_key=_project_key
-                )
+                vm_context = search_with_router(ctx._context_router, text)
             else:
-                vm_context = search_relevant_context(
-                    ctx.vector_store,
-                    text,
-                    top_k=3,
-                    project_key=_project_key,
-                )
+                vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
             if vm_context:
                 augmented_text = f"{vm_context}\n\n---\n\n{augmented_text}"
-            _session_state["memory_searched"] = True
 
         _pre_tokens = estimate_effective_context_tokens(
             ctx,
@@ -615,12 +506,6 @@ class ObscuraSession:
                     ]
                 except (ValueError, KeyError):
                     pass
-            # Forward multimodal images so the Claude backend can attach them
-            # as content blocks. Other backends receive the kwarg through
-            # ``**kwargs`` and silently ignore it (a textual ``[image: name]``
-            # marker is already in the prompt as a fallback for them).
-            if normalized_images:
-                _effective_kwargs["images"] = normalized_images
             _s = ctx.client.run_loop(
                 augmented_text,
                 max_turns=ctx.max_turns,
@@ -823,7 +708,6 @@ class ObscuraSession:
                 response_text,
                 turn_number=turn_num,
                 classifier=ctx._turn_classifier,
-                project_key=_project_key,
             )
 
         # Post-send: update token tracker
@@ -858,8 +742,8 @@ class ObscuraSession:
             except Exception:
                 pass
 
-        # Auto-title (mutating the module-global dict; no ``global``
-        # declaration needed because we only assign to keys).
+        # Auto-title
+        global _session_state
         if not _session_state["titled"] and len(ctx.message_history) >= 2:
             _session_state["titled"] = True
             try:
@@ -1164,18 +1048,6 @@ class ObscuraSession:
         )
         self._cli_user = cli_user
 
-        # Scope the SQLite vector backend to the profile dir if a
-        # profile_id is set and the env var hasn't been explicitly
-        # overridden by the caller. The vector backend reads this env
-        # var lazily on first instantiation, so set it before
-        # ``init_vector_store`` runs. We don't migrate any existing
-        # ``~/.obscura/vector_memory/`` data — the profile gets a fresh
-        # store on first write, mirroring the events.db policy.
-        if self._config.profile_id and "OBSCURA_VECTOR_MEMORY_DIR" not in os.environ:
-            os.environ["OBSCURA_VECTOR_MEMORY_DIR"] = str(
-                self._profile_home / "vector_memory",
-            )
-
         self._vector_store = init_vector_store(cli_user)
 
         if self._vector_store is not None:
@@ -1212,9 +1084,7 @@ class ObscuraSession:
         if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
             include_default = False
 
-        # Reuse the profile-scoped events.db computed in ``create()``
-        # so memory loading sees the same store the session writes to.
-        db_path = self._profile_home / "events.db"
+        db_path = resolve_obscura_home() / "events.db"
         memory_context = load_obscura_memory(self._sid, db_path)
         custom_sections: list[str] = [memory_context] if memory_context else []
 
@@ -1710,16 +1580,7 @@ class ObscuraSession:
             )
             from obscura.plugins.registries.capability_index import CapabilityIndex
 
-            # See cli/__init__.py for the rationale on
-            # OBSCURA_PIN_DEFAULT_CAPABILITIES.
-            import os as _os
-
-            _pin_default = _os.environ.get(
-                "OBSCURA_PIN_DEFAULT_CAPABILITIES", ""
-            ).strip().lower() in ("1", "true", "on", "yes")
-            _routing_config = ToolRoutingConfig(
-                pin_default_capabilities=_pin_default
-            )
+            _routing_config = ToolRoutingConfig()
             _score_index = ToolScoreIndex()
 
             _cap_index = CapabilityIndex()
@@ -1767,7 +1628,7 @@ class ObscuraSession:
 
                 return summarize_session_for_resume(
                     config.session_id,
-                    self._profile_home / "events.db",
+                    resolve_obscura_home() / "events.db",
                 )
             except Exception:
                 pass

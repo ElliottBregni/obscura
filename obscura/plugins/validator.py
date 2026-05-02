@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from obscura.plugins.models import PluginSpec
@@ -42,7 +42,6 @@ class ValidationError:
     message: str
     severity: str = "error"  # "error" | "warning"
 
-    @override
     def __str__(self) -> str:
         return f"[{self.severity}] {self.field}: {self.message}"
 

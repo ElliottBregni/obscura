@@ -255,6 +255,6 @@ ignore = ["E501"]
 "demos/backend_agents/common.py" = ["F811"]
 
 [tool.uv.sources]
-# Pin to openai/codex monorepo. The package metadata published by that repo is
-# named "codex-app-server-sdk", so the dependency must use that name.
+# Pin to openai/codex monorepo — the third-party "codex-app-server-sdk" on
+# PyPI is unrelated. See https://github.com/openai/codex/tree/main/sdk/python
 codex-app-server-sdk = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }

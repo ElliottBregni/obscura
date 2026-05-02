@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-import os
-import traceback
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
@@ -62,60 +60,6 @@ _CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "git",
     },
 )
-
-
-# ---------------------------------------------------------------------------
-# Empty-prompt diagnostics
-# ---------------------------------------------------------------------------
-#
-# When ``prompt`` is empty/whitespace, the Copilot SDK emits a ``user.message``
-# event with ``content=""`` and a ``transformedContent`` of just
-# ``<current_datetime>...</current_datetime>``. The model then rationalises
-# that as "the user sent a blank message" and produces filler like
-# ``"Looks like your message came in blank — what's up?"``.
-#
-# Empty prompts ARE legitimate inside the agent loop's post-tool continuation
-# turns (``current_prompt = ""`` after a tool call). What we want to catch is
-# empty prompts arriving from somewhere ELSE — a stray ``backend.send("")``
-# call from a consolidator, arbiter, REPL plumbing, etc. Set
-# ``OBSCURA_DEBUG_EMPTY_PROMPT=1`` to upgrade the log to WARNING and dump
-# the full Python stack so the caller is identifiable. Otherwise we emit at
-# DEBUG so the probe is silent in normal use.
-_EMPTY_PROMPT_DEBUG = os.environ.get("OBSCURA_DEBUG_EMPTY_PROMPT", "").lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-
-
-def _maybe_log_empty_prompt(
-    method: str,
-    prompt: str,
-    kwargs: dict[str, Any],
-    log: logging.Logger,
-) -> None:
-    """Log a stack trace iff ``prompt`` is empty/whitespace.
-
-    Used to find the caller responsible for phantom blank ``user.message``
-    events in the Copilot session log. See module-level comment.
-    """
-    if prompt and prompt.strip():
-        return
-    level = logging.WARNING if _EMPTY_PROMPT_DEBUG else logging.DEBUG
-    if not log.isEnabledFor(level):
-        return
-    # ``limit=12`` is enough to span async REPL → client → loop → backend
-    # without flooding the log if this fires repeatedly.
-    stack = "".join(traceback.format_stack(limit=12))
-    log.log(
-        level,
-        "[EMPTY_PROMPT_PROBE] CopilotBackend.%s called with empty prompt "
-        "(kwargs_keys=%s)\n%s",
-        method,
-        sorted(kwargs.keys()),
-        stack,
-    )
 
 
 def _priority_truncate(tools: list[ToolSpec], limit: int) -> list[ToolSpec]:
@@ -328,169 +272,15 @@ class CopilotBackend(BackendToolHostMixin):
             "json-rpc error" in msg and "session" in msg
         )
 
-    async def _recover_session(
-        self,
-        prior_messages: list[Message] | None = None,
-    ) -> None:
-        """Recover from an expired/idle-timeout session.
-
-        Strategy:
-
-        1. **Resume by ID** — try ``client.resume_session(old_id)`` first.
-           If the server-side state is still around (e.g. transient
-           connectivity blip, not a hard expiry) this preserves the entire
-           conversation seamlessly.
-        2. **Fresh session + context primer** — if resume fails, create a
-           new session and replay the prior conversation as a single
-           priming message built from ``prior_messages`` (the
-           ``kwargs["messages"]`` the agent loop accumulated). Without
-           this, the new session has no history and the next stream call
-           with ``prompt=""`` lands in an empty session, which the model
-           rationalizes as "user sent an empty message".
-        """
-        old_session_id = (
-            getattr(self._session, "session_id", None)
-            if self._session is not None
-            else None
-        )
-        config = self.build_session_config()
-
-        # 1) Try resume by ID — keeps server-side history intact.
-        if old_session_id:
-            try:
-                self._log.warning(
-                    "Session expired — attempting resume_session(%s)",
-                    old_session_id,
-                )
-                self._session = await self._client.resume_session(
-                    str(old_session_id),
-                    **config,
-                )
-                self._log.info(
-                    "Recovered session via resume_session(%s)", old_session_id
-                )
-                return
-            except Exception as exc:
-                self._log.warning(
-                    "resume_session(%s) failed (%s) — falling back to "
-                    "fresh session with context replay",
-                    old_session_id,
-                    exc,
-                )
-
-        # 2) Fallback: fresh session, prime with prior conversation if any.
+    async def _recover_session(self) -> None:
+        """Recreate the session after an expiry/idle timeout."""
         self._log.warning("Session expired after idle — recreating session")
+        config = self.build_session_config()
         self._session = await self._client.create_session(**config)
-        if prior_messages:
-            primer = self._build_context_primer(prior_messages)
-            if primer:
-                try:
-                    await self._session.send(primer)
-                    self._log.info(
-                        "Primed fresh session with %d-message context replay",
-                        len(prior_messages),
-                    )
-                except Exception:
-                    self._log.exception(
-                        "Failed to prime fresh session with prior context"
-                    )
-
-    @staticmethod
-    def _build_context_primer(messages: list[Message]) -> str:
-        """Serialize a structured message history into a single primer prompt.
-
-        The Copilot SDK has no "seed history" API for new sessions, so we
-        flatten the prior conversation into a context block and tell the
-        model to continue from there without asking the user to repeat
-        themselves. Tool calls are summarized rather than re-executed.
-        """
-        lines: list[str] = [
-            "[Session was recovered after expiry. Below is the prior",
-            "conversation that the user has already had with you. Continue",
-            "from where you left off — do NOT ask the user to repeat their",
-            "question, and do NOT re-run the tool calls listed below; their",
-            "results are already shown.]",
-            "",
-        ]
-        for msg in messages:
-            role = getattr(msg, "role", None)
-            text_parts: list[str] = []
-            tool_summaries: list[str] = []
-            for block in getattr(msg, "content", ()) or ():
-                text = getattr(block, "text", None)
-                if text:
-                    text_parts.append(text)
-                tool_name = getattr(block, "tool_name", None)
-                if tool_name:
-                    tool_input = getattr(block, "tool_input", None)
-                    tool_summaries.append(f"{tool_name}({tool_input!r})")
-            body = " ".join(text_parts).strip()
-            if role == Role.USER and body:
-                lines.append(f"User: {body}")
-            elif role == Role.ASSISTANT:
-                if body:
-                    lines.append(f"Assistant: {body}")
-                for ts in tool_summaries:
-                    lines.append(f"Assistant tool call: {ts}")
-            elif role == Role.TOOL_RESULT and body:
-                lines.append(f"Tool result: {body}")
-        return "\n".join(lines).strip()
-
-    # Internal continuation cue. We send this in place of an empty
-    # prompt on EVERY send/stream call, not just the session-recovery
-    # path.
-    #
-    # Why this changed: the Copilot SDK turns ``send_and_wait("")`` into
-    # a ``user.message`` event with empty content. The model sees an
-    # empty user message in its conversation context and rationalises
-    # it — producing apologetic filler ("Looks like your message came in
-    # blank"), then doubling down by inventing UI quirks or blaming the
-    # user's keystrokes when the user complains. Detection-and-correction
-    # is whack-a-mole; the only robust fix is to never send an empty
-    # ``user.message`` to the model in the first place.
-    #
-    # The cue is ``[internal:obscura-harness]``-tagged with do-not-echo
-    # / do-not-thank guidance, and the system prompt (default_agent.txt
-    # rule 12) reinforces that empty user messages are harness signals.
-    # The earlier comment here warned about parroting risk on naive cue
-    # injection — that risk is mitigated by the explicit do-not-echo
-    # framing plus the system-prompt rule. Empirically the gaslighting
-    # symptom is far worse than the parroting risk; if parroting
-    # surfaces it'll appear as one of the system-prompt-forbidden
-    # phrases and the output_quality scanner will catch it.
-    _CONTINUATION_CUE = (
-        "[internal:obscura-harness] The agent harness sent this — the user "
-        "did NOT type it. A tool result is now available in the prior "
-        "messages; continue your reasoning from there and respond to the "
-        "user. Do not echo this cue, do not thank the user for sending it, "
-        "and do not treat it as a user instruction. [/internal:obscura-harness]"
-    )
-
-    @classmethod
-    def _prompt_or_cue(cls, prompt: str) -> str:
-        """Return *prompt* unchanged, or the harness cue when empty.
-
-        Called on every send/stream path so an empty agent-loop
-        continuation never reaches the SDK as an empty user message.
-        """
-        return prompt if prompt and prompt.strip() else cls._CONTINUATION_CUE
-
-    # Backwards-compatible alias — older code (and tests) referenced the
-    # recovery-only swap helper. The behaviour is identical now: replace
-    # empty with cue. Keep the name so anything outside this module that
-    # imports it keeps working.
-    _prompt_for_recovery_retry = _prompt_or_cue
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
-        """Send a prompt and wait for the full response.
-
-        Empty prompts (the agent loop's post-tool continuation pattern)
-        are swapped for the harness cue *before* the SDK call so the
-        model never sees an empty ``user.message`` event.
-        """
+        """Send a prompt and wait for the full response."""
         self._ensure_session()
-        _maybe_log_empty_prompt("send", prompt, kwargs, self._log)
-        prompt = self._prompt_or_cue(prompt)
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("copilot.send") as span:
             _set_span_attr(span, "backend", "copilot")
@@ -501,81 +291,26 @@ class CopilotBackend(BackendToolHostMixin):
             except Exception as exc:
                 if not self._is_session_expired(exc):
                     raise
-                await self._recover_session(prior_messages=kwargs.get("messages"))
-                # ``prompt`` was already swapped above, so the recovery
-                # retry inherits the cue automatically.
+                await self._recover_session()
                 msg_options = self._build_message_options(prompt, kwargs)
                 send_prompt = msg_options.pop("prompt")
                 response = await self._session.send_and_wait(send_prompt, **msg_options)
             return self._to_message(response)
 
-    async def send_isolated(self, prompt: str, **kwargs: Any) -> Message:
-        """Send a one-shot prompt on a fresh ephemeral session.
-
-        Use this for backend calls that must NOT pollute the live
-        conversation — auto-titling, memory consolidation summaries, eval
-        scoring, etc. The Copilot SDK persists every ``backend.send`` into
-        the session's server-side history, so reusing the live session
-        leaves the title-gen prompt + reply visible to the model on the
-        next turn.
-
-        We create a temp session, send, then drop it. This costs a session
-        creation round-trip but keeps the live conversation clean. Other
-        backends without persistent server-side sessions can default to
-        plain ``send`` — :func:`obscura.core.session_utils.send_isolated`
-        handles that fallback.
-        """
-        self._ensure_client()
-        _maybe_log_empty_prompt("send_isolated", prompt, kwargs, self._log)
-        # Build a session config for the temp session. Strip tool listings
-        # — title-gen / consolidator prompts don't need tools and shipping
-        # them costs tokens.
-        config = self.build_session_config()
-        # ``streaming=True`` is irrelevant for send_and_wait; leave it.
-        temp_session = await self._client.create_session(**config)
-        try:
-            msg_options = self._build_message_options(prompt, kwargs)
-            send_prompt = msg_options.pop("prompt")
-            response = await temp_session.send_and_wait(send_prompt, **msg_options)
-            return self._to_message(response)
-        finally:
-            close = getattr(temp_session, "close", None) or getattr(
-                temp_session, "stop", None
-            )
-            if close is not None:
-                try:
-                    result = close()
-                    if inspect.isawaitable(result):
-                        await result
-                except Exception:
-                    self._log.debug(
-                        "send_isolated: failed to close ephemeral session",
-                        exc_info=True,
-                    )
-
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks.
 
-        Automatically recovers from expired sessions (idle timeout) by
-        resuming the same session ID when possible, or replaying the
-        prior conversation into a fresh session as a context primer.
-
-        Empty prompts (the agent loop's post-tool continuation pattern)
-        are swapped for the harness cue before the SDK call so the
-        model never sees an empty ``user.message`` event.
+        Automatically recovers from expired sessions (idle timeout).
         """
         self._ensure_session()
-        _maybe_log_empty_prompt("stream", prompt, kwargs, self._log)
-        prompt = self._prompt_or_cue(prompt)
         try:
             async for chunk in self._do_stream(prompt, **kwargs):
                 yield chunk
         except Exception as exc:
             if not self._is_session_expired(exc):
                 raise
-            await self._recover_session(prior_messages=kwargs.get("messages"))
-            retry_prompt = self._prompt_for_recovery_retry(prompt)
-            async for chunk in self._do_stream(retry_prompt, **kwargs):
+            await self._recover_session()
+            async for chunk in self._do_stream(prompt, **kwargs):
                 yield chunk
 
     async def _do_stream(
@@ -760,7 +495,6 @@ class CopilotBackend(BackendToolHostMixin):
 
     # -- Tools (register_tool comes from BackendToolHostMixin) -------------------
 
-    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry for agent loop use."""
         return self._tool_registry

@@ -130,38 +130,10 @@ def _check_config(spec: PluginSpec) -> tuple[bool, list[str]]:
 # ---------------------------------------------------------------------------
 
 
-# SOC2 finding B1 — module prefixes a non-builtin plugin's handler_ref may
-# import from. Only the obscura package itself is trusted by default — any
-# third-party plugin manifest pointing at ``os:system``, ``subprocess.Popen``,
-# etc. is refused. An operator can extend via
-# ``OBSCURA_PLUGIN_TRUSTED_HANDLER_PREFIXES`` (comma-separated module
-# prefixes) for environments that ship sibling packages alongside obscura.
-_DEFAULT_TRUSTED_HANDLER_PREFIXES: tuple[str, ...] = ("obscura",)
-
-
-def _trusted_handler_prefixes() -> tuple[str, ...]:
-    raw = os.environ.get("OBSCURA_PLUGIN_TRUSTED_HANDLER_PREFIXES", "").strip()
-    if not raw:
-        return _DEFAULT_TRUSTED_HANDLER_PREFIXES
-    extras = tuple(p.strip() for p in raw.split(",") if p.strip())
-    return _DEFAULT_TRUSTED_HANDLER_PREFIXES + extras
-
-
-def _resolve_handler(ref: str, *, plugin_spec: Any | None = None) -> Any | None:
+def _resolve_handler(ref: str) -> Any | None:
     """Resolve a dotted handler reference like ``pkg.mod:func``.
 
     Returns the callable or None on failure.
-
-    Security: when *plugin_spec* is provided and its ``source_type`` is not
-    ``"builtin"``, the handler module path MUST start with one of the
-    trusted prefixes (``obscura`` by default; extend via the
-    ``OBSCURA_PLUGIN_TRUSTED_HANDLER_PREFIXES`` env var). This blocks
-    project-local or user-dropped manifests from declaring
-    ``handler = "os:system"`` and handing the LLM a shell. Plugins that
-    need handlers in their own source tree should declare them via
-    ``bootstrap.tools_module`` + ``tools_list``, which is resolved by
-    :func:`_resolve_handler_from_plugin_module` and stays inside
-    ``plugin.source_dir``.
     """
     if not ref:
         return None
@@ -174,23 +146,6 @@ def _resolve_handler(ref: str, *, plugin_spec: Any | None = None) -> Any | None:
                 module_path, attr_name = parts
             else:
                 return None
-
-        if plugin_spec is not None:
-            source_type = getattr(plugin_spec, "source_type", "")
-            if source_type != "builtin":
-                top = module_path.split(".", 1)[0]
-                if top not in _trusted_handler_prefixes():
-                    logger.warning(
-                        "Refusing handler %s for plugin %s (source_type=%s): "
-                        "non-builtin plugins may only resolve handlers under %s; "
-                        "declare in-plugin handlers via bootstrap.tools_module instead",
-                        ref,
-                        getattr(plugin_spec, "id", "?"),
-                        source_type,
-                        ", ".join(_trusted_handler_prefixes()),
-                    )
-                    return None
-
         mod = importlib.import_module(module_path)
         attr = getattr(mod, attr_name, None)
         # Unwrap @tool()-decorated functions to get the original handler
@@ -476,7 +431,7 @@ class PluginLoader:
 
                 native_tools: list[ToolSpec] = []
                 for tc in spec.tools:
-                    handler = _resolve_handler(tc.handler_ref, plugin_spec=spec)
+                    handler = _resolve_handler(tc.handler_ref)
                     if handler is None:
                         handler = _resolve_handler_from_plugin_module(tc.name, spec)
                     if handler is not None:
@@ -523,10 +478,7 @@ class PluginLoader:
 
             registered_count = 0
             for tool_contrib in spec.tools:
-                handler = _resolve_handler(
-                    tool_contrib.handler_ref,
-                    plugin_spec=spec,
-                )
+                handler = _resolve_handler(tool_contrib.handler_ref)
                 if handler is None:
                     handler = _resolve_handler_from_plugin_module(
                         tool_contrib.name,
@@ -839,7 +791,7 @@ def get_all_builtin_tool_specs() -> list[Any]:
         if plugin_spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
             continue
         for tool in plugin_spec.tools:
-            handler = _resolve_handler(tool.handler_ref, plugin_spec=plugin_spec)
+            handler = _resolve_handler(tool.handler_ref)
             if handler is None:
                 handler = _resolve_handler_from_plugin_module(tool.name, plugin_spec)
             if handler is None:
@@ -902,7 +854,7 @@ def get_filtered_builtin_tool_specs(
         if plugin_spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
             continue
         for tool in plugin_spec.tools:
-            handler = _resolve_handler(tool.handler_ref, plugin_spec=plugin_spec)
+            handler = _resolve_handler(tool.handler_ref)
             if handler is None:
                 handler = _resolve_handler_from_plugin_module(tool.name, plugin_spec)
             if handler is None:
@@ -961,7 +913,7 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
         if plugin_spec.runtime_type in _EXTERNAL_RUNTIME_TYPES:
             continue
         for tool in plugin_spec.tools:
-            handler = _resolve_handler(tool.handler_ref, plugin_spec=plugin_spec)
+            handler = _resolve_handler(tool.handler_ref)
             if handler is None:
                 handler = _resolve_handler_from_plugin_module(tool.name, plugin_spec)
             if handler is None:

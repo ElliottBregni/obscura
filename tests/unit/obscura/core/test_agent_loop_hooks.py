@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -288,7 +288,6 @@ class TestAgentLoopEventStore:
         tmp_path: Path,
     ) -> None:
         class FailBackend(MockBackend):
-            @override
             async def stream(
                 self,
                 prompt: str,

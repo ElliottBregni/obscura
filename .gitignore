@@ -95,12 +95,7 @@ partity_matrix
 firebase-debug.log
 .sh
 docs/*
-
-# Exception: customer-facing compliance docs must ship in the repo.
-!docs/subprocessors.md
-
 !docs/plans/
-
 .gitnexus
 
 # Pyright and pytest output

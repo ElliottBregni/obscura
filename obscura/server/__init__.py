@@ -199,10 +199,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     if config is None:
         config = ObscuraConfig.from_env()
 
-    # Refuse to start in the one combination that silently exposes a server
-    # without authentication. See ObscuraConfig.validate_deployment_safety.
-    config.validate_deployment_safety()
-
     app = FastAPI(
         title="Obscura SDK API",
         version="0.2.0",

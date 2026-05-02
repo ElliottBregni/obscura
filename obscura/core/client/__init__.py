@@ -610,16 +610,6 @@ class ObscuraClient:
         """Register a hook callback."""
         self._backend.register_hook(hook, callback)
 
-    @property
-    def hooks(self) -> Any:
-        """Public accessor for the HookRegistry (used by the agent layer)."""
-        return self._hooks
-
-    @hooks.setter
-    def hooks(self, value: Any) -> None:
-        """Allow the agent layer to attach or replace the HookRegistry."""
-        self._hooks = value
-
     # -- Backend access (escape hatch) --------------------------------------
 
     @property

@@ -546,128 +546,15 @@ class ClaudeBackend(BackendToolHostMixin):
                 int(max_thinking) if int(max_thinking) > 0 else None
             )
 
-        # Pull multimodal images out of kwargs — the rest of the kwargs
-        # pipeline doesn't understand them, and the Claude SDK only accepts
-        # them through the AsyncIterable message form below.
-        raw_images: Any = kwargs.pop("images", None)
-        images: list[Any] = (
-            list(cast("list[Any]", raw_images)) if isinstance(raw_images, list) else []
-        )
-
         query_kwargs = self._build_query_kwargs(kwargs)
-
-        # Multimodal path: when images are attached, hand the SDK an async
-        # iterable of message dicts whose ``content`` is a list of
-        # ``{"type": "text"|"image"}`` blocks. Claude's wire format requires
-        # each image to carry ``source.type=base64``, ``media_type``, and
-        # ``data`` — we accept either raw base64 strings or full data URLs
-        # (``data:image/png;base64,…``) and normalise here.
-        if images:
-            prompt_payload: Any = self._build_image_message_iterable(prompt, images)
-        else:
-            prompt_payload = prompt
-
         if query_kwargs:
             try:
-                await self._client.query(prompt_payload, **query_kwargs)
+                await self._client.query(prompt, **query_kwargs)
                 return
             except TypeError:
                 # Older SDKs may not accept query kwargs.
                 pass
-        await self._client.query(prompt_payload)
-
-    @staticmethod
-    def _build_image_message_iterable(
-        prompt: str,
-        images: list[Any],
-    ) -> Any:
-        """Build an ``AsyncIterable[dict]`` carrying a multimodal user message.
-
-        Each entry in ``images`` may be:
-          - a string data URL (``data:image/png;base64,…``)
-          - a plain base64 string
-          - a dict with ``data``/``dataUrl``/``base64`` and optional
-            ``media_type`` / ``mediaType``
-
-        Anything that can't be parsed is silently skipped — the text prompt
-        always reaches the model so the turn doesn't fail.
-        """
-        import base64 as _b64
-        import re as _re
-
-        content_blocks: list[dict[str, Any]] = []
-        if prompt:
-            content_blocks.append({"type": "text", "text": prompt})
-
-        data_url_re = _re.compile(r"^data:(?P<mt>[^;]+);base64,(?P<data>.*)$", _re.S)
-
-        for entry in images:
-            data: str = ""
-            media_type: str = "image/png"
-            if isinstance(entry, str):
-                m = data_url_re.match(entry)
-                if m:
-                    media_type = m.group("mt") or "image/png"
-                    data = m.group("data") or ""
-                else:
-                    data = entry
-            elif isinstance(entry, dict):
-                entry_dict: dict[str, Any] = cast("dict[str, Any]", entry)
-                raw_val: Any = (
-                    entry_dict.get("data")
-                    or entry_dict.get("dataUrl")
-                    or entry_dict.get("base64")
-                    or ""
-                )
-                mt_val: Any = (
-                    entry_dict.get("media_type")
-                    or entry_dict.get("mediaType")
-                    or media_type
-                )
-                if isinstance(mt_val, str):
-                    media_type = mt_val
-                if isinstance(raw_val, str):
-                    m = data_url_re.match(raw_val)
-                    if m:
-                        media_type = m.group("mt") or media_type
-                        data = m.group("data") or ""
-                    else:
-                        data = raw_val
-
-            if not data:
-                continue
-            # Strip whitespace and validate base64 cheaply — bad data should
-            # not crash the turn.
-            data = data.strip()
-            try:
-                _b64.b64decode(data, validate=True)
-            except Exception:
-                continue
-            content_blocks.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": data,
-                    },
-                }
-            )
-
-        # Fall back to a plain text-only message if nothing decoded.
-        if not any(b["type"] == "image" for b in content_blocks):
-            return prompt or ""
-
-        message = {
-            "type": "user",
-            "message": {"role": "user", "content": content_blocks},
-            "parent_tool_use_id": None,
-        }
-
-        async def _iter() -> Any:
-            yield message
-
-        return _iter()
+        await self._client.query(prompt)
 
     def _build_query_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Convert unified kwargs into Claude query kwargs.

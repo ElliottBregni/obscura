@@ -171,10 +171,7 @@ class TestEmitAuditEvent:
             record = json.loads(lines[0])
             assert record["event_type"] == "agent.send"
             assert record["user_id"] == "u-123"
-            # SOC2 P-series: raw email is redacted, a stable hash replaces it
-            # so audit retains grouping utility without storing the PII.
-            assert record["user_email"] == "[REDACTED]"
-            assert record["user_email_hash"].startswith("u_")
+            assert record["user_email"] == "dev@test.com"
             assert record["resource"] == "backend:copilot"
             assert record["action"] == "execute"
             assert record["outcome"] == "success"

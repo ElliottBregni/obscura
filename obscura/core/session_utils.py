@@ -32,19 +32,6 @@ _SESSION_DIR = Path.home() / ".obscura" / "sessions"
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-async def _send_oneshot(backend: Any, prompt: str, *, timeout: float) -> Any:
-    """Send *prompt* on a side channel that doesn't pollute conversation state.
-
-    Backends with persistent server-side sessions (Copilot) implement
-    ``send_isolated`` to spin up a temp session for the call. For
-    stateless or HTTP-per-call backends (Anthropic, OpenAI, local LLM)
-    plain ``send`` is already isolated, so we fall back to it.
-    """
-    if hasattr(backend, "send_isolated"):
-        return await asyncio.wait_for(backend.send_isolated(prompt), timeout=timeout)
-    return await asyncio.wait_for(backend.send(prompt), timeout=timeout)
-
-
 async def generate_session_title(
     first_message: str,
     backend: Any,
@@ -54,12 +41,6 @@ async def generate_session_title(
     """Auto-generate a 3-7 word session title from the first user message.
 
     Uses a fast LLM call with minimal tokens. Returns empty string on failure.
-
-    The call goes through :func:`_send_oneshot` rather than the live
-    backend session — for Copilot in particular, ``backend.send`` would
-    persist the title-gen prompt into the active conversation history,
-    leaving "Generate a concise 3-7 word title…" visible to the model on
-    the next real turn.
     """
     if not first_message or len(first_message.strip()) < 5:
         return ""
@@ -71,8 +52,8 @@ async def generate_session_title(
     )
 
     try:
-        if hasattr(backend, "send") or hasattr(backend, "send_isolated"):
-            response = await _send_oneshot(backend, prompt, timeout=timeout)
+        if hasattr(backend, "send"):
+            response = await asyncio.wait_for(backend.send(prompt), timeout=timeout)
             text = ""
             if hasattr(response, "content"):
                 for block in response.content:

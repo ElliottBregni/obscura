@@ -236,12 +236,6 @@ class CodexBackend(BackendToolHostMixin):
         self._sdk_module_name = ""
         # SDK symbols cached at start() so we don't re-import on every turn.
         self._sdk_syms: dict[str, Any] = {}
-        # The codex_app_server SDK rejects concurrent turn consumers on the
-        # same client ("Concurrent turn consumers are not yet supported").
-        # Obscura's REPL lets the user submit a new prompt while a turn is
-        # still streaming, so we serialize calls to send()/stream() here —
-        # the second prompt waits for the first turn's stream to drain.
-        self._turn_lock = asyncio.Lock()
 
     # -- Provider Registry overrides -----------------------------------------
 
@@ -344,10 +338,6 @@ class CodexBackend(BackendToolHostMixin):
             HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
         )
 
-        async with self._turn_lock:
-            return await self._send_locked(prompt)
-
-    async def _send_locked(self, prompt: str) -> Message:
         thread = await self._resolve_thread()
         run_kwargs = self._build_run_kwargs()
         result = await self._maybe_await(thread.run(prompt, **run_kwargs))
@@ -390,77 +380,70 @@ class CodexBackend(BackendToolHostMixin):
             HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
         )
 
-        # Hold the lock for the entire turn so that a second concurrent
-        # caller waits here until our stream is fully drained, instead of
-        # tripping the SDK's "concurrent turn consumers" guard.
-        async with self._turn_lock:
-            thread = await self._resolve_thread()
-            run_kwargs = self._build_run_kwargs()
-            wire_input = self._wrap_text_input(prompt)
-            turn_handle = await self._maybe_await(
-                thread.turn(wire_input, **run_kwargs),
-            )
+        thread = await self._resolve_thread()
+        run_kwargs = self._build_run_kwargs()
+        wire_input = self._wrap_text_input(prompt)
+        turn_handle = await self._maybe_await(thread.turn(wire_input, **run_kwargs))
 
-            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+        yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
-            usage_data: dict[str, int] | None = None
-            finish_reason = "stop"
+        usage_data: dict[str, int] | None = None
+        finish_reason = "stop"
 
-            try:
-                event_stream = turn_handle.stream()
-                async for event in event_stream:
-                    method = getattr(event, "method", "") or ""
-                    payload = getattr(event, "payload", None)
+        try:
+            event_stream = turn_handle.stream()
+            async for event in event_stream:
+                method = getattr(event, "method", "") or ""
+                payload = getattr(event, "payload", None)
 
-                    if method == "thread/started":
-                        tid = getattr(payload, "thread_id", "") or ""
-                        if self._active_session and tid:
-                            self._thread_id_by_session[self._active_session] = tid
+                if method == "thread/started":
+                    tid = getattr(payload, "thread_id", "") or ""
+                    if self._active_session and tid:
+                        self._thread_id_by_session[self._active_session] = tid
 
-                    for chunk in self._map_notification_to_chunks(method, payload):
-                        yield chunk
+                for chunk in self._map_notification_to_chunks(method, payload):
+                    yield chunk
 
-                    if method == "thread/tokenUsage/updated":
-                        tu = getattr(payload, "token_usage", None)
-                        total = getattr(tu, "total", None)
-                        if total is not None:
-                            usage_data = {
-                                "input_tokens": getattr(total, "input_tokens", 0) or 0,
-                                "output_tokens": getattr(total, "output_tokens", 0)
-                                or 0,
-                                "cached_input_tokens": getattr(
-                                    total,
-                                    "cached_input_tokens",
-                                    0,
-                                )
-                                or 0,
-                            }
+                if method == "thread/tokenUsage/updated":
+                    tu = getattr(payload, "token_usage", None)
+                    total = getattr(tu, "total", None)
+                    if total is not None:
+                        usage_data = {
+                            "input_tokens": getattr(total, "input_tokens", 0) or 0,
+                            "output_tokens": getattr(total, "output_tokens", 0) or 0,
+                            "cached_input_tokens": getattr(
+                                total,
+                                "cached_input_tokens",
+                                0,
+                            )
+                            or 0,
+                        }
 
-                    if method == "turn/completed":
-                        turn = getattr(payload, "turn", None)
-                        status = getattr(turn, "status", None)
-                        status_val = getattr(status, "value", status) if status else ""
-                        if status_val == "failed":
-                            finish_reason = "error"
-
-                    if method == "error":
+                if method == "turn/completed":
+                    turn = getattr(payload, "turn", None)
+                    status = getattr(turn, "status", None)
+                    status_val = getattr(status, "value", status) if status else ""
+                    if status_val == "failed":
                         finish_reason = "error"
 
-            except Exception as exc:
-                yield StreamChunk(kind=ChunkKind.ERROR, text=str(exc))
-                finish_reason = "error"
+                if method == "error":
+                    finish_reason = "error"
 
-            await self._run_hooks(HookContext(hook=HookPoint.STOP))
+        except Exception as exc:
+            yield StreamChunk(kind=ChunkKind.ERROR, text=str(exc))
+            finish_reason = "error"
 
-            yield StreamChunk(
-                kind=ChunkKind.DONE,
-                metadata=StreamMetadata(
-                    finish_reason=finish_reason,
-                    model_id=self._model,
-                    usage=usage_data,
-                    session_id=self._active_session or "",
-                ),
-            )
+        await self._run_hooks(HookContext(hook=HookPoint.STOP))
+
+        yield StreamChunk(
+            kind=ChunkKind.DONE,
+            metadata=StreamMetadata(
+                finish_reason=finish_reason,
+                model_id=self._model,
+                usage=usage_data,
+                session_id=self._active_session or "",
+            ),
+        )
 
     # -- Sessions ------------------------------------------------------------
 

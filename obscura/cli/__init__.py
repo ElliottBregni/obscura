@@ -131,13 +131,7 @@ def _sync_provider_settings() -> None:
         _log.debug("Provider settings sync failed (claude): %s", exc)
 
 
-_session_state: dict[str, bool] = {
-    "titled": False,
-    # Gates first-message-only vector-memory injection. Mode "every" in
-    # ``OBSCURA_MEMORY_INJECTION_MODE`` ignores this flag and searches
-    # on every turn (legacy behaviour).
-    "memory_searched": False,
-}
+_session_state: dict[str, bool] = {"titled": False}
 
 
 def _is_interactive_repl(prompt: str | None) -> bool:
@@ -214,80 +208,6 @@ from obscura.core.client import ObscuraClient  # noqa: E402  # noqa: E402
 from obscura.core.event_store import SessionStatus, SQLiteEventStore  # noqa: E402  # noqa: E402
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir  # noqa: E402  # noqa: E402
 from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice  # noqa: E402  # noqa: E402
-
-# ---------------------------------------------------------------------------
-# Per-turn context budget breakdown
-# ---------------------------------------------------------------------------
-
-
-def _log_context_budget(
-    ctx: REPLContext,
-    *,
-    user_text: str,
-    slash_skill_context: str,
-    vm_context: str,
-) -> None:
-    """Log a one-line breakdown of where this turn's context is going.
-
-    Helps answer the "why is auto-compact firing every other turn?"
-    question without having to dump the full request payload. Sources
-    surfaced:
-
-    * ``user``       — the raw user message
-    * ``memory``     — vector-memory injection (channel router or
-                       cross-namespace fallback). Cheapest knob to tune
-                       (``top_k``, score threshold, channel triggers).
-    * ``skill``      — slash-skill prefix (``/skill ...``).
-    * ``history``    — accumulated message history bytes.
-    * ``system``     — system prompt + tool listings shipped to the
-                       backend. For Copilot this includes the entire
-                       MCP tool surface.
-
-    All sizes in chars (≈4 chars per token); a percentage-of-window
-    column lets you tell at a glance whether one source is eating the
-    budget.
-    """
-    try:
-        history_chars = sum(len(t) for _, t in (ctx.message_history or []))
-        sys_chars = len(ctx.system_prompt or "")
-        # Tool listings live inside the backend's session config, not
-        # ctx.system_prompt. For Copilot, _build_tool_listing() generates
-        # the whole MCP surface; surface its size when we can.
-        tools_chars = 0
-        backend = getattr(ctx.client, "_backend", None)
-        if backend is not None and hasattr(backend, "_build_tool_listing"):
-            try:
-                tools_chars = len(backend._build_tool_listing() or "")
-            except Exception:
-                tools_chars = 0
-        window = getattr(ctx.client, "context_window", 0) or 0
-        # ≈4 chars per token; tolerate window=0 to avoid div-by-zero.
-        total = (
-            len(user_text)
-            + len(vm_context)
-            + len(slash_skill_context)
-            + history_chars
-            + sys_chars
-            + tools_chars
-        )
-        pct = (total / 4 / window * 100) if window else 0.0
-        _log.info(
-            "[ctx-budget] user=%dB memory=%dB skill=%dB history=%dB "
-            "system=%dB tools=%dB total=%dB (~%.1f%% of %d-tok window)",
-            len(user_text),
-            len(vm_context),
-            len(slash_skill_context),
-            history_chars,
-            sys_chars,
-            tools_chars,
-            total,
-            pct,
-            window,
-        )
-    except Exception:
-        # Diagnostics must never break the turn.
-        _log.debug("Context budget logging failed", exc_info=True)
-
 
 # ---------------------------------------------------------------------------
 # Tool confirmation callback
@@ -414,8 +334,6 @@ async def send_message(
             ctx.message_history.append(("assistant", inline_agent_response))
 
         if ctx.vector_store is not None and inline_agent_response:
-            from obscura.cli.vector_memory_bridge import derive_project_key
-
             turn_num = len([m for m in ctx.message_history if m[0] == "user"])
             auto_save_turn(
                 ctx.vector_store,
@@ -424,7 +342,6 @@ async def send_message(
                 inline_agent_response,
                 turn_number=turn_num,
                 classifier=ctx._turn_classifier,
-                project_key=derive_project_key(),
             )
         return inline_agent_response
 
@@ -496,51 +413,13 @@ async def send_message(
     if slash_skill_context:
         augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
-    # Vector memory injection is gated by mode + first-turn flag.
-    # See ``vector_memory_bridge.get_memory_injection_mode`` for the
-    # rationale: per-turn search drowns the model in cross-project noise
-    # and double-pays for what conversation history already covers.
-    vm_context = ""
-    from obscura.cli.vector_memory_bridge import (
-        derive_project_key,
-        get_memory_injection_mode,
-        is_project_scope_enabled,
-    )
-
-    _injection_mode = get_memory_injection_mode()
-    _project_key = derive_project_key() if is_project_scope_enabled() else None
-    _should_inject = _injection_mode == "every" or (
-        _injection_mode == "first" and not _session_state["memory_searched"]
-    )
-
-    if ctx.vector_store is not None and _should_inject:
+    if ctx.vector_store is not None:
         if ctx._context_router is not None:
-            vm_context = search_with_router(
-                ctx._context_router, text, project_key=_project_key
-            )
+            vm_context = search_with_router(ctx._context_router, text)
         else:
-            vm_context = search_relevant_context(
-                ctx.vector_store,
-                text,
-                top_k=3,
-                project_key=_project_key,
-            )
+            vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
         if vm_context:
             augmented_text = f"{vm_context}\n\n---\n\n{augmented_text}"
-        # Mark searched even if the search returned nothing — re-running
-        # on the next turn would just produce the same empty result.
-        _session_state["memory_searched"] = True
-
-    # ── Context budget breakdown (per turn) ──────────────────────────────
-    # Surface where each kilobyte is going so we can tell whether memory
-    # injection / tool listings / conversation history is the source of
-    # auto-compact pressure. Logged at INFO; visible without DEBUG.
-    _log_context_budget(
-        ctx,
-        user_text=text,
-        slash_skill_context=slash_skill_context,
-        vm_context=vm_context,
-    )
 
     _pre_tokens = estimate_effective_context_tokens(
         ctx,
@@ -802,7 +681,6 @@ async def send_message(
             response_text,
             turn_number=turn_num,
             classifier=ctx._turn_classifier,
-            project_key=_project_key,
         )
 
     # Post-send: update token tracker and show nudge
@@ -1601,17 +1479,7 @@ async def _repl(
                 )
                 from obscura.plugins.registries.capability_index import CapabilityIndex
 
-                # Honour OBSCURA_PIN_DEFAULT_CAPABILITIES for users who
-                # want the legacy "pin every default-grant tool" behaviour.
-                # The default is False — see ToolRoutingConfig docstring
-                # for why ``default_grant`` shouldn't auto-pin tools every
-                # turn.
-                _pin_default = os.environ.get(
-                    "OBSCURA_PIN_DEFAULT_CAPABILITIES", ""
-                ).strip().lower() in ("1", "true", "on", "yes")
-                _routing_config = ToolRoutingConfig(
-                    pin_default_capabilities=_pin_default
-                )
+                _routing_config = ToolRoutingConfig()
                 _score_index = ToolScoreIndex()
 
                 # Build capability index from loaded plugins
@@ -1711,23 +1579,6 @@ async def _repl(
         agent_infos = _discover_agent_infos()
         available_agents = [a.name for a in agent_infos] or None
 
-        # Best-effort attach to a running browser-extension host so terminal
-        # prompts can drive the user's existing Chrome. Silently skipped when
-        # no host is running or when tools are disabled.
-        browser_bridge_client: Any = None
-        browser_status: dict[str, Any] | None = None
-        if tools_enabled:
-            try:
-                from obscura.integrations.browser.client import attach_if_running
-
-                browser_bridge_client, browser_status = await attach_if_running(
-                    client.register_tool,
-                )
-            except Exception:
-                browser_bridge_client, browser_status = None, None
-        if browser_status is not None:
-            tool_count += int(browser_status.get("tool_count") or 0)
-
         print_banner(
             backend,
             model,
@@ -1737,7 +1588,6 @@ async def _repl(
             mode=mm.current.value,
             available_agents=available_agents,
             agent_infos=agent_infos or None,
-            browser_status=browser_status,
         )
 
         # Start supervisor if --supervise (default) and agents.yaml has agents
@@ -2021,9 +1871,9 @@ async def _repl(
             _swallow("uds_init", _e)
             _uds_inbox = None
 
-        # --- Per-session flags (mutable container for closure access) ---
+        # --- Auto-title tracking (mutable container for closure access) ---
         global _session_state
-        _session_state = {"titled": False, "memory_searched": False}
+        _session_state = {"titled": False}
 
         background_tasks: set[asyncio.Task[str]] = set()
         try:
@@ -2552,12 +2402,6 @@ async def _repl(
 
         finally:
             spinner_task.cancel()
-            # Detach the browser bridge before tearing down the rest of the
-            # session — the bridge socket is fast to close and avoids leaving
-            # a stale FD if anything below this raises.
-            if browser_bridge_client is not None:
-                with contextlib.suppress(Exception):
-                    await browser_bridge_client.close()
             # Stop supervisor fleet
             if supervisor_task is not None:
                 if _supervisor is not None:
@@ -3045,21 +2889,28 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 main.add_command(_kairos_group)
 
 
-from obscura.cli.revoke_commands import revoke_group as _revoke_group  # noqa: E402
+# Backwards-compat aliases added by test harness
+def _emit_context_warnings(*args, **kwargs):
+    from .warnings import emit_context_warnings as _impl
 
-main.add_command(_revoke_group)
-
-
-from obscura.cli.secrets_commands import secrets_group as _secrets_group  # noqa: E402
-
-main.add_command(_secrets_group)
+    return _impl(*args, **kwargs)
 
 
-from obscura.cli.admin_commands import admin_group as _admin_group  # noqa: E402
+def _copilot_budget_pct(tokens: int, context_window: int):
+    from .warnings import get_copilot_budget_pct as _impl
 
-main.add_command(_admin_group)
-
-
-
+    return _impl(tokens, context_window)
 
 
+def _parse_confirm_decision(answer: str) -> str | None:
+    a = (answer or "").lower()
+    if "approve" in a or a.strip().startswith("yes") or "accept" in a:
+        return "approve"
+    if "deny" in a or a.strip().startswith("no") or "do not" in a or "dont" in a:
+        return "deny"
+    return None
+
+
+def _track_task_surface_event(ctx, ev) -> None:
+    """Compatibility stub: track a task-surface event (no-op)."""
+    return

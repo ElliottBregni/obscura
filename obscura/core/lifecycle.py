@@ -96,60 +96,26 @@ def make_audit_hook(store: list[BrokerAuditEntry] | None = None) -> AfterHook:
 # ---------------------------------------------------------------------------
 
 
-def make_redact_hook(patterns: list[str] | None = None) -> AfterHook:
-    """Create an after-hook that redacts secrets from tool-flow events.
+def make_redact_hook(patterns: list[str]) -> AfterHook:
+    """Create an after-hook that redacts secrets from TOOL_RESULT events.
 
-    The built-in pattern library in ``obscura.core.redaction`` runs
-    unconditionally (governed by ``OBSCURA_REDACTION_LEVEL``). Any
-    extra patterns passed in are compiled and applied on top for
-    deployments that need custom scrubbing (e.g., a company-specific
-    token prefix).
-
-    Redaction now extends to both TOOL_CALL and TOOL_RESULT events so
-    arguments carrying secrets don't survive the first hop, even when
-    the result itself is empty.
+    Compiles each pattern in *patterns* as a regex and replaces matches
+    in ``event.tool_result`` with ``[REDACTED]``.  Only runs on
+    TOOL_RESULT events.
     """
-    custom = [re.compile(p) for p in (patterns or [])]
-
-    from obscura.core.redaction import redact_text
-
-    def _scrub(value: str) -> str:
-        value = redact_text(value)
-        for pattern in custom:
-            value = pattern.sub("[REDACTED]", value)
-        return value
+    compiled = [re.compile(p) for p in patterns]
 
     def _hook(event: AgentEvent) -> None:
-        if event.kind is AgentEventKind.TOOL_RESULT and event.tool_result:
-            event.tool_result = _scrub(event.tool_result)
+        if event.kind != AgentEventKind.TOOL_RESULT:
             return
-        if event.kind is AgentEventKind.TOOL_CALL and event.tool_input:
-            # tool_input is a free-form mapping — scrub string leaves only.
-            event.tool_input = _scrub_mapping(event.tool_input, _scrub)
+        if not event.tool_result:
+            return
+        result = event.tool_result
+        for pattern in compiled:
+            result = pattern.sub("[REDACTED]", result)
+        event.tool_result = result
 
     return _hook
-
-
-def _scrub_mapping(
-    data: dict[str, Any],
-    scrub: "Callable[[str], str]",
-) -> dict[str, Any]:
-    """Recursively apply ``scrub`` to string values in a mapping."""
-    from collections.abc import Mapping
-
-    out: dict[str, Any] = {}
-    for key, value in data.items():
-        if isinstance(value, str):
-            out[key] = scrub(value)
-        elif isinstance(value, Mapping):
-            out[key] = _scrub_mapping(dict(value), scrub)
-        elif isinstance(value, list):
-            out[key] = [
-                scrub(item) if isinstance(item, str) else item for item in value  # type: ignore[reportUnknownVariableType]
-            ]
-        else:
-            out[key] = value
-    return out
 
 
 # ---------------------------------------------------------------------------

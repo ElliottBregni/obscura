@@ -9,7 +9,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -267,17 +267,11 @@ class QdrantBackend:
         top_k: int,
         threshold: float | None = None,
         filters: list[MetadataFilter] | None = None,
-        with_vectors: bool = False,
     ) -> list[VectorEntry]:
         """Search for similar vectors and apply optional time-based decay to scores.
 
         Decay is applied as an exponential half-life: final_score = raw_score * (0.5 ** (age_seconds / half_life_seconds)).
         Configure half-life via OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS (default: 30 days).
-
-        When ``with_vectors`` is True, the original embedding is fetched from
-        Qdrant and populated on each ``VectorEntry``. Defaults to False because
-        round-tripping vectors costs bandwidth and is only needed for debug
-        tooling, re-ranking, or graph-aware retrieval.
         """
         must = (
             [FieldCondition(key="namespace", match=MatchValue(value=namespace))]
@@ -291,7 +285,7 @@ class QdrantBackend:
             limit=top_k,
             score_threshold=threshold,
             with_payload=True,
-            with_vectors=with_vectors,
+            with_vectors=False,
         )
         entries = []
         now = datetime.now(UTC)
@@ -340,9 +334,7 @@ class QdrantBackend:
                         key=hit.payload["key"],
                     ),
                     text=hit.payload["text"],
-                    embedding=cast("list[float]", hit.vector)
-                    if with_vectors and hit.vector
-                    else [],
+                    embedding=[],
                     metadata=hit.payload.get("metadata", {}),
                     memory_type=memory_type,
                     created_at=created,
@@ -425,14 +417,8 @@ class QdrantBackend:
         memory_type: str,
         older_than: datetime | None = None,
         limit: int = 100,
-        *,
-        with_vectors: bool = False,
     ) -> list[VectorEntry]:
-        """List entries of a given type, optionally filtered by age.
-
-        ``with_vectors`` opts in to returning the original embedding on each
-        entry. Defaults to False to preserve current cost characteristics.
-        """
+        """List entries of a given type, optionally filtered by age."""
         filt = Filter(
             must=[
                 FieldCondition(key="memory_type", match=MatchValue(value=memory_type)),
@@ -443,7 +429,7 @@ class QdrantBackend:
             scroll_filter=filt,
             limit=limit,
             with_payload=True,
-            with_vectors=with_vectors,
+            with_vectors=False,
         )
         entries: list[VectorEntry] = []
         for p in points:
@@ -461,9 +447,7 @@ class QdrantBackend:
                         key=p.payload["key"],
                     ),
                     text=p.payload["text"],
-                    embedding=cast("list[float]", p.vector)
-                    if with_vectors and p.vector
-                    else [],
+                    embedding=[],
                     metadata=p.payload.get("metadata", {}),
                     memory_type=p.payload.get("memory_type", "general"),
                     created_at=created,

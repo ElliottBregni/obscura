@@ -138,31 +138,7 @@ from obscura.core.tool_context import ToolContext, current_tool_context, bind_to
 from obscura.core.event_store import SQLiteEventStore
 from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.integrations.mcp.discovery import register_external_mcp_tools
-from obscura.integrations.browser.client import (
-    BrowserBridgeClient,
-    attach_if_running,
-    register_browser_tools,
-)
 ```
-
-**Browser bridge:** when the Obscura Chrome side panel is open, terminal
-REPL boot calls `attach_if_running(client.register_tool)` and registers
-~27 `browser_*` tools that proxy through the running native host's Unix
-socket. There are two tool families — **always start with the cheap one
-and escalate only on failure**:
-
-- **Event dispatch** (`browser_fill`, `browser_click`, `browser_press_key`,
-  `browser_clipboard_*`, `browser_eval_js`, etc.) — no banner, no debugger,
-  but `isTrusted=false` so Tab won't move focus and chars don't auto-appear
-  in inputs.
-- **CDP** (`browser_type_text`, `browser_native_click`, `browser_native_press_key`,
-  `browser_upload_file`, `browser_console_logs`, `browser_network_log`) —
-  attaches `chrome.debugger`, Chrome shows a yellow banner. `isTrusted=true`,
-  file uploads work, console/network observable. Call `browser_cdp_detach`
-  when done to dismiss the banner.
-
-Architecture and decision-tree details:
-[`packages/browser-extension/ARCHITECTURE.md`](packages/browser-extension/ARCHITECTURE.md).
 
 **Linting:** `ruff` — E/F rules, E501 ignored. Format: `ruff format`.
 **Type checking:** `pyright` (configured via `pyrightconfig.json`).

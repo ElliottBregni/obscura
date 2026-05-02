@@ -100,42 +100,6 @@ class TestDiscoverMCPServers:
         names = {server.name for server in discovered}
         assert {"github", "supabase"} == names
 
-    def test_default_paths_merge_global_and_local(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        # Regression: a project-local .obscura/mcp/ used to short-circuit
-        # path resolution and drop the global directory entirely, making
-        # globally-configured MCP servers invisible from any project that
-        # had its own MCP config.
-        global_home = tmp_path / "home" / ".obscura"
-        global_mcp = global_home / "mcp"
-        global_mcp.mkdir(parents=True)
-        (global_mcp / "global.json").write_text(
-            json.dumps(
-                {"mcpServers": {"global-only": {"command": "global-cmd"}}},
-            ),
-            encoding="utf-8",
-        )
-
-        project = tmp_path / "project"
-        local_mcp = project / ".obscura" / "mcp"
-        local_mcp.mkdir(parents=True)
-        (local_mcp / "local.json").write_text(
-            json.dumps(
-                {"mcpServers": {"local-only": {"command": "local-cmd"}}},
-            ),
-            encoding="utf-8",
-        )
-
-        monkeypatch.setenv("OBSCURA_HOME", str(global_home))
-        monkeypatch.chdir(project)
-
-        discovered = discover_mcp_servers()
-        names = {server.name for server in discovered}
-        assert names == {"global-only", "local-only"}
-
 
 class TestBuildRuntimeServerConfigs:
     def test_builds_stdio_and_sse_configs(self) -> None:

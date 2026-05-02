@@ -15,10 +15,6 @@ the core code. The host owns:
                 through the side panel
   * bridges   — ``browser-tool`` frames that let obscura call into the
                 active tab's DOM via ``chrome.scripting.executeScript``
-  * fleet     — ``fleet`` frames emitted whenever an in-process
-                ``AgentRuntime`` agent starts, stops, errors, or
-                changes status (lifecycle hook + 2-second polling
-                diff). Defensive: silent when no runtime is present.
 
 Everything else — $skill and @command parsing, vector memory, session
 resume, skill context, auto-compact, permission modes, KAIROS — lives
@@ -36,7 +32,6 @@ import os
 import re
 import struct
 import sys
-import time as _time
 import traceback
 import uuid
 from pathlib import Path
@@ -330,205 +325,6 @@ def _install_widget_broker() -> None:
     _widgets_mod.confirm_permission = _browser_confirm_permission
     _widgets_mod.ask_model_question = _browser_ask_model_question
     log.info("widget broker installed")
-
-
-# ---------------------------------------------------------------------------
-# Fleet observer — ``fleet`` frames on every agent lifecycle change.
-#
-# We monkey-patch ``AgentRuntime.__init__`` so any runtime built in this
-# process (daemon agents, swarm tool, ``/agent run``) auto-registers our
-# lifecycle hook and gets polled every 2 s for status drift. With no
-# runtime present (the common case for panel sessions) the observer
-# emits one empty ``snapshot`` after the ready frame and stays silent —
-# the panel falls through to its ``/agent list`` text path.
-
-_fleet_runtimes: "list[Any]" = []
-_fleet_state: dict[str, dict[str, Any]] = {}
-_fleet_poll_task: asyncio.Task[None] | None = None
-
-_STATUS_MAP = {
-    "RUNNING": "running",
-    "FAILED": "error",
-    "STOPPED": "stopped",
-    "PENDING": "idle",
-    "WAITING": "idle",
-    "COMPLETED": "idle",
-}
-
-_LIFECYCLE_MAP = {
-    "agent.starting": ("running", "agent_started"),
-    "agent.ready": ("idle", "agent_started"),
-    "agent.stopping": ("stopped", "agent_stopped"),
-    "agent.stopped": ("stopped", "agent_stopped"),
-    "agent.start_failed": ("error", "agent_error"),
-}
-
-
-def _agent_status_label(status: Any) -> str:
-    return _STATUS_MAP.get(getattr(status, "name", str(status)).upper(), "idle")
-
-
-def _fleet_emit(event: str, **fields: Any) -> None:
-    """Post a fleet frame. Never raises."""
-    payload: dict[str, Any] = {
-        "type": "fleet",
-        "event": event,
-        "timestamp": int(_time.time()),
-        **fields,
-    }
-    try:
-        _post(payload)
-    except Exception:
-        log.debug("fleet emit failed", exc_info=True)
-
-
-def _fleet_set(name: str, *, status: str, error: str = "", model: str = "") -> None:
-    prev = _fleet_state.get(name, {})
-    _fleet_state[name] = {
-        "status": status,
-        "model": model or prev.get("model", ""),
-        "lastActivity": int(_time.time()),
-        "lastError": error or prev.get("lastError", ""),
-    }
-
-
-def _fleet_handle_runtime_event(event: Any) -> None:
-    """RuntimeLifecycleEvent → fleet frame."""
-    name = getattr(event, "agent_name", None) or ""
-    if not name:
-        return  # runtime-level events ignored; we surface per-agent state only
-    kind = getattr(event, "kind", "") or ""
-    status, out_event = _LIFECYCLE_MAP.get(kind, (None, "agent_activity"))
-    if status is None:
-        status = _fleet_state.get(name, {}).get("status", "idle")
-    details_raw = getattr(event, "details", {}) or {}
-    details: dict[str, Any] = (
-        cast("dict[str, Any]", details_raw) if isinstance(details_raw, dict) else {}
-    )
-    err = str(details.get("error", ""))
-    _fleet_set(name, status=status, error=err, model=getattr(event, "model", "") or "")
-    _fleet_emit(
-        out_event,
-        agent=name,
-        status=status,
-        detail={"message": getattr(event, "message", ""), "error": err},
-    )
-
-
-async def _fleet_poll_loop() -> None:
-    """Poll tracked runtimes every 2 s and emit diff frames."""
-    while True:
-        try:
-            await asyncio.sleep(2.0)
-        except asyncio.CancelledError:
-            return
-        try:
-            _fleet_poll_tick()
-        except Exception:
-            log.debug("fleet poll tick failed", exc_info=True)
-
-
-def _fleet_poll_tick() -> None:
-    seen: set[str] = set()
-    for runtime in list(_fleet_runtimes):
-        try:
-            agents = runtime.list_agents()
-        except Exception:
-            continue
-        for agent in agents:
-            name = getattr(getattr(agent, "config", None), "name", "") or ""
-            if not name:
-                continue
-            seen.add(name)
-            status = _agent_status_label(getattr(agent, "status", None))
-            err_obj = getattr(agent, "_error", None)
-            err = str(err_obj) if err_obj is not None else ""
-            prev = _fleet_state.get(name, {})
-            if prev.get("status") == status and prev.get("lastError") == err:
-                continue
-            _fleet_set(
-                name,
-                status=status,
-                error=err,
-                model=getattr(agent.config, "model", "") or "",
-            )
-            _fleet_emit(
-                "agent_error" if status == "error" else "agent_activity",
-                agent=name,
-                status=status,
-                detail={"error": err},
-            )
-    # Drop tracked agents that disappeared from any active runtime.
-    if _fleet_runtimes:
-        for name in [n for n in _fleet_state if n not in seen]:
-            prev = _fleet_state.pop(name)
-            _fleet_emit(
-                "agent_stopped",
-                agent=name,
-                status="stopped",
-                detail={"error": prev.get("lastError", "")},
-            )
-
-
-def _fleet_track_runtime(runtime: Any) -> None:
-    if runtime in _fleet_runtimes:
-        return
-    _fleet_runtimes.append(runtime)
-    try:
-        runtime.set_lifecycle_hook(_fleet_handle_runtime_event)
-    except Exception:
-        log.debug("set_lifecycle_hook failed", exc_info=True)
-
-
-def _install_fleet_observer() -> None:
-    """Monkey-patch AgentRuntime.__init__ to track every runtime in-process."""
-    try:
-        from obscura.agent import agents as _agents_mod
-    except Exception:
-        log.debug("fleet observer: AgentRuntime import failed", exc_info=True)
-        return
-    runtime_cls = getattr(_agents_mod, "AgentRuntime", None)
-    if runtime_cls is None or getattr(runtime_cls, "_fleet_observer_installed", False):
-        return
-    original_init = runtime_cls.__init__
-
-    def _patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
-        original_init(self, *args, **kwargs)
-        try:
-            _fleet_track_runtime(self)
-        except Exception:
-            log.debug("fleet runtime track failed", exc_info=True)
-
-    runtime_cls.__init__ = _patched_init
-    runtime_cls._fleet_observer_installed = True
-    log.info("fleet observer installed")
-
-
-async def _start_fleet_observer() -> None:
-    """Start the periodic polling task and emit the initial snapshot."""
-    global _fleet_poll_task
-    if _fleet_poll_task is None or _fleet_poll_task.done():
-        _fleet_poll_task = asyncio.create_task(
-            _fleet_poll_loop(), name="fleet-observer-poll"
-        )
-    _fleet_emit(
-        "snapshot",
-        agents=[
-            {"agent": n, **{k: v for k, v in s.items() if k != "expanded"}}
-            for n, s in _fleet_state.items()
-        ],
-    )
-
-
-async def _stop_fleet_observer() -> None:
-    global _fleet_poll_task
-    task = _fleet_poll_task
-    _fleet_poll_task = None
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError, Exception):
-        await task
 
 
 # ---------------------------------------------------------------------------
@@ -827,17 +623,6 @@ async def _ensure_session(
             supervise=False,  # no agent fleet — panel is single-user
             compiled_ws=compiled_ws,
             extra_mcp_servers=extra_mcp_servers or None,
-            # Scope events.db + vector memory to ``~/.obscura/profiles/<profile_id>/``.
-            # Without this, two Chrome profiles running obscura at once
-            # share ``events.db`` and corrupt each other's session ids.
-            # ``_profile_id`` is learned from the panel's first frame
-            # (boot ping) and is set by the time the user issues a send/
-            # command, since native-messaging frames are FIFO and the
-            # boot ping is dispatched before any send. Falls back to the
-            # legacy path when None — typical when the panel hasn't
-            # generated a profile id yet (older extension build) or
-            # tests drive the host directly.
-            profile_id=_profile_id,
         )
 
         _session = await ObscuraSession.create(config)
@@ -965,22 +750,6 @@ async def _handle_send(msg: dict[str, Any]) -> None:
         await _write_frame({"type": "error", "id": msg_id, "message": "Empty prompt"})
         return
 
-    # Pull pasted/dropped images and attached text files out of the panel's
-    # context payload. The rest of ``context`` is page-metadata (url, title,
-    # selection, headings, etc.) that ``_assemble_prompt`` knows how to fold
-    # into the prompt — strip the multimodal keys first so it doesn't try to
-    # render base64 image blobs as page text.
-    raw_images = context.pop("images", None)
-    raw_attached = context.pop("attached_files", None)
-    images_list: list[Any] = (
-        list(cast("list[Any]", raw_images)) if isinstance(raw_images, list) else []
-    )
-    attached_files_list: list[dict[str, Any]] = []
-    if isinstance(raw_attached, list):
-        for item in cast("list[Any]", raw_attached):
-            if isinstance(item, dict):
-                attached_files_list.append(cast("dict[str, Any]", item))
-
     try:
         session = await _ensure_session(
             backend=backend,
@@ -1009,11 +778,7 @@ async def _handle_send(msg: dict[str, Any]) -> None:
         # modes, effort-level thinking budget, file-change tracking, auto-save
         # turn, plan-parse, auto-title. Via the patched BrowserRenderer, every
         # agent event streams back to the panel.
-        assistant_text = await session.send(
-            full_prompt,
-            images=images_list or None,
-            attached_files=attached_files_list or None,
-        )
+        assistant_text = await session.send(full_prompt)
     except asyncio.CancelledError:
         log.info("send cancelled msg_id=%s", msg_id)
         await _write_frame({"type": "error", "id": msg_id, "message": "cancelled"})
@@ -1447,120 +1212,15 @@ _MSG_HANDLERS: dict[str, tuple[Any, bool, bool]] = {
 
 
 # ---------------------------------------------------------------------------
-# Socket bridge — fan-out to external obscura processes.
-
-_socket_bridge: Any = None
-
-
-def _detect_browser() -> str | None:
-    """Best-effort: parent process name when launched via native messaging."""
-    try:
-        import psutil  # type: ignore[import-untyped,import-not-found]
-    except Exception:
-        return None
-    try:
-        return psutil.Process(os.getppid()).name()  # type: ignore[no-any-return]
-    except Exception:
-        return None
-
-
-def _build_tool_specs() -> list[dict[str, Any]]:
-    specs = _ensure_browser_tools()
-    out: list[dict[str, Any]] = []
-    for s in specs:
-        out.append(
-            {
-                "name": s.name,
-                "description": s.description,
-                "parameters": s.parameters,
-                "side_effects": getattr(s, "side_effects", "unknown"),
-            }
-        )
-    return out
-
-
-def _build_tool_dispatch() -> dict[str, Any]:
-    return {s.name: s.handler for s in _ensure_browser_tools()}
-
-
-async def _socket_call(name: str, args: dict[str, Any]) -> Any:
-    handlers = _build_tool_dispatch()
-    handler = handlers.get(name)
-    if handler is None:
-        msg = f"unknown tool: {name}"
-        raise ValueError(msg)
-    return await handler(**args)
-
-
-async def _start_socket_bridge() -> dict[str, Any]:
-    """Start the Unix-socket fan-out and return state for the ready frame."""
-    global _socket_bridge
-    if os.environ.get("OBSCURA_BROWSER_SOCKET_DISABLE") == "1":
-        return {"enabled": False, "reason": "disabled by env"}
-    try:
-        from obscura.integrations.browser import active_hosts, server as sb
-    except Exception:
-        log.exception("socket bridge import failed")
-        return {"enabled": False, "reason": "import failed"}
-
-    try:
-        path = sb.default_socket_path()
-        bridge = sb.SocketBridge(
-            path=path,
-            tools_provider=_build_tool_specs,
-            call=_socket_call,
-            profile_id=lambda: _profile_id,
-        )
-        await bridge.start()
-        _socket_bridge = bridge
-        active_hosts.register(
-            pid=os.getpid(),
-            socket=path,
-            profile_id=_profile_id,
-            browser=_detect_browser(),
-            version=VERSION,
-        )
-        return {"enabled": True, "socket": str(path), "version": sb.VERSION}
-    except Exception as exc:
-        log.exception("socket bridge start failed")
-        return {"enabled": False, "reason": f"{type(exc).__name__}: {exc}"}
-
-
-async def _stop_socket_bridge() -> None:
-    global _socket_bridge
-    bridge = _socket_bridge
-    _socket_bridge = None
-    if bridge is None:
-        return
-    try:
-        from obscura.integrations.browser import active_hosts
-
-        active_hosts.unregister(pid=os.getpid())
-    except Exception:
-        log.debug("active_hosts.unregister failed", exc_info=True)
-    try:
-        await bridge.stop()
-    except Exception:
-        log.debug("socket bridge stop failed", exc_info=True)
-
-
-# ---------------------------------------------------------------------------
 # Main loop
 
 
 async def _main() -> None:
-    # ``_profile_id`` is module-global; the inbound-frame loop below
-    # mutates it. Declared once up front so the ``ready`` frame's
-    # read of it doesn't trip Python's "name used prior to global" rule.
-    global _profile_id
-
     _install_widget_broker()
     _install_renderer_factory()
     _install_console_proxy()
-    _install_fleet_observer()
 
     await _acquire_pid_lock()
-    socket_bridge_state = await _start_socket_bridge()
 
     await _write_frame(
         {
@@ -1576,13 +1236,6 @@ async def _main() -> None:
             "workspaces": _available_workspaces(),
             "pid": os.getpid(),
             "peers": _peer_hosts(),
-            "socket_bridge": socket_bridge_state,
-            # Echo the profile id back so the panel can confirm what
-            # the host learned. May be None if no panel ping has
-            # arrived yet (the ready frame races the boot ping); the
-            # panel already knows its own id and can ignore the field
-            # in that case.
-            "profile_id": _profile_id,
         }
     )
 
@@ -1601,10 +1254,6 @@ async def _main() -> None:
             }
         )
 
-    # Start the fleet observer AFTER ready so the initial snapshot lands
-    # at a predictable position in the panel's message stream.
-    await _start_fleet_observer()
-
     loop = asyncio.get_running_loop()
 
     try:
@@ -1618,9 +1267,9 @@ async def _main() -> None:
             # Capture profile_id from the first frame that carries one.
             # Every subsequent log line is tagged so teammates sharing a
             # machine can correlate their session against this host.
-            # ``global _profile_id`` is declared at the top of _main().
             pid_in_msg = msg.get("profile_id")
             if isinstance(pid_in_msg, str) and pid_in_msg:
+                global _profile_id
                 if _profile_id != pid_in_msg:
                     _profile_id = pid_in_msg
                     log.info("profile_id=%s (host pid=%d)", _profile_id, os.getpid())
@@ -1655,8 +1304,6 @@ async def _main() -> None:
                 task.add_done_callback(lambda _, k=msg_id: _active_sends.pop(k, None))
     finally:
         _release_pid_lock()
-        await _stop_socket_bridge()
-        await _stop_fleet_observer()
 
     # Drain outstanding work.
     if _active_sends:

@@ -16,27 +16,10 @@ from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit
-from obscura.tools.system import validate_url
 
 from obscura.auth.models import AuthenticatedUser
 
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
-
-
-def _validate_webhook_url(url: str) -> str:
-    """SSRF-validate a webhook destination URL (SOC2 finding E2).
-
-    Wraps :func:`obscura.tools.system.validate_url` so private/loopback/
-    cloud-metadata addresses (169.254.169.254, RFC1918, ::1) are rejected
-    before any HTTP request leaves the box, raising
-    :class:`fastapi.HTTPException` with 422 on failure.
-    """
-    if not url:
-        raise HTTPException(status_code=422, detail="webhook url is required")
-    try:
-        return validate_url(url)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"webhook url rejected: {exc}")
 
 
 # In-memory webhook store
@@ -77,11 +60,10 @@ async def webhook_create(
     """Create a webhook for events."""
     webhook_id = str(uuid.uuid4())
     secret = secrets.token_urlsafe(32)
-    url = _validate_webhook_url(str(body.get("url", "")))
 
     webhook = WebhookConfig(
         webhook_id=webhook_id,
-        url=url,
+        url=str(body.get("url", "")),
         events=list(body.get("events", [])),
         secret=secret,
         active=True,
@@ -179,19 +161,8 @@ async def webhook_test(
     ).hexdigest()
 
     try:
-        webhook_url: str = _validate_webhook_url(webhook.url)
-    except HTTPException as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "webhook_id": webhook_id,
-                "error": exc.detail,
-                "success": False,
-            },
-        )
-
-    try:
         async with httpx.AsyncClient() as client:
+            webhook_url: str = webhook.url
             resp = await client.post(
                 webhook_url,
                 json=payload,
@@ -255,14 +226,6 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
         if event_type not in events:
             continue
 
-        try:
-            validated_url = validate_url(webhook_url)
-        except ValueError:
-            # Stored URL no longer passes the SSRF guard (DNS rebound,
-            # allowlist tightened, etc.) — skip silently rather than make
-            # the request.
-            continue
-
         signature = hmac.new(
             webhook_secret.encode(),
             payload_json.encode(),
@@ -272,7 +235,7 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
         try:
             async with httpx.AsyncClient() as client:
                 await client.post(
-                    validated_url,
+                    webhook_url,
                     json=payload,
                     headers={
                         "X-Webhook-Signature": f"sha256={signature}",

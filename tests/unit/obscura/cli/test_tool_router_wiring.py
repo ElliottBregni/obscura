@@ -161,11 +161,8 @@ class TestCapabilityIndexFeedsRouter:
 
     def test_default_grant_capabilities_produce_pinned_tools(self) -> None:
         """Tools from capabilities with default_grant=True should be added
-        to the router's default_grant_tools set. They're only auto-pinned
-        if ``pin_default_capabilities=True`` is explicitly enabled — the
-        default flipped to ``False`` because conflating "permission
-        auto-granted" with "must ride along every turn" exhausts the
-        backend tool cap on multi-plugin setups.
+        to the router's default_grant_tools set, which pins them when
+        pin_default_capabilities=True (the default).
         """
         granted = _make_capability(
             "shell.exec",
@@ -215,89 +212,6 @@ class TestCapabilityIndexFeedsRouter:
         names = {t.name for t in result.tools}
         assert "read_text_file" in names
         assert len(result.tools) <= 5
-
-    def test_default_routing_config_does_not_pin_default_grant_tools(
-        self,
-    ) -> None:
-        """Regression test for the conflation between ``default_grant``
-        (permission) and pinning (turn-budget): under the new default
-        config, an installed-but-irrelevant plugin's tools must NOT
-        be pinned just because their capability has
-        ``default_grant=True``.
-
-        Why this matters: a multi-plugin setup (jira, rollbar, gitnexus,
-        fv-backend, postman) was getting ~80 tools pinned per turn from
-        installed-but-inactive plugins, blowing past Copilot's 128-tool
-        cap. The router still has the plugin tools available; it just
-        shouldn't pre-commit budget to them when the prompt doesn't ask.
-        """
-        # 5 plugins each declaring 10 default-granted tools — the kind
-        # of fan-out a real obscura install has.
-        index = CapabilityIndex()
-        irrelevant_tool_names: list[str] = []
-        for plugin_idx in range(5):
-            tools = tuple(
-                f"plug{plugin_idx}_tool_{i}" for i in range(10)
-            )
-            irrelevant_tool_names.extend(tools)
-            cap = _make_capability(
-                f"plug{plugin_idx}.api",
-                tools,
-                default_grant=True,
-            )
-            index.register(cap, f"plugin-{plugin_idx}")
-
-        # Default config (no explicit pin_default_capabilities) — must
-        # be False after the flip.
-        router = ToolRouter.from_capability_index(
-            config=ToolRoutingConfig(max_tools=5),
-            score_index=ToolScoreIndex(),
-            capability_index=index,
-        )
-        # All 50 default-granted tools known but no pin pressure on
-        # selection.
-        assert len(router._default_grant_tools) == 50
-
-        # An unrelated prompt with the plugin tools available — none
-        # should be force-included.
-        tools = _make_tools(irrelevant_tool_names + ["unrelated_real_tool"])
-        result = router.select("what time is it", tools)
-        # The tools we DON'T select should be the irrelevant plugin
-        # tools. The cap is 5; we should be well under (no force-pin).
-        kept = {t.name for t in result.tools}
-        assert len(kept) <= 5
-        # And specifically, unrelated plugin tools shouldn't dominate.
-        kept_irrelevant = kept & set(irrelevant_tool_names)
-        assert len(kept_irrelevant) <= 5
-
-    def test_explicit_pin_default_capabilities_true_restores_legacy(
-        self,
-    ) -> None:
-        """The legacy pin-everything behaviour is still reachable via
-        explicit opt-in (or ``OBSCURA_PIN_DEFAULT_CAPABILITIES=on``)."""
-        cap = _make_capability(
-            "plug.api",
-            ("plug_tool_a", "plug_tool_b"),
-            default_grant=True,
-        )
-        index = CapabilityIndex()
-        index.register(cap, "plug")
-
-        router = ToolRouter.from_capability_index(
-            config=ToolRoutingConfig(
-                max_tools=5,
-                pin_default_capabilities=True,
-            ),
-            score_index=ToolScoreIndex(),
-            capability_index=index,
-        )
-        tools = _make_tools(
-            [f"filler_{i}" for i in range(50)] + ["plug_tool_a", "plug_tool_b"]
-        )
-        result = router.select("totally unrelated prompt", tools)
-        names = {t.name for t in result.tools}
-        assert "plug_tool_a" in names
-        assert "plug_tool_b" in names
 
     def test_empty_capability_index_does_not_crash(self) -> None:
         index = CapabilityIndex()

@@ -14,7 +14,7 @@ import os
 import random
 import subprocess
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterator, override
+from typing import TYPE_CHECKING, override
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -68,7 +68,6 @@ class KeywordHighlighter(Processor):
     dict.  This makes the keyword glow as you type it.
     """
 
-    @override
     def apply_transformation(
         self,
         ti: object,
@@ -346,7 +345,7 @@ class SlashCommandCompleter(Completer):
         self,
         document: Document,
         complete_event: CompleteEvent,
-    ) -> Iterator[Completion]:
+    ) -> list[Completion]:
         text = document.text_before_cursor.lstrip()
 
         # /slash commands — only at the very start
@@ -378,7 +377,7 @@ class SlashCommandCompleter(Completer):
         # e.g. "$python $se" -> complete "$security"
         word = document.get_word_before_cursor(WORD=True)
         if not word:
-            return
+            return []
 
         if word.startswith("$") and self._dollar_skill_names is not None:
             prefix = word[1:]
@@ -402,7 +401,7 @@ class SlashCommandCompleter(Completer):
                     )
             return
 
-        return
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -410,41 +409,18 @@ class SlashCommandCompleter(Completer):
 # ---------------------------------------------------------------------------
 
 # Import Catppuccin Mocha hex values from the single source of truth.
-try:
-    from obscura.cli.renderer.modern.theme import (
-        BLUE as _C_BLUE,
-        GREEN as _C_GREEN,
-        LAVENDER as _C_LAVENDER,
-        OVERLAY0 as _C_OVERLAY0,
-        PEACH as _C_PEACH,
-        RED as _C_RED,
-        SUBTEXT0 as _C_SUBTEXT0,
-        SURFACE1 as _C_SURFACE1,
-        TEAL as _C_TEAL,
-        TEXT as _C_TEXT,
-    )
-except Exception:
-    import importlib.util
-    import pathlib
-    import sys
-
-    theme_path = pathlib.Path(__file__).parent / "renderer" / "modern" / "theme.py"
-    spec = importlib.util.spec_from_file_location(
-        "obscura.cli.renderer.modern._theme_local", str(theme_path)
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    _C_BLUE = module.BLUE  # pyright: ignore[reportConstantRedefinition]
-    _C_GREEN = module.GREEN  # pyright: ignore[reportConstantRedefinition]
-    _C_LAVENDER = module.LAVENDER  # pyright: ignore[reportConstantRedefinition]
-    _C_OVERLAY0 = module.OVERLAY0  # pyright: ignore[reportConstantRedefinition]
-    _C_PEACH = module.PEACH  # pyright: ignore[reportConstantRedefinition]
-    _C_RED = module.RED  # pyright: ignore[reportConstantRedefinition]
-    _C_SUBTEXT0 = module.SUBTEXT0  # pyright: ignore[reportConstantRedefinition]
-    _C_SURFACE1 = module.SURFACE1  # pyright: ignore[reportConstantRedefinition]
-    _C_TEAL = module.TEAL  # pyright: ignore[reportConstantRedefinition]
-    _C_TEXT = module.TEXT  # pyright: ignore[reportConstantRedefinition]
+from obscura.cli.renderer.modern.theme import (
+    BLUE as _C_BLUE,
+    GREEN as _C_GREEN,
+    LAVENDER as _C_LAVENDER,
+    OVERLAY0 as _C_OVERLAY0,
+    PEACH as _C_PEACH,
+    RED as _C_RED,
+    SUBTEXT0 as _C_SUBTEXT0,
+    SURFACE1 as _C_SURFACE1,
+    TEAL as _C_TEAL,
+    TEXT as _C_TEXT,
+)
 
 PROMPT_STYLE = Style.from_dict(
     {

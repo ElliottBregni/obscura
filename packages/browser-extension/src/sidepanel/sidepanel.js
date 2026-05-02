@@ -25,8 +25,6 @@ const MsgType = {
   CANCEL: "cancel",
   PING: "ping",
   PONG: "pong",
-  LIST_SESSIONS: "list_sessions",
-  SESSIONS: "sessions",
 };
 
 const StorageManager = {
@@ -60,8 +58,6 @@ const stopBtn = $("#stop");
 const sbBackend = $("#sb-backend");
 const sbHost = $("#sb-host");
 const sbGit = $("#sb-git");
-const sbProfile = $("#sb-profile");
-const sbProfileSep = $("#sb-profile-sep");
 const sbKairos = $("#sb-kairos");
 const sbRewind = $("#sb-rewind");
 const sbFleet = $("#sb-fleet");
@@ -86,7 +82,6 @@ const checkpointClose = $("#checkpoint-close");
 const checkpointNameInput = $("#checkpoint-name-input");
 const checkpointSaveBtn = $("#checkpoint-save-btn");
 const checkpointList = $("#checkpoint-list");
-const checkpointError = $("#checkpoint-error");
 const fleetOverlay = $("#fleet-overlay");
 const fleetClose = $("#fleet-close");
 const fleetContent = $("#fleet-content");
@@ -95,12 +90,6 @@ const mcpClose = $("#mcp-close");
 const mcpDiscoverBtn = $("#mcp-discover-btn");
 const mcpContent = $("#mcp-content");
 const micBtn = $("#mic-btn");
-const recentSessionsBtn = $("#recent-sessions-btn");
-const recentSessionsModal = $("#recent-sessions-modal");
-const recentSessionsClose = $("#recent-sessions-close");
-const recentSessionsList = $("#recent-sessions-list");
-let recentSessionsRequestId = null;
-let recentSessionsTimeout = null;
 
 // Storage keys. Bump STORAGE_VERSION any time a stored schema changes and
 // add a migration in `migrateStorage()`. chrome.storage.local is already
@@ -110,28 +99,15 @@ const STORAGE_VERSION_KEY = "obscura.storage.version";
 const SETTINGS_KEY = "obscura.settings.v1";
 const TRANSCRIPT_KEY = "obscura.transcript.v1";
 const SESSIONS_KEY = "obscura.sessions.v1";
-const TABS_KEY = "obscura.tabs.v1";
 const THEME_KEY = "obscura_theme";
 const TOOL_PERMS_KEY = "obscura_tool_perms";
 const PROFILE_ID_KEY = "obscura.profile_id";
-const AUTH_TOKEN_KEY = "obscura.auth_token.v1";
-const ONBOARDED_KEY = "obscura.onboarded.v1";
-
-// Onboarding / host-missing detection
-const HOST_READY_TIMEOUT_MS = 5000;
-const PING_TIMEOUT_MS = 3000;
-let hostReadyTimer = null;       // fires if `ready` doesn't arrive within HOST_READY_TIMEOUT_MS
-let hostReadyReceived = false;   // set on first `ready` frame; cleared on disconnect
-let lastReadySnapshot = null;    // most recent `ready` payload, for test-connection display
-const pingResolvers = new Map(); // pingId -> { resolve, reject, timer }
-const ENV_VAR_BY_BACKEND = { claude: "ANTHROPIC_API_KEY", copilot: "GITHUB_TOKEN", openai: "OPENAI_API_KEY" };
 
 let port = null;
 let sessionId = null;            // per-panel conversation id (from host)
 let pending = new Map();         // msgId -> { bubble, toolBox, toolMap, streamedText, thinkingText, thinkingEl }
 let busy = false;
 let authToken = null;            // shared-secret token for the native host (OBSCURA_AUTH_TOKEN)
-let lastSubmittedToken = false;  // true after we send a frame carrying authToken; cleared on accept/reject
 let commandIndex = [];           // from ready.commands ({name, doc, subcommands})
 let skillIndex = [];             // from ready.skills       (string[])
 let atCommandIndex = [];         // from ready.at_commands  (string[])
@@ -141,17 +117,9 @@ let historyDraft = "";           // saved current input when stepping into histo
 let kairosState = "off";        // "on" | "off"
 let pendingImages = [];          // { dataUrl, name }[] for drag-drop / paste
 let pendingTextFiles = [];       // { name, content }[] for drag-drop
-let checkpointPendingId = null;  // msgId of the in-flight /checkpoint list command
-const checkpointOpIds = new Map(); // msgId -> {op, name} for in-flight checkpoint save/restore/delete
-let checkpointErrorTimer = null;
-let fleetPendingId = null;       // msgId of the in-flight /agent list command (fallback path)
+let checkpointPendingId = null;  // msgId of the in-flight /checkpoint command
+let fleetPendingId = null;       // msgId of the in-flight /agent list command
 let mcpPendingId = null;         // msgId of the in-flight /mcp list|discover command
-
-// Live fleet observability — populated by `fleet` frames from the host.
-// Keyed by agent name. Empty when no supervisor/runtime is reporting; the
-// fleet overlay falls back to running `/agent list` in that case.
-const fleetState = new Map();    // name -> { status, lastActivity, lastError, model, expanded }
-let fleetSeeded = false;         // host has sent at least one fleet frame this connection
 
 // Per-Chrome-tab session persistence: track which Chrome tab this panel belongs to.
 let chromeTabId = null;
@@ -174,23 +142,7 @@ class TabManager {
 
   create(label = "new") {
     if (this._tabs.length >= this._maxTabs) return false;
-    const tab = {
-      id: crypto.randomUUID(),
-      label,
-      sessionId: null,
-      logHTML: "",
-      pending: new Map(),
-      streamStates: {},
-      // Per-tab UI selections — captured from the live dropdowns at the
-      // moment the tab is saved/switched, restored when the tab activates.
-      backend: null,
-      workspace: null,
-      // Chrome tab-group id this conversation owns. Created lazily the first
-      // time the agent opens a browser tab inside this session; subsequent
-      // browser_new_tab calls add to the same group so the user can see
-      // which tabs the agent is operating on at a glance.
-      tabGroupId: null,
-    };
+    const tab = { id: crypto.randomUUID(), label, sessionId: null, logHTML: "", pending: new Map(), streamStates: {} };
     this._tabs.push(tab);
     return tab;
   }
@@ -202,15 +154,13 @@ class TabManager {
     return true;
   }
 
-  saveActive(logHTML, sessionId, pending, streamStates, opts = {}) {
+  saveActive(logHTML, sessionId, pending, streamStates) {
     const t = this.active;
     if (!t) return;
     t.logHTML = logHTML;
     t.sessionId = sessionId;
     t.pending = pending;
     t.streamStates = streamStates ?? {};
-    if (opts.backend !== undefined) t.backend = opts.backend;
-    if (opts.workspace !== undefined) t.workspace = opts.workspace;
   }
 
   activate(idx) {
@@ -231,33 +181,22 @@ function createTab(label = "new", activate = true) {
   if (!tab) return;
   if (activate) switchTab(tabManager.count - 1);
   renderTabs();
-  saveTabs();
-}
-
-function _captureActiveSelections() {
-  return {
-    backend: backendSel?.value || null,
-    workspace: workspaceSel?.value ?? "",
-  };
 }
 
 function closeTab(idx) {
-  tabManager.saveActive(log.innerHTML, sessionId, pending, undefined, _captureActiveSelections());
+  tabManager.saveActive(log.innerHTML, sessionId, pending);
   if (!tabManager.close(idx)) return;
   restoreTab(tabManager.activeIdx);
   renderTabs();
-  saveTabs();
 }
 
 function switchTab(idx) {
   if (idx === tabManager.activeIdx && tabManager.count > 0) return;
-  // save current tab state — including the live backend / workspace
-  // selections so the next switch back restores exactly what the user saw.
-  tabManager.saveActive(log.innerHTML, sessionId, pending, undefined, _captureActiveSelections());
+  // save current tab state
+  tabManager.saveActive(log.innerHTML, sessionId, pending);
   tabManager.activate(idx);
   restoreTab(idx);
   renderTabs();
-  saveTabs();
 }
 
 function restoreTab(idx) {
@@ -266,119 +205,7 @@ function restoreTab(idx) {
   log.innerHTML = tab.logHTML;
   sessionId = tab.sessionId;
   pending = tab.pending || new Map();
-  // Restore per-tab backend / workspace if they were captured. Falls back
-  // to whatever the dropdown currently shows (preserves legacy behaviour
-  // for tabs that pre-date this change).
-  if (tab.backend && backendSel) {
-    if ([...backendSel.options].some((o) => o.value === tab.backend)) {
-      backendSel.value = tab.backend;
-    }
-  }
-  if (tab.workspace !== undefined && tab.workspace !== null && workspaceSel) {
-    if ([...workspaceSel.options].some((o) => o.value === tab.workspace)) {
-      workspaceSel.value = tab.workspace;
-    }
-  }
   scrollToBottom();
-}
-
-// --- Persistence: serialise the tab strip across panel reloads. -----------
-// We snapshot the active tab into the in-memory record before writing so the
-// stored copy reflects the current transcript/sessionId.
-
-function saveTabs() {
-  try {
-    tabManager.saveActive(log.innerHTML, sessionId, pending, undefined, _captureActiveSelections());
-    const tabs = tabManager.all.map((t) => ({
-      id: t.id,
-      label: t.label,
-      sessionId: t.sessionId,
-      logHTML: t.logHTML,
-      backend: t.backend ?? null,
-      workspace: t.workspace ?? null,
-      tabGroupId: t.tabGroupId ?? null,
-    }));
-    chrome.storage.local.set({ [TABS_KEY]: { tabs, activeIdx: tabManager.activeIdx } });
-  } catch (err) {
-    console.warn("[obscura] saveTabs failed", err);
-  }
-}
-
-async function loadTabs() {
-  try {
-    const store = await chrome.storage.local.get([TABS_KEY]);
-    const state = store[TABS_KEY];
-    if (!state || !Array.isArray(state.tabs) || state.tabs.length === 0) return false;
-    tabManager._tabs = state.tabs.map((t) => ({
-      id: t.id || crypto.randomUUID(),
-      label: typeof t.label === "string" && t.label ? t.label : "session",
-      sessionId: t.sessionId ?? null,
-      logHTML: typeof t.logHTML === "string" ? t.logHTML : "",
-      pending: new Map(),
-      streamStates: {},
-      backend: typeof t.backend === "string" ? t.backend : null,
-      workspace: typeof t.workspace === "string" ? t.workspace : null,
-      // Validate the persisted group id later — if the group no longer
-      // exists in Chrome, _ensureSessionTabGroup will create a fresh one
-      // on the next browser_new_tab call.
-      tabGroupId: typeof t.tabGroupId === "number" ? t.tabGroupId : null,
-    }));
-    const idx = Math.min(Math.max(state.activeIdx | 0, 0), tabManager._tabs.length - 1);
-    tabManager._activeIdx = idx;
-    restoreTab(idx);
-    renderTabs();
-    return true;
-  } catch (err) {
-    console.warn("[obscura] loadTabs failed", err);
-    return false;
-  }
-}
-
-// --- Inline rename: dbl-click swaps label <span> for an <input>. ---------
-// Enter / blur commit, Escape reverts. Empty value reverts to original.
-let _editingTabIdx = -1;
-
-function beginRenameTab(idx, labelEl) {
-  if (_editingTabIdx === idx) return;
-  _editingTabIdx = idx;
-  const tab = tabManager.all[idx];
-  if (!tab) return;
-  const original = tab.label;
-  const inp = document.createElement("input");
-  inp.type = "text";
-  inp.className = "tab-label tab-label-edit";
-  inp.value = original;
-  inp.maxLength = 40;
-  let settled = false;
-  const commit = (next) => {
-    if (settled) return;
-    settled = true;
-    _editingTabIdx = -1;
-    const trimmed = (next || "").trim().slice(0, 20);
-    tab.label = trimmed || original || "untitled";
-    renderTabs();
-    saveTabs();
-  };
-  inp.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); commit(inp.value); }
-    else if (e.key === "Escape") { e.preventDefault(); settled = true; _editingTabIdx = -1; renderTabs(); }
-    e.stopPropagation();
-  });
-  inp.addEventListener("blur", () => commit(inp.value));
-  inp.addEventListener("click", (e) => e.stopPropagation());
-  inp.addEventListener("dblclick", (e) => e.stopPropagation());
-  labelEl.replaceWith(inp);
-  inp.focus();
-  inp.select();
-}
-
-// --- Drag-to-reorder. ----------------------------------------------------
-let _dragSrcIdx = -1;
-
-function _clearDropMarkers() {
-  for (const el of tabStrip.querySelectorAll(".tab-item.drop-before, .tab-item.drop-after")) {
-    el.classList.remove("drop-before", "drop-after");
-  }
 }
 
 function renderTabs() {
@@ -387,67 +214,15 @@ function renderTabs() {
   tabManager.all.forEach((tab, i) => {
     const el = document.createElement("div");
     el.className = "tab-item" + (i === tabManager.activeIdx ? " active" : "");
-    el.draggable = true;
     const label = document.createElement("span");
     label.className = "tab-label";
     label.textContent = tab.label;
-    label.addEventListener("dblclick", (e) => {
-      e.stopPropagation();
-      beginRenameTab(i, label);
-    });
     const close = document.createElement("span");
     close.className = "tab-close";
     close.textContent = "×";
     close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(i); });
     el.append(label, close);
     el.addEventListener("click", () => switchTab(i));
-
-    // Drag-and-drop reorder.
-    el.addEventListener("dragstart", (e) => {
-      _dragSrcIdx = i;
-      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(i)); } catch {}
-      el.classList.add("dragging");
-    });
-    el.addEventListener("dragend", () => {
-      _dragSrcIdx = -1;
-      el.classList.remove("dragging");
-      _clearDropMarkers();
-    });
-    el.addEventListener("dragover", (e) => {
-      if (_dragSrcIdx < 0 || _dragSrcIdx === i) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = "move"; } catch {}
-      _clearDropMarkers();
-      const rect = el.getBoundingClientRect();
-      const before = (e.clientX - rect.left) < rect.width / 2;
-      el.classList.add(before ? "drop-before" : "drop-after");
-    });
-    el.addEventListener("dragleave", () => {
-      el.classList.remove("drop-before", "drop-after");
-    });
-    el.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const src = _dragSrcIdx;
-      _clearDropMarkers();
-      if (src < 0 || src === i) return;
-      const rect = el.getBoundingClientRect();
-      const before = (e.clientX - rect.left) < rect.width / 2;
-      let dst = before ? i : i + 1;
-      // Snapshot active tab before reordering so we don't lose live transcript.
-      tabManager.saveActive(log.innerHTML, sessionId, pending);
-      const activeId = tabManager.active?.id ?? null;
-      const [moved] = tabManager._tabs.splice(src, 1);
-      if (src < dst) dst -= 1;
-      tabManager._tabs.splice(dst, 0, moved);
-      // Re-anchor activeIdx to whatever was active before.
-      if (activeId) {
-        const newIdx = tabManager._tabs.findIndex((t) => t.id === activeId);
-        if (newIdx >= 0) tabManager._activeIdx = newIdx;
-      }
-      renderTabs();
-      saveTabs();
-    });
-
     tabStrip.appendChild(el);
   });
   const plus = document.createElement("span");
@@ -526,11 +301,6 @@ function scheduleTranscriptSave() {
 
 backendSel.addEventListener("change", saveSettings);
 ctxToggle.addEventListener("change", saveSettings);
-
-// Persist per-tab dropdown selections immediately so a panel reload
-// without an explicit switch still restores them.
-backendSel.addEventListener("change", () => saveTabs());
-workspaceSel?.addEventListener("change", () => saveTabs());
 
 // ---------------------------------------------------------------------------
 // Per-Chrome-tab state persistence
@@ -793,339 +563,68 @@ function toolResult(msgId, toolUseId, text) {
 
 // ---------------------------------------------------------------------------
 // Rich widget detail rendering
-//
-// Each helper returns either a DocumentFragment / element to append, or null
-// to signal "I don't handle this shape — fall through to the generic table."
-// Keep helpers small (~30 LOC). Tool names are matched case-insensitively
-// because backends spell them differently (`Bash` vs `bash` vs `run_shell`).
-
-// CDP-attaching browser tools: trigger Chrome's yellow "started debugging"
-// banner, so we surface that cost in the widget. Keep this mirrored with the
-// CDP family in packages/browser-extension/ARCHITECTURE.md.
-const CDP_BROWSER_TOOLS = new Set([
-  "browser_type_text",
-  "browser_native_click",
-  "browser_native_press_key",
-  "browser_upload_file",
-  "browser_console_logs",
-  "browser_network_log",
-  "browser_cdp_detach",
-]);
-
-const PATH_LIKE_KEYS = new Set([
-  "path", "file_path", "filename", "filepath", "dir", "directory", "cwd", "root",
-]);
-
-function _truncate(str, n) {
-  if (typeof str !== "string") return String(str);
-  return str.length > n ? str.slice(0, n) + "\n…[truncated]" : str;
-}
-
-function _label(text, color) {
-  const el = document.createElement("div");
-  el.className = "w-detail-label";
-  if (color) el.style.color = color;
-  el.textContent = text;
-  return el;
-}
-
-function _codeBlock(text, { borderColor } = {}) {
-  const pre = document.createElement("pre");
-  pre.className = "code";
-  if (borderColor) pre.style.borderLeftColor = borderColor;
-  const code = document.createElement("code");
-  code.textContent = text;
-  pre.appendChild(code);
-  return pre;
-}
-
-function _path(text) {
-  const span = document.createElement("div");
-  span.className = "w-path";
-  span.textContent = text;
-  return span;
-}
-
-function _chipRow(items) {
-  // items = [{label, value, kind?}]; skips empty values.
-  const row = document.createElement("div");
-  row.className = "w-chip-row";
-  let any = false;
-  for (const { label, value, kind } of items) {
-    if (value === undefined || value === null || value === "") continue;
-    const chip = document.createElement("span");
-    chip.className = "w-chip" + (kind ? ` w-chip-${kind}` : "");
-    chip.textContent = label ? `${label}: ${value}` : String(value);
-    row.appendChild(chip);
-    any = true;
-  }
-  return any ? row : null;
-}
-
-function _cdpBanner() {
-  const chip = document.createElement("span");
-  chip.className = "w-chip w-chip-cdp";
-  chip.title = "This tool attaches chrome.debugger and shows a yellow 'started debugging' banner.";
-  chip.textContent = "CDP — yellow banner";
-  return chip;
-}
-
-function _expandableValue(text, threshold = 400) {
-  // Returns a span; if `text` exceeds threshold, adds a "show more" toggle.
-  const wrap = document.createElement("span");
-  wrap.className = "w-value";
-  if (text.length <= threshold) {
-    wrap.textContent = text;
-    return wrap;
-  }
-  const short = document.createElement("span");
-  short.textContent = text.slice(0, threshold) + "…";
-  const full = document.createElement("span");
-  full.textContent = text;
-  full.hidden = true;
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "w-show-more";
-  toggle.textContent = "show more";
-  toggle.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const expanded = !full.hidden;
-    full.hidden = expanded;
-    short.hidden = !expanded;
-    toggle.textContent = expanded ? "show more" : "show less";
-  });
-  wrap.append(short, full, toggle);
-  return wrap;
-}
-
-// --- per-tool helpers ------------------------------------------------------
-
-function _renderShellLike(detail) {
-  const cmd = detail.command || detail.expression || detail.code || detail.cmd || "";
-  if (!cmd) return null;
-  const frag = document.createDocumentFragment();
-  if (detail.cwd || detail.timeout || detail.description) {
-    const chips = _chipRow([
-      { label: "cwd", value: detail.cwd },
-      { label: "timeout", value: detail.timeout },
-      { label: "desc", value: detail.description },
-    ]);
-    if (chips) frag.appendChild(chips);
-  }
-  frag.appendChild(_codeBlock(_truncate(cmd, 4000)));
-  return frag;
-}
-
-function _renderFileWrite(detail, toolName) {
-  const content = detail.content || detail.new_string || detail.text || "";
-  if (!content) return null;
-  const frag = document.createDocumentFragment();
-  frag.appendChild(_path(detail.file_path || detail.path || toolName));
-  frag.appendChild(_codeBlock(_truncate(content, 4000)));
-  if (detail.old_string) {
-    frag.appendChild(_label("replaces:", "var(--red)"));
-    frag.appendChild(_codeBlock(_truncate(detail.old_string, 2000), { borderColor: "var(--red)" }));
-  }
-  return frag;
-}
-
-function _renderReadFile(detail) {
-  const p = detail.file_path || detail.path;
-  if (!p) return null;
-  const frag = document.createDocumentFragment();
-  frag.appendChild(_path(p));
-  let range = "";
-  if (detail.lines) range = String(detail.lines);
-  else if (detail.offset !== undefined || detail.limit !== undefined) {
-    const off = detail.offset ?? 0;
-    const lim = detail.limit;
-    range = lim !== undefined ? `lines ${off}–${off + lim}` : `from line ${off}`;
-  }
-  const chips = _chipRow([
-    { label: "", value: range },
-    { label: "pages", value: detail.pages },
-  ]);
-  if (chips) frag.appendChild(chips);
-  return frag;
-}
-
-function _renderGlob(detail) {
-  const pattern = detail.pattern;
-  if (!pattern) return null;
-  const frag = document.createDocumentFragment();
-  frag.appendChild(_codeBlock(pattern));
-  if (detail.path) frag.appendChild(_path(detail.path));
-  return frag;
-}
-
-function _renderGrep(detail) {
-  const pattern = detail.pattern;
-  if (!pattern) return null;
-  const frag = document.createDocumentFragment();
-  frag.appendChild(_codeBlock(pattern));
-  if (detail.path) frag.appendChild(_path(detail.path));
-  const chips = _chipRow([
-    { label: "glob", value: detail.glob },
-    { label: "type", value: detail.type },
-    { label: "include", value: detail.include },
-    { label: "mode", value: detail.output_mode },
-    { label: "-i", value: detail["-i"] ? "yes" : null },
-    { label: "-n", value: detail["-n"] ? "yes" : null },
-    { label: "-A", value: detail["-A"] },
-    { label: "-B", value: detail["-B"] },
-    { label: "-C", value: detail["-C"] ?? detail.context },
-    { label: "multiline", value: detail.multiline ? "yes" : null },
-  ]);
-  if (chips) frag.appendChild(chips);
-  return frag;
-}
-
-function _renderWeb(detail, toolName) {
-  const target = detail.url || detail.query;
-  if (!target) return null;
-  const frag = document.createDocumentFragment();
-  const isUrl = !!detail.url;
-  frag.appendChild(_label(isUrl ? "url" : "query", "var(--fg-ghost)"));
-  const big = document.createElement("div");
-  big.className = "w-prominent";
-  big.textContent = target;
-  frag.appendChild(big);
-  if (toolName.toLowerCase() === "webfetch" && detail.prompt) {
-    frag.appendChild(_label("prompt", "var(--fg-ghost)"));
-    frag.appendChild(_expandableValue(detail.prompt));
-  }
-  const chips = _chipRow([
-    { label: "allowed_domains", value: Array.isArray(detail.allowed_domains) ? detail.allowed_domains.join(",") : detail.allowed_domains },
-    { label: "blocked_domains", value: Array.isArray(detail.blocked_domains) ? detail.blocked_domains.join(",") : detail.blocked_domains },
-  ]);
-  if (chips) frag.appendChild(chips);
-  return frag;
-}
-
-function _renderBrowser(detail, toolName) {
-  const frag = document.createDocumentFragment();
-  if (CDP_BROWSER_TOOLS.has(toolName.toLowerCase())) {
-    const banner = document.createElement("div");
-    banner.className = "w-chip-row";
-    banner.appendChild(_cdpBanner());
-    frag.appendChild(banner);
-  }
-  // Prominent line: most browser tools have ONE thing the user cares about.
-  const primary = detail.url || detail.selector || detail.key || detail.text;
-  if (primary !== undefined && primary !== null && primary !== "") {
-    const labelText = detail.url ? "url" : detail.selector ? "selector" : detail.key ? "key" : "text";
-    frag.appendChild(_label(labelText, "var(--fg-ghost)"));
-    const big = document.createElement("div");
-    big.className = "w-prominent";
-    big.textContent = String(primary);
-    frag.appendChild(big);
-  }
-  // Secondary fields as chips.
-  const secondary = [];
-  for (const [k, v] of Object.entries(detail)) {
-    if (k === "tool_name" || k === "input") continue;
-    if (k === "url" || k === "selector" || k === "key" || k === "text") continue;
-    if (v === undefined || v === null || v === "") continue;
-    if (k === "paths" && Array.isArray(v)) {
-      for (const p of v) frag.appendChild(_path(p));
-      continue;
-    }
-    const display = typeof v === "object" ? JSON.stringify(v) : String(v);
-    secondary.push({ label: k, value: display.length > 80 ? display.slice(0, 80) + "…" : display });
-  }
-  const chips = _chipRow(secondary);
-  if (chips) frag.appendChild(chips);
-  return frag.childNodes.length ? frag : null;
-}
-
-function _renderGit(detail, toolName) {
-  // git_* tools: render `git <subcommand> <args>` as a shell-style preview.
-  // Subcommand falls back to the suffix of the tool name, e.g. `git_diff`.
-  const sub = detail.subcommand || detail.command || toolName.replace(/^git[_-]?/i, "") || "";
-  const argsParts = [];
-  if (Array.isArray(detail.args)) argsParts.push(...detail.args.map(String));
-  else if (typeof detail.args === "string") argsParts.push(detail.args);
-  for (const k of ["ref", "branch", "path", "file", "message", "remote"]) {
-    if (detail[k] !== undefined && detail[k] !== null && detail[k] !== "") argsParts.push(`${k}=${detail[k]}`);
-  }
-  const line = ["git", sub, ...argsParts].filter(Boolean).join(" ").trim();
-  if (!line) return null;
-  const frag = document.createDocumentFragment();
-  frag.appendChild(_codeBlock(line));
-  if (detail.cwd) {
-    const chips = _chipRow([{ label: "cwd", value: detail.cwd }]);
-    if (chips) frag.appendChild(chips);
-  }
-  return frag;
-}
-
-function _renderGenericTable(detail) {
-  const table = document.createElement("table");
-  for (const [k, v] of Object.entries(detail)) {
-    if (k === "tool_name" || k === "input") continue;
-    const row = document.createElement("tr");
-    const keyCell = document.createElement("td");
-    keyCell.textContent = k;
-    const valCell = document.createElement("td");
-    if (PATH_LIKE_KEYS.has(k.toLowerCase()) && typeof v === "string") {
-      const span = document.createElement("span");
-      span.className = "w-mono";
-      span.textContent = v;
-      valCell.appendChild(span);
-    } else if (typeof v === "object" && v !== null) {
-      const json = JSON.stringify(v, null, 2);
-      if (json.length > 60) {
-        const pre = document.createElement("pre");
-        pre.className = "code w-inline-code";
-        const code = document.createElement("code");
-        code.textContent = _truncate(json, 2000);
-        pre.appendChild(code);
-        valCell.appendChild(pre);
-      } else {
-        valCell.textContent = json;
-      }
-    } else {
-      valCell.appendChild(_expandableValue(String(v)));
-    }
-    row.append(keyCell, valCell);
-    table.appendChild(row);
-  }
-  return table;
-}
 
 function renderRichDetail(detail, toolName) {
   const container = document.createElement("div");
   container.className = "w-detail-rich";
-  const lower = (toolName || "").toLowerCase();
 
-  let rendered = null;
-  if (lower === "run_shell" || lower === "run_python3" || lower === "bash") {
-    rendered = _renderShellLike(detail);
-  } else if (lower === "write_text_file" || lower === "edit_text_file" || lower === "write" || lower === "edit") {
-    rendered = _renderFileWrite(detail, toolName);
-  } else if (lower === "read" || lower === "read_text_file") {
-    rendered = _renderReadFile(detail);
-  } else if (lower === "glob") {
-    rendered = _renderGlob(detail);
-  } else if (lower === "grep") {
-    rendered = _renderGrep(detail);
-  } else if (lower === "webfetch" || lower === "websearch" || lower === "web_fetch" || lower === "web_search") {
-    rendered = _renderWeb(detail, toolName);
-  } else if (lower.startsWith("browser_")) {
-    rendered = _renderBrowser(detail, toolName);
-  } else if (lower.startsWith("git_") || lower.startsWith("git-")) {
-    rendered = _renderGit(detail, toolName);
+  // Shell / Python commands
+  if (toolName === "run_shell" || toolName === "run_python3") {
+    const cmd = detail.command || detail.expression || detail.code || "";
+    if (cmd) {
+      const pre = document.createElement("pre");
+      pre.className = "code";
+      const code = document.createElement("code");
+      code.textContent = cmd;
+      pre.appendChild(code);
+      container.appendChild(pre);
+      return container;
+    }
   }
 
-  if (rendered) {
-    container.appendChild(rendered);
-    return container;
+  // File writes — show content
+  if (toolName === "write_text_file" || toolName === "edit_text_file") {
+    const content = detail.content || detail.new_string || detail.text || "";
+    if (content) {
+      const label = document.createElement("div");
+      label.style.cssText = "font-size:10.5px;color:var(--fg-ghost);margin-bottom:4px;";
+      label.textContent = detail.file_path || detail.path || toolName;
+      container.appendChild(label);
+      const pre = document.createElement("pre");
+      pre.className = "code";
+      const code = document.createElement("code");
+      code.textContent = content.length > 4000 ? content.slice(0, 4000) + "\n…[truncated]" : content;
+      pre.appendChild(code);
+      container.appendChild(pre);
+      if (detail.old_string) {
+        const diffLabel = document.createElement("div");
+        diffLabel.style.cssText = "font-size:10.5px;color:var(--red);margin:6px 0 2px;";
+        diffLabel.textContent = "replaces:";
+        container.appendChild(diffLabel);
+        const oldPre = document.createElement("pre");
+        oldPre.className = "code";
+        oldPre.style.borderLeftColor = "var(--red)";
+        const oldCode = document.createElement("code");
+        oldCode.textContent = detail.old_string.length > 2000 ? detail.old_string.slice(0, 2000) + "\n…[truncated]" : detail.old_string;
+        oldPre.appendChild(oldCode);
+        container.appendChild(oldPre);
+      }
+      return container;
+    }
   }
 
-  // Fallback: pretty key/value table with path styling, JSON pretty-print
-  // for long objects, and a "show more" toggle for long strings.
-  container.appendChild(_renderGenericTable(detail));
+  // Default: key-value table
+  const table = document.createElement("table");
+  for (const [k, v] of Object.entries(detail)) {
+    const row = document.createElement("tr");
+    const keyCell = document.createElement("td");
+    keyCell.textContent = k;
+    const valCell = document.createElement("td");
+    valCell.textContent = typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
+    row.append(keyCell, valCell);
+    table.appendChild(row);
+  }
+  container.appendChild(table);
   return container;
 }
 
@@ -1388,166 +887,6 @@ async function handleBrowserTool(msg) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Chrome DevTools Protocol bridge.
-//
-// Synthesised KeyboardEvents / MouseEvents from `chrome.scripting` have
-// isTrusted=false, so they can't drive the browser's own input handlers
-// (Tab focus motion, characters appearing in inputs, drag-and-drop, file
-// pickers). The CDP path attaches the extension as a debugger to the active
-// tab and routes input through `Input.dispatchKeyEvent` / `dispatchMouseEvent`
-// — same protocol Puppeteer/Playwright use, so isTrusted=true.
-//
-// Cost: a yellow banner appears on the tab while attached. We attach lazily
-// (only when a CDP-backed tool is invoked) and stay attached for the life
-// of the panel; the model can call browser_cdp_detach to dismiss it.
-
-const cdpState = {
-  attached: new Set(),
-  consoleLogs: new Map(),  // tabId -> [{level, text, ts}]
-  networkLog: new Map(),   // tabId -> [{requestId, method, url, status, mime, ts}]
-};
-
-const CDP_LOG_LIMIT = 250;
-
-function _cdpModifiers(modifiers) {
-  // CDP modifiers bitfield: 1=Alt, 2=Ctrl, 4=Meta, 8=Shift.
-  let flags = 0;
-  for (const m of modifiers || []) {
-    if (m === "Alt") flags |= 1;
-    else if (m === "Control" || m === "Ctrl") flags |= 2;
-    else if (m === "Meta" || m === "Command") flags |= 4;
-    else if (m === "Shift") flags |= 8;
-  }
-  return flags;
-}
-
-function _keyToCode(key) {
-  if (key.length === 1) {
-    const c = key.toUpperCase();
-    if (c >= "A" && c <= "Z") return `Key${c}`;
-    if (c >= "0" && c <= "9") return `Digit${c}`;
-  }
-  return key;  // "Enter", "Escape", etc. match KeyboardEvent.code names.
-}
-
-async function ensureCdpAttached(tabId) {
-  if (cdpState.attached.has(tabId)) return;
-  await chrome.debugger.attach({ tabId }, "1.3");
-  cdpState.attached.add(tabId);
-  cdpState.consoleLogs.set(tabId, []);
-  cdpState.networkLog.set(tabId, []);
-  // Enable the domains we read from. Network adds slight overhead (every
-  // request fires events) but is essential for `browser_network_log`.
-  await chrome.debugger.sendCommand({ tabId }, "Runtime.enable");
-  await chrome.debugger.sendCommand({ tabId }, "Network.enable");
-}
-
-if (typeof chrome !== "undefined" && chrome.debugger) {
-  chrome.debugger.onDetach.addListener((source) => {
-    if (source.tabId !== undefined) {
-      cdpState.attached.delete(source.tabId);
-      cdpState.consoleLogs.delete(source.tabId);
-      cdpState.networkLog.delete(source.tabId);
-    }
-  });
-
-  chrome.debugger.onEvent.addListener((source, method, params) => {
-    const tabId = source.tabId;
-    if (tabId === undefined) return;
-    if (method === "Runtime.consoleAPICalled") {
-      const buf = cdpState.consoleLogs.get(tabId);
-      if (!buf) return;
-      const text = (params.args || [])
-        .map((a) => a.value ?? a.description ?? a.unserializableValue ?? "")
-        .map((s) => String(s).slice(0, 400))
-        .join(" ");
-      buf.push({ level: params.type || "log", text, ts: Date.now() });
-      if (buf.length > CDP_LOG_LIMIT) buf.splice(0, buf.length - CDP_LOG_LIMIT);
-    } else if (method === "Network.requestWillBeSent") {
-      const buf = cdpState.networkLog.get(tabId);
-      if (!buf) return;
-      buf.push({
-        requestId: params.requestId,
-        method: params.request.method,
-        url: params.request.url,
-        ts: Date.now(),
-      });
-      if (buf.length > CDP_LOG_LIMIT) buf.splice(0, buf.length - CDP_LOG_LIMIT);
-    } else if (method === "Network.responseReceived") {
-      const buf = cdpState.networkLog.get(tabId);
-      if (!buf) return;
-      const rec = buf.find((e) => e.requestId === params.requestId);
-      if (rec) {
-        rec.status = params.response.status;
-        rec.mime = params.response.mimeType;
-      }
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Per-session tab grouping.
-//
-// Each panel tab represents one obscura conversation; when the agent opens
-// a browser tab on its behalf, we drop that browser tab into a Chrome tab
-// group so the user can see at a glance which tabs the agent is driving.
-// The group is created lazily on first `browser_new_tab` and persisted on
-// the panel-tab record so a panel reload restores the binding.
-//
-// We never group tabs the user opened themselves — only tabs the agent
-// creates via browser_new_tab.
-
-const TAB_GROUP_COLORS = ["blue", "cyan", "green", "yellow", "orange", "pink", "purple", "red", "grey"];
-
-function _pickGroupColor(seed) {
-  // Deterministic pick from a string seed (panel-tab id) so reopening the
-  // same conversation yields the same colour.
-  let h = 0;
-  for (const c of String(seed || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return TAB_GROUP_COLORS[h % TAB_GROUP_COLORS.length];
-}
-
-async function _groupStillExists(groupId) {
-  if (typeof groupId !== "number" || !chrome.tabGroups?.get) return false;
-  try {
-    await chrome.tabGroups.get(groupId);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function _ensureAgentTabInGroup(newTabId) {
-  if (!chrome.tabs?.group || !chrome.tabGroups?.update) return;
-  const panelTab = tabManager.active;
-  if (!panelTab) return;
-
-  // Drop a stale id (panel reloaded; group was closed).
-  if (panelTab.tabGroupId != null && !(await _groupStillExists(panelTab.tabGroupId))) {
-    panelTab.tabGroupId = null;
-  }
-
-  if (panelTab.tabGroupId == null) {
-    // First agent-opened tab in this conversation — create the group.
-    const groupId = await chrome.tabs.group({ tabIds: [newTabId] });
-    panelTab.tabGroupId = groupId;
-    saveTabs();
-    const title = `obscura: ${(panelTab.label || "").slice(0, 24) || "session"}`;
-    try {
-      await chrome.tabGroups.update(groupId, {
-        title,
-        color: _pickGroupColor(panelTab.id),
-        collapsed: false,
-      });
-    } catch (e) {
-      console.warn("[obscura] tabGroups.update failed", e);
-    }
-  } else {
-    await chrome.tabs.group({ tabIds: [newTabId], groupId: panelTab.tabGroupId });
-  }
-}
-
 async function runBrowserOp(op, args) {
   const tab = await activeTab();
   if (!tab?.id && op !== "list_tabs") throw new Error("no active tab");
@@ -1617,69 +956,14 @@ async function runBrowserOp(op, args) {
       return await execInTab(tab.id, (sel, val) => {
         const el = document.querySelector(sel);
         if (!el) return { ok: false, error: "no match" };
-
-        // Native input / textarea: use the prototype's value setter so React,
-        // Vue, Svelte, etc. observe the change.
-        const isInput = el.tagName === "INPUT" || el.tagName === "TEXTAREA";
-        if (isInput) {
-          const proto = el.tagName === "TEXTAREA"
-            ? HTMLTextAreaElement.prototype
-            : HTMLInputElement.prototype;
-          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-          if (setter) setter.call(el, val); else el.value = val;
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return { ok: true, kind: "input" };
-        }
-
-        // contenteditable host (Notion, Google Docs, Linear's editor, ProseMirror,
-        // Slate, Lexical). Walk up to find the editable root; rich-text editors
-        // route InputEvents from any descendant up to the host.
-        let host = el;
-        while (host && host !== document.body) {
-          if (host.isContentEditable) break;
-          host = host.parentElement;
-        }
-        if (!host || !host.isContentEditable) {
-          return {
-            ok: false,
-            error: "selector matched a non-input, non-contenteditable element",
-          };
-        }
-
-        host.focus();
-        // Select existing content so insertText replaces (matches user paste).
-        const range = document.createRange();
-        range.selectNodeContents(host);
-        const selObj = window.getSelection();
-        selObj?.removeAllRanges();
-        selObj?.addRange(range);
-
-        // Dispatch a beforeinput so editors that gate on it (ProseMirror, Lexical,
-        // Slate) accept the change. Then fall back to execCommand("insertText")
-        // which most rich-text editors translate into their internal model
-        // mutations.
-        const inputEvent = new InputEvent("beforeinput", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertReplacementText",
-          data: val,
-        });
-        host.dispatchEvent(inputEvent);
-
-        if (!inputEvent.defaultPrevented) {
-          // execCommand is deprecated but still the most reliable cross-editor
-          // path. Editors that don't support it can listen on `beforeinput`
-          // (above) and apply the change themselves.
-          document.execCommand("insertText", false, val);
-        }
-
-        host.dispatchEvent(new InputEvent("input", {
-          bubbles: true,
-          inputType: "insertReplacementText",
-          data: val,
-        }));
-        return { ok: true, kind: "contenteditable" };
+        const proto = el.tagName === "TEXTAREA"
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (setter) setter.call(el, val); else el.value = val;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return { ok: true };
       }, [selector, value]);
     }
     case "eval_js": {
@@ -1775,14 +1059,6 @@ async function runBrowserOp(op, args) {
     case "new_tab": {
       const { url, active = true } = args;
       const created = await chrome.tabs.create({ url, active });
-      // Auto-add to this conversation's tab group so the user can see at a
-      // glance which tabs the agent is operating on. Best-effort — group
-      // failures shouldn't block the tab opening.
-      try {
-        await _ensureAgentTabInGroup(created.id);
-      } catch (e) {
-        console.warn("[obscura] tab grouping failed", e);
-      }
       return { id: created.id, url: created.url };
     }
     case "close_tab": {
@@ -1799,196 +1075,6 @@ async function runBrowserOp(op, args) {
     }
     case "go_forward": {
       await chrome.tabs.goForward(tab.id);
-      return { ok: true };
-    }
-    case "press_key": {
-      // Synthesised KeyboardEvents have isTrusted=false. Browser-default
-      // behaviours that hang off real keypresses (Tab moving focus, Escape
-      // closing native dialogs, typing into inputs) won't fire — but app-level
-      // listeners (most "press / to search", "Cmd-K palette", form submit on
-      // Enter, custom modal close on Escape) work fine.
-      const { key, modifiers = [], selector = null } = args;
-      return await execInTab(tab.id, (k, mods, sel) => {
-        let target;
-        if (sel) {
-          target = document.querySelector(sel);
-          if (!target) return { ok: false, error: "no match" };
-          target.focus?.();
-        } else {
-          target = document.activeElement || document.body;
-        }
-        const ctrl = mods.includes("Control") || mods.includes("Ctrl");
-        const shift = mods.includes("Shift");
-        const alt = mods.includes("Alt");
-        const meta = mods.includes("Meta") || mods.includes("Command");
-        const init = {
-          key: k,
-          code: k.length === 1 ? `Key${k.toUpperCase()}` : k,
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          ctrlKey: ctrl,
-          shiftKey: shift,
-          altKey: alt,
-          metaKey: meta,
-        };
-        target.dispatchEvent(new KeyboardEvent("keydown", init));
-        if (k.length === 1 && !ctrl && !meta) {
-          target.dispatchEvent(new KeyboardEvent("keypress", init));
-        }
-        target.dispatchEvent(new KeyboardEvent("keyup", init));
-        return {
-          ok: true,
-          target: {
-            tag: target.tagName?.toLowerCase() || "",
-            id: target.id || "",
-          },
-        };
-      }, [key, modifiers, selector]);
-    }
-    case "clipboard_read": {
-      // Run in the side-panel context (extension page), where the
-      // clipboardRead permission is granted unconditionally. Reading via the
-      // tab's content script would require transient activation per page.
-      try {
-        const text = await navigator.clipboard.readText();
-        return { text };
-      } catch (e) {
-        return { ok: false, error: String(e?.message ?? e) };
-      }
-    }
-    case "clipboard_write": {
-      const { text } = args;
-      try {
-        await navigator.clipboard.writeText(String(text ?? ""));
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e?.message ?? e) };
-      }
-    }
-    case "type_text": {
-      // Real native typing — characters actually appear in the focused input,
-      // including in cross-origin iframes. isTrusted=true.
-      const { text, selector = null } = args;
-      if (selector) {
-        await execInTab(tab.id, (sel) => {
-          document.querySelector(sel)?.focus?.();
-        }, [selector]);
-      }
-      await ensureCdpAttached(tab.id);
-      await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        "Input.insertText",
-        { text: String(text ?? "") },
-      );
-      return { ok: true };
-    }
-    case "native_press_key": {
-      // CDP keyboard event. Tab moves focus, arrow keys navigate, Enter
-      // submits — all the browser-default behaviours synthesised events
-      // can't trigger.
-      const { key, modifiers = [], selector = null } = args;
-      if (selector) {
-        await execInTab(tab.id, (sel) => {
-          document.querySelector(sel)?.focus?.();
-        }, [selector]);
-      }
-      await ensureCdpAttached(tab.id);
-      const mods = _cdpModifiers(modifiers);
-      const code = _keyToCode(key);
-      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
-        type: "rawKeyDown", key, code, modifiers: mods,
-      });
-      // Single printable char: also send a "char" event so the character
-      // shows up in inputs without needing Input.insertText.
-      if (key.length === 1 && (mods & 6) === 0) {  // no Ctrl/Meta
-        await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
-          type: "char", key, code, text: key, unmodifiedText: key, modifiers: mods,
-        });
-      }
-      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
-        type: "keyUp", key, code, modifiers: mods,
-      });
-      return { ok: true };
-    }
-    case "native_click": {
-      // Real mouse: hover (mouseMoved) + press + release. Hover-dependent
-      // UI like dropdown menus and tooltips actually shows. Drag-drop
-      // is implemented separately if needed.
-      const { selector } = args;
-      const rect = await execInTab(tab.id, (sel) => {
-        const el = document.querySelector(sel);
-        if (!el) return null;
-        el.scrollIntoView({ block: "center", inline: "center" });
-        const r = el.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      }, [selector]);
-      if (!rect) return { ok: false, error: "no match" };
-      await ensureCdpAttached(tab.id);
-      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
-        type: "mouseMoved", x: rect.x, y: rect.y, button: "none",
-      });
-      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
-        type: "mousePressed", x: rect.x, y: rect.y, button: "left", clickCount: 1,
-      });
-      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
-        type: "mouseReleased", x: rect.x, y: rect.y, button: "left", clickCount: 1,
-      });
-      return { ok: true };
-    }
-    case "upload_file": {
-      // Sets files on an <input type="file"> via DOM.setFileInputFiles, the
-      // only path that works without OS-level UI automation. ``paths`` are
-      // absolute paths on the user's machine — both processes are local so
-      // the browser can read them.
-      const { selector, paths } = args;
-      if (!Array.isArray(paths) || paths.length === 0) {
-        return { ok: false, error: "paths must be a non-empty array of absolute paths" };
-      }
-      await ensureCdpAttached(tab.id);
-      const doc = await chrome.debugger.sendCommand({ tabId: tab.id }, "DOM.getDocument", {});
-      const found = await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        "DOM.querySelector",
-        { nodeId: doc.root.nodeId, selector },
-      );
-      if (!found?.nodeId) return { ok: false, error: "no match" };
-      await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        "DOM.setFileInputFiles",
-        { nodeId: found.nodeId, files: paths.map(String) },
-      );
-      return { ok: true, file_count: paths.length };
-    }
-    case "console_logs": {
-      const { limit = 50 } = args;
-      await ensureCdpAttached(tab.id);
-      const buf = cdpState.consoleLogs.get(tab.id) || [];
-      return { logs: buf.slice(-Number(limit)) };
-    }
-    case "network_log": {
-      const { limit = 50, url_contains = null } = args;
-      await ensureCdpAttached(tab.id);
-      let buf = cdpState.networkLog.get(tab.id) || [];
-      if (url_contains) {
-        const needle = String(url_contains);
-        buf = buf.filter((e) => e.url?.includes(needle));
-      }
-      return { entries: buf.slice(-Number(limit)) };
-    }
-    case "cdp_detach": {
-      // Lets the model dismiss the yellow banner once it's done with
-      // CDP-backed work. Idempotent.
-      if (cdpState.attached.has(tab.id)) {
-        try {
-          await chrome.debugger.detach({ tabId: tab.id });
-        } catch {
-          // already detached — fine.
-        }
-      }
-      cdpState.attached.delete(tab.id);
-      cdpState.consoleLogs.delete(tab.id);
-      cdpState.networkLog.delete(tab.id);
       return { ok: true };
     }
     default:
@@ -2161,261 +1247,73 @@ sbKairos.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Checkpoint / rewind
 
-function refreshCheckpointList() {
-  const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
-  checkpointPendingId = id;
-  checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
-  pending.set(id, { bubble: document.createElement("div"), streamedText: "", silent: true });
-  try { port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value }); } catch {}
-}
-
 function showCheckpointModal() {
   checkpointModal.classList.remove("hidden");
   checkpointNameInput.value = "";
-  hideCheckpointError();
-  refreshCheckpointList();
+  checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+  // Send /checkpoint list
+  const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
+  checkpointPendingId = id;
+  // Suppress default message rendering by not adding a visible bubble
+  const bubble = document.createElement("div");
+  pending.set(id, { bubble, streamedText: "", silent: true });
+  try {
+    port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value });
+  } catch {}
 }
 
 function hideCheckpointModal() {
   checkpointModal.classList.add("hidden");
   checkpointPendingId = null;
-  hideCheckpointError();
 }
-
-function showCheckpointError(message) {
-  if (!checkpointError) return;
-  if (checkpointErrorTimer) { clearTimeout(checkpointErrorTimer); checkpointErrorTimer = null; }
-  checkpointError.textContent = message;
-  checkpointError.classList.remove("hidden", "fading");
-  // Auto-fade after a few seconds; next user action clears it via hideCheckpointError().
-  checkpointErrorTimer = setTimeout(() => {
-    checkpointError.classList.add("fading");
-    checkpointErrorTimer = setTimeout(() => {
-      checkpointError.classList.add("hidden");
-      checkpointError.classList.remove("fading");
-      checkpointErrorTimer = null;
-    }, 220);
-  }, 4500);
-}
-
-function hideCheckpointError() {
-  if (!checkpointError) return;
-  if (checkpointErrorTimer) { clearTimeout(checkpointErrorTimer); checkpointErrorTimer = null; }
-  checkpointError.classList.add("hidden");
-  checkpointError.classList.remove("fading");
-  checkpointError.textContent = "";
-}
-
-// cmd_checkpoint emits failures via console.print_error rather than an ERROR
-// frame, so we scrape the streamed text for the "error:" prefix.
-function extractCheckpointError(text) {
-  if (!text) return null;
-  for (const raw of text.split("\n")) {
-    const m = /^error:\s*(.+)$/i.exec(raw.trim());
-    if (m && m[1]) return m[1].trim();
-  }
-  return null;
-}
-
-// ---------- Recent sessions modal ----------
-
-function showRecentSessionsModal() {
-  recentSessionsModal.classList.remove("hidden");
-  recentSessionsList.innerHTML = '<div class="recent-sessions-empty">Loading…</div>';
-  const id = crypto.randomUUID?.() ?? `rs-${Date.now()}`;
-  recentSessionsRequestId = id;
-  if (recentSessionsTimeout) clearTimeout(recentSessionsTimeout);
-  recentSessionsTimeout = setTimeout(() => {
-    if (recentSessionsRequestId !== id) return;
-    recentSessionsList.innerHTML =
-      '<div class="recent-sessions-empty">Could not load sessions (timeout).</div>';
-    recentSessionsRequestId = null;
-  }, 5000);
-  try {
-    port?.postMessage({ type: MsgType.LIST_SESSIONS, id });
-  } catch {}
-}
-
-function hideRecentSessionsModal() {
-  recentSessionsModal.classList.add("hidden");
-  recentSessionsRequestId = null;
-  if (recentSessionsTimeout) {
-    clearTimeout(recentSessionsTimeout);
-    recentSessionsTimeout = null;
-  }
-}
-
-function relativeTime(iso) {
-  if (!iso) return "";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "";
-  const sec = Math.max(1, Math.floor((Date.now() - t) / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-  return `${Math.floor(sec / 86400)}d ago`;
-}
-
-function renderRecentSessions(sessions) {
-  recentSessionsList.innerHTML = "";
-  if (!sessions.length) {
-    const empty = document.createElement("div");
-    empty.className = "recent-sessions-empty";
-    empty.textContent = "No saved sessions.";
-    recentSessionsList.appendChild(empty);
-    return;
-  }
-  for (const s of sessions) {
-    const row = document.createElement("div");
-    row.className = "recent-session-row";
-    row.dataset.sid = s.session_id || "";
-
-    const title = document.createElement("div");
-    title.className = "recent-session-title";
-    const summary = (s.summary || "").trim();
-    title.textContent = summary
-      ? (summary.length > 60 ? summary.slice(0, 60) + "…" : summary)
-      : (s.session_id || "(no title)");
-
-    const meta = document.createElement("div");
-    meta.className = "recent-session-meta";
-    const parts = [];
-    if (s.backend) parts.push(s.backend);
-    if (s.message_count) parts.push(`${s.message_count} msgs`);
-    const rel = relativeTime(s.created);
-    if (rel) parts.push(rel);
-    meta.textContent = parts.join(" · ");
-
-    row.appendChild(title);
-    row.appendChild(meta);
-    row.addEventListener("click", () => {
-      const sid = row.dataset.sid;
-      if (!sid) return;
-      hideRecentSessionsModal();
-      const id = crypto.randomUUID?.() ?? `r-${Date.now()}`;
-      try {
-        port?.postMessage({
-          type: MsgType.COMMAND,
-          id,
-          raw: `/resume ${sid}`,
-          backend: backendSel.value,
-        });
-      } catch {}
-    });
-    recentSessionsList.appendChild(row);
-  }
-}
-
-recentSessionsBtn?.addEventListener("click", showRecentSessionsModal);
-recentSessionsClose?.addEventListener("click", hideRecentSessionsModal);
-recentSessionsModal?.addEventListener("click", (e) => {
-  if (e.target === recentSessionsModal) hideRecentSessionsModal();
-});
 
 function parseCheckpointList(text) {
-  // /checkpoint list renders a Rich table: │ Name │ Messages │ Saved │.
-  // Pull name (col 1) and saved time (col 3) out of each data row.
-  const rows = [];
-  const seen = new Set();
-  for (const raw of text.split("\n")) {
-    if (!raw.includes("│")) continue;
-    const cells = raw.split("│").map((c) => c.trim()).filter(Boolean);
-    const name = cells[0];
-    if (!name || name.toLowerCase() === "name" || /^[─━┄┈]+$/.test(name)) continue;
-    if (seen.has(name)) continue;
-    seen.add(name);
-    rows.push({ name, saved: cells[2] || "" });
+  // Extract checkpoint names from lines like "  · name" or "name" or "- name"
+  const names = [];
+  for (const line of text.split("\n")) {
+    const m = /^\s*[·\-\*]?\s*([^\s][^\n]+)$/.exec(line.trim());
+    if (m && m[1] && !m[1].startsWith("checkpoint") && !m[1].startsWith("No ") && !m[1].startsWith("Usage")) {
+      names.push(m[1].trim());
+    }
   }
-  return rows;
+  return names;
 }
 
 function renderCheckpointList(text) {
   checkpointList.innerHTML = "";
-  const rows = parseCheckpointList(text);
-  if (rows.length === 0) {
+  const names = parseCheckpointList(text);
+  if (names.length === 0) {
     const empty = document.createElement("div");
     empty.className = "checkpoint-empty";
     empty.textContent = "no checkpoints saved";
     checkpointList.appendChild(empty);
     return;
   }
-  for (const { name, saved } of rows) {
+  for (const name of names) {
     const row = document.createElement("div");
     row.className = "checkpoint-row";
-    row.dataset.name = name;
-
     const nameEl = document.createElement("span");
     nameEl.className = "cp-name";
     nameEl.textContent = name;
-    row.appendChild(nameEl);
-
-    const actions = document.createElement("span");
-    actions.className = "cp-actions";
-
-    if (saved) {
-      const timeEl = document.createElement("span");
-      timeEl.className = "cp-time";
-      timeEl.textContent = saved;
-      actions.appendChild(timeEl);
-    }
-
     const restoreBtn = document.createElement("button");
     restoreBtn.className = "cp-restore";
     restoreBtn.textContent = "restore";
     restoreBtn.addEventListener("click", () => {
       hideCheckpointModal();
-      sendSilentCommand(`/checkpoint restore ${name}`, { op: "restore", name });
+      sendSilentCommand(`/checkpoint restore ${name}`);
     });
-    actions.appendChild(restoreBtn);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "cp-delete";
-    deleteBtn.title = `Delete checkpoint ${name}`;
-    deleteBtn.setAttribute("aria-label", `Delete checkpoint ${name}`);
-    deleteBtn.textContent = "✕";
-    deleteBtn.addEventListener("click", () => enterDeleteConfirm(row, name));
-    actions.appendChild(deleteBtn);
-
-    row.appendChild(actions);
+    row.append(nameEl, restoreBtn);
     checkpointList.appendChild(row);
   }
 }
 
-function enterDeleteConfirm(row, name) {
-  hideCheckpointError();
-  row.classList.add("confirming");
-  row.innerHTML = "";
-  const text = document.createElement("span");
-  text.className = "cp-confirm-text";
-  const strong = document.createElement("strong");
-  strong.textContent = name;
-  text.append("Delete ", strong, "?");
-  const cancelBtn = document.createElement("button");
-  cancelBtn.className = "cp-confirm-cancel";
-  cancelBtn.textContent = "cancel";
-  cancelBtn.addEventListener("click", () => refreshCheckpointList());
-  const confirmBtn = document.createElement("button");
-  confirmBtn.className = "cp-confirm-delete";
-  confirmBtn.textContent = "delete";
-  confirmBtn.addEventListener("click", () => {
-    confirmBtn.disabled = true;
-    cancelBtn.disabled = true;
-    sendSilentCommand(`/checkpoint delete ${name}`, { op: "delete", name });
-  });
-  row.append(text, cancelBtn, confirmBtn);
-}
-
-function sendSilentCommand(raw, opts) {
+function sendSilentCommand(raw) {
   const id = crypto.randomUUID?.() ?? `sc-${Date.now()}`;
   const bubble = document.createElement("div");
   pending.set(id, { bubble, streamedText: "", silent: true });
-  if (opts && opts.op) {
-    checkpointOpIds.set(id, { op: opts.op, name: opts.name || "" });
-  }
   try {
     port?.postMessage({ type: MsgType.COMMAND, id, raw, backend: backendSel.value });
   } catch {}
-  return id;
 }
 
 sbRewind.addEventListener("click", showCheckpointModal);
@@ -2428,10 +1326,19 @@ checkpointModal.addEventListener("click", (e) => {
 checkpointSaveBtn.addEventListener("click", () => {
   const name = checkpointNameInput.value.trim();
   if (!name) return;
-  hideCheckpointError();
-  sendSilentCommand(`/checkpoint save ${name}`, { op: "save", name });
+  sendSilentCommand(`/checkpoint save ${name}`);
   checkpointNameInput.value = "";
-  // List refresh happens in the DONE handler for the save op; no fixed delay.
+  // Refresh list after a short delay
+  setTimeout(() => {
+    const id = crypto.randomUUID?.() ?? `cp-${Date.now()}`;
+    checkpointPendingId = id;
+    checkpointList.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+    const bubble = document.createElement("div");
+    pending.set(id, { bubble, streamedText: "", silent: true });
+    try {
+      port?.postMessage({ type: MsgType.COMMAND, id, raw: "/checkpoint list", backend: backendSel.value });
+    } catch {}
+  }, 600);
 });
 
 checkpointNameInput.addEventListener("keydown", (e) => {
@@ -2515,13 +1422,6 @@ function connect() {
 
   port.onMessage.addListener((msg) => {
     if (!msg || typeof msg !== "object") return;
-    // Token-acceptance signal: if we recently sent a frame carrying
-    // authToken and the host replies with anything other than another
-    // auth_required, the token was accepted — persist it for next launch.
-    if (lastSubmittedToken && msg.type !== "auth_required" && authToken) {
-      lastSubmittedToken = false;
-      StorageManager.set({ [AUTH_TOKEN_KEY]: authToken }).catch(() => {});
-    }
     switch (msg.type) {
       case MsgType.BRIDGE_READY:
         status.textContent = "";
@@ -2541,11 +1441,6 @@ function connect() {
         }
         break;
       case MsgType.READY:
-        hostReadyReceived = true;
-        lastReadySnapshot = msg;
-        clearHostReadyTimer();
-        hideHostMissingBanner();
-        updateWelcomeHostInfo();
         updateStatusbar(msg);
         if (Array.isArray(msg.commands)) commandIndex = msg.commands;
         if (Array.isArray(msg.skills)) skillIndex = msg.skills;
@@ -2647,21 +1542,6 @@ function connect() {
           } else if (msg.id === mcpPendingId) {
             renderMcpContent(text);
             mcpPendingId = null;
-          } else if (checkpointOpIds.has(msg.id)) {
-            // Save / restore / delete completed. cmd_checkpoint emits
-            // failures via console (chunked text starting with "error:")
-            // rather than an ERROR frame, so scan the streamed text.
-            const opInfo = checkpointOpIds.get(msg.id);
-            checkpointOpIds.delete(msg.id);
-            const errMsg = extractCheckpointError(text);
-            if (errMsg && !checkpointModal.classList.contains("hidden")) {
-              showCheckpointError(errMsg);
-            } else if (!checkpointModal.classList.contains("hidden")) {
-              // Successful op while modal is open — refresh list so the
-              // user sees the change. (Restore closes the modal first,
-              // so this only fires for save / delete.)
-              if (opInfo && opInfo.op !== "restore") refreshCheckpointList();
-            }
           }
           pending.delete(msg.id);
           if (pending.size === 0) { setBusy(false); setLiveStatus(""); drainQueue(); }
@@ -2691,7 +1571,6 @@ function connect() {
             if (firstUser) {
               tabManager.active.label = (firstUser.textContent || "").slice(0, 20) || "session";
               renderTabs();
-              saveTabs();
             }
           }
           // Save session metadata
@@ -2738,43 +1617,8 @@ function connect() {
         showWarningBanner(msg.message || "Warning");
         break;
       }
-      case MsgType.FLEET: {
-        handleFleetFrame(msg);
-        break;
-      }
       case "auth_required": {
-        // If we just sent a frame carrying authToken, this auth_required is
-        // a rejection — clear the stored token and show the gate with an
-        // inline error. Otherwise the host is asking for the first time
-        // (no token attached yet) and we just show the gate.
-        if (lastSubmittedToken) {
-          lastSubmittedToken = false;
-          authToken = null;
-          chrome.storage.local.remove(AUTH_TOKEN_KEY).catch(() => {});
-          showAuthGate({ rejected: true });
-        } else {
-          showAuthGate();
-        }
-        break;
-      }
-      case MsgType.SESSIONS: {
-        // Reply to our list_sessions probe — render the modal list.
-        if (msg.id !== recentSessionsRequestId) break;
-        if (recentSessionsTimeout) {
-          clearTimeout(recentSessionsTimeout);
-          recentSessionsTimeout = null;
-        }
-        renderRecentSessions(Array.isArray(msg.sessions) ? msg.sessions : []);
-        break;
-      }
-      case MsgType.PONG: {
-        // Resolve test-connection ping if we're tracking this id.
-        const r = msg.id ? pingResolvers.get(msg.id) : null;
-        if (r) {
-          if (r.timer) clearTimeout(r.timer);
-          pingResolvers.delete(msg.id);
-          r.resolve(msg);
-        }
+        showAuthGate();
         break;
       }
       case "browser-tool": {
@@ -2783,24 +1627,7 @@ function connect() {
       }
       case MsgType.ERROR: {
         const st = msg.id ? pending.get(msg.id) : null;
-        // Checkpoint operation errors surface inline in the modal, not in
-        // the transcript — the user is in the modal and shouldn't see a
-        // detached error bubble for an action they can't see firing.
-        const isCheckpointOp = msg.id && checkpointOpIds.has(msg.id);
-        const isCheckpointList = msg.id && msg.id === checkpointPendingId;
-        if ((isCheckpointOp || isCheckpointList) && !checkpointModal.classList.contains("hidden")) {
-          if (isCheckpointOp) checkpointOpIds.delete(msg.id);
-          if (isCheckpointList) {
-            checkpointPendingId = null;
-            // Empty list area so it doesn't sit on "loading…".
-            checkpointList.innerHTML = "";
-            const empty = document.createElement("div");
-            empty.className = "checkpoint-empty";
-            empty.textContent = "could not load checkpoints";
-            checkpointList.appendChild(empty);
-          }
-          showCheckpointError(msg.message || "Unknown error");
-        } else if (st?.bubble) {
+        if (st?.bubble) {
           const bubble = st.bubble;
           bubble.parentElement?.classList.remove("cursor");
           bubble.parentElement.classList.remove("assistant");
@@ -2821,21 +1648,9 @@ function connect() {
     setBusy(false);
     setLiveStatus("");
     port = null;
-    hostReadyReceived = false;
-    clearHostReadyTimer();
-    // Drop any in-flight test-connection pings so they don't dangle.
-    for (const [, r] of pingResolvers) {
-      if (r.timer) clearTimeout(r.timer);
-      r.reject(new Error("disconnected"));
-    }
-    pingResolvers.clear();
     setHostStatus("disconnected", "err");
     showDisconnectBanner();
   });
-
-  // Arm the host-missing detector. If no `ready` frame arrives within
-  // HOST_READY_TIMEOUT_MS, surface the install instructions banner.
-  startHostReadyTimer();
 
   // Kick the service worker to spawn the native host. Without this the SW
   // only spawns the host on the first outgoing message, so the initial
@@ -2862,17 +1677,6 @@ function updateStatusbar(ready) {
   if (ready.pid) bits.push(`pid ${ready.pid}`);
   setHostStatus(bits.join(" · ") || "up", "ok");
   sbGit.textContent = ready.git_commit ? `@${ready.git_commit}` : "—";
-  // Profile chip: dim, only shown when we know the id. Helps users with
-  // multiple Chrome profiles tell their panels apart at a glance.
-  // Prefer the id we generated locally (always present); fall back to
-  // whatever the host echoed if for some reason ours is null.
-  const pid = profileId || ready.profile_id || "";
-  if (pid && sbProfile && sbProfileSep) {
-    sbProfile.textContent = `profile ${String(pid).slice(0, 8)}`;
-    sbProfile.title = `Chrome profile id: ${pid}\nStorage: ~/.obscura/profiles/${pid}/`;
-    sbProfile.hidden = false;
-    sbProfileSep.hidden = false;
-  }
 }
 
 function updateBackendStatus() {
@@ -3172,11 +1976,6 @@ document.addEventListener("keydown", (e) => {
       hideDiagOverlay();
       return;
     }
-    if (!recentSessionsModal.classList.contains("hidden")) {
-      e.preventDefault();
-      hideRecentSessionsModal();
-      return;
-    }
     if (shortcutsVisible()) {
       e.preventDefault();
       hideShortcuts();
@@ -3194,23 +1993,6 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     toggleShortcuts();
     return;
-  }
-
-  // "/" — focus composer and trigger slash autocomplete (when not already
-  // typing into an input/textarea/select).
-  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    const t = document.activeElement;
-    const tag = t?.tagName;
-    const editable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable;
-    if (!editable) {
-      e.preventDefault();
-      input.focus();
-      // Insert "/" at the start so the existing slash autocomplete fires.
-      input.value = "/" + input.value;
-      input.setSelectionRange(1, 1);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      return;
-    }
   }
 
   // ⌘/Ctrl+T and ⌘/Ctrl+W from anywhere
@@ -3262,7 +2044,6 @@ form.addEventListener("submit", async (e) => {
   if (tabManager.active && (tabManager.active.label === "new" || tabManager.active.label === "session")) {
     tabManager.active.label = (prompt || "file").slice(0, 20);
     renderTabs();
-    saveTabs();
   }
 
   // `/foo` = slash command (routed to obscura.cli.handle_command).
@@ -3336,7 +2117,6 @@ function dispatchSend(desc) {
         ...(authToken ? { auth_token: authToken } : {}),
       });
     }
-    if (authToken) lastSubmittedToken = true;
   } catch (err) {
     pending.delete(desc.id);
     setBusy(false);
@@ -3363,7 +2143,6 @@ clearBtn.addEventListener("click", () => {
   log.innerHTML = "";
   addMessage("system", "new session.");
   chrome.storage.local.remove(TRANSCRIPT_KEY);
-  saveTabs();
 });
 
 stopBtn.addEventListener("click", () => {
@@ -3406,50 +2185,9 @@ sbDiag.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Diagnostics overlay
 
-function _collectDiagHealthIssues(data) {
-  // Surface obvious problems above the table: errored memory backends and
-  // detected peer hosts. Returns an array of short human-readable strings.
-  const issues = [];
-  const memErr = (key) => {
-    const v = data?.[key];
-    if (v && typeof v === "object" && v.status === "error") {
-      const msg = v.message || v.error || "unknown error";
-      issues.push(`${key.replace(/_/g, " ")}: ${String(msg).slice(0, 200)}`);
-    }
-  };
-  memErr("vector_memory");
-  memErr("kv_memory");
-  memErr("memory");
-  const peers = Array.isArray(data?.peers) ? data.peers : [];
-  if (peers.length > 0) {
-    issues.push(
-      `${peers.length} other obscura host(s) running (PIDs: ${peers.join(", ")})`,
-    );
-  }
-  return issues;
-}
-
 function showDiagOverlay(data) {
   diagContent.innerHTML = "";
   const skip = new Set(["type", "id"]);
-
-  const issues = _collectDiagHealthIssues(data);
-  if (issues.length) {
-    const banner = document.createElement("div");
-    banner.className = "diag-health-banner";
-    const head = document.createElement("div");
-    head.className = "diag-health-head";
-    head.textContent = `${issues.length} issue${issues.length === 1 ? "" : "s"} detected`;
-    banner.appendChild(head);
-    for (const text of issues) {
-      const li = document.createElement("div");
-      li.className = "diag-health-item";
-      li.textContent = text;
-      banner.appendChild(li);
-    }
-    diagContent.appendChild(banner);
-  }
-
   const table = document.createElement("table");
 
   const addRow = (key, val) => {
@@ -3473,52 +2211,13 @@ function showDiagOverlay(data) {
   const clearLink = document.createElement("button");
   clearLink.type = "button";
   clearLink.textContent = "clear tool permissions";
-  clearLink.style.cssText = "margin-top:10px;margin-right:8px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
+  clearLink.style.cssText = "margin-top:10px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
   clearLink.addEventListener("click", async () => {
     await clearToolPerms();
     clearLink.textContent = "cleared ✓";
     setTimeout(() => { clearLink.textContent = "clear tool permissions"; }, 1500);
   });
   diagContent.appendChild(clearLink);
-
-  // "Log out" — clears the persisted auth token and re-shows the gate.
-  const logoutLink = document.createElement("button");
-  logoutLink.type = "button";
-  logoutLink.textContent = "log out";
-  logoutLink.style.cssText = "margin-top:10px;font:inherit;font-size:10.5px;color:var(--fg-ghost);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;cursor:pointer;";
-  logoutLink.addEventListener("click", () => {
-    logoutAuth();
-    hideDiagOverlay();
-  });
-  diagContent.appendChild(logoutLink);
-
-  // "Test connection" — ping the host with a 3s timeout, show inline result.
-  const testLink = document.createElement("button");
-  testLink.type = "button";
-  testLink.textContent = "test connection";
-  testLink.className = "diag-welcome-link";
-  const testResult = document.createElement("span");
-  testResult.style.cssText = "margin-left:8px;font-size:10.5px;font-family:var(--mono);";
-  testLink.addEventListener("click", async () => {
-    testResult.className = "welcome-test-result pending";
-    testResult.textContent = "pinging…";
-    const res = await runTestConnection();
-    testResult.className = `welcome-test-result ${res.ok ? "ok" : "err"}`;
-    testResult.textContent = res.ok ? `✓ Connected (${res.latencyMs}ms)` : `✗ ${res.error}`;
-  });
-  diagContent.appendChild(testLink);
-  diagContent.appendChild(testResult);
-
-  // "Show welcome again" — re-open the onboarding overlay regardless of flag.
-  const welcomeLink = document.createElement("button");
-  welcomeLink.type = "button";
-  welcomeLink.textContent = "show welcome again";
-  welcomeLink.className = "diag-welcome-link";
-  welcomeLink.addEventListener("click", () => {
-    hideDiagOverlay();
-    showWelcomeOverlay({ force: true });
-  });
-  diagContent.appendChild(welcomeLink);
 
   diagOverlay.classList.remove("hidden");
 }
@@ -3545,85 +2244,12 @@ warningBanner.querySelector(".warning-dismiss").addEventListener("click", () => 
 });
 
 // ---------------------------------------------------------------------------
-// Fleet overlay — live observability backed by `fleet` frames from the host.
-
-function handleFleetFrame(msg) {
-  fleetSeeded = true;
-  const event = msg.event || "";
-  if (event === "snapshot") {
-    fleetState.clear();
-    const agents = Array.isArray(msg.agents) ? msg.agents : [];
-    for (const a of agents) {
-      if (!a || !a.agent) continue;
-      fleetState.set(a.agent, {
-        status: a.status || "idle",
-        lastActivity: a.lastActivity || 0,
-        lastError: a.lastError || "",
-        model: a.model || "",
-        expanded: false,
-      });
-    }
-  } else {
-    const name = msg.agent || "";
-    if (!name) return;
-    if (event === "agent_stopped" && fleetState.has(name)) {
-      // Keep the row visible briefly so users notice; mark stopped.
-      const prev = fleetState.get(name);
-      fleetState.set(name, {
-        ...prev,
-        status: "stopped",
-        lastActivity: msg.timestamp || Math.floor(Date.now() / 1000),
-        lastError: msg.detail?.error || prev.lastError || "",
-      });
-    } else {
-      const prev = fleetState.get(name) || { expanded: false };
-      fleetState.set(name, {
-        status: msg.status || prev.status || "idle",
-        lastActivity: msg.timestamp || Math.floor(Date.now() / 1000),
-        lastError: msg.detail?.error || (event === "agent_error" ? msg.detail?.message : "") || prev.lastError || "",
-        model: prev.model || "",
-        expanded: prev.expanded || false,
-      });
-    }
-  }
-  updateFleetIndicator();
-  if (!fleetOverlay.classList.contains("hidden")) {
-    renderFleetContent(null, null);
-  }
-}
-
-function updateFleetIndicator() {
-  // Tag the toolbar fleet button with a colored dot + count.
-  const total = fleetState.size;
-  let cls = "";
-  if (total === 0) {
-    cls = "";
-  } else {
-    let hasErr = false;
-    let anyRunning = false;
-    for (const s of fleetState.values()) {
-      if (s.status === "error") hasErr = true;
-      else if (s.status === "running") anyRunning = true;
-    }
-    if (hasErr) cls = "fleet-err";
-    else if (anyRunning) cls = "fleet-running";
-    else cls = "fleet-idle";
-  }
-  sbFleet.classList.remove("fleet-err", "fleet-running", "fleet-idle");
-  if (cls) sbFleet.classList.add(cls);
-  sbFleet.title = total === 0
-    ? "Agent fleet status (no live agents)"
-    : `Agent fleet status (${total} agent${total === 1 ? "" : "s"})`;
-}
+// Fleet overlay (Feature 3)
 
 function showFleetOverlay() {
   fleetOverlay.classList.remove("hidden");
-  if (fleetSeeded || fleetState.size > 0) {
-    renderFleetContent(null, null);
-    return;
-  }
-  // Host hasn't reported any live fleet yet — fall back to /agent list text.
   fleetContent.innerHTML = '<div class="checkpoint-empty">loading…</div>';
+  // Send /agent list command
   const id = crypto.randomUUID?.() ?? `fl-${Date.now()}`;
   fleetPendingId = id;
   const bubble = document.createElement("div");
@@ -3631,6 +2257,7 @@ function showFleetOverlay() {
   try {
     port?.postMessage({ type: MsgType.COMMAND, id, raw: "/agent list", backend: backendSel.value });
   } catch {
+    // Fallback: request diag data
     port?.postMessage({ type: MsgType.DIAG, id: crypto.randomUUID?.() ?? `diag-${Date.now()}` });
   }
 }
@@ -3640,78 +2267,10 @@ function hideFleetOverlay() {
   fleetPendingId = null;
 }
 
-function _fmtRelTime(ts) {
-  if (!ts) return "—";
-  const dt = Math.max(0, Math.floor(Date.now() / 1000) - ts);
-  if (dt < 5) return "just now";
-  if (dt < 60) return `${dt}s ago`;
-  if (dt < 3600) return `${Math.floor(dt / 60)}m ago`;
-  if (dt < 86400) return `${Math.floor(dt / 3600)}h ago`;
-  return `${Math.floor(dt / 86400)}d ago`;
-}
-
 function renderFleetContent(diagData, agentListText) {
   fleetContent.innerHTML = "";
 
-  // Live path: render from fleetState.
-  if (fleetSeeded || fleetState.size > 0) {
-    if (fleetState.size === 0) {
-      const empty = document.createElement("div");
-      empty.className = "checkpoint-empty";
-      empty.textContent = "no agents running (host is reporting live; fleet is empty)";
-      fleetContent.appendChild(empty);
-      return;
-    }
-    const list = document.createElement("div");
-    list.className = "fleet-agent-list";
-    const sorted = Array.from(fleetState.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    for (const [name, st] of sorted) {
-      const row = document.createElement("div");
-      row.className = `fleet-agent-row fleet-row-${st.status}`;
-
-      const dot = document.createElement("span");
-      dot.className = `fleet-dot fleet-dot-${st.status}`;
-      dot.title = st.status;
-
-      const nameEl = document.createElement("span");
-      nameEl.className = "fleet-agent-name";
-      nameEl.textContent = name;
-
-      const stat = document.createElement("span");
-      stat.className = "fleet-agent-status";
-      stat.textContent = `${st.status} · ${_fmtRelTime(st.lastActivity)}`;
-
-      row.append(dot, nameEl, stat);
-      row.style.cursor = "pointer";
-      row.addEventListener("click", () => {
-        const cur = fleetState.get(name);
-        if (cur) { cur.expanded = !cur.expanded; fleetState.set(name, cur); renderFleetContent(null, null); }
-      });
-      list.appendChild(row);
-
-      if (st.expanded) {
-        const detail = document.createElement("div");
-        detail.className = "fleet-agent-detail";
-        const lines = [];
-        if (st.model) lines.push(`model: ${st.model}`);
-        lines.push(`status: ${st.status}`);
-        lines.push(`last activity: ${_fmtRelTime(st.lastActivity)}`);
-        if (st.lastError) lines.push(`error: ${st.lastError}`);
-        detail.textContent = lines.join("\n");
-        list.appendChild(detail);
-      } else if (st.status === "error" && st.lastError) {
-        // Show errors inline even when collapsed.
-        const errEl = document.createElement("div");
-        errEl.className = "fleet-agent-error-inline";
-        errEl.textContent = st.lastError.length > 140 ? st.lastError.slice(0, 140) + "…" : st.lastError;
-        list.appendChild(errEl);
-      }
-    }
-    fleetContent.appendChild(list);
-    return;
-  }
-
-  // ── Fallback: legacy paths — diag cards or /agent list text ────────────────
+  // If we have diag data, render a card grid
   if (diagData) {
     const cards = document.createElement("div");
     cards.className = "fleet-cards";
@@ -3737,6 +2296,7 @@ function renderFleetContent(diagData, agentListText) {
     return;
   }
 
+  // Parse /agent list text
   if (agentListText) {
     const lines = agentListText.split("\n").map((l) => l.trim()).filter(Boolean);
     const agents = lines.filter((l) => !l.startsWith("No ") && !l.startsWith("Usage") && !l.startsWith("#"));
@@ -3761,13 +2321,6 @@ function renderFleetContent(diagData, agentListText) {
     }
   }
 }
-
-// Refresh "X seconds ago" labels every 5s while overlay is open.
-setInterval(() => {
-  if (!fleetOverlay.classList.contains("hidden") && (fleetSeeded || fleetState.size > 0)) {
-    renderFleetContent(null, null);
-  }
-}, 5000);
 
 sbFleet.addEventListener("click", showFleetOverlay);
 fleetClose.addEventListener("click", hideFleetOverlay);
@@ -3850,41 +2403,6 @@ mcpDiscoverBtn.addEventListener("click", () => {
   } catch {}
 });
 
-// Install-by-slug — small inline form so users can pull a registry entry
-// without dropping to the terminal. Triggers `/mcp install <slug>` and
-// re-runs `/mcp list` afterwards so the panel reflects the new state.
-const mcpInstallInput = $("#mcp-install-input");
-const mcpInstallBtn = $("#mcp-install-btn");
-function _runMcpInstallSlug() {
-  const slug = (mcpInstallInput?.value || "").trim();
-  if (!slug) return;
-  const id = crypto.randomUUID?.() ?? `mcp-${Date.now()}`;
-  mcpPendingId = id;
-  mcpContent.innerHTML = `<div class="mcp-empty">installing ${slug}…</div>`;
-  pending.set(id, {
-    bubble: document.createElement("div"),
-    streamedText: "",
-    silent: true,
-    op: "mcp_install",
-  });
-  try {
-    port?.postMessage({
-      type: MsgType.COMMAND,
-      id,
-      raw: `/mcp install ${slug.replace(/[`\s]/g, "")}`,
-      backend: backendSel.value,
-    });
-  } catch {}
-  mcpInstallInput.value = "";
-}
-mcpInstallBtn?.addEventListener("click", _runMcpInstallSlug);
-mcpInstallInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    _runMcpInstallSlug();
-  }
-});
-
 // ---------------------------------------------------------------------------
 // Voice input (Feature 5)
 
@@ -3960,13 +2478,9 @@ mcpInstallInput?.addEventListener("keydown", (e) => {
 
 // ---------------------------------------------------------------------------
 // Export conversation
-//
-// Default click → markdown. Shift-click → JSON (structured array of
-// {role, text, tools}). Right-click also opens a small picker so users
-// who don't know about Shift get a discoverable affordance.
 
-function _collectTranscript() {
-  const items = [];
+sbExport.addEventListener("click", async () => {
+  const lines = [];
   for (const msg of log.querySelectorAll(".msg")) {
     const role = [...msg.classList].find((c) =>
       ["user", "assistant", "system", "error"].includes(c),
@@ -3975,26 +2489,31 @@ function _collectTranscript() {
     const raw = msg.dataset.raw;
     const text = raw ?? msg.querySelector(".body")?.textContent ?? "";
     if (!text.trim()) continue;
-    const tools = [];
-    for (const pre of msg.querySelectorAll(".tool-input")) {
-      const t = pre.textContent.trim();
-      if (!t) continue;
-      try {
-        tools.push({ input: JSON.parse(t) });
-      } catch {
-        tools.push({ input: t });
+
+    const toolCards = msg.querySelectorAll(".tool-input");
+    let toolMd = "";
+    for (const pre of toolCards) {
+      if (pre.textContent.trim()) {
+        toolMd += `\n\`\`\`json\n${pre.textContent.trim()}\n\`\`\`\n`;
       }
     }
-    items.push({ role, text: text.trim(), tools });
-  }
-  return items;
-}
 
-function _downloadBlob(content, mime, ext) {
+    if (role === "user") {
+      lines.push(`**You:** ${text.trim()}`);
+    } else if (role === "assistant") {
+      if (toolMd) lines.push(toolMd.trim());
+      lines.push(text.trim());
+    } else {
+      lines.push(`> ${text.trim()}`);
+    }
+    lines.push("");
+  }
+
+  const md = lines.join("\n");
   const date = new Date().toISOString().slice(0, 10);
   const sid = sessionId ? sessionId.slice(0, 8) : "unknown";
-  const filename = `obscura-session-${sid}-${date}.${ext}`;
-  const blob = new Blob([content], { type: mime });
+  const filename = `obscura-session-${sid}-${date}.md`;
+  const blob = new Blob([md], { type: "text/markdown" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -4002,79 +2521,15 @@ function _downloadBlob(content, mime, ext) {
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    a.remove();
-  }, 1000);
-}
-
-function exportAsMarkdown() {
-  const items = _collectTranscript();
-  const lines = [];
-  for (const it of items) {
-    const toolMd = it.tools
-      .map(
-        (t) =>
-          `\n\`\`\`json\n${
-            typeof t.input === "string"
-              ? t.input
-              : JSON.stringify(t.input, null, 2)
-          }\n\`\`\`\n`,
-      )
-      .join("");
-    if (it.role === "user") {
-      lines.push(`**You:** ${it.text}`);
-    } else if (it.role === "assistant") {
-      if (toolMd) lines.push(toolMd.trim());
-      lines.push(it.text);
-    } else {
-      lines.push(`> ${it.text}`);
-    }
-    lines.push("");
-  }
-  _downloadBlob(lines.join("\n"), "text/markdown", "md");
-}
-
-function exportAsJson() {
-  const payload = {
-    session_id: sessionId,
-    backend: backendSel?.value ?? null,
-    workspace: workspaceSel?.value || null,
-    exported_at: new Date().toISOString(),
-    messages: _collectTranscript(),
-  };
-  _downloadBlob(JSON.stringify(payload, null, 2), "application/json", "json");
-}
-
-sbExport.addEventListener("click", (e) => {
-  if (e.shiftKey) exportAsJson();
-  else exportAsMarkdown();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 });
-
-sbExport.addEventListener("contextmenu", (e) => {
-  e.preventDefault();
-  exportAsJson();
-});
-
-sbExport.title = "Export transcript (click=markdown · shift-click or right-click=JSON)";
 
 // ---------------------------------------------------------------------------
 // Auth gate
 
-const authError = $("#auth-error");
-
-function showAuthGate(opts) {
+function showAuthGate() {
   authGate.classList.remove("hidden");
   authTokenInput.value = "";
-  if (authError) {
-    if (opts && opts.rejected) {
-      authError.textContent = "Token rejected. Try again.";
-      authError.classList.remove("hidden");
-    } else {
-      authError.textContent = "";
-      authError.classList.add("hidden");
-    }
-  }
   setTimeout(() => authTokenInput.focus(), 50);
 }
 
@@ -4086,14 +2541,6 @@ function submitAuthToken() {
   const val = authTokenInput.value.trim();
   if (!val) return;
   authToken = val;
-  // Clear any prior rejection notice; the next outgoing frame will mark
-  // lastSubmittedToken=true and the receive-side handler will either
-  // persist this token (acceptance) or re-show the gate with the
-  // rejection error if the host emits another auth_required.
-  if (authError) {
-    authError.textContent = "";
-    authError.classList.add("hidden");
-  }
   hideAuthGate();
 }
 
@@ -4102,35 +2549,9 @@ authTokenInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); submitAuthToken(); }
   if (e.key === "Escape") { e.preventDefault(); hideAuthGate(); }
 });
-// Clear the rejection notice as soon as the user starts editing the field.
-authTokenInput.addEventListener("input", () => {
-  if (authError && !authError.classList.contains("hidden")) {
-    authError.textContent = "";
-    authError.classList.add("hidden");
-  }
-});
 authGate.addEventListener("click", (e) => {
   if (e.target === authGate) hideAuthGate();
 });
-
-async function loadPersistedAuthToken() {
-  try {
-    const store = await StorageManager.get([AUTH_TOKEN_KEY]);
-    const saved = store[AUTH_TOKEN_KEY];
-    if (typeof saved === "string" && saved) {
-      authToken = saved;
-    }
-  } catch {
-    // Storage failures are non-fatal — user will just be prompted again.
-  }
-}
-
-function logoutAuth() {
-  authToken = null;
-  lastSubmittedToken = false;
-  chrome.storage.local.remove(AUTH_TOKEN_KEY).catch(() => {});
-  showAuthGate();
-}
 
 // ---------------------------------------------------------------------------
 // Theme switching
@@ -4216,178 +2637,16 @@ async function ensureProfileId() {
 const tagMessage = (msg) => withProfileId(msg, profileId);
 
 // ---------------------------------------------------------------------------
-// Welcome / onboarding overlay + host-missing banner + test-connection
-//
-// First-run UX. The overlay walks new users through native-host install,
-// API-key env var, and a ping/pong round-trip. Dismissed via the
-// `obscura.onboarded.v1` storage flag; re-openable from the diag overlay.
-// (These were referenced earlier in connect()/port.onMessage but the
-// definitions themselves had to live below the rest of the message-
-// handling block — they're forward-referenced via hoisting.)
-
-const welcomeOverlay = $("#welcome-overlay");
-const hostMissingBanner = $("#host-missing-banner");
-
-function showWelcomeOverlay() {
-  if (!welcomeOverlay) return;
-  hideHostMissingBanner();  // avoid stacking
-  welcomeOverlay.classList.remove("hidden");
-  // Reset step visual states; step 1 active.
-  welcomeOverlay.querySelectorAll(".welcome-step").forEach((el, i) => {
-    el.classList.remove("active", "done");
-    if (i === 0) el.classList.add("active");
-    const cb = el.querySelector(".welcome-step-check");
-    if (cb) cb.checked = false;
-  });
-  updateWelcomeEnvvar();
-  updateWelcomeHostInfo();
-  const result = $("#welcome-test-result");
-  if (result) { result.textContent = ""; result.className = "welcome-test-result"; }
-}
-
-function hideWelcomeOverlay() { welcomeOverlay?.classList.add("hidden"); }
-
-async function dismissWelcomeAndPersist() {
-  hideWelcomeOverlay();
-  try { await chrome.storage.local.set({ [ONBOARDED_KEY]: true }); } catch {}
-  // If still no `ready`, leave the user a path back to setup steps.
-  if (!hostReadyReceived && hostReadyTimer === null) showHostMissingBanner();
-}
-
-async function maybeShowWelcomeOnBoot() {
-  try {
-    const store = await chrome.storage.local.get([ONBOARDED_KEY]);
-    if (!store[ONBOARDED_KEY]) showWelcomeOverlay();
-  } catch {}
-}
-
-function advanceWelcomeStep(stepNum) {
-  // Mark prior steps done; reveal next.
-  welcomeOverlay?.querySelectorAll(".welcome-step").forEach((el) => {
-    const n = Number(el.dataset.step);
-    if (n <= stepNum) { el.classList.add("done"); el.classList.remove("active"); }
-    else if (n === stepNum + 1) el.classList.add("active");
-  });
-}
-
-function updateWelcomeEnvvar() {
-  const wbSel = $("#welcome-backend");
-  const envvar = $("#welcome-envvar");
-  if (!wbSel || !envvar) return;
-  envvar.textContent = ENV_VAR_BY_BACKEND[wbSel.value] || "OBSCURA_API_KEY";
-}
-
-function updateWelcomeHostInfo() {
-  const el = $("#welcome-host-info");
-  if (!el) return;
-  if (lastReadySnapshot?.version) {
-    const backends = Array.isArray(lastReadySnapshot.backends) ? lastReadySnapshot.backends.join(", ") : "";
-    el.textContent = `Host v${lastReadySnapshot.version}${backends ? ` · backends: ${backends}` : ""}`;
-  } else el.textContent = "";
-}
-
-$("#welcome-close")?.addEventListener("click", hideWelcomeOverlay);
-$("#welcome-done")?.addEventListener("click", dismissWelcomeAndPersist);
-welcomeOverlay?.addEventListener("click", (e) => { if (e.target === welcomeOverlay) hideWelcomeOverlay(); });
-$("#welcome-backend")?.addEventListener("change", updateWelcomeEnvvar);
-
-welcomeOverlay?.querySelectorAll(".welcome-step-check").forEach((cb) => {
-  cb.addEventListener("change", () => {
-    if (cb.checked) advanceWelcomeStep(Number(cb.dataset.stepCheck));
-  });
-});
-
-welcomeOverlay?.querySelectorAll(".welcome-copy-btn").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const target = document.getElementById(btn.dataset.copyTarget);
-    try {
-      await navigator.clipboard.writeText(target?.textContent ?? "");
-      const orig = btn.textContent;
-      btn.classList.add("copied"); btn.textContent = "copied";
-      setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1200);
-    } catch { btn.textContent = "copy failed"; }
-  });
-});
-
-$("#welcome-test-btn")?.addEventListener("click", async () => {
-  const result = $("#welcome-test-result");
-  if (!result) return;
-  result.className = "welcome-test-result pending"; result.textContent = "pinging…";
-  const res = await runTestConnection();
-  result.className = `welcome-test-result ${res.ok ? "ok" : "err"}`;
-  result.textContent = res.ok ? `✓ Connected (${res.latencyMs}ms)` : `✗ ${res.error}`;
-  if (res.ok) {
-    const cb = welcomeOverlay?.querySelector('[data-step-check="3"]');
-    if (cb && !cb.checked) { cb.checked = true; advanceWelcomeStep(3); }
-  }
-});
-
-// Host-missing banner: surface install instructions if no `ready` in 5s.
-function startHostReadyTimer() {
-  clearHostReadyTimer();
-  hostReadyTimer = setTimeout(() => {
-    hostReadyTimer = null;
-    if (hostReadyReceived) return;
-    // Don't stack the banner on top of the welcome overlay.
-    if (welcomeOverlay && !welcomeOverlay.classList.contains("hidden")) return;
-    showHostMissingBanner();
-  }, HOST_READY_TIMEOUT_MS);
-}
-function clearHostReadyTimer() { if (hostReadyTimer) { clearTimeout(hostReadyTimer); hostReadyTimer = null; } }
-function showHostMissingBanner() { hostMissingBanner?.classList.remove("hidden"); }
-function hideHostMissingBanner() { hostMissingBanner?.classList.add("hidden"); }
-
-$("#host-missing-setup")?.addEventListener("click", () => { hideHostMissingBanner(); showWelcomeOverlay(); });
-$("#host-missing-dismiss")?.addEventListener("click", hideHostMissingBanner);
-
-// Send a `ping` and resolve on matching `pong` (3s timeout). Pong handler in
-// the port.onMessage switch resolves the entry from `pingResolvers`.
-function runTestConnection() {
-  return new Promise((resolve) => {
-    if (!port) { resolve({ ok: false, error: "Not connected to service worker" }); return; }
-    const id = crypto.randomUUID?.() ?? `ping-${Date.now()}-${Math.random()}`;
-    const start = performance.now();
-    const timer = setTimeout(() => {
-      pingResolvers.delete(id);
-      resolve({ ok: false, error: `Host not responding (${PING_TIMEOUT_MS / 1000}s)` });
-    }, PING_TIMEOUT_MS);
-    pingResolvers.set(id, {
-      resolve: () => resolve({ ok: true, latencyMs: Math.round(performance.now() - start) }),
-      reject: () => resolve({ ok: false, error: "Disconnected" }),
-      timer,
-    });
-    try { port.postMessage({ type: MsgType.PING, id }); }
-    catch (err) {
-      clearTimeout(timer); pingResolvers.delete(id);
-      resolve({ ok: false, error: String(err?.message || err) });
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Boot
 
 (async () => {
   await migrateStorage();
   await ensureProfileId();
-  // Load any persisted auth token *before* connect() so the first
-  // outgoing send/command piggybacks it. If the host rejects (wrong or
-  // stale token), the auth_required handler will clear and re-prompt.
-  await loadPersistedAuthToken();
   loadTheme();
   loadSettings();
   loadSessionPicker();
   // Per-tab state is loaded via tab_context message from background after connect().
   // We also try to load it eagerly if chromeTabId is already known (e.g. reopened panel).
   loadTabState();
-  // Restore the multi-tab strip from chrome.storage.local. If no prior
-  // state exists, the default single seed tab created at module load
-  // remains in place and will pick up whatever loadSettings/loadTabState
-  // dropped into the log.
-  await loadTabs();
   connect();
-  // First-run welcome — runs after connect() so the overlay can display
-  // host info as soon as the `ready` frame arrives. No-op once the
-  // obscura.onboarded.v1 storage flag is set.
-  void maybeShowWelcomeOnBoot();
 })();

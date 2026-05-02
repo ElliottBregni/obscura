@@ -322,7 +322,7 @@ class LazyCommandLoader:
         try:
             from obscura.core._default_commands import DEFAULT_COMMANDS
         except ImportError:
-            DEFAULT_COMMANDS = {}  # pyright: ignore[reportConstantRedefinition]
+            DEFAULT_COMMANDS = {}
 
         for filename, content in DEFAULT_COMMANDS.items():
             name = filename.removesuffix(".md")

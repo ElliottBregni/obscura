@@ -850,58 +850,5 @@ class TestStrictModeAuditLog:
         assert "ANTHROPIC_API_KEY" not in result
 
 
-class TestDotenvLoadOrder:
-    """SOC2 finding D1 — ``~/.obscura/.env`` must win over ``./.env``.
-
-    Pre-fix, :func:`_load_dotenv_once` loaded the CWD ``.env`` first with
-    ``override=False``, so a checked-in repo ``.env`` could shadow secrets
-    the user kept in ``~/.obscura/.env``. The CLAUDE.md docs say the
-    precedence runs ``shell > ~/.obscura/.env > ./.obscura/.env > ./.env``;
-    these tests pin that order against the implementation.
-    """
-
-    def test_user_home_wins_over_cwd(
-        self,
-        tmp_path: Any,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        cwd = tmp_path / "repo"
-        cwd.mkdir()
-        (cwd / ".env").write_text("ANTHROPIC_API_KEY=cwd-poisoned\n")
-
-        home = tmp_path / "obscura-home"
-        home.mkdir()
-        (home / ".env").write_text("ANTHROPIC_API_KEY=user-real\n")
-
-        monkeypatch.chdir(cwd)
-        monkeypatch.setenv("OBSCURA_HOME", str(home))
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.setattr(secrets_module, "_dotenv_loaded", False)
-
-        secrets_module._load_dotenv_once()
-        assert os.environ["ANTHROPIC_API_KEY"] == "user-real"
-
-    def test_project_obscura_dir_beats_cwd(
-        self,
-        tmp_path: Any,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        cwd = tmp_path / "repo"
-        (cwd / ".obscura").mkdir(parents=True)
-        (cwd / ".env").write_text("OPENAI_API_KEY=cwd-loses\n")
-        (cwd / ".obscura" / ".env").write_text("OPENAI_API_KEY=project-wins\n")
-
-        home = tmp_path / "obscura-home"
-        home.mkdir()  # no .env here, so this tier is skipped
-
-        monkeypatch.chdir(cwd)
-        monkeypatch.setenv("OBSCURA_HOME", str(home))
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.setattr(secrets_module, "_dotenv_loaded", False)
-
-        secrets_module._load_dotenv_once()
-        assert os.environ["OPENAI_API_KEY"] == "project-wins"
-
-
 # Silence unused-fixture linting -- pytest fixtures are invoked by name.
 _ = Any

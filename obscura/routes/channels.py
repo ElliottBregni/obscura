@@ -55,18 +55,6 @@ def _get_router() -> Any:
     return _channel_router
 
 
-def _webhooks_public_opt_in() -> bool:
-    """True when the operator has explicitly opted into unauthenticated webhooks.
-
-    Setting ``OBSCURA_WEBHOOKS_PUBLIC=1`` disables the default fail-closed
-    behaviour for inbound channel webhooks (Telegram, WhatsApp). Reserved
-    for air-gapped or test deployments — every other deployment must set
-    the per-platform secret env var.
-    """
-    raw = os.environ.get("OBSCURA_WEBHOOKS_PUBLIC", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
 # ---------------------------------------------------------------------------
 # Telegram
 # ---------------------------------------------------------------------------
@@ -80,22 +68,9 @@ async def telegram_webhook(
     """Receive a Telegram Bot API update via webhook."""
     channel_router = _get_router()
 
-    # SOC2 finding E1 — fail closed when no secret is configured.
-    # Pre-fix, an unset TELEGRAM_WEBHOOK_SECRET silently allowed any caller
-    # to dispatch arbitrary text into the agent loop. Post-fix, the route
-    # requires either a configured secret OR explicit OBSCURA_WEBHOOKS_PUBLIC=1.
+    # Verify secret token if configured
     telegram_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
-    if not telegram_secret:
-        if not _webhooks_public_opt_in():
-            logger.error(
-                "Telegram webhook refused: TELEGRAM_WEBHOOK_SECRET unset. "
-                "Set the secret or OBSCURA_WEBHOOKS_PUBLIC=1 to opt in."
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="Webhook secret not configured",
-            )
-    else:
+    if telegram_secret:
         if not x_telegram_bot_api_secret_token:
             logger.warning("Telegram webhook: missing secret token header")
             raise HTTPException(status_code=403, detail="Missing secret token")
@@ -179,23 +154,9 @@ async def whatsapp_webhook(
 
     body = await request.body()
 
-    # SOC2 finding E1 — fail closed when no app secret is configured.
-    # Pre-fix, an unset WHATSAPP_APP_SECRET silently skipped signature
-    # verification, letting any caller spoof WhatsApp messages into the
-    # agent loop. Post-fix, the route requires either the secret OR
-    # explicit OBSCURA_WEBHOOKS_PUBLIC=1.
+    # Verify Meta signature
     app_secret = os.environ.get("WHATSAPP_APP_SECRET", "")
-    if not app_secret:
-        if not _webhooks_public_opt_in():
-            logger.error(
-                "WhatsApp webhook refused: WHATSAPP_APP_SECRET unset. "
-                "Set the secret or OBSCURA_WEBHOOKS_PUBLIC=1 to opt in."
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="Webhook secret not configured",
-            )
-    else:
+    if app_secret:
         sig_header = request.headers.get("X-Hub-Signature-256", "")
         if not _verify_meta_signature(body, sig_header, app_secret):
             logger.warning("WhatsApp webhook: signature verification failed")

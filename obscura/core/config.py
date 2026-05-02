@@ -80,21 +80,6 @@ class ObscuraConfig(BaseModel):
     # Undercover mode — strips AI attribution from commits (default on)
     undercover_enabled: bool = True  # OBSCURA_UNDERCOVER=false to show attribution
 
-    # Deployment-safety override. When the server binds to a non-loopback
-    # address with auth disabled, startup aborts unless this is explicitly
-    # set to true. Intended only for isolated/air-gapped environments.
-    allow_unauthenticated: bool = False
-
-    def validate_deployment_safety(self) -> None:
-        """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
-
-        Auth is now always enforced by the API-key middleware, so the
-        previous "auth-off + non-loopback bind" foot-gun is structurally
-        impossible. ``allow_unauthenticated`` is kept on the config for
-        backwards compat with operators who still set the env var.
-        """
-        return
-
     @classmethod
     def from_env(cls) -> ObscuraConfig:
         """Build config from environment variables with sensible defaults."""
@@ -172,11 +157,4 @@ class ObscuraConfig(BaseModel):
             # Undercover
             undercover_enabled=os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower()
             not in ("0", "false", "no", "off"),
-            # Deployment safety
-            allow_unauthenticated=os.environ.get(
-                "OBSCURA_ALLOW_UNAUTHENTICATED", "false"
-            )
-            .strip()
-            .lower()
-            == "true",
         )

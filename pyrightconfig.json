@@ -13,90 +13,20 @@
   ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.13",
-
-  // ── Correctness rules (kept strict — these catch real bugs) ────────────────
-  "reportArgumentType": "error",
-  "reportReturnType": "error",
-  "reportAttributeAccessIssue": "error",
-  "reportCallIssue": "error",
-  "reportOperatorIssue": "error",
-  "reportIndexIssue": "error",
-  "reportAssignmentType": "error",
-  "reportOptionalMemberAccess": "error",
-  "reportOptionalSubscript": "error",
-  "reportOptionalCall": "error",
-  "reportGeneralTypeIssues": "error",
-  "reportConstantRedefinition": "error",
-  "reportImplicitOverride": "error",
+  "reportMissingTypeStubs": true,
+  "reportUnknownParameterType": true,
+  "reportUnknownMemberType": true,
+  "reportUnknownVariableType": true,
+  "reportUnknownArgumentType": true,
+  "reportUntypedFunctionDecorator": true,
+  "reportUntypedClassDecorator": true,
+  "reportUntypedBaseClass": true,
+  "reportUntypedNamedTuple": true,
+  "reportPrivateUsage": true,
+  "reportImplicitOverride": true,
   "reportUnusedImport": "error",
   "reportUnusedVariable": "error",
-
-  // ── Unknown-type noise (mostly from untyped 3rd-party libs) ───────────────
-  // Downgraded to warnings so they don't drown out real errors.
-  // Fix these incrementally as you add inline stubs or cast() calls.
-  "reportUnknownMemberType": "warning",
-  "reportUnknownVariableType": "warning",
-  "reportUnknownArgumentType": "warning",
-  "reportUnknownParameterType": "warning",
-  "reportUnknownLambdaType": "warning",
-
-  // ── Missing annotations (fixable, but not blocking) ───────────────────────
-  // Keep as warning so CI shows the count without failing.
-  "reportMissingParameterType": "warning",
-  "reportMissingTypeArgument": "warning",
-
-  // ── Private access (your own code — fix gradually) ────────────────────────
-  // Downgraded to warning: most are legitimate cross-module access patterns
-  // in a monorepo that predates the strict naming conventions.
-  "reportPrivateUsage": "warning",
-
-  // ── Untyped decorators / base classes ─────────────────────────────────────
-  "reportUntypedFunctionDecorator": "warning",
-  "reportUntypedClassDecorator": "warning",
-  "reportUntypedBaseClass": "warning",
-  "reportUntypedNamedTuple": "warning",
-
-  // ── Unused code ───────────────────────────────────────────────────────────
-  "reportUnusedFunction": "warning",
-
-  // ── Stubs / imports ───────────────────────────────────────────────────────
-  "reportMissingTypeStubs": "warning",
-  "reportMissingImports": "warning",
-  "reportMissingModuleSource": "warning",
   "reportUnnecessaryTypeIgnoreComment": "warning",
-
-  // ── Per-directory overrides ───────────────────────────────────────────────
-  // Tests get relaxed rules: pytest fixtures are untyped by convention,
-  // and mock objects are inherently dynamic.
-  "executionEnvironments": [
-    {
-      "root": "tests",
-      "reportMissingParameterType": "none",
-      "reportUnknownParameterType": "none",
-      "reportUnknownMemberType": "none",
-      "reportUnknownVariableType": "none",
-      "reportUnknownArgumentType": "none",
-      "reportPrivateUsage": "none",
-      "reportUnusedFunction": "none",
-      "reportUntypedFunctionDecorator": "none",
-      "reportMissingTypeArgument": "none"
-    },
-    {
-      "root": "scripts",
-      "reportMissingParameterType": "none",
-      "reportUnknownParameterType": "none",
-      "reportUnknownMemberType": "none",
-      "reportUnknownVariableType": "none",
-      "reportUnknownArgumentType": "none",
-      "reportPrivateUsage": "none"
-    },
-    {
-      "root": "demos",
-      "reportMissingParameterType": "none",
-      "reportUnknownParameterType": "none",
-      "reportUnknownMemberType": "none",
-      "reportUnknownVariableType": "none",
-      "reportUnknownArgumentType": "none"
-    }
-  ]
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "warning"
 }
