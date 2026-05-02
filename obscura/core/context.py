@@ -24,7 +24,7 @@ from obscura.core.context_lazy import LazySkillLoader, SkillMetadata
 from obscura.core.frontmatter import parse_frontmatter
 
 if TYPE_CHECKING:
-    from obscura.core.types import Backend
+    from obscura.core.types import Backend, Message
 
 # Agent target mapping — must match sync.py AGENT_TARGET_MAP
 _DEFAULT_TARGET_MAP: dict[str, str] = {
@@ -343,7 +343,9 @@ def load_obscura_memory(session_id: str, db_path: Path, max_events: int = 50) ->
         return f"# Session Memory\nWarning: Could not load session memory ({e})"
 
 
-def load_session_messages(session_id: str, db_path: Path, max_turns: int = 10) -> list:
+def load_session_messages(
+    session_id: str, db_path: Path, max_turns: int = 10
+) -> list[Message]:
     """Load session history as Message objects for message history reconstruction.
 
     Args:
@@ -358,10 +360,13 @@ def load_session_messages(session_id: str, db_path: Path, max_turns: int = 10) -
     import json
     import sqlite3
 
-    from obscura.core.types import Message, Role
+    from obscura.core.types import ContentBlock, Message, Role
 
     if not db_path.exists():
         return []
+
+    def _text_msg(role: Role, text: str) -> Message:
+        return Message(role=role, content=[ContentBlock(kind="text", text=text)])
 
     try:
         conn = sqlite3.connect(db_path)
@@ -385,38 +390,38 @@ def load_session_messages(session_id: str, db_path: Path, max_turns: int = 10) -
             return []
 
         # Reconstruct conversation turns
-        messages = []
-        current_user_msg = None
-        current_assistant_text = []
+        messages: list[Message] = []
+        current_assistant_text: list[str] = []
 
         for kind, payload_json, _seq in events:
             try:
-                payload = json.loads(payload_json)
+                payload = cast(dict[str, Any], json.loads(payload_json))
 
                 if kind == "user_message":
                     # Flush previous assistant message if any
                     if current_assistant_text:
-                        text = "".join(current_assistant_text)
-                        messages.append(Message(role=Role.ASSISTANT, content=text))
+                        messages.append(
+                            _text_msg(Role.ASSISTANT, "".join(current_assistant_text))
+                        )
                         current_assistant_text = []
 
                     # Add user message
                     content = payload.get("content", "")
                     if content:
-                        current_user_msg = Message(role=Role.USER, content=content)
-                        messages.append(current_user_msg)
+                        messages.append(_text_msg(Role.USER, str(content)))
 
                 elif kind == "text_delta":
                     # Accumulate assistant response
                     text = payload.get("text", "")
                     if text:
-                        current_assistant_text.append(text)
+                        current_assistant_text.append(str(text))
 
                 elif kind == "turn_complete":
                     # Finalize assistant message
                     if current_assistant_text:
-                        text = "".join(current_assistant_text)
-                        messages.append(Message(role=Role.ASSISTANT, content=text))
+                        messages.append(
+                            _text_msg(Role.ASSISTANT, "".join(current_assistant_text))
+                        )
                         current_assistant_text = []
 
             except Exception:

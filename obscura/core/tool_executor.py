@@ -199,7 +199,7 @@ class ConcurrentToolExecutor:
 
         # Wait for all with sibling abort on first error
         results: list[ToolResultEnvelope] = []
-        pending = set(tasks.values())
+        pending: set[asyncio.Task[ToolResultEnvelope]] = set(tasks.values())
 
         while pending:
             done, pending = await asyncio.wait(

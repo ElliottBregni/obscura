@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.context_window import (
     SNIP_TOOL_OUTPUT_THRESHOLD,
@@ -79,7 +79,7 @@ def repair_tool_pairs(messages: list[Any]) -> list[Any]:
     for msg in messages:
         content = _get_content(msg)
         if isinstance(content, list):
-            for block in content:
+            for block in cast(list[Any], content):
                 if _get_block_type(block) == "tool_use":
                     tid = _get_block_id(block)
                     if tid:
@@ -91,8 +91,8 @@ def repair_tool_pairs(messages: list[Any]) -> list[Any]:
         role = _get_role(msg)
 
         if isinstance(content, list):
-            new_blocks = []
-            for block in content:
+            new_blocks: list[Any] = []
+            for block in cast(list[Any], content):
                 if _get_block_type(block) == "tool_result":
                     tid = _get_block_tool_use_id(block)
                     if tid and tid not in tool_use_ids:
@@ -153,7 +153,7 @@ def snip_tool_outputs(
         new_blocks: list[Any] = []
         msg_changed = False
 
-        for block in content:
+        for block in cast(list[Any], content):
             if _get_block_type(block) == "tool_result":
                 text = _get_block_text(block)
                 if text:
@@ -279,10 +279,10 @@ async def microcompact(
 
     compacted: list[Any] = []
     for seg, summary in zip(segments, summaries):
-        if isinstance(summary, Exception) or not summary:
-            compacted.extend(seg)
-        else:
+        if isinstance(summary, str) and summary:
             compacted.append(_make_microcompact_boundary(summary, len(seg)))
+        else:
+            compacted.extend(seg)
 
     compacted.extend(keep)
     compacted = repair_tool_pairs(compacted)
@@ -403,7 +403,7 @@ async def summarize_messages(
         if isinstance(content, str):
             lines.append(f"[{role}]: {content}")
         elif isinstance(content, list):
-            for block in content:
+            for block in cast(list[Any], content):
                 bt = _get_block_type(block)
                 if bt == "text":
                     text = _get_block_text(block)
@@ -433,7 +433,8 @@ async def summarize_messages(
         if hasattr(backend, "chat"):
             result = await backend.chat([{"role": "user", "content": prompt}])
             if isinstance(result, dict):
-                return str(result.get("content", result.get("text", ""))).strip()
+                d = cast(dict[str, Any], result)
+                return str(d.get("content", d.get("text", ""))).strip()
             return str(result).strip()
         logger.warning("summarize_messages: backend has no known completion method")
         return ""
@@ -548,7 +549,7 @@ async def compact_history(
         for i, s in enumerate(summaries):
             if isinstance(s, Exception):
                 logger.warning("compact_history: chunk %d failed: %s", i, s)
-            elif s:
+            elif isinstance(s, str) and s:
                 parts.append(s)
 
         if parts:
@@ -621,7 +622,7 @@ async def extract_memories(
         if isinstance(content, str):
             lines.append(f"[{role}]: {content[:500]}")
         elif isinstance(content, list):
-            for block in content:
+            for block in cast(list[Any], content):
                 if _get_block_type(block) == "text":
                     text = _get_block_text(block)
                     if text:
@@ -656,7 +657,8 @@ async def extract_memories(
         elif hasattr(backend, "chat"):
             result = await backend.chat([{"role": "user", "content": prompt}])
             if isinstance(result, dict):
-                result_text = str(result.get("content", result.get("text", ""))).strip()
+                d = cast(dict[str, Any], result)
+                result_text = str(d.get("content", d.get("text", ""))).strip()
             else:
                 result_text = str(result).strip()
 
@@ -670,11 +672,16 @@ async def extract_memories(
         cleaned = cleaned.rstrip("`").strip()
         parsed = json.loads(cleaned)
         if isinstance(parsed, list):
-            return [
-                {"key": str(m.get("key", "")), "value": str(m.get("value", ""))}
-                for m in parsed
-                if isinstance(m, dict) and m.get("key") and m.get("value")
-            ]
+            results: list[dict[str, str]] = []
+            for raw in cast(list[Any], parsed):
+                if not isinstance(raw, dict):
+                    continue
+                m = cast(dict[str, Any], raw)
+                if m.get("key") and m.get("value"):
+                    results.append(
+                        {"key": str(m.get("key", "")), "value": str(m.get("value", ""))}
+                    )
+            return results
         return []
     except Exception:
         logger.debug("extract_memories: failed to parse response", exc_info=True)
@@ -762,14 +769,14 @@ async def tiered_compact(
 
     # Strategy 1: Snip verbose tool outputs
     if tier in ("snip", "compact", "critical"):
-        messages, snipped, freed = snip_tool_outputs(messages)
+        messages, snipped, _ = snip_tool_outputs(messages)
         if snipped and thresholds.usage_tier(_used()) == "ok":
             return messages, "snip", tokens_before - _used()
 
     # Strategy 2: Microcompact (synthetic boundaries)
     if tier in ("compact", "critical"):
         preserve = thresholds.preserve_recent
-        messages, did_compact, freed = await microcompact(
+        messages, did_compact, _ = await microcompact(
             messages, model_id, backend, preserve_recent=preserve
         )
         if did_compact and thresholds.usage_tier(_used()) == "ok":
@@ -804,50 +811,54 @@ async def tiered_compact(
 
 def _get_content(msg: Any) -> Any:
     if isinstance(msg, dict):
-        return msg.get("content", "")
+        return cast(dict[str, Any], msg).get("content", "")
     return getattr(msg, "content", "")
 
 
 def _get_role(msg: Any) -> str:
     if isinstance(msg, dict):
-        return str(msg.get("role", ""))
+        return str(cast(dict[str, Any], msg).get("role", ""))
     return str(getattr(msg, "role", ""))
 
 
 def _get_block_type(block: Any) -> str:
     if isinstance(block, dict):
-        return str(block.get("type", ""))
+        return str(cast(dict[str, Any], block).get("type", ""))
     return str(getattr(block, "type", ""))
 
 
 def _get_block_id(block: Any) -> str | None:
     if isinstance(block, dict):
-        return block.get("id")
-    return getattr(block, "id", None)
+        result = cast(dict[str, Any], block).get("id")
+        return result if isinstance(result, str) else None
+    val = getattr(block, "id", None)
+    return val if isinstance(val, str) else None
 
 
 def _get_block_tool_use_id(block: Any) -> str | None:
     if isinstance(block, dict):
-        return block.get("tool_use_id")
-    return getattr(block, "tool_use_id", None)
+        result = cast(dict[str, Any], block).get("tool_use_id")
+        return result if isinstance(result, str) else None
+    val = getattr(block, "tool_use_id", None)
+    return val if isinstance(val, str) else None
 
 
 def _get_block_text(block: Any) -> str:
     if isinstance(block, dict):
-        return str(block.get("text", ""))
+        return str(cast(dict[str, Any], block).get("text", ""))
     return str(getattr(block, "text", ""))
 
 
 def _get_block_name(block: Any) -> str:
     if isinstance(block, dict):
-        return str(block.get("name", "unknown"))
+        return str(cast(dict[str, Any], block).get("name", "unknown"))
     return str(getattr(block, "name", "unknown"))
 
 
 def _rebuild_block_text(block: Any, new_text: str) -> Any:
     """Rebuild a content block with new text, preserving other fields."""
     if isinstance(block, dict):
-        return {**block, "text": new_text}
+        return {**cast(dict[str, Any], block), "text": new_text}
     try:
         if hasattr(block, "model_copy"):
             return block.model_copy(update={"text": new_text})
@@ -864,7 +875,7 @@ def _rebuild_block_text(block: Any, new_text: str) -> Any:
 
 def _rebuild_message(msg: Any, new_content: list[Any]) -> Any:
     if isinstance(msg, dict):
-        return {**msg, "content": new_content}
+        return {**cast(dict[str, Any], msg), "content": new_content}
     try:
         if hasattr(msg, "model_copy"):
             return msg.model_copy(update={"content": new_content})

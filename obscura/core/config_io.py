@@ -11,7 +11,7 @@ import copy
 import logging
 import tomllib
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -104,26 +104,31 @@ def apply_agent_defaults(raw: dict[str, Any]) -> dict[str, Any]:
     if "defaults" not in raw:
         return raw
 
-    defaults = raw["defaults"]
-    if not isinstance(defaults, dict):
+    raw_defaults = raw["defaults"]
+    if not isinstance(raw_defaults, dict):
         return raw
+    defaults = cast(dict[str, Any], raw_defaults)
 
-    result = {k: v for k, v in raw.items() if k != "defaults"}
-    agents = result.get("agents")
+    result: dict[str, Any] = {k: v for k, v in raw.items() if k != "defaults"}
+    agents: Any = result.get("agents")
 
     if isinstance(agents, list):
-        merged_list: list[dict[str, Any]] = []
-        for agent_cfg in agents:
+        merged_list: list[Any] = []
+        for agent_cfg in cast(list[Any], agents):
             if isinstance(agent_cfg, dict):
-                merged_list.append(_deep_merge_new(defaults, agent_cfg))
+                merged_list.append(
+                    _deep_merge_new(defaults, cast(dict[str, Any], agent_cfg))
+                )
             else:
                 merged_list.append(agent_cfg)
         result["agents"] = merged_list
     elif isinstance(agents, dict):
         merged_dict: dict[str, Any] = {}
-        for name, agent_cfg in agents.items():
+        for name, agent_cfg in cast(dict[str, Any], agents).items():
             if isinstance(agent_cfg, dict):
-                merged_dict[name] = _deep_merge_new(defaults, agent_cfg)
+                merged_dict[name] = _deep_merge_new(
+                    defaults, cast(dict[str, Any], agent_cfg)
+                )
             else:
                 merged_dict[name] = agent_cfg
         result["agents"] = merged_dict
@@ -203,9 +208,10 @@ def _extract_agents_with_defaults(raw: dict[str, Any]) -> list[dict[str, Any]]:
     dict-format (``agents: {name: {...}, ...}``) agent configurations.
     Returns a list of deep-copied agent dicts with defaults merged in.
     """
-    defaults = raw.get("defaults", {})
-    if not isinstance(defaults, dict):
-        defaults = {}
+    defaults_raw = raw.get("defaults", {})
+    defaults: dict[str, Any] = (
+        cast(dict[str, Any], defaults_raw) if isinstance(defaults_raw, dict) else {}
+    )
 
     agents_val = raw.get("agents")
     if agents_val is None:
@@ -215,17 +221,17 @@ def _extract_agents_with_defaults(raw: dict[str, Any]) -> list[dict[str, Any]]:
 
     if isinstance(agents_val, list):
         # List format: [{name: "assistant", ...}, ...]
-        for agent in agents_val:
+        for agent in cast(list[Any], agents_val):
             if not isinstance(agent, dict):
                 continue
-            merged = _deep_merge_new(defaults, agent)
+            merged = _deep_merge_new(defaults, cast(dict[str, Any], agent))
             entries.append(merged)
     elif isinstance(agents_val, dict):
         # Dict format: {assistant: {...}, ...}
-        for name, agent_cfg in agents_val.items():
+        for name, agent_cfg in cast(dict[str, Any], agents_val).items():
             if not isinstance(agent_cfg, dict):
                 continue
-            merged = _deep_merge_new(defaults, agent_cfg)
+            merged = _deep_merge_new(defaults, cast(dict[str, Any], agent_cfg))
             merged.setdefault("name", name)
             entries.append(merged)
 
@@ -239,10 +245,13 @@ def _deep_merge_new(base: dict[str, Any], override: dict[str, Any]) -> dict[str,
     else (lists, scalars) is replaced entirely by the override value.
     Neither input is mutated.
     """
-    result = copy.deepcopy(base)
+    result: dict[str, Any] = copy.deepcopy(base)
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge_new(result[key], value)
+        existing = result.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            result[key] = _deep_merge_new(
+                cast(dict[str, Any], existing), cast(dict[str, Any], value)
+            )
         else:
             result[key] = copy.deepcopy(value)
     return result
@@ -262,8 +271,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
             msg,
         ) from exc
 
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         msg = f"Expected a mapping in {path}, got {type(raw).__name__}"
         raise ValueError(msg)
-    return raw
+    return cast(dict[str, Any], raw)

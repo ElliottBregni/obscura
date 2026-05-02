@@ -26,12 +26,13 @@ import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
+from typing_extensions import override
 
 logger = logging.getLogger(__name__)
 
-_TOKENIZER: Any | None = None
-_TOKENIZER_READY = False
+_tokenizer: Any | None = None
+_tokenizer_ready = False
 
 # Mirrors openclaw's context-window-guard.ts constants
 CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000  # Block if available tokens < this
@@ -188,20 +189,21 @@ def estimate_tokens(text: str) -> int:
 
 def _get_tokenizer() -> Any | None:
     """Load and cache tokenizer once per process."""
-    global _TOKENIZER, _TOKENIZER_READY
-    if _TOKENIZER_READY:
-        return _TOKENIZER
-    _TOKENIZER_READY = True
+    global _tokenizer, _tokenizer_ready
+    if _tokenizer_ready:
+        return _tokenizer
+    _tokenizer_ready = True
     try:
         import tiktoken
 
+        tk: Any = tiktoken
         try:
-            _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+            _tokenizer = tk.get_encoding("cl100k_base")
         except Exception:
-            _TOKENIZER = tiktoken.get_encoding("gpt2")
+            _tokenizer = tk.get_encoding("gpt2")
     except ImportError:
-        _TOKENIZER = None
-    return _TOKENIZER
+        _tokenizer = None
+    return _tokenizer
 
 
 @lru_cache(maxsize=8192)
@@ -216,23 +218,24 @@ def _estimate_tokens_cached(text: str) -> int:
 def estimate_message_tokens(msg: Any) -> int:
     """Estimate tokens for a single message, including per-message overhead."""
     total = 0
-    content = getattr(msg, "content", None)
+    content: Any = getattr(msg, "content", None)
     if content is None and isinstance(msg, dict):
-        content = msg.get("content")
+        content = cast(dict[str, Any], msg).get("content")
     if content is None:
-        content = str(msg)
+        content = str(cast(object, msg))
 
     if isinstance(content, str):
         total += estimate_tokens(content)
     elif isinstance(content, list):
-        for block in content:
+        for block in cast(list[Any], content):
             if isinstance(block, dict):
-                text = block.get("text", "")
+                block_dict = cast(dict[str, Any], block)
+                text: Any = block_dict.get("text", "")
                 if not text:
                     try:
-                        text = json.dumps(block)
+                        text = json.dumps(block_dict)
                     except Exception:
-                        text = str(block)
+                        text = str(block_dict)
                 total += estimate_tokens(str(text))
             elif hasattr(block, "text"):
                 total += estimate_tokens(str(block.text))
@@ -279,6 +282,7 @@ class ContextStatus:
     compact_tier: str = "ok"
     """Current compaction tier: 'ok', 'snip', 'compact', or 'critical'."""
 
+    @override
     def __str__(self) -> str:
         s = "BLOCK" if self.should_block else ("WARN" if self.should_warn else "OK")
         tier = f" tier={self.compact_tier}" if self.compact_tier != "ok" else ""

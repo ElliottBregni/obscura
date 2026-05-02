@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.frontmatter import parse_frontmatter
 
@@ -197,13 +197,16 @@ def _parse_eval_section(meta: dict[str, Any]) -> tuple[list[str] | None, int | N
 
     Returns ``(criteria_list, pass_threshold)`` — both ``None`` when absent.
     """
-    eval_section = meta.get("eval")
-    if not isinstance(eval_section, dict):
+    eval_raw = meta.get("eval")
+    if not isinstance(eval_raw, dict):
         return None, None
+    eval_section = cast(dict[str, Any], eval_raw)
     raw_criteria = eval_section.get("criteria")
     criteria: list[str] | None = None
     if isinstance(raw_criteria, list):
-        criteria = [str(c).strip() for c in raw_criteria if str(c).strip()]
+        criteria = [
+            str(c).strip() for c in cast(list[Any], raw_criteria) if str(c).strip()
+        ]
     threshold: int | None = None
     raw_threshold = eval_section.get("pass_threshold")
     if raw_threshold is not None:
@@ -319,12 +322,15 @@ class LazyCommandLoader:
                     )
 
         # 2. Built-in defaults (only if not already overridden by on-disk)
+        default_commands: dict[str, str]
         try:
             from obscura.core._default_commands import DEFAULT_COMMANDS
-        except ImportError:
-            DEFAULT_COMMANDS = {}
 
-        for filename, content in DEFAULT_COMMANDS.items():
+            default_commands = DEFAULT_COMMANDS
+        except ImportError:
+            default_commands = {}
+
+        for filename, content in default_commands.items():
             name = filename.removesuffix(".md")
             if name in self._metadata_cache:
                 continue  # on-disk version takes precedence

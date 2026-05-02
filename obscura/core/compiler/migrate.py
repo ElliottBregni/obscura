@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,13 +16,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _empty_str_list() -> list[str]:
+    return []
+
+
 @dataclass
 class MigrationResult:
     """Summary of a migration run."""
 
-    templates_written: list[str] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    templates_written: list[str] = field(default_factory=_empty_str_list)
+    skipped: list[str] = field(default_factory=_empty_str_list)
+    errors: list[str] = field(default_factory=_empty_str_list)
 
 
 def migrate_agents_yaml(
@@ -66,16 +70,21 @@ def migrate_agents_yaml(
 
     raw = apply_agent_defaults(raw)
 
-    if not isinstance(raw, dict) or "agents" not in raw:
+    if "agents" not in raw:
         result.errors.append("Invalid agents config: expected top-level 'agents' key")
         return result
 
-    agents: list[dict[str, Any]] = raw["agents"]
+    agents_raw = raw["agents"]
+    if not isinstance(agents_raw, list):
+        result.errors.append("Invalid agents config: 'agents' must be a list")
+        return result
+    agents = cast(list[Any], agents_raw)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for agent in agents:
-        if not isinstance(agent, dict):
+    for agent_raw in agents:
+        if not isinstance(agent_raw, dict):
             continue
+        agent = cast(dict[str, Any], agent_raw)
 
         name = agent.get("name")
         if not name:
@@ -118,34 +127,38 @@ def _agent_to_template_toml(agent: dict[str, Any]) -> str:
     plugins: list[str] = []
     plugins_raw = agent.get("plugins", {})
     if isinstance(plugins_raw, dict):
-        for p in plugins_raw.get("require", []):
-            if p and p not in plugins:
+        plugins_dict = cast(dict[str, Any], plugins_raw)
+        for p in cast(list[Any], plugins_dict.get("require", [])):
+            if p and isinstance(p, str) and p not in plugins:
                 plugins.append(p)
-        for p in plugins_raw.get("optional", []):
-            if p and p not in plugins:
+        for p in cast(list[Any], plugins_dict.get("optional", [])):
+            if p and isinstance(p, str) and p not in plugins:
                 plugins.append(p)
     elif isinstance(plugins_raw, list):
-        plugins = [p for p in plugins_raw if p]
+        plugins = [str(p) for p in cast(list[Any], plugins_raw) if p]
 
     # Extract capabilities
     capabilities: list[str] = []
     caps_raw = agent.get("capabilities", {})
     if isinstance(caps_raw, dict):
-        capabilities = caps_raw.get("grant", [])
+        grant = cast(dict[str, Any], caps_raw).get("grant", [])
+        if isinstance(grant, list):
+            capabilities = [str(c) for c in cast(list[Any], grant)]
     elif isinstance(caps_raw, list):
-        capabilities = caps_raw
+        capabilities = [str(c) for c in cast(list[Any], caps_raw)]
 
     # Extract tool permissions into allowlist/denylist
     tool_allowlist: list[str] | None = None
     tool_denylist: list[str] = []
     perms = agent.get("permissions", {})
     if isinstance(perms, dict):
-        allow = perms.get("allow", [])
-        deny = perms.get("deny", [])
-        if allow:
-            tool_allowlist = allow
-        if deny:
-            tool_denylist = deny
+        perms_dict = cast(dict[str, Any], perms)
+        allow = perms_dict.get("allow", [])
+        deny = perms_dict.get("deny", [])
+        if isinstance(allow, list) and allow:
+            tool_allowlist = [str(x) for x in cast(list[Any], allow)]
+        if isinstance(deny, list) and deny:
+            tool_denylist = [str(x) for x in cast(list[Any], deny)]
 
     # Build extra config for fields that don't map directly
     config: dict[str, Any] = {}

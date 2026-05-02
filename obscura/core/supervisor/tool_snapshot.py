@@ -16,13 +16,16 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
     SQLiteSupervisorBackend,
     translate_sql,
 )
+
+if TYPE_CHECKING:
+    from obscura.core.types import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +160,7 @@ class FrozenToolRegistry:
 
     def _compute_hash(self) -> str:
         """Deterministic hash of all tool schemas (sorted by name)."""
-        entries = []
+        entries: list[str] = []
         for tool in self._tools:
             entries.append(
                 json.dumps(
@@ -185,7 +188,7 @@ class FrozenToolRegistry:
     @classmethod
     def from_specs(
         cls,
-        specs: list[Any],
+        specs: list[ToolSpec],
         *,
         allowlist: list[str] | None = None,
         denylist: list[str] | None = None,
@@ -201,7 +204,7 @@ class FrozenToolRegistry:
             denylist: If set, exclude these tool names
 
         """
-        filtered = []
+        filtered: list[ToolSpec] = []
         for spec in specs:
             name = spec.name
             if allowlist and name not in allowlist:
