@@ -1,0 +1,1598 @@
+"""obscura.cli.auth_commands -- Supabase OAuth + magic-link login from the CLI.
+
+Exposes three commands under the ``obscura-auth`` script entry:
+
+* ``obscura-auth login [--provider github|google|magic]`` — OAuth via a local
+  callback server, or magic-link email.
+* ``obscura-auth logout`` — delete stored credentials.
+* ``obscura-auth whoami`` — print the currently authenticated user.
+
+Uses Supabase REST auth endpoints directly (no extra runtime deps):
+
+* ``/auth/v1/authorize`` — OAuth redirect with PKCE (S256).
+* ``/auth/v1/token?grant_type=pkce`` — code → session exchange.
+* ``/auth/v1/token?grant_type=refresh_token`` — session refresh.
+* ``/auth/v1/otp`` + ``/auth/v1/verify`` — magic link.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import http.server
+import json
+import logging
+import os
+import secrets
+import socket
+import threading
+import time
+import urllib.parse
+import webbrowser
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, override
+
+import click
+import httpx
+
+# Route user-readable output through the shared render console so the
+# browser-extension native host's console proxy can stream it into the side
+# panel as `chunk` frames. ``click.echo`` writes straight to ``sys.stdout``
+# and bypasses that proxy. Stays plain text (no Rich markup interpretation)
+# so eval-style output (`secrets export`) is unaffected.
+from obscura.auth import secrets as _secrets
+from obscura.cli.render import console
+
+logger = logging.getLogger(__name__)
+
+
+def _emit(text: str) -> None:
+    """Plain-text print through the shared console (panel-safe)."""
+    console.print(text, markup=False, highlight=False, soft_wrap=True)
+
+CREDENTIALS_PATH = Path(
+    os.environ.get("OBSCURA_CREDENTIALS_FILE")
+    or (
+        Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura"))
+        / "credentials.json"
+    ),
+)
+
+REFRESH_LEEWAY_SECONDS = 60
+_PROVIDER_SECRET_METADATA_KEY = "obscura_provider_secrets"
+
+
+@dataclass(frozen=True)
+class SupabaseCliConfig:
+    url: str
+    anon_key: str
+
+    @classmethod
+    def from_env(cls) -> SupabaseCliConfig | None:
+        """Resolve Supabase project URL + anon key.
+
+        Uses the shared :mod:`obscura.auth.secrets` resolver so values can
+        live in the process env, ``~/.obscura/.env``, or the OS keyring --
+        whichever the user finds most convenient for their platform.
+        """
+        url = (_secrets.resolve("SUPABASE_URL") or "").rstrip("/")
+        anon = _secrets.resolve("SUPABASE_ANON_KEY") or ""
+        if not url or not anon:
+            return None
+        return cls(url=url, anon_key=anon)
+
+
+@dataclass
+class StoredSession:
+    access_token: str
+    refresh_token: str
+    expires_at: int
+    user_id: str
+    email: str
+    provider: str
+    # GitHub provider token — populated on GitHub OAuth only; used as the
+    # "easy path" Copilot auth fallback (see obscura.core.auth.AuthConfig).
+    provider_token: str | None = None
+    # Provider refresh token (when Supabase returns it).
+    provider_refresh_token: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "access_token": self.access_token,
+            "refresh_token": self.refresh_token,
+            "expires_at": self.expires_at,
+            "user_id": self.user_id,
+            "email": self.email,
+            "provider": self.provider,
+            "provider_token": self.provider_token,
+            "provider_refresh_token": self.provider_refresh_token,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> StoredSession:
+        return cls(
+            access_token=str(d["access_token"]),
+            refresh_token=str(d["refresh_token"]),
+            expires_at=int(d["expires_at"]),
+            user_id=str(d.get("user_id", "")),
+            email=str(d.get("email", "")),
+            provider=str(d.get("provider", "")),
+            provider_token=(
+                str(d["provider_token"])
+                if d.get("provider_token") is not None
+                else None
+            ),
+            provider_refresh_token=(
+                str(d["provider_refresh_token"])
+                if d.get("provider_refresh_token") is not None
+                else None
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Secure session storage
+# ---------------------------------------------------------------------------
+# Preferred: OS keychain via the `keyring` package (Keychain on macOS,
+# Secret Service on Linux, Credential Manager on Windows). Falls back to a
+# 0600 plaintext file when `keyring` isn't installed or its backend can't
+# start (e.g. headless Linux without a login session).
+
+_KEYRING_SERVICE = "obscura-cli"
+_KEYRING_USERNAME = "supabase-session"
+
+
+def _keyring_available() -> bool:
+    try:
+        import keyring  # noqa: F401
+        import keyring.errors  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
+        backend = keyring.get_keyring()
+        # NullKeyring / FailKeyring don't actually persist — treat as absent.
+        name = type(backend).__name__
+        if name in {"NullKeyring", "FailKeyring"}:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def save_session(session: StoredSession) -> None:
+    payload = json.dumps(session.to_dict(), indent=2)
+
+    if _keyring_available():
+        try:
+            import keyring
+
+            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, payload)
+            # Drop any plaintext left behind from a prior run.
+            if CREDENTIALS_PATH.exists():
+                try:
+                    CREDENTIALS_PATH.unlink()
+                except OSError:
+                    pass
+            return
+        except Exception as exc:
+            logger.warning(
+                "Keyring write failed (%s); falling back to plaintext %s",
+                exc,
+                CREDENTIALS_PATH,
+            )
+
+    CREDENTIALS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CREDENTIALS_PATH.write_text(payload)
+    try:
+        CREDENTIALS_PATH.chmod(0o600)
+    except OSError:
+        pass
+
+
+def load_session() -> StoredSession | None:
+    if _keyring_available():
+        try:
+            import keyring
+
+            raw = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
+            if raw:
+                try:
+                    return StoredSession.from_dict(json.loads(raw))
+                except (ValueError, KeyError):
+                    return None
+        except Exception as exc:
+            logger.debug("Keyring read failed: %s", exc)
+
+    if not CREDENTIALS_PATH.exists():
+        return None
+    try:
+        return StoredSession.from_dict(json.loads(CREDENTIALS_PATH.read_text()))
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def clear_session() -> bool:
+    removed = False
+    if _keyring_available():
+        try:
+            import keyring
+            import keyring.errors
+
+            try:
+                keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
+                removed = True
+            except keyring.errors.PasswordDeleteError:
+                pass
+        except Exception as exc:
+            logger.debug("Keyring delete failed: %s", exc)
+
+    if CREDENTIALS_PATH.exists():
+        CREDENTIALS_PATH.unlink()
+        removed = True
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# Refresh + accessor
+# ---------------------------------------------------------------------------
+
+
+def _provider_secret_payload(session: StoredSession) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    if session.provider_token:
+        payload["provider_token"] = session.provider_token
+    if session.provider_refresh_token:
+        payload["provider_refresh_token"] = session.provider_refresh_token
+    return payload
+
+
+def _build_provider_secrets_metadata(
+    *,
+    existing_user_metadata: dict[str, Any] | None,
+    provider: str,
+    session: StoredSession,
+) -> dict[str, Any]:
+    metadata = dict(existing_user_metadata or {})
+    existing_secrets = metadata.get(_PROVIDER_SECRET_METADATA_KEY)
+    provider_secrets: dict[str, Any]
+    if isinstance(existing_secrets, dict):
+        provider_secrets = dict(existing_secrets)
+    else:
+        provider_secrets = {}
+
+    merged = _provider_secret_payload(session)
+    if merged:
+        provider_secrets[provider] = {**provider_secrets.get(provider, {}), **merged}
+        metadata[_PROVIDER_SECRET_METADATA_KEY] = provider_secrets
+
+    return metadata
+
+
+def _sync_provider_secrets_to_supabase(
+    cfg: SupabaseCliConfig,
+    *,
+    provider: str,
+    session: StoredSession,
+) -> None:
+    service_role_key = (_secrets.resolve("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    if not service_role_key:
+        return
+    if not session.user_id:
+        return
+
+    admin_headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Content-Type": "application/json",
+    }
+
+    user_resp = httpx.get(
+        f"{cfg.url}/auth/v1/admin/users/{session.user_id}",
+        headers=admin_headers,
+        timeout=20.0,
+    )
+    if user_resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to fetch Supabase user metadata ({user_resp.status_code}): {user_resp.text}",
+        )
+
+    user_body = user_resp.json()
+    existing_user_metadata = user_body.get("user_metadata")
+    metadata = _build_provider_secrets_metadata(
+        existing_user_metadata=(
+            existing_user_metadata if isinstance(existing_user_metadata, dict) else None
+        ),
+        provider=provider,
+        session=session,
+    )
+
+    if metadata == existing_user_metadata:
+        return
+
+    update_resp = httpx.put(
+        f"{cfg.url}/auth/v1/admin/users/{session.user_id}",
+        headers=admin_headers,
+        json={"user_metadata": metadata},
+        timeout=20.0,
+    )
+    if update_resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to update Supabase user metadata ({update_resp.status_code}): {update_resp.text}",
+        )
+
+
+def _refresh_session(cfg: SupabaseCliConfig, refresh_token: str) -> StoredSession:
+    resp = httpx.post(
+        f"{cfg.url}/auth/v1/token",
+        params={"grant_type": "refresh_token"},
+        headers={"apikey": cfg.anon_key, "Content-Type": "application/json"},
+        json={"refresh_token": refresh_token},
+        timeout=20.0,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"refresh failed ({resp.status_code}): {resp.text}")
+    body = resp.json()
+    user = body.get("user") or {}
+    provider_token = body.get("provider_token")
+    provider_refresh_token = body.get("provider_refresh_token")
+    return StoredSession(
+        access_token=body["access_token"],
+        refresh_token=body["refresh_token"],
+        expires_at=int(time.time()) + int(body.get("expires_in", 3600)),
+        user_id=str(user.get("id", "")),
+        email=str(user.get("email", "")),
+        provider="refresh",
+        provider_token=str(provider_token) if provider_token else None,
+        provider_refresh_token=(
+            str(provider_refresh_token) if provider_refresh_token else None
+        ),
+    )
+
+
+def get_access_token() -> str | None:
+    """Return a valid access token, refreshing if needed.
+
+    Public helper for API clients that want to authenticate as the current
+    user. Returns ``None`` when no session is stored or Supabase isn't
+    configured.
+    """
+    session = load_session()
+    if session is None:
+        return None
+
+    if session.expires_at - REFRESH_LEEWAY_SECONDS > int(time.time()):
+        return session.access_token
+
+    cfg = SupabaseCliConfig.from_env()
+    if cfg is None:
+        return session.access_token if session.expires_at > int(time.time()) else None
+
+    try:
+        refreshed = _refresh_session(cfg, session.refresh_token)
+    except Exception as exc:
+        logger.debug("CLI token refresh failed: %s", exc)
+        return None
+    refreshed.provider = session.provider
+    # Preserve previously-captured provider secrets — Supabase refresh
+    # responses may omit them.
+    if refreshed.provider_token is None:
+        refreshed.provider_token = session.provider_token
+    if refreshed.provider_refresh_token is None:
+        refreshed.provider_refresh_token = session.provider_refresh_token
+    save_session(refreshed)
+    if refreshed.provider == "github":
+        _sync_provider_secrets_to_supabase(cfg, provider="github", session=refreshed)
+    return refreshed.access_token
+
+
+def get_github_token() -> str | None:
+    """Return the stored Supabase-forwarded GitHub OAuth token, if any.
+
+    This is the CLI-side source for the "easy path" Copilot fallback — see
+    :class:`obscura.core.auth.AuthConfig.oauth_github_token`. Only populated
+    after a GitHub OAuth sign-in; magic-link sessions return ``None``.
+    """
+    session = load_session()
+    return session.provider_token if session else None
+
+
+def ensure_github_oauth_session(*, open_browser: bool = True) -> StoredSession | None:
+    """Ensure a valid GitHub OAuth session exists for CLI startup.
+
+    Returns the current or newly-created session when Supabase is configured.
+    Returns ``None`` when Supabase is not configured.
+    """
+    cfg = SupabaseCliConfig.from_env()
+    if cfg is None:
+        return None
+
+    token = get_access_token()
+    if token:
+        existing = load_session()
+        if existing is not None:
+            return existing
+
+    session = _run_oauth_flow(cfg, "github", open_browser=open_browser)
+    click.secho(f"Signed in as {session.email or session.user_id}.", fg="green")
+    click.echo(f"Credentials stored at {CREDENTIALS_PATH}")
+    return session
+
+
+# ---------------------------------------------------------------------------
+# Local callback server
+# ---------------------------------------------------------------------------
+
+
+_CALLBACK_HTML_SUCCESS = """<!doctype html>
+<html><head><title>Obscura — signed in</title>
+<style>body{font-family:system-ui;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.card{background:#1b1b1b;padding:2rem 3rem;border-radius:12px;border:1px solid #333;max-width:420px;text-align:center}
+h1{margin:0 0 .5rem;font-size:1.25rem}p{margin:0;color:#aaa;font-size:.9rem}</style></head>
+<body><div class="card"><h1>Signed in to Obscura</h1>
+<p>You can close this window and return to the terminal.</p></div></body></html>
+"""
+
+_CALLBACK_HTML_ERROR = """<!doctype html>
+<html><head><title>Obscura — sign-in failed</title></head>
+<body style="font-family:system-ui;background:#111;color:#eee;padding:2rem">
+<h1>Sign-in failed</h1><pre>{error}</pre></body></html>
+"""
+
+
+def _pkce_pair() -> tuple[str, str]:
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@dataclass
+class _CallbackResult:
+    code: str | None = None
+    error: str | None = None
+
+
+def _build_callback_handler(
+    result: _CallbackResult,
+    done: threading.Event,
+) -> type[http.server.BaseHTTPRequestHandler]:
+    class Handler(http.server.BaseHTTPRequestHandler):
+        @override
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            return
+
+        def do_GET(self) -> None:  # noqa: N802
+            parsed = urllib.parse.urlparse(self.path)
+            qs = urllib.parse.parse_qs(parsed.query)
+
+            if "error" in qs:
+                result.error = qs["error"][0]
+                body = _CALLBACK_HTML_ERROR.format(error=result.error).encode("utf-8")
+                self.send_response(400)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                done.set()
+                return
+
+            code = qs.get("code", [None])[0]
+            if code:
+                result.code = code
+                body = _CALLBACK_HTML_SUCCESS.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                done.set()
+                return
+
+            self.send_response(404)
+            self.end_headers()
+
+    return Handler
+
+
+def _run_oauth_flow(
+    cfg: SupabaseCliConfig,
+    provider: str,
+    *,
+    timeout_seconds: float = 300.0,
+    open_browser: bool = True,
+) -> StoredSession:
+    port = _free_port()
+    redirect_uri = f"http://127.0.0.1:{port}/callback"
+    verifier, challenge = _pkce_pair()
+
+    authorize_url = f"{cfg.url}/auth/v1/authorize?" + urllib.parse.urlencode(
+        {
+            "provider": provider,
+            "redirect_to": redirect_uri,
+            "code_challenge": challenge,
+            "code_challenge_method": "s256",
+        },
+    )
+
+    result = _CallbackResult()
+    done = threading.Event()
+    handler = _build_callback_handler(result, done)
+    server = http.server.HTTPServer(("127.0.0.1", port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        click.echo(f"Opening browser to sign in with {provider}…")
+        click.echo(f"If it didn't open, visit: {authorize_url}")
+        if open_browser:
+            webbrowser.open(authorize_url)
+
+        if not done.wait(timeout=timeout_seconds):
+            raise RuntimeError("Timed out waiting for OAuth callback")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    if result.error:
+        raise RuntimeError(f"OAuth provider returned error: {result.error}")
+    if not result.code:
+        raise RuntimeError("No authorization code received")
+
+    resp = httpx.post(
+        f"{cfg.url}/auth/v1/token",
+        params={"grant_type": "pkce"},
+        headers={"apikey": cfg.anon_key, "Content-Type": "application/json"},
+        json={"auth_code": result.code, "code_verifier": verifier},
+        timeout=20.0,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Code exchange failed ({resp.status_code}): {resp.text}")
+    body = resp.json()
+    user = body.get("user") or {}
+    provider_token = body.get("provider_token")
+    provider_refresh_token = body.get("provider_refresh_token")
+    session = StoredSession(
+        access_token=body["access_token"],
+        refresh_token=body["refresh_token"],
+        expires_at=int(time.time()) + int(body.get("expires_in", 3600)),
+        user_id=str(user.get("id", "")),
+        email=str(user.get("email", "")),
+        provider=provider,
+        provider_token=str(provider_token) if provider_token else None,
+        provider_refresh_token=(
+            str(provider_refresh_token) if provider_refresh_token else None
+        ),
+    )
+    save_session(session)
+    _sync_provider_secrets_to_supabase(cfg, provider=provider, session=session)
+    return session
+
+
+def _send_magic_link(cfg: SupabaseCliConfig, email: str) -> None:
+    resp = httpx.post(
+        f"{cfg.url}/auth/v1/otp",
+        headers={"apikey": cfg.anon_key, "Content-Type": "application/json"},
+        json={"email": email, "create_user": True},
+        timeout=20.0,
+    )
+    if resp.status_code not in (200, 201, 204):
+        raise RuntimeError(f"OTP request failed ({resp.status_code}): {resp.text}")
+
+
+def _verify_otp(cfg: SupabaseCliConfig, email: str, token: str) -> StoredSession:
+    resp = httpx.post(
+        f"{cfg.url}/auth/v1/verify",
+        headers={"apikey": cfg.anon_key, "Content-Type": "application/json"},
+        json={"type": "email", "email": email, "token": token},
+        timeout=20.0,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"OTP verify failed ({resp.status_code}): {resp.text}")
+    body = resp.json()
+    user = body.get("user") or {}
+    session = StoredSession(
+        access_token=body["access_token"],
+        refresh_token=body["refresh_token"],
+        expires_at=int(time.time()) + int(body.get("expires_in", 3600)),
+        user_id=str(user.get("id", "")),
+        email=str(user.get("email", email)),
+        provider="magic",
+    )
+    save_session(session)
+    return session
+
+
+# ---------------------------------------------------------------------------
+# Click group
+# ---------------------------------------------------------------------------
+
+
+@click.group("auth")
+def auth_group() -> None:
+    """Supabase OAuth login for the Obscura CLI."""
+
+
+@auth_group.command("login")
+@click.option(
+    "--provider",
+    type=click.Choice(["github", "google", "magic"], case_sensitive=False),
+    default="github",
+    help="OAuth provider, or 'magic' for email magic-link.",
+)
+@click.option("--email", default=None, help="Email (required for --provider magic).")
+@click.option("--no-browser", is_flag=True, help="Don't auto-open the browser.")
+def login(provider: str, email: str | None, no_browser: bool) -> None:
+    """Sign in via Supabase OAuth or magic-link email."""
+    cfg = SupabaseCliConfig.from_env()
+    if cfg is None:
+        raise click.ClickException(
+            "Supabase is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+        )
+
+    provider = provider.lower()
+
+    if provider == "magic":
+        if not email:
+            email = click.prompt("Email")
+        assert email is not None
+        try:
+            _send_magic_link(cfg, email)
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(f"Magic-link email sent to {email}.")
+        token = click.prompt("Paste the 6-digit code from the email", hide_input=False)
+        try:
+            session = _verify_otp(cfg, email, str(token).strip())
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+    else:
+        try:
+            session = _run_oauth_flow(cfg, provider, open_browser=not no_browser)
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    click.secho(f"Signed in as {session.email or session.user_id}.", fg="green")
+    click.echo(f"Credentials stored at {CREDENTIALS_PATH}")
+
+
+@auth_group.command("logout")
+def logout() -> None:
+    """Remove stored Supabase credentials from this machine."""
+    if clear_session():
+        _emit(f"Removed {CREDENTIALS_PATH}.")
+    else:
+        _emit("No stored credentials to remove.")
+
+
+@auth_group.command("whoami")
+def whoami() -> None:
+    """Print the currently authenticated Supabase user."""
+    session = load_session()
+    if session is None:
+        _emit("Not signed in.")
+        raise SystemExit(1)
+
+    remaining = session.expires_at - int(time.time())
+    state = "valid" if remaining > 0 else "EXPIRED"
+    gh_state = "yes" if session.provider_token else "no"
+    _emit(f"user:        {session.email or session.user_id}")
+    _emit(f"user_id:     {session.user_id}")
+    _emit(f"provider:    {session.provider}")
+    _emit(f"token:       {state} (expires in {max(0, remaining)}s)")
+    _emit(f"github oauth: {gh_state}")
+    _emit(f"file:        {CREDENTIALS_PATH}")
+
+
+# ---------------------------------------------------------------------------
+# `obscura-auth secrets` — store Supabase config in the OS keyring
+# ---------------------------------------------------------------------------
+
+
+@auth_group.group("secrets")
+def secrets_group() -> None:
+    """Store Supabase config in the OS keyring (Keychain / Credential Manager).
+
+    The resolver always prefers env vars, so anything set here is overridden
+    by ``SUPABASE_*`` env vars at runtime -- safe for Docker/CI which keep
+    passing secrets via ``-e``.
+    """
+
+
+def _validate_secret_name(name: str, *, force: bool = False) -> str:
+    """Normalise *name* and optionally reject unknown identifiers.
+
+    The allowlist catches typos on common keys (``SUPABSE_URL`` instead of
+    ``SUPABASE_URL``). Pass ``force=True`` to store an arbitrary name --
+    useful for one-off API keys that aren't in the built-in catalog.
+    """
+    normalized = name.strip().upper()
+    if not force and normalized not in _secrets.KNOWN_SECRET_NAMES:
+        known = ", ".join(_secrets.KNOWN_SECRET_NAMES)
+        raise click.ClickException(
+            f"Unknown secret '{name}'. Pass --force to store an arbitrary name, "
+            f"or pick from: {known}",
+        )
+    return normalized
+
+
+@secrets_group.command("set")
+@click.argument("name")
+@click.option(
+    "--value",
+    default=None,
+    help="Secret value. Omit to be prompted with hidden input.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Accept an arbitrary NAME outside the built-in catalog.",
+)
+def secrets_set(name: str, value: str | None, force: bool) -> None:
+    """Store a service secret in the OS keyring.
+
+    Known names cover Supabase identity config, LLM backend keys
+    (``ANTHROPIC_API_KEY``, ``OPENAI_API_KEY``, ``GITHUB_TOKEN``, …), and
+    common plugin credentials (``NOTION_TOKEN``, ``QDRANT_API_KEY``, …).
+    Use ``--force`` for anything else.
+    """
+    normalized = _validate_secret_name(name, force=force)
+    if not _secrets.keyring_available():
+        raise click.ClickException(
+            "No OS keyring backend available on this system. "
+            f"Set {normalized} as an env var or in ~/.obscura/.env instead.",
+        )
+    if value is None:
+        hide = normalized in _secrets.SENSITIVE_SECRET_NAMES
+        value = click.prompt(f"Value for {normalized}", hide_input=hide)
+    try:
+        stored = _secrets.store(normalized, str(value))
+    except _secrets.SecretsValidationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not stored:
+        raise click.ClickException(f"Failed to store {normalized} in keyring.")
+    click.secho(f"Stored {normalized} in keyring.", fg="green")
+
+
+@secrets_group.command("get")
+@click.argument("name")
+@click.option("--reveal", is_flag=True, help="Print the full value (off by default).")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Accept an arbitrary NAME outside the built-in catalog.",
+)
+def secrets_get(name: str, reveal: bool, force: bool) -> None:
+    """Show where a stored secret is resolved from."""
+    normalized = _validate_secret_name(name, force=force)
+    value = _secrets.resolve(normalized)
+    if value is None:
+        _emit(f"{normalized}: (unset)")
+        raise SystemExit(1)
+    source = _secrets.sources([normalized]).get(normalized, "missing")
+    shown = value if reveal else _secrets.mask(value)
+    _emit(f"{normalized}: {shown} [source: {source}]")
+
+
+@secrets_group.command("delete")
+@click.argument("name")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Accept an arbitrary NAME outside the built-in catalog.",
+)
+def secrets_delete(name: str, force: bool) -> None:
+    """Remove a stored secret from the OS keyring."""
+    normalized = _validate_secret_name(name, force=force)
+    if _secrets.delete(normalized):
+        click.secho(f"Removed {normalized} from keyring.", fg="green")
+    else:
+        _emit(f"No keyring entry found for {normalized}.")
+
+
+@secrets_group.command("list")
+@click.option(
+    "--only-set",
+    is_flag=True,
+    help="Skip names that aren't configured anywhere.",
+)
+def secrets_list(only_set: bool) -> None:
+    """Show where every known secret is currently resolved from."""
+    mapping = _secrets.sources()
+    kr_ready = _secrets.keyring_available()
+    _emit(f"Keyring backend: {'available' if kr_ready else 'unavailable'}")
+    width = max(len(name) for name in mapping)
+    for name, source in mapping.items():
+        if only_set and source == "missing":
+            continue
+        _emit(f"  {name.ljust(width)}  {source}")
+
+
+@secrets_group.command("export")
+@click.option(
+    "--shell",
+    type=click.Choice(["bash", "fish"], case_sensitive=False),
+    default="bash",
+    help="Output syntax. Defaults to POSIX (bash/zsh).",
+)
+@click.option(
+    "--only",
+    default=None,
+    help="Comma-separated subset of names to export (default: all configured).",
+)
+def secrets_export(shell: str, only: str | None) -> None:
+    """Print shell ``export`` lines for every configured secret.
+
+    Designed for one-liners::
+
+        eval "$(obscura-auth secrets export)"
+        obscura-auth secrets export --shell fish | source
+
+    Values are shell-escaped so paste-in-random-string secrets don't break
+    the shell. Commented lines are NEVER emitted for unset names.
+    """
+    import shlex
+
+    if only:
+        requested = [n.strip().upper() for n in only.split(",") if n.strip()]
+    else:
+        requested = list(_secrets.KNOWN_SECRET_NAMES)
+
+    for name in requested:
+        value = _secrets.resolve(name)
+        if value is None:
+            continue
+        quoted = shlex.quote(value)
+        if shell.lower() == "fish":
+            click.echo(f"set -gx {name} {quoted}")
+        else:
+            click.echo(f"export {name}={quoted}")
+
+
+@secrets_group.command("strict-env")
+@click.option(
+    "--tail",
+    type=int,
+    default=20,
+    help="How many recent audit entries to show (default: 20).",
+)
+@click.option(
+    "--clear",
+    is_flag=True,
+    help="Truncate the audit log after showing status.",
+)
+def secrets_strict_env(tail: int, clear: bool) -> None:
+    """Show strict-env status and recent audit entries.
+
+    Strict env mode (``OBSCURA_TOOL_ENV_STRICT=1``) strips known secret
+    names from the process env before Obscura spawns subprocesses. Every
+    strip event lands in a JSONL audit log so you can see which tool
+    was shielded from which keys, after the fact.
+
+    Enable it for a session::
+
+        export OBSCURA_TOOL_ENV_STRICT=1
+        obscura
+
+    Or persist it for your user by adding the line to ``~/.obscura/.env``.
+    """
+    import os as _os
+
+    strict_on = _os.environ.get("OBSCURA_TOOL_ENV_STRICT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    log_path = _secrets.audit_log_path()
+
+    click.echo(f"Strict mode: {'ON' if strict_on else 'off'}")
+    if not strict_on:
+        click.echo(
+            "  Enable with: export OBSCURA_TOOL_ENV_STRICT=1 "
+            "(or add to ~/.obscura/.env)",
+        )
+    click.echo(f"Audit log:   {log_path}")
+
+    if clear:
+        if log_path.exists():
+            log_path.unlink()
+            click.secho(f"Cleared {log_path}.", fg="green")
+        else:
+            click.echo("Audit log doesn't exist yet; nothing to clear.")
+        return
+
+    if not log_path.exists():
+        click.echo("No audit entries yet.")
+        return
+
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail_lines = lines[-tail:] if tail > 0 else lines
+    click.echo(f"Recent entries ({len(tail_lines)} of {len(lines)}):")
+    for raw in tail_lines:
+        if not raw.strip():
+            continue
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            click.echo(f"  [malformed] {raw}")
+            continue
+        ts = entry.get("ts", "?")
+        stripped = entry.get("stripped") or []
+        if isinstance(stripped, list):
+            names = ", ".join(str(n) for n in stripped)
+        else:
+            names = str(stripped)
+        click.echo(f"  {ts}  stripped={names}")
+
+
+# ---------------------------------------------------------------------------
+# `obscura-auth secrets cloud` -- Supabase user_metadata vault
+# ---------------------------------------------------------------------------
+#
+# Design notes:
+#
+# * Values are Fernet-encrypted with a key derived from the user's
+#   email + a per-user salt. No passphrase in this cut -- see the
+#   module docstring for the threat model. A future passphrase-based
+#   tier will layer on top, scoped to keys the user marks ``--risk``.
+# * ``_vault_client()`` returns ``None`` when Supabase isn't configured
+#   so the commands can print a specific "sign in first" error instead
+#   of a vague failure.
+
+
+def _vault_client() -> Any:
+    """Return the Supabase vault client or raise a clean Click error."""
+    from obscura.auth import supabase_secrets as _vault
+
+    client = _vault.get_client()
+    if client is None:
+        raise click.ClickException(
+            "Supabase is not configured. Set SUPABASE_URL and "
+            "SUPABASE_ANON_KEY, or run `obscura-auth login`.",
+        )
+    return client
+
+
+@secrets_group.group("cloud")
+def secrets_cloud_group() -> None:
+    """Per-user encrypted cloud vault in Supabase ``user_metadata``.
+
+    Values are Fernet-encrypted with a key derived from your account
+    email. The primary flows are ``pull-all`` on a fresh machine and
+    ``push NAME`` when you want to sync a local keyring entry up.
+    """
+
+
+def _prompt_passphrase(
+    prompt_text: str = "Passphrase",
+    *,
+    confirm: bool = False,
+) -> str:
+    """Prompt for a passphrase with hidden input."""
+    while True:
+        value = click.prompt(prompt_text, hide_input=True)
+        if not isinstance(value, str) or not value:
+            click.secho("Passphrase cannot be empty.", fg="red")
+            continue
+        if confirm:
+            again = click.prompt("Confirm passphrase", hide_input=True)
+            if value != again:
+                click.secho("Passphrases don't match. Try again.", fg="red")
+                continue
+        return value
+
+
+@secrets_cloud_group.command("status")
+def secrets_cloud_status() -> None:
+    """List names stored in the cloud vaults (regular + risky)."""
+    client = _vault_client()
+    try:
+        names = client.names()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    if not names:
+        click.echo("No entries in the cloud vault.")
+        return
+    click.echo(f"Entries ({len(names)}):")
+    for name, is_risky in names:
+        marker = " [risk]" if is_risky else ""
+        click.echo(f"  {name}{marker}")
+    if any(r for _, r in names):
+        click.echo(
+            "\n[risk]-tagged entries need a passphrase to decrypt. "
+            "Use `cloud passphrase set` to enter it.",
+        )
+
+
+@secrets_cloud_group.group("passphrase")
+def secrets_cloud_passphrase_group() -> None:
+    """Manage the passphrase used to encrypt ``--risk`` entries."""
+
+
+@secrets_cloud_passphrase_group.command("set")
+def secrets_cloud_passphrase_set() -> None:
+    """Prompt for a passphrase and cache the derived key locally.
+
+    Re-run this after rotating the passphrase or on a fresh machine.
+    The passphrase itself is never stored; only a scrypt-derived Fernet
+    key lives in the OS keyring.
+    """
+    client = _vault_client()
+    passphrase = _prompt_passphrase(
+        "Cloud risky-vault passphrase",
+        confirm=True,
+    )
+    try:
+        client.set_passphrase(passphrase)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    click.secho("Passphrase accepted and cached in the OS keyring.", fg="green")
+
+
+@secrets_cloud_passphrase_group.command("clear")
+def secrets_cloud_passphrase_clear() -> None:
+    """Forget the cached passphrase key on this machine."""
+    from obscura.auth import supabase_secrets as _vault
+
+    client = _vault.get_client()
+    if client is not None:
+        client.clear_passphrase()
+    else:
+        _vault.clear_passphrase_key()
+    click.secho("Passphrase key cleared from this machine.", fg="green")
+
+
+@secrets_cloud_group.command("pull")
+@click.argument("name")
+@click.option(
+    "--to-keyring/--print",
+    "to_keyring",
+    default=True,
+    help="Write into the OS keyring (default) or print to stdout.",
+)
+def secrets_cloud_pull(name: str, to_keyring: bool) -> None:
+    """Fetch a secret from the cloud vault.
+
+    If the name lives in the ``--risk`` vault, you'll be prompted for
+    the passphrase on first use. Subsequent pulls reuse the cached key.
+    """
+    client = _vault_client()
+    normalized = name.strip().upper()
+
+    try:
+        value = client.get(normalized)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    # If nothing came back but the name is in the risky vault, prompt
+    # and retry. ``names()`` reveals inventory without needing a key.
+    if value is None:
+        try:
+            inventory = dict(client.names())
+        except Exception as exc:  # noqa: BLE001
+            raise click.ClickException(str(exc)) from exc
+        if normalized in inventory and inventory[normalized]:
+            click.echo(
+                f"{normalized} is in the --risk vault and needs a "
+                "passphrase to decrypt.",
+            )
+            passphrase = _prompt_passphrase("Cloud risky-vault passphrase")
+            try:
+                client.set_passphrase(passphrase)
+                value = client.get(normalized)
+            except Exception as exc:  # noqa: BLE001
+                raise click.ClickException(str(exc)) from exc
+
+    if value is None:
+        raise click.ClickException(f"{normalized} not found in the cloud vault.")
+
+    if to_keyring:
+        if not _secrets.keyring_available():
+            raise click.ClickException(
+                "No OS keyring backend available. Use --print instead.",
+            )
+        try:
+            stored = _secrets.store(normalized, value)
+        except _secrets.SecretsValidationError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if not stored:
+            raise click.ClickException(
+                f"Failed to write {normalized} to the keyring.",
+            )
+        click.secho(f"Pulled {normalized} into the OS keyring.", fg="green")
+    else:
+        click.echo(value)
+
+
+@secrets_cloud_group.command("push")
+@click.argument("name")
+@click.option(
+    "--value",
+    default=None,
+    help="Explicit value. Omit to read from the OS keyring.",
+)
+@click.option(
+    "--risk",
+    is_flag=True,
+    help="Route to the passphrase-protected 'risky' vault.",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Skip the interactive Y/N confirmation.",
+)
+def secrets_cloud_push(
+    name: str,
+    value: str | None,
+    risk: bool,
+    yes: bool,
+) -> None:
+    """Encrypt and push a secret to the cloud vault.
+
+    By default goes to the regular (email-key encrypted) vault. Pass
+    ``--risk`` to route to the passphrase-protected vault; you'll be
+    prompted for the passphrase if no key is cached yet.
+
+    Reads the value from the OS keyring by default -- typical flow is
+    ``secrets set`` locally, then ``cloud push`` to sync. ``--value``
+    overrides. Always confirms interactively unless ``--yes`` is passed.
+    """
+    from obscura.auth import supabase_secrets as _vault
+
+    client = _vault_client()
+    normalized = name.strip().upper()
+
+    if value is None:
+        resolved = _secrets.resolve(normalized)
+        if resolved is None:
+            raise click.ClickException(
+                f"{normalized} is not in your local keyring/env. Use "
+                f"`obscura-auth secrets set {normalized}` first, or pass "
+                "--value.",
+            )
+        value = resolved
+
+    preview = _secrets.mask(value)
+    tag = " (risky vault)" if risk else ""
+    click.echo(
+        f"About to push {normalized} = {preview} (encrypted){tag} "
+        "to your Supabase cloud vault.",
+    )
+    if not yes and not click.confirm("Continue?", default=False):
+        click.echo("Aborted.")
+        return
+
+    if risk and not client.has_passphrase_key():
+        click.echo(
+            "The --risk vault requires a passphrase. You'll only be "
+            "asked for it once per machine; the derived key is cached "
+            "in the OS keyring.",
+        )
+        passphrase = _prompt_passphrase(
+            "Cloud risky-vault passphrase",
+            confirm=True,
+        )
+        try:
+            client.set_passphrase(passphrase)
+        except Exception as exc:  # noqa: BLE001
+            raise click.ClickException(str(exc)) from exc
+
+    try:
+        client.push(normalized, value, risk=risk)
+    except _vault.VaultPushBlocked as exc:
+        raise click.ClickException(str(exc)) from exc
+    except _vault.PassphraseRequired as exc:
+        raise click.ClickException(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    click.secho(f"Pushed {normalized} to the cloud vault.", fg="green")
+
+
+@secrets_cloud_group.command("delete")
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation.")
+def secrets_cloud_delete(name: str, yes: bool) -> None:
+    """Remove a secret from the cloud vault."""
+    client = _vault_client()
+    normalized = name.strip().upper()
+
+    if not yes and not click.confirm(
+        f"Delete {normalized} from the cloud vault?",
+        default=False,
+    ):
+        click.echo("Aborted.")
+        return
+
+    try:
+        removed = client.delete(normalized)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    if removed:
+        click.secho(f"Removed {normalized} from the cloud vault.", fg="green")
+    else:
+        click.echo(f"{normalized} wasn't in the cloud vault.")
+
+
+@secrets_cloud_group.command("pull-all")
+def secrets_cloud_pull_all() -> None:
+    """Pull every cloud entry into the OS keyring.
+
+    Convenient for fresh-machine setup. Prompts once for the risky-vault
+    passphrase up front when the vault has risky entries that aren't
+    already unlocked on this machine.
+    """
+    client = _vault_client()
+
+    if not _secrets.keyring_available():
+        raise click.ClickException(
+            "No OS keyring backend available on this machine.",
+        )
+
+    # Prompt for the passphrase up front when needed, so the snapshot
+    # call below can decrypt everything in one pass.
+    try:
+        needs_passphrase = (
+            client.has_risky_entries() and not client.has_passphrase_key()
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    if needs_passphrase:
+        click.echo(
+            "The vault has --risk entries that need a passphrase to decrypt.",
+        )
+        passphrase = _prompt_passphrase("Cloud risky-vault passphrase")
+        try:
+            client.set_passphrase(passphrase)
+        except Exception as exc:  # noqa: BLE001
+            raise click.ClickException(str(exc)) from exc
+
+    try:
+        snapshot = client.snapshot()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    if not snapshot:
+        click.echo("Nothing to pull -- the cloud vault is empty.")
+        return
+
+    pulled: list[str] = []
+    for candidate, value in snapshot.items():
+        try:
+            ok = _secrets.store(candidate, value)
+        except _secrets.SecretsValidationError as exc:
+            click.secho(f"  skipped {candidate}: {exc}", fg="yellow")
+            continue
+        if ok:
+            pulled.append(candidate)
+    click.secho(
+        f"Pulled {len(pulled)} of {len(snapshot)} entries into the keyring.",
+        fg="green",
+    )
+
+
+# ---------------------------------------------------------------------------
+# `obscura-auth profile` -- Supabase user_metadata.obscura_profile
+# ---------------------------------------------------------------------------
+#
+# Companion to the cloud vault: non-secret preferences, backend
+# defaults, feature flags, and the list of machines the user has
+# signed in on. Reads/writes to the same ``user_metadata`` row via
+# the user's session JWT -- no passphrase, no encryption.
+
+
+def _profile_client() -> Any:
+    from obscura.auth import profile as _profile
+
+    client = _profile.get_client()
+    if client is None:
+        raise click.ClickException(
+            "Supabase is not configured. Set SUPABASE_URL and "
+            "SUPABASE_ANON_KEY, or run `obscura-auth login`.",
+        )
+    return client
+
+
+# Field-name → Python type coercer for ``profile set``. Scalars coerce
+# from the raw CLI string; list fields split on commas.
+_PROFILE_FIELD_TYPES: dict[str, str] = {
+    "display_name": "str",
+    "timezone": "str",
+    "default_backend": "str",
+    "default_model": "str",
+    "undercover": "bool",
+    "feature_flags": "list",
+    "last_workspace": "str",
+    "last_session_id": "str",
+    "last_cwd": "str",
+}
+
+
+def _coerce_profile_value(field_name: str, raw: str) -> Any:
+    kind = _PROFILE_FIELD_TYPES.get(field_name)
+    if kind is None:
+        raise click.ClickException(
+            f"Unknown profile field '{field_name}'. Known: "
+            + ", ".join(sorted(_PROFILE_FIELD_TYPES)),
+        )
+    if kind == "bool":
+        lowered = raw.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+        raise click.ClickException(
+            f"Expected a boolean for '{field_name}' (got {raw!r}).",
+        )
+    if kind == "list":
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return raw
+
+
+@auth_group.group("profile")
+def profile_group() -> None:
+    """Read / write the user's Supabase ``user_metadata.obscura_profile``.
+
+    Plaintext, non-secret preferences and the list of machines you've
+    registered. Secrets belong in ``obscura-auth secrets cloud`` (which
+    writes to a sibling encrypted key in the same row).
+    """
+
+
+@profile_group.command("show")
+def profile_show() -> None:
+    """Print the full profile in human-readable form."""
+    import json as _json
+
+    client = _profile_client()
+    try:
+        profile = client.load()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    data = profile.model_dump(mode="json")
+    devices = data.pop("devices", [])
+    click.echo(_json.dumps(data, indent=2, sort_keys=True))
+    if devices:
+        click.echo(f"\nDevices ({len(devices)}):")
+        for dev in devices:
+            click.echo(f"  - {dev['name']} ({dev['id']})")
+            click.echo(
+                f"      platform={dev['platform']} "
+                f"host={dev['hostname']} "
+                f"last_seen={dev['last_seen']}",
+            )
+    else:
+        click.echo("\nDevices: none registered")
+
+
+@profile_group.command("get")
+@click.argument("field_name")
+def profile_get(field_name: str) -> None:
+    """Print a single field's value."""
+    import json as _json
+
+    if field_name == "devices":
+        raise click.ClickException(
+            "Use `profile device list` to view devices.",
+        )
+    if field_name not in _PROFILE_FIELD_TYPES:
+        raise click.ClickException(
+            f"Unknown field '{field_name}'. Known: "
+            + ", ".join(sorted(_PROFILE_FIELD_TYPES)),
+        )
+
+    client = _profile_client()
+    try:
+        profile = client.load()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    value = getattr(profile, field_name)
+    if value is None:
+        click.echo("(unset)")
+    elif isinstance(value, list):
+        click.echo(_json.dumps(value))
+    else:
+        click.echo(str(value))
+
+
+@profile_group.command("set")
+@click.argument("field_name")
+@click.argument("value")
+def profile_set(field_name: str, value: str) -> None:
+    """Update one profile field.
+
+    Lists accept comma-separated values (``feature_flags=voice,swarm``).
+    Booleans accept ``true|false|yes|no|on|off|1|0``.
+    """
+    coerced = _coerce_profile_value(field_name, value)
+    client = _profile_client()
+    try:
+        client.update(**{field_name: coerced})
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    click.secho(f"Updated {field_name}.", fg="green")
+
+
+@profile_group.command("unset")
+@click.argument("field_name")
+def profile_unset(field_name: str) -> None:
+    """Reset a field to its empty default (``None`` or ``[]``)."""
+    if field_name == "devices":
+        raise click.ClickException(
+            "Use `profile device remove ID` to drop a specific device.",
+        )
+    if field_name not in _PROFILE_FIELD_TYPES:
+        raise click.ClickException(
+            f"Unknown field '{field_name}'. Known: "
+            + ", ".join(sorted(_PROFILE_FIELD_TYPES)),
+        )
+
+    kind = _PROFILE_FIELD_TYPES[field_name]
+    empty: Any = [] if kind == "list" else None
+    client = _profile_client()
+    try:
+        client.update(**{field_name: empty})
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    click.secho(f"Cleared {field_name}.", fg="green")
+
+
+# ---------------------------------------------------------------------------
+# `obscura-auth profile device`
+# ---------------------------------------------------------------------------
+
+
+@profile_group.group("device")
+def profile_device_group() -> None:
+    """Manage the list of machines this user has registered."""
+
+
+@profile_device_group.command("list")
+def profile_device_list() -> None:
+    """List every machine registered on the profile."""
+    from obscura.auth import profile as _profile
+
+    client = _profile_client()
+    try:
+        profile = client.load()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    this_machine = _profile.get_or_create_machine_id()
+    if not profile.devices:
+        click.echo("No devices registered.")
+        return
+    click.echo(f"Devices ({len(profile.devices)}):")
+    for dev in profile.devices:
+        marker = " (this machine)" if dev.id == this_machine else ""
+        click.echo(f"  {dev.name}{marker}")
+        click.echo(
+            f"      id={dev.id} platform={dev.platform} host={dev.hostname}",
+        )
+        click.echo(f"      first_seen={dev.first_seen}  last_seen={dev.last_seen}")
+
+
+@profile_device_group.command("current")
+def profile_device_current() -> None:
+    """Print the current machine's ID + its entry on the profile (if any)."""
+    from obscura.auth import profile as _profile
+
+    machine_id = _profile.get_or_create_machine_id()
+    click.echo(f"machine_id: {machine_id}")
+
+    client = _profile_client()
+    try:
+        profile = client.load()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+    matching = next((d for d in profile.devices if d.id == machine_id), None)
+    if matching is None:
+        click.echo("This machine isn't registered yet.")
+        click.echo(
+            "Run `obscura-auth profile device register` to add it.",
+        )
+        return
+    click.echo(f"name:       {matching.name}")
+    click.echo(f"platform:   {matching.platform}")
+    click.echo(f"hostname:   {matching.hostname}")
+    click.echo(f"first_seen: {matching.first_seen}")
+    click.echo(f"last_seen:  {matching.last_seen}")
+
+
+@profile_device_group.command("register")
+@click.option(
+    "--name",
+    default=None,
+    help="Human-readable label for this machine (defaults to hostname).",
+)
+def profile_device_register(name: str | None) -> None:
+    """Add (or refresh) this machine's entry on the profile."""
+    client = _profile_client()
+    try:
+        entry = client.register_device(name)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    click.secho(
+        f"Registered '{entry.name}' (id={entry.id}) on your profile.",
+        fg="green",
+    )
+
+
+@profile_device_group.command("rename")
+@click.argument("new_name")
+def profile_device_rename(new_name: str) -> None:
+    """Rename the current machine's entry."""
+    client = _profile_client()
+    try:
+        entry = client.rename_device(new_name)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    click.secho(f"Renamed to '{entry.name}'.", fg="green")
+
+
+@profile_device_group.command("remove")
+@click.argument("device_id")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation.")
+def profile_device_remove(device_id: str, yes: bool) -> None:
+    """Drop a device from the profile (e.g. a wiped or lost machine)."""
+    if not yes and not click.confirm(
+        f"Remove device {device_id} from your profile?",
+        default=False,
+    ):
+        click.echo("Aborted.")
+        return
+
+    client = _profile_client()
+    try:
+        removed = client.remove_device(device_id)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    if removed:
+        click.secho(f"Removed device {device_id}.", fg="green")
+    else:
+        click.echo(f"No device with id {device_id} on your profile.")
+
+
+@profile_device_group.command("touch")
+def profile_device_touch() -> None:
+    """Bump this machine's ``last_seen`` timestamp on the profile."""
+    client = _profile_client()
+    try:
+        entry = client.touch_device()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+    if entry is None:
+        click.echo(
+            "This machine isn't registered yet. Run "
+            "`obscura-auth profile device register` first.",
+        )
+        return
+    click.secho(f"Updated last_seen for '{entry.name}'.", fg="green")
+
+
+__all__ = [
+    "CREDENTIALS_PATH",
+    "StoredSession",
+    "SupabaseCliConfig",
+    "auth_group",
+    "clear_session",
+    "get_access_token",
+    "get_github_token",
+    "ensure_github_oauth_session",
+    "load_session",
+    "save_session",
+]

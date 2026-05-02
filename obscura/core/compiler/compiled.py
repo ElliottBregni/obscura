@@ -121,12 +121,24 @@ class ToolRoutingConfig:
     Controls how the :class:`ToolRouter` selects a relevant subset of tools
     for each model turn, keeping the tool-definition payload within backend
     limits and improving model selection accuracy.
+
+    ``pin_default_capabilities`` historically defaulted to ``True`` —
+    every tool from a capability with ``default_grant=true`` was
+    auto-pinned on every turn, conflating "permission auto-granted"
+    with "must ride along even when irrelevant". For a multi-plugin
+    setup (jira, rollbar, gitnexus, fv-backend, postman, …) this can
+    blow past the backend's tool cap purely from inactive plugins. The
+    default is now ``False``: the tools are still registered and
+    selectable by the router based on prompt relevance, just not
+    blanket-pinned. Set ``OBSCURA_PIN_DEFAULT_CAPABILITIES=on`` (or
+    pass ``pin_default_capabilities=True`` explicitly) to restore the
+    legacy behaviour.
     """
 
     enabled: bool = True
     max_tools: int = 50
     pinned_tools: tuple[str, ...] = field(default_factory=_empty_tuple_str)
-    pin_default_capabilities: bool = True
+    pin_default_capabilities: bool = False
     use_quality_scores: bool = True
     use_context_recall: bool = True
     min_quality_score: float = 0.2

@@ -1,0 +1,23 @@
+{
+  "commitMessage": "vault: auto-backup {{date}}",
+  "commitDateFormat": "YYYY-MM-DD HH:mm:ss",
+  "autoSaveInterval": 1,
+  "autoPullInterval": 0,
+  "autoPullOnBoot": true,
+  "disablePush": false,
+  "pullBeforePush": true,
+  "disablePopups": false,
+  "listChangedFilesInMessageBody": true,
+  "showStatusBar": true,
+  "updateSubmodules": false,
+  "syncMethod": "rebase",
+  "autoBackupAfterFileChange": true,
+  "customMessageOnAutoBackup": false,
+  "treeStructure": false,
+  "refreshSourceControl": true,
+  "basePath": "",
+  "differentIntervalCommitAndPush": false,
+  "changedFilesInStatusBar": true,
+  "showedMobileNotice": true,
+  "setLastSaveToCurrentTime": false
+}

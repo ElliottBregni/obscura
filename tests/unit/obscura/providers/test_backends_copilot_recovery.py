@@ -246,17 +246,23 @@ class TestStreamPropagatesPriorMessages:
 
 
 class TestEmptyPromptOnRecoveryOnly:
-    """Healthy-session post-tool turns must pass ``prompt=""`` through
-    verbatim — the live Copilot session has the tool_use + tool_result
-    in server-side state and continues normally. Only the recovery
-    retry path swaps in the internal cue, because the freshly-recovered
-    session lacks that implicit "tool result waiting" context.
+    """``send`` and ``stream`` must NEVER pass an empty prompt through
+    to the SDK — neither on the healthy path nor on the recovery
+    retry. The Copilot SDK turns ``send_and_wait("")`` into a
+    ``user.message`` with empty content; the model rationalises that
+    as "user sent a blank message" and produces apologetic filler that
+    then escalates into UI-quirk gaslighting on later turns.
+
+    The fix swaps every empty prompt for the harness cue at the
+    backend boundary. Earlier behaviour (cue only on the recovery
+    path) caused the failure mode this guard exists to prevent — see
+    the rationale block above ``_CONTINUATION_CUE`` in copilot.py.
     """
 
-    async def test_normal_empty_prompt_passes_through_verbatim(self) -> None:
-        """No session expiry — empty prompt must NOT be swapped. Injecting
-        a cue every continuation makes the model parrot it back ('user
-        keeps saying continue from where you left off')."""
+    async def test_healthy_empty_prompt_swapped_for_cue(self) -> None:
+        """Healthy-session post-tool continuation: ``stream("")`` must
+        reach ``_do_stream`` as the harness cue, not as ``""``. This
+        is the load-bearing contract of the fix."""
         backend = _backend()
         backend._session = MagicMock()
         backend._client = MagicMock()
@@ -274,13 +280,62 @@ class TestEmptyPromptOnRecoveryOnly:
         async for _ in backend.stream("", messages=_make_messages()):
             pass
 
-        assert seen_prompts == [""], (
-            "Empty post-tool prompts must not be modified on the healthy path."
+        assert seen_prompts == [backend._CONTINUATION_CUE], (
+            "Empty post-tool prompts must be swapped for the harness cue "
+            "on the healthy path so the SDK never sends an empty "
+            "user.message to the model."
         )
 
-    async def test_recovery_retry_swaps_empty_to_internal_cue(self) -> None:
-        """When the first call raises session-expired, the retry must use
-        the cue (the freshly-recovered session has no implicit context)."""
+    async def test_whitespace_only_prompt_also_swapped(self) -> None:
+        """Whitespace-only prompts have the same failure mode as empty
+        ones — guard explicitly so trim-related bugs upstream don't
+        bypass the swap."""
+        backend = _backend()
+        backend._session = MagicMock()
+        backend._client = MagicMock()
+
+        seen_prompts: list[str] = []
+
+        async def _do_stream_fake(prompt: str, **_: Any) -> Any:
+            seen_prompts.append(prompt)
+            if False:
+                yield  # pragma: no cover
+            return
+
+        backend._do_stream = _do_stream_fake  # type: ignore[assignment]
+
+        async for _ in backend.stream("   \n\t  ", messages=_make_messages()):
+            pass
+
+        assert seen_prompts == [backend._CONTINUATION_CUE]
+
+    async def test_real_prompt_passes_through_unchanged(self) -> None:
+        """A non-empty user prompt must NOT be replaced — only empty
+        ones get the cue."""
+        backend = _backend()
+        backend._session = MagicMock()
+        backend._client = MagicMock()
+
+        seen_prompts: list[str] = []
+
+        async def _do_stream_fake(prompt: str, **_: Any) -> Any:
+            seen_prompts.append(prompt)
+            if False:
+                yield  # pragma: no cover
+            return
+
+        backend._do_stream = _do_stream_fake  # type: ignore[assignment]
+
+        async for _ in backend.stream("real user input", messages=_make_messages()):
+            pass
+
+        assert seen_prompts == ["real user input"]
+
+    async def test_recovery_retry_uses_cue_for_empty(self) -> None:
+        """When the first call raises session-expired, the retry must
+        also use the cue for an originally-empty prompt. This worked
+        before the fix on the recovery path; the test still has to
+        pass to guard against regressions in the recovery branch."""
         backend = _backend()
         old_session = MagicMock()
         old_session.session_id = "old-sid"
@@ -310,9 +365,13 @@ class TestEmptyPromptOnRecoveryOnly:
         async for _ in backend.stream("", messages=_make_messages()):
             pass
 
-        assert seen_prompts == ["", backend._CONTINUATION_CUE], (
-            "Healthy-path call must be empty; recovery retry must use the cue."
-        )
+        # Both the healthy attempt and the recovery retry use the cue —
+        # the swap happens once at the top of ``stream`` and the recovery
+        # path re-uses the already-swapped prompt.
+        assert seen_prompts == [
+            backend._CONTINUATION_CUE,
+            backend._CONTINUATION_CUE,
+        ]
 
     async def test_recovery_retry_preserves_real_prompt(self) -> None:
         """A real user prompt at recovery time must be replayed verbatim,

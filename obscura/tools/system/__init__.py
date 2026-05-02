@@ -5042,8 +5042,127 @@ async def write_agent_shared(path: str, text: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# for — iterate over a list with an optional template
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    "for",
+    (
+        "Iterate over a list of items and apply an optional string template to each. "
+        "Returns the rendered results joined by a separator. "
+        "Template supports {item} and {index} placeholders."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "description": "List of values to iterate over.",
+                "items": {},
+            },
+            "template": {
+                "type": "string",
+                "description": (
+                    "Template applied to each item. "
+                    "Supports {item} and {index} placeholders. "
+                    "Defaults to \"{item}\"."
+                ),
+            },
+            "separator": {
+                "type": "string",
+                "description": "String used to join rendered results (default: newline).",
+            },
+        },
+        "required": ["items"],
+    },
+)
+async def for_(
+    items: list[Any],
+    template: str = "{item}",
+    separator: str = "\n",
+) -> str:
+    if not isinstance(items, list):
+        return _json_error("invalid_items", detail="items must be a list")
+    results: list[str] = []
+    for index, item in enumerate(items):
+        try:
+            rendered = template.format(item=item, index=index)
+        except (KeyError, ValueError) as exc:
+            return _json_error("template_error", detail=str(exc), index=index)
+        results.append(rendered)
+    return json.dumps(
+        {
+            "ok": True,
+            "count": len(results),
+            "result": separator.join(results),
+            "items": results,
+        }
+    )
+
+
+# Tools registered by default but dropped under the slim profile.
+#
+# Three rationales for inclusion:
+#
+# 1. **Redundant with ``run_shell``** — the model can call ``cp``, ``mv``,
+#    ``rm``, ``mkdir``, ``ps``, ``lsof``, ``which``, ``env``, ``uname`` etc.
+#    via ``run_shell`` directly. Each of these as a separate tool only
+#    burns Copilot's tool-cap budget.
+#
+# 2. **Dynamic tool creation** — ``create_tool`` / ``call_dynamic_tool`` /
+#    ``list_dynamic_tools`` let an agent author its own tools at runtime.
+#    Useful for research; risky for prod and unused day-to-day.
+#
+# 3. **MCP debug** — ``mcp_discovery_status`` / ``mcp_cleanup_orphans`` are
+#    diagnostics; better surfaced via ``/mcp`` slash commands than
+#    shipped to the model on every turn.
+#
+# Set ``OBSCURA_NATIVE_TOOLS=full`` to register everything (legacy
+# behaviour). Anything else (including unset / "slim") drops these.
+_SLIM_NATIVE_TOOLS_DROP: frozenset[str] = frozenset(
+    {
+        # Redundant with run_shell
+        "run_python3",
+        "run_command",
+        "which_command",
+        "copy_path",
+        "move_path",
+        "remove_path",
+        "make_directory",
+        "get_environment",
+        "get_system_info",
+        "list_processes",
+        "signal_process",
+        "list_listening_ports",
+        "list_unix_capabilities",
+        "download_file",
+        # Dynamic tool creation (off by default)
+        "create_tool",
+        "call_dynamic_tool",
+        "list_dynamic_tools",
+        # MCP debug (move to /mcp slash command)
+        "mcp_discovery_status",
+        "mcp_cleanup_orphans",
+    }
+)
+
+
+def _native_tools_profile() -> str:
+    """Read ``OBSCURA_NATIVE_TOOLS`` (default ``"slim"``)."""
+    val = os.environ.get("OBSCURA_NATIVE_TOOLS", "slim").strip().lower()
+    return val if val in ("slim", "full") else "slim"
+
+
 def get_system_tool_specs() -> list[ToolSpec]:
-    """Return default system tool specs for agent runtime."""
+    """Return default system tool specs for agent runtime.
+
+    Filters out tools in :data:`_SLIM_NATIVE_TOOLS_DROP` unless
+    ``OBSCURA_NATIVE_TOOLS=full`` is set. The dropped tools are still
+    importable as Python functions (other modules can still call them
+    internally) — they're just not registered as agent-callable tools.
+    """
     static_specs = [
         # Execution
         cast("ToolSpec", cast("Any", run_python3).spec),
@@ -5126,7 +5245,10 @@ def get_system_tool_specs() -> list[ToolSpec]:
     # Append any dynamically created tools
     for spec in _dynamic_tools.values():
         static_specs.append(spec)
-    return static_specs
+
+    if _native_tools_profile() == "full":
+        return static_specs
+    return [s for s in static_specs if s.name not in _SLIM_NATIVE_TOOLS_DROP]
 
 
 # Compatibility shim: discover_all_commands

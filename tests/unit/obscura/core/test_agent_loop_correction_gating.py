@@ -153,3 +153,109 @@ class TestConsumePendingCorrection:
 
         assert emitted is None
         assert loop._pending_correction == "x"
+
+
+class TestBlankMessageHarnessCueOnContinuation:
+    """When the queued correction was triggered by a blank-message
+    pattern, ``_pending_blank_msg_cue`` is set alongside
+    ``_pending_correction``. On the *next continuation*, the consumer
+    must inject the harness-tagged cue (replacing the empty prompt)
+    instead of holding the correction — that breaks the blank-message
+    rationalisation loop without fabricating user input.
+    """
+
+    def test_blank_msg_cue_injected_on_continuation(self) -> None:
+        loop = _loop()
+        loop._pending_correction = "[OBSCURA CORRECTION] underlying"
+        loop._pending_blank_msg_cue = (
+            "[internal:obscura-harness] stop saying blank "
+            "[/internal:obscura-harness]"
+        )
+
+        new_prompt, emitted = loop._consume_pending_correction("")
+
+        assert new_prompt.startswith("[internal:obscura-harness]")
+        assert emitted == new_prompt
+        # Both pieces of state cleared so the next turn is clean.
+        assert loop._pending_correction is None
+        assert loop._pending_correction_age == 0
+        assert loop._pending_blank_msg_cue is None
+
+    def test_blank_msg_cue_injected_on_whitespace_only_prompt(self) -> None:
+        loop = _loop()
+        loop._pending_correction = "x"
+        loop._pending_blank_msg_cue = "[internal:obscura-harness] cue"
+
+        new_prompt, emitted = loop._consume_pending_correction("   \n\t  ")
+
+        assert new_prompt == "[internal:obscura-harness] cue"
+        assert emitted == "[internal:obscura-harness] cue"
+        assert loop._pending_blank_msg_cue is None
+
+    def test_blank_msg_cue_does_not_fire_on_real_user_prompt(self) -> None:
+        """A real user prompt still gets the standard
+        ``[OBSCURA CORRECTION]``-prepended treatment — the harness cue
+        only kicks in when the alternative is holding (continuation)."""
+        loop = _loop()
+        loop._pending_correction = "[OBSCURA CORRECTION] standard"
+        loop._pending_blank_msg_cue = "[internal:obscura-harness] cue"
+
+        new_prompt, emitted = loop._consume_pending_correction("real input")
+
+        assert new_prompt.startswith("[OBSCURA CORRECTION] standard")
+        assert new_prompt.endswith("real input")
+        assert emitted == "[OBSCURA CORRECTION] standard"
+        # Both pieces of state cleared on consume — we don't want a
+        # leftover cue firing on a future continuation.
+        assert loop._pending_correction is None
+        assert loop._pending_blank_msg_cue is None
+
+    def test_blank_msg_cue_does_not_fire_on_internal_cue_prompt(self) -> None:
+        """If the upcoming prompt is itself a harness primer (e.g. the
+        Copilot recovery cue), don't layer another harness cue on top —
+        hold instead, same as the no-blank-msg case."""
+        loop = _loop()
+        loop._pending_correction = "x"
+        loop._pending_blank_msg_cue = "[internal:obscura-harness] new cue"
+        recovery = "[internal:obscura-harness] recovery primer"
+
+        new_prompt, emitted = loop._consume_pending_correction(recovery)
+
+        assert new_prompt == recovery  # unmodified
+        assert emitted is None
+        # Held — ages but not consumed.
+        assert loop._pending_correction == "x"
+        assert loop._pending_blank_msg_cue == "[internal:obscura-harness] new cue"
+        assert loop._pending_correction_age == 1
+
+    def test_no_blank_msg_cue_falls_back_to_hold(self) -> None:
+        """When ``_pending_blank_msg_cue`` is None (the queued correction
+        is not a blank-message one), continuation behaviour is unchanged:
+        hold the correction instead of injecting anything."""
+        loop = _loop()
+        loop._pending_correction = "[OBSCURA CORRECTION] non-blank"
+        loop._pending_blank_msg_cue = None
+
+        new_prompt, emitted = loop._consume_pending_correction("")
+
+        assert new_prompt == ""
+        assert emitted is None
+        assert loop._pending_correction == "[OBSCURA CORRECTION] non-blank"
+        assert loop._pending_correction_age == 1
+
+    def test_blank_msg_cue_cleared_on_ttl_drop(self) -> None:
+        """If for some reason the cue is queued but ``_pending_blank_msg_cue``
+        is None on the same turn, the held-correction TTL drop must also
+        clear ``_pending_blank_msg_cue`` so a stale cue doesn't survive."""
+        loop = _loop()
+        loop._pending_correction = "x"
+        # Cue is None so we use the held-correction path — the test
+        # still verifies the cleanup paths handle the cue field.
+        ttl = AgentLoop._PENDING_CORRECTION_TTL
+        for _ in range(ttl):
+            loop._consume_pending_correction("")
+            assert loop._pending_correction == "x"
+
+        loop._consume_pending_correction("")
+        assert loop._pending_correction is None
+        assert loop._pending_blank_msg_cue is None

@@ -1,0 +1,25 @@
+# Obsidian workspace state (local, not shared)
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/.cache
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+
+# Logs
+*.log
+
+# Editor
+.vscode/
+*.swp
+*.swo

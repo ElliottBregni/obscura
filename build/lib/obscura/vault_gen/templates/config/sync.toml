@@ -1,0 +1,29 @@
+# sync.toml — backend sync configuration for ${name}
+#
+# vault-gen sync push ${name}   -- push repo state to enabled backends
+# vault-gen sync pull ${name}   -- pull backend state into repo
+# vault-gen sync diff ${name}   -- show what would change on push
+# vault-gen sync status ${name} -- show adapter status and last sync times
+
+# ---------------------------------------------------------------------------
+# Unleash feature flags
+# ---------------------------------------------------------------------------
+# Uncomment to enable syncing flags/ to an Unleash instance.
+# Requires: VAULT_GEN_UNLEASH_TOKEN env var (admin API token).
+#
+# [[adapters]]
+# name = "unleash"
+# enabled = true
+#
+# [adapters.config]
+# base_url = "http://localhost:4242"
+# # api_token is read from env: VAULT_GEN_UNLEASH_TOKEN
+# project = "default"
+# environment = "development"
+# flags_dir = "flags/"
+
+# ---------------------------------------------------------------------------
+# Adding more adapters
+# ---------------------------------------------------------------------------
+# Third-party adapters are registered via the vault_gen.sync_adapters entry
+# point group. See vault-gen docs for the SyncAdapter interface.

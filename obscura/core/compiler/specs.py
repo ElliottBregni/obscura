@@ -57,12 +57,17 @@ class MCPServerSpec(BaseModel):
 
 
 class ToolRoutingSpec(BaseModel):
-    """Tool routing configuration within a template spec."""
+    """Tool routing configuration within a template spec.
+
+    See :class:`obscura.core.compiler.compiled.ToolRoutingConfig` for
+    the rationale behind ``pin_default_capabilities`` defaulting to
+    ``False``.
+    """
 
     enabled: bool = True
     max_tools: int = 50
     pinned_tools: list[str] = Field(default_factory=_empty_str_list)
-    pin_default_capabilities: bool = True
+    pin_default_capabilities: bool = False
     use_quality_scores: bool = True
     use_context_recall: bool = True
     min_quality_score: float = 0.2

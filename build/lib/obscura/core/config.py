@@ -1,0 +1,182 @@
+"""obscura.config — Shared configuration for the Obscura platform.
+
+Loads settings from environment variables, YAML files, or explicit values.
+All three subsystems (auth, telemetry, infrastructure) contribute sections
+to this unified config.
+"""
+
+from __future__ import annotations
+
+import os
+
+from pydantic import BaseModel
+
+from obscura.auth import secrets as _secrets
+
+
+class ObscuraConfig(BaseModel):
+    """Unified configuration for the Obscura platform.
+
+    Each subsystem reads its own section. Resolved from environment
+    variables when not set explicitly.
+    """
+
+    # Server
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+    # Supabase OAuth (primary identity provider for human users).
+    # Service/machine callers continue to use X-API-Key as a local bypass.
+    supabase_url: str = ""  # e.g. https://xxxx.supabase.co
+    supabase_jwt_secret: str = ""  # HS256 shared secret from Supabase project
+    supabase_jwks_url: str = ""  # RS256 JWKS URL; takes precedence over the secret
+    supabase_audience: str = "authenticated"  # default Supabase audience claim
+    supabase_issuer: str = ""  # auto-derived from supabase_url when blank
+
+    # Telemetry (OpenTelemetry)
+    otel_enabled: bool = True
+    otel_endpoint: str = "http://127.0.0.1:4317"
+    otel_service_name: str = "obscura-sdk"
+    log_level: str = "INFO"
+    log_format: str = "json"  # "json" | "text"
+
+    # Backends
+    default_backend: str = "copilot"
+
+    # Capability system
+    capability_secret: str = ""  # HMAC signing key; empty = random per-process
+    capability_ttl: int = 3600  # Token lifetime in seconds
+
+    # Rate limiting
+    rate_limit_rpm: int = 100  # requests per minute per user
+    rate_limit_concurrent: int = 10  # max concurrent requests per user
+
+    # Circuit breaker
+    circuit_breaker_threshold: int = 5  # failures before opening
+    circuit_breaker_recovery: float = 30.0  # seconds before half-open
+
+    # Retry
+    max_retries: int = 2
+    retry_initial_backoff: float = 0.5
+
+    # LLM cache
+    cache_enabled: bool = False  # opt-in
+    cache_max_entries: int = 1000
+    cache_default_ttl: float = 300.0  # 5 minutes
+
+    # A2A (Agent-to-Agent protocol)
+    a2a_enabled: bool = False
+    a2a_redis_url: str = ""  # empty = use InMemoryTaskStore
+    a2a_task_ttl: int = 86400  # TTL for completed tasks in Redis (seconds)
+    a2a_grpc_port: int = 50051  # gRPC server port (0 = disabled)
+    a2a_agent_name: str = "Obscura Agent"
+    a2a_agent_description: str = ""
+
+    # Kairos background daemon (opt-out: set OBSCURA_KAIROS=false to disable)
+    kairos_enabled: bool = True  # default on; OBSCURA_KAIROS=false to disable
+    kairos_proactive: bool = True  # OBSCURA_KAIROS_PROACTIVE=false to save tokens
+    kairos_dream: bool = True  # OBSCURA_KAIROS_DREAM=false to save tokens
+
+    # Undercover mode — strips AI attribution from commits (default on)
+    undercover_enabled: bool = True  # OBSCURA_UNDERCOVER=false to show attribution
+
+    # Deployment-safety override. When the server binds to a non-loopback
+    # address with auth disabled, startup aborts unless this is explicitly
+    # set to true. Intended only for isolated/air-gapped environments.
+    allow_unauthenticated: bool = False
+
+    def validate_deployment_safety(self) -> None:
+        """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
+
+        Auth is now always enforced by the API-key middleware, so the
+        previous "auth-off + non-loopback bind" foot-gun is structurally
+        impossible. ``allow_unauthenticated`` is kept on the config for
+        backwards compat with operators who still set the env var.
+        """
+        return
+
+    @classmethod
+    def from_env(cls) -> ObscuraConfig:
+        """Build config from environment variables with sensible defaults."""
+        return cls(
+            host=os.environ.get("OBSCURA_HOST", "0.0.0.0"),
+            port=int(os.environ.get("OBSCURA_PORT", "8080")),
+            # Supabase OAuth -- env wins, then OS keyring, then default.
+            supabase_url=_secrets.resolve("SUPABASE_URL", default="") or "",
+            supabase_jwt_secret=_secrets.resolve("SUPABASE_JWT_SECRET", default="")
+            or "",
+            supabase_jwks_url=_secrets.resolve("SUPABASE_JWKS_URL", default="") or "",
+            supabase_audience=_secrets.resolve(
+                "SUPABASE_AUDIENCE",
+                default="authenticated",
+            )
+            or "authenticated",
+            supabase_issuer=_secrets.resolve("SUPABASE_ISSUER", default="") or "",
+            # Telemetry
+            otel_enabled=os.environ.get("OTEL_ENABLED", "true").lower() == "true",
+            otel_endpoint=os.environ.get(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "http://127.0.0.1:4317",
+            ),
+            otel_service_name=os.environ.get("OTEL_SERVICE_NAME", "obscura-sdk"),
+            log_level=os.environ.get("OBSCURA_LOG_LEVEL", "INFO"),
+            log_format=os.environ.get("OBSCURA_LOG_FORMAT", "json"),
+            # Backends
+            default_backend=os.environ.get("OBSCURA_DEFAULT_BACKEND", "copilot"),
+            # Capability system
+            capability_secret=os.environ.get("OBSCURA_CAPABILITY_SECRET", ""),
+            capability_ttl=int(os.environ.get("OBSCURA_CAPABILITY_TTL", "3600")),
+            # Rate limiting
+            rate_limit_rpm=int(os.environ.get("OBSCURA_RATE_LIMIT_RPM", "100")),
+            rate_limit_concurrent=int(
+                os.environ.get("OBSCURA_RATE_LIMIT_CONCURRENT", "10"),
+            ),
+            # Circuit breaker
+            circuit_breaker_threshold=int(
+                os.environ.get("OBSCURA_CIRCUIT_BREAKER_THRESHOLD", "5"),
+            ),
+            circuit_breaker_recovery=float(
+                os.environ.get("OBSCURA_CIRCUIT_BREAKER_RECOVERY", "30.0"),
+            ),
+            # Retry
+            max_retries=int(os.environ.get("OBSCURA_MAX_RETRIES", "2")),
+            retry_initial_backoff=float(
+                os.environ.get("OBSCURA_RETRY_INITIAL_BACKOFF", "0.5"),
+            ),
+            # Cache
+            cache_enabled=os.environ.get("OBSCURA_CACHE_ENABLED", "false").lower()
+            == "true",
+            cache_max_entries=int(
+                os.environ.get("OBSCURA_CACHE_MAX_ENTRIES", "1000"),
+            ),
+            cache_default_ttl=float(
+                os.environ.get("OBSCURA_CACHE_DEFAULT_TTL", "300.0"),
+            ),
+            # A2A
+            a2a_enabled=os.environ.get("OBSCURA_A2A_ENABLED", "false").lower()
+            == "true",
+            a2a_redis_url=os.environ.get("OBSCURA_A2A_REDIS_URL", ""),
+            a2a_task_ttl=int(os.environ.get("OBSCURA_A2A_TASK_TTL", "86400")),
+            a2a_grpc_port=int(os.environ.get("OBSCURA_A2A_GRPC_PORT", "50051")),
+            a2a_agent_name=os.environ.get("OBSCURA_A2A_AGENT_NAME", "Obscura Agent"),
+            a2a_agent_description=os.environ.get("OBSCURA_A2A_AGENT_DESCRIPTION", ""),
+            # Kairos
+            kairos_enabled=os.environ.get("OBSCURA_KAIROS", "").strip().lower()
+            not in ("0", "false", "no", "off"),
+            kairos_proactive=os.environ.get("OBSCURA_KAIROS_PROACTIVE", "")
+            .strip()
+            .lower()
+            not in ("0", "false", "no", "off"),
+            kairos_dream=os.environ.get("OBSCURA_KAIROS_DREAM", "").strip().lower()
+            not in ("0", "false", "no", "off"),
+            # Undercover
+            undercover_enabled=os.environ.get("OBSCURA_UNDERCOVER", "").strip().lower()
+            not in ("0", "false", "no", "off"),
+            # Deployment safety
+            allow_unauthenticated=os.environ.get(
+                "OBSCURA_ALLOW_UNAUTHENTICATED", "false"
+            )
+            .strip()
+            .lower()
+            == "true",
+        )

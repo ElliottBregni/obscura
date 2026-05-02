@@ -1,0 +1,28 @@
+# Default workspace for ${name}
+# A workspace groups agents, tools, and policies into a deployable unit.
+
+[workspace]
+name = "default"
+version = "1"
+description = "Default workspace"
+
+[workspace.agents]
+# List agent manifest names (filename without .md) to include in this workspace.
+enabled = ["example-agent"]
+
+[workspace.tools]
+# Tool names available to agents in this workspace.
+allowed = ["read", "write", "search", "list_files", "history", "diff"]
+
+[workspace.memory]
+# Memory backend for agents in this workspace.
+backend = "ephemeral"        # options: ephemeral | vector | none
+# snapshot_dir = "Memory/"  # Uncomment to enable memory snapshots
+
+[workspace.policy]
+# Policy applied to this workspace. Must exist in policies/.
+ref = "default"
+
+[workspace.env]
+# Environment config applied to this workspace.
+ref = "default"

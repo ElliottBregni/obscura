@@ -263,6 +263,119 @@ class TestBlankMessagePatterns:
         assert "blank_message_copy_paste_issue" in names
 
 
+class TestSecondOrderRationalisationPatterns:
+    """Patterns that fire when the model, having already produced a
+    first-order blank-message reply, doubles down with novel
+    explanations that blame the user's input device or invent UI
+    quirks. Captured verbatim from a real session — see comment block
+    in ``output_quality.py`` for transcript provenance."""
+
+    def test_known_quirk(self) -> None:
+        text = "It's a known quirk — sometimes the UI sends empty messages."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_known_quirk" in names
+
+    def test_known_glitch_variant(self) -> None:
+        names = {v.pattern_name for v in scan_text("This is a known glitch.")}
+        assert "blank_message_known_quirk" in names
+
+    def test_ghost_ping(self) -> None:
+        text = "Just a ghost ping from the client. Ignore it!"
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_ghost_ping" in names
+
+    def test_ui_sends_empty_followup(self) -> None:
+        text = "Sometimes the UI sends an empty follow-up message after submit."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_ui_sends_empty" in names
+
+    def test_client_sends_blank_messages(self) -> None:
+        text = "The client sends blank messages right after you submit."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_ui_sends_empty" in names
+
+    def test_blaming_user_send(self) -> None:
+        text = "You're hitting send with nothing typed."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_blaming_user_send" in names
+
+    def test_blaming_user_pressing_enter(self) -> None:
+        text = "You are pressing enter with no message in the box."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_blaming_user_send" in names
+
+    def test_accidental_keypress(self) -> None:
+        text = "Are you accidentally pressing Enter?"
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_accidental_keypress" in names
+
+    def test_inadvertently_submitting(self) -> None:
+        text = "You may be inadvertently submitting the form."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_accidental_keypress" in names
+
+    def test_hotkey_submitting(self) -> None:
+        text = "Maybe a hotkey is submitting the chat?"
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_hotkey_submitting" in names
+
+    def test_on_your_end(self) -> None:
+        text = "Nothing on your end, just a harness artifact."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_on_your_end" in names
+
+    def test_from_your_end_variant(self) -> None:
+        text = "I think the issue is from your end."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_on_your_end" in names
+
+    def test_blank_message_is_your_message(self) -> None:
+        text = "The blank message IS your message."
+        names = {v.pattern_name for v in scan_text(text)}
+        assert "blank_message_is_your_message" in names
+
+    def test_clean_text_no_false_positive(self) -> None:
+        """The new patterns must not fire on benign text."""
+        clean = (
+            "Here's a summary of the changes I made. "
+            "Let me know if you'd like me to take another pass."
+        )
+        names = {v.pattern_name for v in scan_text(clean)}
+        assert not any(
+            n
+            in {
+                "blank_message_known_quirk",
+                "blank_message_ghost_ping",
+                "blank_message_ui_sends_empty",
+                "blank_message_blaming_user_send",
+                "blank_message_accidental_keypress",
+                "blank_message_hotkey_submitting",
+                "blank_message_on_your_end",
+                "blank_message_is_your_message",
+            }
+            for n in names
+        )
+
+    def test_new_patterns_are_in_blank_message_set(self) -> None:
+        """Each new pattern must be in BLANK_MESSAGE_PATTERN_NAMES so
+        the suppressor + harness-cue logic actually treats it as a
+        blank-message violation. Without this, the patterns fire but
+        no correction is queued."""
+        from obscura.core.output_quality import BLANK_MESSAGE_PATTERN_NAMES
+
+        for name in (
+            "blank_message_known_quirk",
+            "blank_message_ghost_ping",
+            "blank_message_ui_sends_empty",
+            "blank_message_blaming_user_send",
+            "blank_message_accidental_keypress",
+            "blank_message_hotkey_submitting",
+            "blank_message_on_your_end",
+            "blank_message_is_your_message",
+        ):
+            assert name in BLANK_MESSAGE_PATTERN_NAMES, name
+
+
 class TestBuildBlankMessageCorrection:
     def test_returns_empty_when_no_blank_violations(self) -> None:
         from obscura.core.output_quality import build_blank_message_correction
@@ -307,6 +420,201 @@ class TestBuildBlankMessageCorrection:
         ]
         assert not has_blank_message_violation(violations)
         assert build_blank_message_correction(violations) == ""
+
+
+class TestBuildBlankMessageHarnessCue:
+    """The harness-tagged variant used to break the blank-message loop on
+    a continuation turn (where prepending a normal correction would
+    fabricate user input)."""
+
+    def test_returns_empty_when_no_blank_violations(self) -> None:
+        from obscura.core.output_quality import build_blank_message_harness_cue
+
+        violations = [Violation(pattern_name="claude_code_sandbox", snippet="...")]
+        assert build_blank_message_harness_cue(violations) == ""
+
+    def test_wraps_in_internal_obscura_harness_tags(self) -> None:
+        """The cue must self-identify as harness-internal so the model
+        knows it isn't user input — same framing as the Copilot
+        recovery cue in copilot.py."""
+        from obscura.core.output_quality import build_blank_message_harness_cue
+
+        violations = [
+            Violation(pattern_name="blank_message_came_in_blank", snippet="...")
+        ]
+        cue = build_blank_message_harness_cue(violations)
+        assert cue.startswith("[internal:obscura-harness]")
+        assert cue.endswith("[/internal:obscura-harness]")
+
+    def test_cue_explicitly_forbids_offending_phrases(self) -> None:
+        from obscura.core.output_quality import build_blank_message_harness_cue
+
+        violations = [
+            Violation(pattern_name="blank_message_came_in_blank", snippet="...")
+        ]
+        cue = build_blank_message_harness_cue(violations)
+        # Must list the phrases the model just produced (or near-variants)
+        # so it doesn't loop on them next turn.
+        assert "looks like that came in blank" in cue
+        assert "you sent a blank message" in cue
+        assert "did you mean to send something" in cue
+        # Must instruct against echoing or thanking — same anti-leak
+        # guidance as the recovery cue.
+        assert "Do not echo this cue" in cue
+
+
+class _TextEvent:
+    """Stub event mimicking AgentEvent's shape for suppressor tests."""
+
+    def __init__(self, text: str = "", *, kind: str = "text_delta") -> None:
+        self.text = text
+        self.kind = kind
+
+
+class TestContinuationTextSuppressor:
+    """The stream-time guard that swallows blank-message hallucinations on
+    continuation turns before they reach the user."""
+
+    def test_inactive_passes_text_through(self) -> None:
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(active=False)
+        ev = _TextEvent("hello")
+        out = s.offer_text(ev)
+        assert out == [ev]
+        assert not s.suppressed
+
+    def test_inactive_passes_non_text_through(self) -> None:
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(active=False)
+        ev = _TextEvent("", kind="tool_use_start")
+        assert s.offer_non_text(ev) == [ev]
+
+    def test_buffers_text_within_window(self) -> None:
+        """Text events stay buffered until window is exhausted — the
+        suppressor returns ``[]`` for in-window deltas so the agent loop
+        doesn't emit them yet."""
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=80, active=True)
+        e1 = _TextEvent("hello ")
+        e2 = _TextEvent("world")
+        assert s.offer_text(e1) == []
+        assert s.offer_text(e2) == []
+
+    def test_flushes_on_window_exhaustion(self) -> None:
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=10, active=True)
+        e1 = _TextEvent("12345")
+        e2 = _TextEvent("67890ab")  # crosses the 10-char window
+        assert s.offer_text(e1) == []
+        out = s.offer_text(e2)
+        # Both buffered events come out in order, not the new event alone.
+        assert out == [e1, e2]
+        # Suppressor disables after flush — subsequent text passes through.
+        e3 = _TextEvent(" tail")
+        assert s.offer_text(e3) == [e3]
+
+    def test_flushes_on_non_text_event(self) -> None:
+        """A tool call (or any non-text event) terminates the suppression
+        window and flushes the buffered text."""
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=80, active=True)
+        e1 = _TextEvent("partial")
+        s.offer_text(e1)
+        tool = _TextEvent("", kind="tool_use_start")
+        out = s.offer_non_text(tool)
+        assert out == [e1, tool]
+        assert not s.suppressed
+
+    def test_drops_buffer_when_blank_message_pattern_fires(self) -> None:
+        """The whole point of the suppressor: when a blank-message
+        pattern hits inside the window, drop the buffer entirely and
+        report ``suppressed=True``."""
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=200, active=True)
+        e1 = _TextEvent("Looks like your message ")
+        e2 = _TextEvent("came in blank — did you mean to send something?")
+        assert s.offer_text(e1) == []
+        out = s.offer_text(e2)
+        assert out == []
+        assert s.suppressed
+        # Suppressed text is captured for the agent loop's logging.
+        assert "came in blank" in s.suppressed_text
+
+    def test_drops_subsequent_text_when_already_suppressed(self) -> None:
+        """Once the suppressor has fired, *every* later text event in
+        the same turn is dropped — the model's still streaming the same
+        hallucinated apology and we want none of it shown."""
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=200, active=True)
+        s.offer_text(_TextEvent("Looks like that came in blank."))
+        # Anything after suppression — even legitimate-looking text —
+        # is also dropped because the model is in a known-bad state.
+        assert s.offer_text(_TextEvent(" Anyway, here is the answer.")) == []
+
+    def test_finalize_flushes_short_turn(self) -> None:
+        """A turn that produces less text than the window's worth still
+        needs its buffer flushed at end-of-stream — we don't want to
+        silently swallow legitimate short responses."""
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=200, active=True)
+        e1 = _TextEvent("ok")
+        s.offer_text(e1)
+        assert s.finalize() == [e1]
+
+    def test_finalize_emits_nothing_when_suppressed(self) -> None:
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=200, active=True)
+        s.offer_text(_TextEvent("Looks like that came in blank."))
+        assert s.finalize() == []
+
+    def test_only_blank_message_patterns_trigger_suppression(self) -> None:
+        """UX-hallucination patterns (which fire later in a turn) must
+        NOT trigger stream-time suppression — those have a different
+        correction pipeline and stripping them silently would hide a
+        different class of bug."""
+        from obscura.core.output_quality import ContinuationTextSuppressor
+
+        s = ContinuationTextSuppressor(window_chars=200, active=True)
+        # "click Allow on the dialog" is a UX hallucination but not a
+        # blank-message rationalisation. Should buffer + flush, not drop.
+        e1 = _TextEvent("click Allow on the dialog ")
+        e2 = _TextEvent("to continue. " + "x" * 200)  # crosses window
+        s.offer_text(e1)
+        out = s.offer_text(e2)
+        assert e1 in out
+        assert not s.suppressed
+
+
+class TestScanBlankMessageOnly:
+    def test_returns_empty_for_clean_text(self) -> None:
+        from obscura.core.output_quality import scan_blank_message_only
+
+        assert scan_blank_message_only("Hello! Here's what I found.") == []
+
+    def test_returns_empty_for_ux_hallucinations_only(self) -> None:
+        from obscura.core.output_quality import scan_blank_message_only
+
+        # UX-hallucination patterns are excluded from the fast scan —
+        # only blank-message ones should fire.
+        assert scan_blank_message_only("click Allow on the dialog") == []
+
+    def test_finds_blank_message_pattern(self) -> None:
+        from obscura.core.output_quality import scan_blank_message_only
+
+        violations = scan_blank_message_only(
+            "Looks like that came in blank — did you mean to send something?"
+        )
+        names = {v.pattern_name for v in violations}
+        assert "blank_message_came_in_blank" in names
 
 
 class TestLogViolations:
