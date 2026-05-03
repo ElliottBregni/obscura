@@ -22,7 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.plugins.claude_compat.manifest_adapter import (
     CLAUDE_NS,
@@ -43,6 +43,16 @@ if TYPE_CHECKING:
     from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _as_str(value: Any, default: str = "") -> str:
+    """Coerce *value* to ``str`` (returning *default* when not a string)."""
+    return value if isinstance(value, str) else default
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    """Coerce *value* to ``int`` (returning *default* when not a non-bool int)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
 
 # Default search paths for Claude Code plugins.
 _CLAUDE_PLUGIN_DIRS: list[Path] = [
@@ -193,6 +203,8 @@ class ClaudePluginLoader:
         user_config = self._user_configs.get(spec.id, {})
 
         # Check for runtime override: load as native Python instead of MCP.
+        runtime_native: str | None = None
+        override: str | None = None
         try:
             from obscura.plugins.runtime_adapter import (
                 RUNTIME_NATIVE,
@@ -200,6 +212,7 @@ class ClaudePluginLoader:
                 load_native_handlers_from_plugin,
             )
 
+            runtime_native = RUNTIME_NATIVE
             override = get_runtime_override(spec.id)
             if override == RUNTIME_NATIVE:
                 logger.info("Runtime override: loading %s as native Python", spec.id)
@@ -242,7 +255,7 @@ class ClaudePluginLoader:
 
         # 3. MCP servers — load configs and register with Obscura's MCP system.
         #    Skip if runtime was overridden to native (tools already loaded above).
-        if override != RUNTIME_NATIVE:
+        if runtime_native is None or override != runtime_native:
             mcp = self._load_mcp_servers(
                 plugin_dir, plugin_name, plugin_data, user_config
             )
@@ -328,15 +341,18 @@ class ClaudePluginLoader:
                 raw = md_file.read_text(encoding="utf-8")
                 # Parse frontmatter.
                 from obscura.plugins.claude_compat.skill_loader import (
-                    _split_frontmatter,
+                    _split_frontmatter,  # pyright: ignore[reportPrivateUsage]
                 )
 
                 import yaml
 
                 fm_str, body = _split_frontmatter(raw)
-                meta = yaml.safe_load(fm_str) if fm_str else {}
-                if not isinstance(meta, dict):
-                    meta = {}
+                meta_obj: Any = yaml.safe_load(fm_str) if fm_str else {}
+                meta: dict[str, Any] = (
+                    cast(dict[str, Any], meta_obj)
+                    if isinstance(meta_obj, dict)
+                    else {}
+                )
 
                 rel = md_file.relative_to(agents_dir)
                 slug = ":".join(rel.with_suffix("").parts)
@@ -345,11 +361,11 @@ class ClaudePluginLoader:
                 agents.append(
                     {
                         "id": agent_id,
-                        "name": meta.get("name", slug),
-                        "description": meta.get("description", ""),
-                        "model": meta.get("model", ""),
+                        "name": _as_str(meta.get("name", slug), slug),
+                        "description": _as_str(meta.get("description", "")),
+                        "model": _as_str(meta.get("model", "")),
                         "system_prompt": body.strip(),
-                        "max_turns": meta.get("maxTurns", 10),
+                        "max_turns": _as_int(meta.get("maxTurns", 10), 10),
                         "source": str(md_file),
                         "source_type": "claude_plugin",
                     }
@@ -373,18 +389,26 @@ class ClaudePluginLoader:
         mcp_path = plugin_dir / ".mcp.json"
         if mcp_path.exists():
             try:
-                data = json.loads(mcp_path.read_text(encoding="utf-8"))
-                raw_servers = data.get("mcpServers", data)
-                if isinstance(raw_servers, dict):
-                    for server_name, config in raw_servers.items():
-                        if not isinstance(config, dict):
-                            continue
-                        scoped_name = f"{CLAUDE_NS}:{plugin_name}:{server_name}"
-                        # Substitute variables in command and args.
-                        config = self._substitute_mcp_config(
-                            config, plugin_dir, plugin_data, user_config
+                data_raw = json.loads(mcp_path.read_text(encoding="utf-8"))
+                if isinstance(data_raw, dict):
+                    data: dict[str, Any] = cast(dict[str, Any], data_raw)
+                    raw_servers = data.get("mcpServers", data)
+                    if isinstance(raw_servers, dict):
+                        raw_servers_dict: dict[Any, Any] = cast(
+                            dict[Any, Any], raw_servers
                         )
-                        servers[scoped_name] = config
+                        for server_name, config_raw in raw_servers_dict.items():
+                            if not isinstance(config_raw, dict) or not isinstance(
+                                server_name, str
+                            ):
+                                continue
+                            config: dict[str, Any] = cast(dict[str, Any], config_raw)
+                            scoped_name = f"{CLAUDE_NS}:{plugin_name}:{server_name}"
+                            # Substitute variables in command and args.
+                            substituted = self._substitute_mcp_config(
+                                config, plugin_dir, plugin_data, user_config
+                            )
+                            servers[scoped_name] = substituted
             except Exception:
                 logger.debug("Could not parse %s", mcp_path, exc_info=True)
 
@@ -392,20 +416,30 @@ class ClaudePluginLoader:
         manifest_path = plugin_dir / ".claude-plugin" / "plugin.json"
         if manifest_path.exists():
             try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                mcp_servers = manifest.get("mcpServers")
-                if isinstance(mcp_servers, dict):
-                    for server_name, config in mcp_servers.items():
-                        if isinstance(config, str):
-                            # Path reference — already handled above if it's .mcp.json.
-                            continue
-                        if isinstance(config, dict):
-                            scoped_name = f"{CLAUDE_NS}:{plugin_name}:{server_name}"
-                            if scoped_name not in servers:
-                                config = self._substitute_mcp_config(
-                                    config, plugin_dir, plugin_data, user_config
+                manifest_raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(manifest_raw, dict):
+                    manifest: dict[str, Any] = cast(dict[str, Any], manifest_raw)
+                    mcp_servers = manifest.get("mcpServers")
+                    if isinstance(mcp_servers, dict):
+                        mcp_servers_dict: dict[Any, Any] = cast(
+                            dict[Any, Any], mcp_servers
+                        )
+                        for server_name, config_raw in mcp_servers_dict.items():
+                            if not isinstance(server_name, str):
+                                continue
+                            if isinstance(config_raw, str):
+                                # Path reference — already handled above if it's .mcp.json.
+                                continue
+                            if isinstance(config_raw, dict):
+                                config = cast(dict[str, Any], config_raw)
+                                scoped_name = (
+                                    f"{CLAUDE_NS}:{plugin_name}:{server_name}"
                                 )
-                                servers[scoped_name] = config
+                                if scoped_name not in servers:
+                                    substituted = self._substitute_mcp_config(
+                                        config, plugin_dir, plugin_data, user_config
+                                    )
+                                    servers[scoped_name] = substituted
             except Exception:
                 pass
 
@@ -429,6 +463,7 @@ class ClaudePluginLoader:
                     user_config=user_config,
                 )
             elif isinstance(val, list):
+                val_list: list[Any] = cast(list[Any], val)
                 result[key] = [
                     substitute_variables(
                         v,
@@ -438,9 +473,10 @@ class ClaudePluginLoader:
                     )
                     if isinstance(v, str)
                     else v
-                    for v in val
+                    for v in val_list
                 ]
             elif isinstance(val, dict):
+                val_dict: dict[Any, Any] = cast(dict[Any, Any], val)
                 result[key] = {
                     k: substitute_variables(
                         v,
@@ -450,7 +486,7 @@ class ClaudePluginLoader:
                     )
                     if isinstance(v, str)
                     else v
-                    for k, v in val.items()
+                    for k, v in val_dict.items()
                 }
             else:
                 result[key] = val
@@ -469,36 +505,53 @@ class ClaudePluginLoader:
             return []
 
         try:
-            data = json.loads(hooks_path.read_text(encoding="utf-8"))
+            data_raw = json.loads(hooks_path.read_text(encoding="utf-8"))
         except Exception:
             logger.debug("Could not parse %s", hooks_path, exc_info=True)
             return []
 
+        if not isinstance(data_raw, dict):
+            return []
+        data: dict[str, Any] = cast(dict[str, Any], data_raw)
+
         hooks_data = data.get("hooks", data)
         if not isinstance(hooks_data, dict):
             return []
+        hooks_dict: dict[Any, Any] = cast(dict[Any, Any], hooks_data)
 
         loaded: list[dict[str, Any]] = []
-        for event_name, hook_entries in hooks_data.items():
+        for event_name, hook_entries in hooks_dict.items():
+            if not isinstance(event_name, str):
+                continue
             if not isinstance(hook_entries, list):
                 continue
-            for entry in hook_entries:
-                if not isinstance(entry, dict):
+            entries_list: list[Any] = cast(list[Any], hook_entries)
+            for entry_raw in entries_list:
+                if not isinstance(entry_raw, dict):
                     continue
+                entry: dict[str, Any] = cast(dict[str, Any], entry_raw)
                 # Substitute variables in hook commands.
-                hook_list = entry.get("hooks", [])
-                for hook in hook_list:
-                    if isinstance(hook, dict) and "command" in hook:
-                        hook["command"] = substitute_variables(
-                            hook["command"],
-                            plugin_root=plugin_dir,
-                            plugin_data=plugin_data,
-                            user_config=user_config,
-                        )
+                hook_list_raw = entry.get("hooks", [])
+                hook_list: list[Any] = (
+                    cast(list[Any], hook_list_raw)
+                    if isinstance(hook_list_raw, list)
+                    else []
+                )
+                for hook_raw in hook_list:
+                    if isinstance(hook_raw, dict):
+                        hook_dict: dict[str, Any] = cast(dict[str, Any], hook_raw)
+                        cmd = hook_dict.get("command")
+                        if isinstance(cmd, str):
+                            hook_dict["command"] = substitute_variables(
+                                cmd,
+                                plugin_root=plugin_dir,
+                                plugin_data=plugin_data,
+                                user_config=user_config,
+                            )
                 loaded.append(
                     {
                         "event": event_name,
-                        "matcher": entry.get("matcher", ""),
+                        "matcher": _as_str(entry.get("matcher", "")),
                         "hooks": hook_list,
                         "source_plugin": f"{CLAUDE_NS}:{plugin_name}",
                     }
@@ -521,7 +574,7 @@ class ClaudePluginLoadResult:
 
     @property
     def summary(self) -> str:
-        parts = []
+        parts: list[str] = []
         if self.loaded_specs:
             parts.append(f"{len(self.loaded_specs)} plugins")
         if self.skills:
