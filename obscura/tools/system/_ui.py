@@ -6,7 +6,10 @@ import json
 import sys
 from typing import Any, ClassVar
 
+from obscura.agent.interaction import AttentionPriority
+from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import tool
+from obscura.notifications.native import NativeNotifier
 from obscura.tools.system._policy import Policy
 
 
@@ -52,8 +55,6 @@ class UI:
     @classmethod
     def resolve_user_interact_callback(cls) -> Any:
         """Return the active user_interact callback (ToolContext first, global fallback)."""
-        from obscura.core.tool_context import current_tool_context
-
         ctx = current_tool_context()
         cb = ctx.user_interact_callback if ctx is not None else None
         return cb if cb is not None else cls.user_interact_callback
@@ -96,8 +97,6 @@ class UI:
         allow_custom: bool = False,
     ) -> str:
         """Present choices to the user via the TUI widget and return the selection."""
-        from obscura.core.tool_context import current_tool_context
-
         UI.ask_user_called = True
 
         ctx = current_tool_context()
@@ -193,8 +192,6 @@ class UI:
         Accepts either the structured ``questions`` array (Claude Code style) or a
         flat ``question`` string + optional ``choices`` list (Copilot / simple style).
         """
-        from obscura.core.tool_context import current_tool_context
-
         UI.ask_user_called = True
 
         ctx = current_tool_context()

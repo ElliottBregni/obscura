@@ -22,6 +22,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from obscura.arbiter.checks import (  # noqa: PLC2701
+    _STOP_WORDS,  # pyright: ignore[reportPrivateUsage]
+    _stem,  # pyright: ignore[reportPrivateUsage]
+)
+from obscura.core.task_queue import (
+    TaskQueue,
+    _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,10 +90,6 @@ class ArbiterWatchdog:
             now = time.time()
             # Find all claimed pending tasks.
             # We check directly since list_claimed requires a worker_id.
-            from obscura.core.task_queue import (
-                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
-            )
-
             conn = _open()
             try:
                 rows = conn.execute(
@@ -123,10 +128,6 @@ class ArbiterWatchdog:
     def _check_spinning_tasks(self) -> list[WatchdogAction]:
         actions: list[WatchdogAction] = []
         try:
-            from obscura.core.task_queue import (
-                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
-            )
-
             conn = _open()
             try:
                 rows = conn.execute(
@@ -161,9 +162,7 @@ class ArbiterWatchdog:
     def _check_orphan_tasks(self) -> list[WatchdogAction]:
         actions: list[WatchdogAction] = []
         try:
-            from obscura.core.task_queue import (
-                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
-            )
+            # lazy: avoid circular dep with obscura.kairos.engine
             from obscura.kairos.goals import GoalBoard
 
             board = GoalBoard()
@@ -236,14 +235,6 @@ class ArbiterWatchdog:
         """
         actions: list[WatchdogAction] = []
         try:
-            from obscura.arbiter.checks import (  # noqa: PLC2701
-                _stem,  # pyright: ignore[reportPrivateUsage]
-                _STOP_WORDS,  # pyright: ignore[reportPrivateUsage]
-            )
-            from obscura.core.task_queue import (
-                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
-            )
-
             def _kw(text: str) -> set[str]:
                 words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())
                 return {_stem(w) for w in words if w not in _STOP_WORDS}
@@ -319,10 +310,6 @@ class ArbiterWatchdog:
         """
         actions: list[WatchdogAction] = []
         try:
-            from obscura.core.task_queue import (
-                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
-            )
-
             conn = _open()
             try:
                 # Find pending tasks blocked by a recently completed task.
@@ -383,8 +370,6 @@ class ArbiterWatchdog:
         for action in actions:
             try:
                 if action.action == "release_claim":
-                    from obscura.core.task_queue import TaskQueue
-
                     q = TaskQueue()
                     worker = action.metadata.get("claimed_by", "")
                     if worker:
@@ -394,8 +379,6 @@ class ArbiterWatchdog:
                     results.append(f"Released: {action.target_id} — {action.reason}")
 
                 elif action.action == "kill_task":
-                    from obscura.core.task_queue import TaskQueue
-
                     TaskQueue().fail(
                         action.target_id,
                         f"Killed by watchdog: {action.reason}",

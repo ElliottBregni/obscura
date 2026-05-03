@@ -240,8 +240,6 @@ def init_workspace(
         )
 
     # -- default $skills -----------------------------------------------------
-    from obscura.core._default_skills import DEFAULT_SKILLS  # noqa: PLC0415
-
     for skill_name, content in DEFAULT_SKILLS.items():
         skill_dir = ws / "skills" / skill_name
         skill_dir.mkdir(parents=True, exist_ok=True)
@@ -252,8 +250,6 @@ def init_workspace(
         )
 
     # -- default *evals ------------------------------------------------------
-    from obscura.core._default_evals import DEFAULT_EVALS  # noqa: PLC0415
-
     for cmd_name, content in DEFAULT_EVALS.items():
         _write_if_missing(
             dst=ws / "evals" / f"{cmd_name}.eval.md",
@@ -272,8 +268,6 @@ def load_workspace_config(cwd: Path | None = None) -> dict[str, Any]:
     ``~/.obscura/config.toml``.  Also supports deprecated ``.yaml`` files.
     Returns the parsed config as a dict.
     """
-    from obscura.core.config_io import try_load_config  # noqa: PLC0415
-
     resolved_cwd = (cwd or Path.cwd()).resolve()
     search_dirs = [
         _resolve_global_home(),
@@ -306,9 +300,6 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
         list of ``"plugin_id: dep"`` strings.
 
     """
-    from obscura.plugins.bootstrapper import run_bootstrap
-    from obscura.plugins.loader import PluginLoader
-
     config = load_workspace_config(cwd)
     plugins_cfg = config.get("plugins", {})
     bootstrap_cfg = plugins_cfg.get("bootstrap", {})
@@ -331,8 +322,6 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
         "errors": [],
         "warnings": [],
     }
-
-    from obscura.plugins.loader import _apply_plugin_filters  # pyright: ignore[reportPrivateUsage]
 
     all_specs = _apply_plugin_filters(list(loader.discover_builtins()))
     for spec in all_specs:
@@ -597,8 +586,6 @@ _DEFAULT_CONFIG_TOML = textwrap.dedent("""\
 
 def _build_default_base_agent_template() -> str:
     """Build base-agent template dynamically with all builtin plugin IDs."""
-    from obscura.core.config_io import dumps_toml  # noqa: PLC0415
-
     try:
         from obscura.plugins.builtins import list_builtin_plugin_ids  # noqa: PLC0415
 

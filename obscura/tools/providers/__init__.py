@@ -71,8 +71,6 @@ class SystemToolProvider:
     def _build_delegation_tool(context: BrokerContext) -> Any:
         """Build a real delegation tool if the agent supports it."""
         try:
-            from obscura.tools.delegation import DelegationContext, make_task_tool
-
             agent = context.agent
             config: AgentConfig | None = getattr(agent, "config", None)
             if config is None or not config.can_delegate:
@@ -101,8 +99,6 @@ class MCPToolProvider:
         self._configs = configs
 
     async def install(self, context: BrokerContext) -> None:
-        from obscura.providers.mcp_backend import MCPBackend
-
         backend = MCPBackend(self._configs)
         await backend.start()
         context.agent.mcp_backend = backend
@@ -142,8 +138,6 @@ class MemoryToolProvider:
     """Provides memory and vector storage tools to agents."""
 
     async def install(self, context: BrokerContext) -> None:
-        from obscura.tools.memory_tools import make_memory_tool_specs
-
         user: AuthenticatedUser | None = getattr(context.agent, "user", None)
         if user is None:
             logger.warning("MemoryToolProvider: No user found on agent, skipping")

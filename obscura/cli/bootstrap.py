@@ -18,8 +18,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-# Import render functions lazily inside functions to avoid circular imports
+from obscura.agent.daemon_agent import (
+    DaemonAgent,
+    IMessageTrigger,
+    ScheduleTrigger,
+)
+from obscura.agent.interaction import AttentionPriority, InteractionBus
+from obscura.agent.supervisor import SupervisorConfig
+from obscura.cli.render import (
+    LabeledStreamRenderer,
+    console,
+    print_error,
+    print_warning,
+)
 from obscura.core.client import ObscuraClient
+from obscura.integrations.mcp.config_loader import (
+    build_runtime_server_configs,
+    discover_mcp_servers,
+)
+from obscura.manifest.models import AgentManifest
+from obscura.tools.swarm import load_agent_configs
 
 if TYPE_CHECKING:
     from obscura.cli.commands import REPLContext
@@ -28,11 +46,6 @@ if TYPE_CHECKING:
 def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:  # pyright: ignore[reportUnusedFunction]
     """Auto-discover MCP servers from ~/.obscura/mcp/. Returns (configs, names)."""
     try:
-        from obscura.integrations.mcp.config_loader import (
-            build_runtime_server_configs,
-            discover_mcp_servers,
-        )
-
         discovered = discover_mcp_servers()
         if discovered:
             return build_runtime_server_configs(discovered), [
@@ -59,8 +72,6 @@ def _discover_agents() -> list[str]:  # pyright: ignore[reportUnusedFunction]
 
 def _discover_agent_infos() -> list[AgentInfo]:
     try:
-        from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
-
         agents = load_agent_configs(include_disabled=True)
         return [
             AgentInfo(
@@ -97,13 +108,9 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
         return None
     agent_name, prompt = parsed
     runtime = await ctx.get_runtime()
-    from obscura.cli.render import LabeledStreamRenderer, console, print_warning
-    from obscura.manifest.models import AgentManifest
 
     manifest: AgentManifest | None = None
     try:
-        from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
-
         agent_configs = load_agent_configs(include_disabled=True)
         cfg = agent_configs.get(agent_name)
         if cfg is not None:
@@ -189,8 +196,6 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
         console.print("[dim][interrupted][/]")
     except Exception as exc:
         renderer.finish()
-        from obscura.cli.render import print_error
-
         print_error(f"Inline @{agent_name} failed: {exc}")
     else:
         renderer.finish()

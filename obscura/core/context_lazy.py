@@ -115,6 +115,14 @@ class LazySkillLoader:
 
         return skills
 
+    def discovered_skills(self) -> list[SkillMetadata]:
+        """Return discovered skill metadata (whatever ``discover_skills`` cached)."""
+        return list(self._metadata_cache.values())
+
+    def has_skill(self, skill_name: str) -> bool:
+        """Whether ``skill_name`` is in the discovered metadata."""
+        return skill_name in self._metadata_cache
+
     def load_skill_body(self, skill_name: str) -> str | None:
         """Load full skill body on-demand.
 
@@ -132,7 +140,9 @@ class LazySkillLoader:
 
         # Get metadata
         if skill_name not in self._metadata_cache:
-            logger.warning(f"Skill '{skill_name}' not found in metadata cache")
+            # Quiet by default — callers may iterate multiple loaders looking
+            # for a skill, so a miss here is normal, not a warning.
+            logger.debug(f"Skill '{skill_name}' not found in metadata cache")
             return None
 
         skill_meta = self._metadata_cache[skill_name]

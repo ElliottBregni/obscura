@@ -159,7 +159,7 @@ class ContextLoader:
         seen: set[str] = set()
         skills: list[SkillMetadata] = []
         for loader in self._ensure_lazy_loaders():
-            for s in loader._metadata_cache.values():  # noqa: SLF001
+            for s in loader.discovered_skills():
                 if s.name in seen:
                     continue
                 skills.append(s)
