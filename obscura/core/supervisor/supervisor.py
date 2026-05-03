@@ -102,7 +102,9 @@ class Supervisor:
         else:
             self._backend = create_supervisor_backend()
         self._config = config or SupervisorConfig()
-        self._lock = SessionLock(backend=self._backend, default_ttl=self._config.lock_ttl)
+        self._lock = SessionLock(
+            backend=self._backend, default_ttl=self._config.lock_ttl
+        )
         self._tool_store = ToolSnapshotStore(backend=self._backend)
 
     def _sql(self, sql: str) -> str:
@@ -240,12 +242,9 @@ class Supervisor:
             # Best-effort user resolution for profile injection.
             _user: Any = None
             try:
-                # obscura.auth.context.current_user is provided when running in
-                # an authenticated runtime; absent in standalone tooling.
-                auth_ctx: Any = __import__(
-                    "obscura.auth.context", fromlist=["current_user"]
-                )
-                _user = auth_ctx.current_user()
+                from obscura.auth.cli_user import local_cli_user
+
+                _user = local_cli_user()
             except Exception:
                 pass
             register_profile_goal_hooks(hooks, user=_user)
