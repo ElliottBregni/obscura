@@ -11,6 +11,7 @@ from pathlib import Path
 
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+from obscura.tools.system._shared import get_system_tool_specs
 from obscura.tools.system._shell import Shell
 
 
@@ -128,9 +129,6 @@ class Process:
         {"type": "object", "properties": {}},
     )
     async def list_unix_capabilities() -> str:
-        # lazy: avoid circular dep with obscura.tools.system (this module is imported by its __init__)
-        from obscura.tools.system import get_system_tool_specs
-
         tool_names = [spec.name for spec in get_system_tool_specs()]
         return json.dumps(
             {

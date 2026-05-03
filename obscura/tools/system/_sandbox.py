@@ -13,6 +13,7 @@ from obscura.auth.secrets import safe_subprocess_env
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
 from obscura.tools.system._policy import Policy
+from obscura.tools.system._shared import get_system_tool_specs
 from obscura.tools.system._shell import Shell
 import logging
 
@@ -72,9 +73,6 @@ class Sandbox:
         clean_name = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
         if not clean_name:
             return Policy.json_error("invalid_tool_name")
-        # lazy: avoid circular dep with obscura.tools.system (this module is imported by its __init__)
-        from obscura.tools.system import get_system_tool_specs
-
         if clean_name in {s.name for s in get_system_tool_specs()}:
             return Policy.json_error("name_conflicts_with_builtin", name=clean_name)
 

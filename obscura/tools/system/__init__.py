@@ -36,6 +36,10 @@ from obscura.tools.system._policy import Policy
 from obscura.tools.system._process import Process
 from obscura.tools.system._sandbox import Sandbox
 from obscura.tools.system._session import Session
+from obscura.tools.system._shared import (
+    get_system_tool_specs as get_system_tool_specs,
+    set_spec_provider as _set_spec_provider,
+)
 from obscura.tools.system._shell import Shell
 from obscura.tools.system._ui import UI
 from obscura.tools.system._web import Web
@@ -720,11 +724,13 @@ class Registry:
 
 
 # ---------------------------------------------------------------------------
-# get_system_tool_specs — aggregates all registered tools.
+# _aggregate_tool_specs — concrete aggregator. Registered with _shared so
+# children that need this list can import it from _shared.get_system_tool_specs
+# at module top without re-entering this __init__.
 # ---------------------------------------------------------------------------
 
 
-def get_system_tool_specs() -> list[ToolSpec]:
+def _aggregate_tool_specs() -> list[ToolSpec]:
     """Return default system tool specs for the agent runtime."""
     static_specs: list[ToolSpec] = [
         # Execution
@@ -809,6 +815,11 @@ def get_system_tool_specs() -> list[ToolSpec]:
     for spec in Sandbox.dynamic_tools.values():
         static_specs.append(spec)
     return static_specs
+
+
+# Wire the aggregator into _shared so children (_sandbox, _process) can
+# import get_system_tool_specs from _shared at module-top without cycles.
+_set_spec_provider(_aggregate_tool_specs)
 
 
 # ---------------------------------------------------------------------------
