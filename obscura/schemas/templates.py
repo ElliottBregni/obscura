@@ -104,8 +104,10 @@ class TemplateCreateRequest(BaseModel):
         default=None,
         description="APER phase config; null = no APER",
     )
-    skills: list[SkillSpecSchema] = Field(default_factory=list)
-    mcp_servers: list[MCPServerSpecSchema] = Field(default_factory=list)
+    skills: list[SkillSpecSchema] = Field(default_factory=list[SkillSpecSchema])
+    mcp_servers: list[MCPServerSpecSchema] = Field(
+        default_factory=list[MCPServerSpecSchema]
+    )
     mcp_auto_discover: bool = Field(default=False)
     mcp_config_path: str = Field(default="config/mcp-config.json")
     mcp_server_names: list[str] = Field(default_factory=list)
