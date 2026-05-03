@@ -68,8 +68,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_str_list() -> list[str]:
+    return []
+
+
+def _empty_plugin_list() -> list[ObscuraMarketplacePlugin]:
+    return []
 
 
 @dataclass
@@ -83,7 +92,7 @@ class ObscuraMarketplacePlugin:
     format: str = "obscura"  # "obscura" | "claude"
     path: str = ""  # relative path in repo
     source: str = ""  # remote source (git URL) if not bundled
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=_empty_str_list)
     author: str = ""
     license: str = ""
 
@@ -96,7 +105,19 @@ class ObscuraMarketplace:
     description: str = ""
     author: str = ""
     url: str = ""
-    plugins: list[ObscuraMarketplacePlugin] = field(default_factory=list)
+    plugins: list[ObscuraMarketplacePlugin] = field(default_factory=_empty_plugin_list)
+
+
+def _as_str(value: Any, default: str = "") -> str:
+    """Coerce *value* to ``str`` (returning *default* when not a string)."""
+    return value if isinstance(value, str) else default
+
+
+def _as_str_list(value: Any) -> list[str]:
+    """Coerce *value* to ``list[str]`` (filtering non-strings)."""
+    if not isinstance(value, list):
+        return []
+    return [v for v in cast(list[Any], value) if isinstance(v, str)]
 
 
 def parse_marketplace_toml(path: Path) -> ObscuraMarketplace | None:
@@ -108,47 +129,59 @@ def parse_marketplace_toml(path: Path) -> ObscuraMarketplace | None:
         return None
 
     try:
-        import tomllib
+        import tomllib as _tomllib
     except ImportError:
         try:
-            import tomli as tomllib  # type: ignore[no-redef]
+            import tomli as _tomllib  # type: ignore[no-redef]
         except ImportError:
             logger.warning("No TOML parser available (need Python 3.11+ or tomli)")
             return None
 
+    tomllib_any: Any = _tomllib
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data: dict[str, Any] = cast(
+            dict[str, Any], tomllib_any.loads(path.read_text(encoding="utf-8"))
+        )
     except Exception:
         logger.warning("Could not parse %s", path, exc_info=True)
         return None
 
-    meta = data.get("marketplace", {})
-    plugins_raw = data.get("plugins", [])
+    meta_raw = data.get("marketplace", {})
+    meta: dict[str, Any] = (
+        cast(dict[str, Any], meta_raw)
+        if isinstance(meta_raw, dict)
+        else cast(dict[str, Any], {})
+    )
+    plugins_raw_obj = data.get("plugins", [])
+    plugins_raw: list[Any] = (
+        cast(list[Any], plugins_raw_obj) if isinstance(plugins_raw_obj, list) else []
+    )
 
     plugins: list[ObscuraMarketplacePlugin] = []
-    for p in plugins_raw:
-        if not isinstance(p, dict):
+    for p_obj in plugins_raw:
+        if not isinstance(p_obj, dict):
             continue
+        p: dict[str, Any] = cast(dict[str, Any], p_obj)
         plugins.append(
             ObscuraMarketplacePlugin(
-                id=p.get("id", p.get("name", "")),
-                name=p.get("name", p.get("id", "")),
-                description=p.get("description", ""),
-                version=p.get("version", "0.0.0"),
-                format=p.get("format", "obscura"),
-                path=p.get("path", ""),
-                source=p.get("source", ""),
-                tags=p.get("tags", []),
-                author=p.get("author", ""),
-                license=p.get("license", ""),
+                id=_as_str(p.get("id", p.get("name", ""))),
+                name=_as_str(p.get("name", p.get("id", ""))),
+                description=_as_str(p.get("description", "")),
+                version=_as_str(p.get("version", "0.0.0"), "0.0.0"),
+                format=_as_str(p.get("format", "obscura"), "obscura"),
+                path=_as_str(p.get("path", "")),
+                source=_as_str(p.get("source", "")),
+                tags=_as_str_list(p.get("tags", [])),
+                author=_as_str(p.get("author", "")),
+                license=_as_str(p.get("license", "")),
             )
         )
 
     return ObscuraMarketplace(
-        name=meta.get("name", path.parent.name),
-        description=meta.get("description", ""),
-        author=meta.get("author", ""),
-        url=meta.get("url", ""),
+        name=_as_str(meta.get("name", path.parent.name), path.parent.name),
+        description=_as_str(meta.get("description", "")),
+        author=_as_str(meta.get("author", "")),
+        url=_as_str(meta.get("url", "")),
         plugins=plugins,
     )
 
