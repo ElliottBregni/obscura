@@ -15,12 +15,12 @@ from unittest.mock import patch
 
 import pytest
 
-from obscura.tools.system import (
-    append_text_file,
-    edit_text_file,
-    remove_path,
-    write_text_file,
-)
+from obscura.tools.system import FsWrite, Policy
+
+append_text_file = FsWrite.append_text_file
+edit_text_file = FsWrite.edit_text_file
+remove_path = FsWrite.remove_path
+write_text_file = FsWrite.write_text_file
 
 
 # ---------------------------------------------------------------------------
@@ -58,37 +58,32 @@ def fake_vault(tmp_path: Path) -> Path:
 
 def test_vault_write_allowed_outside_vault(tmp_path: Path) -> None:
     """Paths outside the vault are always allowed."""
-    from obscura.tools.system import _is_vault_write_allowed
-
-    with patch("obscura.core.paths.resolve_obscura_home", return_value=tmp_path / ".obscura"):
-        result = _is_vault_write_allowed(tmp_path / "some_file.txt")
+    with patch(
+        "obscura.core.paths.resolve_obscura_home",
+        return_value=tmp_path / ".obscura",
+    ):
+        result = Policy.is_vault_write_allowed(tmp_path / "some_file.txt")
     assert result is True
 
 
 def test_vault_write_blocked_user_zone(fake_vault: Path) -> None:
-    from obscura.tools.system import _is_vault_write_allowed
-
     target = fake_vault / "vault" / "user" / "profile.md"
     with patch("obscura.core.paths.resolve_obscura_home", return_value=fake_vault):
-        result = _is_vault_write_allowed(target)
+        result = Policy.is_vault_write_allowed(target)
     assert result is False
 
 
 def test_vault_write_blocked_shared_zone(fake_vault: Path) -> None:
-    from obscura.tools.system import _is_vault_write_allowed
-
     target = fake_vault / "vault" / "shared" / "notes.md"
     with patch("obscura.core.paths.resolve_obscura_home", return_value=fake_vault):
-        result = _is_vault_write_allowed(target)
+        result = Policy.is_vault_write_allowed(target)
     assert result is False
 
 
 def test_vault_write_allowed_agent_zone(fake_vault: Path) -> None:
-    from obscura.tools.system import _is_vault_write_allowed
-
     target = fake_vault / "vault" / "agent" / "scratch.md"
     with patch("obscura.core.paths.resolve_obscura_home", return_value=fake_vault):
-        result = _is_vault_write_allowed(target)
+        result = Policy.is_vault_write_allowed(target)
     assert result is True
 
 

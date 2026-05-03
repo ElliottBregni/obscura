@@ -7087,9 +7087,9 @@ async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
         print_error(f"Not a directory: {p}")
         return None
     # Register with system tools allowlist.
-    from obscura.tools.system import add_allowed_dir
+    from obscura.tools.system import Policy
 
-    add_allowed_dir(p)
+    Policy.add_allowed_dir(p)
     if do_chdir:
         os.chdir(p)
         print_ok(f"Allowed and changed working directory to: {p}")

@@ -13,12 +13,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
 from obscura.tools.policy import ToolPolicy, evaluate_policy
-from obscura.tools.policy.engine import _FS_TOOLS
+from obscura.tools.policy.engine import (
+    _FS_TOOLS,  # pyright: ignore[reportPrivateUsage]
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -518,8 +520,8 @@ async def policy_probe(
 
     if policy_override:
         try:
-            raw_allow = policy_override.get("allow_list") or []
-            raw_deny = policy_override.get("deny_list") or []
+            raw_allow = cast("list[str]", policy_override.get("allow_list") or [])
+            raw_deny = cast("list[str]", policy_override.get("deny_list") or [])
             raw_base = policy_override.get("base_dir")
             policy = ToolPolicy(
                 name="inline_override",
@@ -556,9 +558,16 @@ async def policy_probe(
                     )
                     if pv:
                         try:
-                            data = json.loads(pv[0].get("policy_json", "{}"))
-                            raw_allow = data.get("allow_list") or []
-                            raw_deny = data.get("deny_list") or []
+                            data = cast(
+                                "dict[str, Any]",
+                                json.loads(pv[0].get("policy_json", "{}")),
+                            )
+                            raw_allow = cast(
+                                "list[str]", data.get("allow_list") or [],
+                            )
+                            raw_deny = cast(
+                                "list[str]", data.get("deny_list") or [],
+                            )
                             raw_base = data.get("base_dir")
                             policy = ToolPolicy(
                                 name=f"db:{session_id}",

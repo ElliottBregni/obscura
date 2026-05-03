@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from obscura.core.types import ToolSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+# Generic for the @tool decorator: preserves the wrapped function's signature
+# so strict pyright reads ``X.foo(...)`` with the right arg/return types.
+F = TypeVar("F", bound="Callable[..., Any]")
 
 # ---------------------------------------------------------------------------
 # Tool registry
@@ -303,9 +307,9 @@ class ToolRegistry:
         # the most recently populated registry is what tool_search queries.
         if spec.name == "tool_search":
             try:
-                from obscura.tools.system import set_tool_registry
+                from obscura.tools.system import Registry
 
-                set_tool_registry(self)
+                Registry.set_tool_registry(self)
             except ImportError:
                 pass
 
@@ -517,7 +521,7 @@ def tool(
     output_schema: dict[str, Any] | None = None,
     pydantic_model: type[Any] | None = None,
     required_tier: str = "public",
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[F], F]:
     """Decorator to define a tool that works with both backends.
 
     Usage::
@@ -531,14 +535,15 @@ def tool(
             return Path(path).read_text()
 
     The decorated function gains a ``.spec`` attribute (``ToolSpec``) that
-    the client uses for registration. The function itself remains callable.
+    the client uses for registration. The function itself remains callable
+    and pyright preserves its original signature thanks to the ``F`` TypeVar.
 
     If *parameters* is omitted and *pydantic_model* is provided, the schema
     is generated from the Pydantic model. If both are omitted, a basic schema
     is inferred from type hints.
     """
 
-    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(fn: F) -> F:
         schema = parameters
         if schema is None and pydantic_model is not None:
             schema = pydantic_model.model_json_schema()
@@ -561,8 +566,9 @@ def tool(
                 return _traced_tool_call_async(name, fn, *args, **kwargs)
             return _traced_tool_call(name, fn, *args, **kwargs)
 
-        wrapper.spec = spec
-        return wrapper
+        # Attach the spec so callers can introspect via ``fn.spec``.
+        wrapper.spec = spec  # type: ignore[attr-defined]
+        return cast("F", wrapper)
 
     return decorator
 

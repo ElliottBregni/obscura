@@ -432,7 +432,7 @@ class ObscuraSession:
         _compact_threshold = int(_context_window * 0.60)
         _warn_threshold = ctx.client.context_warn_threshold
 
-        from obscura.tools.system import update_token_usage
+        from obscura.tools.system import Session
 
         # ── Vector memory pre-search ──────────────────────────────────────
         augmented_text = text
@@ -452,7 +452,7 @@ class ObscuraSession:
             ctx,
             pending_user_text=augmented_text,
         )
-        update_token_usage(
+        Session.update_token_usage(
             input_tokens=_pre_tokens,
             context_window=_context_window,
             compact_threshold=_compact_threshold,
@@ -470,7 +470,7 @@ class ObscuraSession:
                     return
                 if now - _last_usage_push < 0.75:
                     return
-            update_token_usage(
+            Session.update_token_usage(
                 input_tokens=_pre_tokens,
                 output_tokens=est_output_tokens,
                 context_window=_context_window,
@@ -713,7 +713,7 @@ class ObscuraSession:
         # Post-send: update token tracker
         _push_stream_token_usage(force=True)
         _post_tokens = estimate_effective_context_tokens(ctx)
-        update_token_usage(
+        Session.update_token_usage(
             input_tokens=_post_tokens,
             output_tokens=len(response_text) // 4,
             context_window=_context_window,
@@ -769,10 +769,10 @@ class ObscuraSession:
 
         # Auto-detect question choices
         try:
-            from obscura.tools.system import reset_ask_user_called, was_ask_user_called
+            from obscura.tools.system import UI
 
-            _tool_asked = was_ask_user_called()
-            reset_ask_user_called()
+            _tool_asked = UI.was_ask_user_called()
+            UI.reset_ask_user_called()
 
             if not _tool_asked:
                 from obscura.cli.widgets import (
@@ -1347,7 +1347,7 @@ class ObscuraSession:
         if config.tools_enabled:
             # ask_user callback
             try:
-                from obscura.tools.system import set_ask_user_callback
+                from obscura.tools.system import UI as _UI_for_ask
 
                 async def _ask_user_handler(
                     question: str,
@@ -1377,21 +1377,18 @@ class ObscuraSession:
                     )
                     return result.text
 
-                set_ask_user_callback(_ask_user_handler)
+                _UI_for_ask.set_ask_user_callback(_ask_user_handler)
             except Exception:
                 pass
 
             # Permission mode + plan approval callbacks
             try:
-                from obscura.tools.system import (
-                    set_permission_mode_callback,
-                    set_plan_approval_callback,
-                )
+                from obscura.tools.system import Session as _Session_for_plan
 
                 def _set_permission_mode(mode: str) -> None:
                     self._ctx._permission_mode = mode
 
-                set_permission_mode_callback(_set_permission_mode)
+                _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
 
                 async def _plan_approval_handler(plan_summary: str) -> bool:
                     from obscura.cli.widgets import (
@@ -1408,13 +1405,13 @@ class ObscuraSession:
                     )
                     return result.action == "approve"
 
-                set_plan_approval_callback(_plan_approval_handler)
+                _Session_for_plan.set_plan_approval_callback(_plan_approval_handler)
             except Exception:
                 pass
 
             # user_interact callback
             try:
-                from obscura.tools.system import set_user_interact_callback
+                from obscura.tools.system import UI as _UI_for_interact
 
                 async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
                     mode = kwargs.get("mode", "question")
@@ -1494,7 +1491,7 @@ class ObscuraSession:
                     )
                     return {"selected": result.text}
 
-                set_user_interact_callback(_user_interact_handler)
+                _UI_for_interact.set_user_interact_callback(_user_interact_handler)
             except Exception:
                 pass
 

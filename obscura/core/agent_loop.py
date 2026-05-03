@@ -1983,19 +1983,13 @@ class AgentLoop:
         early import don't block the agent loop.
         """
         try:
-            from obscura.tools import system as _sys
+            from obscura.tools.system import UI, Session
 
             return {
-                "ask_user_callback": getattr(_sys, "_ask_user_callback", None),
-                "user_interact_callback": getattr(
-                    _sys, "_user_interact_callback", None
-                ),
-                "permission_mode_callback": getattr(
-                    _sys, "_set_permission_mode_callback", None
-                ),
-                "plan_approval_callback": getattr(
-                    _sys, "_plan_approval_callback", None
-                ),
+                "ask_user_callback": UI.ask_user_callback,
+                "user_interact_callback": UI.user_interact_callback,
+                "permission_mode_callback": Session.permission_mode_callback,
+                "plan_approval_callback": Session.plan_approval_callback,
             }
         except Exception:
             return {}

@@ -399,7 +399,7 @@ class TestDetectQuestionChoices:
 @pytest.mark.asyncio
 async def test_ask_user_tool_with_choices() -> None:
     """ask_user tool with choices calls the callback and returns selection."""
-    from obscura.tools.system import ask_user, set_ask_user_callback
+    from obscura.tools.system import UI
 
     async def _mock_callback(
         question: str,
@@ -408,27 +408,27 @@ async def test_ask_user_tool_with_choices() -> None:
     ) -> str:
         return choices[1]
 
-    set_ask_user_callback(_mock_callback)
+    UI.set_ask_user_callback(_mock_callback)
     try:
         import json
 
-        result = await ask_user("Pick one", ["A", "B", "C"])
+        result = await UI.ask_user("Pick one", ["A", "B", "C"])
         parsed = json.loads(result)
         assert parsed["ok"] is True
         assert parsed["selected"] == "B"
     finally:
-        set_ask_user_callback(None)
+        UI.set_ask_user_callback(None)
 
 
 @pytest.mark.asyncio
 async def test_ask_user_tool_no_callback() -> None:
     """ask_user tool without callback returns error."""
-    from obscura.tools.system import ask_user, set_ask_user_callback
+    from obscura.tools.system import UI
 
-    set_ask_user_callback(None)
+    UI.set_ask_user_callback(None)
     import json
 
-    result = await ask_user("Pick one", ["A", "B"])
+    result = await UI.ask_user("Pick one", ["A", "B"])
     parsed = json.loads(result)
     assert parsed["ok"] is False
     assert parsed["error"] == "no_ui"

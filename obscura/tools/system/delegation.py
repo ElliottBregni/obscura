@@ -156,7 +156,10 @@ async def _execute_delegation(
             result = await _invoke_local(runtime, ref, prompt, mode)
         elif isinstance(ref, RemoteAgentRef):
             result = await _invoke_remote(ref, prompt)
-        elif isinstance(ref, UnixSocketAgentRef):
+        elif isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
+            ref,
+            UnixSocketAgentRef,
+        ):
             result = await _invoke_unix_socket(ref, prompt)
         else:
             return json.dumps(
@@ -178,7 +181,7 @@ async def _execute_delegation(
                 "result": result,
                 "prompt": prompt,
                 "duration_seconds": elapsed,
-                "result_length": len(result) if isinstance(result, str) else None,
+                "result_length": len(result),
             },
         )
     except Exception as exc:
@@ -215,20 +218,12 @@ async def _invoke_remote(
     prompt: str,
 ) -> str:
     """Invoke a remote A2A agent over HTTP."""
-    import uuid
-
     from obscura.integrations.a2a.client import A2AClient
-    from obscura.integrations.a2a.types import A2AMessage, TextPart
 
     client = A2AClient(ref.url)
     try:
         await client.connect()
-        message = A2AMessage(
-            role="user",
-            messageId=uuid.uuid4().hex,
-            parts=[TextPart(text=prompt)],
-        )
-        task = await client.send_message(message)
+        task = await client.send_message(prompt)
         # Extract text from the completed task.
         return _extract_task_text(task)
     finally:

@@ -9,23 +9,22 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from obscura.tools.system import (
-    set_user_interact_callback,
-    user_interact,
-)
+from obscura.tools.system import UI
+
+user_interact = UI.user_interact
 
 
 @pytest.fixture(autouse=True)
 def _reset_callback():
     """Reset the user_interact callback before/after each test."""
-    set_user_interact_callback(None)
+    UI.set_user_interact_callback(None)
     yield
-    set_user_interact_callback(None)
+    UI.set_user_interact_callback(None)
 
 
 def _make_callback(return_value: dict[str, Any]) -> AsyncMock:
     cb = AsyncMock(return_value=return_value)
-    set_user_interact_callback(cb)
+    UI.set_user_interact_callback(cb)
     return cb
 
 
