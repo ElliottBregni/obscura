@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Any, cast
 from collections.abc import Callable
 
 from obscura.cli.renderer.modern.theme import (
@@ -62,20 +63,29 @@ def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
 
     # Tool returns JSON with structured diff — parse it.
     try:
-        data = json.loads(raw)
+        data_raw: Any = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return None
 
-    if not isinstance(data, dict) or not data.get("ok"):
+    if not isinstance(data_raw, dict):
+        return None
+    data = cast(dict[str, Any], data_raw)
+    if not data.get("ok"):
         return None
 
-    diff = data.get("diff")
-    if not isinstance(diff, dict):
+    diff_raw: Any = data.get("diff")
+    if not isinstance(diff_raw, dict):
         return None
+    diff = cast(dict[str, Any], diff_raw)
 
-    path = data.get("path", "")
-    summary = diff.get("summary", "")
-    hunks = diff.get("hunks", [])
+    path = str(data.get("path", ""))
+    summary = str(diff.get("summary", ""))
+    hunks_raw: Any = diff.get("hunks", [])
+    hunks: list[dict[str, Any]] = (
+        [cast(dict[str, Any], h) for h in cast(list[Any], hunks_raw) if isinstance(h, dict)]
+        if isinstance(hunks_raw, list)
+        else []
+    )
 
     lines: list[str] = []
 
@@ -90,12 +100,26 @@ def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     cap = _MAX_LINES or float("inf")
     total_lines = 0
     for hunk in hunks:
-        hunk_header = hunk.get("header", "")
+        hunk_header = str(hunk.get("header", ""))
         if hunk_header:
             lines.append(_styled(f"  {hunk_header}", _S_CTX))
-        for diff_line in hunk.get("lines", []):
+        hunk_lines_raw: Any = hunk.get("lines", [])
+        hunk_lines: list[str] = (
+            [str(line) for line in cast(list[Any], hunk_lines_raw)]
+            if isinstance(hunk_lines_raw, list)
+            else []
+        )
+        for diff_line in hunk_lines:
             if total_lines >= cap:
-                remaining = sum(len(h.get("lines", [])) for h in hunks) - total_lines
+                remaining = (
+                    sum(
+                        len(cast(list[Any], h.get("lines", [])))
+                        if isinstance(h.get("lines"), list)
+                        else 0
+                        for h in hunks
+                    )
+                    - total_lines
+                )
                 if remaining > 0:
                     lines.append(_styled(f"  ... ({remaining} more lines)", _S_CTX))
                 break

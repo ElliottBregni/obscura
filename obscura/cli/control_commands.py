@@ -9,7 +9,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -67,7 +67,7 @@ class HeartbeatReport:
     # Tools
     tools_enabled: bool = False
     tool_count: int = 0
-    tool_names: list[str] = field(default_factory=list)
+    tool_names: list[str] = field(default_factory=lambda: cast(list[str], []))
 
     # Events DB
     events_db_ok: bool = False

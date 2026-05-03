@@ -328,7 +328,7 @@ def _refresh_session(cfg: SupabaseCliConfig, refresh_token: str) -> StoredSessio
     if resp.status_code != 200:
         raise RuntimeError(f"refresh failed ({resp.status_code}): {resp.text}")
     body: dict[str, Any] = cast(dict[str, Any], resp.json())
-    user_raw = body.get("user") or {}
+    user_raw: Any = body.get("user") or {}
     user: dict[str, Any] = (
         cast(dict[str, Any], user_raw) if isinstance(user_raw, dict) else {}
     )
@@ -552,8 +552,11 @@ def _run_oauth_flow(
     )
     if resp.status_code != 200:
         raise RuntimeError(f"Code exchange failed ({resp.status_code}): {resp.text}")
-    body = resp.json()
-    user = body.get("user") or {}
+    body: dict[str, Any] = cast(dict[str, Any], resp.json())
+    user_raw: Any = body.get("user") or {}
+    user: dict[str, Any] = (
+        cast(dict[str, Any], user_raw) if isinstance(user_raw, dict) else {}
+    )
     provider_token = body.get("provider_token")
     provider_refresh_token = body.get("provider_refresh_token")
     session = StoredSession(
@@ -593,8 +596,11 @@ def _verify_otp(cfg: SupabaseCliConfig, email: str, token: str) -> StoredSession
     )
     if resp.status_code != 200:
         raise RuntimeError(f"OTP verify failed ({resp.status_code}): {resp.text}")
-    body = resp.json()
-    user = body.get("user") or {}
+    body: dict[str, Any] = cast(dict[str, Any], resp.json())
+    user_raw: Any = body.get("user") or {}
+    user: dict[str, Any] = (
+        cast(dict[str, Any], user_raw) if isinstance(user_raw, dict) else {}
+    )
     session = StoredSession(
         access_token=body["access_token"],
         refresh_token=body["refresh_token"],
@@ -917,14 +923,14 @@ def secrets_strict_env(tail: int, clear: bool) -> None:
         if not raw.strip():
             continue
         try:
-            entry = json.loads(raw)
+            entry: dict[str, Any] = cast(dict[str, Any], json.loads(raw))
         except ValueError:
             click.echo(f"  [malformed] {raw}")
             continue
         ts = entry.get("ts", "?")
-        stripped = entry.get("stripped") or []
+        stripped: Any = entry.get("stripped") or []
         if isinstance(stripped, list):
-            names = ", ".join(str(n) for n in stripped)
+            names = ", ".join(str(n) for n in cast(list[Any], stripped))
         else:
             names = str(stripped)
         click.echo(f"  {ts}  stripped={names}")

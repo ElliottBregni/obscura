@@ -25,14 +25,14 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.cli.bootstrap import (
-    _discover_mcp,
-    _run_inline_agent_from_mention,
+    _discover_mcp,  # pyright: ignore[reportPrivateUsage]
+    _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]
 )
 from obscura.cli.commands import (
-    _FILE_WRITE_TOOLS,
+    _FILE_WRITE_TOOLS,  # pyright: ignore[reportPrivateUsage]
     REPLContext,
     handle_command,
 )
@@ -68,7 +68,7 @@ _log = logging.getLogger("obscura.cli.session")
 _session_state: dict[str, bool] = {"titled": False}
 
 
-def _swallow(label: str, exc: Exception) -> None:
+def _swallow(label: str, exc: Exception) -> None:  # pyright: ignore[reportUnusedFunction]
     """Log a swallowed exception at DEBUG level instead of silently ignoring."""
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
@@ -82,13 +82,13 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
                 before = ""
-            ctx._pending_file_reads[ev.tool_use_id] = (path, before)
+            ctx._pending_file_reads[ev.tool_use_id] = (path, before)  # pyright: ignore[reportPrivateUsage]
 
     elif (
         ev.kind == AgentEventKind.TOOL_RESULT
-        and ev.tool_use_id in ctx._pending_file_reads
+        and ev.tool_use_id in ctx._pending_file_reads  # pyright: ignore[reportPrivateUsage]
     ):
-        path, before = ctx._pending_file_reads.pop(ev.tool_use_id)
+        path, before = ctx._pending_file_reads.pop(ev.tool_use_id)  # pyright: ignore[reportPrivateUsage]
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
@@ -120,7 +120,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
 
 def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     """If in PLAN mode, attempt to parse a structured plan from the response."""
-    mm = ctx._mode_manager
+    mm = ctx._mode_manager  # pyright: ignore[reportPrivateUsage]
     if mm is None:
         return
 
@@ -140,7 +140,7 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
         render_plan(plan)
 
 
-def _track_task_surface_event(ctx: Any, ev: Any) -> None:
+def _track_task_surface_event(ctx: Any, ev: Any) -> None:  # pyright: ignore[reportUnusedFunction]
     """Compatibility stub: track a task-surface event (no-op)."""
     return
 
@@ -234,7 +234,7 @@ class ObscuraSession:
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
-        mcp_configs, mcp_names = self._discover_tools(config)
+        mcp_configs, _ = self._discover_tools(config)
         self._init_vector_memory()
         combined_system = self._compose_system_prompt(config)
         self._combined_system = combined_system
@@ -377,7 +377,7 @@ class ObscuraSession:
                     text,
                     inline_agent_response,
                     turn_number=turn_num,
-                    classifier=ctx._turn_classifier,
+                    classifier=ctx._turn_classifier,  # pyright: ignore[reportPrivateUsage]
                 )
             return inline_agent_response
 
@@ -385,9 +385,10 @@ class ObscuraSession:
 
         renderer = create_renderer(streaming_status=streaming_status)
         # Feed session context into the modern renderer's status bar
+        renderer_any: Any = renderer
         if hasattr(renderer, "set_session_context"):
             _ps = getattr(ctx, "_prompt_status", None)
-            renderer.set_session_context(
+            renderer_any.set_session_context(
                 title=getattr(_ps, "session_title", "") or "",
                 model=ctx.model or "",
                 ctx_pct=getattr(_ps, "ctx_pct", 0),
@@ -441,8 +442,8 @@ class ObscuraSession:
             augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
         if ctx.vector_store is not None:
-            if ctx._context_router is not None:
-                vm_context = search_with_router(ctx._context_router, text)
+            if ctx._context_router is not None:  # pyright: ignore[reportPrivateUsage]
+                vm_context = search_with_router(ctx._context_router, text)  # pyright: ignore[reportPrivateUsage]
             else:
                 vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
             if vm_context:
@@ -496,11 +497,11 @@ class ObscuraSession:
             nonlocal _stream_output_chars
             _buf: list[str] = []
             _effective_kwargs = dict(effective_kwargs)
-            if hasattr(ctx, "_effort_level") and ctx._effort_level:
+            if hasattr(ctx, "_effort_level") and ctx._effort_level:  # pyright: ignore[reportPrivateUsage]
                 try:
                     from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
-                    _lvl = EffortLevel(ctx._effort_level)
+                    _lvl = EffortLevel(ctx._effort_level)  # pyright: ignore[reportPrivateUsage]
                     _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[
                         _lvl
                     ]
@@ -571,8 +572,8 @@ class ObscuraSession:
                             from obscura.cli.tool_collapse import ToolCollapser
 
                             if not hasattr(ctx, "_collapser"):
-                                ctx._collapser = ToolCollapser()
-                            ctx._collapser.record(tool_name, tool_input)
+                                ctx._collapser = ToolCollapser()  # pyright: ignore[reportPrivateUsage]
+                            ctx._collapser.record(tool_name, tool_input)  # pyright: ignore[reportPrivateUsage]
                         except Exception:
                             pass
                         # Tips
@@ -603,13 +604,16 @@ class ObscuraSession:
                     ):
                         meta = getattr(event, "metadata", None)
                         if meta is not None:
-                            _usage = getattr(meta, "usage", None) or {}
+                            _usage: Any = getattr(meta, "usage", None) or {}
                             if isinstance(_usage, dict):
-                                inp = _usage.get("input_tokens", 0) or 0
-                                out = _usage.get("output_tokens", 0) or 0
+                                _usage_dict = cast(dict[str, Any], _usage)
+                                inp: int = int(_usage_dict.get("input_tokens", 0) or 0)
+                                out: int = int(
+                                    _usage_dict.get("output_tokens", 0) or 0
+                                )
                             else:
-                                inp = getattr(_usage, "input_tokens", 0) or 0
-                                out = getattr(_usage, "output_tokens", 0) or 0
+                                inp = int(getattr(_usage, "input_tokens", 0) or 0)
+                                out = int(getattr(_usage, "output_tokens", 0) or 0)
                             if inp > 0 or out > 0:
                                 try:
                                     from obscura.core.cost_tracker import (
@@ -707,7 +711,7 @@ class ObscuraSession:
                 text,
                 response_text,
                 turn_number=turn_num,
-                classifier=ctx._turn_classifier,
+                classifier=ctx._turn_classifier,  # pyright: ignore[reportPrivateUsage]
             )
 
         # Post-send: update token tracker
@@ -749,14 +753,18 @@ class ObscuraSession:
             try:
                 from obscura.core.session_utils import generate_session_title
 
-                title = await generate_session_title(text, ctx.client._backend)
+                title = await generate_session_title(
+                    text,
+                    ctx.client._backend,  # pyright: ignore[reportPrivateUsage]
+                )
                 if title:
                     await ctx.store.update_session(ctx.session_id, summary=title)
+                    ctx_any: Any = ctx
                     if (
                         hasattr(ctx, "_prompt_status")
-                        and ctx._prompt_status is not None
+                        and ctx_any._prompt_status is not None
                     ):
-                        ctx._prompt_status.session_title = title
+                        ctx_any._prompt_status.session_title = title
                     console.print(
                         f"  [dim]session titled:[/] [bold bright_cyan]{title}[/]",
                         highlight=False,
@@ -916,7 +924,7 @@ class ObscuraSession:
                         contacts=tuple(im_cfg.get("contacts", [])),
                         poll_interval=im_cfg.get("poll_interval", 30),
                         notify_user=tdef.notify_user,
-                        priority=tdef.priority,
+                        priority=cast(Any, tdef.priority),
                         data=im_data,
                     ),
                 )
@@ -963,7 +971,7 @@ class ObscuraSession:
                 _log.debug("Failed to load persisted schedules: %s", _sched_exc)
 
             daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
-            daemon._bus = bus
+            daemon._bus = bus  # pyright: ignore[reportPrivateUsage]
             task: asyncio.Task[None] = asyncio.create_task(
                 daemon.loop_forever(),
                 name=f"daemon-{agent_def.name}",
@@ -1386,7 +1394,7 @@ class ObscuraSession:
                 from obscura.tools.system import Session as _Session_for_plan
 
                 def _set_permission_mode(mode: str) -> None:
-                    self._ctx._permission_mode = mode
+                    self._ctx._permission_mode = mode  # pyright: ignore[reportPrivateUsage]
 
                 _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
 
@@ -1573,7 +1581,7 @@ class ObscuraSession:
             from obscura.core.tool_score_index import ToolScoreIndex
             from obscura.plugins.loader import (
                 PluginLoader,
-                _load_plugin_config_flag,
+                _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
             )
             from obscura.plugins.registries.capability_index import CapabilityIndex
 
@@ -1582,7 +1590,7 @@ class ObscuraSession:
 
             _cap_index = CapabilityIndex()
             _pl = PluginLoader()
-            _all_pspecs = []
+            _all_pspecs: list[Any] = []
             if _load_plugin_config_flag("load_builtins"):
                 _all_pspecs.extend(_pl.discover_builtins())
             _all_pspecs.extend(_pl.discover_local())
@@ -1597,7 +1605,11 @@ class ObscuraSession:
                 capability_index=_cap_index,
                 backend=config.backend,
             )
-            self._client._backend.set_tool_router(_router)
+            from obscura.core.types import ToolRouterCapable
+
+            backend = self._client._backend  # pyright: ignore[reportPrivateUsage]
+            if isinstance(backend, ToolRouterCapable):
+                backend.set_tool_router(_router)
             self._tool_router_ref = _router
         except Exception:
             pass
@@ -1621,12 +1633,16 @@ class ObscuraSession:
             with contextlib.suppress(Exception):
                 await self._client.reset_session()
             try:
-                from obscura.core.context import summarize_session_for_resume
-
-                return summarize_session_for_resume(
+                # ``summarize_session_for_resume`` is provided when the session
+                # context module is available; absent in trimmed installs.
+                ctx_mod: Any = __import__(
+                    "obscura.core.context", fromlist=["summarize_session_for_resume"]
+                )
+                summary: Any = ctx_mod.summarize_session_for_resume(
                     config.session_id,
                     resolve_obscura_home() / "events.db",
                 )
+                return str(summary) if summary else ""
             except Exception:
                 pass
         return ""

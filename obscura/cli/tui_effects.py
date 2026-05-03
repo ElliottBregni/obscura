@@ -126,7 +126,7 @@ def turn_summary(
         for t in tools_used:
             short = t.replace("_text_file", "").replace("_files", "")
             counts[short] = counts.get(short, 0) + 1
-        tool_parts = []
+        tool_parts: list[str] = []
         for name, count in counts.items():
             if count > 1:
                 tool_parts.append(f"{name} ×{count}")

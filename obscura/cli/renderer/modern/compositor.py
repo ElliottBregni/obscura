@@ -72,7 +72,7 @@ class Compositor:
         content_region = region.inner(node.style)
         cursor_y = content_region.y
         for child in node.children:
-            if not isinstance(child, Component) or not child.visible:
+            if not child.visible:
                 continue
             child_region = layout.get(id(child))
             if child_region.width == 0 and child_region.height == 0:

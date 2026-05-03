@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import cast
 
 
 class BorderStyle(Enum):
@@ -119,7 +120,9 @@ class Region:
 class LayoutResult:
     """Mapping from components to their allocated regions."""
 
-    regions: dict[int, Region] = field(default_factory=dict)
+    regions: dict[int, Region] = field(
+        default_factory=lambda: cast(dict[int, Region], {})
+    )
 
     def get(self, component_id: int) -> Region:
         return self.regions.get(component_id, Region())
@@ -202,7 +205,7 @@ class LayoutEngine:
         content = outer.inner(style)
         cursor_y = content.y
         for child in node.children:
-            if not isinstance(child, Component) or not child.visible:
+            if not child.visible:
                 continue
             child_height = self._layout_node(
                 child,

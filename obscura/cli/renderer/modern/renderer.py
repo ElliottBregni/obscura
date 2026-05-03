@@ -156,7 +156,7 @@ class ModernRenderer:
         fps_str = os.environ.get("OBSCURA_RENDERER_FPS", "")
         if fps_str:
             with contextlib.suppress(ValueError):
-                self.FRAME_INTERVAL_S = 1.0 / max(1, int(fps_str))
+                self.FRAME_INTERVAL_S = 1.0 / max(1, int(fps_str))  # pyright: ignore[reportConstantRedefinition]
 
         # SIGWINCH
         with contextlib.suppress(OSError, ValueError):

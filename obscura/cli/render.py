@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from pathlib import Path
+from typing import IO, Any, cast
+
+from typing_extensions import override
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -116,7 +119,7 @@ def _detect_language(text: str) -> str | None:
     return None
 
 
-def _render_structured(text: str) -> Syntax | None:
+def _render_structured(text: str) -> Syntax | None:  # pyright: ignore[reportUnusedFunction]
     """If text looks like code/JSON/TOML, return a Syntax object."""
     lang = _detect_language(text)
     if lang:
@@ -152,15 +155,13 @@ class OutputManager:
         self._buffer: list[str] = []
         self._session_log_path = None
 
-    def configure_session_log_path(self, path) -> None:
+    def configure_session_log_path(self, path: str | Path) -> None:
         """Configure directory where session hidden deltas will be stored.
 
         Expects a pathlib.Path or str directory. Creates a file named
         'hidden_deltas.log' in the provided directory.
         """
         try:
-            from pathlib import Path
-
             p = Path(path)
             p.mkdir(parents=True, exist_ok=True)
             file_path = p / "hidden_deltas.log"
@@ -240,10 +241,12 @@ if config.CAPTURE_PRINTS:
 
     _orig_print = builtins.print
 
-    def _capturing_print(*args, **kwargs) -> None:
+    def _capturing_print(*args: Any, **kwargs: Any) -> None:
         _orig_print(*args, **kwargs)
         with contextlib.suppress(Exception):
-            output.capture_internal(" ".join(str(a) for a in args))
+            output.capture_internal(
+                " ".join(str(cast(object, a)) for a in args)
+            )
 
     builtins.print = _capturing_print
 
@@ -278,7 +281,7 @@ class _DynamicStdout:
         return True
 
 
-console = Console(file=_DynamicStdout(), force_terminal=True, legacy_windows=False)
+console = Console(file=cast(IO[str], _DynamicStdout()), force_terminal=True, legacy_windows=False)
 
 # Active renderer for expand-preview hotkey (set by send_message)
 _active_renderer: Any = None
@@ -328,7 +331,7 @@ class StreamRenderer:
         self._thinking_blocks: list[str] = []  # completed thinking blocks
         self._in_thinking = False
         # StreamingStatus from prompt.py (toolbar spinner)
-        self._ss: object | None = external_status or streaming_status
+        self._ss: Any = external_status or streaming_status
         # jitter control for reasoning preview
         self._last_preview_update: float = float("-inf")
         import os as _os
@@ -347,13 +350,15 @@ class StreamRenderer:
                 self._thinking_buf.append(event.text)
                 # Persist hidden reasoning deltas to session log for later replay
                 try:
-                    status = None
-                    if hasattr(event, "raw") and isinstance(event.raw, dict):
-                        status = event.raw.get("status", "")
+                    status: Any = None
+                    raw: Any = getattr(event, "raw", None)
+                    if isinstance(raw, dict):
+                        raw_dict = cast(dict[str, Any], raw)
+                        status = raw_dict.get("status", "")
                     output.capture_hidden_delta(
                         "REASONING_DELTA",
                         event.text,
-                        status=status or "",
+                        status=str(status) if status else "",
                     )
                 except Exception:
                     pass
@@ -416,7 +421,7 @@ class StreamRenderer:
             except Exception:
                 pass
 
-    def _update_thinking_preview(self, raw_status: dict | None = None) -> None:
+    def _update_thinking_preview(self, raw_status: dict[str, Any] | None = None) -> None:
         """Update toolbar preview, but respect jitter so updates are rate-limited."""
         if self._ss is None:
             return
@@ -430,8 +435,8 @@ class StreamRenderer:
             preview = "".join(self._thinking_buf).strip().replace("\n", " ")
             if len(preview) > 80:
                 preview = "..." + preview[-77:]
-            payload = {"preview": preview}
-            if raw_status and isinstance(raw_status, dict) and "status" in raw_status:
+            payload: dict[str, Any] = {"preview": preview}
+            if raw_status and "status" in raw_status:
                 payload["status"] = raw_status.get("status")
             if hasattr(self._ss, "update"):
                 try:
@@ -439,18 +444,14 @@ class StreamRenderer:
                 except Exception:
                     # fallback to attribute assignment
                     try:
-                        self._ss.preview = preview  # type: ignore[attr-defined]
+                        self._ss.preview = preview
                     except Exception:
                         pass
             else:
                 try:
-                    self._ss.preview = preview  # type: ignore[attr-defined]
-                    if (
-                        raw_status
-                        and isinstance(raw_status, dict)
-                        and "status" in raw_status
-                    ):
-                        self._ss.text = raw_status.get("status")  # type: ignore[attr-defined]
+                    self._ss.preview = preview
+                    if raw_status and "status" in raw_status:
+                        self._ss.text = raw_status.get("status")
                 except Exception:
                     pass
             self._last_preview_update = now
@@ -666,6 +667,7 @@ class LabeledStreamRenderer(StreamRenderer):
         self._color = color
         self._header_printed = False
 
+    @override
     def _flush_text(self) -> None:
         if self._text_buf:
             text = "".join(self._text_buf)

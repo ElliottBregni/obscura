@@ -68,23 +68,22 @@ class KeywordHighlighter(Processor):
     dict.  This makes the keyword glow as you type it.
     """
 
+    @override
     def apply_transformation(
         self,
-        ti: object,
+        ti: Any,
     ) -> Transformation:
-        fragments = ti.fragments  # type: ignore[attr-defined]
-        doc = ti.document  # type: ignore[attr-defined]
-        text = doc.text_before_cursor + doc.text_after_cursor
+        fragments: list[tuple[str, str]] = ti.fragments
+        doc: Any = ti.document
+        text = str(doc.text_before_cursor) + str(doc.text_after_cursor)
 
         if not text:
-            return Transformation(fragments)
+            return Transformation(cast(Any, fragments))
 
-        # Find keyword matches and build replacement fragments
-        new_fragments: list[tuple[str, str]] = []
         # Flatten the existing fragments into a single string to match positions
         flat = "".join(s for _, s in fragments)
         if not flat:
-            return Transformation(fragments)
+            return Transformation(cast(Any, fragments))
 
         # Build a set of character positions that should be styled
         styled_positions: dict[int, str] = {}
@@ -103,10 +102,10 @@ class KeywordHighlighter(Processor):
                 start = idx + 1
 
         if not styled_positions:
-            return Transformation(fragments)
+            return Transformation(cast(Any, fragments))
 
         # Rebuild fragments with styled characters
-        new_fragments = []
+        new_fragments: list[tuple[str, str]] = []
         pos = 0
         for style, segment in fragments:
             for ch in segment:
@@ -116,7 +115,7 @@ class KeywordHighlighter(Processor):
                     new_fragments.append((style, ch))
                 pos += 1
 
-        return Transformation(new_fragments)
+        return Transformation(cast(Any, new_fragments))
 
 
 def _keyword_gradient_styles() -> dict[str, str]:
