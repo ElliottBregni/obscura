@@ -11,11 +11,11 @@ from pydantic import BaseModel, ConfigDict
 from obscura.auth.cli_session import (
     StoredSession,
     SupabaseCliConfig,
-    _sync_provider_secrets_to_supabase,  # pyright: ignore[reportPrivateUsage]
     clear_session,
     get_access_token,
     get_github_token,
     load_session,
+    sync_provider_secrets_to_supabase,
 )
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role

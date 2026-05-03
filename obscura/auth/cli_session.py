@@ -248,7 +248,7 @@ def _build_provider_secrets_metadata(
     return metadata
 
 
-def _sync_provider_secrets_to_supabase(
+def sync_provider_secrets_to_supabase(
     cfg: SupabaseCliConfig,
     *,
     provider: str,
@@ -371,7 +371,7 @@ def get_access_token() -> str | None:
         refreshed.provider_refresh_token = session.provider_refresh_token
     save_session(refreshed)
     if refreshed.provider == "github":
-        _sync_provider_secrets_to_supabase(cfg, provider="github", session=refreshed)
+        sync_provider_secrets_to_supabase(cfg, provider="github", session=refreshed)
     return refreshed.access_token
 
 
@@ -386,7 +386,7 @@ def get_github_token() -> str | None:
     return session.provider_token if session else None
 
 
-def _decode_jwt_payload(token: str) -> dict[str, Any]:
+def decode_jwt_payload(token: str) -> dict[str, Any]:
     """Decode JWT payload without verifying — caller must trust the source."""
     try:
         parts = token.split(".")
@@ -395,7 +395,7 @@ def _decode_jwt_payload(token: str) -> dict[str, Any]:
         padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
         return json.loads(base64.urlsafe_b64decode(padded))  # type: ignore[no-any-return]
     except Exception:
-        logger.debug("suppressed exception in _decode_jwt_payload", exc_info=True)
+        logger.debug("suppressed exception in decode_jwt_payload", exc_info=True)
         return {}
 
 

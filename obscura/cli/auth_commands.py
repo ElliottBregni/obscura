@@ -50,13 +50,13 @@ from obscura.auth.cli_session import (
     CREDENTIALS_PATH,
     StoredSession,
     SupabaseCliConfig,
-    _decode_jwt_payload,
-    _sync_provider_secrets_to_supabase,
     clear_session,
+    decode_jwt_payload,
     get_access_token,
     get_github_token,
     load_session,
     save_session,
+    sync_provider_secrets_to_supabase,
 )
 
 _SSO_AUTH_HOST = os.environ.get(
@@ -208,7 +208,7 @@ def _run_oauth_flow(
         raise RuntimeError("No tokens received from SSO callback")
 
     tokens = result.tokens
-    claims = _decode_jwt_payload(tokens["access_token"])
+    claims = decode_jwt_payload(tokens["access_token"])
     session = StoredSession(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],
@@ -220,7 +220,7 @@ def _run_oauth_flow(
         provider_refresh_token=None,
     )
     save_session(session)
-    _sync_provider_secrets_to_supabase(cfg, provider=provider, session=session)
+    sync_provider_secrets_to_supabase(cfg, provider=provider, session=session)
     return session
 
 
