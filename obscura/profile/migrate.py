@@ -106,7 +106,7 @@ def _make_key(section: str, item: str, index: int) -> str:
     section_slug = re.sub(r"[^\w]", "_", section.lower()).strip("_")
 
     if ":" in item:
-        label = item.split(":")[0].strip()
+        label = item.split(":", maxsplit=1)[0].strip()
         label_slug = re.sub(r"[^\w]", "_", label.lower()).strip("_")
         return f"{section_slug}.{label_slug}"
 

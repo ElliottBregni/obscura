@@ -9,9 +9,11 @@ import time as _time
 from pathlib import Path
 from typing import Any, ClassVar
 
+from obscura.auth.secrets import safe_subprocess_env
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
 from obscura.tools.system._policy import Policy
+from obscura.tools.system._shell import Shell
 
 
 class Sandbox:
@@ -67,6 +69,7 @@ class Sandbox:
         clean_name = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
         if not clean_name:
             return Policy.json_error("invalid_tool_name")
+        # lazy: avoid circular dep with obscura.tools.system (this module is imported by its __init__)
         from obscura.tools.system import get_system_tool_specs
 
         if clean_name in {s.name for s in get_system_tool_specs()}:
@@ -274,8 +277,6 @@ class Sandbox:
             )
 
         cmd, args = interpreters[lang]
-        from obscura.tools.system._shell import Shell
-
         resolved_cmd = Shell.resolve_command(cmd)
 
         # Optionally save code to file first
@@ -300,8 +301,6 @@ class Sandbox:
         # by strict mode, so the sandbox can be explicitly handed the secrets
         # it needs while the rest of the parent env is filtered when
         # OBSCURA_TOOL_ENV_STRICT=1.
-        from obscura.auth.secrets import safe_subprocess_env
-
         run_env = safe_subprocess_env(env)
 
         proc = await asyncio.create_subprocess_exec(

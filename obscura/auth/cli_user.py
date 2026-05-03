@@ -17,6 +17,7 @@ import json
 from typing import Any, cast
 
 from obscura.auth.models import AuthenticatedUser
+from obscura.auth.supabase import extract_roles
 
 
 class CliAuthError(RuntimeError):
@@ -57,8 +58,6 @@ def current_cli_user() -> AuthenticatedUser:
 
     # Reuse the same role-mapping the FastAPI middleware applies, so CLI and
     # HTTP produce identical role tuples for the same Supabase user.
-    from obscura.auth.supabase import extract_roles
-
     roles = extract_roles(app_metadata, claims)
     org_id_raw = app_metadata.get("org_id")
     org_id = str(org_id_raw) if org_id_raw is not None else None

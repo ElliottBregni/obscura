@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import IO, Any, cast
 
-from typing_extensions import override
+from typing import override
 
 from rich.console import Console
 from rich.markdown import Markdown

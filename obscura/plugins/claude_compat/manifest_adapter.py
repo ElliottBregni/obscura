@@ -214,7 +214,7 @@ def _extract_mcp_tool_stubs(
                         name=f"{plugin_id}:mcp:{server_name}",
                         description=f"MCP server '{server_name}' from Claude Code plugin",
                         handler_ref="",  # resolved at MCP connect time
-                        capability=f"{CLAUDE_NS}.{plugin_id.split(':')[-1].replace('-', '_')}",
+                        capability=f"{CLAUDE_NS}.{plugin_id.rsplit(':', maxsplit=1)[-1].replace('-', '_')}",
                         side_effects="write",
                     )
                 )

@@ -29,7 +29,8 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
+from collections.abc import Callable
 
 from obscura.core.paths import resolve_obscura_global_home
 
@@ -506,7 +507,7 @@ def _record_decision(src: ExternalSource, cwd: Path, status: str) -> None:
     data["decisions"] = decisions
     decisions[src.id] = {
         "status": status,
-        "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
     }
     _save_marker(src.scope, cwd, data)
 

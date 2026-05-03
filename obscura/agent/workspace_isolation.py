@@ -25,8 +25,8 @@ import logging
 import os
 import time
 
-import obscura.tools.worktree_observer as worktree_observer
-import obscura.tools.worktree_registry as worktree_registry
+from obscura.tools import worktree_observer
+from obscura.tools import worktree_registry
 
 logger = logging.getLogger(__name__)
 

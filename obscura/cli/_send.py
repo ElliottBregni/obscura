@@ -298,8 +298,6 @@ async def send_message(
                             out = int(getattr(_usage_raw, "output_tokens", 0) or 0)
                         if inp > 0 or out > 0:
                             try:
-                                from obscura.core.cost_tracker import get_cost_tracker
-
                                 get_cost_tracker().record(
                                     inp,
                                     out,
@@ -367,8 +365,6 @@ async def send_message(
     finally:
         renderer.finish()
         try:
-            from obscura.cli.render import set_active_renderer
-
             set_active_renderer(None)
         except Exception:
             pass
@@ -414,16 +410,12 @@ async def send_message(
     # Auto-compact: trigger if context exceeds threshold.
     if _post_tokens > _compact_threshold:
         try:
-            from obscura.core.compaction import should_auto_compact
-
             if should_auto_compact(
                 [{"role": r, "content": t} for r, t in ctx.message_history],
                 ctx.model or "default",
                 system_prompt=ctx.system_prompt,
             ):
                 console.print("[dim cyan]  Auto-compacting context...[/]")
-                from obscura.cli.commands import cmd_compact
-
                 await cmd_compact("4", ctx)
         except Exception:
             pass
@@ -432,8 +424,6 @@ async def send_message(
     if not _session_state["titled"] and len(ctx.message_history) >= 2:
         _session_state["titled"] = True
         try:
-            from obscura.core.session_utils import generate_session_title
-
             title = await generate_session_title(text, ctx.client._backend)  # pyright: ignore[reportPrivateUsage]
             if title:
                 await ctx.store.update_session(ctx.session_id, summary=title)
@@ -448,23 +438,15 @@ async def send_message(
             pass
 
     # Parse plan if in PLAN mode
-    from obscura.cli._tool_confirm import maybe_parse_plan
 
     maybe_parse_plan(response_text, ctx)
 
     # Auto-detect question choices and present interactive widget.
     try:
-        from obscura.tools.system import UI
-
         _tool_asked = UI.was_ask_user_called()
         UI.reset_ask_user_called()
 
         if not _tool_asked:
-            from obscura.cli.widgets import (
-                detect_question_choices,
-                present_detected_choices,
-            )
-
             detected = detect_question_choices(response_text)
             if detected is not None:
                 selection = await present_detected_choices(detected)

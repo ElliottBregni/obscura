@@ -23,6 +23,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core.config_io import load_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -175,8 +177,6 @@ class PluginPolicyEngine:
 
         ruleset = PolicyRuleSet()
         if policies_dir.is_dir():
-            from obscura.core.config_io import load_config  # noqa: PLC0415
-
             # Discover .toml first, then .yaml for backward compat
             policy_files = sorted(policies_dir.glob("*.toml")) + sorted(
                 policies_dir.glob("*.yaml"),

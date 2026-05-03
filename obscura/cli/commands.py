@@ -7164,7 +7164,7 @@ async def _oneshot_stream(client: Any, prompt: str, idle_timeout: float = 60.0) 
                 )
             except StopAsyncIteration:
                 break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise _OneshotStalled("".join(parts), idle_timeout) from None
             if hasattr(chunk, "text") and chunk.text:
                 parts.append(chunk.text)

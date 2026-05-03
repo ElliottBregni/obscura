@@ -29,6 +29,9 @@ import sys
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_global_home
+from obscura.core.types import ToolSpec
+from obscura.plugins.builtins import list_builtin_manifests
+from obscura.plugins.lazy import LazyPluginManager
 from obscura.plugins.manifest import ManifestError, parse_manifest_file
 from obscura.plugins.models import (
     PluginSpec,
@@ -259,8 +262,6 @@ class PluginLoader:
 
     def discover_builtins(self) -> list[PluginSpec]:
         """Discover built-in plugin manifests shipped with Obscura."""
-        from obscura.plugins.builtins import list_builtin_manifests
-
         specs: list[PluginSpec] = []
         for path in list_builtin_manifests():
             try:
@@ -616,9 +617,6 @@ class PluginLoader:
             Plugin IDs to initialize immediately (prewarm set).
 
         """
-        from obscura.core.types import ToolSpec
-        from obscura.plugins.lazy import LazyPluginManager
-
         load_builtins = _load_plugin_config_flag("load_builtins")
 
         all_specs: list[PluginSpec] = []
@@ -780,8 +778,6 @@ def get_all_builtin_tool_specs() -> list[Any]:
     list of ``ToolSpec`` instances with resolved handlers.  Tools whose handler
     cannot be resolved are silently skipped.
     """
-    from obscura.core.types import ToolSpec
-
     load_builtins = _load_plugin_config_flag("load_builtins")
 
     loader = PluginLoader()
@@ -838,8 +834,6 @@ def get_filtered_builtin_tool_specs(
     This enables pack-scoped sessions where only a subset of available
     plugins (and therefore tools) are loaded into the model context.
     """
-    from obscura.core.types import ToolSpec
-
     load_builtins = _load_plugin_config_flag("load_builtins")
 
     loader = PluginLoader()
@@ -901,8 +895,6 @@ def get_all_builtin_tool_specs_with_report() -> tuple[list[Any], list[tuple[str,
     list of ``(tool_name, handler_ref)`` tuples for tools whose handler
     could not be resolved.
     """
-    from obscura.core.types import ToolSpec
-
     load_builtins = _load_plugin_config_flag("load_builtins")
 
     loader = PluginLoader()

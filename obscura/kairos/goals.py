@@ -217,11 +217,7 @@ class GoalBoard:
         updates: dict[str, Any] = {"updated": now}
 
         for key, val in fields.items():
-            if key == "acceptance_criteria" and isinstance(val, list):
-                updates[key] = tuple(cast(list[Any], val))
-            elif key == "depends_on" and isinstance(val, list):
-                updates[key] = tuple(cast(list[Any], val))
-            elif key == "tasks" and isinstance(val, list):
+            if (key == "acceptance_criteria" and isinstance(val, list)) or (key == "depends_on" and isinstance(val, list)) or (key == "tasks" and isinstance(val, list)):
                 updates[key] = tuple(cast(list[Any], val))
             elif key in {
                 "title",

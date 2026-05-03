@@ -19,7 +19,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ async def _run_pytest(
         duration_ms = int((time.monotonic() - start) * 1000)
         stdout = stdout_bytes.decode(errors="replace")
         return _parse_pytest_output(stdout, proc.returncode or 0, duration_ms)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         duration_ms = int((time.monotonic() - start) * 1000)
         return TestOutcome(timeout_exceeded=True, duration_ms=duration_ms)
     except FileNotFoundError:

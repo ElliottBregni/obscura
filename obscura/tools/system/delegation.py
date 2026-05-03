@@ -24,6 +24,8 @@ from obscura.agent.peers import (
     UnixSocketAgentRef,
 )
 from obscura.core.types import ToolSpec
+from obscura.integrations.a2a.client import A2AClient
+from obscura.integrations.a2a.transports.unix_socket import UnixSocketA2AClient
 
 if TYPE_CHECKING:
     from obscura.agent.agents import AgentRuntime
@@ -218,8 +220,6 @@ async def _invoke_remote(
     prompt: str,
 ) -> str:
     """Invoke a remote A2A agent over HTTP."""
-    from obscura.integrations.a2a.client import A2AClient
-
     client = A2AClient(ref.url)
     try:
         await client.connect()
@@ -236,10 +236,6 @@ async def _invoke_unix_socket(
     prompt: str,
 ) -> str:
     """Invoke an agent over a Unix domain socket."""
-    from obscura.integrations.a2a.transports.unix_socket import (
-        UnixSocketA2AClient,
-    )
-
     client = UnixSocketA2AClient(ref.socket_path)
     try:
         await client.connect()

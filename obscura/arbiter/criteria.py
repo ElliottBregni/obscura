@@ -24,7 +24,8 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Protocol
+from collections.abc import Sequence
 
 if TYPE_CHECKING:
     from obscura.arbiter.test_runner import TestOutcome

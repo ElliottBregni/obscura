@@ -29,6 +29,12 @@ from dataclasses import dataclass, replace as _dc_replace
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.agent.daemon_agent import DaemonAgent, IMessageTrigger, ScheduleTrigger
+from obscura.agent.interaction import InteractionBus
+from obscura.agent.supervisor import SupervisorConfig
+from obscura.auth.cli_user import current_cli_user
+from obscura.cli import trace as trace_mod
+from obscura.cli.app.modes import Plan, TUIMode
 from obscura.cli.bootstrap import (
     _discover_mcp,  # pyright: ignore[reportPrivateUsage]
     _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]
@@ -36,13 +42,19 @@ from obscura.cli.bootstrap import (
 from obscura.cli.commands import (
     _FILE_WRITE_TOOLS,  # pyright: ignore[reportPrivateUsage]
     REPLContext,
+    cmd_compact,
+    estimate_effective_context_tokens,
     handle_command,
 )
 from obscura.cli.render import (
     console,
+    print_info,
     print_warning,
     render_plan,
+    set_active_renderer,
 )
+from obscura.cli.renderer import create_renderer
+from obscura.cli.tool_collapse import ToolCollapser
 from obscura.cli.vector_memory_bridge import (
     auto_save_turn,
     init_vector_store,
@@ -51,15 +63,81 @@ from obscura.cli.vector_memory_bridge import (
     search_relevant_context,
     search_with_router,
 )
+from obscura.cli.widgets import (
+    AttentionWidgetRequest,
+    ModelQuestionRequest,
+    MultiSelectRequest,
+    NotifyWidgetRequest,
+    PermissionWidgetRequest,
+    ToolConfirmRequest,
+    ask_model_question,
+    ask_multi_select,
+    confirm_attention,
+    confirm_permission,
+    confirm_tool,
+    detect_question_choices,
+    present_detected_choices,
+    render_notification_banner,
+)
+from obscura.core.cleanup import run_cleanup
 from obscura.core.client import ObscuraClient
+from obscura.core.commit_attribution import get_attribution_tracker
+from obscura.core.compaction import should_auto_compact
+from obscura.core.context import load_obscura_memory
+from obscura.core.cost_tracker import get_cost_tracker
+from obscura.core.deep_log import dlog
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.paths import resolve_obscura_global_home, resolve_obscura_home
+from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+from obscura.core.session_utils import generate_session_title
+from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+from obscura.core.compiler.compiled import ToolRoutingConfig
+from obscura.core.hooks import HookRegistry
+from obscura.core.settings import load_all_hooks
+from obscura.core.system_prompts import (
+    compose_environment_context,
+    compose_system_prompt,
+)
+from obscura.core.tool_router import ToolRouter
+from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import (
+    EFFORT_THINKING_BUDGETS,
     AgentEventKind,
     Backend,
+    EffortLevel,
     SessionRef,
+    ToolCallInfo,
     ToolChoice,
+    ToolRouterCapable,
 )
+from obscura.memory_channels import (
+    ContextRouter,
+    TurnClassifier,
+    load_channels_from_config,
+)
+from obscura.plugins.builtins import list_builtin_plugin_ids
+from obscura.plugins.capabilities import resolve_allowed_tools_from_config
+from obscura.plugins.loader import (
+    PluginLoader,
+    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
+    get_all_builtin_tool_specs,
+    get_capability_map,
+    get_filtered_builtin_tool_specs,
+)
+from obscura.plugins.registries.capability_index import CapabilityIndex
+from obscura.tools.arbiter_tools import get_arbiter_tool_specs
+from obscura.tools.browser import get_browser_tool_specs
+from obscura.tools.goal_tools import get_goal_tool_specs
+from obscura.tools.lsp import get_lsp_tool_specs
+from obscura.tools.memory_tools import (
+    build_channels_prompt_section,
+    make_memory_tool_specs,
+)
+from obscura.tools.profile_tools import get_profile_tool_specs
+from obscura.tools.system import Session, UI, get_system_tool_specs
+from obscura.tools.system.file_state import record_file_access
+from obscura.tools.task_tools import get_task_tool_specs
+from obscura.tools.worktree import get_worktree_tool_specs
 
 _log = logging.getLogger("obscura.cli.session")
 
@@ -99,8 +177,6 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
             ctx.add_file_change(path, before, after)
             # Record attribution.
             try:
-                from obscura.core.commit_attribution import get_attribution_tracker
-
                 added = len(after.splitlines()) - len(before.splitlines())
                 if added >= 0:
                     get_attribution_tracker().record_agent_edit(path, lines_added=added)
@@ -113,8 +189,6 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 pass
             # Record in file history.
             try:
-                from obscura.tools.system.file_state import record_file_access
-
                 record_file_access(Path(path), "edit")
             except Exception:
                 pass
@@ -126,15 +200,11 @@ def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     if mm is None:
         return
 
-    from obscura.cli.app.modes import TUIMode
-
     if mm.current != TUIMode.PLAN:
         return
 
     if not response_text.strip():
         return
-
-    from obscura.cli.app.modes import Plan
 
     plan = Plan.parse(response_text)
     if plan.steps:
@@ -295,8 +365,6 @@ class ObscuraSession:
                 )
             )
             try:
-                from obscura.cli.render import print_info
-
                 print_info(
                     f"Loaded session summary ({len(resume_summary)} chars)",
                 )
@@ -360,8 +428,6 @@ class ObscuraSession:
         Returns the accumulated assistant text.  All pre/post-processing
         (vector memory, auto-compact, auto-title, plan parsing) is included.
         """
-        from obscura.cli import trace as trace_mod
-
         ctx = self._ctx
         effective_kwargs = loop_kwargs if loop_kwargs is not None else self._loop_kwargs
 
@@ -383,8 +449,6 @@ class ObscuraSession:
                 )
             return inline_agent_response
 
-        from obscura.cli.renderer import create_renderer
-
         renderer = create_renderer(streaming_status=streaming_status)
         # Feed session context into the modern renderer's status bar
         renderer_any: Any = renderer
@@ -397,23 +461,14 @@ class ObscuraSession:
             )
         # Register active renderer so prompt can expand previews while streaming
         try:
-            from obscura.cli.render import set_active_renderer
-
             set_active_renderer(renderer)
         except Exception:
             pass
         accumulated: list[str] = []
 
         # Build confirm callback with permission mode integration.
-        from obscura.core.types import ToolCallInfo
-
         async def confirm_cb(tc: ToolCallInfo) -> bool:
             try:
-                from obscura.core.permission_modes import (
-                    PermissionMode,
-                    PermissionModeEngine,
-                )
-
                 mode_str = getattr(ctx, "permission_mode", "default")
                 engine = PermissionModeEngine(PermissionMode(mode_str))
                 decision = engine.evaluate(tc.name, tc.input)
@@ -429,13 +484,9 @@ class ObscuraSession:
             return True
 
         # ── Token-aware auto-compact ──────────────────────────────────────
-        from obscura.cli.commands import cmd_compact, estimate_effective_context_tokens
-
         _context_window = ctx.client.context_window
         _compact_threshold = int(_context_window * 0.60)
         _warn_threshold = ctx.client.context_warn_threshold
-
-        from obscura.tools.system import Session
 
         # ── Vector memory pre-search ──────────────────────────────────────
         augmented_text = text
@@ -501,8 +552,6 @@ class ObscuraSession:
             _effective_kwargs = dict(effective_kwargs)
             if hasattr(ctx, "effort_level") and ctx.effort_level:
                 try:
-                    from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
-
                     _lvl = EffortLevel(ctx.effort_level)
                     _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[
                         _lvl
@@ -548,8 +597,6 @@ class ObscuraSession:
                     _track_file_event(event.kind, ctx, event)
                     # Deep logging
                     try:
-                        from obscura.core.deep_log import dlog
-
                         if event.kind == AgentEventKind.TOOL_CALL:
                             dlog.tool_call(
                                 getattr(event, "tool_name", ""),
@@ -571,8 +618,6 @@ class ObscuraSession:
                         tool_name = getattr(event, "tool_name", "")
                         tool_input = getattr(event, "tool_input", {})
                         try:
-                            from obscura.cli.tool_collapse import ToolCollapser
-
                             if not hasattr(ctx, "collapser"):
                                 ctx.collapser = ToolCollapser()
                             ctx.collapser.record(tool_name, tool_input)
@@ -618,10 +663,6 @@ class ObscuraSession:
                                 out = int(getattr(_usage, "output_tokens", 0) or 0)
                             if inp > 0 or out > 0:
                                 try:
-                                    from obscura.core.cost_tracker import (
-                                        get_cost_tracker,
-                                    )
-
                                     get_cost_tracker().record(
                                         inp,
                                         out,
@@ -689,8 +730,6 @@ class ObscuraSession:
         finally:
             renderer.finish()
             try:
-                from obscura.cli.render import set_active_renderer
-
                 set_active_renderer(None)
             except Exception:
                 pass
@@ -736,8 +775,6 @@ class ObscuraSession:
         # Auto-compact
         if _post_tokens > _compact_threshold:
             try:
-                from obscura.core.compaction import should_auto_compact
-
                 if should_auto_compact(
                     [{"role": r, "content": t} for r, t in ctx.message_history],
                     ctx.model or "default",
@@ -753,8 +790,6 @@ class ObscuraSession:
         if not _session_state["titled"] and len(ctx.message_history) >= 2:
             _session_state["titled"] = True
             try:
-                from obscura.core.session_utils import generate_session_title
-
                 title = await generate_session_title(
                     text,
                     ctx.client._backend,  # pyright: ignore[reportPrivateUsage]
@@ -779,17 +814,10 @@ class ObscuraSession:
 
         # Auto-detect question choices
         try:
-            from obscura.tools.system import UI
-
             _tool_asked = UI.was_ask_user_called()
             UI.reset_ask_user_called()
 
             if not _tool_asked:
-                from obscura.cli.widgets import (
-                    detect_question_choices,
-                    present_detected_choices,
-                )
-
                 detected = detect_question_choices(response_text)
                 if detected is not None:
                     selection = await present_detected_choices(detected)
@@ -845,8 +873,6 @@ class ObscuraSession:
 
         # Flush deep log
         try:
-            from obscura.core.deep_log import dlog
-
             dlog.session_event("end", session_id=ctx.session_id)
             dlog.flush()
             dlog.close()
@@ -860,16 +886,12 @@ class ObscuraSession:
 
         # Run cleanup tasks
         try:
-            from obscura.core.cleanup import run_cleanup
-
             await run_cleanup()
         except Exception:
             pass
 
         # Save commit attribution
         try:
-            from obscura.core.commit_attribution import get_attribution_tracker
-
             get_attribution_tracker().save()
         except Exception:
             pass
@@ -894,10 +916,7 @@ class ObscuraSession:
 
     async def start_imessage_daemon(self) -> asyncio.Task[None] | None:
         """Start iMessage daemon if configured in agents.yaml."""
-        from obscura.agent.daemon_agent import DaemonAgent
-        from obscura.agent.interaction import InteractionBus
-        from obscura.agent.supervisor import SupervisorConfig
-        from obscura.cli.render import console as _console
+        _console = console
 
         config_path = Path.home() / ".obscura" / "agents.yaml"
         if not config_path.exists():
@@ -911,8 +930,6 @@ class ObscuraSession:
             if not im_triggers:
                 continue
 
-            from obscura.agent.daemon_agent import IMessageTrigger as _IMT
-
             triggers: list[Any] = []
             for tdef in im_triggers:
                 im_cfg = tdef.imessage or {}
@@ -922,7 +939,7 @@ class ObscuraSession:
                     if k not in {"contacts", "poll_interval"}
                 }
                 triggers.append(
-                    _IMT(
+                    IMessageTrigger(
                         contacts=tuple(im_cfg.get("contacts", [])),
                         poll_interval=im_cfg.get("poll_interval", 30),
                         notify_user=tdef.notify_user,
@@ -950,15 +967,13 @@ class ObscuraSession:
 
             # Load persisted schedules
             try:
-                from obscura.agent.daemon_agent import ScheduleTrigger as _ST
-
                 _schedules_path = Path.home() / ".obscura" / "schedules.json"
                 if _schedules_path.is_file():
                     for sched in json.loads(
                         _schedules_path.read_text(encoding="utf-8"),
                     ):
                         triggers.append(
-                            _ST(
+                            ScheduleTrigger(
                                 cron=sched["cron"],
                                 prompt=sched["prompt"],
                                 description=f"{sched.get('id', '?')}: {sched['prompt'][:40]}",
@@ -1001,8 +1016,6 @@ class ObscuraSession:
         try:
             from dotenv import load_dotenv
 
-            from obscura.core.paths import resolve_obscura_global_home
-
             global_env = resolve_obscura_global_home() / ".env"
             if global_env.is_file():
                 load_dotenv(global_env)
@@ -1038,8 +1051,6 @@ class ObscuraSession:
 
     def _init_vector_memory(self) -> None:
         """Initialize vector store and memory channels."""
-        from obscura.auth.cli_user import current_cli_user
-
         cli_user = current_cli_user()
         self._cli_user = cli_user
 
@@ -1052,12 +1063,6 @@ class ObscuraSession:
         self.turn_classifier = None
         if self._vector_store is not None:
             try:
-                from obscura.memory_channels import (
-                    ContextRouter,
-                    TurnClassifier,
-                    load_channels_from_config,
-                )
-
                 _channels = load_channels_from_config()
                 if _channels:
                     self.context_router = ContextRouter(_channels, self._vector_store)
@@ -1067,12 +1072,6 @@ class ObscuraSession:
 
     def _compose_system_prompt(self, config: SessionConfig) -> str:
         """Build the combined system prompt."""
-        from obscura.core.context import load_obscura_memory
-        from obscura.core.system_prompts import (
-            compose_environment_context,
-            compose_system_prompt,
-        )
-
         include_default = not config.no_default_prompt
         if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
             include_default = False
@@ -1099,8 +1098,6 @@ class ObscuraSession:
         # Memory channel documentation
         if self.context_router is not None:
             try:
-                from obscura.tools.memory_tools import build_channels_prompt_section
-
                 channels_doc = build_channels_prompt_section(
                     self.context_router.channels,
                 )
@@ -1115,8 +1112,8 @@ class ObscuraSession:
 
         # Environment context
         try:
+            # lazy: avoid circular dep with obscura.agent.agents via providers chain
             from obscura.agent import AGENT_TYPE_REGISTRY
-            from obscura.plugins.builtins import list_builtin_plugin_ids
 
             env_section = compose_environment_context(
                 plugin_ids=list_builtin_plugin_ids(),
@@ -1138,11 +1135,8 @@ class ObscuraSession:
 
         # KAIROS context
         try:
-            from obscura.kairos.engine import KairosEngine as _KairosEngineProbe
-            from obscura.kairos.engine import is_kairos_enabled as _kep
-
-            if _kep():
-                _probe_engine = _KairosEngineProbe()
+            if is_kairos_enabled():
+                _probe_engine = KairosEngine()
                 _kairos_sys = _probe_engine.get_system_prompt_addition()
                 if _kairos_sys:
                     custom_sections.append(_kairos_sys)
@@ -1151,6 +1145,7 @@ class ObscuraSession:
 
         # Coordinator context
         try:
+            # lazy: avoid circular dep with obscura.agent.agents via providers chain
             from obscura.agent.coordinator import (
                 get_coordinator_system_prompt,
                 is_coordinator_mode,
@@ -1160,6 +1155,7 @@ class ObscuraSession:
                 custom_sections.append(get_coordinator_system_prompt())
 
                 try:
+                    # lazy: avoid circular dep with obscura.agent.agents via providers chain
                     from obscura.tools.swarm import (
                         build_agent_catalog,
                         load_agent_configs,
@@ -1191,8 +1187,6 @@ class ObscuraSession:
             return system_tools, 0
 
         try:
-            from obscura.tools.system import get_system_tool_specs
-
             system_tools = get_system_tool_specs()
         except Exception:
             pass
@@ -1200,64 +1194,48 @@ class ObscuraSession:
         # Memory tools
         if self._vector_store is not None:
             try:
-                from obscura.tools.memory_tools import make_memory_tool_specs
-
                 system_tools.extend(make_memory_tool_specs(self._cli_user))
             except Exception:
                 pass
 
         # Worktree tools
         try:
-            from obscura.tools.worktree import get_worktree_tool_specs
-
             system_tools.extend(get_worktree_tool_specs())
         except Exception:
             pass
 
         # Task tools
         try:
-            from obscura.tools.task_tools import get_task_tool_specs
-
             system_tools.extend(get_task_tool_specs())
         except Exception:
             pass
 
         # Goal tools
         try:
-            from obscura.tools.goal_tools import get_goal_tool_specs
-
             system_tools.extend(get_goal_tool_specs())
         except Exception:
             pass
 
         # Arbiter tools
         try:
-            from obscura.tools.arbiter_tools import get_arbiter_tool_specs
-
             system_tools.extend(get_arbiter_tool_specs())
         except Exception:
             pass
 
         # Profile tools
         try:
-            from obscura.tools.profile_tools import get_profile_tool_specs
-
             system_tools.extend(get_profile_tool_specs())
         except Exception:
             pass
 
         # LSP tool
         try:
-            from obscura.tools.lsp import get_lsp_tool_specs
-
             system_tools.extend(get_lsp_tool_specs())
         except Exception:
             pass
 
         # Browser tool
         try:
-            from obscura.tools.browser import get_browser_tool_specs
-
             system_tools.extend(get_browser_tool_specs())
         except Exception:
             pass
@@ -1277,12 +1255,8 @@ class ObscuraSession:
             )
 
             if _ws_include or _ws_exclude:
-                from obscura.plugins.loader import get_filtered_builtin_tool_specs
-
                 plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
             else:
-                from obscura.plugins.loader import get_all_builtin_tool_specs
-
                 plugin_tools = get_all_builtin_tool_specs()
 
             for tool in plugin_tools:
@@ -1295,8 +1269,6 @@ class ObscuraSession:
         # Backfill capability metadata
         if system_tools:
             try:
-                from obscura.plugins.loader import get_capability_map
-
                 _cap_map = get_capability_map()
                 system_tools = [
                     _dc_replace(t, capability=_cap_map[t.name])
@@ -1310,10 +1282,6 @@ class ObscuraSession:
         # Filter by capability grants
         if system_tools:
             try:
-                from obscura.plugins.capabilities import (
-                    resolve_allowed_tools_from_config,
-                )
-
                 _allowed = resolve_allowed_tools_from_config()
                 if _allowed is not None:
                     system_tools = [
@@ -1338,20 +1306,11 @@ class ObscuraSession:
         if config.tools_enabled:
             # ask_user callback
             try:
-                from obscura.tools.system import UI as _UI_for_ask
-
                 async def _ask_user_handler(
                     question: str,
                     choices: list[str],
                     allow_custom: bool = False,
                 ) -> str:
-                    from obscura.cli.widgets import (
-                        AttentionWidgetRequest,
-                        ModelQuestionRequest,
-                        ask_model_question,
-                        confirm_attention,
-                    )
-
                     if choices:
                         result = await confirm_attention(
                             AttentionWidgetRequest(
@@ -1368,25 +1327,18 @@ class ObscuraSession:
                     )
                     return result.text
 
-                _UI_for_ask.set_ask_user_callback(_ask_user_handler)
+                UI.set_ask_user_callback(_ask_user_handler)
             except Exception:
                 pass
 
             # Permission mode + plan approval callbacks
             try:
-                from obscura.tools.system import Session as _Session_for_plan
-
                 def _set_permission_mode(mode: str) -> None:
                     self._ctx.permission_mode = mode
 
-                _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
+                Session.set_permission_mode_callback(_set_permission_mode)
 
                 async def _plan_approval_handler(plan_summary: str) -> bool:
-                    from obscura.cli.widgets import (
-                        PermissionWidgetRequest,
-                        confirm_permission,
-                    )
-
                     result = await confirm_permission(
                         PermissionWidgetRequest(
                             action="Exit plan mode and begin implementation",
@@ -1396,23 +1348,16 @@ class ObscuraSession:
                     )
                     return result.action == "approve"
 
-                _Session_for_plan.set_plan_approval_callback(_plan_approval_handler)
+                Session.set_plan_approval_callback(_plan_approval_handler)
             except Exception:
                 pass
 
             # user_interact callback
             try:
-                from obscura.tools.system import UI as _UI_for_interact
-
                 async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
                     mode = kwargs.get("mode", "question")
 
                     if mode == "permission":
-                        from obscura.cli.widgets import (
-                            PermissionWidgetRequest,
-                            confirm_permission,
-                        )
-
                         result = await confirm_permission(
                             PermissionWidgetRequest(
                                 action=kwargs.get("action", ""),
@@ -1423,11 +1368,6 @@ class ObscuraSession:
                         return {"approved": result.action == "approve"}
 
                     if mode == "notify":
-                        from obscura.cli.widgets import (
-                            NotifyWidgetRequest,
-                            render_notification_banner,
-                        )
-
                         render_notification_banner(
                             NotifyWidgetRequest(
                                 title=kwargs.get("title", ""),
@@ -1438,14 +1378,9 @@ class ObscuraSession:
                         return {}
 
                     if mode == "multi_select":
-                        from obscura.cli.widgets import (
-                            MultiSelectRequest,
-                            ask_multi_select as _ask_multi_select,
-                        )
-
                         choices = kwargs.get("choices", [])
                         question = kwargs.get("question", "")
-                        result = await _ask_multi_select(
+                        result = await ask_multi_select(
                             MultiSelectRequest(
                                 question=question,
                                 choices=tuple(choices),
@@ -1457,13 +1392,6 @@ class ObscuraSession:
                         return {"selected": selected}
 
                     # question mode (default)
-                    from obscura.cli.widgets import (
-                        AttentionWidgetRequest,
-                        ModelQuestionRequest,
-                        ask_model_question,
-                        confirm_attention,
-                    )
-
                     choices = kwargs.get("choices", [])
                     question = kwargs.get("question", "")
                     if choices:
@@ -1482,15 +1410,13 @@ class ObscuraSession:
                     )
                     return {"selected": result.text}
 
-                _UI_for_interact.set_user_interact_callback(_user_interact_handler)
+                UI.set_user_interact_callback(_user_interact_handler)
             except Exception:
                 pass
 
         # Project hooks
         project_hooks = None
         try:
-            from obscura.core.settings import load_all_hooks
-
             _hook_registry = load_all_hooks()
             if _hook_registry.count > 0:
                 project_hooks = _hook_registry
@@ -1500,9 +1426,6 @@ class ObscuraSession:
         # Memory channel TOOL_CALL hook
         self._tool_router_ref = None
         if self.context_router is not None:
-            from obscura.core.hooks import HookRegistry
-            from obscura.core.types import AgentEventKind as _AEK
-
             if project_hooks is None:
                 project_hooks = HookRegistry()
 
@@ -1518,16 +1441,11 @@ class ObscuraSession:
                         list(context_router.signals.file_paths),
                     )
 
-            project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
+            project_hooks.add_after(_channel_tool_signal, AgentEventKind.TOOL_CALL)
 
         # Kairos hooks
         try:
-            from obscura.kairos.engine import is_kairos_enabled as _kie2
-
-            if _kie2():
-                from obscura.core.hooks import HookRegistry
-                from obscura.core.types import AgentEventKind as _AEK2
-
+            if is_kairos_enabled():
                 if project_hooks is None:
                     project_hooks = HookRegistry()
 
@@ -1547,8 +1465,8 @@ class ObscuraSession:
                     ):
                         self._kairos_engine.log_agent_event("turn_complete")
 
-                project_hooks.add_after(_kairos_tool_hook, _AEK2.TOOL_CALL)
-                project_hooks.add_after(_kairos_turn_hook, _AEK2.TURN_COMPLETE)
+                project_hooks.add_after(_kairos_tool_hook, AgentEventKind.TOOL_CALL)
+                project_hooks.add_after(_kairos_turn_hook, AgentEventKind.TURN_COMPLETE)
         except Exception:
             pass
 
@@ -1559,15 +1477,6 @@ class ObscuraSession:
         if not config.tools_enabled:
             return
         try:
-            from obscura.core.compiler.compiled import ToolRoutingConfig
-            from obscura.core.tool_router import ToolRouter
-            from obscura.core.tool_score_index import ToolScoreIndex
-            from obscura.plugins.loader import (
-                PluginLoader,
-                _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
-            )
-            from obscura.plugins.registries.capability_index import CapabilityIndex
-
             _routing_config = ToolRoutingConfig()
             _score_index = ToolScoreIndex()
 
@@ -1588,7 +1497,6 @@ class ObscuraSession:
                 capability_index=_cap_index,
                 backend=config.backend,
             )
-            from obscura.core.types import ToolRouterCapable
 
             backend = self._client._backend  # pyright: ignore[reportPrivateUsage]
             if isinstance(backend, ToolRouterCapable):
@@ -1644,8 +1552,6 @@ async def _cli_confirm(
     """Prompt user to approve a tool call via TUI widget.  Returns True to allow."""
     if tool_name in ctx.confirm_always:
         return True
-
-    from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
 
     result = await confirm_tool(
         ToolConfirmRequest(tool_name=tool_name, tool_input=tool_input),

@@ -37,7 +37,7 @@ import logging
 import os
 import threading
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import cast
 
@@ -651,7 +651,7 @@ def safe_subprocess_env(
         if stripped:
             _append_audit(
                 {
-                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "ts": datetime.now(UTC).isoformat(),
                     "event": "strict_strip",
                     "stripped": sorted(stripped),
                     "count": len(stripped),

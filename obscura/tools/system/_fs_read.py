@@ -415,7 +415,7 @@ class FsRead:
                 asyncio.to_thread(_do_glob),
                 timeout=30.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return Policy.json_error(
                 "timeout",
                 path=str(target),

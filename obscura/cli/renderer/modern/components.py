@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from typing_extensions import override
+from typing import override
 
 from obscura.cli.renderer.modern.layout import (
     BorderStyle,

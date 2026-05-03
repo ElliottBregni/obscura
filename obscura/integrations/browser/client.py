@@ -36,12 +36,12 @@ from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.types import ToolSpec
+
 from . import active_hosts, wire
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-
-    from obscura.core.types import ToolSpec
 
 log = logging.getLogger("obscura.browser.client")
 
@@ -125,7 +125,7 @@ class BrowserBridgeClient:
         except (FileNotFoundError, ConnectionRefusedError) as e:
             msg = f"socket {path} not reachable: {e}"
             raise BrowserBridgeError(msg) from e
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             msg = f"timed out connecting to {path}"
             raise BrowserBridgeError(msg) from e
 
@@ -204,7 +204,7 @@ class BrowserBridgeClient:
         await self._send({"type": "call", "id": cid, "name": name, "args": args or {}})
         try:
             return await asyncio.wait_for(fut, timeout=timeout) if timeout else await fut
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             msg = f"browser bridge call '{name}' timed out after {timeout}s"
             raise BrowserBridgeError(msg) from e
         finally:
@@ -304,8 +304,6 @@ def _build_proxy_spec(
 ) -> ToolSpec:
     """Turn a wire-format tool descriptor into a real ``ToolSpec`` whose
     handler proxies through the given bridge client."""
-    from obscura.core.types import ToolSpec
-
     real_name = str(raw.get("name") or "")
     name = name_prefix + real_name
     description = str(raw.get("description") or "")

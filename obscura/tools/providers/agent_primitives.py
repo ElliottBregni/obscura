@@ -482,7 +482,7 @@ async def datadog_list_logs(
     limit: int = 50,
     **_: Any,
 ) -> dict[str, Any]:
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     body: dict[str, Any] = {
@@ -528,7 +528,7 @@ async def datadog_list_traces(
     limit: int = 50,
     **_: Any,
 ) -> dict[str, Any]:
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     body: dict[str, Any] = {

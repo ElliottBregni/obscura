@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Mapping, Sequence, cast
+from typing import Any, cast
+from collections.abc import Mapping, Sequence
 
 from obscura.arbiter.checks import (
     check_drift,

@@ -249,7 +249,7 @@ class Grep:
                     asyncio.to_thread(_do_rglob),
                     timeout=30.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return Policy.json_error(
                     "timeout",
                     path=str(target),

@@ -44,6 +44,7 @@ from obscura.agent.interaction import (
 )
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.types import AgentEventKind
+from obscura.integrations.messaging.factory import get_adapter
 from obscura.integrations.messaging.identity import (
     build_conversation_key,
     normalize_identity,
@@ -590,8 +591,6 @@ class DaemonAgent:
 
     async def _handle_message_trigger(self, trigger: Trigger) -> None:
         """Process incoming platform message and send a reply (multi-turn)."""
-        from obscura.integrations.messaging.factory import get_adapter
-
         platform = str(trigger.data.get("platform", "imessage"))
         account_id = str(trigger.data.get("account_id", "default"))
         sender = trigger.data.get("sender", "unknown")
@@ -993,8 +992,6 @@ class DaemonAgent:
 
     async def _poll_messages(self, triggers: list[MessageTrigger]) -> None:
         """Poll generic message platforms via registered adapters."""
-        from obscura.integrations.messaging.factory import get_adapter
-
         # Group by (platform, account_id, poll_interval) so each adapter is isolated.
         groups: dict[tuple[str, str, int], list[MessageTrigger]] = {}
         for trig in triggers:

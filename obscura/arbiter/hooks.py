@@ -8,7 +8,8 @@ hook points.  Follows the same pattern as
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping, cast
+from typing import Any, cast
+from collections.abc import Mapping
 
 from obscura.arbiter.checks import check_test_results
 from obscura.arbiter.engine import ArbiterEngine

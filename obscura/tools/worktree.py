@@ -21,8 +21,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import obscura.tools.worktree_observer as worktree_observer
-import obscura.tools.worktree_registry as worktree_registry
+from obscura.tools import worktree_observer
+from obscura.tools import worktree_registry
 from obscura.auth.secrets import safe_subprocess_env
 from obscura.core.cleanup import register_cleanup
 from obscura.core.tools import tool

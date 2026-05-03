@@ -5,14 +5,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from obscura.integrations.messaging.identity import normalize_identity
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.telegram.client import TelegramClient
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

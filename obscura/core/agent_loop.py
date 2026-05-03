@@ -50,7 +50,8 @@ from collections.abc import Coroutine
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, cast
+from typing import Any, cast
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -1903,7 +1904,7 @@ class AgentLoop:
                 # Normalize dotted provider prefixes (skip mcp__-prefixed
                 # names — see _parse_tool_call for rationale).
                 if "." in recipient and not recipient.startswith("mcp__"):
-                    recipient = recipient.split(".")[-1]
+                    recipient = recipient.rsplit(".", maxsplit=1)[-1]
 
                 # Skip inner recipients that are not registered to avoid
                 # emitting error results for orchestrator wrapper entries.
@@ -2661,7 +2662,7 @@ class AgentLoop:
         # ToolRegistry.get() resolves on its own (dot↔underscore variants),
         # and stripping here would discard the server-name segment.
         if "." in name and not name.startswith("mcp__"):
-            name = name.split(".")[-1]
+            name = name.rsplit(".", maxsplit=1)[-1]
 
         return ToolCallInfo(
             tool_use_id=f"tool_{uuid.uuid4().hex[:12]}",
@@ -3050,7 +3051,7 @@ class AgentLoop:
             event_turn = int(rec.payload.get("turn", 0))
 
             # When we enter a new turn, flush any accumulated tool pairs
-            if event_turn > current_turn and current_turn > 0:
+            if event_turn > current_turn > 0:
                 if current_turn_tool_calls and current_turn_tool_results:
                     pair = AgentLoop._build_structured_tool_messages(
                         current_turn_tool_calls,

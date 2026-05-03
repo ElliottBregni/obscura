@@ -11,6 +11,7 @@ from pathlib import Path
 
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+from obscura.tools.system._shell import Shell
 
 
 class Process:
@@ -45,8 +46,6 @@ class Process:
         {"type": "object", "properties": {}},
     )
     async def get_system_info() -> str:
-        from obscura.tools.system._shell import Shell
-
         info = {
             "platform": platform.platform(),
             "system": platform.system(),
@@ -72,8 +71,6 @@ class Process:
         {"type": "object", "properties": {}},
     )
     async def list_processes() -> str:
-        from obscura.tools.system._shell import Shell
-
         return await Shell.run_command(
             "ps",
             args=["-ax", "-o", "pid,ppid,user,%cpu,%mem,command"],
@@ -94,8 +91,6 @@ class Process:
         },
     )
     async def signal_process(pid: int, signal: str = "TERM") -> str:
-        from obscura.tools.system._shell import Shell
-
         return await Shell.run_command(
             "kill",
             args=[f"-{signal}", str(pid)],
@@ -109,8 +104,6 @@ class Process:
         {"type": "object", "properties": {}},
     )
     async def list_listening_ports() -> str:
-        from obscura.tools.system._shell import Shell
-
         if shutil.which("lsof"):
             return await Shell.run_command(
                 "lsof",
@@ -136,8 +129,8 @@ class Process:
         {"type": "object", "properties": {}},
     )
     async def list_unix_capabilities() -> str:
+        # lazy: avoid circular dep with obscura.tools.system (this module is imported by its __init__)
         from obscura.tools.system import get_system_tool_specs
-        from obscura.tools.system._shell import Shell
 
         tool_names = [spec.name for spec in get_system_tool_specs()]
         return json.dumps(

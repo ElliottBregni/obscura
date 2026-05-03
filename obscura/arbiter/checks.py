@@ -11,7 +11,8 @@ every evaluation and must never block.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping, Sequence
+from typing import Any
+from collections.abc import Mapping, Sequence
 
 from obscura.core.eval_checks import (
     check_python_syntax,

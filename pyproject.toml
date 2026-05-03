@@ -258,9 +258,11 @@ ignore = [
 
     # pyupgrade
     "UP037",   # quoted annotations (sometimes needed for forward refs)
-    "UP038",   # isinstance with X|Y (rejected by some Python versions at runtime)
 
     # type-checking imports
+    "TC001",   # move application import to TYPE_CHECKING (stylistic; out of scope here)
+    "TC002",   # move third-party import to TYPE_CHECKING (stylistic; out of scope here)
+    "TC003",   # move stdlib import to TYPE_CHECKING (stylistic; out of scope here)
     "TC006",   # runtime cast() argument should be quoted (ugly, often unhelpful)
 
     # ruff-specific
@@ -319,6 +321,9 @@ ignore = [
 "obscura/cli/repl.py" = ["PLC0415"]
 "obscura/cli/widgets.py" = ["PLC0415"]
 "obscura/cli/renderer/__init__.py" = ["PLC0415"]
+"obscura/cli/renderer/modern/layout.py" = ["PLC0415"]
+"obscura/cli/renderer/modern/renderer.py" = ["PLC0415"]
+"obscura/cli/trace.py" = ["PLC0415"]
 "obscura/cli/app/__init__.py" = ["PLC0415"]
 "obscura/cli/app/diff_engine.py" = ["PLC0415"]
 "obscura/cli/app/modes.py" = ["PLC0415"]

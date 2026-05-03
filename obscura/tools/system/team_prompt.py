@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
 
 _TEAM_PROMPT_FILENAMES = ("team_prompt.md", "team_prompt.txt", "team_prompt")
@@ -51,8 +52,6 @@ async def read_team_prompt(path: str = "") -> str:
     if path:
         target = Path(path).expanduser().resolve()
     else:
-        from obscura.core.paths import resolve_obscura_home
-
         target_or_none = _locate_team_prompt(resolve_obscura_home())
         if target_or_none is None:
             return json.dumps(

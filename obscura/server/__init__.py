@@ -21,8 +21,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from obscura.auth.middleware import APIKeyAuthMiddleware
+from obscura.auth.rate_limit_middleware import RateLimitMiddleware
+from obscura.auth.security_headers import SecurityHeadersMiddleware
 from obscura.core.config import ObscuraConfig
+from obscura.core.rate_limiter import RateLimiter
 from obscura.deps import ClientFactory
+from obscura.heartbeat import get_default_monitor
+from obscura.integrations.a2a.server import ObscuraA2AServer
+from obscura.integrations.a2a.store import InMemoryTaskStore, RedisTaskStore
+from obscura.integrations.a2a.transports import (
+    create_jsonrpc_router,
+    create_rest_router,
+    create_sse_router,
+    create_wellknown_router,
+)
+from obscura.integrations.mcp.server import ObscuraMCPServer, create_mcp_router
+from obscura.integrations.messaging.factory import build_channel_router
+from obscura.integrations.messaging.store import ChannelConfigStore
+from obscura.routes import all_routers
+from obscura.routes.channels import (
+    _get_router as _get_channel_router,  # pyright: ignore[reportPrivateUsage]
+)
+from obscura.routes.channels import init_channel_router
+from obscura.routes.template_store import load_persisted_templates, put
+from obscura.telemetry import init_telemetry
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -47,8 +69,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize telemetry (traces, metrics, structured logging)
     try:
-        from obscura.telemetry import init_telemetry
-
         init_telemetry(config)
         logger.info("Telemetry initialized (otel_enabled=%s)", config.otel_enabled)
     except Exception:
@@ -66,8 +86,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize heartbeat monitor
     try:
-        from obscura.heartbeat import get_default_monitor
-
         monitor = get_default_monitor()
         await monitor.start()
         app.state._heartbeat_monitor = monitor
@@ -80,8 +98,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Load persisted agent templates into memory
     try:
-        from obscura.routes.template_store import load_persisted_templates, put
-
         persisted = load_persisted_templates()
         for tid, tdata in persisted.items():
             put(tid, tdata)
@@ -101,9 +117,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             and os.environ.get("TWILIO_AUTH_TOKEN", "")
         )
         if _has_telegram or _has_whatsapp:
-            from obscura.integrations.messaging.factory import build_channel_router
-            from obscura.routes.channels import init_channel_router
-
             channel_router = await build_channel_router()
             init_channel_router(channel_router)
             logger.info(
@@ -126,9 +139,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # This runs regardless of whether env-var credentials were found — DB configs
     # can register additional channels (or override env-var channels) at startup.
     try:
-        from obscura.integrations.messaging.store import ChannelConfigStore
-        from obscura.routes.channels import _get_router as _get_channel_router  # pyright: ignore[reportPrivateUsage]
-
         _db_config_store = ChannelConfigStore()
         _enabled_configs = _db_config_store.list_all(enabled_only=True)
         if _enabled_configs:
@@ -136,9 +146,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 _live_router = _get_channel_router()
             except Exception:
                 # Router not yet initialized (no env creds); build a minimal one
-                from obscura.integrations.messaging.factory import build_channel_router
-                from obscura.routes.channels import init_channel_router
-
                 _live_router = await build_channel_router()
                 init_channel_router(_live_router)
 
@@ -222,9 +229,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             logger.debug("Telemetry middleware not available; skipping")
 
     # Rate limiting (after auth so request.state.user is populated)
-    from obscura.auth.rate_limit_middleware import RateLimitMiddleware
-    from obscura.core.rate_limiter import RateLimiter
-
     rate_limiter = RateLimiter(
         default_rpm=config.rate_limit_rpm,
         default_concurrent=config.rate_limit_concurrent,
@@ -234,8 +238,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     # Security headers — always on (opt-out via env). Added before auth so
     # even 401/429 responses carry CSP/HSTS/COOP/etc.
-    from obscura.auth.security_headers import SecurityHeadersMiddleware
-
     app.add_middleware(SecurityHeadersMiddleware)
 
     # Auth is always on. APIKeyAuthMiddleware accepts both Obscura API keys
@@ -273,8 +275,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     # -- MCP routes --------------------------------------------------------
 
     try:
-        from obscura.integrations.mcp.server import ObscuraMCPServer, create_mcp_router
-
         mcp_server = ObscuraMCPServer()
         mcp_router = create_mcp_router(mcp_server)
         app.include_router(mcp_router)
@@ -286,25 +286,13 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
 
     if config.a2a_enabled:
         try:
-            from obscura.integrations.a2a.server import ObscuraA2AServer
-            from obscura.integrations.a2a.transports import (
-                create_jsonrpc_router,
-                create_rest_router,
-                create_sse_router,
-                create_wellknown_router,
-            )
-
             # Choose store backend
             if config.a2a_redis_url:
-                from obscura.integrations.a2a.store import RedisTaskStore
-
                 a2a_store = RedisTaskStore(
                     config.a2a_redis_url,
                     task_ttl=config.a2a_task_ttl,
                 )
             else:
-                from obscura.integrations.a2a.store import InMemoryTaskStore
-
                 a2a_store = InMemoryTaskStore()
 
             a2a_server = ObscuraA2AServer(
@@ -326,8 +314,6 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
             logger.warning(f"Could not initialize A2A: {e}")
 
     # -- API routes --------------------------------------------------------
-
-    from obscura.routes import all_routers
 
     for router in all_routers:
         app.include_router(router)

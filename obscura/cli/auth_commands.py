@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from typing_extensions import override
+from typing import override
 
 import click
 import httpx
@@ -1076,7 +1076,7 @@ def secrets_cloud_pull(name: str, to_keyring: bool) -> None:
             inventory = dict(client.names())
         except Exception as exc:  # noqa: BLE001
             raise click.ClickException(str(exc)) from exc
-        if normalized in inventory and inventory[normalized]:
+        if inventory.get(normalized):
             click.echo(
                 f"{normalized} is in the --risk vault and needs a "
                 "passphrase to decrypt.",

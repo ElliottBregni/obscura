@@ -40,6 +40,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from obscura.auth.secrets import KEYRING_SERVICE as _KEYRING_SERVICE
 from obscura.auth.secrets import append_audit as _append_audit
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -601,9 +602,9 @@ class SupabaseVaultClient:
 
 
 def _utc_now_iso() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +619,8 @@ _singleton_config: tuple[str, str] | None = None
 def get_client() -> SupabaseVaultClient | None:
     global _singleton, _singleton_config
 
+    # lazy: avoid the obscura.auth → obscura.cli import cycle (cli.auth_commands
+    # imports obscura.auth.supabase_secrets at module level).
     from obscura.cli.auth_commands import SupabaseCliConfig, get_access_token
 
     cfg = SupabaseCliConfig.from_env()

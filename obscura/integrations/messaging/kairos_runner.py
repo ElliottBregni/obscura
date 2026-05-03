@@ -49,6 +49,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from obscura.core.agent_loop import AgentLoop
+from obscura.core.kairos import GoalBudget, Kairos
+from obscura.core.kairos.types import KairosEventKind
+from obscura.integrations.messaging.router import ObscuraAgentRunner
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -184,8 +189,6 @@ class KairosAgentRunner:
         system_prompt: str,
         max_turns: int,
     ) -> str:
-        from obscura.integrations.messaging.router import ObscuraAgentRunner
-
         runner = ObscuraAgentRunner(
             backend=self._backend,
             tool_registry=self._tool_registry,
@@ -210,10 +213,6 @@ class KairosAgentRunner:
         session_id: str,
         system_prompt: str,
     ) -> str:
-        from obscura.core.agent_loop import AgentLoop
-        from obscura.core.kairos import Kairos, GoalBudget
-        from obscura.core.kairos.types import KairosEventKind
-
         cfg = self._config
         loop = AgentLoop(
             backend=self._backend,

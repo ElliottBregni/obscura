@@ -7,6 +7,20 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+from obscura.core.client import ObscuraClient
+from obscura.core.paths import resolve_obscura_home
+from obscura.core.types import Backend
+from obscura.integrations.messaging.kairos_runner import (
+    KairosAgentRunner,
+    KairosRunnerConfig,
+)
+from obscura.integrations.messaging.router import (
+    ChannelMode,
+    ChannelRouter,
+    ChannelRouterConfig,
+    ObscuraAgentRunner,
+)
+
 AdapterBuilder = Callable[..., Any]
 
 logger = logging.getLogger(__name__)
@@ -131,15 +145,6 @@ async def build_channel_router(
     Returns a ready :class:`~obscura.integrations.messaging.router.ChannelRouter`.
     This coroutine must be ``await``-ed — it performs async backend initialisation.
     """
-    from obscura.core.client import ObscuraClient
-    from obscura.core.types import Backend
-    from obscura.integrations.messaging.router import (
-        ChannelMode,
-        ChannelRouter,
-        ChannelRouterConfig,
-        ObscuraAgentRunner,
-    )
-
     _backend_name = backend_name or os.environ.get("OBSCURA_BACKEND", "claude")
     try:
         _backend_enum = Backend(_backend_name)
@@ -169,12 +174,6 @@ async def build_channel_router(
         nonlocal _kairos_runner
         if _kairos_runner is None:
             try:
-                from obscura.core.paths import resolve_obscura_home
-                from obscura.integrations.messaging.kairos_runner import (
-                    KairosAgentRunner,
-                    KairosRunnerConfig,
-                )
-
                 _kairos_runner = KairosAgentRunner(
                     backend=backend_impl,
                     tool_registry=tool_registry,

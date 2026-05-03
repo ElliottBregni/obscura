@@ -36,7 +36,7 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from typing_extensions import override
+from typing import override
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec

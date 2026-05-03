@@ -32,7 +32,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, cast
 
@@ -119,7 +119,7 @@ class ObscuraProfile(BaseModel):
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +457,8 @@ def get_client() -> ProfileClient | None:
     """Return the process-wide profile client, or ``None`` when Supabase isn't configured."""
     global _singleton, _singleton_config
 
+    # lazy: avoid the obscura.auth → obscura.cli import cycle (cli.auth_commands
+    # imports obscura.auth.profile at module level).
     from obscura.cli.auth_commands import SupabaseCliConfig, get_access_token
 
     cfg = SupabaseCliConfig.from_env()

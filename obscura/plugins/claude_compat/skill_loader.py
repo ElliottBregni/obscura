@@ -16,7 +16,10 @@ from typing import Any, cast
 
 import yaml
 
-from obscura.plugins.claude_compat.variables import substitute_variables
+from obscura.plugins.claude_compat.variables import (
+    get_plugin_data_dir,
+    substitute_variables,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +42,6 @@ def load_skills_as_commands(
     commands: dict[str, SkillCommand] = {}
 
     if plugin_data is None:
-        from obscura.plugins.claude_compat.variables import get_plugin_data_dir
-
         plugin_data = get_plugin_data_dir(plugin_name)
 
     # Skills directory: skills/<name>/SKILL.md

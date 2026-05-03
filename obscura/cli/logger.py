@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from typing_extensions import override
+from typing import override
 
 from obscura.cli import render
 

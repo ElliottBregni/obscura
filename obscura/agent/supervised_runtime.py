@@ -34,11 +34,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from obscura.agent.agents import AgentRuntime
 from obscura.core.supervisor import Supervisor, SupervisorConfig
 from obscura.core.supervisor.types import SupervisorEvent
 
 if TYPE_CHECKING:
-    from obscura.agent.agents import Agent, AgentRuntime
+    from obscura.agent.agents import Agent
     from obscura.auth.models import AuthenticatedUser
     from obscura.core.types import AgentEvent
 
@@ -266,8 +267,6 @@ class SupervisedRuntime:
         """Return (creating if needed) the underlying AgentRuntime."""
         if self._runtime is not None:
             return self._runtime
-
-        from obscura.agent.agents import AgentRuntime
 
         self._runtime = AgentRuntime(user=self._user)
         return self._runtime

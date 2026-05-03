@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.hooks import HookRegistry
+from obscura.core.system_prompts import SUBAGENT_SYSTEM_PROMPT
+from obscura.core.types import AgentEventKind
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -38,8 +42,6 @@ def inject_subagent_context(
     """
     import logging
 
-    from obscura.core.system_prompts import SUBAGENT_SYSTEM_PROMPT
-
     _log = logging.getLogger(__name__)
 
     # --- 1. System prompt ---------------------------------------------------
@@ -71,9 +73,6 @@ def inject_subagent_context(
     }
 
     try:
-        from obscura.core.hooks import HookRegistry
-        from obscura.core.types import AgentEventKind
-
         client = getattr(agent, "_client", None)
         if client is not None:
             hook_reg: HookRegistry | None = getattr(client, "hooks", None)

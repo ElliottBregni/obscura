@@ -11,6 +11,10 @@ from urllib import error as url_error
 from urllib import parse as url_parse
 from urllib import request as url_request
 
+from obscura.core.context_window import (
+    MAX_WEB_FETCH_TOKENS,
+    truncate_to_token_budget,
+)
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 
@@ -140,11 +144,6 @@ class Web:
                 body_text = Web.html_to_markdown(text) if is_html else text
 
                 # Token budget truncation.
-                from obscura.core.context_window import (
-                    MAX_WEB_FETCH_TOKENS,
-                    truncate_to_token_budget,
-                )
-
                 body_text, token_truncated = truncate_to_token_budget(
                     body_text,
                     MAX_WEB_FETCH_TOKENS,

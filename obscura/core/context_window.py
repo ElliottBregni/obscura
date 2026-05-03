@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, cast
-from typing_extensions import override
+from typing import override
 
 logger = logging.getLogger(__name__)
 

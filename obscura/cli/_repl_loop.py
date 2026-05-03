@@ -29,10 +29,107 @@ from dataclasses import replace as _dc_replace
 from datetime import UTC, datetime
 from typing import Any
 
+from obscura.agent.agents import AgentStatus
+from obscura.agent.supervisor import AgentSupervisor
+from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
+from obscura.auth.cli_user import current_cli_user
+from obscura.cli._daemon import start_imessage_daemon
+from obscura.cli._env_loader import bootstrap_env
+from obscura.cli._send import (
+    _session_state,  # pyright: ignore[reportPrivateUsage]
+    send_message,
+)
+from obscura.cli.bootstrap import (
+    _discover_agent_infos,  # pyright: ignore[reportPrivateUsage]
+    _discover_mcp,  # pyright: ignore[reportPrivateUsage]
+)
+from obscura.cli.commands import (
+    COMPLETIONS,
+    REPLContext,
+    estimate_effective_context_tokens,
+    handle_command,
+)
+from obscura.cli.prompt import (
+    PromptStatus,
+    RunningAgentInfo,
+    StreamingStatus,
+    _get_git_branch,  # pyright: ignore[reportPrivateUsage]
+    animate_spinner,
+    bordered_prompt,
+    create_prompt_session,
+)
+from obscura.cli.render import (
+    console,
+    print_banner,
+    print_error,
+    print_info,
+    print_ok,
+    print_warning,
+)
+from obscura.cli.tips import TipScheduler
+from obscura.cli.tui_effects import ultrathink_banner
+from obscura.cli.vector_memory_bridge import (
+    init_vector_store,
+    load_startup_memories,
+    run_startup_maintenance,
+)
+from obscura.cli.widgets import (
+    AttentionWidgetRequest,
+    ModelQuestionRequest,
+    MultiSelectRequest,
+    NotifyWidgetRequest,
+    PermissionWidgetRequest,
+    ToolConfirmRequest,
+    ask_model_question,
+    ask_multi_select,
+    confirm_attention,
+    confirm_permission,
+    confirm_tool,
+    render_notification_banner,
+)
 from obscura.core.client import ObscuraClient
+from obscura.core.compiler.compiled import ToolRoutingConfig
+from obscura.core.context import load_obscura_memory
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_home
-from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
+from obscura.core.settings import load_all_hooks
+from obscura.core.system_prompts import (
+    compose_environment_context,
+    compose_system_prompt,
+)
+from obscura.core.tool_router import ToolRouter
+from obscura.core.tool_score_index import ToolScoreIndex
+from obscura.core.types import (
+    AgentEventKind,
+    Backend,
+    SessionRef,
+    ToolChoice,
+    ToolRouterCapable,
+)
+from obscura.integrations.browser.client import attach_if_running
+from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+from obscura.memory_channels import (
+    ContextRouter,
+    TurnClassifier,
+    load_channels_from_config,
+)
+from obscura.plugins.builtins import list_builtin_plugin_ids
+from obscura.plugins.capabilities import resolve_allowed_tools_from_config
+from obscura.plugins.loader import (
+    PluginLoader,
+    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
+    get_all_builtin_tool_specs,
+    get_capability_map,
+    get_filtered_builtin_tool_specs,
+)
+from obscura.plugins.models import PluginSpec
+from obscura.plugins.registries.capability_index import CapabilityIndex
+from obscura.tools.memory_tools import (
+    build_channels_prompt_section,
+    make_memory_tool_specs,
+)
+from obscura.tools.system import UI, Session, get_system_tool_specs
 
 _log = logging.getLogger("obscura.cli")
 
@@ -57,37 +154,6 @@ async def repl(
     compiled_ws: Any | None = None,
 ) -> None:
     """Core async loop -- runs the interactive REPL or single-shot."""
-    from obscura.cli._env_loader import bootstrap_env
-    from obscura.cli._send import _session_state, send_message  # pyright: ignore[reportPrivateUsage]
-    from obscura.cli.bootstrap import (
-        _discover_agent_infos,  # pyright: ignore[reportPrivateUsage]
-        _discover_mcp,  # pyright: ignore[reportPrivateUsage]
-    )
-    from obscura.cli.commands import (
-        COMPLETIONS,
-        REPLContext,
-        handle_command,
-    )
-    from obscura.cli.prompt import (
-        PromptStatus,
-        StreamingStatus,
-        _get_git_branch,  # pyright: ignore[reportPrivateUsage]
-        animate_spinner,
-        bordered_prompt,
-        create_prompt_session,
-    )
-    from obscura.cli.render import (
-        console,
-        print_banner,
-        print_ok,
-        print_warning,
-    )
-    from obscura.cli.vector_memory_bridge import (
-        init_vector_store,
-        load_startup_memories,
-        run_startup_maintenance,
-    )
-
     # Event store
     db_path = resolve_obscura_home() / "events.db"
     store = SQLiteEventStore(db_path)

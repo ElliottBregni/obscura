@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import tool
+from obscura.integrations.mcp.config_loader import discover_mcp_servers
+from obscura.integrations.mcp.process_cleanup import cleanup_orphans, detect_orphans
 from obscura.tools.system._policy import Policy
 
 
@@ -31,7 +34,6 @@ class Mcp:
         },
     )
     async def mcp_discovery_status() -> str:
-        from obscura.core.tool_context import current_tool_context
 
         ctx = current_tool_context()
         report = ctx.mcp_discovery_report if ctx is not None else None
@@ -85,11 +87,6 @@ class Mcp:
         },
     )
     async def mcp_cleanup_orphans(dry_run: bool = True, force: bool = False) -> str:
-        from obscura.core.tool_context import current_tool_context
-        from obscura.integrations.mcp.process_cleanup import (
-            cleanup_orphans,
-            detect_orphans,
-        )
 
         ctx = current_tool_context()
         report = ctx.mcp_discovery_report if ctx is not None else None
@@ -114,7 +111,6 @@ class Mcp:
 
         # We need the original commands. They're not in the report — rescan via
         # the user-facing MCP config files.
-        from obscura.integrations.mcp.config_loader import discover_mcp_servers
 
         discovered = discover_mcp_servers()
         by_name = {s.name: s for s in discovered}

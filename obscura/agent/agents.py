@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 import contextlib
 
+from obscura.agent.interaction import InteractionBus as _IB
 from obscura.agent.peers import (
     AgentRef,
     PeerCatalog,
@@ -52,15 +53,18 @@ from obscura.agent.peers import (
     PeerRegistry,
 )
 from obscura.core.client import ObscuraClient
+from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.core.types import AgentEvent, AgentEventKind, ToolSpec
+from obscura.manifest.lazy import LazyManifestProxy
 from obscura.memory import MemoryStore
+from obscura.plugins.broker import ToolBroker
+from obscura.plugins.policy import PluginPolicyEngine
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import InteractionBus
     from obscura.auth.models import AuthenticatedUser
     from obscura.heartbeat.client import AgentHeartbeatClient
-    from obscura.manifest.lazy import LazyManifestProxy
     from obscura.manifest.models import AgentManifest
     from obscura.providers.mcp_backend import MCPBackend
     from obscura.tools.providers import BrokerContext
@@ -200,8 +204,6 @@ class AgentConfig(BaseModel):
         Maps manifest fields to config fields and builds ``MCPConfig``
         from ``mcp_server_refs``.
         """
-        from obscura.manifest.lazy import LazyManifestProxy
-
         proxy = LazyManifestProxy(manifest)
 
         # Build MCP config from manifest refs
@@ -417,6 +419,8 @@ class Agent:
 
     async def start(self) -> None:
         """Initialize the agent and connect to backend."""
+        # lazy: obscura.tools.providers transitively imports obscura.providers.*
+        # which loops back through obscura.integrations.mcp → obscura.agent.agents.
         from obscura.tools.providers import (
             A2ARemoteToolProvider,
             BrokerContext,
@@ -501,9 +505,6 @@ class Agent:
             raise
 
         # Create ToolBroker as the authoritative tool registry
-        from obscura.plugins.broker import ToolBroker
-        from obscura.plugins.policy import PluginPolicyEngine
-
         policy_engine = PluginPolicyEngine()
 
         # Wire permission mode engine — inherit from config if set.
@@ -544,6 +545,7 @@ class Agent:
             and not server_configs
             and self.config.mcp.auto_discover
         ):
+            # lazy: obscura.integrations.mcp package init imports obscura.agent.agents.
             from obscura.integrations.mcp.config_loader import (
                 build_runtime_server_configs,
                 discover_mcp_servers,
@@ -589,6 +591,7 @@ class Agent:
                 logger.debug("Plugin-based MCP filtering failed: %s", exc)
 
         if self.config.mcp.enabled and server_configs:
+            # lazy: obscura.integrations.mcp package init imports obscura.agent.agents.
             from obscura.integrations.mcp.types import (
                 MCPConnectionConfig,
                 MCPTransportType,
@@ -787,8 +790,6 @@ class Agent:
         if self.manifest_proxy is not None:
             manifest_hooks = self.manifest_proxy.hook_registry
             if manifest_hooks.count > 0:
-                from obscura.core.hooks import HookRegistry
-
                 # If the client has a hook registry, merge; otherwise set it
                 existing: HookRegistry | None = getattr(self._client, "_hooks", None)
                 if existing is not None:
@@ -1459,8 +1460,6 @@ class AgentRuntime:
         lifecycle_hook: RuntimeLifecycleHook | None = None,
         interaction_bus: InteractionBus | None = None,
     ) -> None:
-        from obscura.agent.interaction import InteractionBus as _IB
-
         self.user = user
         self.runtime_id = f"runtime-{uuid.uuid4().hex[:8]}"
         self._agents: dict[str, Agent] = {}
@@ -1741,8 +1740,6 @@ class AgentRuntime:
                 explicitly overrides them).
 
         """
-        from obscura.manifest.lazy import LazyManifestProxy
-
         # Resolve "auto" provider — inherit caller's backend, or use override
         resolved_provider: str | None = provider_override
         if manifest.provider == "auto":

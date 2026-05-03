@@ -37,14 +37,20 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
+from obscura.core.agent_loop import AgentLoop
+from obscura.core.hooks import HookRegistry
+from obscura.core.paths import resolve_obscura_home
+from obscura.core.types import AgentEventKind, ContentBlock, Message, Role
 from obscura.integrations.messaging.identity import build_conversation_key
 from obscura.integrations.messaging.models import PlatformMessage
-from obscura.integrations.messaging.store import ConversationStore, MessageDedupeStore
+from obscura.integrations.messaging.store import (
+    ChannelConfigRecord,
+    ConversationStore,
+    MessageDedupeStore,
+)
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +163,6 @@ class ObscuraAgentRunner:
         max_turns: int,
     ) -> str:
         """Run one agent turn and collect the full response text."""
-        from obscura.core.agent_loop import AgentLoop
-        from obscura.core.hooks import HookRegistry
-        from obscura.core.types import AgentEventKind, ContentBlock, Message, Role
-
         # Rebuild history as Message objects
         messages: list[Message] = []
         for entry in history:
@@ -306,8 +308,6 @@ class ChannelRouter:
         Called at runtime when a config is created/updated/applied via the REST API.
         Raises ValueError for unknown platforms; logs and swallows adapter init errors.
         """
-        from obscura.integrations.messaging.store import ChannelConfigRecord
-
         if not isinstance(record, ChannelConfigRecord):
             msg = f"apply_config requires a ChannelConfigRecord, got {type(record)}"
             raise TypeError(msg)
@@ -365,7 +365,7 @@ class ChannelRouter:
 
         if channel_mode == ChannelMode.KAIROS:
             try:
-                from obscura.core.paths import resolve_obscura_home
+                # lazy: avoid circular dep with obscura.integrations.messaging.kairos_runner
                 from obscura.integrations.messaging.kairos_runner import (
                     KairosAgentRunner,
                     KairosRunnerConfig,
@@ -435,7 +435,7 @@ class ChannelRouter:
             recipient_id="agent",
             message_id=_message_id,
             text=text,
-            timestamp=datetime.datetime.now(tz=datetime.timezone.utc),
+            timestamp=datetime.datetime.now(tz=datetime.UTC),
             metadata=metadata or {},
         )
         await self.dispatch_message(msg)

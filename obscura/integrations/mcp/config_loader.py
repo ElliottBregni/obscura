@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.paths import resolve_obscura_mcp_dir
+from obscura.core.paths import resolve_all_mcp_dirs, resolve_obscura_mcp_dir
 from obscura.integrations.mcp.types import MCPTransportType
 
 if TYPE_CHECKING:
@@ -103,8 +103,6 @@ def _merge_roots(roots: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 def _resolve_default_config_paths() -> list[Path]:
     """Return MCP config paths in merge order (global first, local last)."""
-    from obscura.core.paths import resolve_all_mcp_dirs
-
     # Prefer a project-local .obscura/mcp when present (tests and local
     # workflows expect local overrides to be used in preference to global
     # catalogs).  Only fall back to the global+local merge when no local

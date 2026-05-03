@@ -516,8 +516,6 @@ async def config_tool(
     },
 )
 async def write_agent_shared(path: str, text: str) -> str:
-    from obscura.core.paths import resolve_obscura_home
-
     shared_root = (resolve_obscura_home() / "vault" / "shared").resolve()
 
     candidate = (shared_root / path).resolve()
@@ -638,8 +636,6 @@ class Registry:
         },
     )
     async def tool_search(query: str, max_results: int = 5) -> str:
-        from obscura.core.tool_context import current_tool_context
-
         ctx = current_tool_context()
         registry: Any = ctx.registry if ctx is not None else None
         if registry is None:

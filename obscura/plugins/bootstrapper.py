@@ -22,7 +22,8 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 if TYPE_CHECKING:
     from obscura.plugins.models import BootstrapDep, PluginSpec

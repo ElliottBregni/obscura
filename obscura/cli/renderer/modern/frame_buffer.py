@@ -23,7 +23,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import IO
 
-from typing_extensions import override
+from typing import override
 
 from obscura.cli.renderer.modern.theme import RESET, STYLE_DEFAULT, Style
 

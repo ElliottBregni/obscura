@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 from urllib import parse as url_parse
 
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_output_dir
+
 
 class Policy:
     """Path / URL / command access-control namespace.
@@ -138,8 +140,6 @@ class Policy:
             ):
                 candidate = Path.cwd() / candidate
             else:
-                from obscura.core.paths import resolve_obscura_output_dir
-
                 candidate = resolve_obscura_output_dir() / candidate
         return candidate.resolve()
 
@@ -164,8 +164,6 @@ class Policy:
             if part == ".obscura":
                 return True
         try:
-            from obscura.core.paths import resolve_obscura_home
-
             obscura_home = resolve_obscura_home().resolve()
             try:
                 resolved.relative_to(obscura_home)
@@ -189,8 +187,6 @@ class Policy:
         ``vault/agent/`` is the only zone agents may write to. Paths
         outside the vault are unaffected and always return True.
         """
-        from obscura.core.paths import resolve_obscura_home
-
         try:
             vault_root = resolve_obscura_home() / "vault"
             rel = path.resolve().relative_to(vault_root.resolve())

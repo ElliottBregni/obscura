@@ -42,11 +42,25 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from obscura.agent.agents import AgentRuntime
+from obscura.agent.aper_loop_agent import APERLoopAgent
+from obscura.agent.daemon_agent import (
+    DaemonAgent,
+    IMessageTrigger,
+    MessageTrigger,
+    ScheduleTrigger,
+    Trigger,
+)
 from obscura.agent.interaction import (
     AttentionPriority,
     AttentionRequest,
     InteractionBus,
 )
+from obscura.agent.loop_agent import LoopAgent
+from obscura.core.client import ObscuraClient
+from obscura.core.config_io import apply_agent_defaults, try_load_config
+from obscura.manifest.loader import ManifestLoader
+from obscura.notifications.native import NativeNotifier
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,8 +131,6 @@ class SupervisorConfig:
 
         Each agent manifest is converted to an :class:`AgentDefinition`.
         """
-        from obscura.manifest.loader import ManifestLoader
-
         resolved = directory.expanduser()
         if not resolved.is_dir():
             logger.warning("Manifest directory not found: %s", resolved)
@@ -181,11 +193,6 @@ class SupervisorConfig:
             resolved
             if resolved.suffix in (".yaml", ".yml")
             else resolved.with_suffix(".yaml")
-        )
-
-        from obscura.core.config_io import (  # noqa: PLC0415
-            apply_agent_defaults,
-            try_load_config,
         )
 
         raw = try_load_config(toml_path, yaml_path)
@@ -292,9 +299,6 @@ class AgentSupervisor:
 
     async def run_forever(self) -> None:
         """Start all agents and block until stopped."""
-        from obscura.agent.agents import AgentRuntime
-        from obscura.notifications.native import NativeNotifier
-
         # Support both YAML and directory-based config
         if self._config_path.is_dir():
             config = SupervisorConfig.from_directory(self._config_path)
@@ -413,8 +417,6 @@ class AgentSupervisor:
         agent_def: AgentDefinition,
     ) -> None:
         """Instantiate and run an agent based on its type."""
-        from obscura.core.client import ObscuraClient
-
         # Generate A2A card for this agent
         self._generate_agent_card(agent_def)
 
@@ -446,8 +448,6 @@ class AgentSupervisor:
         client: Any,
         agent_def: AgentDefinition,
     ) -> None:
-        from obscura.agent.loop_agent import LoopAgent
-
         agent = LoopAgent(
             client,
             name=agent_def.name,
@@ -461,14 +461,6 @@ class AgentSupervisor:
         client: Any,
         agent_def: AgentDefinition,
     ) -> None:
-        from obscura.agent.daemon_agent import (
-            DaemonAgent,
-            IMessageTrigger,
-            MessageTrigger,
-            ScheduleTrigger,
-            Trigger,
-        )
-
         triggers: list[Trigger] = []
         for tdef in agent_def.triggers:
             priority = _parse_priority(tdef.priority)
@@ -539,8 +531,6 @@ class AgentSupervisor:
         client: Any,
         agent_def: AgentDefinition,
     ) -> None:
-        from obscura.agent.aper_loop_agent import APERLoopAgent
-
         agent = APERLoopAgent(
             client,
             name=agent_def.name,

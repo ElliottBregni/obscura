@@ -31,8 +31,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
-from obscura.kairos.user_profile import UserProfile
-from obscura.kairos.vault_sync import notify_profile_changed
 from obscura.profile.builder import ProfileBuilder
 from obscura.profile.migrate import migrate_flat_profile
 from obscura.profile.models import ProfileCategory, ProfileFact
@@ -45,12 +43,18 @@ if TYPE_CHECKING:
 def _notify_vault_profile() -> None:
     """Best-effort vault sync on profile mutation."""
     try:
+        # lazy: avoid circular dep with obscura.kairos (kairos.dream imports get_profile_tool_specs from here)
+        from obscura.kairos.vault_sync import notify_profile_changed
+
         notify_profile_changed()
     except Exception:
         pass
 
 
 def _profile() -> Any:
+    # lazy: avoid circular dep with obscura.kairos (kairos.dream imports get_profile_tool_specs from here)
+    from obscura.kairos.user_profile import UserProfile
+
     return UserProfile()
 
 

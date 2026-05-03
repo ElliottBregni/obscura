@@ -31,13 +31,11 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from obscura.core.types import ToolSpec
 from obscura.integrations.mcp.client import MCPClient
 from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
-
-if TYPE_CHECKING:
-    from obscura.core.types import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -201,8 +199,6 @@ async def _probe_one_server(
     per-server overrides extend the window for known-slow servers but
     can't shrink it below the caller's floor.
     """
-    from obscura.core.types import ToolSpec  # local to avoid import cycle
-
     name = str(server.get("name") or "unknown")
     transport = str(server.get("transport") or "stdio")
     started = time.monotonic()
